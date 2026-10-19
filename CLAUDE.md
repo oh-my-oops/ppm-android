@@ -7,6 +7,7 @@ Plan: `plans/261019-2119-native-android-app/` (gitignored, in the main checkout)
 - `core/protocol` — wire types. Frames are parsed into a kotlinx `JsonElement` first and read field by field (`Json.kt` extensions), so an unknown field or frame `type` never fails a decode.
 - `core/client` — REST (`ApiClient` + `ApiClientSessions`/`ApiClientUploads` extensions), `SocketConnection` (OkHttp WebSocket as a channel of events, never reconnects by itself), `InflightGets` (identical GETs share one request, as `api-client.ts`), `ServerStore` (servers in a `KeyValueStore`, passwords in a `SecretStore`).
 - `core/state` — `ChatTranscript` (pure reducer ported from `src/web/hooks/use-chat.ts`: frames in, `ChatEffect`s out), `ChatController` (history + socket + reconnect around it, publishes one `StateFlow<ChatState>`), `GlobalEvents` (`/ws/global`), `HistoryList` / `ChatSearch`.
+- `core/state/workspace` — the web's layout (panels, tabs, dock): `WorkspaceStore` is `panel-store.ts` + `dock-actions.ts`, `WorkspaceCache` its local copy (`ppm-panels-*`) with the debounced PUT and the hydrate of `panel-utils.ts`. The blob is the one every browser of that server reads and writes, so a tab type, metadata key or field the app does not know is kept (`metadata` whole, the rest in `extra`) and written back unchanged.
 
 The three `core` modules are plain Kotlin/JVM: their tests run on the JVM, no emulator.
 

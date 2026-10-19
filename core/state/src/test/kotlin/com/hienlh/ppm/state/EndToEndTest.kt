@@ -14,18 +14,26 @@ import com.hienlh.ppm.client.setDefaultTag
 import com.hienlh.ppm.client.setTag
 import com.hienlh.ppm.client.updateTag
 import com.hienlh.ppm.client.upload
+import com.hienlh.ppm.client.workspace
 import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.HistoryMessage
 import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.protocol.TurnOptions
+import com.hienlh.ppm.state.workspace.MemoryValues
+import com.hienlh.ppm.state.workspace.NewTab
+import com.hienlh.ppm.state.workspace.WorkspaceCache
+import com.hienlh.ppm.state.workspace.WorkspaceStore
+import com.hienlh.ppm.state.workspace.workspaceRemote
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.HttpUrl
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -113,6 +121,27 @@ class EndToEndTest {
         } catch (error: PpmError) {
             assertEquals(PpmError.Unauthorized(), error)
         }
+    }
+
+    @Test
+    fun `a layout one device saves is the one another device opens`() = onMain {
+        val file = "notes-${UUID.randomUUID()}.md"
+        val phone = WorkspaceCache(MemoryValues(), "w.", api.workspaceRemote(), scope)
+        val first = WorkspaceStore(phone, isMobile = { true })
+        first.switchProject(project)
+        val id = first.openTab(NewTab("editor", file, project, JsonObject(mapOf("filePath" to JsonPrimitive(file)))))
+        // A field this app has never heard of rides along.
+        first.updateTab(id) { it.copy(extra = JsonObject(mapOf("pinned" to JsonPrimitive(true)))) }
+        phone.flush()
+        poll("the layout to reach the server") { api.workspace(project)?.layout?.toString()?.contains(file) == true }
+
+        val tablet = WorkspaceCache(MemoryValues(), "w.", api.workspaceRemote(), scope)
+        assertTrue("the server's copy was not taken", tablet.hydrate(project))
+        val second = WorkspaceStore(tablet, isMobile = { false })
+        second.switchProject(project)
+        val tab = second.state.value.activeGridTab
+        assertEquals(id, tab?.id)
+        assertEquals(JsonPrimitive(true), tab?.extra?.get("pinned"))
     }
 
     @Test
