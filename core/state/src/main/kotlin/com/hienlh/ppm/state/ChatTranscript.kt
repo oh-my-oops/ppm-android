@@ -8,6 +8,7 @@ import com.hienlh.ppm.protocol.HistoryPage
 import com.hienlh.ppm.protocol.Reported
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.protocol.SessionStateFrame
+import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.TurnSnapshot
 import com.hienlh.ppm.protocol.TurnStop
 import kotlinx.serialization.json.JsonElement
@@ -142,7 +143,7 @@ class ChatTranscript {
     // User actions
 
     /** The message to put on the socket; the transcript shows it at once. */
-    fun send(content: String, now: Long = System.currentTimeMillis()): ChatClientMessage.Message {
+    fun send(content: String, options: TurnOptions = TurnOptions(), now: Long = System.currentTimeMillis()): ChatClientMessage.Message {
         localCounter++
         val id = "local-user-$localCounter-$now"
         activity++
@@ -158,7 +159,7 @@ class ChatTranscript {
             turnFinalized = false
         }
         appendUser(content, id, now)
-        return ChatClientMessage.Message(id, content)
+        return ChatClientMessage.Message(id, content, options)
     }
 
     fun respond(request: ApprovalRequest, approved: Boolean, data: JsonElement? = null): ChatClientMessage.ApprovalResponse {

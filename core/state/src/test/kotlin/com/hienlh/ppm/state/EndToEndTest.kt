@@ -8,6 +8,7 @@ import com.hienlh.ppm.client.deleteSession
 import com.hienlh.ppm.client.deleteSessions
 import com.hienlh.ppm.client.deleteTag
 import com.hienlh.ppm.client.deleteUpload
+import com.hienlh.ppm.client.providerModels
 import com.hienlh.ppm.client.resetTags
 import com.hienlh.ppm.client.setDefaultTag
 import com.hienlh.ppm.client.setTag
@@ -15,8 +16,10 @@ import com.hienlh.ppm.client.updateTag
 import com.hienlh.ppm.client.upload
 import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.HistoryMessage
+import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionPhase
+import com.hienlh.ppm.protocol.TurnOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -326,6 +329,47 @@ class EndToEndTest {
             )
         } finally {
             chat.stop()
+        }
+    }
+
+    @Test
+    fun `model, effort and thinking picked in one chat are the session's`() = onMain {
+        val claude = api.providerModels(project, "claude")
+        assertTrue("$claude", claude.any { it.value == "claude-opus-5-5" && it.label == "Claude Opus 5.5" })
+        assertEquals(emptyList<ModelOption>(), api.providerModels(project, "mock"))
+
+        val session = api.createSession(project, "mock")
+        val first = open(session)
+        try {
+            // The greeting's report: thinking is on until something turns it off.
+            assertTrue(first.state.value.thinking)
+            first.setEffort(Effort.XHIGH)
+            first.setThinking(false)
+            first.setModel("claude-opus-5-5")
+            // Shown at once, before the server has answered.
+            assertEquals("xhigh", first.state.value.effort)
+            assertFalse(first.state.value.thinking)
+
+            // The server answers each pick on the first socket; give it a moment to store them.
+            delay(1_000)
+            val second = open(session)
+            try {
+                waitFor("another chat to read them") {
+                    second.state.value.let { it.effort == "xhigh" && !it.thinking && it.model == "claude-opus-5-5" }
+                }
+                assertEquals(
+                    TurnOptions(permissionMode = "plan", model = "claude-opus-5-5", effort = "xhigh"),
+                    second.settings.turnOptions(TurnOptions(permissionMode = "plan")),
+                )
+            } finally {
+                second.stop()
+            }
+
+            // A message carries its mode, and the turn still runs.
+            first.send("hello there", TurnOptions(permissionMode = "plan"))
+            first.turnEnds(2)
+        } finally {
+            first.stop()
         }
     }
 

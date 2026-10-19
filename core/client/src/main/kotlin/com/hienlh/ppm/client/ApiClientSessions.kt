@@ -1,8 +1,11 @@
 package com.hienlh.ppm.client
 
 import com.hienlh.ppm.protocol.ChatSearchPage
+import com.hienlh.ppm.protocol.ModelOption
+import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.int
+import com.hienlh.ppm.protocol.string
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -83,3 +86,10 @@ suspend fun ApiClient.setDefaultTag(tagId: Int?, project: String) {
 suspend fun ApiClient.resetTags(project: String) {
     call("POST", "${tagsPath(project)}/reset", body = JsonObject(emptyMap()))
 }
+
+/** The models a provider offers. An empty list also means the provider could not be asked. */
+suspend fun ApiClient.providerModels(project: String, providerId: String): List<ModelOption> =
+    call("GET", "${chatPath(project)}/providers/${ApiClient.escape(providerId)}/models").array.orEmpty().mapNotNull { entry ->
+        val value = entry["value"].string ?: return@mapNotNull null
+        ModelOption(value, entry["label"].string ?: value)
+    }

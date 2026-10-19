@@ -5,8 +5,10 @@ import com.hienlh.ppm.client.SocketConnection
 import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ChatFrame
+import com.hienlh.ppm.protocol.PromptCacheState
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionPhase
+import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.TurnStop
 import com.hienlh.ppm.protocol.WireJson
 import kotlinx.coroutines.CancellationException
@@ -40,6 +42,11 @@ data class ChatState(
     val connection: ChatController.Connection = ChatController.Connection.Connecting,
     val historyError: String? = null,
     val loadingOlder: Boolean = false,
+    /** What [ChatSettings] holds. */
+    val model: String? = null,
+    val effort: String? = null,
+    val thinking: Boolean = true,
+    val promptCache: PromptCacheState? = null,
 ) {
     val isRunning: Boolean get() = phase.isRunning
     val canSend: Boolean get() = connection == ChatController.Connection.Connected
@@ -64,6 +71,7 @@ class ChatController(
     }
 
     val transcript = ChatTranscript()
+    val settings = ChatSettings()
     val providerId: String = session.providerId
     var sessionId: String = session.id
         private set
@@ -104,11 +112,24 @@ class ChatController(
         socket = null
     }
 
-    fun send(text: String) {
+    /** [options] carries the composer's mode and priority; the model, effort and thinking are added here. */
+    fun send(text: String, options: TurnOptions = TurnOptions()) {
         val content = text.trim()
         val socket = socket
         if (content.isEmpty() || socket == null || connection != Connection.Connected) return
-        socket.send(transcript.send(content, clock()).json.toString())
+        socket.send(transcript.send(content, settings.turnOptions(options), clock()).json.toString())
+        publish()
+    }
+
+    /** Shown at once and stored for the session. Without a connection the pick still rides on the next message, as on the web. */
+    fun setModel(model: String) = pick(settings.pickModel(model))
+
+    fun setEffort(effort: Effort) = pick(settings.pickEffort(effort))
+
+    fun setThinking(enabled: Boolean) = pick(settings.pickThinking(enabled))
+
+    private fun pick(frame: ChatClientMessage) {
+        socket?.send(frame.json.toString())
         publish()
     }
 
@@ -188,6 +209,7 @@ class ChatController(
         lastFrameAt = clock()
         // The snapshot of a long turn can run to megabytes: decode it off the main thread.
         val frame = withContext(Dispatchers.Default) { WireJson.parseOrNull(text)?.let(ChatFrame::from) } ?: return
+        if (frame is ChatFrame.SessionState) settings.apply(frame.state)
         perform(transcript.handle(frame, clock()))
     }
 
@@ -290,6 +312,10 @@ class ChatController(
             connection = connection,
             historyError = historyError,
             loadingOlder = loadingOlder,
+            model = settings.model,
+            effort = settings.effort,
+            thinking = settings.thinking,
+            promptCache = settings.promptCache,
         )
     }
 

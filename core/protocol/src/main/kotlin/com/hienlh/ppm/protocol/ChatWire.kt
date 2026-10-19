@@ -41,13 +41,53 @@ sealed interface Reported<out T> {
     data class Value<T>(val value: T?) : Reported<T>
 }
 
+/**
+ * What the server knows about a session's prompt cache (`PromptCacheState`). Times are the
+ * server's epoch milliseconds.
+ */
+data class PromptCacheState(
+    /** An hour on a subscription, five minutes on an API key. */
+    val ttlMs: Double,
+    /** When the last turn completed: when the cache was last written. */
+    val lastTurnEndedAt: Double? = null,
+    /** A running session total, only a floor for "has this cached anything"; never shown. */
+    val billedPrefixTokens: Double? = null,
+    /** What the last turn held; the figure that may be shown. */
+    val contextTokens: Double? = null,
+    /** Set while a compaction nothing has followed yet makes the cache useless. */
+    val compactedAt: Double? = null,
+) {
+    companion object {
+        fun from(json: JsonElement?): PromptCacheState? {
+            val ttl = json["ttlMs"].double ?: return null
+            return PromptCacheState(
+                ttlMs = ttl,
+                lastTurnEndedAt = json["lastTurnEndedAt"].double,
+                billedPrefixTokens = json["billedPrefixTokens"].double,
+                contextTokens = json["contextTokens"].double,
+                compactedAt = json["compactedAt"].double,
+            )
+        }
+    }
+}
+
 data class SessionStateFrame(
-    val sessionId: String?,
-    val phase: SessionPhase,
-    val title: String?,
-    val pendingApproval: Reported<ApprovalRequest>,
-    val turnStop: Reported<TurnStop>,
-    val compacting: Boolean,
+    val sessionId: String? = null,
+    val phase: SessionPhase = SessionPhase.IDLE,
+    val title: String? = null,
+    val pendingApproval: Reported<ApprovalRequest> = Reported.NotReported,
+    val turnStop: Reported<TurnStop> = Reported.NotReported,
+    val compacting: Boolean = false,
+    /** The session's model and effort, its own or else its provider's default. */
+    val model: String? = null,
+    val effort: String? = null,
+    /** Whether thinking is on for it. */
+    val thinking: Boolean? = null,
+    /**
+     * Left out of the answers to a model, effort or thinking change, which the web reads as
+     * "nothing known" — and a cache written for another model is no use anyway.
+     */
+    val promptCache: PromptCacheState? = null,
 )
 
 /** `turn_events`: every buffered event of the running turn — a full snapshot, not a delta. */
@@ -91,6 +131,10 @@ sealed interface ChatFrame {
                             ?.let { Reported.Value(ApprovalRequest.from(it)) } ?: Reported.NotReported,
                         turnStop = json["turnStop"]?.let { Reported.Value(TurnStop.from(it)) } ?: Reported.NotReported,
                         compacting = json["compactStatus"].string == "compacting",
+                        model = json["model"].string?.ifEmpty { null },
+                        effort = json["effort"].string?.ifEmpty { null },
+                        thinking = json["thinking"].bool,
+                        promptCache = PromptCacheState.from(json["promptCache"]),
                     ),
                 )
                 "turn_events" -> TurnEvents(
@@ -122,6 +166,20 @@ sealed interface ChatFrame {
     }
 }
 
+/**
+ * The choices a message carries (`TurnSettings` plus the composer's mode and priority); a value
+ * left null is left out of the frame.
+ */
+data class TurnOptions(
+    /** `default`, `acceptEdits`, `plan` or `bypassPermissions`; without one the server uses the session's last, then its config. */
+    val permissionMode: String? = null,
+    /** `now`, `next` or `later`, for a message sent while a turn runs. */
+    val priority: String? = null,
+    val model: String? = null,
+    val effort: String? = null,
+    val thinking: Boolean? = null,
+)
+
 /** A frame this app sends on the chat socket. */
 sealed interface ChatClientMessage {
     val json: JsonObject
@@ -138,12 +196,43 @@ sealed interface ChatClientMessage {
         override val json get() = buildJsonObject { put("type", "cancel") }
     }
 
-    data class Message(val clientMessageId: String, val content: String) : ChatClientMessage {
+    data class Message(val clientMessageId: String, val content: String, val options: TurnOptions = TurnOptions()) :
+        ChatClientMessage {
         override val json
             get() = buildJsonObject {
                 put("type", "message")
                 put("clientMessageId", clientMessageId)
                 put("content", content)
+                options.permissionMode?.let { put("permissionMode", it) }
+                options.priority?.let { put("priority", it) }
+                options.model?.let { put("model", it) }
+                options.effort?.let { put("effort", it) }
+                options.thinking?.let { put("thinking", it) }
+            }
+    }
+
+    /** Stored for the session; the server answers with a `session_state`. */
+    data class SetModel(val model: String) : ChatClientMessage {
+        override val json
+            get() = buildJsonObject {
+                put("type", "set_model")
+                put("model", model)
+            }
+    }
+
+    data class SetEffort(val effort: String) : ChatClientMessage {
+        override val json
+            get() = buildJsonObject {
+                put("type", "set_effort")
+                put("effort", effort)
+            }
+    }
+
+    data class SetThinking(val enabled: Boolean) : ChatClientMessage {
+        override val json
+            get() = buildJsonObject {
+                put("type", "set_thinking")
+                put("enabled", enabled)
             }
     }
 

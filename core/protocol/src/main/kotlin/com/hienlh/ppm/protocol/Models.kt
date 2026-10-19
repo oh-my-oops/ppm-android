@@ -338,3 +338,6 @@ object WireDate {
 fun List<SessionInfo>.sortedForList(): List<SessionInfo> = sortedWith(
     compareByDescending<SessionInfo> { it.pinned }.thenByDescending { it.lastActive ?: Instant.MIN },
 )
+
+/** A model a provider offers (`GET …/chat/providers/:id/models`). */
+data class ModelOption(val value: String, val label: String)
