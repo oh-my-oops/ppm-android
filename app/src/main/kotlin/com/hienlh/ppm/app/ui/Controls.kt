@@ -248,10 +248,11 @@ fun BottomSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier, background
         }
     }
     LaunchedEffect(panelHeight) {
-        if (panelHeight > 0 && offset.value == Float.MAX_VALUE) {
-            offset.snapTo(panelHeight)
-            offset.animateTo(0f, tween(200))
-        }
+        if (panelHeight <= 0f || closing) return@LaunchedEffect
+        // Below the edge until it is measured, then up. The effect can be started again before
+        // the rise is done (it was, on the first frames of a sheet), so it always finishes it.
+        if (offset.value == Float.MAX_VALUE) offset.snapTo(panelHeight)
+        offset.animateTo(0f, tween(200))
     }
     Dialog(
         onDismissRequest = ::close,
