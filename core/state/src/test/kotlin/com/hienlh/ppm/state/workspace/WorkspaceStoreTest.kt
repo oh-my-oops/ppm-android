@@ -285,6 +285,22 @@ class WorkspaceStoreTest {
     }
 
     @Test
+    fun `a singleton is one per project, not one among every project in memory`() {
+        val store = store()
+        store.switchProject("one")
+        store.openTab(NewTab("settings", "Settings"))
+        store.switchProject("two")
+        val panel = store.s.focusedPanelId
+        val id = store.openTab(NewTab("settings", "Settings"))
+        assertEquals("settings@$panel", id)
+        assertEquals(panel, store.s.focusedPanelId)
+        assertEquals(id, store.s.activeGridTab?.id)
+        // Found again, suffix and all.
+        store.openTab(editor("a.ts"))
+        assertEquals(id, store.openTab(NewTab("settings", "Settings")))
+    }
+
+    @Test
     fun `terminals are numbered past the highest open one, the dock's included`() {
         val store = store()
         store.switchProject("app")

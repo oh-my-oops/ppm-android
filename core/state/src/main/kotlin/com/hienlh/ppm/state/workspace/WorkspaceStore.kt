@@ -274,20 +274,15 @@ class WorkspaceStore(
             }
         }
 
-        // On screen only: the grid and, off a phone, the floating windows.
-        if (tabDef.type in ONE_PER_WORKSPACE_TYPES) {
+        // On screen only: the grid and, off a phone, the floating windows. The web looks for a
+        // singleton in every panel, other projects' keep-alive ones too, so on a phone Settings
+        // opened in a second project focused the first one's hidden panel and showed nothing.
+        // Searched here instead, a singleton is what the web says it is: one per project.
+        if (tabDef.type in ONE_PER_WORKSPACE_TYPES || tabDef.type in SINGLETON_TYPES) {
             val windows = if (mobile) emptyList() else s.panels.keys.filter(::isWindowPanelId)
             for (opid in s.gridPanelIds + windows) {
                 val panel = s.panels[opid] ?: continue
                 val existing = panel.tabs.firstOrNull { it.id == baseId || it.id.startsWith("$baseId@") } ?: continue
-                activateIn(panel.id, existing.id, focus = focusAfterActivate(panel.id))
-                return existing.id
-            }
-        }
-
-        if (tabDef.type in SINGLETON_TYPES) {
-            for (panel in s.panels.values) {
-                val existing = panel.tab(baseId) ?: continue
                 activateIn(panel.id, existing.id, focus = focusAfterActivate(panel.id))
                 return existing.id
             }

@@ -5,7 +5,7 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.hienlh.ppm.client.ApiClient
@@ -33,11 +33,8 @@ import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionTag
 import com.hienlh.ppm.protocol.SessionUnread
 import com.hienlh.ppm.protocol.ThemeSelection
-import com.hienlh.ppm.protocol.WireJson
-import com.hienlh.ppm.protocol.array
-import com.hienlh.ppm.protocol.get
+import com.hienlh.ppm.protocol.double
 import com.hienlh.ppm.protocol.sortedForList
-import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatSearch
 import com.hienlh.ppm.state.GlobalEvents
@@ -45,6 +42,13 @@ import com.hienlh.ppm.state.HistoryList
 import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.PermissionMode
+import com.hienlh.ppm.state.workspace.NewTab
+import com.hienlh.ppm.state.workspace.WorkspaceCache
+import com.hienlh.ppm.state.workspace.WorkspaceState
+import com.hienlh.ppm.state.workspace.WorkspaceStore
+import com.hienlh.ppm.state.workspace.WorkspaceTab
+import com.hienlh.ppm.state.workspace.tabSessionId
+import com.hienlh.ppm.state.workspace.workspaceRemote
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,7 +57,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -61,8 +64,8 @@ import kotlinx.serialization.json.put
 import okhttp3.HttpUrl
 
 /**
- * What the app shows (`AppModel.swift`): the open server, its projects, a project's chats and
- * the chat tabs open on it, and the theme. Lives as long as the process, so a rotation or a
+ * What the app shows (`AppModel.swift`): the open server, its projects, a project's chats, the
+ * tabs open on it (the layout every browser of that server shares) and the theme. Lives as long as the process, so a rotation or a
  * trip to the background keeps every chat connected. Main thread only.
  */
 @Stable
@@ -82,9 +85,6 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** The tab switcher's order, `default` or `recent`, kept on this device as the web keeps it. */
     var tabSortMode by mutableStateOf(prefs.get("tabSortMode") ?: "default")
         private set
-
-    /** Tab ids, the most recently shown first: the tab switcher's Recent order. */
-    val recentTabs = mutableStateListOf<String>()
 
     var api by mutableStateOf<ApiClient?>(null)
         private set
@@ -133,9 +133,26 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     var sessionsSyncError by mutableStateOf<String?>(null)
         private set
 
-    val tabs = mutableStateListOf<ChatTab>()
-    var activeTabId by mutableStateOf<String?>(null)
+    /** The open server's layout, shared with every browser on it (the web's `usePanelStore`). */
+    private var workspace: WorkspaceStore? = null
+    private var workspaceCache: WorkspaceCache? = null
+    private var workspaceJob: Job? = null
+
+    /** The first project of a server reads the server's copy of its tabs even when this device has one, as a page load does. */
+    private var hydratedOnce = false
+
+    /** The layout as drawn: the store's state, mirrored where Compose sees it. */
+    var layout by mutableStateOf<WorkspaceState?>(null)
         private set
+
+    /** The chat behind each chat tab in memory, by tab id; a tab whose chat has not started has none. */
+    private val chats = mutableStateMapOf<String, ChatTab>()
+
+    /** The session of the tab in front when the chats were last synced, to tell when another one comes forward. */
+    private var shownSession: String? = null
+
+    /** Tabs asked for while the selected project's layout was still on its way; opened once it is shown. */
+    private val waitingForWorkspace = mutableListOf<(WorkspaceStore) -> Unit>()
 
     /** The project sheet's order: `recent`, `priority` (the server's own) or `name`, shared through the server's UI prefs. */
     var projectSortMode by mutableStateOf("priority")
@@ -159,7 +176,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     var windowVisible = true
         set(value) {
             field = value
-            if (value) activeTabId?.let { events?.seen(it) }
+            // In the background Android may end the process at any time: the layout goes out now.
+            if (value) activeSessionId?.let { events?.seen(it) } else workspaceCache?.flush()
         }
 
     var showSignIn by mutableStateOf(false)
@@ -177,9 +195,6 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** Delete old sessions was chosen, until the user says how old. */
     var askDeleteOld by mutableStateOf(false)
 
-    /** Whether the Settings tab is open; it is the one shown while [activeTabId] is [SETTINGS_TAB]. */
-    var settingsOpen by mutableStateOf(false)
-        private set
     var deletingOld by mutableStateOf(false)
         private set
 
@@ -187,11 +202,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** Whether there is a server to show; otherwise the app asks for one. */
     val hasServer: Boolean get() = debug != null || store.servers.value.isNotEmpty()
-    val activeTab: ChatTab? get() = tabs.firstOrNull { it.id == activeTabId }
     val currentProject: ProjectInfo? get() = projects.firstOrNull { it.name == selectedProject }
-
-    /** Every open tab's id in the order shown: the chats, then Settings when it is open. */
-    val tabIds: List<String> get() = tabs.map { it.id } + if (settingsOpen) listOf(SETTINGS_TAB) else emptyList()
 
     /** The projects in the order the project sheet shows them. */
     val sortedProjects: List<ProjectInfo>
@@ -249,7 +260,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** Called whenever the selected server changes, and again once its password is given. */
     private suspend fun openSelectedServer() {
-        closeTabs()
+        closeWorkspace()
         events?.stop()
         events = null
         api = null
@@ -270,6 +281,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             ApiClient(url, token)
         }
         this.api = api
+        openWorkspace(api)
         startEvents(api)
         coroutineScope {
             launch { loadTheme() }
@@ -314,7 +326,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         // Whatever changed while the socket was down — another device renamed, pinned or
         // started a chat — was never delivered.
         events.onReady = { scope.launch { refreshSessions(quiet = true) } }
-        events.isShown = { id -> windowVisible && activeTabId == id }
+        events.isShown = { id -> windowVisible && activeSessionId == id }
         this.events = events
         events.start()
     }
@@ -325,6 +337,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
      */
     fun becameActive() {
         events?.wake()
+        refreshWorkspace()
         val readAt = sessionsReadAt ?: return
         if (System.currentTimeMillis() - readAt > 15_000) scope.launch { refreshSessions(quiet = true) }
     }
@@ -341,7 +354,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** A tab's title: the list's, which carries a rename made anywhere, else the tab's own. */
     fun title(tab: ChatTab, liveTitle: String?): String {
-        sessions.firstOrNull { it.id == tab.id }?.title?.takeIf { it.isNotEmpty() }?.let { return it }
+        sessions.firstOrNull { it.id == tab.session.id }?.title?.takeIf { it.isNotEmpty() }?.let { return it }
         return liveTitle?.takeIf { it.isNotEmpty() } ?: tab.session.title.ifEmpty { "New Chat" }
     }
 
@@ -374,8 +387,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         sessions = sessions.filter { it.id != session.id }
         sidebarList?.remove(session.id)
         homeList?.remove(session.id)
-        tabs.forEach { it.historyList?.remove(session.id) }
-        if (tabs.any { it.id == session.id }) closeTab(session.id)
+        chats.values.forEach { it.historyList?.remove(session.id) }
+        closeSessionTabs(session.id)
         try {
             api.deleteSession(project, session.id, session.providerId)
         } catch (error: CancellationException) {
@@ -436,7 +449,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         if (list != sessions) sessions = list.sortedForList()
         sidebarList?.patch(matches, change)
         homeList?.patch(matches, change)
-        for (tab in tabs) tab.historyList?.patch(matches, change)
+        for (tab in chats.values) tab.historyList?.patch(matches, change)
     }
 
     /** Opens what the search found. */
@@ -483,7 +496,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         // A chip that is gone cannot stay picked: its list would show nothing, with no chip lit.
         sidebarList?.let { if (it.tag == tag.id) it.tag = null }
         homeList?.let { if (it.tag == tag.id) it.tag = null }
-        for (tab in tabs) tab.historyList?.let { if (it.tag == tag.id) it.tag = null }
+        for (tab in chats.values) tab.historyList?.let { if (it.tag == tag.id) it.tag = null }
         if (!report { api.deleteTag(project, tag.id) }) refreshSessions(quiet = true)
         reloadTags()
     }
@@ -546,8 +559,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     suspend fun openProject(name: String) {
         val api = api ?: return
         if (name == selectedProject && sessionsLoad != Load.Idle) return
-        closeTabs()
         selectedProject = name
+        waitingForWorkspace.clear()
         events?.project = name
         resetProjectState()
         if (debug == null) prefs.put("lastProject.$serverKey", name)
@@ -556,6 +569,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         homeList = HistoryList(api, name, scope)
         sidebarSearch = ChatSearch(api, name, scope)
         models = ModelCatalog(api, name)
+        // Apart from the list: a failed read of the sessions must not leave the tabs unshown.
+        scope.launch { showWorkspace(name) }
         sessionsLoad = Load.Loading
         syncsRunning++
         try {
@@ -581,7 +596,6 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             syncsRunning--
         }
         if (selectedProject != name) return
-        restoreTabs()
         debug?.session?.let { id -> sessions.firstOrNull { it.id == id }?.let(::openTab) }
     }
 
@@ -649,36 +663,154 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     // Tabs
 
-    /** Opens a session in a tab, or brings its tab forward. */
-    fun openTab(session: SessionInfo) {
-        if (tabs.none { it.id == session.id }) tabs += ChatTab(session)
-        activate(session.id)
+    private fun openWorkspace(api: ApiClient) {
+        val cache = WorkspaceCache(prefs, "workspace.$serverKey.", api.workspaceRemote(), scope)
+        // Until the tablet layout exists every window draws the phone's, so tabs open as a phone opens them.
+        val store = WorkspaceStore(cache, isMobile = { true })
+        workspaceCache = cache
+        workspace = store
+        hydratedOnce = false
+        workspaceJob = scope.launch {
+            store.state.collect { state ->
+                syncChats(state)
+                layout = state
+            }
+        }
+    }
+
+    /** A server's tabs go when another opens; their last changes still go out to it. */
+    private fun closeWorkspace() {
+        workspaceCache?.flush()
+        workspaceJob?.cancel()
+        workspaceJob = null
+        workspace = null
+        workspaceCache = null
+        layout = null
+        chats.values.forEach { it.stop() }
+        chats.clear()
+        shownSession = null
+        waitingForWorkspace.clear()
     }
 
     /**
-     * Shows a tab. A tab the user picked has its unread cleared even when it was marked by
-     * hand; one shown for them (restored, or next after a close) only loses the others.
+     * Shows [name]'s tabs. The server's copy is read first on a server's first project and when
+     * this device has none (app.tsx): an empty layout made before it arrived would be the newer
+     * one, and would replace it on every device.
      */
-    fun activate(id: String, picked: Boolean = true) {
-        if (id == SETTINGS_TAB) {
-            if (!settingsOpen) return
-            activeTabId = id
-            touchRecent(id)
-            return
+    private suspend fun showWorkspace(name: String) {
+        val store = workspace ?: return
+        val cache = workspaceCache ?: return
+        if (!hydratedOnce || !cache.has(name)) {
+            hydratedOnce = true
+            cache.hydrate(name)
         }
-        val tab = tabs.firstOrNull { it.id == id } ?: return
-        val api = api ?: return
-        val project = selectedProject ?: return
-        activeTabId = id
-        touchRecent(id)
-        if (picked) events?.markRead(id) else if (windowVisible) events?.seen(id)
-        tab.start(api, project, scope)
-        saveTabs()
+        if (workspace !== store || selectedProject != name) return
+        store.switchProject(name)
+        val waiting = waitingForWorkspace.toList()
+        waitingForWorkspace.clear()
+        for (open in waiting) open(store)
     }
 
-    private fun touchRecent(id: String) {
-        recentTabs.remove(id)
-        recentTabs.add(0, id)
+    /** Runs [open] on the selected project's layout: a tab opened before it is shown would land in no project's. */
+    private fun withWorkspace(open: (WorkspaceStore) -> Unit) {
+        val store = workspace ?: return
+        if (selectedProject != null && store.state.value.currentProject == selectedProject) open(store) else waitingForWorkspace += open
+    }
+
+    /** Back in front: another device may have changed this project's tabs meanwhile (the web reads them on every load). */
+    private fun refreshWorkspace() {
+        val store = workspace ?: return
+        val cache = workspaceCache ?: return
+        val project = store.state.value.currentProject ?: return
+        scope.launch {
+            if (cache.hydrate(project) && workspace === store && store.state.value.currentProject == project) store.reloadProject(project)
+        }
+    }
+
+    /**
+     * Gives each chat tab in memory its chat, ends the chats of tabs that went (closed here or on
+     * another device) and connects the one in front; the others connect once shown, then stay up.
+     */
+    private fun syncChats(state: WorkspaceState) {
+        val live = HashMap<String, WorkspaceTab>()
+        for (panel in state.panels.values) for (tab in panel.tabs) if (tab.type == "chat") live[tab.id] = tab
+        for ((id, chat) in chats.toList()) {
+            val tab = live[id]
+            if (tab == null || tabSessionId(tab) != chat.session.id) {
+                chat.stop()
+                chats.remove(id)
+            }
+        }
+        for ((id, tab) in live) {
+            if (id in chats) continue
+            val sessionId = tabSessionId(tab) ?: continue
+            val project = tab.projectId ?: tab.metaString("projectName") ?: state.currentProject ?: continue
+            val session = sessions.firstOrNull { it.id == sessionId }
+                ?: SessionInfo(id = sessionId, providerId = tab.metaString("providerId") ?: "claude", title = tab.title)
+            chats[id] = ChatTab(id, session, project)
+        }
+        val active = state.activeGridTab
+        val api = api
+        if (active != null && api != null) chats[active.id]?.start(api, scope)
+        // A chat that comes forward by itself (restored, or next after a close) loses its unread
+        // unless it was marked by hand; one the user picks loses it either way (`activate`).
+        val sessionId = tabSessionId(active)
+        if (sessionId != shownSession) {
+            shownSession = sessionId
+            if (sessionId != null && windowVisible) events?.seen(sessionId)
+        }
+    }
+
+    /** The tab bar's tabs, the phone's merged one: every grid panel's, this project's, with the panel each is in. */
+    val openTabs: List<Pair<WorkspaceTab, String>> get() = layout?.mergedTabs.orEmpty()
+
+    /** The tab the main area shows. */
+    val activeTab: WorkspaceTab? get() = layout?.activeGridTab
+    val activeTabId: String? get() = activeTab?.id
+
+    /** Read from the store rather than [layout]: the global socket asks between two frames. */
+    private val activeSessionId: String? get() = tabSessionId(workspace?.state?.value?.activeGridTab)
+
+    /** The chat of a chat tab; none for a tab whose chat has not started. */
+    fun chat(tabId: String): ChatTab? = chats[tabId]
+
+    /** The grid panels in grid order, for the tab switcher's "Panel N" groups. */
+    val gridPanelIds: List<String> get() = layout?.gridPanelIds.orEmpty()
+
+    /** The tab switcher's Recent order (`mobile-nav.tsx`): the latest shown first, the never-shown last in tab order. */
+    fun recentOrder(tabs: List<Pair<WorkspaceTab, String>>): List<Pair<WorkspaceTab, String>> =
+        tabs.withIndex()
+            .sortedWith(compareByDescending<IndexedValue<Pair<WorkspaceTab, String>>> { it.value.first.metadata["lastActiveAt"].double ?: -1.0 }.thenBy { it.index })
+            .map { it.value }
+
+    private fun panelOf(tabId: String): String? = openTabs.firstOrNull { it.first.id == tabId }?.second
+
+    /** Opens a session in a tab, or brings its tab forward (`openSessionInItsTab`). */
+    fun openTab(session: SessionInfo) {
+        val project = selectedProject ?: return
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = "chat",
+                    title = session.title.ifEmpty { "Chat" },
+                    projectId = project,
+                    metadata = buildJsonObject {
+                        put("projectName", project)
+                        put("sessionId", session.id)
+                        put("providerId", session.providerId)
+                    },
+                ),
+            )
+            events?.markRead(session.id)
+        }
+    }
+
+    /** Shows a tab the user picked: its chat's unread clears even when it was marked by hand. */
+    fun activate(tabId: String) {
+        val store = workspace ?: return
+        val panelId = panelOf(tabId)
+        store.setActiveTab(tabId, panelId)
+        tabSessionId(panelId?.let { store.state.value.panels[it] }?.tab(tabId))?.let { events?.markRead(it) }
     }
 
     fun pickTabSort(mode: String) {
@@ -686,71 +818,98 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         prefs.put("tabSortMode", mode)
     }
 
-    /** Settings opens as a tab of its own, as on the web's phone layout. */
-    fun openSettings() {
-        settingsOpen = true
-        activate(SETTINGS_TAB)
+    /** Settings opens as a tab on a phone, as on the web's (`openSettings`). */
+    fun openSettings() = withWorkspace { it.openTab(NewTab("settings", "Settings")) }
+
+    fun closeTab(tabId: String) {
+        workspace?.closeTab(tabId, panelOf(tabId))
     }
 
-    fun closeTab(id: String) {
-        recentTabs.remove(id)
-        if (id == SETTINGS_TAB) {
-            settingsOpen = false
-            if (activeTabId == id) {
-                activeTabId = null
-                tabs.lastOrNull()?.let { activate(it.id, picked = false) }
-            }
-            return
+    /** Close Others: the other closable tabs of [keep]'s panel (`mobile-nav.tsx`). */
+    fun closeOtherTabs(keep: String) {
+        val panel = panelTabs(keep) ?: return
+        closeAll(panel.second, panel.first.filter { it.id != keep && it.closable }.map { it.id })
+    }
+
+    /** Close to the Right: the closable tabs after [tabId] in its panel. */
+    fun closeTabsToRight(tabId: String) {
+        val panel = panelTabs(tabId) ?: return
+        closeAll(panel.second, panel.first.dropWhile { it.id != tabId }.drop(1).filter { it.closable }.map { it.id })
+    }
+
+    /** Whether the tab menu offers Close Others: another closable tab in the panel. */
+    fun canCloseOthers(tabId: String): Boolean = panelTabs(tabId)?.first?.any { it.id != tabId && it.closable } == true
+
+    /** Whether it offers Close to the Right: the tab is not its panel's last. */
+    fun hasTabsToRight(tabId: String): Boolean = panelTabs(tabId)?.first?.let { tabs -> tabs.indexOfFirst { it.id == tabId } in 0 until tabs.lastIndex } == true
+
+    private fun panelTabs(tabId: String): Pair<List<WorkspaceTab>, String>? {
+        val panelId = panelOf(tabId) ?: return null
+        val panel = layout?.panels?.get(panelId) ?: return null
+        return panel.tabs to panelId
+    }
+
+    private fun closeAll(panelId: String, ids: List<String>) {
+        val store = workspace ?: return
+        for (id in ids) store.closeTab(id, panelId)
+    }
+
+    /** A deleted session's tabs go with it, wherever they are. */
+    private fun closeSessionTabs(sessionId: String) {
+        val store = workspace ?: return
+        for (panel in store.state.value.panels.values.toList()) {
+            for (tab in panel.tabs) if (tabSessionId(tab) == sessionId) store.closeTab(tab.id, panel.id)
         }
-        val index = tabs.indexOfFirst { it.id == id }
-        if (index < 0) return
-        tabs[index].stop()
-        tabs.removeAt(index)
-        if (activeTabId == id) {
-            activeTabId = null
-            when {
-                tabs.isNotEmpty() -> activate(tabs[maxOf(0, index - 1)].id, picked = false)
-                settingsOpen -> activate(SETTINGS_TAB)
-            }
-        }
-        saveTabs()
-    }
-
-    /** Close Others: every tab but [keep]. */
-    fun closeOtherTabs(keep: String) = closeWhere(keep) { it != keep }
-
-    /** Close to the Right: the tabs after [id]. */
-    fun closeTabsToRight(id: String) {
-        val after = tabIds.dropWhile { it != id }.drop(1).toSet()
-        closeWhere(id) { it in after }
-    }
-
-    /** Closes the tabs [gone] picks at once, showing [fallback] if the one in front went. */
-    private fun closeWhere(fallback: String, gone: (String) -> Boolean) {
-        val closing = tabIds.filter(gone)
-        if (closing.isEmpty()) return
-        for (tab in tabs) if (gone(tab.id)) tab.stop()
-        tabs.removeAll { gone(it.id) }
-        if (gone(SETTINGS_TAB)) settingsOpen = false
-        recentTabs.removeAll(closing)
-        if (activeTabId?.let(gone) == true) activate(fallback) else saveTabs()
     }
 
     /**
      * Shows another session in this tab, as picking one from the chat's own History does; a
-     * session already open elsewhere is brought forward instead.
+     * session already open in a tab is brought forward instead.
      */
-    fun replaceTab(id: String, session: SessionInfo) {
-        if (tabs.any { it.id == session.id }) {
-            activate(session.id)
+    fun replaceTab(tabId: String, session: SessionInfo) {
+        val store = workspace ?: return
+        val open = openTabs.firstOrNull { tabSessionId(it.first) == session.id }
+        if (open != null) {
+            activate(open.first.id)
             return
         }
-        val index = tabs.indexOfFirst { it.id == id }
-        if (index < 0) return
-        tabs[index].stop()
-        tabs[index] = ChatTab(session)
-        recentTabs.remove(id)
-        activate(session.id)
+        store.updateTab(tabId) { tab ->
+            tab.copy(title = session.title.ifEmpty { "Chat" })
+                .withMetadata("sessionId" to JsonPrimitive(session.id), "providerId" to JsonPrimitive(session.providerId))
+        }
+        events?.markRead(session.id)
+    }
+
+    /** The title the server gives a chat goes onto its tab too, so every browser shows it (chat-tab.tsx). */
+    fun retitleTab(tabId: String, title: String) {
+        val store = workspace ?: return
+        if (store.state.value.panelOf(tabId)?.tab(tabId)?.title == title) return
+        store.updateTab(tabId) { it.copy(title = title) }
+    }
+
+    /** A chat tab made on the web before its first message has no session yet; this gives it one. */
+    suspend fun startChat(tabId: String) {
+        val api = api ?: return
+        val project = selectedProject ?: return
+        val store = workspace ?: return
+        val provider = store.state.value.panelOf(tabId)?.tab(tabId)?.metaString("providerId")?.takeIf { it != "default" }
+        try {
+            val session = api.createSession(project, provider)
+            if (selectedProject != project || workspace !== store) return
+            sessions = (listOf(session) + sessions.filter { it.id != session.id }).sortedForList()
+            store.updateTab(tabId) { tab ->
+                tab.withMetadata(
+                    "sessionId" to JsonPrimitive(session.id),
+                    "providerId" to JsonPrimitive(session.providerId),
+                    "providerPending" to null,
+                    "focusedProviderOnOpen" to null,
+                )
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            actionError = describe(error)
+        }
     }
 
     /** A new chat in a new tab; the server's default provider when [providerId] is null. */
@@ -766,62 +925,6 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             throw error
         } catch (error: Exception) {
             actionError = describe(error)
-        }
-    }
-
-    /** A project's tabs go when another opens; Settings, which belongs to no project, stays. */
-    private fun closeTabs() {
-        tabs.forEach { it.stop() }
-        recentTabs.removeAll { it != SETTINGS_TAB }
-        tabs.clear()
-        if (activeTabId != SETTINGS_TAB) activeTabId = null
-    }
-
-    private val tabsKey: String get() = "tabs.$serverKey.${selectedProject.orEmpty()}"
-
-    private fun saveTabs() {
-        if (debug != null || selectedProject == null) return
-        val saved = buildJsonObject {
-            put(
-                "tabs",
-                JsonArray(
-                    tabs.map { tab ->
-                        buildJsonObject {
-                            put("id", tab.id)
-                            put("providerId", tab.session.providerId)
-                            put("title", tab.session.title)
-                        }
-                    },
-                ),
-            )
-            // Settings is not saved: the chat behind it is the one to come back to.
-            put("active", (if (activeTabId == SETTINGS_TAB) recentTabs.firstOrNull { it != SETTINGS_TAB } else activeTabId).orEmpty())
-        }
-        prefs.put(tabsKey, saved.toString())
-    }
-
-    /** The tabs this project had open; only the one in front connects until another is chosen. */
-    private fun restoreTabs() {
-        if (debug != null) return
-        val saved = prefs.get(tabsKey)?.let(WireJson::parseOrNull) ?: return
-        val restored = saved["tabs"].array.orEmpty().mapNotNull { entry ->
-            val id = entry["id"].string ?: return@mapNotNull null
-            val session = sessions.firstOrNull { it.id == id } ?: SessionInfo(
-                id = id,
-                providerId = entry["providerId"].string ?: "claude",
-                title = entry["title"].string ?: "",
-            )
-            ChatTab(session)
-        }
-        tabs.clear()
-        tabs.addAll(restored)
-        // Settings in front stays there; the restored tabs connect once one is picked.
-        if (activeTabId == SETTINGS_TAB) return
-        val active = saved["active"].string
-        if (active != null && tabs.any { it.id == active }) {
-            activate(active, picked = false)
-        } else {
-            tabs.firstOrNull()?.let { activate(it.id, picked = false) }
         }
     }
 
@@ -854,19 +957,14 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         null
     }
 
-    companion object {
-        /** The Settings tab's id among the chat tabs'. */
-        const val SETTINGS_TAB = "__settings__"
-    }
 }
 
 /**
- * One open chat tab. Its connection starts when the tab is first shown and stays up while the
- * tab is open, so a tab behind still shows its turn streaming.
+ * The chat of one chat tab ([tabId] in the layout). Its connection starts when the tab is first
+ * shown and stays up while the tab is open, so a tab behind still shows its turn streaming.
  */
 @Stable
-class ChatTab(val session: SessionInfo) {
-    val id: String = session.id
+class ChatTab(val tabId: String, val session: SessionInfo, val project: String) {
     var controller by mutableStateOf<ChatController?>(null)
         private set
 
@@ -886,7 +984,7 @@ class ChatTab(val session: SessionInfo) {
     /** For a message sent while the turn runs; back to Queue after each send. */
     var priority by mutableStateOf(MessagePriority.DEFAULT)
 
-    fun start(api: ApiClient, project: String, scope: CoroutineScope) {
+    fun start(api: ApiClient, scope: CoroutineScope) {
         if (controller != null) return
         historyList = HistoryList(api, project, scope)
         controller = ChatController(api, project, session, scope).also { it.start() }

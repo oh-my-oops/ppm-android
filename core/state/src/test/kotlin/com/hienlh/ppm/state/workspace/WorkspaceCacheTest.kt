@@ -113,6 +113,16 @@ class WorkspaceCacheTest {
     }
 
     @Test
+    fun `the layout this device sent, back from the server, changes nothing`() = runTest {
+        val cache = cache()
+        cache.save("app", oneTab("editor:same"))
+        remote.server = SavedLayout(oneTab("editor:same"), "2026-10-20T05:00:00.000Z")
+        assertFalse(cache.hydrate("app"))
+        assertTrue(cache.has("app"))
+        assertFalse(cache.has("lib"))
+    }
+
+    @Test
     fun `hydrating keeps this device's copy when it is newer`() = runTest {
         val cache = cache()
         cache.save("app", oneTab("editor:local"))

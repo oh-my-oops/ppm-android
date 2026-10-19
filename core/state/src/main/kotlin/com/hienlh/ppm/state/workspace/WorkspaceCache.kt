@@ -74,7 +74,13 @@ class WorkspaceCache(
         }
     }
 
-    /** Takes the server's copy of [project] when it is at least as new as this device's; true when it did. */
+    /** Whether this device keeps a copy of [project]'s layout. */
+    fun has(project: String): Boolean = values.get(key(project)) != null
+
+    /**
+     * Takes the server's copy of [project] when it is at least as new as this device's. True when
+     * that changed what this device holds, i.e. when the layout shown is out of date.
+     */
     suspend fun hydrate(project: String): Boolean {
         if (project == GLOBAL_PROJECT) return false
         val server = try {
@@ -82,9 +88,13 @@ class WorkspaceCache(
         } catch (_: Exception) {
             null
         } ?: return false
-        if (resolveWorkspaceConflict(stored(project), server) !== server) return false
+        val local = stored(project)
+        if (resolveWorkspaceConflict(local, server) !== server) return false
         // Migrated before it is written, as on the web, so a legacy tab from another device never lands here.
-        write(project, SavedLayout(migratePortsToTunnels(server.layout), server.updatedAt))
+        val layout = migratePortsToTunnels(server.layout)
+        // The copy this device sent itself comes back stamped by the server: nothing to show again.
+        if (local != null && local.layout.toJson() == layout.toJson()) return false
+        write(project, SavedLayout(layout, server.updatedAt))
         return true
     }
 

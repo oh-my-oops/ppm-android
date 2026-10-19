@@ -16,6 +16,7 @@ The three `core` modules are plain Kotlin/JVM: their tests run on the JVM, no em
 - **One thread drives every controller.** `ChatController`, `GlobalEvents`, `HistoryList` and `ChatSearch` take a parent `CoroutineScope` whose dispatcher must be a single thread (the main one on Android, `e2e-main` in `EndToEndTest`) and must be called from it. Nothing in them is synchronized; the `StateFlow`s are what other threads may read.
 - `ChatController` decodes frames on `Dispatchers.Default` and applies them back on its own thread: a `turn_events` snapshot can be megabytes.
 - Two deliberate differences from the Swift code: `ChatController` keeps the reason it closed a silent socket for (Swift's `close()` reports `nil` and overwrites it), and history/frames take `now` in epoch milliseconds.
+- **Tabs are the web's layout.** `AppModel` draws `WorkspaceStore`'s state; a chat tab's chat (`ChatTab`) is keyed by the layout's tab id, which is not the session id (`chat:<provider>/<session>`, or a minted id the session came to later): go through `tabSessionId` for unread, running and marking read. The one deliberate difference from `panel-store.ts`: a singleton (`settings`, `git-log`) is looked for on screen, as a table's tab is, not in other projects' keep-alive panels (see the comment in `WorkspaceStore.openTab`).
 - `HttpUrl.toString()` always prints a root path (`http://host:8080/`), where Foundation prints none — tests written from the Swift ones must expect the slash.
 
 ## Building and testing

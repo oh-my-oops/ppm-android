@@ -88,9 +88,14 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
     val chat = tab.controller ?: return
     val state by chat.state.collectAsState()
     val tokens = LocalPpmTokens.current
-    var historyOpen by remember(tab.id) { mutableStateOf(false) }
-    // The title the server gives a new chat goes into every list, as the web's tab carries it.
-    LaunchedEffect(state.title) { state.title?.takeIf { it.isNotEmpty() }?.let { model.renameSession(tab.id, it) } }
+    var historyOpen by remember(tab.tabId) { mutableStateOf(false) }
+    // The title the server gives a new chat goes into every list and onto its tab, as the web's tab carries it.
+    LaunchedEffect(state.title) {
+        state.title?.takeIf { it.isNotEmpty() }?.let {
+            model.renameSession(tab.session.id, it)
+            model.retitleTab(tab.tabId, it)
+        }
+    }
     BoxWithConstraints(modifier.fillMaxSize()) {
         // The chat's own `@container`: under 420 px the chips drop their words.
         val narrow = maxWidth <= 420.dp
@@ -233,7 +238,7 @@ private fun ReloadButton(connected: Boolean, reload: () -> Unit) {
 @Composable
 private fun OverflowButton(model: AppModel, tab: ChatTab) {
     val tokens = LocalPpmTokens.current
-    val unread = model.unreadSessions()[tab.id] != null
+    val unread = model.unreadSessions()[tab.session.id] != null
     var open by remember { mutableStateOf(false) }
     Box(
         Modifier.size(20.dp).clip(RoundedCornerShape(4.dp)).ppmClickable(pressedColor = tokens.panel2.color) { open = true },
@@ -245,12 +250,12 @@ private fun OverflowButton(model: AppModel, tab: ChatTab) {
                 if (unread) {
                     MenuItem("Mark as read", onClick = {
                         open = false
-                        model.markRead(tab.id)
+                        model.markRead(tab.session.id)
                     }, icon = { MenuIcon(ProductIcon.BellOff, tokens.warning) }, vertical = 12.dp)
                 } else {
                     MenuItem("Mark as unread", onClick = {
                         open = false
-                        model.markUnread(model.sessions.firstOrNull { it.id == tab.id } ?: tab.session)
+                        model.markUnread(model.sessions.firstOrNull { it.id == tab.session.id } ?: tab.session)
                     }, icon = { FilledCircleIcon(tokens.accent) }, vertical = 12.dp)
                 }
             }
@@ -313,7 +318,7 @@ private fun ChatHistoryDropdown(model: AppModel, tab: ChatTab, list: HistoryList
                 else -> {
                     for (session in sessions) {
                         HistoryBarRow(model, session, unread[session.id]?.type, unread.containsKey(session.id)) {
-                            model.replaceTab(tab.id, session)
+                            model.replaceTab(tab.tabId, session)
                             close()
                         }
                     }

@@ -77,21 +77,21 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.app.AppModel
-import com.hienlh.ppm.app.AppModel.Companion.SETTINGS_TAB
 import com.hienlh.ppm.chat.RelativeTime
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
-import com.hienlh.ppm.design.ProviderLogo
-import com.hienlh.ppm.design.ProviderLogos
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.SessionInfo
+import com.hienlh.ppm.state.workspace.WorkspaceTab
+import com.hienlh.ppm.state.workspace.tabSessionId
 import kotlinx.coroutines.launch
 import java.time.Instant
 
@@ -119,11 +119,7 @@ fun PhoneShell(model: AppModel) {
                 .padding(bottom = with(density) { maxOf(ime, nav).toDp() }),
         ) {
             val tab = model.activeTab
-            when {
-                model.activeTabId == SETTINGS_TAB && model.settingsOpen -> SettingsTab(model)
-                tab != null -> key(tab.id) { ChatPane(model, tab) }
-                else -> EmptyPanel(model, onOpenSession = { model.openTab(it) })
-            }
+            if (tab != null) key(tab.id) { TabBody(model, tab) } else EmptyPanel(model, onOpenSession = { model.openTab(it) })
         }
         MobileNav(
             model,
@@ -164,7 +160,7 @@ private fun MobileNav(model: AppModel, onMenu: () -> Unit, onProjects: () -> Uni
                 NavDivider()
                 NavCell("New tab", { model.scope.launch { model.newChat() } }) { PpmIcon(ProductIcon.Plus, 20.dp, tokens.text2.color) }
             }
-            val active = model.activeTabId
+            val active = model.activeTab
             if (active != null) {
                 CurrentTabButton(model, active, Modifier.weight(1f), onTabs)
             } else {
@@ -198,10 +194,9 @@ private fun NavDivider() {
 
 /** `flex-1 h-12 px-3 border-t-2 border-primary bg-surface`: icon, title, the count of tabs, a chevron. */
 @Composable
-private fun CurrentTabButton(model: AppModel, active: String, modifier: Modifier, onClick: () -> Unit) {
+private fun CurrentTabButton(model: AppModel, active: WorkspaceTab, modifier: Modifier, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
-    val chat = model.tabs.firstOrNull { it.id == active }
-    val title = if (chat != null) model.title(chat, chat.controller?.state?.value?.title) else "Settings"
+    val title = tabTitle(model, active)
     Row(
         modifier
             .fillMaxHeight()
@@ -212,7 +207,7 @@ private fun CurrentTabButton(model: AppModel, active: String, modifier: Modifier
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        TabIcon(chat?.session?.providerId, tokens.accent)
+        TabIcon(active, tokens.accent)
         BasicText(
             title,
             Modifier.weight(1f),
@@ -220,18 +215,8 @@ private fun CurrentTabButton(model: AppModel, active: String, modifier: Modifier
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        CountChip(model.tabIds.size)
+        CountChip(model.openTabs.size)
         PpmIcon(ProductIcon.ChevronUp, 14.dp, tokens.text3.color)
-    }
-}
-
-/** A chat tab's provider logo, or Settings' gear, at 16 px. */
-@Composable
-private fun TabIcon(providerId: String?, tint: Rgba) {
-    when {
-        providerId == null -> PpmIcon(ProductIcon.Settings, 16.dp, tint.color)
-        ProviderLogos.has(providerId) -> ProviderLogo(providerId, 16.dp, tint.color)
-        else -> PpmIcon(ProductIcon.MessageSquare, 16.dp, tint.color)
     }
 }
 
@@ -450,7 +435,7 @@ private fun TabSwitcherSheet(model: AppModel, onDismiss: () -> Unit, onLongPress
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             BasicText("Open Tabs", style = ppmText(13f, FontWeight.SemiBold, lineHeight = 19.5f).copy(color = tokens.text.color))
-            CountChip(model.tabIds.size)
+            CountChip(model.openTabs.size)
             Spacer(Modifier.weight(1f))
             val segment = RoundedCornerShape(12.dp)
             Row(
@@ -504,16 +489,17 @@ private fun TabSwitcherSheet(model: AppModel, onDismiss: () -> Unit, onLongPress
             }
         }
         val q = query.text.toString().trim().lowercase()
-        val entries = model.tabIds.map { id -> id to tabTitle(model, id) }
-            .filter { (_, title) -> q.isEmpty() || title.lowercase().contains(q) }
-            .let { list ->
-                if (model.tabSortMode == "recent") {
-                    list.sortedBy { (id, _) -> model.recentTabs.indexOf(id).let { if (it < 0) Int.MAX_VALUE else it } }
-                } else {
-                    list
-                }
+        // `buildTabSwitcherGroups`: matched by title or kind; one group per grid panel, or one
+        // header-less list in Recent order.
+        val matching = model.openTabs.filter { (tab, _) -> q.isEmpty() || tabTitle(model, tab).lowercase().contains(q) || tab.type.lowercase().contains(q) }
+        val groups = if (model.tabSortMode == "recent") {
+            if (matching.isEmpty()) emptyList() else listOf("" to model.recentOrder(matching))
+        } else {
+            model.gridPanelIds.mapIndexedNotNull { index, panelId ->
+                matching.filter { it.second == panelId }.takeIf { it.isNotEmpty() }?.let { "Panel ${index + 1}" to it }
             }
-        if (entries.isEmpty()) {
+        }
+        if (groups.isEmpty()) {
             BasicText(
                 "No tabs match",
                 Modifier.fillMaxWidth().padding(vertical = 24.dp),
@@ -521,28 +507,45 @@ private fun TabSwitcherSheet(model: AppModel, onDismiss: () -> Unit, onLongPress
             )
         } else {
             LazyColumn(Modifier.weight(1f, fill = false).fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp)) {
-                items(entries, key = { it.first }) { (id, title) ->
-                    TabRow(
-                        model, id, title,
-                        streaming = id in running,
-                        unreadType = unread[id]?.type,
-                        unreadManual = unread[id]?.manual == true,
-                        onOpen = {
-                            model.activate(id)
-                            onDismiss()
-                        },
-                        onLongPress = { onLongPress(id) },
-                    )
+                for ((label, tabs) in groups) {
+                    if (label.isNotEmpty()) item(key = "group\u0000$label") { GroupHeader(label, tabs.size) }
+                    items(tabs, key = { (tab, panelId) -> "${tab.id}\u0000$panelId" }) { (tab, _) ->
+                        val sessionId = tabSessionId(tab)
+                        val entry = sessionId?.let { unread[it] }
+                        TabRow(
+                            model, tab, tabTitle(model, tab),
+                            streaming = sessionId != null && sessionId in running,
+                            unreadType = entry?.type,
+                            unreadManual = entry?.manual == true,
+                            onOpen = {
+                                model.activate(tab.id)
+                                onDismiss()
+                            },
+                            onLongPress = { onLongPress(tab.id) },
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-private fun tabTitle(model: AppModel, id: String): String {
-    if (id == SETTINGS_TAB) return "Settings"
-    val tab = model.tabs.firstOrNull { it.id == id } ?: return id
-    return model.title(tab, tab.controller?.state?.value?.title)
+/** `flex items-center gap-1.5 px-2 pt-2 pb-1`: the panel's columns icon, "PANEL N" and its count. */
+@Composable
+private fun GroupHeader(label: String, count: Int) {
+    val tokens = LocalPpmTokens.current
+    Row(
+        Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        PpmIcon(ProductIcon.Columns2, 12.dp, tokens.text3.color)
+        BasicText(
+            label.uppercase(),
+            style = ppmText(11f, FontWeight.SemiBold, lineHeight = 16.5f).copy(color = tokens.text3.color, letterSpacing = 0.05.em),
+        )
+        BasicText("$count", style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text3.color))
+    }
 }
 
 /**
@@ -552,7 +555,7 @@ private fun tabTitle(model: AppModel, id: String): String {
 @Composable
 private fun TabRow(
     model: AppModel,
-    id: String,
+    tab: WorkspaceTab,
     title: String,
     streaming: Boolean,
     unreadType: String?,
@@ -561,9 +564,9 @@ private fun TabRow(
     onLongPress: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
-    val active = id == model.activeTabId
-    val chat = model.tabs.firstOrNull { it.id == id }
-    val session = chat?.let { tab -> model.sessions.firstOrNull { it.id == tab.id } ?: tab.session }
+    val active = tab.id == model.activeTabId
+    val chat = model.chat(tab.id)
+    val session = chat?.let { c -> model.sessions.firstOrNull { it.id == c.session.id } ?: c.session }
     // The tag's colour, else the project's when it is a plain colour (a palette gradient is not one).
     val bar = session?.tag?.color?.let(Rgba::hex) ?: chat?.let { model.currentProject?.color?.takeIf { it.startsWith("#") }?.let(Rgba::hex) }
     val shape = RoundedCornerShape(12.dp)
@@ -597,7 +600,7 @@ private fun TabRow(
                     PpmIcon(ProductIcon.MessageCircle, 16.dp, tokens.warning.color)
                     TypingDots(tokens.warning, Modifier.align(Alignment.Center))
                 } else {
-                    TabIcon(chat?.session?.providerId, if (active) tokens.accent else tokens.text2)
+                    TabIcon(tab, if (active) tokens.accent else tokens.text2)
                     if (unreadType != null && (!active || unreadManual)) {
                         Box(Modifier.align(Alignment.TopEnd).offset(4.dp, (-4).dp).size(8.dp).clip(CircleShape).background(tokens.notification(unreadType).color))
                     }
@@ -612,7 +615,7 @@ private fun TabRow(
             )
             if (active) Box(Modifier.size(6.dp).clip(CircleShape).background(tokens.accent.color))
             Box(
-                Modifier.size(32.dp).clip(RoundedCornerShape(12.dp)).ppmClickable(pressedColor = tokens.panel2.color) { model.closeTab(id) },
+                Modifier.size(32.dp).clip(RoundedCornerShape(12.dp)).ppmClickable(pressedColor = tokens.panel2.color) { model.closeTab(tab.id) },
                 contentAlignment = Alignment.Center,
             ) { PpmIcon(ProductIcon.X, 16.dp, tokens.text3.color) }
         }
@@ -648,13 +651,13 @@ private fun TypingDots(color: Rgba, modifier: Modifier) {
 @Composable
 private fun TabMenuSheet(model: AppModel, id: String, onDismiss: () -> Unit, onRename: (SessionInfo) -> Unit) {
     val tokens = LocalPpmTokens.current
-    val chat = model.tabs.firstOrNull { it.id == id }
-    val session = chat?.let { tab -> model.sessions.firstOrNull { it.id == tab.id } ?: tab.session }
-    val unread = model.unreadSessions()[id] != null
-    val ids = model.tabIds
+    val tab = model.openTabs.firstOrNull { it.first.id == id }?.first
+    val chat = model.chat(id)
+    val session = chat?.let { c -> model.sessions.firstOrNull { it.id == c.session.id } ?: c.session }
+    val unread = session != null && model.unreadSessions()[session.id] != null
     BottomSheet(onDismiss) {
         BasicText(
-            tabTitle(model, id),
+            tab?.let { tabTitle(model, it) } ?: "",
             Modifier.fillMaxWidth().line(top = false, tokens.border.color).padding(horizontal = 12.dp, vertical = 8.dp),
             style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
             maxLines = 1,
@@ -692,17 +695,19 @@ private fun TabMenuSheet(model: AppModel, id: String, onDismiss: () -> Unit, onR
                 SheetDivider()
             }
         }
-        SheetRow("Close", ProductIcon.X) {
-            onDismiss()
-            model.closeTab(id)
+        if (tab?.closable == true) {
+            SheetRow("Close", ProductIcon.X) {
+                onDismiss()
+                model.closeTab(id)
+            }
         }
-        if (ids.any { it != id }) {
+        if (model.canCloseOthers(id)) {
             SheetRow("Close Others", ProductIcon.XSquare) {
                 onDismiss()
                 model.closeOtherTabs(id)
             }
         }
-        if (ids.indexOf(id) in 0 until ids.lastIndex) {
+        if (model.hasTabsToRight(id)) {
             SheetRow("Close to the Right", ProductIcon.ChevronsRight) {
                 onDismiss()
                 model.closeTabsToRight(id)
