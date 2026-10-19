@@ -1,0 +1,310 @@
+package com.hienlh.ppm.app.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
+import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.PpmIcon
+import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.ppmClickable
+import com.hienlh.ppm.design.ppmShadow
+import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.protocol.SessionInfo
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
+
+/** Tailwind's `shadow-md` and `shadow-lg`, by their larger layer. */
+private val shadowMd = ThemeShadow(0.0, 4.0, 6.0, -1.0, Rgba(0.0, 0.0, 0.0, 0.1))
+private val shadowLg = ThemeShadow(0.0, 10.0, 15.0, -3.0, Rgba(0.0, 0.0, 0.0, 0.1))
+
+/**
+ * A Radix menu's box: `min-w-[8rem] rounded-md border bg-popover p-1`, opaque as `.popover-solid`
+ * makes it, as wide as its widest row.
+ */
+@Composable
+fun MenuBox(modifier: Modifier = Modifier, minWidth: Dp = 128.dp, large: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(8.dp)
+    Column(
+        modifier
+            .width(IntrinsicSize.Max)
+            .widthIn(min = minWidth)
+            .ppmShadow(if (large) shadowLg else shadowMd, shape)
+            .clip(shape)
+            .background(tokens.panel2.over(tokens.bgSolid).color)
+            .border(1.dp, tokens.border.color, shape)
+            .padding(4.dp),
+        content = content,
+    )
+}
+
+/**
+ * A menu row (`rounded-sm px-2 py-1.5 text-sm gap-2`), lit while pressed as `focus:bg-accent`
+ * lights it. The web's icons carry `mr-2` on top of the gap; [vertical] is 12 where the web asks
+ * for `max-md:py-3`.
+ */
+@Composable
+fun MenuItem(
+    label: String,
+    onClick: () -> Unit,
+    icon: (@Composable () -> Unit)? = null,
+    color: Rgba? = null,
+    vertical: Dp = 6.dp,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(6.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = vertical),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (icon != null) {
+            Box(Modifier.padding(end = 8.dp)) { icon() }
+        }
+        BasicText(
+            label,
+            Modifier.weight(1f, fill = false),
+            style = ppmText(14f, lineHeight = 20f).copy(color = (color ?: tokens.text).color),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (trailing != null) {
+            Spacer(Modifier.weight(1f))
+            trailing()
+        }
+    }
+}
+
+/** `size-3.5` in `text-muted-foreground`, the colour a Radix item gives an icon of none. */
+@Composable
+fun MenuIcon(icon: ProductIcon, tint: Rgba? = null) {
+    val tokens = LocalPpmTokens.current
+    PpmIcon(icon, 14.dp, (tint ?: tokens.text2).color)
+}
+
+/** `-mx-1 my-1 h-px bg-border`. */
+@Composable
+fun MenuSeparator() {
+    val tokens = LocalPpmTokens.current
+    Box(Modifier.padding(vertical = 4.dp).fillMaxWidth().height(1.dp).background(tokens.border.color))
+}
+
+/** Lucide's `Circle` with `fill-current`: a dot, 14 px with its stroke. */
+@Composable
+fun FilledCircleIcon(color: Rgba, size: Dp = 14.dp) {
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(size * 0.92f).clip(CircleShape).background(color.color))
+    }
+}
+
+/**
+ * Room around a popup's box for its shadow: a popup window is only as big as what it holds,
+ * and a shadow past its edge would be cut off. The positions below place the box, not the room.
+ */
+private val ShadowRoom = 16.dp
+
+/** A popup holding [content] in a [MenuBox], placed by [place] (given the box's own size). */
+@Composable
+private fun MenuPopup(
+    place: (anchor: IntRect, window: IntSize, box: IntSize) -> IntOffset,
+    onDismiss: () -> Unit,
+    minWidth: Dp = 128.dp,
+    large: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val room = with(LocalDensity.current) { ShadowRoom.roundToPx() }
+    val provider = remember(place, room) { RoomyPosition(room, place) }
+    Popup(
+        popupPositionProvider = provider,
+        onDismissRequest = onDismiss,
+        // Unclipped, so that the room can reach past the screen's edge while the box stays on it.
+        properties = PopupProperties(focusable = true, clippingEnabled = false),
+    ) {
+        Box(Modifier.padding(ShadowRoom)) { MenuBox(minWidth = minWidth, large = large, content = content) }
+    }
+}
+
+private class RoomyPosition(
+    private val room: Int,
+    private val place: (anchor: IntRect, window: IntSize, box: IntSize) -> IntOffset,
+) : PopupPositionProvider {
+    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
+        val box = IntSize(popupContentSize.width - 2 * room, popupContentSize.height - 2 * room)
+        val at = place(anchorBounds, windowSize, box)
+        return IntOffset(at.x - room, at.y - room)
+    }
+}
+
+private fun IntSize.fitX(x: Int, box: IntSize) = x.coerceIn(0, maxOf(0, width - box.width))
+
+private fun IntSize.fitY(y: Int, box: IntSize) = y.coerceIn(0, maxOf(0, height - box.height))
+
+/**
+ * A context menu where the finger was held (Radix's `ContextMenu` on touch): [at] is the press
+ * within the parent; it opens to the right of it and below, flipping or shifting to stay on
+ * screen. A tap anywhere else closes it.
+ */
+@Composable
+fun ContextMenuPopup(at: Offset, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    val gap = with(LocalDensity.current) { 2.dp.roundToPx() }
+    val place = remember(at, gap) {
+        { anchor: IntRect, window: IntSize, box: IntSize ->
+            val px = anchor.left + at.x.roundToInt()
+            val py = anchor.top + at.y.roundToInt()
+            var x = px + gap
+            if (x + box.width > window.width) x = px - gap - box.width
+            IntOffset(window.fitX(x, box), window.fitY(py, box))
+        }
+    }
+    MenuPopup(place, onDismiss, content = content)
+}
+
+/** A dropdown opened above its trigger, its right edge on the trigger's (`side="top" align="end"`). */
+@Composable
+fun DropdownAboveEnd(onDismiss: () -> Unit, minWidth: Dp = 128.dp, content: @Composable ColumnScope.() -> Unit) {
+    val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
+    val place = remember(gap) {
+        { anchor: IntRect, window: IntSize, box: IntSize ->
+            var y = anchor.top - gap - box.height
+            if (y < 0) y = anchor.bottom + gap
+            IntOffset(window.fitX(anchor.right - box.width, box), y)
+        }
+    }
+    MenuPopup(place, onDismiss, minWidth = minWidth, content = content)
+}
+
+/**
+ * A row that opens a submenu beside it, as Radix's `SubTrigger` does on a tap: to the right,
+ * or to the left when the screen has no room there.
+ */
+@Composable
+fun SubMenuItem(label: String, icon: (@Composable () -> Unit)?, content: @Composable ColumnScope.(close: () -> Unit) -> Unit) {
+    val tokens = LocalPpmTokens.current
+    var open by remember { mutableStateOf(false) }
+    Box(Modifier.background(if (open) tokens.panel2.color else Color.Transparent, RoundedCornerShape(6.dp))) {
+        MenuItem(label, onClick = { open = !open }, icon = icon, trailing = { PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text2.color) })
+        if (open) {
+            val place = remember {
+                { anchor: IntRect, window: IntSize, box: IntSize ->
+                    var x = anchor.right
+                    if (x + box.width > window.width) x = anchor.left - box.width
+                    IntOffset(window.fitX(x, box), window.fitY(anchor.top, box))
+                }
+            }
+            MenuPopup(place, onDismiss = { open = false }, large = true) { content { open = false } }
+        }
+    }
+}
+
+/**
+ * A chat's menu (`session-context-menu.tsx`): pin, mark unread, rename, its tag, delete. A list
+ * passes [onRename] and [onDelete] only where the web's does: the home list has neither.
+ */
+@Composable
+fun SessionContextMenu(
+    model: AppModel,
+    session: SessionInfo,
+    at: Offset,
+    onDismiss: () -> Unit,
+    onRename: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
+) {
+    val tokens = LocalPpmTokens.current
+    val unread = model.unreadSessions()[session.id] != null
+    fun run(action: suspend () -> Unit) {
+        onDismiss()
+        model.scope.launch { action() }
+    }
+    ContextMenuPopup(at, onDismiss) {
+        MenuItem(
+            if (session.pinned) "Unpin" else "Pin",
+            onClick = { run { model.togglePin(session) } },
+            icon = { MenuIcon(if (session.pinned) ProductIcon.PinOff else ProductIcon.Pin) },
+        )
+        if (!unread) {
+            MenuItem("Mark as unread", onClick = {
+                onDismiss()
+                model.markUnread(session)
+            }, icon = { FilledCircleIcon(tokens.accent) })
+        }
+        if (onRename != null) {
+            MenuItem("Rename", onClick = {
+                onDismiss()
+                onRename()
+            }, icon = { MenuIcon(ProductIcon.Pencil) })
+        }
+        if (model.tags.tags.isNotEmpty()) {
+            SubMenuItem("Set Tag", icon = { MenuIcon(ProductIcon.Tag) }) { close ->
+                for (tag in model.tags.tags) {
+                    MenuItem(
+                        tag.name,
+                        onClick = {
+                            close()
+                            run { model.setTag(tag, session) }
+                        },
+                        icon = { TagDot(tag.color, 10.dp) },
+                        trailing = if (session.tag?.id == tag.id) ({ PpmIcon(ProductIcon.Check, 12.dp, tokens.text.color) }) else null,
+                    )
+                }
+                if (session.tag != null) {
+                    MenuSeparator()
+                    MenuItem("Remove tag", onClick = {
+                        close()
+                        run { model.setTag(null, session) }
+                    })
+                }
+            }
+        }
+        if (onDelete != null) {
+            MenuSeparator()
+            MenuItem("Delete", onClick = {
+                onDismiss()
+                onDelete()
+            }, icon = { MenuIcon(ProductIcon.Trash2) }, color = tokens.error)
+        }
+    }
+}

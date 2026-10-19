@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The web's icon (src/web/public/icon-512.svg): "PPM" in the accent, here in Geist Bold,
+     outlined with fontTools so that no font is needed to draw it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FF3B82F6"
+        android:pathData="M30.6 61.69H33.89V56.38H36.75C40.43 56.38 42.66 54.45 42.66 51.34C42.66 48.22 40.43 46.31 36.75 46.31H30.6ZM33.89 53.61V49.08H36.56C38.29 49.08 39.29 49.84 39.29 51.34C39.29 52.83 38.29 53.61 36.56 53.61ZM45.7 61.69H48.99V56.38H51.85C55.53 56.38 57.76 54.45 57.76 51.34C57.76 48.22 55.53 46.31 51.85 46.31H45.7ZM48.99 53.61V49.08H51.65C53.38 49.08 54.38 49.84 54.38 51.34C54.38 52.83 53.38 53.61 51.65 53.61ZM60.79 61.69H64.08V51.73L67.67 61.64H70.49L74.11 51.73V61.69H77.4V46.31H73L69.1 57.51L65.18 46.31H60.79Z" />
+</vector>

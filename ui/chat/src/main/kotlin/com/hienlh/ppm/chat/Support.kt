@@ -24,7 +24,7 @@ import java.time.Instant
 
 /** `formatRelativeDate`, kept current: "just now" becomes "1m ago" without a redraw from outside. */
 @Composable
-internal fun RelativeTime(date: Instant, style: TextStyle, modifier: Modifier = Modifier) {
+fun RelativeTime(date: Instant, style: TextStyle, modifier: Modifier = Modifier) {
     var now by remember { mutableStateOf(Instant.now()) }
     LaunchedEffect(date) {
         while (true) {
