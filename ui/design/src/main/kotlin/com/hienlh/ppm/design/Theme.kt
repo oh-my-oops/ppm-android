@@ -150,12 +150,16 @@ val LocalPpmTheme = staticCompositionLocalOf { BuiltInThemes.auroraDark }
 /** Its tokens as this layout uses them: a phone layout gets the theme's mobile overrides. */
 val LocalPpmTokens = staticCompositionLocalOf { BuiltInThemes.auroraDark.tokens }
 
+/** The web's `useIsMobile()`: the phone layout, where touch targets grow to 44px. */
+val LocalPpmMobile = staticCompositionLocalOf { false }
+
 /** Provides [theme] below; [mobile] is the web's `(max-width: 767px)`. */
 @Composable
 fun PpmThemeProvider(theme: PpmTheme, mobile: Boolean, content: @Composable () -> Unit) {
     CompositionLocalProvider(
         LocalPpmTheme provides theme,
         LocalPpmTokens provides if (mobile) theme.mobileTokens else theme.tokens,
+        LocalPpmMobile provides mobile,
         content = content,
     )
 }

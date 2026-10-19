@@ -1,0 +1,106 @@
+package com.hienlh.ppm.chat
+
+import com.hienlh.ppm.protocol.SessionPhase
+import com.hienlh.ppm.protocol.ToolOutcome
+import com.hienlh.ppm.protocol.WireJson
+import com.hienlh.ppm.state.ChatBlock
+import com.hienlh.ppm.state.ChatItem
+import com.hienlh.ppm.state.ChatState
+import com.hienlh.ppm.state.ToolBlock
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/** The chat views' rules, without a device (`PPMSelfTest/ChatUITests.swift`). */
+class ChatViewsTest {
+    @Test
+    fun `edit diff pairs removed and added lines`() {
+        val diff = EditDiff.rows("a\nb\nc", "a\nB\nc")
+        assertEquals(
+            listOf(
+                EditDiff.Row(EditDiff.Kind.EQUAL, "a"),
+                EditDiff.Row(EditDiff.Kind.DEL, "b", listOf(0 to 1)),
+                EditDiff.Row(EditDiff.Kind.INS, "B", listOf(0 to 1)),
+                EditDiff.Row(EditDiff.Kind.EQUAL, "c"),
+            ),
+            diff.rows,
+        )
+        assertEquals(0, diff.extra)
+        assertEquals(listOf(8 to 9) to listOf(8 to 9), EditDiff.wordRanges("let x = 1", "let x = 2"))
+        val long = EditDiff.rows("", (1..20).joinToString("\n"))
+        assertEquals(12, long.rows.size)
+        assertEquals(9, long.extra)
+    }
+
+    @Test
+    fun `edit diff marks each changed word, as diffWordsWithSpace does`() {
+        val (removed, added) = EditDiff.wordRanges("val a = foo(1)", "val b = foo(2)")
+        assertEquals(listOf(4 to 5, 12 to 13), removed)
+        assertEquals(listOf(4 to 5, 12 to 13), added)
+        // An inserted line in the middle leaves the lines around it equal.
+        val rows = EditDiff.rows("one\nthree", "one\ntwo\nthree").rows
+        assertEquals(listOf(EditDiff.Kind.EQUAL, EditDiff.Kind.INS, EditDiff.Kind.EQUAL), rows.map { it.kind })
+        assertEquals("two", rows[1].text)
+    }
+
+    @Test
+    fun `myers finds the shortest script`() {
+        val (removed, inserted) = EditDiff.diff("ABCABBA".toList(), "CBABAC".toList())
+        // Myers' own example: an edit distance of 5.
+        assertEquals(5, removed.count { it } + inserted.count { it })
+    }
+
+    @Test
+    fun `tool summaries and delays`() {
+        assertEquals("30m", formatDelay(1800.0))
+        assertEquals("1m 30s", formatDelay(90.0))
+        assertEquals("1h 1m 40s", formatDelay(3700.0))
+        assertEquals("0s", formatDelay(0.0))
+        val bash = toolSummary("Bash", WireJson.parse("""{"command":"rm -rf /tmp/test"}"""))
+        assertEquals("rm -rf /tmp/test", bash.detail)
+        assertTrue("a command without a description is shown as code", bash.monoDetail)
+        assertEquals("c.swift", toolSummary("Read", WireJson.parse("""{"file_path":"/a/b/c.swift"}""")).detail)
+        assertEquals("ppm-db · db_query", toolSummary("mcp__ppm-db__db_query", WireJson.parse("{}")).name)
+        assertEquals("1/2 done", toolSummary("TodoWrite", WireJson.parse("""{"todos":[{"status":"completed"},{"status":"pending"}]}""")).detail)
+        assertEquals("#7 → done", toolSummary("TaskUpdate", WireJson.parse("""{"taskId":7,"status":"done"}""")).detail)
+    }
+
+    private fun message(id: String, role: ChatItem.Role, vararg blocks: ChatBlock) = ChatItem(id, role, blocks.toList(), null)
+
+    @Test
+    fun `a turn's last answer carries the actions and the turn's text`() {
+        val tool = ToolBlock(toolUseId = null, name = "Read", input = WireJson.parse("{}"))
+        val items = listOf(
+            message("u1", ChatItem.Role.USER, ChatBlock.Text("q1")),
+            message("a1", ChatItem.Role.ASSISTANT, ChatBlock.Text("A")),
+            message("a2", ChatItem.Role.ASSISTANT, ChatBlock.Tool(tool)),
+            message("u2", ChatItem.Role.USER, ChatBlock.Text("q2")),
+            message("a3", ChatItem.Role.ASSISTANT, ChatBlock.Text("B")),
+        )
+        val done = TranscriptRows.of(items, running = false)
+        assertEquals(listOf(false, false, true, false, true), done.map { it.actions != null })
+        assertEquals(listOf(null, null, "A", null, "B"), done.map { it.actions?.copyText })
+        // The running turn's actions wait until it ends.
+        assertEquals(listOf(false, false, true, false, false), TranscriptRows.of(items, running = true).map { it.actions != null })
+    }
+
+    @Test
+    fun `the thinking line shows only while nothing streams`() {
+        val idle = ChatState(sessionId = "s")
+        assertNull(indicatorLabel(idle))
+        assertEquals("Initializing", indicatorLabel(idle.copy(phase = SessionPhase.INITIALIZING)))
+        val streaming = idle.copy(phase = SessionPhase.STREAMING, live = listOf(ChatBlock.Text("hi")))
+        assertNull(indicatorLabel(streaming))
+        val tool = ToolBlock(toolUseId = "t", name = "Read", input = WireJson.parse("{}"), result = ToolOutcome("x", false))
+        assertEquals("Processing", indicatorLabel(streaming.copy(live = listOf(ChatBlock.Tool(tool)))))
+        assertEquals("Compacting messages...", indicatorLabel(streaming.copy(compacting = true)))
+    }
+
+    @Test
+    fun `long output folds`() {
+        assertTrue(isLongOutput("1\n2\n3\n4"))
+        assertTrue(isLongOutput("x".repeat(201)))
+        assertEquals(false, isLongOutput("1\n2\n3"))
+    }
+}
