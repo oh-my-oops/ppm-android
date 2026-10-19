@@ -58,6 +58,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -143,6 +144,28 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** The layout as drawn: the store's state, mirrored where Compose sees it. */
     var layout by mutableStateOf<WorkspaceState?>(null)
+        private set
+
+    /**
+     * The window is at least 768 dp wide (the web's `md`): the desktop layout, where every grid
+     * panel is on screen and a tab opens in the focused one. Under it, the phone's.
+     */
+    var wide by mutableStateOf(false)
+        private set
+
+    /** The desktop sidebar folded to its rail (⌘B on the web), shared through the server's UI prefs. */
+    var sidebarCollapsed by mutableStateOf(false)
+        private set
+
+    /** The desktop sidebar's width in dp, 200–600, shared like [sidebarCollapsed]. */
+    var sidebarWidth by mutableIntStateOf(280)
+        private set
+
+    /**
+     * Where the dock sits: `bottom`, `left` or `right`. The web keeps it in the browser (the
+     * server drops the key), so each device has its own.
+     */
+    var dockPosition by mutableStateOf(prefs.get("dockPosition")?.takeIf { it in DOCK_POSITIONS } ?: "bottom")
         private set
 
     /** The chat behind each chat tab in memory, by tab id; a tab whose chat has not started has none. */
@@ -301,6 +324,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                 uiPrefs.await()?.let { prefs ->
                     prefs.projectSortMode?.takeIf { it in setOf("recent", "priority", "name") }?.let { projectSortMode = it }
                     projectOpenedAt = prefs.recentOpen
+                    prefs.sidebarCollapsed?.let { sidebarCollapsed = it }
+                    prefs.sidebarWidth?.let { sidebarWidth = it }
                 }
                 projects
             }
@@ -665,8 +690,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     private fun openWorkspace(api: ApiClient) {
         val cache = WorkspaceCache(prefs, "workspace.$serverKey.", api.workspaceRemote(), scope)
-        // Until the tablet layout exists every window draws the phone's, so tabs open as a phone opens them.
-        val store = WorkspaceStore(cache, isMobile = { true })
+        // Asked at each change, as the web asks `useIsMobile`: a phone opens every tab in the first panel.
+        val store = WorkspaceStore(cache, isMobile = { !wide })
         workspaceCache = cache
         workspace = store
         hydratedOnce = false
@@ -727,9 +752,16 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         }
     }
 
+    /** Follows the window's width; a wider window shows every grid panel, so their chats connect. */
+    fun setWindowWide(value: Boolean) {
+        if (wide == value) return
+        wide = value
+        workspace?.state?.value?.let(::syncChats)
+    }
+
     /**
      * Gives each chat tab in memory its chat, ends the chats of tabs that went (closed here or on
-     * another device) and connects the one in front; the others connect once shown, then stay up.
+     * another device) and connects the ones on screen; the others connect once shown, then stay up.
      */
     private fun syncChats(state: WorkspaceState) {
         val live = HashMap<String, WorkspaceTab>()
@@ -751,7 +783,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         }
         val active = state.activeGridTab
         val api = api
-        if (active != null && api != null) chats[active.id]?.start(api, scope)
+        if (api != null) {
+            // A phone shows the focused panel's tab; the desktop layout shows each grid panel's.
+            val shown = if (wide) state.gridPanelIds.mapNotNull { state.panels[it]?.activeTab } else listOfNotNull(active)
+            for (tab in shown) chats[tab.id]?.start(api, scope)
+        }
         // A chat that comes forward by itself (restored, or next after a close) loses its unread
         // unless it was marked by hand; one the user picks loses it either way (`activate`).
         val sessionId = tabSessionId(active)
@@ -785,8 +821,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     private fun panelOf(tabId: String): String? = openTabs.firstOrNull { it.first.id == tabId }?.second
 
-    /** Opens a session in a tab, or brings its tab forward (`openSessionInItsTab`). */
-    fun openTab(session: SessionInfo) {
+    /**
+     * Opens a session in a tab, or brings its tab forward (`openSessionInItsTab`): in [panelId]
+     * when given, else in the focused panel (a phone's first).
+     */
+    fun openTab(session: SessionInfo, panelId: String? = null) {
         val project = selectedProject ?: return
         withWorkspace { store ->
             store.openTab(
@@ -800,15 +839,15 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                         put("providerId", session.providerId)
                     },
                 ),
+                panelId,
             )
             events?.markRead(session.id)
         }
     }
 
     /** Shows a tab the user picked: its chat's unread clears even when it was marked by hand. */
-    fun activate(tabId: String) {
+    fun activate(tabId: String, panelId: String? = panelOf(tabId)) {
         val store = workspace ?: return
-        val panelId = panelOf(tabId)
         store.setActiveTab(tabId, panelId)
         tabSessionId(panelId?.let { store.state.value.panels[it] }?.tab(tabId))?.let { events?.markRead(it) }
     }
@@ -821,8 +860,74 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** Settings opens as a tab on a phone, as on the web's (`openSettings`). */
     fun openSettings() = withWorkspace { it.openTab(NewTab("settings", "Settings")) }
 
-    fun closeTab(tabId: String) {
-        workspace?.closeTab(tabId, panelOf(tabId))
+    fun closeTab(tabId: String, panelId: String? = panelOf(tabId)) {
+        workspace?.closeTab(tabId, panelId)
+    }
+
+    // The desktop layout's panels and dock
+
+    /** A touch in a panel focuses it, as a mouse-down does on the web: the next tab opens there. */
+    fun focusPanel(panelId: String) {
+        val store = workspace ?: return
+        if (store.state.value.focusedPanelId != panelId) store.setFocusedPanel(panelId, rememberChat = false)
+    }
+
+    /** An empty panel's Close Panel; what it still holds goes to the panel before it. */
+    fun closePanel(panelId: String) {
+        workspace?.closePanel(panelId)
+    }
+
+    /** The open project's dock tabs; the dock holds every project's. */
+    val dockTabs: List<WorkspaceTab>
+        get() {
+            val state = layout ?: return emptyList()
+            return state.dockPanel?.tabs.orEmpty().filter { it.projectId.isNullOrEmpty() || state.currentProject == null || it.projectId == state.currentProject }
+        }
+
+    /**
+     * Shows or hides the dock. The web's toggle opens a terminal in an empty dock; this app has
+     * no terminal yet, so it only shows what another device left there.
+     */
+    fun setDockVisible(visible: Boolean) {
+        workspace?.setDockVisible(visible)
+    }
+
+    /** The dock's share of the main area. The layout keeps it within 15–85 %: what it kept is returned. */
+    fun setDockHeight(percent: Double): Double? {
+        val store = workspace ?: return null
+        store.setDockHeight(percent)
+        return store.state.value.dock.height
+    }
+
+    /** Maximize / restore: for this run only, as on the web. */
+    fun toggleDockExpanded() {
+        workspace?.toggleDockExpanded()
+    }
+
+    fun pickDockPosition(position: String) {
+        if (position !in DOCK_POSITIONS) return
+        dockPosition = position
+        prefs.put("dockPosition", position)
+    }
+
+    fun toggleSidebar() {
+        sidebarCollapsed = !sidebarCollapsed
+        putUiPref { put("sidebarCollapsed", sidebarCollapsed) }
+    }
+
+    /** Follows the drag; [saveSidebarWidth] sends the width the drag ended on. */
+    fun resizeSidebar(width: Int) {
+        sidebarWidth = width.coerceIn(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
+    }
+
+    fun saveSidebarWidth() {
+        putUiPref { put("sidebarWidth", sidebarWidth) }
+    }
+
+    /** One UI pref, for every device; a refused one is simply not kept. */
+    private fun putUiPref(change: JsonObjectBuilder.() -> Unit) {
+        val api = api ?: return
+        scope.launch { quietly { api.putUiPrefs(buildJsonObject(change)) } }
     }
 
     /** Close Others: the other closable tabs of [keep]'s panel (`mobile-nav.tsx`). */
@@ -912,15 +1017,15 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         }
     }
 
-    /** A new chat in a new tab; the server's default provider when [providerId] is null. */
-    suspend fun newChat(providerId: String? = null) {
+    /** A new chat in a new tab (in [panelId] when given); the server's default provider when [providerId] is null. */
+    suspend fun newChat(providerId: String? = null, panelId: String? = null) {
         val api = api ?: return
         val project = selectedProject ?: return
         try {
             val session = api.createSession(project, providerId)
             if (selectedProject != project) return
             sessions = (listOf(session) + sessions.filter { it.id != session.id }).sortedForList()
-            openTab(session)
+            openTab(session, panelId)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -958,6 +1063,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     }
 
 }
+
+private val DOCK_POSITIONS = setOf("bottom", "left", "right")
+
+const val SIDEBAR_MIN_WIDTH = 200
+const val SIDEBAR_MAX_WIDTH = 600
 
 /**
  * The chat of one chat tab ([tabId] in the layout). Its connection starts when the tab is first

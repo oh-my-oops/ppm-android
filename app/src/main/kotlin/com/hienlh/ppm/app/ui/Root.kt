@@ -29,6 +29,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +42,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ui.tablet.TabletShell
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.PpmThemeProvider
@@ -55,8 +57,8 @@ import kotlinx.coroutines.launch
 
 /**
  * Everything the activity shows: the connect screen until there is a server, then the phone
- * layout — under 768 dp, the web's `md` breakpoint, and for now above it too — with the dialogs
- * and the error toast over it.
+ * layout under 768 dp — the web's `md` breakpoint — and the desktop one from there, with the
+ * dialogs and the error toast over it.
  */
 @Composable
 fun PpmRoot(model: AppModel) {
@@ -79,8 +81,14 @@ fun PpmRoot(model: AppModel) {
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val mobile = maxWidth < 768.dp
+        // The layout follows the window, not the device: a rotation or a split screen can cross it.
+        SideEffect { model.setWindowWide(!mobile) }
         PpmThemeProvider(theme, mobile) {
-            if (model.hasServer) PhoneShell(model) else ConnectScreen(model, signIn = false)
+            when {
+                !model.hasServer -> ConnectScreen(model, signIn = false)
+                mobile -> PhoneShell(model)
+                else -> TabletShell(model)
+            }
             if (model.showSignIn) ConnectScreen(model, signIn = true, onCancel = { model.showSignIn = false })
             if (model.addingServer) ConnectScreen(model, signIn = false, onCancel = { model.addingServer = false })
             Dialogs(model)

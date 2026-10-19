@@ -286,7 +286,7 @@ private fun ChatHistoryDropdown(model: AppModel, tab: ChatTab, list: HistoryList
         ) {
             PpmIcon(ProductIcon.Search, 12.dp, tokens.text3.color)
             // A phone's inputs are 16 px whatever the class says.
-            PpmTextField(query, "Search sessions...", Modifier.weight(1f))
+            PpmTextField(query, "Search sessions...", Modifier.weight(1f), desktopStyle = ppmText(11f, lineHeight = 16.5f))
             SmallIconButton(ProductIcon.CalendarX2, enabled = !model.deletingOld) { model.askDeleteOld = true }
             SmallIconButton(ProductIcon.RefreshCw, spinning = refreshing || state.loading || model.deletingOld, enabled = !refreshing) {
                 scope.launch {

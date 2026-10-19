@@ -19,6 +19,15 @@ The three `core` modules are plain Kotlin/JVM: their tests run on the JVM, no em
 - **Tabs are the web's layout.** `AppModel` draws `WorkspaceStore`'s state; a chat tab's chat (`ChatTab`) is keyed by the layout's tab id, which is not the session id (`chat:<provider>/<session>`, or a minted id the session came to later): go through `tabSessionId` for unread, running and marking read. The one deliberate difference from `panel-store.ts`: a singleton (`settings`, `git-log`) is looked for on screen, as a table's tab is, not in other projects' keep-alive panels (see the comment in `WorkspaceStore.openTab`).
 - `HttpUrl.toString()` always prints a root path (`http://host:8080/`), where Foundation prints none — tests written from the Swift ones must expect the slash.
 
+## Drawing like the web
+
+- Under 768 dp the phone layout (`PhoneShell`), from 768 dp the desktop one (`ui/tablet/`), as `use-is-mobile.ts`; `LocalPpmMobile` says which.
+- CSS counts a border into the box; Compose's `border()` draws inside it and takes no room. A `px-2 py-0.5 border` chip is `padding(9.dp, 3.dp)` here, a `p-1` menu inside its border `padding(5.dp)`; `Modifier.edge()` (tablet) is a one-sided border that does make room.
+- Inputs are 16 px only on a phone (`globals.css`). A field the tablet shows passes its class's own size as `PpmTextField(desktopStyle = …)`.
+- In a `Row` measured for its intrinsic width (a menu is `IntrinsicSize.Max`), every weighted child counts as wide as the widest one: a label plus a weighted `Spacer` made a 128 px menu 168. Weight the label instead.
+- What the web shows only on hover (`can-hover:` is hover **and** a fine pointer) is always shown on a touch tablet. Compare with the web under touch emulation (CDP `Emulation.setTouchEmulationEnabled`), not a desktop mouse — and expect Playwright clicks to hang while `setEmitTouchEventsForMouse` is on.
+- A handle that moves with the edge it drags measures on the screen (`Modifier.screenDrag`, `TabletShell.kt`): `draggable` reports moves in the handle's own coordinates, which came to about half the finger's travel, and `drag()` drops the last stretch when the release carries it.
+
 ## Building and testing
 
 JDK 21 (`/usr/bin/java`), Android SDK in `~/Android/Sdk`. Run Gradle outside PPM's cgroup, so that its daemon does not die with a PPM restart:
@@ -42,5 +51,5 @@ Sessions are created with `providerId: "mock"`, so no AI is paid for. The mock s
 
 ## Devices
 
-- Emulator: the AVD `PPM_Phone`, started on port 5580 (`emulator-5580`). Always pass `adb -s <serial>`.
+- Emulators: the AVD `PPM_Phone` on port 5580 (`emulator-5580`) and `PPM_Tablet` on 5582 (`emulator-5582`, a Pixel Tablet at 2560×1600 and 320 dpi: 1280×800 dp, the web viewport to set beside it, less the 24 dp status bar). Always pass `adb -s <serial>`.
 - Never touch `emulator-5556` or any `Velox_*` AVD: they belong to other work on this machine.

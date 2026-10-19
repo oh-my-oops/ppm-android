@@ -385,15 +385,22 @@ class WorkspaceStore(
         // The dock and a window's panel are never removed here: the dock outlives its tabs, and a
         // window's panel goes with its window.
         val offGridSource = fromPanelId == DOCK_PANEL_ID || isWindowPanelId(fromPanelId)
+        // Focus follows the tab, except into the dock, where it stays on the grid (focusAfterActivate).
+        fun focus(grid: List<List<String>>) = when {
+            toPanelId != DOCK_PANEL_ID -> toPanelId
+            st.focusedPanelId in grid.flatten() -> st.focusedPanelId
+            else -> grid.flatten().firstOrNull() ?: st.focusedPanelId
+        }
         if (fromTabs.isEmpty() && st.gridPanelIds.size > 1 && !offGridSource) {
+            val grid = gridRemovePanel(st.grid, fromPanelId)
             commit(st.copy(
                 panels = (st.panels - fromPanelId) + (toPanelId to target),
-                grid = gridRemovePanel(st.grid, fromPanelId),
-                focusedPanelId = toPanelId,
+                grid = grid,
+                focusedPanelId = focus(grid),
             ))
         } else {
             commit(st.copy(
-                focusedPanelId = toPanelId,
+                focusedPanelId = focus(st.grid),
                 panels = st.panels + (fromPanelId to from.copy(tabs = fromTabs, activeTabId = fromActive, tabHistory = fromHistory)) + (toPanelId to target),
             ))
         }
@@ -554,8 +561,13 @@ class WorkspaceStore(
         persist()
     }
 
-    /** A tab activated inside a floating window leaves focus where it was: a window has no tab bar to open into. */
-    private fun focusAfterActivate(panelId: String): String = if (isWindowPanelId(panelId)) s.focusedPanelId else panelId
+    /**
+     * A tab activated inside a floating window leaves focus where it was: a window has no tab bar
+     * to open into. Nor does the dock here, though the web moves focus there: a chat opened from
+     * the sidebar after a dock pill was picked would land in the dock (a web bug, see the plan).
+     */
+    private fun focusAfterActivate(panelId: String): String =
+        if (isWindowPanelId(panelId) || panelId == DOCK_PANEL_ID) s.focusedPanelId else panelId
 
     private fun stampActive(tabs: List<WorkspaceTab>, id: String): List<WorkspaceTab> {
         val at = JsonPrimitive(now())

@@ -76,6 +76,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.design.ppmClickable
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -187,7 +188,8 @@ fun SecondaryButton(title: String, modifier: Modifier = Modifier, onClick: () ->
 
 /**
  * A text field drawn as the web's inputs are: [placeholder] in the subtle colour while empty, the
- * accent caret. Inputs are 16px on a phone (`globals.css`), so that is the default size.
+ * accent caret. Inputs are 16px on a phone (`globals.css`), so that is the default size; outside
+ * the phone layout a field takes its class's own size, [desktopStyle], where one is given.
  */
 @Composable
 fun PpmTextField(
@@ -195,6 +197,7 @@ fun PpmTextField(
     placeholder: String,
     modifier: Modifier = Modifier,
     style: TextStyle = ppmText(16f, lineHeight = 24f),
+    desktopStyle: TextStyle? = null,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     onKeyboardAction: KeyboardActionHandler? = null,
     lineLimits: TextFieldLineLimits = TextFieldLineLimits.SingleLine,
@@ -203,6 +206,7 @@ fun PpmTextField(
     onFocusChanged: (Boolean) -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
+    val style = desktopStyle?.takeUnless { LocalPpmMobile.current } ?: style
     BasicTextField(
         state = state,
         modifier = modifier

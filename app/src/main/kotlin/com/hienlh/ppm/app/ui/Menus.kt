@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -72,15 +71,16 @@ fun MenuBox(modifier: Modifier = Modifier, minWidth: Dp = 128.dp, large: Boolean
             .clip(shape)
             .background(tokens.panel2.over(tokens.bgSolid).color)
             .border(1.dp, tokens.border.color, shape)
-            .padding(4.dp),
+            // `p-1` inside the 1 px border, which CSS counts into the box and `border()` does not.
+            .padding(5.dp),
         content = content,
     )
 }
 
 /**
  * A menu row (`rounded-sm px-2 py-1.5 text-sm gap-2`), lit while pressed as `focus:bg-accent`
- * lights it. The web's icons carry `mr-2` on top of the gap; [vertical] is 12 where the web asks
- * for `max-md:py-3`.
+ * lights it. The web's icons carry `mr-2` on top of the gap ([iconEnd], 0 for a menu whose icons
+ * do not); [vertical] is 12 where the web asks for `max-md:py-3`.
  */
 @Composable
 fun MenuItem(
@@ -90,6 +90,7 @@ fun MenuItem(
     color: Rgba? = null,
     vertical: Dp = 6.dp,
     trailing: (@Composable () -> Unit)? = null,
+    iconEnd: Dp = 8.dp,
 ) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(6.dp)
@@ -103,19 +104,18 @@ fun MenuItem(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (icon != null) {
-            Box(Modifier.padding(end = 8.dp)) { icon() }
+            Box(Modifier.padding(end = iconEnd)) { icon() }
         }
+        // With a trailing item the label takes the rest of the row, which puts the item at the end
+        // (`ml-auto`). A weighted spacer instead would count the label twice in the menu's width.
         BasicText(
             label,
-            Modifier.weight(1f, fill = false),
+            Modifier.weight(1f, fill = trailing != null),
             style = ppmText(14f, lineHeight = 20f).copy(color = (color ?: tokens.text).color),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (trailing != null) {
-            Spacer(Modifier.weight(1f))
-            trailing()
-        }
+        trailing?.invoke()
     }
 }
 
@@ -212,6 +212,32 @@ fun DropdownAboveEnd(onDismiss: () -> Unit, minWidth: Dp = 128.dp, content: @Com
             var y = anchor.top - gap - box.height
             if (y < 0) y = anchor.bottom + gap
             IntOffset(window.fitX(anchor.right - box.width, box), y)
+        }
+    }
+    MenuPopup(place, onDismiss, minWidth = minWidth, content = content)
+}
+
+/**
+ * A dropdown under its trigger (Radix's default `side="bottom"`, 4 px off), its left edge on the
+ * trigger's; above it when the screen has no room below, as Radix flips it.
+ */
+@Composable
+fun DropdownBelowStart(onDismiss: () -> Unit, minWidth: Dp = 128.dp, content: @Composable ColumnScope.() -> Unit) =
+    DropdownBelow(alignEnd = false, onDismiss, minWidth, content)
+
+/** The same with its right edge on the trigger's (`align="end"`). */
+@Composable
+fun DropdownBelowEnd(onDismiss: () -> Unit, minWidth: Dp = 128.dp, content: @Composable ColumnScope.() -> Unit) =
+    DropdownBelow(alignEnd = true, onDismiss, minWidth, content)
+
+@Composable
+private fun DropdownBelow(alignEnd: Boolean, onDismiss: () -> Unit, minWidth: Dp, content: @Composable ColumnScope.() -> Unit) {
+    val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
+    val place = remember(gap, alignEnd) {
+        { anchor: IntRect, window: IntSize, box: IntSize ->
+            var y = anchor.bottom + gap
+            if (y + box.height > window.height && anchor.top - gap - box.height >= 0) y = anchor.top - gap - box.height
+            IntOffset(window.fitX(if (alignEnd) anchor.right - box.width else anchor.left, box), window.fitY(y, box))
         }
     }
     MenuPopup(place, onDismiss, minWidth = minWidth, content = content)

@@ -237,15 +237,15 @@ private fun CountChip(count: Int) {
 
 /**
  * The project's avatar (`ProjectAvatar`): its colour — a picked hex or a palette gradient, else
- * the palette by position — with initials that tell it from the others. An uploaded image is
- * not drawn yet.
+ * the palette by position — with initials that tell it from the others; a circle, or the 7 px
+ * squircle the desktop sidebar uses ([square]). An uploaded image is not drawn yet.
  */
 @Composable
-fun ProjectAvatar(model: AppModel, project: ProjectInfo, size: Dp) {
+fun ProjectAvatar(model: AppModel, project: ProjectInfo, size: Dp, square: Boolean = false) {
     val names = model.projects.map { it.name }
     val index = names.indexOf(project.name).coerceAtLeast(0)
     Box(
-        Modifier.size(size).clip(CircleShape).background(projectFill(project.color ?: PROJECT_PALETTE[index % PROJECT_PALETTE.size])),
+        Modifier.size(size).clip(if (square) RoundedCornerShape(7.dp) else CircleShape).background(projectFill(project.color ?: PROJECT_PALETTE[index % PROJECT_PALETTE.size])),
         contentAlignment = Alignment.Center,
     ) {
         BasicText(
@@ -307,7 +307,7 @@ internal fun projectInitials(name: String, all: List<String>): String {
  * project with its path. Adding and editing projects are left out until this app has them.
  */
 @Composable
-private fun ProjectSheet(model: AppModel, onDismiss: () -> Unit) {
+internal fun ProjectSheet(model: AppModel, onDismiss: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val query = rememberTextFieldState()
     BottomSheet(onDismiss, background = tokens.bgSolid.color) {
@@ -624,7 +624,7 @@ private fun TabRow(
 
 /** `tab-typing-dot`: three 2 px dots hopping 1.5 px in turn, a second each. */
 @Composable
-private fun TypingDots(color: Rgba, modifier: Modifier) {
+internal fun TypingDots(color: Rgba, modifier: Modifier) {
     val transition = rememberInfiniteTransition(label = "typing")
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(1.5.dp), verticalAlignment = Alignment.CenterVertically) {
         for (index in 0 until 3) {

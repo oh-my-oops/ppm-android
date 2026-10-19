@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.chat.RelativeTime
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.PpmIcon
@@ -57,11 +58,19 @@ import com.hienlh.ppm.state.HistoryList
 import kotlinx.coroutines.launch
 
 /**
- * What a phone shows with no tab open (`EmptyPanel` in editor-panel.tsx): the tiles that open a
- * tab, then the project's chats. Only AI Chat is a tab this app has, so it is the one tile.
+ * What a panel with no tab shows (`EmptyPanel` in editor-panel.tsx): the tiles that open a tab,
+ * Close Panel when there is another panel ([onClosePanel]), then the project's chats. Only AI
+ * Chat is a tab this app has, so it is the one tile. On the desktop layout the new chat opens in
+ * [panelId]; a phone has only the one.
  */
 @Composable
-fun EmptyPanel(model: AppModel, onOpenSession: (SessionInfo) -> Unit, modifier: Modifier = Modifier) {
+fun EmptyPanel(
+    model: AppModel,
+    onOpenSession: (SessionInfo) -> Unit,
+    modifier: Modifier = Modifier,
+    panelId: String? = null,
+    onClosePanel: (() -> Unit)? = null,
+) {
     val tokens = LocalPpmTokens.current
     val scope = rememberCoroutineScope()
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -81,7 +90,21 @@ fun EmptyPanel(model: AppModel, onOpenSession: (SessionInfo) -> Unit, modifier: 
                         // `grid-cols-3 gap-2 max-w-sm`: one tile keeps a third of the row.
                         BoxWithConstraints(Modifier.widthIn(max = 384.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
                             QuickOpenTile(ProductIcon.MessageSquare, "AI Chat", Modifier.width((maxWidth - 16.dp) / 3)) {
-                                scope.launch { model.newChat() }
+                                scope.launch { model.newChat(panelId = panelId) }
+                            }
+                        }
+                        if (onClosePanel != null) {
+                            // `px-4 py-3.5 rounded-md text-xs text-text-subtle`, an X before the words.
+                            Row(
+                                Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .pressable(pressedColor = tokens.panel2.color, shape = RoundedCornerShape(8.dp), onClick = onClosePanel)
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                PpmIcon(ProductIcon.X, 14.dp, tokens.text3.color)
+                                BasicText("Close Panel", style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color))
                             }
                         }
                         val list = model.homeList
@@ -246,10 +269,12 @@ fun SearchBox(state: TextFieldState, placeholder: String, modifier: Modifier = M
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
     var focused by remember { mutableStateOf(false) }
+    // `py-1.5 text-xs` outside the phone layout: 30 px with the border.
+    val mobile = LocalPpmMobile.current
     Row(
         modifier
             .fillMaxWidth()
-            .heightIn(min = 34.dp)
+            .heightIn(min = if (mobile) 34.dp else 30.dp)
             .clip(shape)
             .background(tokens.panel.color)
             .border(1.dp, if (focused) tokens.accent.opacity(0.5).color else tokens.border.color, shape)
@@ -258,7 +283,13 @@ fun SearchBox(state: TextFieldState, placeholder: String, modifier: Modifier = M
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         PpmIcon(ProductIcon.Search, 14.dp, tokens.text3.color)
-        PpmTextField(state, placeholder, Modifier.weight(1f).padding(vertical = 5.dp), onFocusChanged = { focused = it })
+        PpmTextField(
+            state,
+            placeholder,
+            Modifier.weight(1f).padding(vertical = if (mobile) 5.dp else 7.dp),
+            desktopStyle = ppmText(12f, lineHeight = 16f),
+            onFocusChanged = { focused = it },
+        )
         if (state.text.isNotEmpty()) {
             Box(
                 Modifier.size(24.dp).clip(RoundedCornerShape(4.dp)).pressable(pressedColor = tokens.panel2.color) { state.clearText() },

@@ -455,6 +455,20 @@ class WorkspaceStoreTest {
         assertEquals(listOf("editor:a.ts"), store.s.panels.getValue(first).tabs.map { it.id })
     }
 
+    @Test
+    fun `picking a dock tab leaves focus on the grid, where the next tab opens`() {
+        val store = store()
+        store.switchProject("app")
+        val first = store.s.focusedPanelId
+        val id = store.openTab(NewTab("terminal", "Terminal", "app"))
+        store.redockTab(id, first)
+        store.setActiveTab(id, DOCK_PANEL_ID)
+        assertEquals(first, store.s.focusedPanelId)
+        store.openTab(editor("b.ts"))
+        assertEquals(listOf("editor:b.ts"), store.s.panels.getValue(first).tabs.map { it.id })
+        assertEquals(listOf(id), store.s.dockPanel!!.tabs.map { it.id })
+    }
+
     // ---------------------------------------------------------------------------------------
     // The focused chat's provider
     // ---------------------------------------------------------------------------------------

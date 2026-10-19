@@ -203,11 +203,7 @@ private fun ThemeCard(theme: PpmTheme, active: Boolean, modifier: Modifier, onCl
         contentAlignment = Alignment.CenterStart,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // `ThemeSwatch`: three 12x24 strips in a bordered, rounded box.
-            val swatchShape = RoundedCornerShape(8.dp)
-            Row(Modifier.clip(swatchShape).border(1.dp, tokens.border.color, swatchShape).padding(1.dp)) {
-                for (color in theme.swatch) Box(Modifier.width(12.dp).height(24.dp).background(color.color))
-            }
+            ThemeSwatch(theme)
             Column(Modifier.weight(1f)) {
                 BasicText(
                     theme.name.replace(Regex(" (Dark|Light)$"), ""),
@@ -220,6 +216,16 @@ private fun ThemeCard(theme: PpmTheme, active: Boolean, modifier: Modifier, onCl
         }
         // `absolute top-1 right-1`, from the padding box.
         if (active) PpmIcon(ProductIcon.Check, 14.dp, tokens.accent.color, Modifier.align(Alignment.TopEnd).offset(4.dp, (-4).dp))
+    }
+}
+
+/** `ThemeSwatch`: three 12x24 strips in a bordered, rounded box. */
+@Composable
+internal fun ThemeSwatch(theme: PpmTheme) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(8.dp)
+    Row(Modifier.clip(shape).border(1.dp, tokens.border.color, shape).padding(1.dp)) {
+        for (color in theme.swatch) Box(Modifier.width(12.dp).height(24.dp).background(color.color))
     }
 }
 

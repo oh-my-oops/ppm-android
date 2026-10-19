@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -43,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.chat.RelativeTime
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.PpmIcon
@@ -97,18 +99,20 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             val shape = RoundedCornerShape(8.dp)
             var focused by remember { mutableStateOf(false) }
+            // `py-1.5 text-xs` outside the phone layout, its 1 px border counted as CSS counts it.
+            val vertical = if (LocalPpmMobile.current) 6.dp else 7.dp
             Row(
                 Modifier
                     .weight(1f)
                     .clip(shape)
                     .background(tokens.panel2.color)
                     .border(1.dp, if (focused) tokens.accent.opacity(0.5).color else tokens.border.color, shape)
-                    .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                    .padding(start = 8.dp, end = 8.dp, top = vertical, bottom = vertical),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 PpmIcon(ProductIcon.Search, 14.dp, tokens.text3.color)
-                PpmTextField(query, "Filter sessions…", Modifier.weight(1f), onFocusChanged = { focused = it })
+                PpmTextField(query, "Filter sessions…", Modifier.weight(1f), desktopStyle = ppmText(12f, lineHeight = 16f), onFocusChanged = { focused = it })
             }
             SquareIconButton(ProductIcon.CalendarX2, enabled = !model.deletingOld) { model.askDeleteOld = true }
             var refreshing by remember { mutableStateOf(false) }
@@ -259,7 +263,8 @@ private fun PillChip(label: String, selected: Boolean, color: Rgba?, onClick: ()
             .background(fill)
             .border(1.dp, border.color, CircleShape)
             .ppmClickable(pressedColor = tokens.panel2.color, shape = CircleShape, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 2.dp),
+            // The padding plus the 1 px border, which CSS counts into the box and `border()` does not.
+            .padding(horizontal = 9.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -294,7 +299,8 @@ private fun SidebarSessionRow(model: AppModel, session: SessionInfo, unreadType:
             if (renaming) {
                 InlineRename(model, session, Modifier.weight(1f)) { renaming = false }
             } else {
-                Column(Modifier.weight(1f)) {
+                // The title is a button inside a line of the body's 16/24 text, so never under 24 px.
+                Column(Modifier.weight(1f).heightIn(min = 24.dp), verticalArrangement = Arrangement.Center) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (bot) PpmIcon(ProductIcon.Bot, 14.dp, tokens.text2.color)
                         BasicText(
@@ -309,8 +315,11 @@ private fun SidebarSessionRow(model: AppModel, session: SessionInfo, unreadType:
                 HistoryIcon(if (session.pinned) ProductIcon.PinOff else ProductIcon.Pin, if (session.pinned) tokens.accent else tokens.text3) {
                     model.scope.launch { model.togglePin(session) }
                 }
-                HistoryIcon(ProductIcon.Pencil, tokens.text3) { renaming = true }
-                HistoryIcon(ProductIcon.Trash2, tokens.text3) { model.confirmDeleteSession = session }
+                // Rename and delete share one span, so no gap between them.
+                Row {
+                    HistoryIcon(ProductIcon.Pencil, tokens.text3) { renaming = true }
+                    HistoryIcon(ProductIcon.Trash2, tokens.text3) { model.confirmDeleteSession = session }
+                }
             }
         }
         menuAt?.let { at ->
