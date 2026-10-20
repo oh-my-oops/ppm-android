@@ -75,11 +75,15 @@ fun PanelArea(model: AppModel) {
     }
     var extent by remember { mutableIntStateOf(0) }
     val bottom = position == "bottom"
-    val drag: (Float) -> Unit = { delta ->
+    // The share the drag began with: the dock is that moved by the whole offset, and so back under
+    // the pointer once the pointer returns from past a limit.
+    val from = remember { FloatArray(1) }
+    val dragStart = { from[0] = share }
+    val drag: (Float) -> Unit = { moved ->
         if (extent > 0) {
             // Dragging toward the grid grows the dock: up for a bottom dock, toward the middle for a side one.
-            val toward = if (position == "left") delta else -delta
-            share = (share + toward / extent).coerceIn(DOCK_MIN, DOCK_MAX)
+            val toward = if (position == "left") moved else -moved
+            share = (from[0] + toward / extent).coerceIn(DOCK_MIN, DOCK_MAX)
         }
     }
     // A maximized dock's size is not the one to keep: restoring returns to the saved one.
@@ -94,7 +98,7 @@ fun PanelArea(model: AppModel) {
         Column(Modifier.fillMaxSize().onSizeChanged { extent = it.height }) {
             grid(Modifier.weight(if (visible) 1f - share else 1f).fillMaxWidth())
             if (visible) {
-                SplitHandle(vertical = false, onDrag = drag, onDragEnd = dragEnd)
+                SplitHandle(vertical = false, onDragStart = dragStart, onDrag = drag, onDragEnd = dragEnd)
                 dock(Modifier.weight(share).fillMaxWidth())
             }
         }
@@ -102,11 +106,11 @@ fun PanelArea(model: AppModel) {
         Row(Modifier.fillMaxSize().onSizeChanged { extent = it.width }) {
             if (visible && position == "left") {
                 dock(Modifier.weight(share).fillMaxHeight())
-                SplitHandle(vertical = true, onDrag = drag, onDragEnd = dragEnd)
+                SplitHandle(vertical = true, onDragStart = dragStart, onDrag = drag, onDragEnd = dragEnd)
             }
             grid(Modifier.weight(if (visible) 1f - share else 1f).fillMaxHeight())
             if (visible && position == "right") {
-                SplitHandle(vertical = true, onDrag = drag, onDragEnd = dragEnd)
+                SplitHandle(vertical = true, onDragStart = dragStart, onDrag = drag, onDragEnd = dragEnd)
                 dock(Modifier.weight(share).fillMaxHeight())
             }
         }
@@ -135,12 +139,22 @@ private fun PanelGrid(model: AppModel, state: WorkspaceState) {
                         Box(Modifier.weight(columns[r][c]).fillMaxHeight()) { EditorPanel(model, state, panelId, multiple = count > 1) }
                     }
                     if (c < row.lastIndex) {
-                        SplitHandle(vertical = true, onDrag = { delta -> if (width > 0) columns[r].shift(c, delta / width) })
+                        val from = remember { FloatArray(1) }
+                        SplitHandle(
+                            vertical = true,
+                            onDragStart = { from[0] = columns[r][c] },
+                            onDrag = { moved -> if (width > 0) columns[r].place(c, from[0] + moved / width) },
+                        )
                     }
                 }
             }
             if (r < grid.lastIndex) {
-                SplitHandle(vertical = false, onDrag = { delta -> if (height > 0) rows.shift(r, delta / height) })
+                val from = remember { FloatArray(1) }
+                SplitHandle(
+                    vertical = false,
+                    onDragStart = { from[0] = rows[r] },
+                    onDrag = { moved -> if (height > 0) rows.place(r, from[0] + moved / height) },
+                )
             }
         }
     }
@@ -148,10 +162,10 @@ private fun PanelGrid(model: AppModel, state: WorkspaceState) {
 
 private fun equalShares(n: Int): SnapshotStateList<Float> = mutableStateListOf<Float>().apply { repeat(n) { add(1f / n) } }
 
-/** Moves the line after pane [index] by [by] of the whole line, neither neighbour under its minimum. */
-private fun SnapshotStateList<Float>.shift(index: Int, by: Float) {
+/** Gives pane [index] [share] of the whole line, from its neighbour after it, neither under its minimum. */
+private fun SnapshotStateList<Float>.place(index: Int, share: Float) {
     val pair = this[index] + this[index + 1]
-    val first = (this[index] + by).coerceIn(PANE_MIN, (pair - PANE_MIN).coerceAtLeast(PANE_MIN))
+    val first = share.coerceIn(PANE_MIN, (pair - PANE_MIN).coerceAtLeast(PANE_MIN))
     this[index] = first
     this[index + 1] = pair - first
 }

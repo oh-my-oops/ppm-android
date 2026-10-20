@@ -102,12 +102,15 @@ fun Modifier.edge(edge: Edge, color: Color): Modifier = drawBehind {
  * `resizeTargetMinimumSize.coarse`, as Chrome on Android reports a coarse pointer, and shows the
  * double arrow (`ew-resize` / `ns-resize`) over all of it. Only the pixel itself lights, as CSS's
  * `:hover` covers the line and not the grab area around it. [vertical] is a line between
- * side-by-side panes; [onDrag] gets each move in pixels.
+ * side-by-side panes. [onDragStart] comes at the press, and [onDrag] gets how far the pointer has
+ * moved since, in pixels: react-resizable-panels moves the layout the drag began with by the whole
+ * offset, so a line held at its limit while the pointer runs on comes back under the pointer.
  */
 @Composable
-fun SplitHandle(vertical: Boolean, onDrag: (Float) -> Unit, onDragEnd: () -> Unit = {}) {
+fun SplitHandle(vertical: Boolean, onDragStart: () -> Unit = {}, onDrag: (Float) -> Unit, onDragEnd: () -> Unit = {}) {
     val tokens = LocalPpmTokens.current
     var held by remember { mutableStateOf(false) }
+    val moved = remember { FloatArray(1) }
     var onLine by remember { mutableStateOf(false) }
     // `transition-colors duration-150` between the three.
     val lit = colorsFade(onLine || held).toDouble()
@@ -140,8 +143,15 @@ fun SplitHandle(vertical: Boolean, onDrag: (Float) -> Unit, onDragEnd: () -> Uni
                 .screenDrag(
                     horizontal = vertical,
                     cursor = cursor,
-                    onStart = { held = true },
-                    onDrag = onDrag,
+                    onStart = {
+                        held = true
+                        moved[0] = 0f
+                        onDragStart()
+                    },
+                    onDrag = { delta ->
+                        moved[0] += delta
+                        onDrag(moved[0])
+                    },
                     onEnd = {
                         held = false
                         onDragEnd()
