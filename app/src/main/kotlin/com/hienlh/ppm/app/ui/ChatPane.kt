@@ -256,7 +256,7 @@ private fun OverflowButton(model: AppModel, tab: ChatTab) {
                     MenuItem("Mark as unread", onClick = {
                         open = false
                         model.markUnread(model.sessions.firstOrNull { it.id == tab.session.id } ?: tab.session)
-                    }, icon = { FilledCircleIcon(tokens.accent) }, vertical = 12.dp)
+                    }, icon = { MenuIcon(ProductIcon.Circle, tokens.accent) }, vertical = 12.dp)
                 }
             }
         }

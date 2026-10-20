@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -25,6 +26,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
@@ -165,6 +168,8 @@ private fun EditorPanel(model: AppModel, state: WorkspaceState, panelId: String,
     val focused = state.focusedPanelId == panelId
     // A panel holding only another project's tab shows none, and counts as empty (`visibleTabs`).
     val tabs = visibleTabs(panel.tabs, state.currentProject)
+    val drag = LocalTabDrag.current
+    DisposableEffect(drag, panelId) { onDispose { drag?.areas?.remove(panelId) } }
     Column(
         Modifier
             .fillMaxSize()
@@ -183,7 +188,8 @@ private fun EditorPanel(model: AppModel, state: WorkspaceState, panelId: String,
             },
     ) {
         TabBar(model, panelId, tabs, panel.activeTabId)
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        // The content is where a dragged tab is dropped (`data-panel-drop-zone`).
+        Box(Modifier.weight(1f).fillMaxWidth().onGloballyPositioned { drag?.areas?.set(panelId, it.boundsInRoot()) }) {
             val active = tabs.firstOrNull { it.id == panel.activeTabId }
             when {
                 tabs.isEmpty() -> EmptyPanel(
@@ -194,6 +200,8 @@ private fun EditorPanel(model: AppModel, state: WorkspaceState, panelId: String,
                 )
                 active != null -> key(active.id) { TabBody(model, active) }
             }
+            val target = drag?.target
+            if (drag?.tab != null && target?.panelId == panelId) DropHighlight(target.zone)
         }
     }
 }

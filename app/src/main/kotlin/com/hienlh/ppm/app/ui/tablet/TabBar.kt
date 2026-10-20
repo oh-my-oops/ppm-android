@@ -19,10 +19,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -31,21 +33,34 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.toRect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toSize
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ui.ContextMenuPopup
+import com.hienlh.ppm.app.ui.MenuIcon
+import com.hienlh.ppm.app.ui.MenuItem
+import com.hienlh.ppm.app.ui.MenuSeparator
+import com.hienlh.ppm.app.ui.SetTagMenuItem
 import com.hienlh.ppm.app.ui.TabIcon
 import com.hienlh.ppm.app.ui.TypingDots
 import com.hienlh.ppm.app.ui.pressable
@@ -83,6 +98,8 @@ fun TabBar(model: AppModel, panelId: String, tabs: List<WorkspaceTab>, activeTab
     val density = LocalDensity.current
     val unread = model.unreadSessions()
     val running = model.runningSessions()
+    val drag = LocalTabDrag.current
+    DisposableEffect(drag, panelId) { onDispose { drag?.bars?.remove(panelId) } }
     // Each tab's span in the scrolled row, in pixels, to tell which ones are out of view.
     val spans = remember { mutableStateMapOf<String, IntRange>() }
     var viewport by remember { mutableIntStateOf(0) }
@@ -99,7 +116,13 @@ fun TabBar(model: AppModel, panelId: String, tabs: List<WorkspaceTab>, activeTab
             span.last > scroll.value + viewport -> scroll.animateScrollTo(span.last - viewport)
         }
     }
-    Box(Modifier.fillMaxWidth().height(BAR_HEIGHT).edge(Edge.Bottom, tokens.border.color)) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(BAR_HEIGHT)
+            .edge(Edge.Bottom, tokens.border.color)
+            .onGloballyPositioned { coordinates -> drag?.bars?.set(panelId, coordinates.boundsInRoot()) },
+    ) {
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
             Row(
                 Modifier.weight(1f, fill = false).fillMaxHeight().onSizeChanged { viewport = it.width }.horizontalScroll(scroll),
@@ -110,6 +133,7 @@ fun TabBar(model: AppModel, panelId: String, tabs: List<WorkspaceTab>, activeTab
                     TabChip(
                         model,
                         tab,
+                        panelId,
                         active = tab.id == activeTabId,
                         unread = entry,
                         streaming = tab.type == "chat" && sessionId != null && sessionId in running,
@@ -117,6 +141,10 @@ fun TabBar(model: AppModel, panelId: String, tabs: List<WorkspaceTab>, activeTab
                         onSelect = { model.activate(tab.id, panelId) },
                         onClose = { model.closeTab(tab.id, panelId) },
                     )
+                }
+                // A mouse dropping past the last tab: `w-0.5 h-6 bg-primary rounded-full`.
+                if (drag?.insert == BarInsert(panelId, null)) {
+                    Box(Modifier.align(Alignment.CenterVertically).width(2.dp).height(24.dp).background(tokens.accent.color, CircleShape))
                 }
             }
             // "+": the command palette on the web, which this app does not have yet; a new chat here until it does.
@@ -206,6 +234,7 @@ private fun ScrollArrow(left: Boolean, dot: String?, modifier: Modifier, onClick
 private fun TabChip(
     model: AppModel,
     tab: WorkspaceTab,
+    panelId: String,
     active: Boolean,
     unread: SessionUnread?,
     streaming: Boolean,
@@ -217,58 +246,111 @@ private fun TabChip(
     val color = if (active) tokens.accent else tokens.text2
     val chat = model.chat(tab.id)
     val tag = chat?.let { c -> model.sessions.firstOrNull { it.id == c.session.id }?.tag?.color }?.let(Rgba::hex)
-    Box(modifier.fillMaxHeight()) {
-        Row(
-            Modifier
-                .fillMaxHeight()
-                .background(if (active) tokens.panel2.color else Color.Transparent)
-                .drawBehind {
-                    if (active) drawRect(tokens.accent.color, Offset.Zero, Size(size.width, 2.dp.toPx()))
-                    drawRect(tokens.borderSoft.color, Offset(size.width - 1.dp.toPx(), 0f), Size(1.dp.toPx(), size.height))
-                }
-                .pressable(pressedColor = if (active) Color.Transparent else tokens.panel.opacity(0.6).color, onClick = onSelect)
-                .padding(start = 12.dp, end = 13.dp, top = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+    val title = tabTitle(model, tab)
+    val drag = LocalTabDrag.current
+    var menuAt by remember { mutableStateOf<Offset?>(null) }
+    val snapshot = rememberGraphicsLayer()
+    DisposableEffect(drag, tab.id) { onDispose { drag?.chips?.remove(tab.id) } }
+    Box(
+        modifier
+            .fillMaxHeight()
+            .onGloballyPositioned { drag?.chips?.set(tab.id, panelId to Rect(it.positionInRoot(), it.size.toSize())) }
+            .then(if (drag == null) Modifier else Modifier.tabGestures(drag, model, { DraggedTab(tab.id, panelId, title, snapshot) }) { menuAt = it }),
+    ) {
+        // The tab as a mouse drag shows it: everything but the drop mark.
+        Box(
+            Modifier.fillMaxHeight().drawWithContent {
+                snapshot.record { this@drawWithContent.drawContent() }
+                drawLayer(snapshot)
+            },
         ) {
-            Box {
-                if (streaming) {
-                    PpmIcon(ProductIcon.MessageCircle, 16.dp, tokens.warning.color)
-                    TypingDots(tokens.warning, Modifier.align(Alignment.Center))
-                } else {
-                    TabIcon(tab, color)
-                    if (unread != null && (!active || unread.manual)) {
-                        Box(Modifier.align(Alignment.TopEnd).offset(4.dp, (-4).dp).size(8.dp).clip(CircleShape).background(tokens.notification(unread.type).color))
+            Row(
+                Modifier
+                    .fillMaxHeight()
+                    .background(if (active) tokens.panel2.color else Color.Transparent)
+                    .drawBehind {
+                        if (active) drawRect(tokens.accent.color, Offset.Zero, Size(size.width, 2.dp.toPx()))
+                        drawRect(tokens.borderSoft.color, Offset(size.width - 1.dp.toPx(), 0f), Size(1.dp.toPx(), size.height))
+                    }
+                    .pressable(pressedColor = if (active) Color.Transparent else tokens.panel.opacity(0.6).color, onClick = onSelect)
+                    .padding(start = 12.dp, end = 13.dp, top = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Box {
+                    if (streaming) {
+                        PpmIcon(ProductIcon.MessageCircle, 16.dp, tokens.warning.color)
+                        TypingDots(tokens.warning, Modifier.align(Alignment.Center))
+                    } else {
+                        TabIcon(tab, color)
+                        if (unread != null && (!active || unread.manual)) {
+                            Box(Modifier.align(Alignment.TopEnd).offset(4.dp, (-4).dp).size(8.dp).clip(CircleShape).background(tokens.notification(unread.type).color))
+                        }
                     }
                 }
+                BasicText(
+                    title,
+                    Modifier.widthIn(max = 120.dp),
+                    style = ppmText(12f, lineHeight = 16f).copy(color = color.color),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (tab.closable) {
+                    // `ml-1 rounded-sm p-0.5`, the X at 12 px.
+                    Box(
+                        Modifier
+                            .padding(start = 4.dp)
+                            .size(16.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "Close tab", onClick = onClose),
+                        contentAlignment = Alignment.Center,
+                    ) { PpmIcon(ProductIcon.X, 12.dp, color.color) }
+                }
             }
-            BasicText(
-                tabTitle(model, tab),
-                Modifier.widthIn(max = 120.dp),
-                style = ppmText(12f, lineHeight = 16f).copy(color = color.color),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (tab.closable) {
-                // `ml-1 rounded-sm p-0.5`, the X at 12 px.
+            if (tag != null) {
+                // `absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full`.
                 Box(
-                    Modifier
-                        .padding(start = 4.dp)
-                        .size(16.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "Close tab", onClick = onClose),
-                    contentAlignment = Alignment.Center,
-                ) { PpmIcon(ProductIcon.X, 12.dp, color.color) }
+                    Modifier.align(Alignment.CenterStart).padding(vertical = 8.dp).width(3.dp).fillMaxHeight().drawBehind {
+                        val round = CornerRadius(size.width)
+                        drawPath(Path().apply { addRoundRect(RoundRect(size.toRect(), topRight = round, bottomRight = round)) }, tag.color)
+                    },
+                )
             }
         }
-        if (tag != null) {
-            // `absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full`.
-            Box(
-                Modifier.align(Alignment.CenterStart).padding(vertical = 8.dp).width(3.dp).fillMaxHeight().drawBehind {
-                    val round = CornerRadius(size.width)
-                    drawPath(Path().apply { addRoundRect(RoundRect(size.toRect(), topRight = round, bottomRight = round)) }, tag.color)
-                },
-            )
+        if (drag?.insert == BarInsert(panelId, tab.id)) {
+            // A mouse dropping before this tab: `absolute left-0 top-1 bottom-1 w-0.5 bg-primary rounded-full`.
+            Box(Modifier.align(Alignment.CenterStart).padding(vertical = 4.dp).width(2.dp).fillMaxHeight().background(tokens.accent.color, CircleShape))
         }
+        menuAt?.let { at -> TabMenu(model, tab, panelId, at) { menuAt = null } }
+    }
+}
+
+/**
+ * A tab's menu (draggable-tab.tsx, with tab-bar.tsx's items for a chat): Mark as unread while the
+ * chat has none and Set Tag while the project has tags, then Close, Close Others and Close to the
+ * Right. Its window, dock and file items come with windows, terminals and the editor.
+ */
+@Composable
+private fun TabMenu(model: AppModel, tab: WorkspaceTab, panelId: String, at: Offset, onDismiss: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val sessionId = tabSessionId(tab)
+    val unread = sessionId?.let { model.unreadSessions()[it] }?.takeIf { it.count > 0 }
+    val session = sessionId?.let { id -> model.sessions.firstOrNull { it.id == id } }
+    fun pick(action: () -> Unit) {
+        onDismiss()
+        action()
+    }
+    ContextMenuPopup(at, onDismiss) {
+        if (sessionId != null && unread == null) {
+            MenuItem("Mark as unread", onClick = { pick { model.markUnread(sessionId, tab.title) } }, icon = { MenuIcon(ProductIcon.Circle, tokens.accent) })
+            MenuSeparator()
+        }
+        if (session != null && model.tags.tags.isNotEmpty()) {
+            SetTagMenuItem(model, session, onDismiss)
+            MenuSeparator()
+        }
+        if (tab.closable) MenuItem("Close", onClick = { pick { model.closeTab(tab.id, panelId) } })
+        MenuItem("Close Others", onClick = { pick { model.closeOtherTabs(tab.id) } })
+        MenuItem("Close to the Right", onClick = { pick { model.closeTabsToRight(tab.id) } })
     }
 }

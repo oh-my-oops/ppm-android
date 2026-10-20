@@ -27,6 +27,9 @@ The three `core` modules are plain Kotlin/JVM: their tests run on the JVM, no em
 - In a `Row` measured for its intrinsic width (a menu is `IntrinsicSize.Max`), every weighted child counts as wide as the widest one: a label plus a weighted `Spacer` made a 128 px menu 168. Weight the label instead.
 - What the web shows only on hover (`can-hover:` is hover **and** a fine pointer) is always shown on a touch tablet. Compare with the web under touch emulation (CDP `Emulation.setTouchEmulationEnabled`), not a desktop mouse — and expect Playwright clicks to hang while `setEmitTouchEventsForMouse` is on.
 - A handle that moves with the edge it drags measures on the screen (`Modifier.screenDrag`, `TabletShell.kt`): `draggable` reports moves in the handle's own coordinates, which came to about half the finger's travel, and `drag()` drops the last stretch when the release carries it.
+- Tailwind 4's bare `border` is `currentColor`, not the border token: the web's menus are outlined in the text colour, and `MenuBox` copies that. Read a colour off the page (`getComputedStyle`), not off the class name.
+- `graphicsLayer(alpha < 1)` draws into an offscreen buffer the size of the element, which cuts a shadow off at its edge. An element with a shadow takes `CompositingStrategy.ModulateAlpha` (the tab drag's label).
+- `Modifier.pointerHoverIcon` takes effect when the pointer comes in: one attached while the pointer is already over it waits for the next entry. Keep it attached and change its icon (`dragCursor`).
 
 ## Building and testing
 
@@ -53,3 +56,5 @@ Sessions are created with `providerId: "mock"`, so no AI is paid for. The mock s
 
 - Emulators: the AVD `PPM_Phone` on port 5580 (`emulator-5580`) and `PPM_Tablet` on 5582 (`emulator-5582`, a Pixel Tablet at 2560×1600 and 320 dpi: 1280×800 dp, the web viewport to set beside it, less the 24 dp status bar). Always pass `adb -s <serial>`.
 - Never touch `emulator-5556` or any `Velox_*` AVD: they belong to other work on this machine.
+- The web beside the app on the same device: Chrome on `PPM_Tablet` at `http://10.0.2.2:<port>`. Its page starts 97 dp lower than the app's window, at the same x.
+- A mouse: `adb shell input mouse` presses no button, and Compose ignores a mouse press without one. `scripts/virtual-mouse.py` registers a real USB mouse through `uinput` and plays steps on it (move, press, right press, wait, screenshot).

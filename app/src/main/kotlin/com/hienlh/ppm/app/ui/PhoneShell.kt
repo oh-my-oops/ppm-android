@@ -669,7 +669,7 @@ private fun TabMenuSheet(model: AppModel, id: String, onDismiss: () -> Unit, onR
                 onRename(session)
             }
             if (!unread) {
-                SheetRow("Mark as unread", leading = { FilledCircleIcon(tokens.accent, 16.dp) }) {
+                SheetRow("Mark as unread", leading = { PpmIcon(ProductIcon.Circle, 16.dp, tokens.accent.color) }) {
                     onDismiss()
                     model.markUnread(session)
                 }

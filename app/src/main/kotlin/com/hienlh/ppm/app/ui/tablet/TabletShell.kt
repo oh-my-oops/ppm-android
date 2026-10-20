@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,13 +46,17 @@ import com.hienlh.ppm.design.ProductIcon
  */
 @Composable
 fun TabletShell(model: AppModel) {
-    Backdrop {
-        Row(Modifier.fillMaxSize().safeDrawingPadding()) {
-            Sidebar(model)
-            Column(Modifier.weight(1f).fillMaxHeight()) {
-                Box(Modifier.weight(1f).fillMaxWidth()) { PanelArea(model) }
-                StatusBar(model)
+    val drag = remember { TabDrag() }
+    CompositionLocalProvider(LocalTabDrag provides drag) {
+        Backdrop(Modifier.dragCursor(drag)) {
+            Row(Modifier.fillMaxSize().safeDrawingPadding()) {
+                Sidebar(model)
+                Column(Modifier.weight(1f).fillMaxHeight()) {
+                    Box(Modifier.weight(1f).fillMaxWidth()) { PanelArea(model) }
+                    StatusBar(model)
+                }
             }
+            TabDragGhost(drag)
         }
     }
 }

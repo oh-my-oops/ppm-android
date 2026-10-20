@@ -43,6 +43,7 @@ import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.workspace.NewTab
+import com.hienlh.ppm.state.workspace.SplitDirection
 import com.hienlh.ppm.state.workspace.WorkspaceCache
 import com.hienlh.ppm.state.workspace.WorkspaceState
 import com.hienlh.ppm.state.workspace.WorkspaceStore
@@ -929,6 +930,35 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         val api = api ?: return
         scope.launch { quietly { api.putUiPrefs(buildJsonObject(change)) } }
     }
+
+    /** A tab dropped on another panel's middle goes to the end of its tabs, in front. */
+    fun moveTab(tabId: String, fromPanelId: String, toPanelId: String) {
+        workspace?.moveTab(tabId, fromPanelId, toPanelId)
+    }
+
+    /** A tab dropped on a panel's edge: a new panel on that side holds it. */
+    fun splitPanel(direction: SplitDirection, tabId: String, fromPanelId: String, targetPanelId: String) {
+        workspace?.splitPanel(direction, tabId, fromPanelId, targetPanelId)
+    }
+
+    /**
+     * A tab a mouse dropped among a bar's tabs, before [beforeTabId] (last for null). The web
+     * counts its drop index before taking the tab out, so a tab moved right lands one place past
+     * the mark it was dropped on; here it lands on the mark.
+     */
+    fun dropTab(tabId: String, fromPanelId: String, toPanelId: String, beforeTabId: String?) {
+        val store = workspace ?: return
+        val tabs = store.state.value.panels[toPanelId]?.tabs ?: return
+        if (fromPanelId == toPanelId) {
+            val rest = tabs.filter { it.id != tabId }
+            store.reorderTab(tabId, toPanelId, rest.indexOfFirst { it.id == beforeTabId }.takeIf { it >= 0 } ?: rest.size)
+        } else {
+            store.moveTab(tabId, fromPanelId, toPanelId, tabs.indexOfFirst { it.id == beforeTabId }.takeIf { it >= 0 })
+        }
+    }
+
+    /** A tab's Mark as unread: its chat, under the tab's title. */
+    fun markUnread(sessionId: String, title: String) = events?.markUnread(sessionId, title)
 
     /** Close Others: the other closable tabs of [keep]'s panel (`mobile-nav.tsx`). */
     fun closeOtherTabs(keep: String) {

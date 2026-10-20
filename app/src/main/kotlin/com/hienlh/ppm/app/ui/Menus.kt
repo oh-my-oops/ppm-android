@@ -48,6 +48,7 @@ import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.SessionInfo
+import com.hienlh.ppm.protocol.SessionTag
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -57,7 +58,8 @@ private val shadowLg = ThemeShadow(0.0, 10.0, 15.0, -3.0, Rgba(0.0, 0.0, 0.0, 0.
 
 /**
  * A Radix menu's box: `min-w-[8rem] rounded-md border bg-popover p-1`, opaque as `.popover-solid`
- * makes it, as wide as its widest row.
+ * makes it, as wide as its widest row. The border has no colour of its own, and Tailwind 4 gives
+ * such a border the text's (`text-popover-foreground`): the web's menus are outlined in it.
  */
 @Composable
 fun MenuBox(modifier: Modifier = Modifier, minWidth: Dp = 128.dp, large: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
@@ -70,7 +72,7 @@ fun MenuBox(modifier: Modifier = Modifier, minWidth: Dp = 128.dp, large: Boolean
             .ppmShadow(if (large) shadowLg else shadowMd, shape)
             .clip(shape)
             .background(tokens.panel2.over(tokens.bgSolid).color)
-            .border(1.dp, tokens.border.color, shape)
+            .border(1.dp, tokens.text.color, shape)
             // `p-1` inside the 1 px border, which CSS counts into the box and `border()` does not.
             .padding(5.dp),
         content = content,
@@ -131,14 +133,6 @@ fun MenuIcon(icon: ProductIcon, tint: Rgba? = null) {
 fun MenuSeparator() {
     val tokens = LocalPpmTokens.current
     Box(Modifier.padding(vertical = 4.dp).fillMaxWidth().height(1.dp).background(tokens.border.color))
-}
-
-/** Lucide's `Circle` with `fill-current`: a dot, 14 px with its stroke. */
-@Composable
-fun FilledCircleIcon(color: Rgba, size: Dp = 14.dp) {
-    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
-        Box(Modifier.size(size * 0.92f).clip(CircleShape).background(color.color))
-    }
 }
 
 /**
@@ -252,7 +246,8 @@ fun SubMenuItem(label: String, icon: (@Composable () -> Unit)?, content: @Compos
     val tokens = LocalPpmTokens.current
     var open by remember { mutableStateOf(false) }
     Box(Modifier.background(if (open) tokens.panel2.color else Color.Transparent, RoundedCornerShape(6.dp))) {
-        MenuItem(label, onClick = { open = !open }, icon = icon, trailing = { PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text2.color) })
+        // A `SubTrigger` has no `gap-2`: the label follows the icon's `mr-2` alone.
+        MenuItem(label, onClick = { open = !open }, icon = icon, iconEnd = 0.dp, trailing = { PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text2.color) })
         if (open) {
             val place = remember {
                 { anchor: IntRect, window: IntSize, box: IntSize ->
@@ -262,6 +257,31 @@ fun SubMenuItem(label: String, icon: (@Composable () -> Unit)?, content: @Compos
                 }
             }
             MenuPopup(place, onDismiss = { open = false }, large = true) { content { open = false } }
+        }
+    }
+}
+
+/** "Set Tag": the project's tags with the session's ticked, and Remove tag while it has one. */
+@Composable
+fun SetTagMenuItem(model: AppModel, session: SessionInfo, onDismiss: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    SubMenuItem("Set Tag", icon = { MenuIcon(ProductIcon.Tag) }) { close ->
+        fun pick(tag: SessionTag?) {
+            close()
+            onDismiss()
+            model.scope.launch { model.setTag(tag, session) }
+        }
+        for (tag in model.tags.tags) {
+            MenuItem(
+                tag.name,
+                onClick = { pick(tag) },
+                icon = { TagDot(tag.color, 10.dp) },
+                trailing = if (session.tag?.id == tag.id) ({ PpmIcon(ProductIcon.Check, 12.dp, tokens.text.color) }) else null,
+            )
+        }
+        if (session.tag != null) {
+            MenuSeparator()
+            MenuItem("Remove tag", onClick = { pick(null) })
         }
     }
 }
@@ -295,7 +315,7 @@ fun SessionContextMenu(
             MenuItem("Mark as unread", onClick = {
                 onDismiss()
                 model.markUnread(session)
-            }, icon = { FilledCircleIcon(tokens.accent) })
+            }, icon = { MenuIcon(ProductIcon.Circle, tokens.accent) })
         }
         if (onRename != null) {
             MenuItem("Rename", onClick = {
@@ -303,28 +323,7 @@ fun SessionContextMenu(
                 onRename()
             }, icon = { MenuIcon(ProductIcon.Pencil) })
         }
-        if (model.tags.tags.isNotEmpty()) {
-            SubMenuItem("Set Tag", icon = { MenuIcon(ProductIcon.Tag) }) { close ->
-                for (tag in model.tags.tags) {
-                    MenuItem(
-                        tag.name,
-                        onClick = {
-                            close()
-                            run { model.setTag(tag, session) }
-                        },
-                        icon = { TagDot(tag.color, 10.dp) },
-                        trailing = if (session.tag?.id == tag.id) ({ PpmIcon(ProductIcon.Check, 12.dp, tokens.text.color) }) else null,
-                    )
-                }
-                if (session.tag != null) {
-                    MenuSeparator()
-                    MenuItem("Remove tag", onClick = {
-                        close()
-                        run { model.setTag(null, session) }
-                    })
-                }
-            }
-        }
+        if (model.tags.tags.isNotEmpty()) SetTagMenuItem(model, session, onDismiss)
         if (onDelete != null) {
             MenuSeparator()
             MenuItem("Delete", onClick = {
