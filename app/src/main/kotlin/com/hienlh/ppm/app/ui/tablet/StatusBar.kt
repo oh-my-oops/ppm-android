@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -23,9 +24,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -35,6 +39,7 @@ import com.hienlh.ppm.app.ui.DropdownAboveEnd
 import com.hienlh.ppm.app.ui.MenuItem
 import com.hienlh.ppm.app.ui.ThemeSwatch
 import com.hienlh.ppm.app.ui.screenKeptAwake
+import com.hienlh.ppm.app.ui.windows.WindowDock
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.design.BuiltInThemes
@@ -49,11 +54,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.math.max
 
 /**
  * The status bar (status-bar.tsx): `h-[26px] px-3.5 bg-panel border-t border-border-soft
  * text-[11px] font-mono text-text-3`. On the left the open project's branch and the dock's
- * toggle; on the right the machine's CPU and memory, the theme picker and the server's version.
+ * toggle; in the middle the floating windows' dock; on the right the machine's CPU and memory,
+ * the theme picker and the server's version.
  * Problems and an extension's items come with the features they belong to.
  */
 @Composable
@@ -65,29 +72,64 @@ fun StatusBar(model: AppModel) {
         // the branch's counts give way.
         val compact = maxWidth < 768.dp
         val narrow = maxWidth < 576.dp
-        Row(
-            Modifier.fillMaxWidth().fillMaxHeight().padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            // The side that gives way: the branch name ellipsizes, then the group clips.
-            Row(
-                Modifier.weight(1f).clipToBounds(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                GitStatus(model, text, narrow)
-                DockToggle(model, text)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (model.screenKeptAwake()) Awake(text)
-                model.api?.let { Resources(it, text) }
-                ThemePicker(model, text, compact)
-                model.info?.version?.let { BasicText("v$it", Modifier.padding(horizontal = 4.dp), style = text, maxLines = 1) }
-            }
+        StatusBarRow(
+            Modifier.fillMaxSize().padding(horizontal = 14.dp),
+            left = {
+                // The side that gives way: the branch name ellipsizes, then the group clips.
+                Row(Modifier.clipToBounds(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    GitStatus(model, text, narrow)
+                    DockToggle(model, text)
+                }
+            },
+            // The floating windows' taskbar takes the free middle.
+            dock = if (model.windowState.windows.isNotEmpty()) ({ WindowDock(model) }) else null,
+            right = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (model.screenKeptAwake()) Awake(text)
+                    model.api?.let { Resources(it, text) }
+                    ThemePicker(model, text, compact)
+                    model.info?.version?.let { BasicText("v$it", Modifier.padding(horizontal = 4.dp), style = text, maxLines = 1) }
+                }
+            },
+        )
+    }
+}
+
+/**
+ * The bar's row (`flex justify-between gap-3`): the right group never shrinks, the left one takes
+ * what it needs of the rest and clips past it, and the window [dock], when there is one, every
+ * dp between them (`flex-1 basis-0`); without it the two groups sit at either end.
+ */
+@Composable
+private fun StatusBarRow(modifier: Modifier, left: @Composable () -> Unit, dock: (@Composable () -> Unit)?, right: @Composable () -> Unit) {
+    Layout(
+        content = {
+            Box(Modifier.layoutId(LEFT)) { left() }
+            if (dock != null) Box(Modifier.layoutId(DOCK)) { dock() }
+            Box(Modifier.layoutId(RIGHT)) { right() }
+        },
+        modifier = modifier,
+    ) { measurables, constraints ->
+        val width = constraints.maxWidth
+        val height = constraints.maxHeight
+        val gap = 12.dp.roundToPx()
+        val loose = Constraints(maxWidth = width, maxHeight = height)
+        val right = measurables.first { it.layoutId == RIGHT }.measure(loose)
+        val dockMeasurable = measurables.firstOrNull { it.layoutId == DOCK }
+        val gaps = if (dockMeasurable != null) 2 * gap else gap
+        val left = measurables.first { it.layoutId == LEFT }.measure(loose.copy(maxWidth = max(0, width - right.width - gaps)))
+        val dock = dockMeasurable?.measure(Constraints.fixed(max(0, width - right.width - left.width - gaps), height))
+        layout(width, height) {
+            left.placeRelative(0, (height - left.height) / 2)
+            dock?.placeRelative(left.width + gap, 0)
+            right.placeRelative(width - right.width, (height - right.height) / 2)
         }
     }
 }
+
+private const val LEFT = "left"
+private const val DOCK = "dock"
+private const val RIGHT = "right"
 
 /**
  * The open project's branch (`GitStatus`) in the accent, then how far it is ahead of and behind

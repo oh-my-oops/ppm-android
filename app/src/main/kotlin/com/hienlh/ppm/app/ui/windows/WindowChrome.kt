@@ -1,8 +1,15 @@
 package com.hienlh.ppm.app.ui.windows
 
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,10 +21,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -202,13 +217,76 @@ internal enum class TileSize(val box: Dp, val radius: Dp, val glyph: Dp) {
     Large(24.dp, 8.dp, 14.dp),
 }
 
-/** `WindowTile`: the window's glyph in its colour, on a tile of that colour at 20 %. */
+/**
+ * `WindowTile`: the window's glyph in its colour, on a tile of that colour at 20 %. [muted] dims
+ * it as a minimized window's (`opacity-55 saturate-50`, what spills past the tile included);
+ * [content] sits on it, unclipped, as the busy dot does.
+ */
 @Composable
-internal fun WindowTile(icon: ProductIcon, tone: Rgba, size: TileSize, modifier: Modifier = Modifier) {
+internal fun WindowTile(
+    icon: ProductIcon,
+    tone: Rgba,
+    size: TileSize,
+    modifier: Modifier = Modifier,
+    muted: Boolean = false,
+    content: @Composable BoxScope.() -> Unit = {},
+) {
     Box(
-        modifier.size(size.box).background(tone.opacity(0.2).color, RoundedCornerShape(size.radius)),
+        modifier
+            .size(size.box)
+            .then(if (muted) Modifier.drawWithContent { drawMuted() } else Modifier)
+            .background(tone.opacity(0.2).color, RoundedCornerShape(size.radius)),
         contentAlignment = Alignment.Center,
-    ) { PpmIcon(icon, size.glyph, tone.color) }
+    ) {
+        PpmIcon(icon, size.glyph, tone.color)
+        content()
+    }
+}
+
+/** CSS `opacity: .55; filter: saturate(.5)`: one layer, so overlapping parts are not dimmed twice. */
+private val MUTED_PAINT = Paint().apply {
+    alpha = 0.55f
+    colorFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0.5f) })
+}
+
+/** How far a tile's [WindowTile] content may reach past it: the busy dot and its ring. */
+private val MUTED_SPILL = 8.dp
+
+private fun ContentDrawScope.drawMuted() {
+    val spill = MUTED_SPILL.toPx()
+    drawIntoCanvas { canvas ->
+        canvas.saveLayer(Rect(-spill, -spill, size.width + spill, size.height + spill), MUTED_PAINT)
+        drawContent()
+        canvas.restore()
+    }
+}
+
+/**
+ * `WindowBusyDot`: the 7 px green dot of a window with an AI turn running, ringed in the panel's
+ * colour, pinging (`animate-ping`: twice its size and gone by three quarters of each second).
+ * Placed by the caller on a tile's corner.
+ */
+@Composable
+internal fun WindowBusyDot(modifier: Modifier = Modifier) {
+    val tokens = LocalPpmTokens.current
+    val ping by rememberInfiniteTransition(label = "ping").animateFloat(
+        0f, 1f,
+        infiniteRepeatable(
+            keyframes {
+                durationMillis = 1_000
+                0f at 0 using CubicBezierEasing(0f, 0f, 0.2f, 1f)
+                1f at 750
+            },
+        ),
+        label = "ping",
+    )
+    Canvas(modifier.size(7.dp)) {
+        val radius = size.minDimension / 2
+        // `ring-2 ring-panel`: a box shadow, outside the dot.
+        drawCircle(tokens.panel.color, radius + 2.dp.toPx())
+        drawCircle(tokens.success.color, radius)
+        drawCircle(tokens.success.opacity(1.0 - ping).color, radius * (1 + ping))
+    }
 }
 
 /**

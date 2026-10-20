@@ -1,5 +1,8 @@
 package com.hienlh.ppm.app.ui
 
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -27,7 +30,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInteropFilter
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -150,16 +156,83 @@ private fun MenuPopup(
     large: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    PlacedPopup(place, onDismiss) { MenuBox(minWidth = minWidth, large = large, content = content) }
+}
+
+/**
+ * A popup holding [content] as it is, placed by [place] (given the content's own size) with room
+ * around it for a shadow. Back or a tap anywhere else closes it, the room included; Esc is the
+ * content's to handle. With [passThrough], as Radix's non-modal `Popover`, the press that closes
+ * it also reaches what it landed on, where a menu's only closes the menu.
+ */
+@Composable
+fun PlacedPopup(
+    place: (anchor: IntRect, window: IntSize, box: IntSize) -> IntOffset,
+    onDismiss: () -> Unit,
+    passThrough: Boolean = false,
+    content: @Composable () -> Unit,
+) {
     val room = with(LocalDensity.current) { ShadowRoom.roundToPx() }
     val provider = remember(place, room) { RoomyPosition(room, place) }
+    val under = LocalView.current.rootView
     if (closedByConnectionLost(onDismiss)) return
     Popup(
         popupPositionProvider = provider,
         onDismissRequest = onDismiss,
-        // Unclipped, so that the room can reach past the screen's edge while the box stays on it.
-        properties = PopupProperties(focusable = true, clippingEnabled = false),
+        properties = if (passThrough) PassThroughProperties else MenuProperties,
     ) {
-        Box(Modifier.padding(ShadowRoom)) { MenuBox(minWidth = minWidth, large = large, content = content) }
+        val taps = remember(room, under, passThrough) { RoomTaps(room, under.takeIf { passThrough }) }
+        taps.onDismiss = onDismiss
+        Box(
+            Modifier
+                .onSizeChanged { taps.size = it }
+                .pointerInteropFilter(onTouchEvent = taps::onTouch)
+                .padding(ShadowRoom),
+        ) { content() }
+    }
+}
+
+/** Unclipped, so that the room can reach past the screen's edge while the box stays on it. */
+private val MenuProperties = PopupProperties(focusable = true, clippingEnabled = false)
+
+/** [MenuProperties], but a press outside the popup's window goes on to the window under it. */
+private val PassThroughProperties = PopupProperties(
+    flags = WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+)
+
+/**
+ * A press in a popup's room — inside its window, outside its box — taken as one outside: it
+ * closes the popup, and given the window [under] it, the whole gesture goes on there, the popup
+ * closing as it ends (closing at the press would take the window, and the rest with it).
+ */
+private class RoomTaps(private val room: Int, private val under: View?) {
+    var size = IntSize.Zero
+    var onDismiss: () -> Unit = {}
+    private var forwarding = false
+
+    fun onTouch(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            val inBox = event.x >= room && event.y >= room && event.x < size.width - room && event.y < size.height - room
+            if (inBox) return false
+            if (under == null) {
+                onDismiss()
+                return true
+            }
+            forwarding = true
+        }
+        if (!forwarding || under == null) return false
+        val at = IntArray(2).also(under::getLocationOnScreen)
+        val copy = MotionEvent.obtain(event)
+        copy.offsetLocation(event.rawX - event.x - at[0], event.rawY - event.y - at[1])
+        under.dispatchTouchEvent(copy)
+        copy.recycle()
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            forwarding = false
+            onDismiss()
+        }
+        return true
     }
 }
 
