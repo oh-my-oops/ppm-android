@@ -1,5 +1,6 @@
 package com.hienlh.ppm.client
 
+import com.hienlh.ppm.protocol.HistoryMessage
 import com.hienlh.ppm.protocol.HistoryPage
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.ProjectTags
@@ -9,6 +10,7 @@ import com.hienlh.ppm.protocol.ServerInfo
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionPage
 import com.hienlh.ppm.protocol.SessionUnread
+import com.hienlh.ppm.protocol.TaskItem
 import com.hienlh.ppm.protocol.ThemeSelection
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.array
@@ -124,6 +126,18 @@ class ApiClient(val baseUrl: HttpUrl, val token: String) {
         val json = call("GET", "${chatPath(project)}/sessions/${escape(sessionId)}/messages", query)
         return HistoryPage.from(json) ?: throw PpmError.BadResponse("Unexpected history.")
     }
+
+    /**
+     * The compaction segment that ends at the message [before] in the transcript at [jsonlPath],
+     * the one a compact summary names: the conversation that summary replaced, its own summary first.
+     */
+    suspend fun preCompactMessages(project: String, jsonlPath: String, before: String): List<HistoryMessage> =
+        call("GET", "${chatPath(project)}/pre-compact-messages", listOf("jsonlPath" to jsonlPath, "before" to before))
+            .array.orEmpty().mapNotNull(HistoryMessage::from)
+
+    /** Claude's tasks in a chat, rebuilt from its whole transcript. */
+    suspend fun sessionTasks(project: String, sessionId: String): List<TaskItem> =
+        call("GET", "${chatPath(project)}/sessions/${escape(sessionId)}/tasks").array.orEmpty().mapNotNull(TaskItem::from)
 
     /** Read on every device (the server broadcasts it), and a notification still waiting for its delay is dropped. */
     suspend fun markRead(project: String, sessionId: String) {

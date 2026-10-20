@@ -4,6 +4,7 @@ import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatFrame
 import com.hienlh.ppm.protocol.ChatReply
+import com.hienlh.ppm.protocol.HistoryMessage
 import com.hienlh.ppm.protocol.HistoryPage
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionPhase
@@ -366,5 +367,82 @@ class TranscriptTest {
             listOf(ChatEffect.AdoptSessionId("b")),
             chat.handle(frame("""{"type":"session_migrated","oldSessionId":"a","newSessionId":"b","streamSeq":1}""")),
         )
+    }
+
+    private fun summary(id: String, path: String) =
+        msg(id, "user", "This session is being continued from a previous conversation. Read the full transcript at: $path")
+
+    private fun history(vararg messages: JsonElement) = messages.mapNotNull(HistoryMessage::from)
+
+    @Test
+    fun `a compact summary's earlier conversation shows above it, and so does that one's`() {
+        val chat = ChatTranscript()
+        chat.applyHistory(page(listOf(summary("s2", "/t/b.jsonl"), msg("u3", "user", "after"))), chat.activity)
+        assertEquals("/t/b.jsonl", chat.unexpandedCompact?.transcriptPath)
+        assertEquals("s2", chat.unexpandedCompact?.id)
+
+        // The segment before s2 starts with the summary before it.
+        chat.expand("s2", "/t/b.jsonl", history(summary("s1", "/t/a.jsonl"), msg("u2", "user", "middle")))
+        val prefix = PreCompact.idPrefix("/t/b.jsonl")
+        assertEquals(listOf("${prefix}s1", "${prefix}u2", "s2", "u3"), chat.shown.map { it.id })
+        assertEquals("${prefix}s1", chat.unexpandedCompact?.id)
+        assertEquals("s1", PreCompact.rawId("${prefix}s1"))
+        // What arrives from the socket is not part of a segment.
+        assertEquals(listOf("s2", "u3"), chat.items.map { it.id })
+
+        chat.expand("${prefix}s1", "/t/a.jsonl", history(msg("u1", "user", "first")))
+        assertEquals(listOf("${PreCompact.idPrefix("/t/a.jsonl")}u1", "${prefix}s1", "${prefix}u2", "s2", "u3"), chat.shown.map { it.id })
+        assertNull(chat.unexpandedCompact)
+    }
+
+    @Test
+    fun `an empty earlier conversation counts as loaded`() {
+        val chat = ChatTranscript()
+        chat.applyHistory(page(listOf(summary("s", "/t/a.jsonl"))), chat.activity)
+        chat.expand("s", "/t/a.jsonl", emptyList())
+        assertEquals(listOf("s"), chat.shown.map { it.id })
+        assertNull(chat.unexpandedCompact)
+    }
+
+    @Test
+    fun `segment ids carry the web's prefix, and only the first one comes off`() {
+        assertEquals("pc-4b8f8z-", PreCompact.idPrefix("/home/u/.claude/projects/-home-u-app/0b6c.jsonl"))
+        assertEquals("pc-el4ils-", PreCompact.idPrefix("/tmp/a.jsonl"))
+        assertEquals("pc-twst0s-", PreCompact.idPrefix("é/ü.jsonl"))
+        assertEquals("0b6c-11-22", PreCompact.rawId("pc-abc-0b6c-11-22"))
+        assertEquals("0b6c-11-22", PreCompact.rawId("0b6c-11-22"))
+        assertEquals("/x/y.jsonl", PreCompact.transcriptPath("READ THE FULL TRANSCRIPT AT:\n  /x/y.jsonl."))
+        assertNull(PreCompact.transcriptPath("read the full transcript at: /x/y.json"))
+    }
+
+    @Test
+    fun `an older page leaves out what is already shown`() {
+        val chat = ChatTranscript()
+        chat.applyHistory(page(listOf(msg("b", "user", "two"), msg("c", "user", "three")), start = 2), chat.activity)
+        chat.prependHistory(page(listOf(msg("a", "user", "one"), msg("b", "user", "two"))), before = 2)
+        assertEquals(listOf("a", "b", "c"), chat.items.map { it.id })
+        assertEquals(0, chat.historyStart)
+    }
+
+    @Test
+    fun `task tool calls are counted per message, a streamed one once`() {
+        val chat = ChatTranscript()
+        val assistant = json(
+            """
+            {"id":"a","role":"assistant","content":"","events":[
+              {"type":"tool_use","tool":"TaskCreate","input":{},"toolUseId":"t1"},
+              {"type":"tool_use","tool":"Bash","input":{},"toolUseId":"t2"},
+              {"type":"tool_use","tool":"TaskUpdate","input":{},"toolUseId":"t3","parentToolUseId":"x"}]}
+            """,
+        )
+        chat.applyHistory(page(listOf(assistant)), chat.activity)
+        assertEquals(2, chat.items.single().taskCalls)
+
+        chat.handle(frame("""{"type":"phase_changed","phase":"thinking"}"""))
+        chat.handle(frame("""{"type":"tool_use","tool":"TaskStop","input":{},"toolUseId":"t4","streamSeq":1}"""))
+        chat.handle(frame("""{"type":"tool_use","tool":"TaskStop","input":{"taskId":"1"},"toolUseId":"t4","streamSeq":2}"""))
+        assertEquals(1, chat.live?.taskCalls)
+        chat.handle(frame("""{"type":"done","sessionId":"s","streamSeq":3}"""))
+        assertEquals(1, chat.items.last().taskCalls)
     }
 }

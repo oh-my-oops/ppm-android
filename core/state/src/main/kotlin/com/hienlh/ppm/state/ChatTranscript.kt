@@ -5,6 +5,7 @@ import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatFrame
 import com.hienlh.ppm.protocol.ChatReply
+import com.hienlh.ppm.protocol.HistoryMessage
 import com.hienlh.ppm.protocol.HistoryPage
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.Reported
@@ -224,11 +225,53 @@ class ChatTranscript {
         return true
     }
 
-    /** Adds the page of older messages fetched with `before`. */
+    /** Adds the page of older messages fetched with `before`, less any already shown. */
     fun prependHistory(page: HistoryPage, before: Int) {
         if (before != historyStart) return
-        items = page.messages.mapNotNull(ChatItem::fromHistory) + items
+        val have = items.mapTo(HashSet()) { it.id }
+        items = page.messages.mapNotNull(ChatItem::fromHistory).filterNot { it.id in have } + items
         historyStart = page.start
+    }
+
+    // Before compactions
+
+    /** The conversation before each compaction loaded so far, by the id of the summary it ends at. */
+    private var expansions: Map<String, List<ChatItem>> = emptyMap()
+    private var shownFor: Pair<List<ChatItem>, Map<String, List<ChatItem>>>? = null
+    private var shownItems: List<ChatItem> = emptyList()
+
+    /**
+     * What the chat shows (`renderedMessages`): [items], with each loaded segment above the
+     * summary it ends at, and a segment's own summary expanded the same way.
+     */
+    val shown: List<ChatItem>
+        get() {
+            if (expansions.isEmpty()) return items
+            shownFor?.let { (from, with) -> if (from === items && with === expansions) return shownItems }
+            val out = ArrayList<ChatItem>(items.size)
+            val seen = HashSet<String>()
+            fun visit(list: List<ChatItem>) {
+                for (item in list) {
+                    val before = expansions[item.id]
+                    // A segment that somehow held its own summary would otherwise never end.
+                    if (!before.isNullOrEmpty() && seen.add(item.id)) visit(before)
+                    out += item
+                }
+            }
+            visit(items)
+            shownFor = items to expansions
+            shownItems = out
+            return out
+        }
+
+    /** The topmost compact summary shown whose earlier conversation is not loaded (`findTopUnexpandedCompact`). */
+    val unexpandedCompact: ChatItem?
+        get() = shown.firstOrNull { it.transcriptPath != null && it.id !in expansions }
+
+    /** Shows [messages], read from [path], above the compact summary [compactId] (`expandCompact`). */
+    fun expand(compactId: String, path: String, messages: List<HistoryMessage>) {
+        val prefix = PreCompact.idPrefix(path)
+        expansions = expansions + (compactId to messages.mapNotNull(ChatItem::fromHistory).map { it.copy(id = prefix + it.id) })
     }
 
     // Frames
@@ -382,7 +425,7 @@ class ChatTranscript {
         localCounter++
         items = items + ChatItem(
             "local-assistant-$localCounter", ChatItem.Role.ASSISTANT, turn.blocks, Instant.ofEpochMilli(liveStartedAt),
-            sdkUuid = sdkUuid, answerText = turn.answerText,
+            sdkUuid = sdkUuid, answerText = turn.answerText, taskCalls = turn.taskCalls,
         )
     }
 

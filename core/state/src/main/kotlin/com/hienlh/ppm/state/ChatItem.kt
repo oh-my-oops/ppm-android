@@ -1,6 +1,7 @@
 package com.hienlh.ppm.state
 
 import com.hienlh.ppm.protocol.ChatEvent
+import com.hienlh.ppm.protocol.Compaction
 import com.hienlh.ppm.protocol.HistoryMessage
 import com.hienlh.ppm.protocol.ToolOutcome
 import com.hienlh.ppm.protocol.array
@@ -46,11 +47,18 @@ data class ChatItem(
     val timestampText: String? = null,
     /** An answer's text as the web quotes it: every text event run together, a subagent's too. */
     val answerText: String = blocks.filterIsInstance<ChatBlock.Text>().joinToString("") { it.text },
+    /** Set on the compact summary that opens a segment: what that compaction did. */
+    val compaction: Compaction? = null,
+    /** Calls to Claude's task tools in this message, a subagent's too (`countTaskEvents`). */
+    val taskCalls: Int = 0,
 ) {
     enum class Role { USER, ASSISTANT, SYSTEM }
 
     val text: String
         get() = blocks.filterIsInstance<ChatBlock.Text>().joinToString("\n\n") { it.text }
+
+    /** The transcript this message names as a compact summary does, read once (`extractJsonlPath`). */
+    val transcriptPath: String? = PreCompact.transcriptPath(if (role == Role.ASSISTANT) answerText else text)
 
     companion object {
         /** Null for a message with nothing to show (the transcript keeps placeholders for failed turns). */
@@ -65,6 +73,7 @@ data class ChatItem(
                     timestamp = message.timestamp,
                     sdkUuid = message.sdkUuid,
                     timestampText = message.timestampText,
+                    compaction = message.compaction,
                 )
             }
             HistoryMessage.Role.ASSISTANT -> {
@@ -80,7 +89,12 @@ data class ChatItem(
                 } else {
                     message.events.filterIsInstance<ChatEvent.Text>().joinToString("") { it.text }
                 }
-                if (blocks.isEmpty()) null else ChatItem(message.id, Role.ASSISTANT, blocks, message.timestamp, message.sdkUuid, message.timestampText, answerText)
+                val taskCalls = message.events.count { it is ChatEvent.ToolUse && it.name in TASK_TOOLS }
+                if (blocks.isEmpty()) {
+                    null
+                } else {
+                    ChatItem(message.id, Role.ASSISTANT, blocks, message.timestamp, message.sdkUuid, message.timestampText, answerText, message.compaction, taskCalls)
+                }
             }
         }
     }
@@ -94,9 +108,14 @@ class TurnBuilder(
     private val list = mutableListOf<ChatBlock>()
     private val toolIndex = HashMap<String, Int>()
     private val allText = StringBuilder()
+    private val taskCallIds = HashSet<String>()
 
     /** [ChatItem.answerText] of the message being built. */
     val answerText: String get() = allText.toString()
+
+    /** [ChatItem.taskCalls] of the message being built: each call once, however often it streams in. */
+    var taskCalls = 0
+        private set
 
     /** A copy: what is shown must not change under the UI as more events arrive. */
     val blocks: List<ChatBlock> get() = list.toList()
@@ -135,6 +154,7 @@ class TurnBuilder(
     private fun addToolUse(use: ChatEvent.ToolUse) {
         val parent = use.parent
         val id = use.toolUseId
+        if (use.name in TASK_TOOLS && (id == null || taskCallIds.add(id))) taskCalls++
         val existing = id?.let { toolIndex[it] }
         when {
             parent != null -> addStep(parent, ToolSummary.title(use.name, use.input))
@@ -242,3 +262,6 @@ object ToolSummary {
         return if (line.length > 200) line.take(200) + "…" else line
     }
 }
+
+/** Claude's task tools: a call to one is what makes a chat's task list worth reading. */
+internal val TASK_TOOLS = setOf("TaskCreate", "TaskUpdate", "TaskStop")

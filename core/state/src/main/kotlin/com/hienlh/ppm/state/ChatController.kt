@@ -9,6 +9,7 @@ import com.hienlh.ppm.protocol.PromptCacheState
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionPhase
+import com.hienlh.ppm.protocol.TaskItem
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.TurnStop
 import com.hienlh.ppm.protocol.WireJson
@@ -44,7 +45,13 @@ data class ChatState(
     val hasLoadedHistory: Boolean = false,
     val connection: ChatController.Connection = ChatController.Connection.Connecting,
     val historyError: String? = null,
-    val loadingOlder: Boolean = false,
+    /** Something above what is shown can still be loaded: an older page, or the conversation before a compaction. */
+    val hasEarlier: Boolean = false,
+    val loadingEarlier: Boolean = false,
+    /** Why loading what is above failed; nothing more loads by itself until it is asked again. */
+    val earlierError: String? = null,
+    /** Claude's tasks in this chat, read while it shows calls to its task tools. */
+    val tasks: List<TaskItem> = emptyList(),
     /** What [ChatSettings] holds. */
     val model: String? = null,
     val effort: String? = null,
@@ -85,7 +92,12 @@ class ChatController(
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
     private var connection: Connection = Connection.Connecting
     private var historyError: String? = null
-    private var loadingOlder = false
+    private var loadingEarlier = false
+    private var earlierError: String? = null
+    private var tasks: List<TaskItem> = emptyList()
+    /** The session and the count of task-tool calls [tasks] were last asked for. */
+    private var tasksAskedFor: Pair<String, Int>? = null
+    private var tasksJob: Job? = null
     private var socket: SocketConnection? = null
     private var lastFrameAt = clock()
     private var closeReason: String? = null
@@ -165,21 +177,36 @@ class ChatController(
         publish()
     }
 
-    suspend fun loadOlder() {
-        if (transcript.historyStart <= 0 || loadingOlder) return
-        loadingOlder = true
-        publish()
+    /**
+     * What is above the shown messages (`loadMore`): the next older page while there is one, and
+     * after the last of them the conversation before the topmost compact summary. A failure lands in
+     * [ChatState.earlierError]; asking again is the retry. Runs in the chat's own scope, so that
+     * whatever asked can go away meanwhile.
+     */
+    fun loadEarlier() {
+        if (loadingEarlier) return
         val before = transcript.historyStart
-        try {
-            val page = api.history(project, sessionId, providerId, limit = 50, before = before)
-            transcript.prependHistory(page, before)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            historyError = describe(error)
-        } finally {
-            loadingOlder = false
-            publish()
+        val compact = transcript.unexpandedCompact
+        val path = compact?.transcriptPath
+        if (before <= 0 && (compact == null || path == null)) return
+        loadingEarlier = true
+        earlierError = null
+        publish()
+        scope.launch {
+            try {
+                if (before > 0) {
+                    transcript.prependHistory(api.history(project, sessionId, providerId, limit = 50, before = before), before)
+                } else if (compact != null && path != null) {
+                    transcript.expand(compact.id, path, api.preCompactMessages(project, path, PreCompact.rawId(compact.id)))
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                earlierError = describe(error)
+            } finally {
+                loadingEarlier = false
+                publish()
+            }
         }
     }
 
@@ -313,11 +340,40 @@ class ChatController(
         }
     }
 
+    /**
+     * `useTasks`: the tasks read again 300 ms after the count of task-tool calls shown changes, and
+     * none while there are none. A failed read keeps what was there.
+     */
+    private fun askForTasks() {
+        val calls = transcript.shown.sumOf { it.taskCalls } + (transcript.live?.taskCalls ?: 0)
+        val key = sessionId to calls
+        if (key == tasksAskedFor) return
+        tasksAskedFor = key
+        tasksJob?.cancel()
+        if (calls == 0) {
+            tasks = emptyList()
+            return
+        }
+        val session = sessionId
+        tasksJob = scope.launch {
+            delay(300)
+            try {
+                tasks = api.sessionTasks(project, session)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                return@launch
+            }
+            publish()
+        }
+    }
+
     private fun publish() {
+        askForTasks()
         _state.value = ChatState(
             sessionId = sessionId,
             providerId = providerId,
-            items = transcript.items,
+            items = transcript.shown,
             live = transcript.live?.blocks,
             phase = transcript.phase,
             pendingApproval = transcript.pendingApproval,
@@ -329,7 +385,10 @@ class ChatController(
             hasLoadedHistory = transcript.hasLoadedHistory,
             connection = connection,
             historyError = historyError,
-            loadingOlder = loadingOlder,
+            hasEarlier = transcript.historyStart > 0 || transcript.unexpandedCompact != null,
+            loadingEarlier = loadingEarlier,
+            earlierError = earlierError,
+            tasks = tasks,
             model = settings.model,
             effort = settings.effort,
             thinking = settings.thinking,

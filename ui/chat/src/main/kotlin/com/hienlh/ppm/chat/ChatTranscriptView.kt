@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -102,7 +104,8 @@ import java.time.Instant
 fun ChatTranscriptView(
     state: ChatState,
     onRespond: (ApprovalRequest, approved: Boolean, data: JsonElement?) -> Unit,
-    onLoadOlder: suspend () -> Unit,
+    /** What is above the shown messages: an older page, or the conversation before a compaction. */
+    onLoadEarlier: () -> Unit,
     onReload: () -> Unit,
     modifier: Modifier = Modifier,
     /** Alt+↑ (-1) and Alt+↓ (1), for this chat only while its tab has the keyboard. */
@@ -127,7 +130,7 @@ fun ChatTranscriptView(
                 CenteredNotice("Loading messages...", pulsing = true)
             state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null ->
                 Welcome(welcome)
-            else -> TranscriptList(state, turnStartedAt, onRespond, onLoadOlder, jumps, onDismiss, onClearErrors, onReply)
+            else -> TranscriptList(state, turnStartedAt, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply)
         }
         state.historyError?.let { error ->
             HistoryErrorBanner(error, onReload, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
@@ -140,7 +143,7 @@ private fun TranscriptList(
     state: ChatState,
     turnStartedAt: Instant?,
     onRespond: (ApprovalRequest, Boolean, JsonElement?) -> Unit,
-    onLoadOlder: suspend () -> Unit,
+    onLoadEarlier: () -> Unit,
     jumps: Flow<Int>,
     onDismiss: (String) -> Unit,
     onClearErrors: () -> Unit,
@@ -151,18 +154,30 @@ private fun TranscriptList(
     val density = LocalDensity.current
     val tokens = LocalPpmTokens.current
     val live = state.live
-    // Top down, as the web's: the older-messages row, the messages oldest first, the turn
-    // streaming in, and the approval or the thinking line while there is one.
-    val head = if (state.historyStart > 0) 1 else 0
+    // Top down, as the web's: the sentinel while there is more above, the skeleton while it loads,
+    // the messages oldest first, the turn streaming in, and the approval or the thinking line
+    // while there is one.
+    val head = (if (state.hasEarlier) 1 else 0) + (if (state.loadingEarlier) 1 else 0)
     val trailing = state.pendingApproval != null || indicatorLabel(state) != null
     val count = head + rows.size + (if (!live.isNullOrEmpty()) 1 else 0) + (if (trailing) 1 else 0)
-    // Opened at its end, so the first frame is already the newest, and the older-messages row,
-    // which loads a page once it is composed, is not passed on the way there.
+    // Opened at its end, so the first frame is already the newest, and the sentinel, which loads
+    // what is above once it is near the screen, is not passed on the way there.
     val list = rememberLazyListState((count - 1).coerceAtLeast(0), OPEN_AT_END)
     val scroll = rememberTranscriptScroll(list)
     val oldest = rows.firstOrNull()?.item?.id
     SideEffect {
-        scroll.keepPlace(oldest) { id -> rows.indexOfFirst { it.item.id == id }.let { if (it < 0) -1 else head + it } }
+        scroll.keepPlace(Triple(state.hasEarlier, state.loadingEarlier, oldest)) { key ->
+            rows.indexOfFirst { it.item.id == key }.let { if (it < 0) -1 else head + it }
+        }
+    }
+    // `topSentinelRef`: what is above loads once the sentinel is near the screen, while nothing
+    // loads and nothing has failed. The web starts 400 px early; only what is on screen is measured
+    // here, so that is the sentinel on it, or the message under it less than 400 px above it.
+    val load by rememberUpdatedState(onLoadEarlier)
+    val early = with(density) { 400.dp.toPx() }
+    LaunchedEffect(list, state.hasEarlier, state.loadingEarlier, state.earlierError, rows.size) {
+        if (!state.hasEarlier || state.loadingEarlier || state.earlierError != null) return@LaunchedEffect
+        snapshotFlow { list.nearTop(early) }.collect { near -> if (near) load() }
     }
     // The message a reply card jumped to, lit for 1.4 s (`showMessageAt`).
     var flashing by remember { mutableStateOf<String?>(null) }
@@ -192,29 +207,44 @@ private fun TranscriptList(
     val userItems = remember(rows, head) { rows.indices.filter { rows[it].item.role == ChatItem.Role.USER }.map { head + it } }
     val nav by remember(userItems, density) { derivedStateOf { list.messageNav(userItems, density) } }
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize().nestedScroll(scroll.connection), state = list) {
-            if (head > 0) {
-                item(key = OLDER_ROW) { OlderMessagesRow(state.loadingOlder, state.historyStart, onLoadOlder) }
-            }
-            for (row in rows) {
-                item(key = row.item.id, contentType = row.item.role) {
-                    val reply = remember(row, state.sessionId, state.providerId, onReply) { replyAction(row, state, onReply) }
-                    ChatMessageView(
-                        row.item,
-                        row.actions?.copy(onReply = reply),
-                        Modifier.replyFlash(flashing == row.item.id, tokens.accent).padding(start = 16.dp, end = 16.dp, top = 16.dp),
-                        replies,
-                        onReply = reply.takeIf { row.item.role == ChatItem.Role.USER },
-                    ) { onDismiss(row.item.id) }
+        Column(Modifier.fillMaxSize()) {
+            TaskTracker(state.tasks)
+            LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scroll.connection), state = list) {
+                if (state.hasEarlier) item(key = SENTINEL) { Spacer(Modifier.fillMaxWidth().height(1.dp)) }
+                if (state.loadingEarlier) item(key = SKELETON) { PreCompactSkeleton() }
+                for (row in rows) {
+                    item(key = row.item.id, contentType = row.item.role) {
+                        val reply = remember(row, state.sessionId, state.providerId, onReply) { replyAction(row, state, onReply) }
+                        val place = Modifier.replyFlash(flashing == row.item.id, tokens.accent).padding(start = 16.dp, end = 16.dp, top = 16.dp)
+                        val compaction = row.item.compaction
+                        val message: @Composable (Modifier) -> Unit = { modifier ->
+                            ChatMessageView(
+                                row.item,
+                                row.actions?.copy(onReply = reply),
+                                modifier,
+                                replies,
+                                onReply = reply.takeIf { row.item.role == ChatItem.Role.USER },
+                            ) { onDismiss(row.item.id) }
+                        }
+                        // Above the summary: the rule marks where the conversation was cut.
+                        if (compaction == null) {
+                            message(place)
+                        } else {
+                            Column(place.fillMaxWidth()) {
+                                CompactionDivider(compaction)
+                                message(Modifier)
+                            }
+                        }
+                    }
                 }
-            }
-            if (!live.isNullOrEmpty()) {
-                item(key = "live") {
-                    AssistantBlocks(live, live = state.isRunning, actions = null, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp))
+                if (!live.isNullOrEmpty()) {
+                    item(key = "live") {
+                        AssistantBlocks(live, live = state.isRunning, actions = null, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp))
+                    }
                 }
-            }
-            if (trailing) {
-                item(key = "trailing") { Trailing(state, turnStartedAt, onRespond) }
+                if (trailing) {
+                    item(key = "trailing") { Trailing(state, turnStartedAt, onRespond) }
+                }
             }
         }
         ScrollNavigator(
@@ -225,6 +255,11 @@ private fun TranscriptList(
             jumps = jumps,
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 12.dp),
         )
+        // Both over the top of the chat, the tracker too; the errors button above the other.
+        val earlierError = state.earlierError
+        if (earlierError != null && !state.loadingEarlier) {
+            EarlierErrorPill(earlierError, onLoadEarlier, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+        }
         val errors = rows.count { it.item.role == ChatItem.Role.SYSTEM }
         if (errors > 1) ClearErrorsButton(errors, onClearErrors, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
     }
@@ -271,8 +306,10 @@ private fun Modifier.replyFlash(on: Boolean, accent: Rgba): Modifier = if (!on) 
     drawRect(accent.opacity(0.4).color, Offset(-ring / 2, -ring / 2), Size(size.width + ring, size.height + ring), style = Stroke(ring))
 }
 
-/** The older-messages row's key: always the list's first item while it is there. */
-private const val OLDER_ROW = "older"
+/** The keys of what sits above the messages while it is there: the 1 px sentinel, then the skeleton. */
+private const val SENTINEL = "earlier"
+private const val SKELETON = "earlier-skeleton"
+private val HEAD_KEYS = setOf(SENTINEL, SKELETON)
 
 /** Where the list starts before it is measured: far past its last item, which it then clamps to its end. */
 private const val OPEN_AT_END = 100_000_000
@@ -299,7 +336,7 @@ private class TranscriptScroll(
     private var top: Any? = null
     private var topOffset = 0
     private var remaining: Int? = null
-    private var oldest: String? = null
+    private var head: Any? = null
 
     /** Scrolling up, by finger, fling or wheel, lets go of the end at once. */
     val connection = object : NestedScrollConnection {
@@ -345,18 +382,20 @@ private class TranscriptScroll(
     }
 
     /**
-     * `preserveFromBottomRef`: a page of older messages leaves the view where it was. The list keeps
-     * its first item in place by itself; only the older-messages row, which stays first, has to hand
-     * its place to the message that was under it. Called before the list measures [firstId].
+     * `preserveFromBottomRef`: what comes in above the messages — a page, an earlier conversation,
+     * the skeleton standing in for it — leaves the view where it was. The list keeps its first item
+     * in place by itself; only when that is the sentinel or the skeleton, which stay first, does the
+     * message under them take their place. Called with what makes up the [head] before the list
+     * measures it.
      */
-    fun keepPlace(firstId: String?, indexOf: (String) -> Int) {
-        val before = oldest
-        oldest = firstId
-        if (before == null || before == firstId) return
+    fun keepPlace(head: Any, indexOf: (Any) -> Int) {
+        val before = this.head
+        this.head = head
+        if (before == null || before == head) return
         val visible = list.layoutInfo.visibleItemsInfo
-        if (visible.firstOrNull()?.key != OLDER_ROW) return
-        val kept = visible.firstOrNull { it.key == before } ?: return
-        val index = indexOf(before)
+        if (visible.firstOrNull()?.key !in HEAD_KEYS) return
+        val kept = visible.firstOrNull { it.key !in HEAD_KEYS } ?: return
+        val index = indexOf(kept.key)
         if (index >= 0) list.requestScrollToItem(index, -kept.offset)
     }
 }
@@ -369,6 +408,15 @@ private fun rememberTranscriptScroll(list: LazyListState): TranscriptScroll {
     val scroll = remember(list, density) { with(density) { TranscriptScroll(list, held, 1.dp.roundToPx(), NEAR_END.roundToPx()) } }
     LaunchedEffect(scroll) { scroll.follow() }
     return scroll
+}
+
+/** The sentinel on screen, or the message under it less than [early] px above the top of it. */
+private fun LazyListState.nearTop(early: Float): Boolean {
+    val info = layoutInfo
+    val first = info.visibleItemsInfo.firstOrNull() ?: return false
+    // A list with no height is a hidden tab.
+    if (info.viewportSize.height <= 0) return false
+    return first.index == 0 || (first.index == 1 && -first.offset <= early)
 }
 
 /** To the end of the list, [short] px before its last pixel. */
@@ -596,27 +644,6 @@ private fun HistoryErrorBanner(message: String, retry: () -> Unit, modifier: Mod
         PpmIcon(ProductIcon.AlertCircle, 14.dp, tokens.error.color)
         BasicText("Could not load messages: $message", Modifier.weight(1f, fill = false), style, maxLines = 2, overflow = TextOverflow.Ellipsis)
         BasicText("Retry", style = style.copy(textDecoration = TextDecoration.Underline))
-    }
-}
-
-/** Older messages exist above: they load when this row comes into view. */
-@Composable
-private fun OlderMessagesRow(loading: Boolean, historyStart: Int, load: suspend () -> Unit) {
-    val tokens = LocalPpmTokens.current
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(historyStart) { load() }
-    Row(
-        Modifier.fillMaxWidth().padding(top = 12.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        val style = ppmText(11f).copy(color = tokens.text3.color)
-        if (loading) PpmIcon(ProductIcon.Loader2, 12.dp, tokens.text3.color, Modifier.padding(end = 6.dp), spinning = true)
-        BasicText(
-            if (loading) "Loading..." else "Load earlier messages",
-            Modifier.ppmClickable(enabled = !loading, pressedColor = tokens.surfaceHover.color) { scope.launch { load() } },
-            style,
-        )
     }
 }
 

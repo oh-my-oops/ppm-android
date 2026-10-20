@@ -134,7 +134,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                 ChatTranscriptView(
                     state,
                     onRespond = { request, approved, data -> chat.respond(request, approved, data) },
-                    onLoadOlder = { chat.loadOlder() },
+                    onLoadEarlier = chat::loadEarlier,
                     onReload = { chat.reload() },
                     modifier = Modifier.weight(1f),
                     jumps = remember(tab.tabId) { model.chatJumps.filter { it.first == tab.tabId }.map { it.second } },

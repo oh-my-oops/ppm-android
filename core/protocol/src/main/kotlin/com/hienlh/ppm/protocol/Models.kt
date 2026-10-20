@@ -281,6 +281,8 @@ data class HistoryMessage(
     val sdkUuid: String? = null,
     /** [timestamp] as the server wrote it: a reply finds its message again by comparing this text. */
     val timestampText: String? = null,
+    /** Set on the compact summary that opens a segment: what that compaction did. */
+    val compaction: Compaction? = null,
 ) {
     enum class Role(val wire: String) { USER("user"), ASSISTANT("assistant"), SYSTEM("system") }
 
@@ -296,6 +298,49 @@ data class HistoryMessage(
                 timestamp = WireDate.parse(json["timestamp"]),
                 sdkUuid = json["sdkUuid"].string,
                 timestampText = json["timestamp"].string,
+                compaction = json["compaction"]?.let(Compaction::from),
+            )
+        }
+    }
+}
+
+/** One compaction, as read from its `compact_boundary` record (`CompactionInfo`). */
+data class Compaction(
+    /** Run with `/compact`, or by itself on a full context window. */
+    val manual: Boolean,
+    val preTokens: Long,
+    val postTokens: Long,
+    val savedTokens: Long,
+    val durationMs: Long? = null,
+) {
+    companion object {
+        fun from(json: JsonElement): Compaction? {
+            val saved = json["savedTokens"].long ?: return null
+            return Compaction(
+                manual = json["trigger"].string == "manual",
+                preTokens = json["preTokens"].long ?: 0,
+                postTokens = json["postTokens"].long ?: 0,
+                savedTokens = saved,
+                durationMs = json["durationMs"].long,
+            )
+        }
+    }
+}
+
+/** One of Claude's tasks in a chat, rebuilt by the server from the whole transcript (`TaskItem`). */
+data class TaskItem(val id: String, val subject: String, val status: Status) {
+    enum class Status(val wire: String) { PENDING("pending"), IN_PROGRESS("in_progress"), COMPLETED("completed"), STOPPED("stopped") }
+
+    /** Completed or stopped: nothing left to do on it. */
+    val finished: Boolean get() = status == Status.COMPLETED || status == Status.STOPPED
+
+    companion object {
+        fun from(json: JsonElement): TaskItem? {
+            val id = json["id"].string ?: return null
+            return TaskItem(
+                id = id,
+                subject = json["subject"].string ?: "",
+                status = Status.entries.firstOrNull { it.wire == json["status"].string } ?: Status.PENDING,
             )
         }
     }

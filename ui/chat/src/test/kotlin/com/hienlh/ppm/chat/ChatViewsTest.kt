@@ -1,5 +1,6 @@
 package com.hienlh.ppm.chat
 
+import com.hienlh.ppm.protocol.Compaction
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.protocol.ToolOutcome
 import com.hienlh.ppm.protocol.WireJson
@@ -119,5 +120,28 @@ class ChatViewsTest {
         assertTrue(isLongOutput("1\n2\n3\n4"))
         assertTrue(isLongOutput("x".repeat(201)))
         assertEquals(false, isLongOutput("1\n2\n3"))
+    }
+
+    @Test
+    fun `token counts read as fmtTokens writes them, toFixed's rounding included`() {
+        val web = mapOf(
+            0L to "0", 950L to "950", 1_000L to "1.0k", 1_049L to "1.0k", 1_050L to "1.1k", 1_250L to "1.3k",
+            9_950L to "9.9k", 9_999L to "10.0k", 10_000L to "10k", 10_500L to "11k", 15_500L to "16k",
+            999_999L to "1000k", 1_000_000L to "1.0M", 1_050_000L to "1.1M", 1_250_000L to "1.3M", 123_456_789L to "123.5M",
+        )
+        for ((n, text) in web) assertEquals("$n", text, fmtTokens(n))
+    }
+
+    @Test
+    fun `the compaction divider's title says how it ran, the context before and after, and how long`() {
+        assertEquals(
+            "Ran with /compact · 152k → 12k tokens · took 1m 5s",
+            compactionDetail(Compaction(manual = true, preTokens = 152_000, postTokens = 12_000, savedTokens = 140_000, durationMs = 64_600)),
+        )
+        assertEquals(
+            "Ran automatically on a full context window · 9.5k → 950 tokens",
+            compactionDetail(Compaction(manual = false, preTokens = 9_500, postTokens = 950, savedTokens = 8_550)),
+        )
+        assertEquals("took 42s", compactionDetail(Compaction(true, 1, 1, 0, 41_500)).substringAfterLast(" · "))
     }
 }
