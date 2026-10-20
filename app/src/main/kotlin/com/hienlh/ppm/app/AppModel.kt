@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.hienlh.ppm.client.ApiClient
+import com.hienlh.ppm.client.GitBranchStatus
 import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.client.ServerProfile
 import com.hienlh.ppm.client.ServerStore
@@ -20,6 +21,8 @@ import com.hienlh.ppm.client.createTag
 import com.hienlh.ppm.client.deleteSession
 import com.hienlh.ppm.client.deleteSessions
 import com.hienlh.ppm.client.deleteTag
+import com.hienlh.ppm.client.gitRepos
+import com.hienlh.ppm.client.gitStatus
 import com.hienlh.ppm.client.projectImage
 import com.hienlh.ppm.client.putUiPrefs
 import com.hienlh.ppm.client.renameSession
@@ -64,6 +67,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -209,6 +216,12 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     var events by mutableStateOf<GlobalEvents?>(null)
         private set
 
+    /** Each project's branch and how far it is from its upstream, for the tablet's status bar (the web's git `meta`). */
+    val gitBranches = mutableStateMapOf<String, GitBranchStatus>()
+
+    /** The projects PPM just wrote to a repository of (`git:changed`). */
+    private val gitChanged = MutableSharedFlow<String>(extraBufferCapacity = 16)
+
     /** Whether the app is in front (the web's `document.hidden`, inverted). */
     var windowVisible = true
         set(value) {
@@ -305,6 +318,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         projects = emptyList()
         projectsLoad = Load.Idle
         selectedProject = null
+        gitBranches.clear()
         resetProjectState()
         restoreUiPrefs()
         val api = if (debug != null) {
@@ -385,6 +399,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         // started a chat — was never delivered.
         events.onReady = { scope.launch { refreshSessions(quiet = true) } }
         events.isShown = { id -> windowVisible && activeSessionId == id }
+        events.onGitChanged = { gitChanged.tryEmit(it) }
         this.events = events
         events.start()
     }
@@ -631,6 +646,33 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         }
         // A failure is not kept: the next avatar drawn asks again, as an <img> mounted again does.
         return load.await().also { if (it == null) projectImages.remove(key, load) }
+    }
+
+    /**
+     * Keeps [project]'s branch in [gitBranches] while the status bar shows it (`useGitChangesPoller`):
+     * read every 10 s, and 300 ms after PPM writes to the repository, so a burst of writes costs one
+     * read. A project with no repository, or several to choose from, shows no branch.
+     */
+    suspend fun watchGit(project: String) {
+        val api = api ?: return
+        val repo = quietly { api.gitRepos(project) }?.resolved ?: return
+        suspend fun read() {
+            // A failed read keeps the branch last shown.
+            val status = quietly { api.gitStatus(project, repo) } ?: return
+            if (this.api === api) gitBranches[project] = status
+        }
+        coroutineScope {
+            launch {
+                gitChanged.filter { it == project }.collectLatest {
+                    delay(300)
+                    read()
+                }
+            }
+            while (true) {
+                read()
+                delay(10_000)
+            }
+        }
     }
 
     /** Opening a project puts it first in the Recent order, on every device (`touchRecent`). */

@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,23 +51,31 @@ import java.util.Locale
 
 /**
  * The status bar (status-bar.tsx): `h-[26px] px-3.5 bg-panel border-t border-border-soft
- * text-[11px] font-mono text-text-3`. On the left the dock's toggle; on the right the machine's
- * CPU and memory, the theme picker and the server's version. Git, Problems and an extension's
- * items come with the features they belong to.
+ * text-[11px] font-mono text-text-3`. On the left the open project's branch and the dock's
+ * toggle; on the right the machine's CPU and memory, the theme picker and the server's version.
+ * Problems and an extension's items come with the features they belong to.
  */
 @Composable
 fun StatusBar(model: AppModel) {
     val tokens = LocalPpmTokens.current
     val text = ppmText(11f, kind = FontKind.MONO, lineHeight = 16.5f).copy(color = tokens.text3.color)
     BoxWithConstraints(Modifier.fillMaxWidth().height(26.dp).background(tokens.panel.color).edge(Edge.Top, tokens.borderSoft.color)) {
-        // The bar is its own `@container`: under 48rem the theme keeps only its icon.
+        // The bar is its own `@container`: under 48rem the theme keeps only its icon, under 36rem
+        // the branch's counts give way.
         val compact = maxWidth < 768.dp
+        val narrow = maxWidth < 576.dp
         Row(
             Modifier.fillMaxWidth().fillMaxHeight().padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // The side that gives way: the branch name ellipsizes, then the group clips.
+            Row(
+                Modifier.weight(1f).clipToBounds(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                GitStatus(model, text, narrow)
                 DockToggle(model, text)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -75,6 +84,50 @@ fun StatusBar(model: AppModel) {
                 model.info?.version?.let { BasicText("v$it", Modifier.padding(horizontal = 4.dp), style = text, maxLines = 1) }
             }
         }
+    }
+}
+
+/**
+ * The open project's branch (`GitStatus`) in the accent, then how far it is ahead of and behind
+ * its upstream, or "synced". Read while the bar shows and the app is in front. Checking out
+ * another branch from here comes with Source Control.
+ */
+@Composable
+private fun GitStatus(model: AppModel, text: TextStyle, narrow: Boolean) {
+    val tokens = LocalPpmTokens.current
+    val project = model.selectedProject ?: return
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(model.api, project, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { model.watchGit(project) }
+    }
+    val git = model.gitBranches[project] ?: return
+    val branch = git.branch ?: return
+    val synced = git.tracking != null && git.ahead == 0 && git.behind == 0
+    Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.weight(1f, fill = false), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            PpmIcon(ProductIcon.GitBranch, 12.dp, tokens.accent.color)
+            BasicText(branch, Modifier.widthIn(max = 140.dp), style = text.copy(color = tokens.accent.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (!narrow && (git.ahead > 0 || git.behind > 0)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (git.ahead > 0) GitCount(ProductIcon.ArrowUp, git.ahead, text)
+                if (git.behind > 0) GitCount(ProductIcon.ArrowDown, git.behind, text)
+            }
+        }
+        if (!narrow && synced) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                PpmIcon(ProductIcon.Check, 12.dp, tokens.success.color)
+                BasicText("synced", style = text.copy(color = tokens.success.color), maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun GitCount(icon: ProductIcon, count: Int, text: TextStyle) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        PpmIcon(icon, 12.dp, text.color)
+        BasicText("$count", style = text, maxLines = 1)
     }
 }
 

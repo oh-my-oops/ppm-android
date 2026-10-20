@@ -69,6 +69,16 @@ class GlobalEventsTest {
         e.handle(json("""{"type":"file:changed","projectName":"app","path":"a.ts"}"""))
         assertEquals(emptySet<String>(), e.running.value)
     }
+
+    @Test
+    fun `a write to a repository names its project`() {
+        val e = events()
+        val changed = mutableListOf<String>()
+        e.onGitChanged = { changed += it }
+        e.handle(json("""{"type":"git:changed","projectName":"app","repo":"/w/app"}"""))
+        e.handle(json("""{"type":"git:commit-draft","projectName":"app","repo":"/w/app","message":"x","updatedAt":null}"""))
+        assertEquals(listOf("app"), changed)
+    }
 }
 
 class SessionSearchTest {

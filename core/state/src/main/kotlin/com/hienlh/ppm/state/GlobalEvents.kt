@@ -74,6 +74,9 @@ class GlobalEvents(
      */
     var isShown: ((String) -> Boolean)? = null
 
+    /** PPM wrote to a repository of this project (`git:changed`): a commit, a checkout, a push. */
+    var onGitChanged: ((project: String) -> Unit)? = null
+
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
     private var socket: SocketConnection? = null
 
@@ -165,6 +168,7 @@ class GlobalEvents(
             }
             // Every phase from now on carries the new id, so the old one's `idle` never comes.
             "session:migrated" -> frame["oldSessionId"].string?.let { _running.value -= it }
+            "git:changed" -> frame["projectName"].string?.let { onGitChanged?.invoke(it) }
         }
     }
 
