@@ -106,8 +106,10 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
     }
     val tokens = LocalPpmTokens.current
     val isEdit = tool.name == "Edit" || tool.name == "MultiEdit"
-    // An edit opens on its diff, unless it failed and the diff was never applied.
-    var expanded by remember { mutableStateOf(isEdit && !isError) }
+    val imagePath = remember(tool.name, tool.input, tool.requestId) { imageReadPath(tool) }
+    // An edit opens on its diff, unless it failed and the diff was never applied; an image read on
+    // the picture, which is the point of the card.
+    var expanded by remember { mutableStateOf((isEdit && !isError) || imagePath != null) }
     // An edit that fails shows nothing worth opening on; it collapses once.
     LaunchedEffect(isError) {
         if (isError && isEdit) expanded = false
@@ -146,7 +148,11 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 ToolDetails(tool.name, tool.input)
-                if (result != null && showsResult(tool.name, result)) ToolResultView(tool.name, result.output)
+                if (imagePath != null) ToolImagePreview(imagePath, tool.toolUseId)
+                // The preview names the file already, so the result's echo of it is left out.
+                if (result != null && showsResult(tool.name, result) && !(imagePath != null && !result.isError)) {
+                    ToolResultView(tool.name, result.output)
+                }
             }
         }
     }
@@ -170,6 +176,24 @@ internal fun resultHasImagePlaceholder(output: String): Boolean {
     if (!output.startsWith("[")) return false
     val blocks = WireJson.parseOrNull(output) as? JsonArray ?: return false
     return blocks.any { it["type"].string == "text" && it["text"].string?.let(IMAGE_PLACEHOLDER::matches) == true }
+}
+
+/** Tools whose `file_path` names an image the card shows: Codex's ImageGen too, the picture it wrote being its point. */
+private val IMAGE_PATH_TOOLS = setOf("Read", "ImageGen")
+
+/** A path from the root, as `useBlobUrl` tells one: `/…`, or a Windows drive. */
+private val ABSOLUTE_PATH = Regex("""^(/|[A-Za-z]:[/\\])""")
+
+/**
+ * `imageReadPath`: the image a call opened, or null when it is no picture the card can show. Only
+ * an absolute path counts, as the only kind the raw-file route reads outside the project, and the
+ * kind Read and ImageGen always give; an approval request is not a call, and shows none.
+ */
+internal fun imageReadPath(tool: ToolBlock): String? {
+    if (tool.requestId != null || tool.name !in IMAGE_PATH_TOOLS) return null
+    val path = tool.input["file_path"].string ?: return null
+    if (!ABSOLUTE_PATH.containsMatchIn(path)) return null
+    return if (isImageExtension(path)) path else null
 }
 
 /** A backgrounded agent's call answers this the moment the agent starts (`isAsyncAgentLaunchAck`). */
@@ -467,11 +491,18 @@ private fun ToolDetails(name: String, input: JsonElement) {
 private fun FileDetails(name: String, input: JsonElement) {
     val tokens = LocalPpmTokens.current
     fun s(key: String) = input[key].string ?: ""
+    val path = s("notebook_path").ifEmpty { s("file_path") }
+    val hasEditDiff = name == "Edit" && (s("old_string").isNotEmpty() || s("new_string").isNotEmpty())
+    val tabs = LocalChatTabs.current
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Mono(s("notebook_path").ifEmpty { s("file_path") }, tokens.text2, breakAll = true)
-        if (name == "Edit" && (s("old_string").isNotEmpty() || s("new_string").isNotEmpty())) {
-            EditDiffView(s("old_string"), s("new_string"))
+        // `flex items-start gap-3`: the path opens the file, and an edit's diff opens in a tab of its own.
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FileLink(path, ProductIcon.ExternalLink, tokens.text2, monoText, breakAll = true, Modifier.weight(1f, fill = false)) { tabs?.openFile(path) }
+            if (hasEditDiff) {
+                FileLink("View Diff", ProductIcon.Columns2, tokens.text3, cardText, breakAll = false) { tabs?.openDiff(path, s("old_string"), s("new_string")) }
+            }
         }
+        if (hasEditDiff) EditDiffView(s("old_string"), s("new_string"))
         if (name == "MultiEdit") {
             val edits = input["edits"].array.orEmpty()
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -488,6 +519,32 @@ private fun FileDetails(name: String, input: JsonElement) {
                 Mono(truncate(s("content"), 300), tokens.text3)
             }
         }
+    }
+}
+
+/**
+ * A text button with an icon before it (`flex items-center gap-1`, the icon `size-3`), lit in the
+ * accent and underlined under a mouse (`hover:text-primary hover:underline`). [breakAll]: it breaks
+ * anywhere, as a path does; else it keeps to one line (`whitespace-nowrap`).
+ */
+@Composable
+private fun FileLink(label: String, icon: ProductIcon, color: Rgba, style: TextStyle, breakAll: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val hover = rememberHover(instant = true)
+    val lit = hover.lit > 0f
+    val tint = (if (lit) tokens.accent else color).color
+    Row(
+        modifier.ppmClickable(pressedColor = tokens.surfaceHover.color, source = hover.source, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        PpmIcon(icon, 12.dp, tint)
+        BasicText(
+            if (breakAll) remember(label) { if (BREAK in label) label else breakAnywhere(label) } else label,
+            style = style.copy(color = tint, textDecoration = if (lit) TextDecoration.Underline else null),
+            softWrap = breakAll,
+            maxLines = if (breakAll) Int.MAX_VALUE else 1,
+        )
     }
 }
 

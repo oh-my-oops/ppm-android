@@ -24,6 +24,9 @@ object WebCursor {
     /** `active:cursor-grabbing`, and anything a mouse is dragging. */
     val Grabbing = PointerIcon(android.view.PointerIcon.TYPE_GRABBING)
 
+    /** `cursor-zoom-in`, which Chromium hands Android as its own zoom-in icon. */
+    val ZoomIn = PointerIcon(android.view.PointerIcon.TYPE_ZOOM_IN)
+
     /** `cursor-not-allowed`: Chrome's hand with a no-entry sign. */
     val NotAllowed = PointerIcon(android.view.PointerIcon.TYPE_NO_DROP)
 

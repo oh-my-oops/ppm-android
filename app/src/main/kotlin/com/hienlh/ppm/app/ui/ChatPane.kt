@@ -68,9 +68,13 @@ import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.chat.CONTINUE_AFTER_STOP
 import com.hienlh.ppm.chat.ChatImages
+import com.hienlh.ppm.chat.ChatTabs
 import com.hienlh.ppm.chat.ChatTranscriptView
 import com.hienlh.ppm.chat.LocalChatImages
+import com.hienlh.ppm.chat.LocalChatTabs
+import com.hienlh.ppm.chat.LocalToolImages
 import com.hienlh.ppm.chat.RelativeTime
+import com.hienlh.ppm.chat.ToolImages
 import com.hienlh.ppm.chat.TurnStopBar
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmMobile
@@ -130,7 +134,15 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         val narrow = maxWidth <= 420.dp
         Column(Modifier.fillMaxSize()) {
             val images = remember(tab.project) { ChatImages { model.chatImage(tab.project, it) } }
-            CompositionLocalProvider(LocalChatImages provides images) {
+            val toolImages = remember(tab.project) { ToolImages { model.toolImage(tab.project, it) } }
+            val tabs = remember(tab.project) {
+                object : ChatTabs {
+                    override fun openFile(path: String) = model.openFileTab(tab.project, path)
+
+                    override fun openDiff(path: String, original: String, modified: String) = model.openDiffTab(tab.project, path, original, modified)
+                }
+            }
+            CompositionLocalProvider(LocalChatImages provides images, LocalToolImages provides toolImages, LocalChatTabs provides tabs) {
                 ChatTranscriptView(
                     state,
                     onRespond = { request, approved, data -> chat.respond(request, approved, data) },

@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import com.hienlh.ppm.chat.ToolImage
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.GitBranchStatus
 import com.hienlh.ppm.client.PpmError
@@ -28,6 +29,7 @@ import com.hienlh.ppm.client.gitStatus
 import com.hienlh.ppm.client.keybindings
 import com.hienlh.ppm.client.newChatProviderSettings
 import com.hienlh.ppm.client.projectImage
+import com.hienlh.ppm.client.rawFile
 import com.hienlh.ppm.client.uploadedFile
 import com.hienlh.ppm.client.putUiPrefs
 import com.hienlh.ppm.client.renameSession
@@ -884,6 +886,62 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             }
         }
         return load.await().also { if (it == null) chatImages.remove(key, load) }
+    }
+
+    /**
+     * An image a tool card previews (`useBlobUrl`): read each time a card asks, as the web reads it
+     * on every mount, and failed with what went wrong — the HTTP status, or `network`.
+     */
+    suspend fun toolImage(project: String, path: String): ToolImage {
+        val api = api ?: return ToolImage.Failed("network")
+        val file = try {
+            api.rawFile(project, path)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: PpmError.Server) {
+            return ToolImage.Failed(error.status.toString())
+        } catch (_: PpmError.Unauthorized) {
+            return ToolImage.Failed("401")
+        } catch (_: Exception) {
+            return ToolImage.Failed("network")
+        }
+        return withContext(Dispatchers.Default) { ToolImage.decode(file.bytes, file.contentType) }
+    }
+
+    /** A file a chat names, in an editor tab of [project] (`openTab` in a tool card); focused when it is open already. */
+    fun openFileTab(project: String, path: String) {
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = "editor",
+                    title = path.split('/', '\\').last(),
+                    projectId = project,
+                    metadata = buildJsonObject {
+                        put("filePath", path)
+                        put("projectName", project)
+                    },
+                ),
+            )
+        }
+    }
+
+    /** An edit's change in a diff tab of its own (`openEditDiff`). */
+    fun openDiffTab(project: String, path: String, original: String, modified: String) {
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = "git-diff",
+                    title = "Diff ${path.split('/', '\\').last()}",
+                    projectId = project,
+                    metadata = buildJsonObject {
+                        put("filePath", path)
+                        put("projectName", project)
+                        put("original", original)
+                        put("modified", modified)
+                    },
+                ),
+            )
+        }
     }
 
     /**
