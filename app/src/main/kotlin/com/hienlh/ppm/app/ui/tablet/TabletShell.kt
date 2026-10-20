@@ -37,13 +37,14 @@ import androidx.compose.ui.zIndex
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.Backdrop
 import com.hienlh.ppm.app.ui.CornerChrome
+import com.hienlh.ppm.app.ui.windows.WindowLayer
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 
 /**
  * The desktop layout (app.tsx from `md` up): the sidebar, then the working area — the panel grid
- * with the dock — over the status bar, which spans the working area only.
+ * with the dock, the floating windows over it — over the status bar, which spans the working area only.
  */
 @Composable
 fun TabletShell(model: AppModel) {
@@ -53,7 +54,10 @@ fun TabletShell(model: AppModel) {
             Row(Modifier.fillMaxSize().safeDrawingPadding()) {
                 Sidebar(model)
                 Column(Modifier.weight(1f).fillMaxHeight()) {
-                    Box(Modifier.weight(1f).fillMaxWidth()) { PanelArea(model) }
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        PanelArea(model)
+                        WindowLayer(model)
+                    }
                     StatusBar(model)
                 }
             }

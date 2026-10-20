@@ -68,6 +68,9 @@ class ApiClient(val baseUrl: HttpUrl, val token: String) {
     /** The server's address on its own network (`/api/tunnel`'s `localUrl`), when it knows one. */
     suspend fun localUrl(): String? = call("GET", "/api/tunnel")["localUrl"].string
 
+    /** The server's OS as Node names it (`win32`, `darwin`, `linux`), from `/api/system/host`. */
+    suspend fun hostPlatform(): String? = call("GET", "/api/system/host")["platform"].string
+
     /** The permanent hostname of the server's named tunnel, while it is set to one. */
     suspend fun namedTunnelHostname(): String? {
         val status = call("GET", "/api/tunnel/named/status")

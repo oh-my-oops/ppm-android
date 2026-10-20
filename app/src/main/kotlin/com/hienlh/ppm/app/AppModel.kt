@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.hienlh.ppm.client.ApiClient
@@ -57,6 +58,9 @@ import com.hienlh.ppm.state.KeyBindings
 import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.PermissionMode
+import com.hienlh.ppm.state.windows.WindowKind
+import com.hienlh.ppm.state.windows.WindowStore
+import com.hienlh.ppm.state.windows.WindowsState
 import com.hienlh.ppm.state.workspace.DOCK_PANEL_ID
 import com.hienlh.ppm.state.workspace.NavEntry
 import com.hienlh.ppm.state.workspace.NavHistory
@@ -86,6 +90,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -197,6 +202,30 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** Keep the screen on while any turn runs (`keepScreenAwake`), shared like [sidebarCollapsed]. */
     var keepScreenAwake by mutableStateOf(true)
+        private set
+
+    /** The look of the floating windows (`explorerSkin`): `windows`, `macos`, or `auto`/null to follow the server's OS. */
+    var explorerSkin by mutableStateOf<String?>(null)
+        private set
+
+    /** The open server's OS (`/api/system/host`), kept per server so the first frame already knows it. */
+    var hostPlatform by mutableStateOf<String?>(null)
+        private set
+
+    /** The skin every window wears (use-explorer-skin.ts): the one picked, else Windows' on a Windows server, macOS' on any other. */
+    val windowsSkin: Boolean
+        get() = when (explorerSkin) {
+            "windows" -> true
+            "macos" -> false
+            else -> hostPlatform == "win32"
+        }
+
+    /** The open server's floating windows (the web's `useWindowStore`), drawn on a tablet only. */
+    var windows by mutableStateOf<WindowStore?>(null)
+        private set
+
+    /** Their state as drawn. */
+    var windowState by mutableStateOf(WindowsState())
         private set
 
     /**
@@ -390,6 +419,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         resetProjectState()
         restoreUiPrefs()
         localUrl = prefs.get("localUrl.$serverKey")
+        hostPlatform = prefs.get("hostPlatform.$serverKey")
         val api = if (debug != null) {
             ApiClient(debug.url, debug.password)
         } else {
@@ -419,6 +449,12 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     private suspend fun readAddresses(api: ApiClient) {
         coroutineScope {
             launch { quietly { api.namedTunnelHostname() }?.let { if (this@AppModel.api === api) namedHostname = it } }
+            launch {
+                val platform = quietly { api.hostPlatform() } ?: return@launch
+                if (this@AppModel.api !== api) return@launch
+                hostPlatform = platform
+                prefs.put("hostPlatform.$serverKey", platform)
+            }
             launch {
                 val url = quietly { api.localUrl() }?.takeIf { it.startsWith("http://") || it.startsWith("https://") } ?: return@launch
                 if (this@AppModel.api !== api) return@launch
@@ -501,6 +537,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                     prefs.sidebarCollapsed?.let { sidebarCollapsed = it }
                     prefs.sidebarWidth?.let { sidebarWidth = it }
                     prefs.keepScreenAwake?.let { keepScreenAwake = it }
+                    prefs.explorerSkin?.let { explorerSkin = it }
                     saveUiPrefs()
                 }
                 projects
@@ -540,10 +577,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         sidebarCollapsed = saved.sidebarCollapsed ?: false
         sidebarWidth = saved.sidebarWidth ?: SIDEBAR_DEFAULT_WIDTH
         keepScreenAwake = saved.keepScreenAwake ?: true
+        explorerSkin = saved.explorerSkin
     }
 
     private fun saveUiPrefs() {
-        prefs.put("uiPrefs.$serverKey", UiPrefs(projectSortMode, projectOpenedAt, sidebarCollapsed, sidebarWidth, keepScreenAwake).toJson().toString())
+        prefs.put("uiPrefs.$serverKey", UiPrefs(projectSortMode, projectOpenedAt, sidebarCollapsed, sidebarWidth, keepScreenAwake, explorerSkin).toJson().toString())
     }
 
     private fun startEvents(api: ApiClient) {
@@ -952,13 +990,17 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     // Tabs
 
     private fun openWorkspace(api: ApiClient) {
-        val cache = WorkspaceCache(prefs, "workspace.$serverKey.", api.workspaceRemote(), scope)
+        val cache = WorkspaceCache(prefs, "workspace.$serverKey.", api.workspaceRemote(), scope, windowPanelsKey = "windowPanels.$serverKey")
+        // One set of windows per server, as the web keeps one per origin.
+        val windowStore = WindowStore(prefs, "windows.$serverKey")
         // Asked at each change, as the web asks `useIsMobile`: a phone opens every tab in the first panel.
-        val store = WorkspaceStore(cache, isMobile = { !wide })
+        val store = WorkspaceStore(cache, isMobile = { !wide }, windows = windowStore)
         workspaceCache = cache
         workspace = store
+        windows = windowStore
         hydratedOnce = false
         workspaceJob = scope.launch {
+            launch { windowStore.state.collect { windowState = it } }
             store.state.collect { state ->
                 syncChats(state)
                 layout = state
@@ -975,6 +1017,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         workspace = null
         workspaceCache = null
         layout = null
+        windows = null
+        windowState = WindowsState()
         chats.values.forEach { it.stop() }
         chats.clear()
         shownSession = null
@@ -1202,8 +1246,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** `autoOpenFromUrl`: the focused panel's tab with the address's id, or a new tab built from the address. */
     private fun openFromUrl(store: WorkspaceStore, type: String, identifier: String?, project: String) {
-        // The web opens Settings as a window on the desktop layout; here it is a tab until windows come (E4).
-        if (type == "settings") return openSettings()
+        if (type == "settings") return openSettingsWhenWindowsReady()
         val state = store.state.value
         val focused = state.panels[state.focusedPanelId]
         val expected = tabIdFromUrl(type, identifier)
@@ -1229,8 +1272,35 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         prefs.put("tabSortMode", mode)
     }
 
-    /** Settings opens as a tab on a phone, as on the web's (`openSettings`). */
-    fun openSettings() = withWorkspace { it.openTab(NewTab("settings", "Settings")) }
+    /**
+     * open-settings.ts: Settings in a floating window on a tablet — the one already open comes
+     * forward, as there is only one set of settings — and as a tab on a phone.
+     */
+    fun openSettings() {
+        val windows = windows
+        if (!wide || windows == null) {
+            withWorkspace { it.openTab(NewTab("settings", "Settings")) }
+            return
+        }
+        val existing = windows.state.value.windows.values.firstOrNull { it.kind == WindowKind.Settings }
+        if (existing != null) windows.focus(existing.id) else windows.open(WindowKind.Settings)
+    }
+
+    /** close-window.ts: a window's ×, Escape on its titlebar; a detached tab goes back to the grid. */
+    fun closeWindow(id: String) {
+        workspace?.closeWindow(id)
+    }
+
+    /**
+     * Settings from a link: on a tablet once the saved windows are back, since bringing them back
+     * replaces whatever is open (`openSettingsOnceWindowLayerIsReady`).
+     */
+    private fun openSettingsWhenWindowsReady() {
+        scope.launch {
+            snapshotFlow { !wide || windowState.restored }.first { it }
+            openSettings()
+        }
+    }
 
     /** Opens the command palette, its search holding [query]. */
     fun openPalette(query: String = "") {

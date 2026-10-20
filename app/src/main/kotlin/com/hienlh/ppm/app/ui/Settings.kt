@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -37,11 +38,14 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ui.tablet.Edge
+import com.hienlh.ppm.app.ui.tablet.edge
 import com.hienlh.ppm.client.ServerProfile
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.FontKind
@@ -49,34 +53,117 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.PpmTheme
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.ThemeTokens
 import com.hienlh.ppm.design.ppmClickable
+import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.protocol.get
+import com.hienlh.ppm.protocol.string
+import com.hienlh.ppm.state.windows.WindowRuntimeState
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
- * Settings as a tab (`settings-body.tsx` at a phone's width): the category list over the pane,
- * a row opening its pane and Back returning to the list. Only the categories this app has are
- * listed — Appearance's theme, and the servers it connects to, which the web has no need of.
+ * Settings as a tab: on a phone the category list over the pane, a row opening its pane and
+ * Back returning to the list. Only the categories this app has are listed — Appearance's theme,
+ * and the servers it connects to, which the web has no need of.
  */
 @Composable
-fun SettingsTab(model: AppModel) {
-    var category by rememberSaveable { mutableStateOf(SettingsCategory.Appearance) }
-    var showList by rememberSaveable { mutableStateOf(true) }
-    BackHandler(enabled = !showList) { showList = true }
-    Box(Modifier.fillMaxSize()) {
-        SettingsPane(model, category, onBack = { showList = true })
-        if (showList) {
-            SettingsIndex {
-                category = it
-                showList = false
+fun SettingsTab(model: AppModel) = SettingsBody(model, backReturnsToList = true)
+
+/**
+ * Settings in a floating window (settings-window-content.tsx): the open category rides on the
+ * window's payload, so the window comes back on the pane it was left on.
+ */
+@Composable
+fun SettingsWindowContent(model: AppModel, win: WindowRuntimeState) {
+    val category = SettingsCategory.entries.firstOrNull { it.id == win.payload["category"].string }
+    SettingsBody(model, initialCategory = category, onCategoryChange = { next ->
+        model.windows?.setPayload(win.id, buildJsonObject { put("category", next.id) })
+    })
+}
+
+/**
+ * `settings-body.tsx`, laid out by its own width as the web's `@container` does: from 640 dp the
+ * categories sit in a rail beside the pane; narrower, the list covers the pane until a category
+ * is picked. The pane stays mounted either way, so picking a category never rebuilds it.
+ * [initialCategory] opens straight on its pane; [backReturnsToList] lets Android's Back bring the
+ * list back over it.
+ */
+@Composable
+private fun SettingsBody(
+    model: AppModel,
+    initialCategory: SettingsCategory? = null,
+    backReturnsToList: Boolean = false,
+    onCategoryChange: (SettingsCategory) -> Unit = {},
+) {
+    var category by rememberSaveable { mutableStateOf(initialCategory ?: SettingsCategory.Appearance) }
+    var showList by rememberSaveable { mutableStateOf(initialCategory == null) }
+    val select: (SettingsCategory) -> Unit = {
+        category = it
+        // Also cleared from the rail: should the body narrow later, a stale list would cover the pane just picked.
+        showList = false
+        onCategoryChange(it)
+    }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val split = maxWidth >= SPLIT_WIDTH
+        BackHandler(enabled = backReturnsToList && !split && !showList) { showList = true }
+        Row(Modifier.fillMaxSize()) {
+            if (split) SettingsRail(category, select)
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                SettingsPane(model, category, split, onBack = { showList = true })
+                if (showList && !split) SettingsIndex(select)
             }
         }
     }
 }
 
-enum class SettingsCategory(val label: String, val subtitle: String, val icon: ProductIcon) {
-    Appearance("Appearance", "Theme", ProductIcon.Palette),
-    Servers("Servers", "The PPM servers this app connects to", ProductIcon.HardDrive),
+/** `@[640px]`: the body's width from which the rail shows. */
+private val SPLIT_WIDTH = 640.dp
+
+enum class SettingsCategory(val id: String, val label: String, val subtitle: String, val icon: ProductIcon) {
+    Appearance("appearance", "Appearance", "Theme", ProductIcon.Palette),
+    Servers("servers", "Servers", "The PPM servers this app connects to", ProductIcon.HardDrive),
+}
+
+/**
+ * settings-category-rail.tsx: `w-[210px] border-r`, every category at once in `p-2`. Both of this
+ * app's sit in the web's first group, which has no heading.
+ */
+@Composable
+private fun SettingsRail(active: SettingsCategory, onSelect: (SettingsCategory) -> Unit) {
+    val tokens = LocalPpmTokens.current
+    Column(
+        Modifier
+            .width(210.dp)
+            .fillMaxHeight()
+            .edge(Edge.Right, tokens.border.color)
+            .verticalScroll(rememberScrollState())
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        for (category in SettingsCategory.entries) {
+            val on = category == active
+            // `px-2.5 py-2 rounded-md gap-2.5`: the active row in `bg-accent`, any other `active:bg-accent`.
+            val shape = RoundedCornerShape(8.dp)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .then(if (on) Modifier.background(tokens.panel2.color) else Modifier)
+                    .ppmClickable(pressedColor = tokens.panel2.color, shape = shape) { onSelect(category) }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                PpmIcon(category.icon, 16.dp, (if (on) tokens.text else tokens.text2).color)
+                BasicText(category.label, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
 }
 
 /** `absolute inset-0 bg-background`: "Settings", then a row per category. */
@@ -118,20 +205,25 @@ private fun SettingsIndex(onSelect: (SettingsCategory) -> Unit) {
     }
 }
 
-/** The pane: Back, the category's icon and name (`px-2 py-2.5`), then its content in `p-4 pb-8`. */
+/**
+ * The pane: the category's icon and name (`px-2 py-2.5`, `px-4` beside the rail), then its
+ * content in `p-4 pb-8`. Back to the list leads the row when there is no rail.
+ */
 @Composable
-private fun SettingsPane(model: AppModel, category: SettingsCategory, onBack: () -> Unit) {
+private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boolean, onBack: () -> Unit) {
     val tokens = LocalPpmTokens.current
     Column(Modifier.fillMaxSize()) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().padding(horizontal = if (split) 16.dp else 8.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(
-                Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "Back to settings list", onClick = onBack),
-                contentAlignment = Alignment.Center,
-            ) { PpmIcon(ProductIcon.ArrowLeft, 16.dp, tokens.text.color) }
+            if (!split) {
+                Box(
+                    Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "Back to settings list", onClick = onBack),
+                    contentAlignment = Alignment.Center,
+                ) { PpmIcon(ProductIcon.ArrowLeft, 16.dp, tokens.text.color) }
+            }
             PpmIcon(category.icon, 16.dp, tokens.text2.color)
             BasicText(category.label, style = ppmText(14f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -187,7 +279,10 @@ private val THEME_MODES = listOf(
     Triple("system", "System", ProductIcon.Monitor),
 )
 
-/** `rounded-lg border p-2 min-h-11`: the swatch, the name and its mode; the active one ringed with a check. */
+/**
+ * `rounded-lg border p-2 min-h-11`: the swatch, the name and its mode; the active one ringed with
+ * a check. The 1 px border takes room, as CSS borders do, so the padding is 9.
+ */
 @Composable
 private fun ThemeCard(theme: PpmTheme, active: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
@@ -199,7 +294,7 @@ private fun ThemeCard(theme: PpmTheme, active: Boolean, modifier: Modifier, onCl
             .clip(shape)
             .border(1.dp, (if (active) tokens.accent else tokens.border).color, shape)
             .ppmClickable(pressedColor = tokens.panel2.opacity(0.4).color, shape = shape, onClick = onClick)
-            .padding(8.dp),
+            .padding(9.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -229,7 +324,11 @@ internal fun ThemeSwatch(theme: PpmTheme) {
     }
 }
 
-/** The web's `Button` in `default` (picked, with `ring-2 ring-primary`) or `outline`, `h-9 gap-2`. */
+/**
+ * The web's `Button` in `default` (picked, with `ring-2 ring-primary`) or `outline`, `h-9 gap-2`.
+ * The outline's `border` names no colour outside dark mode (`dark:border-input`), so in a light
+ * theme it is Tailwind 4's default, the text colour.
+ */
 @Composable
 private fun ModeButton(label: String, icon: ProductIcon, on: Boolean, dark: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
@@ -238,7 +337,7 @@ private fun ModeButton(label: String, icon: ProductIcon, on: Boolean, dark: Bool
     Row(
         modifier
             .height(36.dp)
-            .then(if (on) Modifier.ring(2.dp, tokens.accent.color, 8.dp) else Modifier)
+            .then(if (on) Modifier.ring(2.dp, tokens.accent.color, 8.dp) else Modifier.ppmShadow(SHADOW_XS, shape))
             .clip(shape)
             .background(
                 when {
@@ -248,7 +347,7 @@ private fun ModeButton(label: String, icon: ProductIcon, on: Boolean, dark: Bool
                     else -> tokens.bgSolid.color
                 },
             )
-            .then(if (on) Modifier else Modifier.border(1.dp, tokens.border.color, shape))
+            .then(if (on) Modifier else Modifier.border(1.dp, outlineBorder(tokens, dark), shape))
             .ppmClickable(pressedColor = if (on) Color.Black.copy(alpha = 0.1f) else tokens.panel2.color, shape = shape, onClick = onClick)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -259,14 +358,24 @@ private fun ModeButton(label: String, icon: ProductIcon, on: Boolean, dark: Bool
     }
 }
 
-/** Tailwind's `ring-N`: a solid [width] band outside the box, its corners following [radius]. */
+/** The outline button's border: `dark:border-input` (the border colour), else the text colour. */
+private fun outlineBorder(tokens: ThemeTokens, dark: Boolean): Color = (if (dark) tokens.border else tokens.text).color
+
+/** `shadow-xs`, under an outline button. */
+private val SHADOW_XS = ThemeShadow(0.0, 1.0, 2.0, 0.0, Rgba(0.0, 0.0, 0.0, 0.05))
+
+/**
+ * Tailwind's `ring-N`: a solid [width] band outside the box, its corners following [radius]. A
+ * box-shadow, so nothing is drawn under the box itself.
+ */
 private fun Modifier.ring(width: Dp, color: Color, radius: Dp): Modifier = drawBehind {
     val band = width.toPx()
     drawRoundRect(
         color,
-        topLeft = Offset(-band, -band),
-        size = Size(size.width + band * 2, size.height + band * 2),
-        cornerRadius = CornerRadius(radius.toPx() + band),
+        topLeft = Offset(-band / 2, -band / 2),
+        size = Size(size.width + band, size.height + band),
+        cornerRadius = CornerRadius(radius.toPx() + band / 2),
+        style = Stroke(band),
     )
 }
 
@@ -318,9 +427,10 @@ private fun ServersSection(model: AppModel) {
             Modifier
                 .fillMaxWidth()
                 .height(36.dp)
+                .ppmShadow(SHADOW_XS, shape)
                 .clip(shape)
                 .background(if (model.theme.isDark) tokens.border.opacity(0.3).color else tokens.bgSolid.color)
-                .border(1.dp, tokens.border.color, shape)
+                .border(1.dp, outlineBorder(tokens, model.theme.isDark), shape)
                 .ppmClickable(pressedColor = tokens.panel2.color, shape = shape) { model.addingServer = true },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
