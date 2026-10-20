@@ -75,7 +75,6 @@ import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
-import com.hienlh.ppm.state.defaultKey
 import com.hienlh.ppm.state.formatShortcut
 import com.hienlh.ppm.state.scoreFileSearchFast
 import kotlinx.coroutines.launch
@@ -113,14 +112,15 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
     val focus = remember { FocusRequester() }
     val list = rememberLazyListState()
     var selected by remember { mutableIntStateOf(0) }
-    val commands = remember(model) {
+    val bindings = model.keyBindings
+    val commands = remember(model, bindings) {
         fun run(action: () -> Unit): () -> Unit = {
             onDismiss()
             action()
         }
         listOf(
-            PaletteCommand("New AI Chat", ProductIcon.MessageSquare, "ai assistant claude", formatShortcut(defaultKey("open-chat")), run { model.scope.launch { model.newChat() } }),
-            PaletteCommand("Settings", ProductIcon.Settings, "config preferences theme", formatShortcut(defaultKey("open-settings")), run { model.openSettings() }),
+            PaletteCommand("New AI Chat", ProductIcon.MessageSquare, "ai assistant claude", formatShortcut(bindings.binding("open-chat")), run { model.scope.launch { model.newChat() } }),
+            PaletteCommand("Settings", ProductIcon.Settings, "config preferences theme", formatShortcut(bindings.binding("open-settings")), run { model.openSettings() }),
         )
     }
     val text = query.text.toString()

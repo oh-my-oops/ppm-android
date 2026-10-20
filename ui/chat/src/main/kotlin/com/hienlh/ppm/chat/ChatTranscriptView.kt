@@ -1,13 +1,13 @@
 package com.hienlh.ppm.chat
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,20 +30,24 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.FontKind
@@ -51,15 +55,19 @@ import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.ppmClickable
+import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.state.ChatBlock
 import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.ChatState
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 import java.time.Instant
@@ -76,6 +84,8 @@ fun ChatTranscriptView(
     onLoadOlder: suspend () -> Unit,
     onReload: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Alt+↑ (-1) and Alt+↓ (1), for this chat only while its tab has the keyboard. */
+    jumps: Flow<Int> = emptyFlow(),
 ) {
     // When the running turn started, for the wait counter before anything streams.
     var turnStartedAt by remember { mutableStateOf<Instant?>(null) }
@@ -88,7 +98,7 @@ fun ChatTranscriptView(
                 CenteredNotice("Loading messages...", pulsing = true)
             state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null ->
                 CenteredNotice("Send a message to start a new conversation", pulsing = false)
-            else -> TranscriptList(state, turnStartedAt, onRespond, onLoadOlder)
+            else -> TranscriptList(state, turnStartedAt, onRespond, onLoadOlder, jumps)
         }
         state.historyError?.let { error ->
             HistoryErrorBanner(error, onReload, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
@@ -102,14 +112,18 @@ private fun TranscriptList(
     turnStartedAt: Instant?,
     onRespond: (ApprovalRequest, Boolean, JsonElement?) -> Unit,
     onLoadOlder: suspend () -> Unit,
+    jumps: Flow<Int>,
 ) {
     val rows = remember(state.items, state.isRunning) { TranscriptRows.of(state.items, state.isRunning) }
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val atBottom by remember { derivedStateOf { list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset < 80 } }
+    val density = LocalDensity.current
     val live = state.live
     // Laid out bottom up: index 0 is the newest thing on screen.
     val tail = 1 + if (!live.isNullOrEmpty()) 1 else 0
+    // The user's messages as items of that list, oldest first.
+    val userItems = remember(rows, tail) { rows.indices.filter { rows[it].item.role == ChatItem.Role.USER }.map { tail + rows.lastIndex - it } }
+    val nav by remember(userItems, density) { derivedStateOf { list.messageNav(userItems, density) } }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true, verticalArrangement = Arrangement.Top) {
             item(key = "trailing") { Trailing(state, turnStartedAt, onRespond) }
@@ -128,26 +142,72 @@ private fun TranscriptList(
                 item(key = "older") { OlderMessagesRow(state.loadingOlder, state.historyStart, onLoadOlder) }
             }
         }
-        val userRows = rows.indices.filter { rows[it].item.role == ChatItem.Role.USER }
         ScrollNavigator(
-            count = userRows.size,
-            atBottom = atBottom,
-            jump = { position ->
-                scope.launch {
-                    if (position == null) list.animateScrollToItem(0) else list.scrollToTop(tail + rows.lastIndex - userRows[position])
-                }
-            },
+            nav,
+            goUp = { scope.launch { list.toPreviousMessage(userItems, density) } },
+            goDown = { scope.launch { list.toNextMessage(userItems, density) } },
+            goBottom = { scope.launch { list.scrollToItem(0) } },
+            jumps = jumps,
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 12.dp),
         )
     }
 }
 
-/** Puts item [index] of a bottom-up list at the top of the screen, as `scrollIntoView` does. */
+/** Puts item [index] of a bottom-up list at the top of the screen, as `scrollTo({ top })` does: its top, if it is taller. */
 private suspend fun LazyListState.scrollToTop(index: Int) {
     scrollToItem(index)
     val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return
-    val room = layoutInfo.viewportSize.height - item.size
-    if (room > 0) scrollBy(-room.toFloat())
+    scrollBy((item.size - layoutInfo.viewportSize.height).toFloat())
+}
+
+/**
+ * Where each of [items] (oldest first) starts against the top of the screen, as `ChatScrollNav`
+ * measures its rows: px below it, negative above it, infinite off screen. A bottom-up list counts
+ * an item's offset from the bottom edge.
+ */
+private fun LazyListState.topsOf(items: List<Int>): List<Float> {
+    val info = layoutInfo
+    val visible = info.visibleItemsInfo
+    if (visible.isEmpty()) return items.map { Float.POSITIVE_INFINITY }
+    val newest = visible.minOf { it.index }
+    val oldest = visible.maxOf { it.index }
+    return items.map { index ->
+        when {
+            index > oldest -> Float.NEGATIVE_INFINITY
+            index < newest -> Float.POSITIVE_INFINITY
+            else -> visible.first { it.index == index }.let { (info.viewportEndOffset - it.offset - it.size).toFloat() }
+        }
+    }
+}
+
+/** What the navigator shows (`NavState`): read off the scroll position, so a swipe moves it as a jump does. */
+private data class MessageNav(val hasAbove: Boolean, val atBottom: Boolean, val position: Int, val total: Int)
+
+private fun LazyListState.messageNav(items: List<Int>, density: Density): MessageNav = with(density) {
+    val tops = topsOf(items)
+    MessageNav(
+        hasAbove = tops.any { it < -4.dp.toPx() },
+        atBottom = firstVisibleItemIndex == 0 && firstVisibleItemScrollOffset < 8.dp.toPx(),
+        // 1-based: the last of the user's messages at or above the top of the screen.
+        position = tops.count { it <= 12.dp.toPx() },
+        total = tops.size,
+    )
+}
+
+/** `goUp`: the last of the user's messages that starts above the screen, put at its top. */
+private suspend fun LazyListState.toPreviousMessage(items: List<Int>, density: Density) {
+    val tops = topsOf(items)
+    val slack = with(density) { 4.dp.toPx() }
+    val target = tops.indices.lastOrNull { tops[it] < -slack } ?: return
+    scrollToTop(items[target])
+}
+
+/** `goDown`: the first that starts below the top of the screen, else the end of the chat. */
+private suspend fun LazyListState.toNextMessage(items: List<Int>, density: Density) {
+    val tops = topsOf(items)
+    val slack = with(density) { 4.dp.toPx() }
+    val target = tops.indices.firstOrNull { tops[it] > slack }
+    if (target != null) scrollToTop(items[target]) else scrollToItem(0)
 }
 
 /** The approval or question the AI waits on, and the thinking line. */
@@ -274,75 +334,98 @@ private fun OlderMessagesRow(loading: Boolean, historyStart: Int, load: suspend 
     }
 }
 
+/** Folding away after it opens, and after the last jump. */
+private const val AUTO_COLLAPSE_MS = 3_200L
+
+/** Shorter, when a shortcut opens it only to show where it went. */
+private const val KEYBOARD_PEEK_MS = 1_000L
+
+/** Tailwind's `shadow-lg`. */
+private val SHADOW_LG = listOf(
+    ThemeShadow(0.0, 10.0, 15.0, -3.0, Rgba(0.0, 0.0, 0.0, 0.1)),
+    ThemeShadow(0.0, 4.0, 6.0, -4.0, Rgba(0.0, 0.0, 0.0, 0.1)),
+)
+
 /**
- * The bottom-right puck that opens previous · position · next · latest between the user's own
- * messages, folding away 3.2 s after the last use (`ChatScrollNav`). [jump] takes the 0-based
- * position among them, or null for the newest message.
+ * The bottom-right puck between the user's own messages (`ChatScrollNav`): a tap opens previous ·
+ * position · next · latest, which folds away 3.2 s after the last use. Alt+↑ / Alt+↓ jump the
+ * same way and show it for a second.
  */
 @Composable
-private fun ScrollNavigator(count: Int, atBottom: Boolean, jump: (Int?) -> Unit, modifier: Modifier) {
+private fun ScrollNavigator(
+    nav: MessageNav,
+    goUp: () -> Unit,
+    goDown: () -> Unit,
+    goBottom: () -> Unit,
+    jumps: Flow<Int>,
+    modifier: Modifier,
+) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     var open by remember { mutableStateOf(false) }
-    // 1-based: the user message last jumped to.
-    var position by remember { mutableIntStateOf(0) }
-    var collapse by remember { mutableStateOf<Job?>(null) }
-    val scope = rememberCoroutineScope()
-
-    fun scheduleCollapse() {
-        collapse?.cancel()
-        collapse = scope.launch {
-            delay(3_200)
-            open = false
+    var collapseMs by remember { mutableLongStateOf(AUTO_COLLAPSE_MS) }
+    // Bumped on every jump, so that the fold waits again even where the position stays.
+    var jumpTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(open, nav.position, jumpTick) {
+        if (!open) return@LaunchedEffect
+        delay(collapseMs)
+        open = false
+    }
+    fun jumped() {
+        collapseMs = AUTO_COLLAPSE_MS
+        jumpTick++
+    }
+    val up by rememberUpdatedState(goUp)
+    val down by rememberUpdatedState(goDown)
+    LaunchedEffect(jumps) {
+        jumps.collect { direction ->
+            if (direction < 0) up() else down()
+            jumped()
+            collapseMs = KEYBOARD_PEEK_MS
+            open = true
         }
     }
 
     Box(modifier) {
-        AnimatedVisibility(open, enter = fadeIn(), exit = fadeOut()) {
+        if (open) {
             val shape = RoundedCornerShape(12.dp)
             Column(
-                Modifier
+                SHADOW_LG.fold(Modifier as Modifier) { m, shadow -> m.ppmShadow(shadow, shape) }
                     .background(tokens.panel2.opacity(0.95).color, shape)
                     .border(1.dp, tokens.border.color, shape)
                     .padding(4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 val rowHeight = if (mobile) 36.dp else 30.dp
-                NavRow(ProductIcon.ChevronUp, 15, rowHeight, enabled = position > 1, label = "Jump to previous message") {
-                    position = (position - 1).coerceAtLeast(1)
-                    jump(position - 1)
-                    scheduleCollapse()
+                NavRow(ProductIcon.ChevronUp, 15, rowHeight, enabled = nav.hasAbove, label = "Jump to previous message") {
+                    goUp()
+                    jumped()
                 }
                 BasicText(
-                    if (count == 0) "0/0" else "${position.coerceAtLeast(1)}/$count",
+                    if (nav.total == 0) "0/0" else "${nav.position.coerceAtLeast(1)}/${nav.total}",
                     Modifier.padding(vertical = 1.dp),
                     ppmText(10f, FontWeight.Medium, FontKind.MONO).copy(color = tokens.text3.color),
                 )
-                NavRow(ProductIcon.ChevronDown, 15, rowHeight, enabled = !atBottom, label = "Jump to next message") {
-                    if (position < count) {
-                        position++
-                        jump(position - 1)
-                    } else {
-                        jump(null)
-                    }
-                    scheduleCollapse()
+                NavRow(ProductIcon.ChevronDown, 15, rowHeight, enabled = !nav.atBottom, label = "Jump to next message") {
+                    goDown()
+                    jumped()
                 }
-                NavRow(ProductIcon.ChevronsDown, 13, rowHeight, enabled = !atBottom, label = "Jump to latest") {
-                    position = count
-                    jump(null)
-                    scheduleCollapse()
+                NavRow(ProductIcon.ChevronsDown, 13, rowHeight, enabled = !nav.atBottom, label = "Jump to latest") {
+                    goBottom()
+                    jumped()
                 }
             }
-        }
-        if (!open) {
+        } else {
+            val hover = remember { MutableInteractionSource() }
+            val hovered by hover.collectIsHoveredAsState()
             // A 44px target around a 36px puck on a phone, as the web sizes it.
             Box(
                 Modifier
                     .size(if (mobile) 44.dp else 30.dp)
+                    .hoverable(hover)
                     .ppmClickable(pressedColor = Color.Transparent, shape = CircleShape) {
-                        position = count
+                        collapseMs = AUTO_COLLAPSE_MS
                         open = true
-                        scheduleCollapse()
                     }
                     .semantics { contentDescription = "Navigate messages" },
                 contentAlignment = Alignment.Center,
@@ -350,28 +433,34 @@ private fun ScrollNavigator(count: Int, atBottom: Boolean, jump: (Int?) -> Unit,
                 Box(
                     Modifier
                         .size(if (mobile) 36.dp else 30.dp)
-                        .background(tokens.panel2.opacity(0.55).color, CircleShape)
+                        .background((if (hovered) tokens.panel2 else tokens.panel2.opacity(0.55)).color, CircleShape)
                         .border(1.dp, tokens.border.color, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    PpmIcon(ProductIcon.ChevronsUpDown, 15.dp, tokens.text3.color)
+                    PpmIcon(ProductIcon.ChevronsUpDown, 15.dp, (if (hovered) tokens.text else tokens.text3).color)
                 }
             }
         }
     }
 }
 
+/** `w-[34px] h-[30px] rounded-[9px]` (36 px tall on a phone), the surface and the text colour under a pointer. */
 @Composable
 private fun NavRow(icon: ProductIcon, size: Int, height: Dp, enabled: Boolean, label: String, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
+    val hover = remember { MutableInteractionSource() }
+    val hovered by hover.collectIsHoveredAsState()
+    val shape = RoundedCornerShape(9.dp)
     Box(
         Modifier
             .size(width = 34.dp, height = height)
             .alpha(if (enabled) 1f else 0.3f)
-            .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, shape = RoundedCornerShape(9.dp), onClick = onClick)
+            .background(if (hovered && enabled) tokens.panel2.color else Color.Transparent, shape)
+            .hoverable(hover, enabled)
+            .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, shape = shape, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        PpmIcon(icon, size.dp, tokens.text2.color)
+        PpmIcon(icon, size.dp, (if (hovered && enabled) tokens.text else tokens.text2).color)
     }
 }

@@ -47,3 +47,90 @@ fun defaultKey(actionId: String): String = DEFAULT_KEYS[actionId].orEmpty()
 /** A combo as the command palette writes it (`formatShortcut`), off a Mac: `Mod+L` is `Ctrl+L`. */
 fun formatShortcut(combo: String): String =
     combo.replace("Mod+", "Ctrl+").replace("Meta+", "⌘")
+
+/** A key going down as the web's handler sees it: `KeyboardEvent.key` and the four modifiers. */
+data class KeyPress(
+    val key: String,
+    val ctrl: Boolean = false,
+    val meta: Boolean = false,
+    val alt: Boolean = false,
+    val shift: Boolean = false,
+)
+
+/** `parseCombo`: `Mod` is Ctrl, as on the web anywhere but a Mac. */
+data class KeyCombo(val ctrl: Boolean, val meta: Boolean, val alt: Boolean, val shift: Boolean, val key: String) {
+    /** `eventMatchesCombo`: every modifier exactly, the key case-blind. */
+    fun matches(press: KeyPress): Boolean =
+        press.ctrl == ctrl && press.meta == meta && press.alt == alt && press.shift == shift && press.key.lowercase() == key
+
+    companion object {
+        fun parse(combo: String): KeyCombo {
+            var ctrl = false
+            var meta = false
+            var alt = false
+            var shift = false
+            var key = ""
+            for (part in combo.split("+")) {
+                when (val p = part.trim()) {
+                    "Mod", "Ctrl" -> ctrl = true
+                    "Meta", "Cmd" -> meta = true
+                    "Alt" -> alt = true
+                    "Shift" -> shift = true
+                    else -> key = p.lowercase()
+                }
+            }
+            return KeyCombo(ctrl, meta, alt, shift, key)
+        }
+    }
+}
+
+/** VS Code's Ctrl+`, a second way to toggle the terminal panel, on the desktop layout only (`matchesDockBacktick`). */
+val DOCK_BACKTICK: KeyCombo = KeyCombo.parse("Ctrl+`")
+
+/**
+ * The shortcuts in force (keybindings-store.ts): the server's overrides (`/api/settings/keybindings`,
+ * shared by every device) over the defaults. An override of "" leaves the action without one.
+ */
+class KeyBindings(val overrides: Map<String, String> = emptyMap()) {
+    private val combos: Map<String, KeyCombo> = KEY_ACTIONS.mapNotNull { action ->
+        val combo = overrides[action.id] ?: action.defaultKey
+        if (combo.isEmpty()) null else action.id to KeyCombo.parse(combo)
+    }.toMap()
+
+    /** `getBinding`. */
+    fun binding(actionId: String): String = overrides[actionId] ?: defaultKey(actionId)
+
+    /** `matchesEvent`. */
+    fun matches(press: KeyPress, actionId: String): Boolean = combos[actionId]?.matches(press) == true
+}
+
+/**
+ * Shift pressed and let go on its own twice within 400 ms opens the command palette, and cannot
+ * be changed (use-global-keybindings.ts). Shift held for another key (a capital letter) does not
+ * count, nor does any key typed between the two.
+ */
+class DoubleShift {
+    private var lastShiftUp = 0L
+    private var shiftAlone = false
+
+    /** A key went down: [isShift] for Shift itself, [shiftHeld] for any other key typed with it. */
+    fun keyDown(isShift: Boolean, shiftHeld: Boolean) {
+        if (isShift) {
+            shiftAlone = true
+            return
+        }
+        if (shiftHeld) shiftAlone = false
+        lastShiftUp = 0
+    }
+
+    /** Shift came up at [at] ms: true when that completes a double tap. */
+    fun shiftUp(at: Long, otherModifiers: Boolean, composing: Boolean): Boolean {
+        if (!shiftAlone || otherModifiers || composing) return false
+        if (at - lastShiftUp < 400) {
+            lastShiftUp = 0
+            return true
+        }
+        lastShiftUp = at
+        return false
+    }
+}

@@ -63,3 +63,7 @@ suspend fun ApiClient.newChatProviderSettings(): NewChatProviderSettings {
     val data = call("GET", "/api/settings/ai")
     return NewChatProviderSettings(data["default_provider"].string, data["new_chat_provider_mode"].string)
 }
+
+/** The keyboard shortcuts changed in Settings (`/api/settings/keybindings`), by action id; a value that is not text is left out. */
+suspend fun ApiClient.keybindings(): Map<String, String> =
+    call("GET", "/api/settings/keybindings").obj.orEmpty().mapNotNull { (id, combo) -> combo.string?.let { id to it } }.toMap()

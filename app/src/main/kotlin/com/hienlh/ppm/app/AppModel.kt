@@ -24,6 +24,7 @@ import com.hienlh.ppm.client.deleteSessions
 import com.hienlh.ppm.client.deleteTag
 import com.hienlh.ppm.client.gitRepos
 import com.hienlh.ppm.client.gitStatus
+import com.hienlh.ppm.client.keybindings
 import com.hienlh.ppm.client.newChatProviderSettings
 import com.hienlh.ppm.client.projectImage
 import com.hienlh.ppm.client.putUiPrefs
@@ -50,6 +51,7 @@ import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatSearch
 import com.hienlh.ppm.state.GlobalEvents
 import com.hienlh.ppm.state.HistoryList
+import com.hienlh.ppm.state.KeyBindings
 import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.PermissionMode
@@ -248,6 +250,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** Text for a new chat's message box, by session, until its tab shows (the web's `pendingMessage`). */
     private val pendingDrafts = mutableMapOf<String, String>()
 
+    /** The keyboard shortcuts in force: the server's overrides over the web's defaults. */
+    var keyBindings by mutableStateOf(KeyBindings())
+        private set
+
+    /** Alt+↑ / Alt+↓ for a chat, by its tab's id: -1 for the user's previous message, 1 for the next. */
+    val chatJumps = MutableSharedFlow<Pair<String, Int>>(extraBufferCapacity = 8)
+
     /** The tag whose Delete was chosen in Manage tags, until the user confirms. */
     var confirmDeleteTag by mutableStateOf<SessionTag?>(null)
 
@@ -328,6 +337,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         projectsLoad = Load.Idle
         selectedProject = null
         gitBranches.clear()
+        keyBindings = KeyBindings()
         resetProjectState()
         restoreUiPrefs()
         val api = if (debug != null) {
@@ -357,8 +367,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             val projects = coroutineScope {
                 val info = async { runCatching { api.info() }.getOrNull() }
                 val uiPrefs = async { quietly { api.uiPrefs() } }
+                val keys = async { quietly { api.keybindings() } }
                 val projects = api.projects()
                 this@AppModel.info = info.await()
+                keys.await()?.let { keyBindings = KeyBindings(it) }
                 uiPrefs.await()?.let { prefs ->
                     prefs.projectSortMode?.takeIf { it in PROJECT_SORT_MODES }?.let { projectSortMode = it }
                     projectOpenedAt = prefs.recentOpen
@@ -983,6 +995,29 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     fun closePalette() {
         paletteQuery = null
+    }
+
+    /** Alt+] / Alt+[: the focused panel's next or previous tab, round the ends. */
+    fun cycleTab(forward: Boolean) {
+        val state = layout ?: return
+        val panelId = state.focusedPanelId.takeIf { it in state.gridPanelIds } ?: state.gridPanelIds.firstOrNull() ?: return
+        val panel = state.panels[panelId] ?: return
+        val tabs = panel.tabs
+        if (tabs.size < 2) return
+        val index = tabs.indexOfFirst { it.id == panel.activeTabId }
+        activate(tabs[if (forward) (index + 1) % tabs.size else (index - 1 + tabs.size) % tabs.size].id, panelId)
+    }
+
+    /** Mod+1…9: the project at that place in the server's list, as the web counts them. */
+    fun openProjectAt(position: Int) {
+        val project = projects.getOrNull(position - 1) ?: return
+        scope.launch { openProject(project.name) }
+    }
+
+    /** Alt+↑ / Alt+↓ move the chat on screen in the focused panel, and no other (`ownsGlobalShortcut`). */
+    fun jumpInChat(direction: Int) {
+        val tabId = activeTabId ?: return
+        chatJumps.tryEmit(tabId to direction)
     }
 
     fun closeTab(tabId: String, panelId: String? = panelOf(tabId)) {

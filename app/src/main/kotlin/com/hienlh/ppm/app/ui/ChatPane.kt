@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
+import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.chat.CONTINUE_AFTER_STOP
 import com.hienlh.ppm.chat.ChatTranscriptView
 import com.hienlh.ppm.chat.RelativeTime
@@ -76,6 +77,8 @@ import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatState
 import com.hienlh.ppm.state.HistoryList
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -106,6 +109,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                 onLoadOlder = { chat.loadOlder() },
                 onReload = { chat.reload() },
                 modifier = Modifier.weight(1f),
+                jumps = remember(tab.tabId) { model.chatJumps.filter { it.first == tab.tabId }.map { it.second } },
             )
             state.notice?.let { NoticeBar(it) { chat.dismissNotice() } }
             val stop = state.turnStop
@@ -450,6 +454,7 @@ fun InlineRename(model: AppModel, session: SessionInfo, modifier: Modifier = Mod
             Modifier
                 .weight(1f)
                 .focusRequester(focus)
+                .tracksTextFocus(state)
                 .onFocusChanged {
                     if (it.isFocused) focused = true else if (focused) finish(save = true)
                 }

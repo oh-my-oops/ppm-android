@@ -75,6 +75,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -211,7 +212,8 @@ fun PpmTextField(
         state = state,
         modifier = modifier
             .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
-            .onFocusChanged { onFocusChanged(it.isFocused) },
+            .onFocusChanged { onFocusChanged(it.isFocused) }
+            .tracksTextFocus(state),
         textStyle = style.copy(color = tokens.text.color),
         cursorBrush = SolidColor(tokens.accent.color),
         keyboardOptions = keyboardOptions,

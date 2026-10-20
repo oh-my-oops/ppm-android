@@ -11,6 +11,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,6 +40,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
@@ -79,7 +82,14 @@ fun PpmRoot(model: AppModel) {
     val selectedId by model.store.selectedId.collectAsState()
     LaunchedEffect(selectedId, servers.size) { model.showSelectedServer() }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val focusManager = LocalFocusManager.current
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            // A tap nothing else takes (the transcript, an empty stretch of a panel) leaves the text
+            // field, as a click outside an input does in a browser: the keyboard goes, shortcuts work.
+            .pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus() }) },
+    ) {
         val mobile = maxWidth < 768.dp
         // The layout follows the window, not the device: a rotation or a split screen can cross it.
         SideEffect { model.setWindowWide(!mobile) }

@@ -72,6 +72,7 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
+import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
@@ -160,6 +161,7 @@ fun MobileComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: C
                     // `max-h-20`, its `py-1.5` included.
                     .heightIn(max = 80.dp)
                     .focusRequester(focus)
+                    .tracksTextFocus(tab.draft)
                     .onPreviewKeyEvent { event ->
                         if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                         when {
