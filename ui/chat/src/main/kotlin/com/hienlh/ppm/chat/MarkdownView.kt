@@ -93,9 +93,10 @@ data class MarkdownStyle(
     val lineHeight: Float get() = size * lineHeightRatio
 
     fun heading(level: Int): MarkdownStyle = when (level) {
+        // `1rem` and `0.875rem`, whatever size the text around them is.
         1 -> copy(size = 16f, weight = FontWeight.Bold)
-        2 -> copy(weight = FontWeight.Bold)
-        3 -> copy(weight = FontWeight.SemiBold)
+        2 -> copy(size = 14f, weight = FontWeight.Bold)
+        3 -> copy(size = 14f, weight = FontWeight.SemiBold)
         // Tailwind's reset leaves h4–h6 as plain text; the web's markdown styles skip them.
         else -> this
     }

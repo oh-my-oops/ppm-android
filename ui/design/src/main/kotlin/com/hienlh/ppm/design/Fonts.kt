@@ -50,6 +50,9 @@ object PpmFonts {
     /** Geist's descender, 295 of its 1000 units. */
     const val SANS_DESCENT = 0.295f
 
+    /** Geist's x-height, 530 of its 1000 units: where `vertical-align: middle` puts an icon. */
+    const val SANS_X_HEIGHT = 0.53f
+
     /**
      * The very files the web loads (`@fontsource/monaspace-argon`: release 1.101, Latin only, at
      * 400 and 700). 1.400's vertical metrics set 11 px text nearly 2 px lower in its line than the

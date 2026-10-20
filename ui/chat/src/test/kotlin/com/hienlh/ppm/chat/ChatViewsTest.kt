@@ -1,5 +1,6 @@
 package com.hienlh.ppm.chat
 
+import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.protocol.Compaction
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.protocol.ToolOutcome
@@ -173,6 +174,36 @@ class ChatViewsTest {
         assertEquals("1\n2\n3\n4", collapsedPreview("1\n2\n3\n4\n5\n6"))
         assertEquals("1\n2\n3\n4", collapsedPreview("1\n2\n3\n4"))
         assertEquals(2_000, collapsedPreview("x".repeat(50_000)).length)
+    }
+
+    @Test
+    fun `a SendMessage call reads as the web's card reads it`() {
+        val legacy = NormalizedSendMessage.of(
+            WireJson.parse("""{"type":"message","recipient":"dev","content":"\n  First line\nsecond","message":null,"priority":"high","n":2}"""),
+        )
+        assertEquals("dev", legacy.to)
+        assertEquals("First line", legacy.firstLine)
+        assertEquals("message", legacy.kind)
+        assertEquals(listOf("priority" to "high", "n" to "2"), legacy.extras)
+        val protocol = NormalizedSendMessage.of(
+            WireJson.parse("""{"to":"lead","message":"{\"type\":\"shutdown_response\",\"request_id\":\"r1\",\"approve\":true}","notify_when_idle":true}"""),
+        )
+        assertEquals(SendMessageProtocol("shutdown_response", "r1", approve = true), protocol.protocol)
+        assertEquals("", protocol.text)
+        assertTrue(protocol.notifyWhenIdle)
+        val summary = toolSummary("SendMessage", WireJson.parse("""{"to":"reviewer","message":"Start with ToolCards.kt","summary":"  ${"x".repeat(80)} "}"""))
+        assertEquals("reviewer · ${"x".repeat(72)}…", summary.detail)
+        assertEquals(ProductIcon.ArrowRight, summary.detailIcon)
+        assertEquals("unknown · shutdown_response", toolSummary("SendMessage", WireJson.parse("""{"message":{"type":"shutdown_response"}}""")).detail)
+        // The runtime's status object, inside a text block or not.
+        assertEquals(SendMessageOutcome(true, "Message sent to reviewer's inbox", null, null), SendMessageOutcome.parse("""{"success":true,"message":"Message sent to reviewer's inbox"}"""))
+        assertEquals(
+            SendMessageOutcome(false, "No such peer", "dev", "p2"),
+            SendMessageOutcome.parse("""[{"type":"text","text":"{\"success\":false,\"error\":\"No such peer\",\"pin\":{\"name\":\"dev\",\"ref\":\"p2\"}}"}]"""),
+        )
+        assertNull(SendMessageOutcome.parse("sent"))
+        assertEquals("1200", jsString(WireJson.parse("1200.0")))
+        assertEquals("true", jsString(WireJson.parse("true")))
     }
 
     @Test

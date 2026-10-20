@@ -1,6 +1,17 @@
 package com.hienlh.ppm.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.sp
+import com.hienlh.ppm.protocol.bool
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,9 +59,7 @@ import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ToolOutcome
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.array
-import com.hienlh.ppm.protocol.double
 import com.hienlh.ppm.protocol.get
-import com.hienlh.ppm.protocol.int
 import com.hienlh.ppm.protocol.prettyString
 import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.ToolBlock
@@ -59,12 +68,17 @@ import com.hienlh.ppm.state.truthy
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
+import kotlin.math.floor
 
 /** `text-xs`: the cards' text, 12px on a 16px line. */
 private val cardText = ppmText(12f, lineHeight = 16f)
 
 /** `<pre class="font-mono">` at 12px. */
 private val monoText = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f)
+
+/** `text-[10px]` inside a card, on the line `text-xs` sets: 10 × 4/3. */
+private val tinyText = ppmText(10f, lineHeight = 40f / 3)
+private val tinyMono = ppmText(10f, kind = FontKind.MONO, lineHeight = 40f / 3)
 
 /**
  * A tool call as the web's `ToolCard` draws it (src/web/components/chat/tool-cards.tsx): a tinted
@@ -119,7 +133,7 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 // Codex's exit code for a shell call: its output can matter even when it failed.
                 result?.exitCode?.let { code ->
-                    BasicText("exit $code", style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = (if (code == 0) tokens.text3 else tokens.error).color))
+                    BasicText("exit $code", style = tinyMono.copy(color = (if (code == 0) tokens.text3 else tokens.error).color))
                 }
                 StatusIcon(if (isError) Status.FAILED else if (isDone) Status.DONE else Status.RUNNING)
                 PpmIcon(if (expanded) ProductIcon.ChevronDown else ProductIcon.ChevronRight, 12.dp, tokens.text3.color)
@@ -131,7 +145,7 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 ToolDetails(tool.name, tool.input)
-                if (result != null && showsResult(tool.name, result)) CollapsibleOutput(result.output)
+                if (result != null && showsResult(tool.name, result)) ToolResultView(tool.name, result.output)
             }
         }
     }
@@ -220,18 +234,22 @@ internal fun StatusIcon(state: Status) {
 
 // Summary
 
-/** The header's one line: the tool's name, then what it acted on. */
-internal data class ToolSummaryText(val icon: ProductIcon? = null, val name: String, val detail: String, val monoDetail: Boolean = false)
+/**
+ * The header's one line: an icon, the tool's name, then what it acted on. [detailIcon] opens the
+ * detail and [endIcon] follows the line, as SendMessage's arrow and clock do.
+ */
+internal data class ToolSummaryText(
+    val icon: ProductIcon? = null,
+    val name: String,
+    val detail: String,
+    val monoDetail: Boolean = false,
+    val detailIcon: ProductIcon? = null,
+    val endIcon: ProductIcon? = null,
+)
 
 /** `ToolSummary` in tool-cards.tsx. */
 internal fun toolSummary(name: String, input: JsonElement): ToolSummaryText {
-    // `String(v ?? "")`: a whole number reads without a decimal point.
-    fun s(key: String): String {
-        val value = input[key] ?: return ""
-        value.string?.let { return it }
-        val number = value.double ?: return ""
-        return if (number == Math.floor(number) && Math.abs(number) < 9e15) number.toLong().toString() else number.toString()
-    }
+    fun s(key: String): String = jsString(input[key])
     return when (name) {
         "Read", "Write", "Edit", "MultiEdit", "NotebookEdit" -> ToolSummaryText(name = name, detail = basename(s("file_path")))
         "Bash", "PowerShell" -> {
@@ -263,8 +281,16 @@ internal fun toolSummary(name: String, input: JsonElement): ToolSummaryText {
         "TaskUpdate" -> ToolSummaryText(ProductIcon.ListTodo, name, "#${s("taskId")} → ${s("status")}")
         "TaskStop" -> ToolSummaryText(ProductIcon.ListTodo, name, "#${s("taskId")} stopped")
         "SendMessage" -> {
-            val to = s("to")
-            ToolSummaryText(ProductIcon.Send, name, if (to.isEmpty()) "" else "→ $to")
+            // Who it went to and the author's label for it, else the line the recipient previews.
+            val message = NormalizedSendMessage.of(input)
+            val raw = message.summary ?: message.firstLine.ifEmpty { if (message.protocol != null) message.kind else "" }
+            val label = if (raw.length > 72) raw.take(72) + "…" else raw
+            ToolSummaryText(
+                name = name,
+                detail = message.to.ifEmpty { "unknown" } + if (label.isEmpty()) "" else " · $label",
+                detailIcon = ProductIcon.ArrowRight,
+                endIcon = if (message.notifyWhenIdle) ProductIcon.Clock else null,
+            )
         }
         else -> ToolSummaryText(name = name, detail = "")
     }
@@ -288,28 +314,68 @@ internal fun formatDelay(seconds: Double): String {
 private fun ToolSummaryLine(name: String, input: JsonElement, modifier: Modifier) {
     val tokens = LocalPpmTokens.current
     val summary = remember(name, input) { toolSummary(name, input) }
-    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (summary.icon != null) PpmIcon(summary.icon, 12.dp, tokens.text.color)
-        val text = buildAnnotatedString {
-            append(summary.name)
-            if (summary.detail.isNotEmpty()) {
-                append(" ")
-                val detail = if (summary.monoDetail) {
-                    SpanStyle(color = tokens.text3.color, fontFamily = PpmFonts.mono, fontWeight = FontWeight.Normal)
-                } else {
-                    SpanStyle(color = tokens.text3.color)
+    // `<Icon className="size-3 inline" /> {name}`: icons sit in the line, a space from the words.
+    val text = buildAnnotatedString {
+        if (summary.icon != null) {
+            appendInlineContent("icon")
+            append(" ")
+        }
+        append(summary.name)
+        if (summary.detail.isNotEmpty() || summary.detailIcon != null) {
+            append(" ")
+            val detail = if (summary.monoDetail) {
+                SpanStyle(color = tokens.text3.color, fontFamily = PpmFonts.mono, fontWeight = FontWeight.Normal)
+            } else {
+                SpanStyle(color = tokens.text3.color)
+            }
+            withStyle(detail) {
+                if (summary.detailIcon != null) {
+                    appendInlineContent("detailIcon")
+                    append(" ")
                 }
-                withStyle(detail) { append(summary.detail) }
+                append(summary.detail)
             }
         }
-        BasicText(
-            text,
-            style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            softWrap = false,
-        )
+        if (summary.endIcon != null) appendInlineContent("endIcon")
     }
+    val inline = buildMap {
+        summary.icon?.let { put("icon", inlineIcon(it, tokens.text.color)) }
+        summary.detailIcon?.let { put("detailIcon", inlineIcon(it, tokens.text3.color)) }
+        // `ml-1`.
+        summary.endIcon?.let { put("endIcon", inlineIcon(it, tokens.text3.color, marginStart = 4f)) }
+    }
+    BasicText(
+        text,
+        modifier,
+        style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        softWrap = false,
+        inlineContent = inline,
+    )
+}
+
+/** A `size-3 inline` icon in a line of card text, [marginStart] after what comes before it. */
+private fun inlineIcon(icon: ProductIcon, color: Color, marginStart: Float = 0f, end: Boolean = true) = InlineTextContent(
+    Placeholder((12f + marginStart).sp, 12.sp, PlaceholderVerticalAlign.Center),
+) {
+    Box(Modifier.fillMaxSize(), contentAlignment = if (end) Alignment.CenterEnd else Alignment.CenterStart) {
+        PpmIcon(icon, with(LocalDensity.current) { 12.sp.toDp() }, color, Modifier.offset(y = inlineIconDrop()))
+    }
+}
+
+/**
+ * How far under the middle of a 12px Geist line of 16 an inline icon's middle sits. Preflight gives
+ * an `svg` `vertical-align: middle`: half an x-height above the baseline, which Chrome places from
+ * the font's ascent and descent rounded to device pixels.
+ */
+@Composable
+private fun inlineIconDrop(): Dp = with(LocalDensity.current) {
+    val px = 12.sp.toPx()
+    val line = 16.sp.toPx()
+    val (ascent, descent) = PpmFonts.chromeAscentDescent(px, PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT)
+    val baseline = floor((line - ascent - descent) / 2) + ascent
+    (baseline - PpmFonts.SANS_X_HEIGHT * px / 2 - line / 2).toDp()
 }
 
 // Details
@@ -318,7 +384,7 @@ private fun ToolSummaryLine(name: String, input: JsonElement, modifier: Modifier
 @Composable
 private fun ToolDetails(name: String, input: JsonElement) {
     val tokens = LocalPpmTokens.current
-    fun s(key: String) = input[key].string ?: ""
+    fun s(key: String) = jsString(input[key])
     when (name) {
         "Bash", "PowerShell" -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (s("description").isNotEmpty()) {
@@ -352,16 +418,46 @@ private fun ToolDetails(name: String, input: JsonElement) {
             }
             if (s("prompt").isNotEmpty()) BasicText(truncate(s("prompt"), 100), style = cardText.copy(color = tokens.text3.color))
         }
+        "SendMessage" -> SendMessageDetails(input)
         "ToolSearch" -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Mono(s("query"), tokens.text2)
-            input["max_results"].int?.let { BasicText("Max results: $it", style = cardText.copy(color = tokens.text3.color)) }
+            if (truthy(input["max_results"])) BasicText("Max results: ${s("max_results")}", style = cardText.copy(color = tokens.text3.color))
         }
         "AskUserQuestion" -> AnsweredQuestions(input)
+        "ScheduleWakeup" -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // `Number(delaySeconds) || 0`.
+            val seconds = s("delaySeconds").trim().ifEmpty { "0" }.toDoubleOrNull()?.takeIf { !it.isNaN() } ?: 0.0
+            val line = buildAnnotatedString {
+                appendInlineContent("clock")
+                append("Wake in ")
+                withStyle(SpanStyle(color = tokens.text.color, fontWeight = FontWeight.Medium)) { append(formatDelay(seconds)) }
+                withStyle(SpanStyle(color = tokens.text3.color)) { append(" (${jsNumberText(seconds)}s)") }
+            }
+            // `mr-1`.
+            val clock = inlineIcon(ProductIcon.Clock, tokens.text2.color, marginStart = 4f, end = false)
+            BasicText(line, style = cardText.copy(color = tokens.text2.color), inlineContent = mapOf("clock" to clock))
+            if (truthy(input["reason"])) BasicText(s("reason"), style = ppmText(12f, lineHeight = 16f, italic = true).copy(color = tokens.text2.color))
+            if (truthy(input["prompt"])) {
+                Column {
+                    // `mb-0.5`.
+                    BasicText("Prompt on wake", Modifier.padding(bottom = 2.dp), tinyText.copy(color = tokens.text3.color))
+                    MiniMarkdown(s("prompt"), maxHeight = 192.dp)
+                }
+            }
+        }
         "TaskCreate" -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             BasicText(s("subject"), style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
-            if (s("description").isNotEmpty()) BasicText(s("description"), style = cardText.copy(color = tokens.text3.color))
+            if (truthy(input["description"])) BasicText(s("description"), style = cardText.copy(color = tokens.text3.color))
+            if (truthy(input["activeForm"])) BasicText(s("activeForm"), style = ppmText(12f, lineHeight = 16f, italic = true).copy(color = tokens.text3.color))
         }
-        "ImageGen" -> if (s("prompt").isNotEmpty()) BasicText(s("prompt"), style = cardText.copy(color = tokens.text2.color))
+        "TaskUpdate", "TaskStop" -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            BasicText("#${s("taskId")}", style = monoText.copy(color = tokens.text2.color))
+            TaskStatusBadge(if (name == "TaskStop") "stopped" else s("status"))
+        }
+        "ImageGen" -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (truthy(input["prompt"])) BasicText(s("prompt"), style = cardText.copy(color = tokens.text2.color))
+            if (input["transparentBackground"].bool == true) BasicText("Transparent background", style = cardText.copy(color = tokens.text3.color))
+        }
         else -> Mono(if (input is JsonNull) "null" else input.prettyString, tokens.text2)
     }
 }
@@ -380,7 +476,7 @@ private fun FileDetails(name: String, input: JsonElement) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 edits.forEachIndexed { index, edit ->
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        BasicText("Edit ${index + 1}", style = ppmText(10f).copy(color = tokens.text3.color))
+                        BasicText("Edit ${index + 1}", style = tinyText.copy(color = tokens.text3.color))
                         EditDiffView(edit["old_string"].string ?: "", edit["new_string"].string ?: "")
                     }
                 }
@@ -466,7 +562,156 @@ private fun AnsweredQuestions(input: JsonElement) {
     }
 }
 
+/** A Task card's status pill (`TaskStatusBadge`): the todo list's colours, stopped and the rest neutral. */
+@Composable
+private fun TaskStatusBadge(status: String) {
+    val tokens = LocalPpmTokens.current
+    val (text, border, fill) = when (status) {
+        "completed" -> Triple(tokens.success, tokens.success.opacity(0.3), tokens.success.opacity(0.1))
+        "in_progress" -> Triple(tokens.warning, tokens.warning.opacity(0.3), tokens.warning.opacity(0.1))
+        // `bg-surface` is the panel.
+        else -> Triple(tokens.text3, tokens.border, tokens.panel)
+    }
+    val shape = RoundedCornerShape(4.dp)
+    BasicText(
+        status,
+        Modifier.background(fill.color, shape).cssBorder(border.color, shape).padding(horizontal = 6.dp, vertical = 2.dp),
+        tinyText.copy(color = text.color),
+    )
+}
+
+/** `MiniMarkdown`: a card's markdown at the card's 12px, in the secondary colour, scrolling past [maxHeight]. */
+@Composable
+private fun MiniMarkdown(content: String, maxHeight: Dp) {
+    val tokens = LocalPpmTokens.current
+    Box(Modifier.fillMaxWidth().heightIn(max = maxHeight).verticalScroll(rememberScrollState())) {
+        MarkdownView(content, style = MarkdownStyle(size = 12f, lineHeightRatio = 16f / 12f, color = tokens.text2))
+    }
+}
+
+/** A badge for a message kind (`KindBadge`); prose gets none. */
+@Composable
+private fun KindBadge(kind: String) {
+    val tokens = LocalPpmTokens.current
+    val badge = TEAM_BADGES[kind]
+    val (fill, text) = when (badge?.second) {
+        TeamBadgeTone.PRIMARY -> tokens.accent.opacity(0.2) to tokens.accent
+        TeamBadgeTone.WARNING -> tokens.warning.opacity(0.2) to tokens.warning
+        TeamBadgeTone.SUCCESS -> tokens.success.opacity(0.2) to tokens.success
+        TeamBadgeTone.ERROR -> tokens.error.opacity(0.2) to tokens.error
+        TeamBadgeTone.MUTED -> tokens.text3.opacity(0.2) to tokens.text3
+        null -> tokens.panel2 to tokens.text3
+    }
+    BasicText(
+        badge?.first ?: kind,
+        Modifier.background(fill.color, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+        tinyText.copy(color = text.color),
+    )
+}
+
+/** `SendMessageDetails`: who it went to, then the message itself. */
+@Composable
+private fun SendMessageDetails(input: JsonElement) {
+    val tokens = LocalPpmTokens.current
+    val message = remember(input) { NormalizedSendMessage.of(input) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val middle = Modifier.align(Alignment.CenterVertically)
+            BasicText("To", middle, cardText.copy(color = tokens.text3.color))
+            BasicText(message.to.ifEmpty { "unknown" }, middle, ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
+            if (message.kind != "message") Box(middle) { KindBadge(message.kind) }
+            if (message.notifyWhenIdle) {
+                Row(
+                    middle.background(tokens.panel2.color, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    PpmIcon(ProductIcon.Clock, 12.dp, tokens.text3.color)
+                    BasicText("notify when idle", style = tinyText.copy(color = tokens.text3.color))
+                }
+            }
+        }
+        // The summary is in the header already.
+        if (message.text.isNotEmpty()) MiniMarkdown(message.text, maxHeight = 160.dp)
+        message.protocol?.let { protocol ->
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                protocol.approve?.let { approve ->
+                    val line = buildAnnotatedString {
+                        append(if (approve) "Approved" else "Rejected")
+                        if (!protocol.requestId.isNullOrEmpty()) {
+                            withStyle(SpanStyle(color = tokens.text3.color, fontFamily = PpmFonts.mono)) { append(" · ${protocol.requestId}") }
+                        }
+                    }
+                    BasicText(line, style = cardText.copy(color = tokens.text2.color))
+                }
+                for (note in listOf(protocol.reason, protocol.feedback)) {
+                    if (!note.isNullOrEmpty()) BasicText(note, style = cardText.copy(color = tokens.text3.color))
+                }
+            }
+        }
+        if (message.extras.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                for ((key, value) in message.extras) {
+                    val line = buildAnnotatedString {
+                        withStyle(SpanStyle(fontFamily = PpmFonts.mono)) { append(key) }
+                        append(": $value")
+                    }
+                    BasicText(line, style = cardText.copy(color = tokens.text3.color))
+                }
+            }
+        }
+    }
+}
+
 // Output
+
+/** A result as the web shows it (`ToolResultView`): SendMessage's delivery line, else the raw output. */
+@Composable
+private fun ToolResultView(name: String, output: String) {
+    val outcome = remember(name, output) { if (name == "SendMessage") SendMessageOutcome.parse(output) else null }
+    if (outcome != null) SendMessageOutcomeView(output, outcome) else CollapsibleOutput(output)
+}
+
+/** Whether the message arrived, with the runtime's JSON one tap away (`SendMessageOutcomeView`). */
+@Composable
+private fun SendMessageOutcomeView(output: String, outcome: SendMessageOutcome) {
+    val tokens = LocalPpmTokens.current
+    var showRaw by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top)) {
+        Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                val middle = Modifier.align(Alignment.CenterVertically)
+                val tone = if (outcome.ok) tokens.success else tokens.error
+                PpmIcon(if (outcome.ok) ProductIcon.CheckCircle2 else ProductIcon.XCircle, 12.dp, tone.color, middle)
+                BasicText(if (outcome.ok) "Delivered" else "Not delivered", middle, cardText.copy(color = tone.color))
+                outcome.detail?.let { BasicText("· $it", middle, cardText.copy(color = tokens.text3.color)) }
+                outcome.ref?.let { BasicText("[$it]", middle, tinyMono.copy(color = tokens.text3.color)) }
+            }
+            OutputToggle(if (showRaw) "Hide raw" else "Show raw", ProductIcon.Code) { showRaw = !showRaw }
+            if (showRaw) {
+                Box(Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState())) {
+                    SelectionContainer(Modifier.fillMaxWidth()) { BasicText(output, style = tinyMono.copy(color = tokens.text3.color)) }
+                }
+            }
+        }
+    }
+}
+
+/** A `text-[10px] text-text-subtle hover:text-text-secondary` toggle with its icon. */
+@Composable
+private fun OutputToggle(label: String, icon: ProductIcon, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val hover = rememberHover()
+    val color = tokens.text2.mix(tokens.text3, hover.lit.toDouble()).color
+    Row(
+        Modifier.ppmClickable(pressedColor = tokens.surfaceHover.color, source = hover.source, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        PpmIcon(icon, 12.dp, color)
+        BasicText(label, style = tinyText.copy(color = color))
+    }
+}
 
 /** Longer than three lines or 200 characters: collapsed to four lines behind a toggle. */
 internal fun isLongOutput(output: String): Boolean = output.split("\n").size > 3 || output.length > 200
@@ -506,7 +751,7 @@ private fun CollapsibleOutput(output: String) {
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     PpmIcon(if (collapsed) ProductIcon.ChevronRight else ProductIcon.ChevronDown, 12.dp, color)
-                    BasicText("Output (${output.split("\n").size} lines)", style = ppmText(10f).copy(color = color))
+                    BasicText("Output (${output.split("\n").size} lines)", style = tinyText.copy(color = color))
                 }
             }
             when {
@@ -558,11 +803,8 @@ private fun AgentRow(tool: ToolBlock, status: Status, bgRunning: Boolean, modifi
         }
         BasicText(text, Modifier.weight(1f), style = cardText, maxLines = 1, overflow = TextOverflow.Ellipsis, softWrap = false)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // `text-[10px]` on preflight's 1.5 line.
-            if (bgRunning) BasicText("running…", style = ppmText(10f, lineHeight = 15f).copy(color = tokens.accent.color))
-            if (tool.steps > 0) {
-                BasicText(stepCount(tool.steps), style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text3.color))
-            }
+            if (bgRunning) BasicText("running…", style = tinyText.copy(color = tokens.accent.color))
+            if (tool.steps > 0) BasicText(stepCount(tool.steps), style = tinyMono.copy(color = tokens.text3.color))
             StatusIcon(status)
         }
     }
