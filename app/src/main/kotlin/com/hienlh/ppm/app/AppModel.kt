@@ -15,6 +15,7 @@ import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.client.ServerProfile
 import com.hienlh.ppm.client.ServerStore
+import com.hienlh.ppm.client.UiPrefs
 import com.hienlh.ppm.client.createTag
 import com.hienlh.ppm.client.deleteSession
 import com.hienlh.ppm.client.deleteSessions
@@ -65,6 +66,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
@@ -166,7 +168,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         private set
 
     /** The desktop sidebar's width in dp, 200–600, shared like [sidebarCollapsed]. */
-    var sidebarWidth by mutableIntStateOf(280)
+    var sidebarWidth by mutableIntStateOf(SIDEBAR_DEFAULT_WIDTH)
         private set
 
     /**
@@ -192,6 +194,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** When each project was last opened (epoch ms), for the Recent order and the age beside each. */
     var projectOpenedAt by mutableStateOf(emptyMap<String, Long>())
         private set
+
+    init {
+        restoreUiPrefs()
+    }
 
     /** The theme picked on any device (`/api/settings/theme`). */
     var themeSelection by mutableStateOf(ThemeSelection("aurora", "system"))
@@ -300,6 +306,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         projectsLoad = Load.Idle
         selectedProject = null
         resetProjectState()
+        restoreUiPrefs()
         val api = if (debug != null) {
             ApiClient(debug.url, debug.password)
         } else {
@@ -330,10 +337,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                 val projects = api.projects()
                 this@AppModel.info = info.await()
                 uiPrefs.await()?.let { prefs ->
-                    prefs.projectSortMode?.takeIf { it in setOf("recent", "priority", "name") }?.let { projectSortMode = it }
+                    prefs.projectSortMode?.takeIf { it in PROJECT_SORT_MODES }?.let { projectSortMode = it }
                     projectOpenedAt = prefs.recentOpen
                     prefs.sidebarCollapsed?.let { sidebarCollapsed = it }
                     prefs.sidebarWidth?.let { sidebarWidth = it }
+                    saveUiPrefs()
                 }
                 projects
             }
@@ -353,6 +361,23 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** Identifies the open server in saved state, so each server keeps its own tabs. */
     private val serverKey: String get() = if (debug != null) "debug" else store.selected?.id ?: "none"
+
+    /**
+     * The UI prefs this device last had for the open server, or the web's defaults for a server it
+     * has not opened: the web keeps them in localStorage, so it draws with them before the server
+     * answers, and so does this — the sidebar no longer starts at 280 and jumps to its width.
+     */
+    private fun restoreUiPrefs() {
+        val saved = prefs.get("uiPrefs.$serverKey")?.let { runCatching { UiPrefs.from(Json.parseToJsonElement(it)) }.getOrNull() } ?: UiPrefs()
+        projectSortMode = saved.projectSortMode?.takeIf { it in PROJECT_SORT_MODES } ?: "priority"
+        projectOpenedAt = saved.recentOpen
+        sidebarCollapsed = saved.sidebarCollapsed ?: false
+        sidebarWidth = saved.sidebarWidth ?: SIDEBAR_DEFAULT_WIDTH
+    }
+
+    private fun saveUiPrefs() {
+        prefs.put("uiPrefs.$serverKey", UiPrefs(projectSortMode, projectOpenedAt, sidebarCollapsed, sidebarWidth).toJson().toString())
+    }
 
     private fun startEvents(api: ApiClient) {
         val events = GlobalEvents(api, scope)
@@ -575,6 +600,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** Orders the project sheet for every device, as `setProjectSortMode` does. */
     fun pickProjectSort(mode: String) {
         projectSortMode = mode
+        saveUiPrefs()
         val api = api ?: return
         scope.launch { quietly { api.putUiPrefs(buildJsonObject { put("projectSortMode", mode) }) } }
     }
@@ -611,6 +637,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     private fun touchProject(name: String) {
         val times = projectOpenedAt + (name to System.currentTimeMillis())
         projectOpenedAt = times
+        saveUiPrefs()
         val api = api ?: return
         scope.launch {
             quietly { api.putUiPrefs(buildJsonObject { put("recentOpen", JsonObject(times.mapValues { JsonPrimitive(it.value) })) }) }
@@ -948,6 +975,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     fun toggleSidebar() {
         sidebarCollapsed = !sidebarCollapsed
+        saveUiPrefs()
         putUiPref { put("sidebarCollapsed", sidebarCollapsed) }
     }
 
@@ -957,6 +985,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     }
 
     fun saveSidebarWidth() {
+        saveUiPrefs()
         putUiPref { put("sidebarWidth", sidebarWidth) }
     }
 
@@ -1131,7 +1160,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
 private val DOCK_POSITIONS = setOf("bottom", "left", "right")
 
+private val PROJECT_SORT_MODES = setOf("recent", "priority", "name")
+
 const val SIDEBAR_MIN_WIDTH = 200
+const val SIDEBAR_DEFAULT_WIDTH = 280
 const val SIDEBAR_MAX_WIDTH = 600
 
 /**
