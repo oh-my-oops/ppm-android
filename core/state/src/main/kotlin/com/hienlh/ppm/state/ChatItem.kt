@@ -35,7 +35,18 @@ sealed interface ChatBlock {
 }
 
 /** One message as the chat shows it. */
-data class ChatItem(val id: String, val role: Role, val blocks: List<ChatBlock>, val timestamp: Instant?) {
+data class ChatItem(
+    val id: String,
+    val role: Role,
+    val blocks: List<ChatBlock>,
+    val timestamp: Instant?,
+    /** The SDK's own id for the message, which a reply names when there is one. */
+    val sdkUuid: String? = null,
+    /** [timestamp] as the server wrote it, which a reply compares. Null for a message made here. */
+    val timestampText: String? = null,
+    /** An answer's text as the web quotes it: every text event run together, a subagent's too. */
+    val answerText: String = blocks.filterIsInstance<ChatBlock.Text>().joinToString("") { it.text },
+) {
     enum class Role { USER, ASSISTANT, SYSTEM }
 
     val text: String
@@ -52,6 +63,8 @@ data class ChatItem(val id: String, val role: Role, val blocks: List<ChatBlock>,
                     role = if (message.role == HistoryMessage.Role.USER) Role.USER else Role.SYSTEM,
                     blocks = listOf(ChatBlock.Text(message.content)),
                     timestamp = message.timestamp,
+                    sdkUuid = message.sdkUuid,
+                    timestampText = message.timestampText,
                 )
             }
             HistoryMessage.Role.ASSISTANT -> {
@@ -62,7 +75,12 @@ data class ChatItem(val id: String, val role: Role, val blocks: List<ChatBlock>,
                 } else {
                     turn.blocks
                 }
-                if (blocks.isEmpty()) null else ChatItem(message.id, Role.ASSISTANT, blocks, message.timestamp)
+                val answerText = if (message.events.isEmpty()) {
+                    message.content
+                } else {
+                    message.events.filterIsInstance<ChatEvent.Text>().joinToString("") { it.text }
+                }
+                if (blocks.isEmpty()) null else ChatItem(message.id, Role.ASSISTANT, blocks, message.timestamp, message.sdkUuid, message.timestampText, answerText)
             }
         }
     }
@@ -75,6 +93,10 @@ class TurnBuilder(
 ) {
     private val list = mutableListOf<ChatBlock>()
     private val toolIndex = HashMap<String, Int>()
+    private val allText = StringBuilder()
+
+    /** [ChatItem.answerText] of the message being built. */
+    val answerText: String get() = allText.toString()
 
     /** A copy: what is shown must not change under the UI as more events arrive. */
     val blocks: List<ChatBlock> get() = list.toList()
@@ -83,7 +105,10 @@ class TurnBuilder(
 
     fun add(event: ChatEvent) {
         when (event) {
-            is ChatEvent.Text -> if (event.parent == null) append(event.text, thinking = false)
+            is ChatEvent.Text -> {
+                allText.append(event.text)
+                if (event.parent == null) append(event.text, thinking = false)
+            }
             is ChatEvent.Thinking -> if (event.parent == null) append(event.text, thinking = true)
             is ChatEvent.ToolUse -> addToolUse(event)
             is ChatEvent.ToolResult -> {

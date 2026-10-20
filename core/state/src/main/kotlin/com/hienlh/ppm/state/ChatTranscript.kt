@@ -347,7 +347,7 @@ class ChatTranscript {
         live = null
         if (turn.isEmpty) return
         localCounter++
-        items = items + ChatItem("local-assistant-$localCounter", ChatItem.Role.ASSISTANT, turn.blocks, Instant.ofEpochMilli(now))
+        items = items + ChatItem("local-assistant-$localCounter", ChatItem.Role.ASSISTANT, turn.blocks, Instant.ofEpochMilli(now), answerText = turn.answerText)
     }
 
     private fun appendUser(content: String, id: String? = null, now: Long) {

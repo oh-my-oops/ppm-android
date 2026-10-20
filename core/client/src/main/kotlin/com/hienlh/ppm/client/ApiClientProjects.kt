@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import okhttp3.Request
 import java.io.IOException
 
 /** The server keeps its projects in [order] from now on (`reorderProjects`); a name it does not have is ignored. */
@@ -16,8 +17,11 @@ suspend fun ApiClient.reorderProjects(order: List<String>) {
  * A project's uploaded avatar, WebP (`GET /api/projects/:name/image`). [version] is the project's
  * `image`, the file's own name: the web puts it in the address, so a new upload is a new address.
  */
-suspend fun ApiClient.projectImage(name: String, version: String): ByteArray {
-    val request = request("GET", "/api/projects/${ApiClient.escape(name)}/image", listOf("v" to version))
+suspend fun ApiClient.projectImage(name: String, version: String): ByteArray =
+    bytes(request("GET", "/api/projects/${ApiClient.escape(name)}/image", listOf("v" to version)))
+
+/** The body of a GET that answers a file rather than JSON; an error answer is thrown as JSON's is. */
+internal suspend fun ApiClient.bytes(request: Request): ByteArray {
     val response = try {
         PpmHttp.getClient.newCall(request).await()
     } catch (error: IOException) {

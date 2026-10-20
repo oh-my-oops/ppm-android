@@ -30,6 +30,13 @@ suspend fun ApiClient.upload(
     return send(PpmHttp.client, request).array.orEmpty().mapNotNull(UploadedFile::from)
 }
 
+/**
+ * The bytes of a file sent with a message (`GET /api/project/:p/chat/uploads/:filename`), named by
+ * the path the message carries. The route is under a project, but every upload is reachable from any.
+ */
+suspend fun ApiClient.uploadedFile(project: String, path: String): ByteArray =
+    bytes(request("GET", "${chatPath(project)}/uploads/${ApiClient.escape(path.split('/', '\\').last())}"))
+
 /** Discards an upload that was never sent, as removing an attachment from the composer does. */
 suspend fun ApiClient.deleteUpload(project: String, path: String) {
     val filename = path.substringAfterLast('/')

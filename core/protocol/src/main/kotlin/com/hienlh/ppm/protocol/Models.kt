@@ -277,6 +277,10 @@ data class HistoryMessage(
     val content: String,
     val events: List<ChatEvent>,
     val timestamp: Instant?,
+    /** The SDK's own id for the message, which a reply names when there is one. */
+    val sdkUuid: String? = null,
+    /** [timestamp] as the server wrote it: a reply finds its message again by comparing this text. */
+    val timestampText: String? = null,
 ) {
     enum class Role(val wire: String) { USER("user"), ASSISTANT("assistant"), SYSTEM("system") }
 
@@ -290,6 +294,8 @@ data class HistoryMessage(
                 content = json["content"].string ?: "",
                 events = json["events"].array.orEmpty().map(ChatEvent::from),
                 timestamp = WireDate.parse(json["timestamp"]),
+                sdkUuid = json["sdkUuid"].string,
+                timestampText = json["timestamp"].string,
             )
         }
     }

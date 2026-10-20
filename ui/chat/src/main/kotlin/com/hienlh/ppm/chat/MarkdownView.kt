@@ -5,7 +5,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,14 +19,23 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.IntrinsicMeasurable
+import androidx.compose.ui.layout.IntrinsicMeasureScope
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Measurable
+import androidx.compose.ui.layout.MeasurePolicy
+import androidx.compose.ui.layout.MeasureResult
+import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.AnnotatedString
@@ -48,6 +56,7 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeTokens
 import com.hienlh.ppm.design.ppmText
+import kotlin.math.roundToInt
 
 /**
  * How markdown text is set. Line heights are ratios, as Tailwind's are: a 12px table cell inside
@@ -201,16 +210,20 @@ private fun MarkdownList(list: MarkdownBlock.ListBlock, style: MarkdownStyle, mo
         list.items.forEachIndexed { index, item ->
             Row {
                 // An outside marker in the list's 1rem padding; a long number hangs further out.
-                BasicText(
-                    if (list.ordered) "${list.start + index}." else "•",
-                    Modifier
-                        .alignByBaseline()
-                        .width(16.dp)
-                        .wrapContentWidth(Alignment.End, unbounded = true)
-                        .padding(end = if (list.ordered) 4.dp else 6.dp),
-                    style = ppmText(style.size, style.weight, lineHeight = style.lineHeight).copy(color = color),
-                    softWrap = false,
-                )
+                if (list.ordered) {
+                    BasicText(
+                        "${list.start + index}.",
+                        Modifier
+                            .alignByBaseline()
+                            .width(16.dp)
+                            .wrapContentWidth(Alignment.End, unbounded = true)
+                            .padding(end = 4.dp),
+                        style = ppmText(style.size, style.weight, lineHeight = style.lineHeight).copy(color = color),
+                        softWrap = false,
+                    )
+                } else {
+                    DiscMarker(style, color, Modifier.alignByBaseline())
+                }
                 if (item.checked != null) {
                     TaskBox(item.checked, Modifier.alignBy { it.measuredHeight - 1 }.padding(end = 5.dp))
                 }
@@ -218,6 +231,31 @@ private fun MarkdownList(list: MarkdownBlock.ListBlock, style: MarkdownStyle, mo
             }
         }
     }
+}
+
+/**
+ * Chrome's `disc` marker, which it draws rather than sets: a circle `(A·2/3 + 1) / 2` px across,
+ * its top `A/2` above the baseline and its left edge `⌊A·2/3⌋ + 7` px before the item's text, A
+ * being the font's ascent rounded to a pixel. Geist's own bullet glyph is half that size.
+ */
+@Composable
+private fun DiscMarker(style: MarkdownStyle, color: Color, modifier: Modifier) {
+    var baseline by remember { mutableFloatStateOf(0f) }
+    // A line of the item's text with nothing in it, for the baseline to align to and draw on.
+    BasicText(
+        BREAK.toString(),
+        modifier
+            .width(16.dp)
+            .drawBehind {
+                val ascent = (style.size.sp.toDp().value * PpmFonts.SANS_ASCENT).roundToInt()
+                val across = (ascent * 2f / 3f + 1f) / 2f
+                val left = 16f - ascent * 2 / 3 - 7f
+                val center = Offset(left + across / 2, -(ascent / 2f) + across / 2) * density
+                drawCircle(color, across / 2 * density, center + Offset(0f, baseline))
+            },
+        style = ppmText(style.size, style.weight, lineHeight = style.lineHeight),
+        onTextLayout = { baseline = it.firstBaseline },
+    )
 }
 
 /** A GFM task item's (disabled) checkbox. */
@@ -247,55 +285,85 @@ private fun MarkdownTable(header: List<String>, rows: List<List<String>>, style:
     val tokens = LocalPpmTokens.current
     val cellStyle = style.copy(size = 12f)
     val cells = listOf(header) + rows
-    BoxWithConstraints(modifier.fillMaxWidth()) {
-        val available = constraints.maxWidth
-        Box(Modifier.horizontalScroll(rememberScrollState())) {
-            Layout(
-                content = {
-                    cells.forEachIndexed { row, values ->
-                        values.forEachIndexed { column, value ->
-                            TableCell(
-                                value,
-                                style = if (row == 0) cellStyle.copy(weight = FontWeight.Medium) else cellStyle,
-                                background = if (row == 0) tokens.bgSolid.color else Color.Transparent,
-                                border = tokens.border.color,
-                                lastColumn = column == header.lastIndex,
-                                lastRow = row == cells.lastIndex,
-                            )
-                        }
-                    }
-                },
-            ) { measurables, _ ->
-                val columns = header.size
-                val minWidths = IntArray(columns)
-                val maxWidths = IntArray(columns)
-                measurables.forEachIndexed { index, cell ->
-                    val column = index % columns
-                    minWidths[column] = maxOf(minWidths[column], cell.minIntrinsicWidth(Constraints.Infinity))
-                    maxWidths[column] = maxOf(maxWidths[column], cell.maxIntrinsicWidth(Constraints.Infinity))
-                }
-                val widths = TableWidths.distribute(minWidths, maxWidths, available)
-                val heights = IntArray(cells.size)
-                measurables.forEachIndexed { index, cell ->
-                    val row = index / columns
-                    heights[row] = maxOf(heights[row], cell.minIntrinsicHeight(widths[index % columns]))
-                }
-                val placeables = measurables.mapIndexed { index, cell ->
-                    cell.measure(Constraints.fixed(widths[index % columns], heights[index / columns]))
-                }
-                layout(widths.sum(), heights.sum()) {
-                    var y = 0
-                    for (row in cells.indices) {
-                        var x = 0
-                        for (column in 0 until columns) {
-                            placeables[row * columns + column].place(x, y)
-                            x += widths[column]
-                        }
-                        y += heights[row]
-                    }
+    val policy = remember(header.size) { TableLayout(header.size) }
+    Layout(
+        content = {
+            cells.forEachIndexed { row, values ->
+                values.forEachIndexed { column, value ->
+                    TableCell(
+                        value,
+                        style = if (row == 0) cellStyle.copy(weight = FontWeight.Medium) else cellStyle,
+                        background = if (row == 0) tokens.bgSolid.color else Color.Transparent,
+                        border = tokens.border.color,
+                        lastColumn = column == header.lastIndex,
+                        lastRow = row == cells.lastIndex,
+                    )
                 }
             }
+        },
+        // The scroller passes the line's width on as its minimum, its maximum being endless.
+        modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        policy,
+    )
+}
+
+/**
+ * Rows of [columns] cells, the columns sized by [TableWidths] to fill the width the scroller
+ * passes on as its minimum. It answers intrinsic sizes too, as CSS does for a table whose width
+ * is a percentage of a box that sizes itself from it (a badge that shrinks to fit): every column
+ * at its content's narrowest, or widest.
+ */
+private class TableLayout(private val columns: Int) : MeasurePolicy {
+    override fun MeasureScope.measure(measurables: List<Measurable>, constraints: Constraints): MeasureResult {
+        val widths = widths(measurables, constraints.minWidth.takeIf { it > 0 })
+        val heights = heights(measurables, widths)
+        val placeables = measurables.mapIndexed { index, cell ->
+            cell.measure(Constraints.fixed(widths[index % columns], heights[index / columns]))
         }
+        return layout(widths.sum(), heights.sum()) {
+            var y = 0
+            for (row in heights.indices) {
+                var x = 0
+                for (column in 0 until columns) {
+                    placeables[row * columns + column].place(x, y)
+                    x += widths[column]
+                }
+                y += heights[row]
+            }
+        }
+    }
+
+    override fun IntrinsicMeasureScope.minIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) =
+        IntArray(columns).also { fold(measurables, it) { cell -> cell.minIntrinsicWidth(Constraints.Infinity) } }.sum()
+
+    override fun IntrinsicMeasureScope.maxIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) =
+        IntArray(columns).also { fold(measurables, it) { cell -> cell.maxIntrinsicWidth(Constraints.Infinity) } }.sum()
+
+    override fun IntrinsicMeasureScope.minIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int) =
+        heights(measurables, widths(measurables, width.takeIf { it != Constraints.Infinity })).sum()
+
+    override fun IntrinsicMeasureScope.maxIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int) =
+        minIntrinsicHeight(measurables, width)
+
+    /** Each column's width, filling [fill]; with nothing to fill, each at its widest. */
+    private fun widths(cells: List<IntrinsicMeasurable>, fill: Int?): IntArray {
+        val min = IntArray(columns).also { fold(cells, it) { cell -> cell.minIntrinsicWidth(Constraints.Infinity) } }
+        val max = IntArray(columns).also { fold(cells, it) { cell -> cell.maxIntrinsicWidth(Constraints.Infinity) } }
+        return TableWidths.distribute(min, max, fill ?: max.sum())
+    }
+
+    private fun heights(cells: List<IntrinsicMeasurable>, widths: IntArray): IntArray {
+        val heights = IntArray((cells.size + columns - 1) / columns)
+        cells.forEachIndexed { index, cell ->
+            val row = index / columns
+            heights[row] = maxOf(heights[row], cell.minIntrinsicHeight(widths[index % columns]))
+        }
+        return heights
+    }
+
+    /** The largest of [size] over each column's cells, into [into]. */
+    private inline fun fold(cells: List<IntrinsicMeasurable>, into: IntArray, size: (IntrinsicMeasurable) -> Int) {
+        cells.forEachIndexed { index, cell -> into[index % columns] = maxOf(into[index % columns], size(cell)) }
     }
 }
 

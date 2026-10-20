@@ -1,0 +1,632 @@
+package com.hienlh.ppm.chat
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
+import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.LucideIcon
+import com.hienlh.ppm.design.PpmIcon
+import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.colorsFade
+import com.hienlh.ppm.design.ppmClickable
+import com.hienlh.ppm.design.ppmShadow
+import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
+import com.hienlh.ppm.protocol.ChatReply
+import com.hienlh.ppm.protocol.ParsedUserMessage
+import com.hienlh.ppm.protocol.ReplyReference
+import java.time.Instant
+
+/**
+ * Where a reply card's message is (`replyAvailable` / `onJumpToReply`): a jump that shows it, or
+ * null when this chat does not hold it.
+ */
+fun interface ReplyTargets {
+    fun jump(reply: ReplyReference): (() -> Unit)?
+
+    companion object {
+        val None = ReplyTargets { null }
+    }
+}
+
+/** An image sent with a message, read with the server's credentials (`useAuthBlob`); null when it will not load. */
+fun interface ChatImages {
+    suspend fun load(path: String): ImageBitmap?
+}
+
+/** How this chat reads its images. None, and every thumbnail shows its broken-image icon. */
+val LocalChatImages = staticCompositionLocalOf<ChatImages?> { null }
+
+/** Tailwind's `shadow-sm`. */
+private val shadowSm = listOf(
+    ThemeShadow(0.0, 1.0, 3.0, 0.0, Rgba(0.0, 0.0, 0.0, 0.1)),
+    ThemeShadow(0.0, 1.0, 2.0, -1.0, Rgba(0.0, 0.0, 0.0, 0.1)),
+)
+
+/** `text-sm`'s line ratio, which a child that sets only a size (`text-[11px]`) keeps. */
+private const val SM_LINE = 20f / 14f
+
+/** `text-xs`'s, for what sits inside a `text-xs` box. */
+private const val XS_LINE = 16f / 12f
+
+/** Tailwind's `sky-500`, `sky-600` and `sky-400`, as Chrome draws their `oklch()` in sRGB. */
+private val sky500 = Rgba(0.0, 165.69 / 255, 244.07 / 255, 1.0)
+private val sky600 = Rgba(0.0, 132.13 / 255, 209.05 / 255, 1.0)
+private val sky400 = Rgba(0.0, 187.79 / 255, 1.0, 1.0)
+
+/** `IMAGE_EXTS` in message-media.tsx. */
+private val IMAGE_EXTENSIONS = setOf(".png", ".jpg", ".jpeg", ".gif", ".webp")
+
+private fun isImagePath(path: String): Boolean {
+    val dot = path.lastIndexOf('.')
+    return dot >= 0 && path.substring(dot).lowercase() in IMAGE_EXTENSIONS
+}
+
+/** `basename` in lib/utils.ts, which splits at either slash. */
+private fun fileName(path: String): String = path.split('/', '\\').last()
+
+/**
+ * The user's message (`message-user-bubble.tsx`): what the composer and the runtime wrapped
+ * around it taken apart into a reply card, badges and chips, then the text, two lines until
+ * "Show more". What the runtime put there on its own (a task's result, a command's caveat) is
+ * drawn faint and full width, with no action bar.
+ */
+@Composable
+internal fun UserBubble(content: String, timestamp: Instant?, replies: ReplyTargets, modifier: Modifier = Modifier) {
+    val tokens = LocalPpmTokens.current
+    val parsed = remember(content) { ParsedUserMessage.parse(content) }
+    val system = parsed.isSystemContext
+    val rad = tokens.rad.dp
+    val shape = if (system) RoundedCornerShape(12.dp) else RoundedCornerShape(topStart = rad, topEnd = rad, bottomEnd = 4.dp, bottomStart = rad)
+    Column(
+        modifier.fillMaxWidth(),
+        horizontalAlignment = if (system) Alignment.Start else Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        // As wide as what it holds, as a box in a flex column is, up to 80%.
+        var bubble = if (system) Modifier.fillMaxWidth() else Modifier.maxWidthFraction(0.8f).width(IntrinsicSize.Max)
+        for (shadow in shadowSm) bubble = bubble.ppmShadow(shadow, shape)
+        val fill = if (system) tokens.panel.opacity(0.4) else tokens.accentWash
+        val stroke = if (system) tokens.border.opacity(0.4) else tokens.accentWashBorder
+        Column(bubble.background(fill.color, shape).border(1.dp, stroke.color, shape).padding(horizontal = 13.dp, vertical = 9.dp)) {
+            parsed.replyTo?.let { ReplyCard(it, replies.jump(it), Modifier.padding(bottom = 8.dp)) }
+            if (parsed.tags.isNotEmpty()) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (tag in parsed.tags) {
+                        if (tag.name == "task-notification") TaskNotificationBadge(tag) else SystemTagBadge(tag)
+                    }
+                }
+            }
+            parsed.agent?.let { agent ->
+                // `dark:` is the device's dark mode on the web, not PPM's theme.
+                val color = if (isSystemInDarkTheme()) sky400 else sky600
+                LabelChip(agent, sky500.opacity(0.15), sky500.opacity(0.25), color) { PpmIcon(ProductIcon.Bot, 12.dp, it) }
+            }
+            parsed.command?.let { command ->
+                LabelChip(command.name, tokens.accent.opacity(0.15), tokens.accent.opacity(0.2), tokens.accent) { PpmIcon(LucideIcon.Slash, 12.dp, it) }
+            }
+            parsed.idePath?.let { path ->
+                Row(Modifier.padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    BasicText("Opened in IDE:", style = ppmText(11f, lineHeight = 11f * SM_LINE).copy(color = tokens.text3.color))
+                    FilePathChip(path, lineHeight = 10f * SM_LINE)
+                }
+            }
+            if (parsed.files.isNotEmpty()) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (path in parsed.files) if (isImagePath(path)) ImageChip(path) else FileChip(path)
+                }
+            }
+            if (parsed.terminalBlocks.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (block in parsed.terminalBlocks) TerminalBlockPreview(block)
+                }
+            }
+            if (parsed.text.isNotEmpty()) BubbleText(parsed.text, system)
+        }
+        if (!system) MessageActionBar(timestamp, remember(content) { ChatReply.decode(content).content })
+    }
+}
+
+/** The text, two lines until "Show more"; then up to half the window, scrolling. */
+@Composable
+private fun BubbleText(text: String, system: Boolean) {
+    val tokens = LocalPpmTokens.current
+    val uriHandler = LocalUriHandler.current
+    var expanded by remember(text) { mutableStateOf(false) }
+    var clamped by remember(text) { mutableStateOf(false) }
+    // `max-h-[50vh]` once expanded.
+    val expandedLimit = with(LocalDensity.current) { (LocalWindowInfo.current.containerSize.height / 2).toDp() }
+    val style = ppmText(14f, lineHeight = 20f).copy(color = (if (system) tokens.text2 else tokens.text).color)
+    val (annotated, inline) = if (system) {
+        pathChips(text)
+    } else {
+        remember(text, tokens, uriHandler) { linkedUserText(text, tokens, uriHandler) } to emptyMap<String, InlineTextContent>()
+    }
+    // `linkedUserText` breaks its URLs only in text with no break of its own.
+    WithoutBreaksOnCopy(enabled = !system && BREAK !in text) {
+        SelectionContainer {
+            if (expanded) {
+                BasicText(annotated, Modifier.heightIn(max = expandedLimit).verticalScroll(rememberScrollState()), style, inlineContent = inline)
+            } else {
+                BasicText(
+                    annotated,
+                    style = style,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { clamped = it.hasVisualOverflow },
+                    inlineContent = inline,
+                )
+            }
+        }
+    }
+    if (expanded || clamped) {
+        // `text-primary/70 hover:text-primary`, or `text-text-subtle hover:text-text-secondary` for context.
+        val hover = rememberHover()
+        val lit = hover.lit.toDouble()
+        val color = (if (system) tokens.text2.mix(tokens.text3, lit) else tokens.accent.mix(tokens.accent.opacity(0.7), lit)).color
+        Row(
+            Modifier.padding(top = 4.dp).ppmClickable(pressedColor = Color.Transparent, source = hover.source) { expanded = !expanded },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            PpmIcon(if (expanded) ProductIcon.ChevronUp else ProductIcon.ChevronDown, 12.dp, color)
+            BasicText(if (expanded) "Show less" else "Show more", style = ppmText(12f, lineHeight = 16f).copy(color = color))
+        }
+    }
+}
+
+/** `TextWithFilePaths`: each absolute path of two segments or more drawn as its chip, in the line. */
+private val ABSOLUTE_PATH = Regex("""/(?:[\w.\-]+/)+[\w.\-]+""")
+
+@Composable
+private fun pathChips(text: String): Pair<AnnotatedString, Map<String, InlineTextContent>> {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val tokens = LocalPpmTokens.current
+    return remember(text, density, tokens) {
+        val inline = HashMap<String, InlineTextContent>()
+        val annotated = buildAnnotatedString {
+            var last = 0
+            ABSOLUTE_PATH.findAll(text).forEachIndexed { index, match ->
+                append(text, last, match.range.first)
+                val id = "path-$index"
+                appendInlineContent(id, match.value)
+                val label = measurer.measure(fileName(match.value), filePathStyle(10f * SM_LINE), maxLines = 1).size.width
+                with(density) {
+                    // Borders, padding, both icons and both gaps around the name, which stops at 240.
+                    val width = 40.dp.toPx() + minOf(label.toFloat(), 240.dp.toPx())
+                    val height = (6f + 10f * SM_LINE).dp.toPx()
+                    inline[id] = InlineTextContent(Placeholder(width.toSp(), height.toSp(), PlaceholderVerticalAlign.TextCenter)) {
+                        FilePathChip(match.value, lineHeight = 10f * SM_LINE, Modifier.fillMaxSize())
+                    }
+                }
+                last = match.range.last + 1
+            }
+            append(text, last, text.length)
+        }
+        annotated to inline
+    }
+}
+
+/** `font-mono text-[10px]`, its line [lineHeight] tall. */
+private fun filePathStyle(lineHeight: Float) = ppmText(10f, kind = FontKind.MONO, lineHeight = lineHeight)
+
+/**
+ * `FilePathChip`: a path by its name, `rounded border-border/50 bg-surface/50 font-mono
+ * text-[10px]`. [lineHeight] is what the box it sits in makes of 10 px. The web opens the file in a
+ * tab when it is clicked; this app has no file tab yet (06a), so it is only drawn.
+ */
+@Composable
+private fun FilePathChip(path: String, lineHeight: Float, modifier: Modifier = Modifier) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(4.dp)
+    val color = tokens.text2.color
+    Row(
+        modifier
+            .clip(shape)
+            .background(tokens.panel.opacity(0.5).color)
+            .border(1.dp, tokens.border.opacity(0.5).color, shape)
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        PpmIcon(ProductIcon.FileText, 10.dp, color)
+        BasicText(
+            fileName(path),
+            Modifier.widthIn(max = 240.dp),
+            style = filePathStyle(lineHeight).copy(color = color),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        PpmIcon(ProductIcon.ExternalLink, 8.dp, color.copy(alpha = color.alpha * 0.5f))
+    }
+}
+
+/** The agent's and the slash command's chip: `rounded-md border px-2 py-0.5 text-xs font-medium`, `mb-0.5` under it. */
+@Composable
+private fun LabelChip(label: String, fill: Rgba, stroke: Rgba, color: Rgba, icon: @Composable (Color) -> Unit) {
+    val shape = RoundedCornerShape(8.dp)
+    Row(
+        Modifier
+            .padding(bottom = 2.dp)
+            .background(fill.color, shape)
+            .border(1.dp, stroke.color, shape)
+            .padding(horizontal = 9.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        icon(color.color)
+        BasicText(label, style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = color.color))
+    }
+}
+
+/** An attachment's box: `rounded-md border-border/60 bg-background/40 px-1.5 py-0.5 text-[11px]`. */
+@Composable
+private fun AttachmentChip(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(8.dp)
+    Row(
+        modifier
+            .clip(shape)
+            .background(tokens.bgSolid.opacity(0.4).color)
+            .border(1.dp, tokens.border.opacity(0.6).color, shape)
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) { content() }
+}
+
+@Composable
+private fun AttachmentName(path: String) {
+    BasicText(
+        fileName(path),
+        Modifier.widthIn(max = 128.dp),
+        style = ppmText(11f, lineHeight = 11f * SM_LINE).copy(color = LocalPpmTokens.current.text2.color),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/** A file that is not an image: its icon and name. */
+@Composable
+private fun FileChip(path: String) {
+    AttachmentChip {
+        PpmIcon(ProductIcon.FileText, 12.dp, LocalPpmTokens.current.text2.color)
+        AttachmentName(path)
+    }
+}
+
+private sealed interface Thumbnail {
+    data object Loading : Thumbnail
+    data object Failed : Thumbnail
+    data class Loaded(val image: ImageBitmap) : Thumbnail
+}
+
+/**
+ * `AuthImageThumbnail`: a 16 px picture of the image in place of the icon, a pulsing square while
+ * it loads and the image icon if it will not. The web opens it in its lightbox; this app has none
+ * yet (3b.3), so a tap does nothing.
+ */
+@Composable
+private fun ImageChip(path: String) {
+    val tokens = LocalPpmTokens.current
+    val images = LocalChatImages.current
+    val thumbnail by produceState<Thumbnail>(Thumbnail.Loading, path, images) {
+        value = images?.load(path)?.let(Thumbnail::Loaded) ?: Thumbnail.Failed
+    }
+    AttachmentChip {
+        val shape = RoundedCornerShape(6.dp)
+        when (val shown = thumbnail) {
+            is Thumbnail.Loaded -> Image(shown.image, fileName(path), Modifier.size(16.dp).clip(shape), contentScale = ContentScale.Crop)
+            Thumbnail.Failed -> PpmIcon(ProductIcon.Image, 12.dp, tokens.text2.color)
+            Thumbnail.Loading -> Box(Modifier.size(16.dp).alpha(pulse()).background(tokens.panel.color, shape))
+        }
+        AttachmentName(path)
+    }
+}
+
+/** `TerminalBlockPreview`: "Terminal output", and the block under it once opened. */
+@Composable
+private fun TerminalBlockPreview(content: String) {
+    val tokens = LocalPpmTokens.current
+    var expanded by remember(content) { mutableStateOf(false) }
+    val hover = rememberHover()
+    val pressed by hover.source.collectIsPressedAsState()
+    // `hover:bg-surface` only while closed; a finger down lights it as a mouse over it does.
+    val lit = if (expanded) 0.0 else if (pressed) 1.0 else hover.lit.toDouble()
+    val open = colorsFade(expanded).toDouble()
+    val shape = RoundedCornerShape(8.dp)
+    val fill = tokens.panel2.mix(tokens.panel.mix(tokens.bgSolid.opacity(0.4), lit), open)
+    val stroke = tokens.accent.opacity(0.5).mix(tokens.border.opacity(0.6), open)
+    val color = tokens.text.mix(tokens.text2, open).color
+    val turn by animateFloatAsState(if (expanded) 180f else 0f, label = "chevron")
+    Column {
+        Row(
+            Modifier
+                .clip(shape)
+                .background(fill.color)
+                .border(1.dp, stroke.color, shape)
+                .ppmClickable(pressedColor = Color.Transparent, source = hover.source) { expanded = !expanded }
+                .padding(horizontal = 9.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            PpmIcon(ProductIcon.TerminalSquare, 14.dp, color)
+            BasicText("Terminal output", style = ppmText(12f, lineHeight = 16f).copy(color = color))
+            PpmIcon(ProductIcon.ChevronDown, 12.dp, color, Modifier.rotate(turn))
+        }
+        if (expanded) {
+            // `mt-1 max-h-40 overflow-auto rounded-md border bg-background p-2 text-xs font-mono`.
+            SelectionContainer(
+                Modifier
+                    .padding(top = 4.dp)
+                    .fillMaxWidth()
+                    .heightIn(max = 160.dp)
+                    .clip(shape)
+                    .background(tokens.bgSolid.color)
+                    .border(1.dp, tokens.border.color, shape)
+                    .verticalScroll(rememberScrollState())
+                    .padding(9.dp),
+            ) {
+                BasicText(content, style = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text.color))
+            }
+        }
+    }
+}
+
+/** A badge's pill: `rounded-full border-border/60 bg-surface/50 px-2 py-0.5 text-text-subtle`, lit as `hover:` lights it. */
+@Composable
+private fun BadgePill(gap: Int, onClick: () -> Unit, content: @Composable (Color, Float) -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val hover = rememberHover()
+    val pressed by hover.source.collectIsPressedAsState()
+    val lit = if (pressed) 1.0 else hover.lit.toDouble()
+    Row(
+        Modifier
+            .clip(CircleShape)
+            .background(tokens.panel.mix(tokens.panel.opacity(0.5), lit).color)
+            .border(1.dp, tokens.border.opacity(0.6).color, CircleShape)
+            .ppmClickable(pressedColor = Color.Transparent, source = hover.source, onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(gap.dp),
+    ) { content(tokens.text2.mix(tokens.text3, lit).color, lit.toFloat()) }
+}
+
+/** What an opened badge shows: `mt-1 rounded border-border/40 bg-surface/30 px-2 py-1.5`, scrolling past [maxHeight] when it has one. */
+@Composable
+private fun BadgeBody(maxHeight: Int?, content: @Composable () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(4.dp)
+    Box(
+        Modifier
+            .padding(top = 4.dp)
+            .fillMaxWidth()
+            .then(if (maxHeight != null) Modifier.heightIn(max = maxHeight.dp) else Modifier)
+            .clip(shape)
+            .background(tokens.panel.opacity(0.3).color)
+            .border(1.dp, tokens.border.opacity(0.4).color, shape)
+            .then(if (maxHeight != null) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+            .padding(horizontal = 9.dp, vertical = 7.dp),
+    ) { content() }
+}
+
+@Composable
+private fun Chevron(open: Boolean, color: Color) {
+    val turn by animateFloatAsState(if (open) 90f else 0f, label = "chevron")
+    PpmIcon(ProductIcon.ChevronRight, 10.dp, color, Modifier.rotate(turn))
+}
+
+/** `SystemTagBadge`: the tag's label, its text under it once opened. */
+@Composable
+private fun SystemTagBadge(tag: ParsedUserMessage.SystemTag) {
+    val tokens = LocalPpmTokens.current
+    var open by remember(tag) { mutableStateOf(false) }
+    // A flex item: as wide as the wider of its pill and what it opens to.
+    Column(Modifier.width(IntrinsicSize.Max)) {
+        BadgePill(gap = 4, onClick = { open = !open }) { color, _ ->
+            PpmIcon(ProductIcon.Tag, 10.dp, color)
+            BasicText(tag.label, style = ppmText(12f, lineHeight = 16f).copy(color = color))
+            Chevron(open, color)
+        }
+        if (open) {
+            BadgeBody(maxHeight = 160) {
+                // `text-[11px] leading-relaxed text-text-subtle/80 whitespace-pre-wrap`.
+                SelectionContainer {
+                    BasicText(tag.content, style = ppmText(11f, lineHeight = 11f * 1.625f).copy(color = tokens.text3.opacity(0.8).color))
+                }
+            }
+        }
+    }
+}
+
+/** `TaskNotificationBadge`: how the task ended and its summary; opened, the summary, its output file and its result. */
+@Composable
+private fun TaskNotificationBadge(tag: ParsedUserMessage.SystemTag) {
+    val tokens = LocalPpmTokens.current
+    var open by remember(tag) { mutableStateOf(false) }
+    val summary = remember(tag) { tag.field("summary") }
+    val outputFile = remember(tag) { tag.field("output-file") }
+    val result = remember(tag) { tag.field("result") }
+    val ok = remember(tag) { tag.field("status") == "completed" }
+    Column(Modifier.width(IntrinsicSize.Max)) {
+        BadgePill(gap = 6, onClick = { open = !open }) { color, _ ->
+            if (ok) PpmIcon(ProductIcon.CheckCircle2, 10.dp, tokens.success.color) else PpmIcon(ProductIcon.XCircle, 10.dp, tokens.warning.color)
+            BasicText(
+                summary ?: "Task notification",
+                Modifier.widthIn(max = 320.dp),
+                style = ppmText(12f, lineHeight = 16f).copy(color = color),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Chevron(open, color)
+        }
+        if (open) {
+            // No `max-h` of its own: only the result in it scrolls.
+            BadgeBody(maxHeight = null) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    summary?.let { BasicText(it, style = ppmText(11f, lineHeight = 11f * XS_LINE).copy(color = tokens.text2.color)) }
+                    outputFile?.let { FilePathChip(it, lineHeight = 10f * XS_LINE) }
+                    result?.let { TaskResult(it) }
+                }
+            }
+        }
+    }
+}
+
+/** The result as markdown, `text-[11px] leading-relaxed text-text-subtle/80 max-h-60`, scrolling past that. */
+@Composable
+private fun TaskResult(markdown: String) {
+    val tokens = LocalPpmTokens.current
+    val blocks = remember(markdown) { Markdown.parse(markdown) }
+    val style = MarkdownStyle(size = 11f, lineHeightRatio = 1.625f, color = tokens.text3.opacity(0.8))
+    // It scrolls, so the last block's bottom margin stays inside it.
+    val trailing = blocks.lastOrNull()?.let { MarkdownGaps.margins(it).second } ?: 0
+    Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()).padding(bottom = trailing.dp)) {
+        MarkdownBlocks(blocks, style)
+    }
+}
+
+/**
+ * `ReplyCard`: the message this one answers, as it was quoted — "Reply to you / AI", which jumps
+ * to it while the chat holds it, two lines of the quote until "Show quote". On a phone both
+ * buttons are 44 tall (`min-h-[44px] md:min-h-0`).
+ */
+@Composable
+private fun ReplyCard(reply: ReplyReference, onJump: (() -> Unit)?, modifier: Modifier = Modifier) {
+    val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
+    var expanded by remember(reply) { mutableStateOf(false) }
+    val small = ppmText(12f, lineHeight = 16f)
+    val minHeight = if (mobile) 44.dp else 0.dp
+    Column(
+        modifier
+            .fillMaxWidth()
+            .replyFrame(tokens.panel.opacity(0.6).color, tokens.border.color, tokens.accent.color)
+            .padding(start = 10.dp, end = 9.dp, top = 5.dp, bottom = 5.dp),
+    ) {
+        Box(
+            Modifier
+                .heightIn(min = minHeight)
+                .then(if (onJump != null) Modifier.ppmClickable(pressedColor = Color.Transparent, onClick = onJump) else Modifier),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            BasicText(
+                if (reply.role == ReplyReference.Role.USER) "Reply to you" else "Reply to AI",
+                style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = (if (onJump != null) tokens.accent else tokens.text2).color),
+            )
+        }
+        val quoteStyle = small.copy(color = tokens.text2.color)
+        SelectionContainer {
+            if (expanded) {
+                BasicText(reply.quote, Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()), quoteStyle)
+            } else {
+                BasicText(reply.quote, style = quoteStyle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        val note = small.copy(color = tokens.text3.color)
+        if (reply.truncated) BasicText("Quote shortened to 12,000 characters", Modifier.padding(top = 4.dp), note)
+        if (onJump == null) BasicText("Original message unavailable", Modifier.padding(top = 4.dp), note)
+        // `text-primary hover:underline`, at once.
+        val hover = rememberHover(instant = true)
+        Box(
+            Modifier.heightIn(min = minHeight).ppmClickable(pressedColor = Color.Transparent, source = hover.source) { expanded = !expanded },
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            BasicText(
+                if (expanded) "Show less" else "Show quote",
+                style = small.copy(color = tokens.accent.color, textDecoration = if (hover.lit > 0f) TextDecoration.Underline else null),
+            )
+        }
+    }
+}
+
+/**
+ * `rounded-md border border-border border-l-2 border-l-primary` over its fill: the left side 2 px
+ * in the accent, the rest 1 px, the colours meeting where CSS joins them, on the line from each
+ * outer corner through the inner one.
+ */
+private fun Modifier.replyFrame(fill: Color, border: Color, accent: Color): Modifier = drawBehind {
+    val radius = 8.dp.toPx()
+    val left = 2.dp.toPx()
+    val side = 1.dp.toPx()
+    val outer = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radius))) }
+    val leftCorner = CornerRadius((radius - left).coerceAtLeast(0f), (radius - side).coerceAtLeast(0f))
+    val rightCorner = CornerRadius((radius - side).coerceAtLeast(0f))
+    val inner = Path().apply {
+        addRoundRect(RoundRect(left, side, size.width - side, size.height - side, leftCorner, rightCorner, rightCorner, leftCorner))
+    }
+    drawPath(outer, fill)
+    val ring = Path.combine(PathOperation.Difference, outer, inner)
+    drawPath(ring, border)
+    val slope = radius * side / left
+    val leftShare = Path().apply {
+        moveTo(0f, 0f)
+        lineTo(radius, slope)
+        lineTo(radius, size.height - slope)
+        lineTo(0f, size.height)
+        close()
+    }
+    clipPath(leftShare) { drawPath(ring, accent) }
+}

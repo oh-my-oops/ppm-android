@@ -28,6 +28,7 @@ import com.hienlh.ppm.client.gitStatus
 import com.hienlh.ppm.client.keybindings
 import com.hienlh.ppm.client.newChatProviderSettings
 import com.hienlh.ppm.client.projectImage
+import com.hienlh.ppm.client.uploadedFile
 import com.hienlh.ppm.client.putUiPrefs
 import com.hienlh.ppm.client.renameSession
 import com.hienlh.ppm.client.reorderProjects
@@ -854,6 +855,24 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         }
         // A failure is not kept: the next avatar drawn asks again, as an <img> mounted again does.
         return load.await().also { if (it == null) projectImages.remove(key, load) }
+    }
+
+    /** Images sent with messages, read or being read, by file name: the web's `imageBlobCache`, kept for the session. */
+    private val chatImages = mutableMapOf<String, Deferred<ImageBitmap?>>()
+
+    /** An image a message carries (`AuthImageThumbnail`); null when it will not load, and asked again next time. */
+    suspend fun chatImage(project: String, path: String): ImageBitmap? {
+        val api = api ?: return null
+        val key = path.split('/', '\\').last()
+        val load = chatImages.getOrPut(key) {
+            scope.async {
+                quietly {
+                    val bytes = api.uploadedFile(project, path)
+                    withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }
+                }
+            }
+        }
+        return load.await().also { if (it == null) chatImages.remove(key, load) }
     }
 
     /**

@@ -32,6 +32,7 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.selectAll
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -68,7 +69,9 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
 import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.chat.CONTINUE_AFTER_STOP
+import com.hienlh.ppm.chat.ChatImages
 import com.hienlh.ppm.chat.ChatTranscriptView
+import com.hienlh.ppm.chat.LocalChatImages
 import com.hienlh.ppm.chat.RelativeTime
 import com.hienlh.ppm.chat.TurnStopBar
 import com.hienlh.ppm.design.LocalPpmMobile
@@ -111,23 +114,26 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         // The chat's own `@container`: under 420 px the chips drop their words.
         val narrow = maxWidth <= 420.dp
         Column(Modifier.fillMaxSize()) {
-            ChatTranscriptView(
-                state,
-                onRespond = { request, approved, data -> chat.respond(request, approved, data) },
-                onLoadOlder = { chat.loadOlder() },
-                onReload = { chat.reload() },
-                modifier = Modifier.weight(1f),
-                jumps = remember(tab.tabId) { model.chatJumps.filter { it.first == tab.tabId }.map { it.second } },
-                welcome = {
-                    // `w-full px-4`; picking a chat shows it in this tab. The chat itself is left out:
-                    // this app makes a new chat's session before its first message, the web after.
-                    tab.welcomeList?.let { list ->
-                        SessionListPanel(model, list, onOpen = { model.replaceTab(tab.tabId, it) }, Modifier.padding(horizontal = 16.dp), without = tab.session.id)
-                    }
-                },
-                onDismiss = chat::dismissMessage,
-                onClearErrors = chat::clearErrors,
-            )
+            val images = remember(tab.project) { ChatImages { model.chatImage(tab.project, it) } }
+            CompositionLocalProvider(LocalChatImages provides images) {
+                ChatTranscriptView(
+                    state,
+                    onRespond = { request, approved, data -> chat.respond(request, approved, data) },
+                    onLoadOlder = { chat.loadOlder() },
+                    onReload = { chat.reload() },
+                    modifier = Modifier.weight(1f),
+                    jumps = remember(tab.tabId) { model.chatJumps.filter { it.first == tab.tabId }.map { it.second } },
+                    welcome = {
+                        // `w-full px-4`; picking a chat shows it in this tab. The chat itself is left out:
+                        // this app makes a new chat's session before its first message, the web after.
+                        tab.welcomeList?.let { list ->
+                            SessionListPanel(model, list, onOpen = { model.replaceTab(tab.tabId, it) }, Modifier.padding(horizontal = 16.dp), without = tab.session.id)
+                        }
+                    },
+                    onDismiss = chat::dismissMessage,
+                    onClearErrors = chat::clearErrors,
+                )
+            }
             state.notice?.let { NoticeBar(it) { chat.dismissNotice() } }
             val stop = state.turnStop
             if (stop != null && !state.isRunning) TurnStopBar(stop, onContinue = { chat.send(CONTINUE_AFTER_STOP) })

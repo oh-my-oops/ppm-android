@@ -28,6 +28,7 @@ import kotlinx.serialization.json.JsonElement
 /** Everything one chat shows, as one value the UI collects. */
 data class ChatState(
     val sessionId: String,
+    val providerId: String? = null,
     val items: List<ChatItem> = emptyList(),
     /** The blocks of the assistant message being streamed. */
     val live: List<ChatBlock>? = null,
@@ -76,7 +77,7 @@ class ChatController(
     var sessionId: String = session.id
         private set
 
-    private val _state = MutableStateFlow(ChatState(sessionId = session.id))
+    private val _state = MutableStateFlow(ChatState(sessionId = session.id, providerId = session.providerId))
     val state: StateFlow<ChatState> = _state.asStateFlow()
 
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
@@ -309,6 +310,7 @@ class ChatController(
     private fun publish() {
         _state.value = ChatState(
             sessionId = sessionId,
+            providerId = providerId,
             items = transcript.items,
             live = transcript.live?.blocks,
             phase = transcript.phase,

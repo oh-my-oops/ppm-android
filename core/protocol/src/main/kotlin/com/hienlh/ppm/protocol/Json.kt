@@ -113,7 +113,7 @@ internal fun jsNumber(value: Double?): String {
 }
 
 /** `JSON.stringify` of a string, including its escapes for lone surrogates. */
-private fun StringBuilder.appendJsString(text: String) {
+internal fun StringBuilder.appendJsString(text: String) {
     append('"')
     var index = 0
     while (index < text.length) {

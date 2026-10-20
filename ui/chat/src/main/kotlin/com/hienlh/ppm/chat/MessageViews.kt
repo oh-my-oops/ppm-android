@@ -81,75 +81,17 @@ data class MessageActions(val timestamp: Instant?, val copyText: String)
 
 /** One message of the transcript (`MessageBubble` in message-list.tsx). */
 @Composable
-fun ChatMessageView(item: ChatItem, actions: MessageActions?, modifier: Modifier = Modifier, onDismiss: () -> Unit = {}) {
+fun ChatMessageView(
+    item: ChatItem,
+    actions: MessageActions?,
+    modifier: Modifier = Modifier,
+    replies: ReplyTargets = ReplyTargets.None,
+    onDismiss: () -> Unit = {},
+) {
     when (item.role) {
-        ChatItem.Role.USER -> UserBubble(item.text, item.timestamp, modifier)
+        ChatItem.Role.USER -> UserBubble(item.text, item.timestamp, replies, modifier)
         ChatItem.Role.ASSISTANT -> AssistantBlocks(item.blocks, live = false, actions = actions, modifier = modifier)
         ChatItem.Role.SYSTEM -> SystemMessage(item.text, onDismiss, modifier)
-    }
-}
-
-// User
-
-/** Tailwind's `shadow-sm`. */
-private val shadowSm = listOf(
-    ThemeShadow(0.0, 1.0, 3.0, 0.0, Rgba(0.0, 0.0, 0.0, 0.1)),
-    ThemeShadow(0.0, 1.0, 2.0, -1.0, Rgba(0.0, 0.0, 0.0, 0.1)),
-)
-
-/**
- * The user's message: accent wash, the corner by the sender squared off, two lines until
- * "Show more" (`message-user-bubble.tsx`).
- */
-@Composable
-internal fun UserBubble(text: String, timestamp: Instant?, modifier: Modifier = Modifier) {
-    val tokens = LocalPpmTokens.current
-    val uriHandler = LocalUriHandler.current
-    var expanded by remember(text) { mutableStateOf(false) }
-    var clamped by remember(text) { mutableStateOf(false) }
-    val rad = tokens.rad.dp
-    val shape = RoundedCornerShape(topStart = rad, topEnd = rad, bottomEnd = 4.dp, bottomStart = rad)
-    // `max-h-[50vh]` once expanded.
-    val expandedLimit = with(LocalDensity.current) { (LocalWindowInfo.current.containerSize.height / 2).toDp() }
-    Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        var bubble = Modifier.maxWidthFraction(0.8f)
-        for (shadow in shadowSm) bubble = bubble.ppmShadow(shadow, shape)
-        Column(
-            bubble
-                .background(tokens.accentWash.color, shape)
-                .border(1.dp, tokens.accentWashBorder.color, shape)
-                .padding(horizontal = 13.dp, vertical = 9.dp),
-        ) {
-            val annotated = remember(text, tokens, uriHandler) { linkedUserText(text, tokens, uriHandler) }
-            val style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color)
-            SelectionContainer {
-                if (expanded) {
-                    BasicText(annotated, Modifier.heightIn(max = expandedLimit).verticalScroll(rememberScrollState()), style)
-                } else {
-                    BasicText(
-                        annotated,
-                        style = style,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        onTextLayout = { clamped = it.hasVisualOverflow },
-                    )
-                }
-            }
-            if (expanded || clamped) {
-                // `text-primary/70 hover:text-primary`.
-                val hover = rememberHover()
-                val color = tokens.accent.mix(tokens.accent.opacity(0.7), hover.lit.toDouble()).color
-                Row(
-                    Modifier.padding(top = 4.dp).ppmClickable(pressedColor = Color.Transparent, source = hover.source) { expanded = !expanded },
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    PpmIcon(if (expanded) ProductIcon.ChevronUp else ProductIcon.ChevronDown, 12.dp, color)
-                    BasicText(if (expanded) "Show less" else "Show more", style = ppmText(12f, lineHeight = 16f).copy(color = color))
-                }
-            }
-        }
-        MessageActionBar(timestamp, text)
     }
 }
 
@@ -237,7 +179,7 @@ fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActi
 
 /** Tailwind's `animate-pulse`: 2 s, down to half opacity and back. */
 @Composable
-private fun pulse(): Float {
+internal fun pulse(): Float {
     val alpha by rememberInfiniteTransition(label = "pulse").animateFloat(
         initialValue = 1f,
         targetValue = 0.5f,

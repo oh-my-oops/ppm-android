@@ -26,6 +26,9 @@ object PpmFonts {
         Font(R.font.geist_italic, FontWeight.Normal, FontStyle.Italic),
     )
 
+    /** Geist's ascender, 1005 of its 1000 units: what Chrome sizes a list's disc from. */
+    const val SANS_ASCENT = 1.005f
+
     /**
      * The very files the web loads (`@fontsource/monaspace-argon`: release 1.101, Latin only, at
      * 400 and 700). 1.400's vertical metrics set 11 px text nearly 2 px lower in its line than the

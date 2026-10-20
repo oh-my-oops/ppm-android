@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -14,10 +15,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -31,6 +30,9 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -40,12 +42,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -68,10 +79,13 @@ import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ApprovalRequest
+import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.state.ChatBlock
 import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.ChatState
+import com.hienlh.ppm.state.MessageReply
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
@@ -80,9 +94,9 @@ import kotlinx.serialization.json.JsonElement
 import java.time.Instant
 
 /**
- * A chat's messages, the turn streaming in, and what it waits on — kept on the newest
- * (`MessageList` in message-list.tsx). The list is laid out from the bottom, so a growing turn
- * stays in view and older pages arriving above move nothing.
+ * A chat's messages, the turn streaming in, and what it waits on (`MessageList` in
+ * message-list.tsx): kept on the newest while it is at the end, and left where the user put it
+ * once they scroll away ([TranscriptScroll]).
  */
 @Composable
 fun ChatTranscriptView(
@@ -130,38 +144,79 @@ private fun TranscriptList(
     onClearErrors: () -> Unit,
 ) {
     val rows = remember(state.items, state.isRunning) { TranscriptRows.of(state.items, state.isRunning) }
-    val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val tokens = LocalPpmTokens.current
     val live = state.live
-    // Laid out bottom up: index 0 is the newest thing on screen.
-    val tail = 1 + if (!live.isNullOrEmpty()) 1 else 0
+    // Top down, as the web's: the older-messages row, the messages oldest first, the turn
+    // streaming in, and the approval or the thinking line while there is one.
+    val head = if (state.historyStart > 0) 1 else 0
+    val trailing = state.pendingApproval != null || indicatorLabel(state) != null
+    val count = head + rows.size + (if (!live.isNullOrEmpty()) 1 else 0) + (if (trailing) 1 else 0)
+    // Opened at its end, so the first frame is already the newest, and the older-messages row,
+    // which loads a page once it is composed, is not passed on the way there.
+    val list = rememberLazyListState((count - 1).coerceAtLeast(0), OPEN_AT_END)
+    val scroll = rememberTranscriptScroll(list)
+    val oldest = rows.firstOrNull()?.item?.id
+    SideEffect {
+        scroll.keepPlace(oldest) { id -> rows.indexOfFirst { it.item.id == id }.let { if (it < 0) -1 else head + it } }
+    }
+    // The message a reply card jumped to, lit for 1.4 s (`showMessageAt`).
+    var flashing by remember { mutableStateOf<String?>(null) }
+    var flashJob by remember { mutableStateOf<Job?>(null) }
+    val replies = remember(rows, state.sessionId, state.providerId, head) {
+        val found = HashMap<ReplyReference, ChatItem?>()
+        ReplyTargets { reply ->
+            val target = if (reply in found) found[reply] else MessageReply.resolve(reply, state.items, state.sessionId, state.providerId).also { found[reply] = it }
+            val row = target?.let { rows.indexOfFirst { it.item.id == target.id } } ?: -1
+            if (target == null || row < 0) return@ReplyTargets null
+            val jump: () -> Unit = {
+                flashJob?.cancel()
+                flashing = target.id
+                flashJob = scope.launch {
+                    delay(1_400)
+                    flashing = null
+                }
+                scope.launch {
+                    scroll.release()
+                    list.reveal(head + row, with(density) { 24.dp.toPx() })
+                }
+            }
+            jump
+        }
+    }
     // The user's messages as items of that list, oldest first.
-    val userItems = remember(rows, tail) { rows.indices.filter { rows[it].item.role == ChatItem.Role.USER }.map { tail + rows.lastIndex - it } }
+    val userItems = remember(rows, head) { rows.indices.filter { rows[it].item.role == ChatItem.Role.USER }.map { head + it } }
     val nav by remember(userItems, density) { derivedStateOf { list.messageNav(userItems, density) } }
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true, verticalArrangement = Arrangement.Top) {
-            item(key = "trailing") { Trailing(state, turnStartedAt, onRespond) }
+        LazyColumn(Modifier.fillMaxSize().nestedScroll(scroll.connection), state = list) {
+            if (head > 0) {
+                item(key = OLDER_ROW) { OlderMessagesRow(state.loadingOlder, state.historyStart, onLoadOlder) }
+            }
+            for (row in rows) {
+                item(key = row.item.id, contentType = row.item.role) {
+                    ChatMessageView(
+                        row.item,
+                        row.actions,
+                        Modifier.replyFlash(flashing == row.item.id, tokens.accent).padding(start = 16.dp, end = 16.dp, top = 16.dp),
+                        replies,
+                    ) { onDismiss(row.item.id) }
+                }
+            }
             if (!live.isNullOrEmpty()) {
                 item(key = "live") {
                     AssistantBlocks(live, live = state.isRunning, actions = null, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp))
                 }
             }
-            for (index in rows.indices.reversed()) {
-                val row = rows[index]
-                item(key = row.item.id, contentType = row.item.role) {
-                    ChatMessageView(row.item, row.actions, Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp)) { onDismiss(row.item.id) }
-                }
-            }
-            if (state.historyStart > 0) {
-                item(key = "older") { OlderMessagesRow(state.loadingOlder, state.historyStart, onLoadOlder) }
+            if (trailing) {
+                item(key = "trailing") { Trailing(state, turnStartedAt, onRespond) }
             }
         }
         ScrollNavigator(
             nav,
-            goUp = { scope.launch { list.toPreviousMessage(userItems, density) } },
-            goDown = { scope.launch { list.toNextMessage(userItems, density) } },
-            goBottom = { scope.launch { list.scrollToItem(0) } },
+            goUp = { scope.launch { list.toPreviousMessage(userItems, density, scroll::release) } },
+            goDown = { scope.launch { list.toNextMessage(userItems, density, scroll::toEnd) } },
+            goBottom = { scope.launch { scroll.toEnd() } },
             jumps = jumps,
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 12.dp),
         )
@@ -204,29 +259,144 @@ private fun ClearErrorsButton(count: Int, onClick: () -> Unit, modifier: Modifie
     }
 }
 
-/** Puts item [index] of a bottom-up list at the top of the screen, as `scrollTo({ top })` does: its top, if it is taller. */
-private suspend fun LazyListState.scrollToTop(index: Int) {
-    scrollToItem(index)
+/** A row a reply card jumped to: `bg-primary/10 ring-1 ring-primary/40`, the ring outside it. */
+private fun Modifier.replyFlash(on: Boolean, accent: Rgba): Modifier = if (!on) this else drawBehind {
+    drawRect(accent.opacity(0.1).color)
+    val ring = 1.dp.toPx()
+    drawRect(accent.opacity(0.4).color, Offset(-ring / 2, -ring / 2), Size(size.width + ring, size.height + ring), style = Stroke(ring))
+}
+
+/** The older-messages row's key: always the list's first item while it is there. */
+private const val OLDER_ROW = "older"
+
+/** Where the list starts before it is measured: far past its last item, which it then clamps to its end. */
+private const val OPEN_AT_END = 100_000_000
+
+/** `STICK_TO_BOTTOM_OFFSET_PX`: this near the end, moving down takes hold of it again. */
+private val NEAR_END = 70.dp
+
+/**
+ * The transcript's scrolling as message-list.tsx has it: `useStickToBottom` with `initial` and
+ * `resize` both "instant", over a list with `[overflow-anchor:none]`. The list is laid out top
+ * down, so whatever grows moves only what is under it. While the chat holds its end it follows
+ * the end, a frame later, as the web's ResizeObserver does, and stops 1 px short of the last
+ * pixel, as `targetScrollTop` does. Moving it up lets go; coming within 70 px of the end on the
+ * way down, or the content shrinking there, takes hold again.
+ */
+@Stable
+private class TranscriptScroll(
+    private val list: LazyListState,
+    private val held: MutableState<Boolean>,
+    private val short: Int,
+    private val near: Int,
+) {
+    // The first item on screen and its offset at the last layout, and how far the end was below the screen.
+    private var top: Any? = null
+    private var topOffset = 0
+    private var remaining: Int? = null
+    private var oldest: String? = null
+
+    /** Scrolling up, by finger, fling or wheel, lets go of the end at once. */
+    val connection = object : NestedScrollConnection {
+        override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+            if (consumed.y > 0f) held.value = false
+            return Offset.Zero
+        }
+    }
+
+    /** `stopScroll`. */
+    fun release() {
+        held.value = false
+    }
+
+    /** `scrollToBottom`. */
+    suspend fun toEnd() {
+        held.value = true
+        list.scrollToEnd(short)
+    }
+
+    /** Watches every layout of the list, for as long as it is shown. */
+    suspend fun follow() {
+        snapshotFlow { list.layoutInfo }.collect { info ->
+            val first = info.visibleItemsInfo.firstOrNull()
+            // A list with no height is a hidden tab: nothing it says is about the chat.
+            if (first == null || info.viewportSize.height <= 0) return@collect
+            val last = info.visibleItemsInfo.last()
+            // How far the end is below the screen, null while it is past the items on screen.
+            val now = if (last.index == info.totalItemsCount - 1) last.offset + last.size - info.viewportEndOffset else null
+            val opened = top == null
+            // Nothing scrolled, so what moved the end was the content, or the screen, changing size.
+            val resized = first.key == top && first.offset == topOffset
+            val before = remaining
+            top = first.key
+            topOffset = first.offset
+            remaining = now
+            if (held.value) {
+                if (opened || now == null || (resized && before != null && now > before && now > short)) list.scrollToEnd(short)
+            } else if (now != null && now - short <= near && (before == null || now < before)) {
+                held.value = true
+            }
+        }
+    }
+
+    /**
+     * `preserveFromBottomRef`: a page of older messages leaves the view where it was. The list keeps
+     * its first item in place by itself; only the older-messages row, which stays first, has to hand
+     * its place to the message that was under it. Called before the list measures [firstId].
+     */
+    fun keepPlace(firstId: String?, indexOf: (String) -> Int) {
+        val before = oldest
+        oldest = firstId
+        if (before == null || before == firstId) return
+        val visible = list.layoutInfo.visibleItemsInfo
+        if (visible.firstOrNull()?.key != OLDER_ROW) return
+        val kept = visible.firstOrNull { it.key == before } ?: return
+        val index = indexOf(before)
+        if (index >= 0) list.requestScrollToItem(index, -kept.offset)
+    }
+}
+
+/** A chat's [TranscriptScroll], holding its end as it opens, and after the activity is recreated if it did then. */
+@Composable
+private fun rememberTranscriptScroll(list: LazyListState): TranscriptScroll {
+    val density = LocalDensity.current
+    val held = rememberSaveable { mutableStateOf(true) }
+    val scroll = remember(list, density) { with(density) { TranscriptScroll(list, held, 1.dp.roundToPx(), NEAR_END.roundToPx()) } }
+    LaunchedEffect(scroll) { scroll.follow() }
+    return scroll
+}
+
+/** To the end of the list, [short] px before its last pixel. */
+private suspend fun LazyListState.scrollToEnd(short: Int) {
+    val last = layoutInfo.totalItemsCount - 1
+    if (last < 0) return
+    if (layoutInfo.visibleItemsInfo.lastOrNull()?.index != last) scrollToItem(last)
+    val end = layoutInfo.visibleItemsInfo.lastOrNull()?.takeIf { it.index == last } ?: return
+    val remaining = end.offset + end.size - layoutInfo.viewportEndOffset
+    if (remaining != short) scrollBy((remaining - short).toFloat())
+}
+
+/** `showMessageAt`: item [index] scrolled smoothly to [gap] px below the top of the screen. */
+private suspend fun LazyListState.reveal(index: Int, gap: Float) {
+    if (layoutInfo.visibleItemsInfo.none { it.index == index }) scrollToItem(index)
     val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return
-    scrollBy((item.size - layoutInfo.viewportSize.height).toFloat())
+    animateScrollBy(item.offset - gap)
 }
 
 /**
  * Where each of [items] (oldest first) starts against the top of the screen, as `ChatScrollNav`
- * measures its rows: px below it, negative above it, infinite off screen. A bottom-up list counts
- * an item's offset from the bottom edge.
+ * measures its rows: px below it, negative above it, infinite off screen.
  */
 private fun LazyListState.topsOf(items: List<Int>): List<Float> {
-    val info = layoutInfo
-    val visible = info.visibleItemsInfo
+    val visible = layoutInfo.visibleItemsInfo
     if (visible.isEmpty()) return items.map { Float.POSITIVE_INFINITY }
-    val newest = visible.minOf { it.index }
-    val oldest = visible.maxOf { it.index }
+    val first = visible.first().index
+    val last = visible.last().index
     return items.map { index ->
         when {
-            index > oldest -> Float.NEGATIVE_INFINITY
-            index < newest -> Float.POSITIVE_INFINITY
-            else -> visible.first { it.index == index }.let { (info.viewportEndOffset - it.offset - it.size).toFloat() }
+            index < first -> Float.NEGATIVE_INFINITY
+            index > last -> Float.POSITIVE_INFINITY
+            else -> visible.first { it.index == index }.offset.toFloat()
         }
     }
 }
@@ -236,40 +406,40 @@ private data class MessageNav(val hasAbove: Boolean, val atBottom: Boolean, val 
 
 private fun LazyListState.messageNav(items: List<Int>, density: Density): MessageNav = with(density) {
     val tops = topsOf(items)
+    val info = layoutInfo
+    val last = info.visibleItemsInfo.lastOrNull()
+    val toEnd = if (last != null && last.index == info.totalItemsCount - 1) last.offset + last.size - info.viewportEndOffset else Int.MAX_VALUE
     MessageNav(
         hasAbove = tops.any { it < -4.dp.toPx() },
-        atBottom = firstVisibleItemIndex == 0 && firstVisibleItemScrollOffset < 8.dp.toPx(),
+        atBottom = toEnd < 8.dp.toPx(),
         // 1-based: the last of the user's messages at or above the top of the screen.
         position = tops.count { it <= 12.dp.toPx() },
         total = tops.size,
     )
 }
 
-/** `goUp`: the last of the user's messages that starts above the screen, put at its top. */
-private suspend fun LazyListState.toPreviousMessage(items: List<Int>, density: Density) {
+/** `goUp`: the last of the user's messages that starts above the screen, put at its top; moving up lets go of the end. */
+private suspend fun LazyListState.toPreviousMessage(items: List<Int>, density: Density, release: () -> Unit) {
     val tops = topsOf(items)
     val slack = with(density) { 4.dp.toPx() }
     val target = tops.indices.lastOrNull { tops[it] < -slack } ?: return
-    scrollToTop(items[target])
+    release()
+    scrollToItem(items[target])
 }
 
 /** `goDown`: the first that starts below the top of the screen, else the end of the chat. */
-private suspend fun LazyListState.toNextMessage(items: List<Int>, density: Density) {
+private suspend fun LazyListState.toNextMessage(items: List<Int>, density: Density, toEnd: suspend () -> Unit) {
     val tops = topsOf(items)
     val slack = with(density) { 4.dp.toPx() }
     val target = tops.indices.firstOrNull { tops[it] > slack }
-    if (target != null) scrollToTop(items[target]) else scrollToItem(0)
+    if (target != null) scrollToItem(items[target]) else toEnd()
 }
 
-/** The approval or question the AI waits on, and the thinking line. */
+/** The approval or question the AI waits on, and the thinking line: shown only while there is one (`hasTrailing`). */
 @Composable
 private fun Trailing(state: ChatState, turnStartedAt: Instant?, onRespond: (ApprovalRequest, Boolean, JsonElement?) -> Unit) {
     val indicator = indicatorLabel(state)
     val request = state.pendingApproval
-    if (request == null && indicator == null) {
-        Spacer(Modifier.height(16.dp))
-        return
-    }
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (request != null) {
             key(request.requestId) {
