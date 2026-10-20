@@ -18,6 +18,9 @@ object TextInputFocus {
     /** An IME is composing in it (Telex before the word is done, say). */
     val composing: Boolean get() = state?.composition != null
 
+    /** What it holds, null with no field focused. */
+    val text: String? get() = state?.text?.toString()
+
     internal fun take(state: TextFieldState) {
         this.state = state
     }

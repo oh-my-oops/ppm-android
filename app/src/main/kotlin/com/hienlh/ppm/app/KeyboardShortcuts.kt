@@ -21,6 +21,9 @@ import kotlinx.coroutines.launch
 class KeyboardShortcuts(private val model: AppModel) {
     private val doubleShift = DoubleShift()
 
+    /** The focused field's text at the last Shift down or up, to see what an IME typed in between. */
+    private var shiftText: String? = null
+
     /** Keys whose press ran a shortcut: their release is kept from the views too. */
     private val taken = mutableSetOf<Int>()
 
@@ -31,11 +34,13 @@ class KeyboardShortcuts(private val model: AppModel) {
             KeyEvent.ACTION_DOWN -> Unit
             KeyEvent.ACTION_UP -> {
                 val otherModifiers = event.isCtrlPressed || event.isMetaPressed || event.isAltPressed
+                if (isShift) noteTyping()
                 if (isShift && doubleShift.shiftUp(event.eventTime, otherModifiers, TextInputFocus.composing)) model.openPalette()
                 return taken.remove(code)
             }
             else -> return false
         }
+        if (isShift) noteTyping()
         doubleShift.keyDown(isShift, event.isShiftPressed)
         if (isShift || TextInputFocus.composing) return false
         val key = webKey(event) ?: return false
@@ -43,6 +48,17 @@ class KeyboardShortcuts(private val model: AppModel) {
         val ran = if (TextInputFocus.focused) inTextField(press) else anywhere(press)
         if (ran) taken += code
         return ran
+    }
+
+    /**
+     * The letters of a hardware keyboard reach no key event here while an IME shows its keyboard
+     * (Gboard types them itself), so a capital is Shift down and up alone: what the field gained
+     * since the last Shift is the typing those events would have shown.
+     */
+    private fun noteTyping() {
+        val text = TextInputFocus.text
+        if (text != shiftText) doubleShift.typed()
+        shiftText = text
     }
 
     /** What this app runs, for the system's list of shortcuts (Meta + /), with the keys set in Settings. */

@@ -112,19 +112,28 @@ class KeyBindings(val overrides: Map<String, String> = emptyMap()) {
 class DoubleShift {
     private var lastShiftUp = 0L
     private var shiftAlone = false
+    private var shiftDown = false
 
     /** A key went down: [isShift] for Shift itself, [shiftHeld] for any other key typed with it. */
     fun keyDown(isShift: Boolean, shiftHeld: Boolean) {
         if (isShift) {
             shiftAlone = true
+            shiftDown = true
             return
         }
         if (shiftHeld) shiftAlone = false
         lastShiftUp = 0
     }
 
+    /**
+     * Text went in with no key event to show for it: an IME showing its keyboard takes a hardware
+     * keyboard's letters and types them itself, where a browser still fires a `keydown` for each.
+     */
+    fun typed() = keyDown(isShift = false, shiftHeld = shiftDown)
+
     /** Shift came up at [at] ms: true when that completes a double tap. */
     fun shiftUp(at: Long, otherModifiers: Boolean, composing: Boolean): Boolean {
+        shiftDown = false
         if (!shiftAlone || otherModifiers || composing) return false
         if (at - lastShiftUp < 400) {
             lastShiftUp = 0

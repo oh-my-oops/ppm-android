@@ -72,4 +72,23 @@ class KeyBindingsTest {
         DoubleShift().let { tap(it, 1_000); assertFalse(tap(it, 1_100, otherModifiers = true)) }
         DoubleShift().let { tap(it, 1_000); assertFalse(tap(it, 1_100, composing = true)) }
     }
+
+    @Test
+    fun `text an IME typed counts as a key, between the taps or under a held Shift`() {
+        DoubleShift().let {
+            it.keyDown(isShift = true, shiftHeld = true)
+            it.shiftUp(1_000, otherModifiers = false, composing = false)
+            it.typed()
+            it.keyDown(isShift = true, shiftHeld = true)
+            assertFalse(it.shiftUp(1_100, otherModifiers = false, composing = false))
+        }
+        DoubleShift().let {
+            // "I" then "S" through the IME: each Shift came up with a capital typed under it.
+            for (at in listOf(1_000L, 1_100L)) {
+                it.keyDown(isShift = true, shiftHeld = true)
+                it.typed()
+                assertFalse(it.shiftUp(at, otherModifiers = false, composing = false))
+            }
+        }
+    }
 }
