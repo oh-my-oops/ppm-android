@@ -37,6 +37,38 @@ class ProtocolTest {
     }
 
     @Test
+    fun `done carries the turn's usage, and a subagent's the call it ended`() {
+        val done = ChatEvent.from(
+            json(
+                """{"type":"done","lastMessageUuid":"u","usage":{"model":"claude-sonnet-4-5","inputTokens":1200,"outputTokens":850,
+                   "cacheReadTokens":18000,"cacheWriteTokens":52000,"costUsd":0.2841,"cacheHitRate":0.25,"coldStart":true,
+                   "coldReason":"idle_timeout","cacheTtlMs":3600000}}""",
+            ),
+        ) as ChatEvent.Done
+        val usage = done.usage!!
+        assertEquals(71_200L, usage.prefixTokens)
+        assertEquals(listOf(0.2841, 0.25), listOf(usage.costUsd, usage.cacheHitRate))
+        assertEquals("idle_timeout", usage.coldReason)
+        assertEquals(3_600_000.0, usage.cacheTtlMs)
+        assertNull(usage.contextTokens)
+        assertNull(usage.compactedAt)
+        assertNull(done.parent)
+        assertEquals(ChatEvent.Done(parent = "t1"), ChatEvent.from(json("""{"type":"done","parentToolUseId":"t1"}""")))
+        // Usage that is not an object is none; a figure left out is zero.
+        assertNull((ChatEvent.from(json("""{"type":"done","usage":null}""")) as ChatEvent.Done).usage)
+        assertEquals(TurnUsage("", 0, 0, 0, 0, 0.0, 0.0, coldStart = false), TurnUsage.from(json("{}")))
+    }
+
+    @Test
+    fun `account_retry says why, and which account takes over`() {
+        assertEquals(
+            ChatEvent.AccountRetry("Rate limited — switching account", "Work"),
+            ChatEvent.from(json("""{"type":"account_retry","reason":"Rate limited — switching account","accountId":"a2","accountLabel":"Work"}""")),
+        )
+        assertEquals(ChatEvent.AccountRetry(null, null), ChatEvent.from(json("""{"type":"account_retry"}""")))
+    }
+
+    @Test
     fun `client messages`() {
         assertEquals(
             json("""{"type":"message","clientMessageId":"c1","content":"hi"}"""),

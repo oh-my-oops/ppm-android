@@ -260,4 +260,4 @@ internal fun fmtTokens(n: Long): String = when {
 }
 
 /** `toFixed`: the double's exact value, a half rounded up. */
-private fun fixed(value: Double, digits: Int): String = BigDecimal(value).setScale(digits, RoundingMode.HALF_UP).toPlainString()
+internal fun fixed(value: Double, digits: Int): String = BigDecimal(value).setScale(digits, RoundingMode.HALF_UP).toPlainString()

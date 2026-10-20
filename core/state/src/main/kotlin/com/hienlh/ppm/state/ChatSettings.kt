@@ -7,6 +7,7 @@ import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.PromptCacheState
 import com.hienlh.ppm.protocol.SessionStateFrame
 import com.hienlh.ppm.protocol.TurnOptions
+import com.hienlh.ppm.protocol.TurnUsage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -61,6 +62,22 @@ class ChatSettings {
             }
         }
         promptCache = state.promptCache
+    }
+
+    /**
+     * A finished turn rewrote the cache, so its clock restarts [now], ahead of the next report
+     * (`done` in use-chat.ts): a phone left on the chat may not reconnect for hours. A figure the
+     * turn did not measure keeps the one in hand; [TurnUsage.compactedAt] is cleared when absent.
+     */
+    fun turnEnded(usage: TurnUsage, now: Long) {
+        val cache = promptCache ?: return
+        promptCache = cache.copy(
+            ttlMs = usage.cacheTtlMs ?: cache.ttlMs,
+            lastTurnEndedAt = now.toDouble(),
+            billedPrefixTokens = usage.prefixTokens.toDouble(),
+            contextTokens = usage.contextTokens ?: cache.contextTokens,
+            compactedAt = usage.compactedAt,
+        )
     }
 
     /** Each returns the frame that stores the pick for the session. */

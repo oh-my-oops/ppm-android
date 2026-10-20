@@ -5,6 +5,7 @@ import com.hienlh.ppm.protocol.ChatFrame
 import com.hienlh.ppm.protocol.PromptCacheState
 import com.hienlh.ppm.protocol.SessionStateFrame
 import com.hienlh.ppm.protocol.TurnOptions
+import com.hienlh.ppm.protocol.TurnUsage
 import com.hienlh.ppm.protocol.WireJson
 import kotlinx.serialization.json.JsonNull
 import org.junit.Assert.assertEquals
@@ -186,6 +187,30 @@ class ComposerChoicesTest {
         settings.apply(SessionStateFrame(model = "opus"))
         assertNull(settings.promptCache)
         assertEquals("opus", settings.model)
+    }
+
+    @Test
+    fun `a finished turn restarts the cache's clock, as done does on the web`() {
+        val settings = ChatSettings()
+        val usage = TurnUsage("m", 1_000, 10, 40_000, 9_000, 0.1, 0.8, coldStart = false)
+        settings.turnEnded(usage, now = 5)
+        assertNull("a cache nobody reported", settings.promptCache)
+        settings.apply(
+            SessionStateFrame(
+                promptCache = PromptCacheState(300_000.0, lastTurnEndedAt = 1.0, billedPrefixTokens = 7.0, contextTokens = 58_700.0, compactedAt = 2.0),
+            ),
+        )
+        settings.turnEnded(usage, now = 9_000)
+        // What the turn did not measure keeps the figure in hand; a compaction ends with the turn that re-cached it.
+        assertEquals(
+            PromptCacheState(300_000.0, lastTurnEndedAt = 9_000.0, billedPrefixTokens = 50_000.0, contextTokens = 58_700.0),
+            settings.promptCache,
+        )
+        settings.turnEnded(usage.copy(contextTokens = 61_000.0, cacheTtlMs = 3_600_000.0, compactedAt = 8_000.0), now = 10_000)
+        assertEquals(
+            PromptCacheState(3_600_000.0, lastTurnEndedAt = 10_000.0, billedPrefixTokens = 50_000.0, contextTokens = 61_000.0, compactedAt = 8_000.0),
+            settings.promptCache,
+        )
     }
 
     @Test

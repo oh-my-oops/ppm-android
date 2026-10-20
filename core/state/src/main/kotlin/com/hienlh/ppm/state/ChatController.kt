@@ -4,6 +4,7 @@ import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.SocketConnection
 import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.ChatClientMessage
+import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatFrame
 import com.hienlh.ppm.protocol.PromptCacheState
 import com.hienlh.ppm.protocol.ReplyReference
@@ -254,6 +255,9 @@ class ChatController(
         // The snapshot of a long turn can run to megabytes: decode it off the main thread.
         val frame = withContext(Dispatchers.Default) { WireJson.parseOrNull(text)?.let(ChatFrame::from) } ?: return
         if (frame is ChatFrame.SessionState) settings.apply(frame.state)
+        val ended = (frame as? ChatFrame.Event)?.event as? ChatEvent.Done
+        val usage = ended?.usage
+        if (usage != null && ended.parent == null && transcript.phase.isRunning) settings.turnEnded(usage, clock())
         perform(transcript.handle(frame, clock()))
     }
 

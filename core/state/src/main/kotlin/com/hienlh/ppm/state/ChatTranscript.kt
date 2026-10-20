@@ -14,6 +14,7 @@ import com.hienlh.ppm.protocol.SessionStateFrame
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.TurnSnapshot
 import com.hienlh.ppm.protocol.TurnStop
+import com.hienlh.ppm.protocol.TurnUsage
 import kotlinx.serialization.json.JsonElement
 import java.time.Instant
 
@@ -379,7 +380,7 @@ class ChatTranscript {
 
     private fun apply(event: ChatEvent, replaying: Boolean, effects: MutableList<ChatEffect>, now: Long) {
         when (event) {
-            is ChatEvent.Text, is ChatEvent.Thinking, is ChatEvent.ToolUse, is ChatEvent.ToolResult -> addToLive(event, now)
+            is ChatEvent.Text, is ChatEvent.Thinking, is ChatEvent.ToolUse, is ChatEvent.ToolResult, is ChatEvent.AccountRetry -> addToLive(event, now)
             is ChatEvent.Error -> if (live != null || phase.isRunning) {
                 addToLive(event, now)
             } else if (items.lastOrNull().let { it?.role != ChatItem.Role.SYSTEM || it.text != event.message }) {
@@ -397,8 +398,9 @@ class ChatTranscript {
                 // On replay, `session_state.pendingApproval` is the authority.
                 if (!replaying) pendingApproval = event.request
             }
-            is ChatEvent.Done -> {
-                finalizeLive(event.lastMessageUuid)
+            // A subagent's own end finishes nothing of the turn.
+            is ChatEvent.Done -> if (event.parent == null) {
+                finalizeLive(event.lastMessageUuid, event.usage)
                 turnFinalized = true
             }
             is ChatEvent.SessionMigrated -> effects += ChatEffect.AdoptSessionId(event.newSessionId)
@@ -418,14 +420,14 @@ class ChatTranscript {
      * The streamed answer as a message: stamped when it began streaming, as the web stamps it, and
      * with the SDK's id once `done` names it, which is what finds it again after a reload.
      */
-    private fun finalizeLive(sdkUuid: String? = null) {
+    private fun finalizeLive(sdkUuid: String? = null, usage: TurnUsage? = null) {
         val turn = live ?: return
         live = null
         if (turn.isEmpty) return
         localCounter++
         items = items + ChatItem(
             "local-assistant-$localCounter", ChatItem.Role.ASSISTANT, turn.blocks, Instant.ofEpochMilli(liveStartedAt),
-            sdkUuid = sdkUuid, answerText = turn.answerText, taskCalls = turn.taskCalls,
+            sdkUuid = sdkUuid, answerText = turn.answerText, taskCalls = turn.taskCalls, usage = usage,
         )
     }
 

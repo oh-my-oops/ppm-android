@@ -72,6 +72,7 @@ import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.TurnStop
+import com.hienlh.ppm.protocol.TurnUsage
 import com.hienlh.ppm.state.ChatBlock
 import com.hienlh.ppm.state.ChatItem
 import kotlinx.coroutines.delay
@@ -95,7 +96,7 @@ fun ChatMessageView(
 ) {
     when (item.role) {
         ChatItem.Role.USER -> UserBubble(item.text, item.timestamp, replies, modifier, onReply)
-        ChatItem.Role.ASSISTANT -> AssistantBlocks(item.blocks, live = false, actions = actions, modifier = modifier)
+        ChatItem.Role.ASSISTANT -> AssistantBlocks(item.blocks, live = false, actions = actions, modifier = modifier, usage = item.usage)
         ChatItem.Role.SYSTEM -> SystemMessage(item.text, onDismiss, modifier)
     }
 }
@@ -173,9 +174,9 @@ internal fun ActionButton(icon: ProductIcon, label: String, title: String, touch
 
 // Assistant
 
-/** An answer's blocks in order — text, thinking, tool calls — then its action bar. */
+/** An answer's blocks in order — text, thinking, tool calls — then the turn's cost notice and its action bar. */
 @Composable
-fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActions?, modifier: Modifier = Modifier) {
+fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActions?, modifier: Modifier = Modifier, usage: TurnUsage? = null) {
     Column(modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             blocks.forEachIndexed { index, block ->
@@ -189,9 +190,16 @@ fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActi
                     is ChatBlock.Thinking -> ThinkingBlock(block.text, growing)
                     is ChatBlock.Tool -> ToolCardView(block.tool, turnRunning = live)
                     is ChatBlock.Error -> InlineError(block.message)
+                    // The web quotes it into the answer as markdown of its own.
+                    is ChatBlock.Retry -> Column {
+                        val quote = "> ↻ ${block.reason} — retrying with **${block.accountLabel}**..."
+                        WithoutOnCopy(CODE_EDGE) { SelectionContainer { MarkdownView(quote) } }
+                        if (growing) StreamingMark()
+                    }
                 }
             }
         }
+        if (actions != null && usage != null) TurnCostWarning(usage, Modifier.padding(top = 8.dp))
         // `-mt-1.5` against the column's `gap-2`: 2 px under the answer.
         if (actions != null) MessageActionBar(actions.timestamp, actions.copyText, Modifier.padding(top = 2.dp), actions.onReply)
     }

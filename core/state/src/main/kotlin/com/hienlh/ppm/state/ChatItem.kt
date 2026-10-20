@@ -4,6 +4,7 @@ import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.Compaction
 import com.hienlh.ppm.protocol.HistoryMessage
 import com.hienlh.ppm.protocol.ToolOutcome
+import com.hienlh.ppm.protocol.TurnUsage
 import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.obj
@@ -33,6 +34,9 @@ sealed interface ChatBlock {
     data class Thinking(val text: String) : ChatBlock
     data class Tool(val tool: ToolBlock) : ChatBlock
     data class Error(val message: String) : ChatBlock
+
+    /** The turn going on with another account (`account_retry`), which the web quotes into the answer. */
+    data class Retry(val reason: String, val accountLabel: String) : ChatBlock
 }
 
 /** One message as the chat shows it. */
@@ -51,6 +55,8 @@ data class ChatItem(
     val compaction: Compaction? = null,
     /** Calls to Claude's task tools in this message, a subagent's too (`countTaskEvents`). */
     val taskCalls: Int = 0,
+    /** The token split of the turn this answer ended, as its `done` reported it; history has none. */
+    val usage: TurnUsage? = null,
 ) {
     enum class Role { USER, ASSISTANT, SYSTEM }
 
@@ -147,6 +153,7 @@ class TurnBuilder(
                 if (request.tool == "ppm:db_execute" || requestIndex(request.requestId) >= 0) return
                 list += ChatBlock.Tool(ToolBlock(toolUseId = null, name = request.tool, input = request.input, requestId = request.requestId))
             }
+            is ChatEvent.AccountRetry -> list += ChatBlock.Retry(event.reason ?: "Auth failed", event.accountLabel ?: "another account")
             is ChatEvent.Done, is ChatEvent.SessionMigrated, is ChatEvent.Other -> Unit
         }
     }

@@ -72,6 +72,32 @@ class TranscriptTest {
     }
 
     @Test
+    fun `a retry sits between the text around it, and only the turn's own end keeps its usage`() {
+        val chat = ChatTranscript()
+        chat.handle(frame("""{"type":"phase_changed","phase":"thinking"}"""))
+        chat.handle(frame("""{"type":"text","content":"Hel","streamSeq":1}"""))
+        chat.handle(frame("""{"type":"account_retry","reason":"Usage limit reached — switching account","accountLabel":"Work","streamSeq":2}"""))
+        chat.handle(frame("""{"type":"account_retry","streamSeq":3}"""))
+        chat.handle(frame("""{"type":"text","content":"lo","streamSeq":4}"""))
+        assertEquals(
+            listOf(
+                ChatBlock.Text("Hel"),
+                ChatBlock.Retry("Usage limit reached — switching account", "Work"),
+                ChatBlock.Retry("Auth failed", "another account"),
+                ChatBlock.Text("lo"),
+            ),
+            chat.live?.blocks,
+        )
+        chat.handle(frame("""{"type":"done","parentToolUseId":"t1","usage":{"inputTokens":5},"streamSeq":5}"""))
+        assertNotNull("a subagent's end closed the turn", chat.live)
+        chat.handle(frame("""{"type":"done","usage":{"model":"m","inputTokens":5,"cacheReadTokens":95},"streamSeq":6}"""))
+        val answer = chat.items.single()
+        assertEquals(100L, answer.usage?.prefixTokens)
+        // What Copy takes is the answer, without the notice.
+        assertEquals("Hello", answer.answerText)
+    }
+
+    @Test
     fun `a result pairs with its call by id, or the last open call without one`() {
         val turn = TurnBuilder(live = true)
         turn.add(ChatEvent.ToolUse("Read", json("""{"file_path":"a.ts"}"""), "t1"))

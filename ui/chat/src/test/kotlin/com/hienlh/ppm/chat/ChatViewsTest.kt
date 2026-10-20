@@ -3,6 +3,7 @@ package com.hienlh.ppm.chat
 import com.hienlh.ppm.protocol.Compaction
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.protocol.ToolOutcome
+import com.hienlh.ppm.protocol.TurnUsage
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.state.ChatBlock
 import com.hienlh.ppm.state.ChatItem
@@ -15,6 +16,47 @@ import org.junit.Test
 
 /** The chat views' rules, without a device (`PPMSelfTest/ChatUITests.swift`). */
 class ChatViewsTest {
+    @Test
+    fun `a costly turn is judged as assessTurnCost judges it`() {
+        val idle = TurnUsage("claude-sonnet-4-5", 1200, 850, 18_000, 52_000, 0.2841, 18_000.0 / 71_200, coldStart = true, coldReason = "idle_timeout")
+        assertEquals(
+            TurnCostVerdict(
+                TurnCostVerdict.Level.BAD,
+                53_200,
+                "53k of this session's transcript was re-sent uncached because the session sat idle with no tab open long enough for PPM " +
+                    "to release its subprocess.",
+            ),
+            TurnCost.assess(idle),
+        )
+        assertEquals("9.6", fixed(TurnCost.multiplier(idle), 1))
+        val model = TurnUsage("claude-opus-4-1", 800, 1430, 52_000, 9_000, 0.0721, 52_000.0 / 61_800, coldStart = true, coldReason = "set_model")
+        assertEquals(
+            TurnCostVerdict(
+                TurnCostVerdict.Level.WARN,
+                9_800,
+                "9.8k of this session's transcript was re-sent uncached because the model was changed, which restarts the session.",
+            ),
+            TurnCost.assess(model),
+        )
+        assertEquals("2.8", fixed(TurnCost.multiplier(model), 1))
+        // A reason PPM has no words for is named as it came; none, or an empty one, is left out.
+        assertEquals(
+            "53k of this session's transcript was re-sent uncached because the session restarted (foo).",
+            TurnCost.assess(idle.copy(coldReason = "foo")).reason,
+        )
+        assertEquals("53k of this session's transcript was re-sent uncached.", TurnCost.assess(idle.copy(coldReason = "")).reason)
+        assertEquals("53k of this session's transcript was re-sent uncached.", TurnCost.assess(idle.copy(coldReason = null)).reason)
+        // Half from the cache is a warning, nine tenths nothing; so is a warm turn, and a prefix under 20k.
+        assertEquals(TurnCostVerdict.Level.WARN, TurnCost.assess(idle.copy(cacheHitRate = 0.5)).level)
+        assertEquals(TurnCostVerdict.Level.OK, TurnCost.assess(idle.copy(cacheHitRate = 0.9)).level)
+        assertEquals(TurnCostVerdict.Level.OK, TurnCost.assess(idle.copy(coldStart = false)).level)
+        val small = idle.copy(inputTokens = 100, cacheReadTokens = 900, cacheWriteTokens = 18_999, cacheHitRate = 0.045)
+        assertEquals(TurnCostVerdict.Level.OK, TurnCost.assess(small).level)
+        assertEquals(TurnCostVerdict.Level.BAD, TurnCost.assess(small.copy(cacheWriteTokens = 19_000)).level)
+        assertEquals("12.0", fixed(TurnCost.multiplier(small), 1))
+        assertEquals(1.0, TurnCost.multiplier(idle.copy(inputTokens = 0, cacheReadTokens = 0, cacheWriteTokens = 0)), 0.0)
+    }
+
     @Test
     fun `edit diff pairs removed and added lines`() {
         val diff = EditDiff.rows("a\nb\nc", "a\nB\nc")
