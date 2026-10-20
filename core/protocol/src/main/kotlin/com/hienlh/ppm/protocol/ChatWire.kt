@@ -104,7 +104,8 @@ sealed interface ChatFrame {
     data class Event(val event: ChatEvent, val streamSeq: Int?) : ChatFrame
     data class SessionState(val state: SessionStateFrame) : ChatFrame
     data class TurnEvents(val snapshot: TurnSnapshot) : ChatFrame
-    data class PhaseChanged(val phase: SessionPhase) : ChatFrame
+    /** [elapsed]: seconds the server has waited for a first answer, sent every 5 s while `connecting`. */
+    data class PhaseChanged(val phase: SessionPhase, val elapsed: Int? = null) : ChatFrame
     data class Ping(val streamSeq: Int?) : ChatFrame
     data class TurnStopped(val stop: TurnStop?) : ChatFrame
     /** The server refused a message; [content] and [replyTo] are the message as it arrived. */
@@ -151,7 +152,7 @@ sealed interface ChatFrame {
                         truncated = json["truncated"].bool ?: false,
                     ),
                 )
-                "phase_changed" -> PhaseChanged(SessionPhase.fromWire(json["phase"].string))
+                "phase_changed" -> PhaseChanged(SessionPhase.fromWire(json["phase"].string), json["elapsed"].int)
                 "ping" -> Ping(seq)
                 "turn_stop" -> TurnStopped(TurnStop.from(json["stop"]))
                 "message_rejected" -> MessageRejected(

@@ -155,6 +155,11 @@ class ChatViewsTest {
         val tool = ToolBlock(toolUseId = "t", name = "Read", input = WireJson.parse("{}"), result = ToolOutcome("x", false))
         assertEquals("Processing", indicatorLabel(streaming.copy(live = listOf(ChatBlock.Tool(tool)))))
         assertEquals("Compacting messages...", indicatorLabel(streaming.copy(compacting = true)))
+        // What PPM is doing shows over the text, and a compaction over that.
+        val status = streaming.copy(statusMessage = "Selecting account...")
+        assertEquals("Selecting account...", indicatorLabel(status))
+        assertEquals("Compacting messages...", indicatorLabel(status.copy(compacting = true)))
+        assertNull(indicatorLabel(status.copy(phase = SessionPhase.IDLE)))
     }
 
     @Test

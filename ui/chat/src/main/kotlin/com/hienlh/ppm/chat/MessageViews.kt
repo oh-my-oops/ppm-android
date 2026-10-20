@@ -31,7 +31,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -77,7 +76,6 @@ import com.hienlh.ppm.state.ChatBlock
 import com.hienlh.ppm.state.ChatItem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.time.Duration
 import java.time.Instant
 
 /** The time, the Copy text and Reply under the last message of a finished turn. */
@@ -349,25 +347,18 @@ internal fun ThinkingBlock(text: String, streaming: Boolean) {
 
 /**
  * What the turn is doing before any answer streams, or after a tool ran (`ThinkingIndicator`
- * in message-events.tsx). [waitingSince] is set while nothing has streamed yet: the wait is counted.
+ * in message-events.tsx). [elapsed] is the server's count of a wait for the first answer, sent
+ * every 5 s while `connecting`; it shows while nothing has streamed yet ([waiting]).
  */
 @Composable
-fun ThinkingIndicator(label: String, waitingSince: Instant?, connecting: Boolean, modifier: Modifier = Modifier) {
+fun ThinkingIndicator(label: String, elapsed: Int, waiting: Boolean, connecting: Boolean, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(1_000)
-            now = System.currentTimeMillis()
-        }
-    }
-    val elapsed = waitingSince?.let { Duration.between(it, Instant.ofEpochMilli(now)).seconds.coerceAtLeast(0) } ?: 0
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PpmIcon(ProductIcon.Loader2, 12.dp, tokens.text3.color, spinning = true)
             val text = buildAnnotatedString {
                 append(label)
-                if (waitingSince != null && elapsed > 0) {
+                if (waiting && elapsed > 0) {
                     withStyle(SpanStyle(color = tokens.text3.opacity(0.6).color)) { append("... (${elapsed}s)") }
                 }
             }

@@ -98,6 +98,33 @@ class TranscriptTest {
     }
 
     @Test
+    fun `the wait is the server's count, and PPM's own status stands until the account is known`() {
+        val chat = ChatTranscript()
+        chat.handle(frame("""{"type":"phase_changed","phase":"connecting"}"""))
+        assertEquals(0, chat.connectingElapsed)
+        chat.handle(frame("""{"type":"phase_changed","phase":"connecting","elapsed":10}"""))
+        assertEquals(10, chat.connectingElapsed)
+        chat.handle(frame("""{"type":"status_update","phase":"refreshing","message":"Checking token for Work...","accountLabel":"Work","streamSeq":1}"""))
+        assertEquals("Checking token for Work... (Work)", chat.statusMessage)
+        chat.handle(frame("""{"type":"account_info","accountId":"a","accountLabel":"Work","streamSeq":2}"""))
+        assertNull(chat.statusMessage)
+        chat.handle(frame("""{"type":"phase_changed","phase":"thinking"}"""))
+        assertEquals(0, chat.connectingElapsed)
+        chat.handle(frame("""{"type":"status_update","phase":"retrying","message":"Retrying (1/3)...","accountLabel":"","streamSeq":3}"""))
+        assertEquals("Retrying (1/3)...", chat.statusMessage)
+        chat.handle(frame("""{"type":"text","content":"Hi","streamSeq":4}"""))
+        chat.handle(frame("""{"type":"done","parentToolUseId":"t","streamSeq":5}"""))
+        assertEquals("Retrying (1/3)...", chat.statusMessage)
+        chat.handle(frame("""{"type":"done","streamSeq":6}"""))
+        assertNull(chat.statusMessage)
+        chat.handle(frame("""{"type":"status_update","phase":"routing","message":"Selecting account...","streamSeq":7}"""))
+        chat.handle(frame("""{"type":"phase_changed","phase":"idle"}"""))
+        assertNull(chat.statusMessage)
+        // Nothing of either lands in the answer.
+        assertEquals(listOf(ChatBlock.Text("Hi")), chat.items.single().blocks)
+    }
+
+    @Test
     fun `a result pairs with its call by id, or the last open call without one`() {
         val turn = TurnBuilder(live = true)
         turn.add(ChatEvent.ToolUse("Read", json("""{"file_path":"a.ts"}"""), "t1"))

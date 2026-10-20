@@ -40,6 +40,8 @@ data class ChatState(
     val turnStop: TurnStop? = null,
     val title: String? = null,
     val compacting: Boolean = false,
+    val connectingElapsed: Int = 0,
+    val statusMessage: String? = null,
     /** A refused send for the composer to take back ([ChatController.takeRejected]). */
     val rejected: RejectedSend? = null,
     val historyStart: Int = 0,
@@ -384,6 +386,8 @@ class ChatController(
             turnStop = transcript.turnStop,
             title = transcript.title,
             compacting = transcript.compacting,
+            connectingElapsed = transcript.connectingElapsed,
+            statusMessage = transcript.statusMessage,
             rejected = transcript.rejected,
             historyStart = transcript.historyStart,
             hasLoadedHistory = transcript.hasLoadedHistory,

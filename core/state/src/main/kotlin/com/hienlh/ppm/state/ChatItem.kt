@@ -154,7 +154,7 @@ class TurnBuilder(
                 list += ChatBlock.Tool(ToolBlock(toolUseId = null, name = request.tool, input = request.input, requestId = request.requestId))
             }
             is ChatEvent.AccountRetry -> list += ChatBlock.Retry(event.reason ?: "Auth failed", event.accountLabel ?: "another account")
-            is ChatEvent.Done, is ChatEvent.SessionMigrated, is ChatEvent.Other -> Unit
+            is ChatEvent.Done, is ChatEvent.SessionMigrated, is ChatEvent.StatusUpdate, is ChatEvent.AccountInfo, is ChatEvent.Other -> Unit
         }
     }
 

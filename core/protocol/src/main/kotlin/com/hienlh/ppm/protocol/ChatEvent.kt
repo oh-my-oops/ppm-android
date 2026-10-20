@@ -88,9 +88,15 @@ sealed interface ChatEvent {
 
     /** The provider moved the turn to another account: a rate limit, a usage cap or a failed sign-in. */
     data class AccountRetry(val reason: String?, val accountLabel: String?) : ChatEvent
+
+    /** What PPM does before the provider answers: picking an account, refreshing its token, retrying. */
+    data class StatusUpdate(val message: String, val accountLabel: String?) : ChatEvent
+
+    /** The account the turn runs on. */
+    data object AccountInfo : ChatEvent
     data class SessionMigrated(val newSessionId: String) : ChatEvent
 
-    /** Anything else (`account_info`, `team_*`, …): not shown yet. */
+    /** Anything else (`team_*`, …): not shown yet. */
     data class Other(val type: String) : ChatEvent
 
     companion object {
@@ -111,6 +117,8 @@ sealed interface ChatEvent {
                 "error" -> Error(json["message"].string ?: "Unknown error")
                 "done" -> Done(json["lastMessageUuid"].string, TurnUsage.from(json["usage"]), parent)
                 "account_retry" -> AccountRetry(json["reason"].string, json["accountLabel"].string)
+                "status_update" -> StatusUpdate(json["message"].string ?: "", json["accountLabel"].string)
+                "account_info" -> AccountInfo
                 "session_migrated" -> json["newSessionId"].string?.let(::SessionMigrated) ?: Other(type)
                 else -> Other(type)
             }

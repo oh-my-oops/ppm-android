@@ -93,7 +93,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
-import java.time.Instant
 
 /**
  * A chat's messages, the turn streaming in, and what it waits on (`MessageList` in
@@ -119,18 +118,13 @@ fun ChatTranscriptView(
     /** A message picked to answer; null leaves Reply out. */
     onReply: ((ReplyReference) -> Unit)? = null,
 ) {
-    // When the running turn started, for the wait counter before anything streams.
-    var turnStartedAt by remember { mutableStateOf<Instant?>(null) }
-    LaunchedEffect(state.isRunning) {
-        turnStartedAt = if (state.isRunning) turnStartedAt ?: Instant.now() else null
-    }
     Box(modifier.fillMaxSize()) {
         when {
             !state.hasLoadedHistory && state.items.isEmpty() && state.historyError == null ->
                 CenteredNotice("Loading messages...", pulsing = true)
             state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null ->
                 Welcome(welcome)
-            else -> TranscriptList(state, turnStartedAt, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply)
+            else -> TranscriptList(state, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply)
         }
         state.historyError?.let { error ->
             HistoryErrorBanner(error, onReload, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
@@ -141,7 +135,6 @@ fun ChatTranscriptView(
 @Composable
 private fun TranscriptList(
     state: ChatState,
-    turnStartedAt: Instant?,
     onRespond: (ApprovalRequest, Boolean, JsonElement?) -> Unit,
     onLoadEarlier: () -> Unit,
     jumps: Flow<Int>,
@@ -243,7 +236,7 @@ private fun TranscriptList(
                     }
                 }
                 if (trailing) {
-                    item(key = "trailing") { Trailing(state, turnStartedAt, onRespond) }
+                    item(key = "trailing") { Trailing(state, onRespond) }
                 }
             }
         }
@@ -490,7 +483,7 @@ private suspend fun LazyListState.toNextMessage(items: List<Int>, density: Densi
 
 /** The approval or question the AI waits on, and the thinking line: shown only while there is one (`hasTrailing`). */
 @Composable
-private fun Trailing(state: ChatState, turnStartedAt: Instant?, onRespond: (ApprovalRequest, Boolean, JsonElement?) -> Unit) {
+private fun Trailing(state: ChatState, onRespond: (ApprovalRequest, Boolean, JsonElement?) -> Unit) {
     val indicator = indicatorLabel(state)
     val request = state.pendingApproval
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -502,22 +495,23 @@ private fun Trailing(state: ChatState, turnStartedAt: Instant?, onRespond: (Appr
         if (indicator != null) {
             ThinkingIndicator(
                 indicator,
-                waitingSince = if (state.live.isNullOrEmpty()) turnStartedAt else null,
+                elapsed = state.connectingElapsed,
+                waiting = state.live.isNullOrEmpty(),
                 connecting = state.phase == SessionPhase.CONNECTING,
             )
         }
     }
 }
 
-/** Shown while nothing streams: before the first token, and while a tool's result is read. */
+/** Shown while nothing streams — before the first token, while a tool's result is read — and over text while PPM says what it is doing. */
 internal fun indicatorLabel(state: ChatState): String? {
     if (!state.isRunning) return null
-    if (state.compacting) return "Compacting messages..."
+    val status = if (state.compacting) "Compacting messages..." else state.statusMessage
     val live = state.live
     val waiting = live.isNullOrEmpty()
     val afterTool = (live?.lastOrNull() as? ChatBlock.Tool)?.tool?.result != null
-    if (!waiting && !afterTool) return null
-    return when (state.phase) {
+    if (status == null && !waiting && !afterTool) return null
+    return status ?: when (state.phase) {
         SessionPhase.INITIALIZING -> "Initializing"
         SessionPhase.CONNECTING -> "Connecting"
         SessionPhase.THINKING -> "Thinking"

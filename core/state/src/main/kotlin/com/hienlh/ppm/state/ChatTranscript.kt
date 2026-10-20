@@ -56,6 +56,14 @@ class ChatTranscript {
     var compacting = false
         private set
 
+    /** Seconds the server has waited for a first answer; 0 outside `connecting` (`connectingElapsed`). */
+    var connectingElapsed = 0
+        private set
+
+    /** What PPM is doing ahead of the provider (`status_update`), shown in place of the phase until the turn's account is known. */
+    var statusMessage: String? = null
+        private set
+
     /** A send the server refused, as it was typed and quoted, until the composer takes it back ([takeRejected]). */
     var rejected: RejectedSend? = null
         private set
@@ -120,7 +128,10 @@ class ChatTranscript {
             }
             is ChatFrame.SessionState -> applySessionState(frame.state, now, effects)
             is ChatFrame.TurnEvents -> applySnapshot(frame.snapshot, now, effects)
-            is ChatFrame.PhaseChanged -> applyPhase(frame.phase, effects)
+            is ChatFrame.PhaseChanged -> {
+                connectingElapsed = if (frame.phase == SessionPhase.CONNECTING) frame.elapsed ?: 0 else 0
+                applyPhase(frame.phase, effects)
+            }
             is ChatFrame.TurnStopped -> turnStop = frame.stop
             is ChatFrame.MessageRejected -> {
                 // Without an id, the latest send of the same text and reply (`message_rejected` in use-chat.ts).
@@ -371,6 +382,7 @@ class ChatTranscript {
         resyncInFlight = false
         replayTruncated = false
         compacting = false
+        statusMessage = null
         // A turn can end after frames were lost (no `done` seen): reconcile from history.
         if (replayWasTruncated || (wasRunning && !turnFinalized)) {
             finalizeLive()
@@ -402,7 +414,10 @@ class ChatTranscript {
             is ChatEvent.Done -> if (event.parent == null) {
                 finalizeLive(event.lastMessageUuid, event.usage)
                 turnFinalized = true
+                statusMessage = null
             }
+            is ChatEvent.StatusUpdate -> statusMessage = event.message + (event.accountLabel?.takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: "")
+            is ChatEvent.AccountInfo -> statusMessage = null
             is ChatEvent.SessionMigrated -> effects += ChatEffect.AdoptSessionId(event.newSessionId)
             is ChatEvent.Other -> Unit
         }
