@@ -15,7 +15,16 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.graphics.ClipOp
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.addOutline
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.shadow.DropShadowPainter
+import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.invalidateDraw
+import androidx.compose.ui.node.requireGraphicsContext
 import androidx.compose.ui.geometry.Size
 
 /** An sRGB colour with alpha, as the web's theme tokens write them. */
@@ -194,8 +203,12 @@ private class RadialBrush(private val gradient: ThemeBackground.Radial) : Shader
     override fun hashCode() = gradient.hashCode()
 }
 
-/** A CSS box-shadow, spread included (Compose's drop shadow takes the same four numbers). */
-fun Modifier.ppmShadow(shadow: ThemeShadow, shape: Shape): Modifier = dropShadow(
+/**
+ * A CSS box-shadow, spread included (Compose's drop shadow takes the same four numbers), and only
+ * outside the box, where CSS draws one: Compose's own `dropShadow` also fills the shape beneath, so
+ * a see-through background showed it (the user's `bg-accent-wash` bubble came out grey).
+ */
+fun Modifier.ppmShadow(shadow: ThemeShadow, shape: Shape): Modifier = this then OuterShadowElement(
     shape,
     Shadow(
         radius = shadow.blur.dp,
@@ -204,3 +217,31 @@ fun Modifier.ppmShadow(shadow: ThemeShadow, shape: Shape): Modifier = dropShadow
         offset = DpOffset(shadow.x.dp, shadow.y.dp),
     ),
 )
+
+private data class OuterShadowElement(val shape: Shape, val shadow: Shadow) : ModifierNodeElement<OuterShadowNode>() {
+    override fun create() = OuterShadowNode(shape, shadow)
+
+    override fun update(node: OuterShadowNode) = node.update(shape, shadow)
+}
+
+/** Compose's `SimpleDropShadowNode`, the shadow drawn with the box itself clipped out. */
+private class OuterShadowNode(var shape: Shape, var shadow: Shadow) : Modifier.Node(), DrawModifierNode {
+    private var painter: DropShadowPainter? = null
+    private val outline = Path()
+
+    fun update(shape: Shape, shadow: Shadow) {
+        if (shape == this.shape && shadow == this.shadow) return
+        this.shape = shape
+        this.shadow = shadow
+        painter = null
+        invalidateDraw()
+    }
+
+    override fun ContentDrawScope.draw() {
+        val painter = painter ?: requireGraphicsContext().shadowContext.createDropShadowPainter(shape, shadow).also { painter = it }
+        outline.reset()
+        outline.addOutline(shape.createOutline(size, layoutDirection, this))
+        clipPath(outline, ClipOp.Difference) { with(painter) { draw(size) } }
+        drawContent()
+    }
+}
