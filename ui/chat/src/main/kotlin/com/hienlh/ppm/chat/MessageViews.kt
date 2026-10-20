@@ -183,7 +183,7 @@ fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActi
                 val growing = live && index == blocks.lastIndex
                 when (block) {
                     is ChatBlock.Text -> Column {
-                        SelectionContainer { MarkdownView(block.text, streaming = growing) }
+                        WithoutOnCopy(CODE_EDGE) { SelectionContainer { MarkdownView(block.text, streaming = growing) } }
                         if (growing) StreamingMark()
                     }
                     is ChatBlock.Thinking -> ThinkingBlock(block.text, growing)
@@ -327,8 +327,10 @@ internal fun ThinkingBlock(text: String, streaming: Boolean) {
                 if (streaming) snapshotFlow { scroll.maxValue }.collect { scroll.scrollTo(it) }
             }
             Column(Modifier.heightIn(max = 240.dp).verticalScroll(scroll).padding(start = 8.dp, end = 8.dp, bottom = 8.dp)) {
-                SelectionContainer {
-                    MarkdownView(text, style = thinkingStyle.copy(color = tokens.text3.opacity(0.8)), streaming = streaming)
+                WithoutOnCopy(CODE_EDGE) {
+                    SelectionContainer {
+                        MarkdownView(text, style = thinkingStyle.copy(color = tokens.text3.opacity(0.8)), streaming = streaming)
+                    }
                 }
             }
         }

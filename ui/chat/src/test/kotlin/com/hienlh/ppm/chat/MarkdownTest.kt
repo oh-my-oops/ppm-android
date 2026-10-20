@@ -1,10 +1,13 @@
 package com.hienlh.ppm.chat
 
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.unit.em
 import com.hienlh.ppm.chat.InlineMarkdown.Kind
 import com.hienlh.ppm.chat.InlineMarkdown.Span
 import com.hienlh.ppm.design.BuiltInThemes
+import com.hienlh.ppm.design.PpmFonts
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -79,10 +82,25 @@ class MarkdownTest {
     }
 
     @Test
-    fun `blocks collapse their margins`() {
-        assertEquals(8, MarkdownGaps.gap(MarkdownBlock.Paragraph("a"), MarkdownBlock.Code(null, "", closed = true)))
-        assertEquals(12, MarkdownGaps.gap(MarkdownBlock.Paragraph("a"), MarkdownBlock.Heading(1, "")))
-        assertEquals(4, MarkdownGaps.gap(MarkdownBlock.Heading(3, ""), MarkdownBlock.Paragraph("a")))
+    fun `blocks collapse their margins as Chrome does`() {
+        // Measured in Chrome: the gaps between the blocks, then what collapses out of the message.
+        val first = Markdown.parse(
+            "Intro.\n\n```ts\nconst a = 1;\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n> One.\n>\n> Two.\n\n---\n\n" +
+                "1. First\n2. Second\n   - nested one\n   - nested two\n3. Third\n\n- loose one\n\n- loose two\n\nLast.",
+        )
+        assertEquals(listOf(0, 8, 8, 4, 8, 8, 4, 4), MarkdownGaps.tops(first))
+        assertEquals(0 to 0, MarkdownGaps.ends(first))
+        val ordered = first[5] as MarkdownBlock.ListBlock
+        // An item holding a list ends with that list's margin.
+        assertEquals(listOf(0, 2, 4), MarkdownGaps.itemTops(ordered.items))
+        assertEquals(listOf(0, 4), MarkdownGaps.tops(ordered.items[1].blocks))
+        // The quote's paragraphs drop their outer margins and keep the one between them.
+        assertEquals(listOf(0, 4), MarkdownGaps.tops((first[3] as MarkdownBlock.Quote).blocks))
+        // A table keeps its margins inside its scroller: nothing collapses out, 8 more inside.
+        assertEquals(0 to 8, MarkdownGaps.ends(Markdown.parse("| a |\n|---|\n| 1 |\n\n```\ncode\n```")))
+        assertEquals(4 to 8, MarkdownGaps.ends(Markdown.parse("> A quote first.\n\n### Three\n\nText.\n\n---")))
+        assertEquals(8 to 4, MarkdownGaps.ends(Markdown.parse("```\ncode\n```\n\n- item\n\n## Two\n\n- last")))
+        assertEquals(12 to 4, MarkdownGaps.ends(Markdown.parse("# One\n\n- last")))
     }
 
     @Test
@@ -150,6 +168,21 @@ class MarkdownTest {
     }
 
     @Test
+    fun `the spans around and after a code box take in its edges`() {
+        val handler = object : UriHandler {
+            override fun openUri(uri: String) = Unit
+        }
+        val text = inline("**`a`** and *b `c` d*").annotated(BuiltInThemes.auroraDark.tokens, handler, 14f)
+        assertEquals("${CODE_EDGE}a$CODE_EDGE and b ${CODE_EDGE}c$CODE_EDGE d", text.text)
+        val weights = text.spanStyles.filter { it.item.fontWeight != null }.map { it.start to it.end }
+        assertEquals(listOf(0 to 3), weights)
+        val italics = text.spanStyles.filter { it.item.fontStyle != null }.map { it.start to it.end }
+        assertEquals(listOf(8 to 15), italics)
+        val code = text.spanStyles.filter { it.item.fontFamily != null }.map { text.text.substring(it.start, it.end) }
+        assertEquals(listOf("a", "c"), code)
+    }
+
+    @Test
     fun `bare URLs become links, minus the sentence's punctuation`() {
         val parsed = inline("see https://ppm.dev/x). and `https://in.code`")
         val links = parsed.spans.filter { it.kind == Kind.LINK }
@@ -164,9 +197,14 @@ class MarkdownTest {
                 opened += uri
             }
         }
-        val text = parsed.annotated(BuiltInThemes.auroraDark.tokens, handler)
-        val codeStyle = text.spanStyles.single { it.start == code.start && it.end == code.end }
-        assertEquals("inline code sits on the page background", BuiltInThemes.auroraDark.tokens.bgSolid.color, codeStyle.item.background)
+        val text = parsed.annotated(BuiltInThemes.auroraDark.tokens, handler, 14f)
+        // The code's box takes room on either side of it, and is drawn rather than set as a background.
+        val box = text.getStringAnnotations(CODE_BOX, 0, text.length).single()
+        assertEquals("${CODE_EDGE}https://in.code$CODE_EDGE", text.text.substring(box.start, box.end))
+        val codeStyle = text.spanStyles.single { it.start == box.start + 1 && it.end == box.end - 1 }
+        assertEquals(PpmFonts.mono, codeStyle.item.fontFamily)
+        assertEquals((12f / 14f).em, codeStyle.item.fontSize)
+        assertEquals(Color.Unspecified, codeStyle.item.background)
         val link = text.getLinkAnnotations(0, text.length).single().item as LinkAnnotation.Url
         assertEquals("https://ppm.dev/x", link.url)
         assertNotNull(link.linkInteractionListener)

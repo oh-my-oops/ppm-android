@@ -113,16 +113,22 @@ internal fun breakAnywhere(text: String): String = buildString(text.length * 2) 
 @Composable
 internal fun WithoutBreaksOnCopy(enabled: Boolean, content: @Composable () -> Unit) {
     if (!enabled) return content()
-    val clipboard = LocalClipboard.current
-    val unbroken = remember(clipboard) { UnbrokenClipboard(clipboard) }
-    CompositionLocalProvider(LocalClipboard provides unbroken, content = content)
+    WithoutOnCopy(BREAK, content)
 }
 
-private class UnbrokenClipboard(private val inner: Clipboard) : Clipboard by inner {
+/** [content] copied to the clipboard without [mark], a character there for the layout alone. */
+@Composable
+internal fun WithoutOnCopy(mark: Char, content: @Composable () -> Unit) {
+    val clipboard = LocalClipboard.current
+    val clean = remember(clipboard, mark) { CleanClipboard(clipboard, mark) }
+    CompositionLocalProvider(LocalClipboard provides clean, content = content)
+}
+
+private class CleanClipboard(private val inner: Clipboard, private val mark: Char) : Clipboard by inner {
     override suspend fun setClipEntry(clipEntry: ClipEntry?) {
         val data = clipEntry?.clipData
         val text = data?.takeIf { it.itemCount == 1 }?.getItemAt(0)?.text
-        if (text == null || BREAK !in text) return inner.setClipEntry(clipEntry)
-        inner.setClipEntry(ClipEntry(ClipData.newPlainText(data.description.label, text.toString().replace(BREAK.toString(), ""))))
+        if (text == null || mark !in text) return inner.setClipEntry(clipEntry)
+        inner.setClipEntry(ClipEntry(ClipData.newPlainText(data.description.label, text.toString().replace(mark.toString(), ""))))
     }
 }

@@ -542,9 +542,9 @@ private fun TaskResult(markdown: String) {
     val tokens = LocalPpmTokens.current
     val blocks = remember(markdown) { Markdown.parse(markdown) }
     val style = MarkdownStyle(size = 11f, lineHeightRatio = 1.625f, color = tokens.text3.opacity(0.8))
-    // It scrolls, so the last block's bottom margin stays inside it.
-    val trailing = blocks.lastOrNull()?.let { MarkdownGaps.margins(it).second } ?: 0
-    Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()).padding(bottom = trailing.dp)) {
+    // It scrolls, so the margins collapsing out of the first and last block stay inside it.
+    val (top, bottom) = remember(blocks) { MarkdownGaps.ends(blocks) }
+    Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()).padding(top = top.dp, bottom = bottom.dp)) {
         MarkdownBlocks(blocks, style)
     }
 }

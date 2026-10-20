@@ -52,6 +52,23 @@ object PpmFonts {
         Font(R.font.monaspace_argon_bold, FontWeight.Bold),
         Font(R.font.monaspace_argon_italic, FontWeight.Normal, FontStyle.Italic),
     )
+
+    /** Monaspace's typo ascender and descender, 1565 and 435 of its 2000 units, which Chrome takes (`USE_TYPO_METRICS`). */
+    const val MONO_ASCENT = 0.7825f
+    const val MONO_DESCENT = 0.2175f
+
+    /** Monaspace's one advance, 1240 of its 2000 units. */
+    const val MONO_ADVANCE = 0.62f
+
+    /**
+     * A font's ascent and descent at [px] as Chrome rounds them for a box (`AscentDescentWithHacks`):
+     * each to a whole pixel, and a descent rounded down takes one from the ascent.
+     */
+    fun chromeAscentDescent(px: Float, ascent: Float, descent: Float): Pair<Float, Float> {
+        val up = Math.round(px * ascent).toFloat()
+        val down = Math.round(px * descent).toFloat()
+        return if (down < px * descent && up >= 1) up - 1 to down + 1 else up to down
+    }
 }
 
 /**
