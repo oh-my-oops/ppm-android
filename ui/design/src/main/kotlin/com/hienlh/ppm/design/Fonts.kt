@@ -1,8 +1,11 @@
 package com.hienlh.ppm.design
 
 import android.content.Context
+import android.content.res.Resources
 import android.graphics.Typeface
 import android.os.Build
+import android.util.DisplayMetrics
+import android.util.TypedValue
 import androidx.annotation.RequiresApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.AndroidFont
@@ -16,6 +19,8 @@ import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextMotion
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
+import kotlin.math.ceil
+import kotlin.math.floor
 
 /**
  * The web's two typefaces: Geist for the interface, Monaspace Argon for code and metadata. Both
@@ -41,6 +46,9 @@ object PpmFonts {
 
     /** Geist's ascender, 1005 of its 1000 units: what Chrome sizes a list's disc from. */
     const val SANS_ASCENT = 1.005f
+
+    /** Geist's descender, 295 of its 1000 units. */
+    const val SANS_DESCENT = 0.295f
 
     /**
      * The very files the web loads (`@fontsource/monaspace-argon`: release 1.101, Latin only, at
@@ -68,6 +76,29 @@ object PpmFonts {
         val up = Math.round(px * ascent).toFloat()
         val down = Math.round(px * descent).toFloat()
         return if (down < px * descent && up >= 1) up - 1 to down + 1 else up to down
+    }
+
+    /**
+     * The `topRatio` that puts the baseline of a line [line] px tall, in a font of [px] px, where
+     * Chrome puts it (LayoutNG `CalculateLeadingSpace`): the half-leading above floored to a whole
+     * pixel, over [chromeAscentDescent]. Compose centres the text on the metrics Android rounds,
+     * each to the nearest pixel, and set most sizes 1–2 px lower than the web (14 px in 20 at 2x:
+     * 30, Chrome 29). Its span puts ⌈extra × (1 − ratio)⌉ of the room under the text, and cannot
+     * lift it above the font's own ascent (12 px in 16: one short). Null for a line no taller than
+     * the font, which the span leaves alone.
+     */
+    fun chromeTopRatio(px: Float, line: Float, ascent: Float, descent: Float): Float? {
+        val androidDescent = Math.round(px * descent)
+        val height = ceil(line).toInt()
+        val extra = height - Math.round(px * ascent) - androidDescent
+        if (extra <= 0) return null
+        val (up, down) = chromeAscentDescent(px, ascent, descent)
+        val below = height - androidDescent - (floor((line - up - down) / 2) + up).toInt()
+        return when {
+            below <= 0 -> 1f
+            below >= extra -> 0f
+            else -> 1f - (below - 0.5f) / extra
+        }
     }
 }
 
@@ -126,8 +157,8 @@ enum class FontKind { SANS, MONO }
 
 /**
  * Text set as a CSS rule would: [kind] at [size] CSS pixels (sp, so the system font size still
- * scales it), and with [lineHeight] each line box is that tall, half the extra leading above
- * and half below. Glyphs keep their unhinted advances and fractional positions, as Chrome lays
+ * scales it), and with [lineHeight] each line box is that tall, the text on the baseline Chrome
+ * gives it there ([PpmFonts.chromeTopRatio]). Glyphs keep their unhinted advances and fractional positions, as Chrome lays
  * text out: Android's default snaps every advance to a whole pixel, which at 2.625x made a line
  * 1–2 % narrower than the web's and wrapped it somewhere else.
  */
@@ -143,6 +174,21 @@ fun ppmText(
     fontWeight = weight,
     fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
     lineHeight = lineHeight?.sp ?: TextUnit.Unspecified,
-    lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
+    lineHeightStyle = LineHeightStyle(lineHeight?.let { chromeAlignment(kind, size, it) } ?: LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
     textMotion = TextMotion.Animated,
 )
+
+private fun chromeAlignment(kind: FontKind, size: Float, lineHeight: Float): LineHeightStyle.Alignment {
+    val metrics = systemMetrics ?: return LineHeightStyle.Alignment.Center
+    val px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, size, metrics)
+    val line = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, lineHeight, metrics)
+    val ratio = if (kind == FontKind.SANS) {
+        PpmFonts.chromeTopRatio(px, line, PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT)
+    } else {
+        PpmFonts.chromeTopRatio(px, line, PpmFonts.MONO_ASCENT, PpmFonts.MONO_DESCENT)
+    }
+    return ratio?.let(LineHeightStyle::Alignment) ?: LineHeightStyle.Alignment.Center
+}
+
+/** The display's, where a style is made without a context at hand; none under the JVM tests. */
+private val systemMetrics: DisplayMetrics? get() = runCatching { Resources.getSystem().displayMetrics }.getOrNull()

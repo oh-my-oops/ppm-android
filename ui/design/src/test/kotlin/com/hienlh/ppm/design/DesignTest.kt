@@ -6,9 +6,11 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
+import kotlin.math.ceil
 
 /** The design data and rules, without a device (`PPMSelfTest/DesignTests.swift`). */
 class DesignTest {
@@ -157,6 +159,55 @@ class DesignTest {
         // Never thinner than a pixel, and none at all for none.
         assertEquals(1, Density(0.75f).cssBorderPx(1.dp))
         assertEquals(0, Density(2.625f).cssBorderPx(0.dp))
+    }
+
+    private data class Line(val mono: Boolean, val size: Float, val height: Float, val density: Float, val baseline: Int)
+
+    @Test
+    fun `text sits on the baseline Chrome gives it`() {
+        // Chrome's, in device px from the top of the line box, measured on the emulators by CDP.
+        val chrome = listOf(
+            Line(false, 10.5f, 15.75f, 2f, 22),
+            Line(false, 11f, 16.5f, 2f, 23),
+            Line(false, 11f, 17.875f, 2f, 24),
+            Line(false, 12f, 18f, 2f, 25),
+            Line(false, 13f, 19.5f, 2f, 28),
+            Line(false, 14f, 20f, 2f, 29),
+            Line(false, 14f, 21f, 2f, 30),
+            Line(false, 16f, 24f, 2f, 34),
+            Line(false, 20f, 28f, 2f, 42),
+            Line(true, 10f, 15f, 2f, 20),
+            Line(true, 11f, 16.5f, 2f, 22),
+            Line(true, 12f, 16f, 2f, 22),
+            Line(true, 14f, 20f, 2f, 27),
+            Line(false, 10.5f, 15.75f, 2.625f, 29),
+            Line(false, 11f, 16.5f, 2.625f, 31),
+            Line(false, 11f, 17.875f, 2.625f, 33),
+            Line(false, 12f, 18f, 2.625f, 34),
+            Line(false, 13f, 19.5f, 2.625f, 36),
+            Line(false, 14f, 20f, 2.625f, 39),
+            Line(false, 14f, 21f, 2.625f, 40),
+            Line(false, 16f, 24f, 2.625f, 45),
+            Line(false, 20f, 28f, 2.625f, 54),
+            Line(true, 10f, 15f, 2.625f, 27),
+            Line(true, 11f, 16.5f, 2.625f, 29),
+            Line(true, 12f, 16f, 2.625f, 30),
+            Line(true, 14f, 20f, 2.625f, 36),
+        )
+        for (line in chrome) {
+            val ascent = if (line.mono) PpmFonts.MONO_ASCENT else PpmFonts.SANS_ASCENT
+            val descent = if (line.mono) PpmFonts.MONO_DESCENT else PpmFonts.SANS_DESCENT
+            val px = line.size * line.density
+            val ratio = PpmFonts.chromeTopRatio(px, line.height * line.density, ascent, descent)!!
+            // Where Compose's LineHeightStyleSpan then puts it, on the metrics Android rounds.
+            val height = ceil(line.height * line.density).toInt()
+            val below = height - Math.round(px * ascent) - Math.round(px * descent)
+            assertEquals("$line", line.baseline, height - Math.round(px * descent) - ceil(below * (1 - ratio)).toInt())
+        }
+        // 12 px in 16: Chrome's text is one pixel above where Android's ascent lets the span lift it.
+        assertEquals(0f, PpmFonts.chromeTopRatio(24f, 32f, PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT))
+        // A line no taller than the font is left to the span.
+        assertNull(PpmFonts.chromeTopRatio(24f, 24f, PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT))
     }
 
     @Test
