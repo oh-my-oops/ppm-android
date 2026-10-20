@@ -125,14 +125,27 @@ class TranscriptTest {
     }
 
     @Test
-    fun `a result pairs with its call by id, or the last open call without one`() {
+    fun `a result pairs with its call by id, or else with the first card still without one`() {
         val turn = TurnBuilder(live = true)
         turn.add(ChatEvent.ToolUse("Read", json("""{"file_path":"a.ts"}"""), "t1"))
         turn.add(ChatEvent.ToolUse("Bash", json("""{"command":"ls"}"""), "t2"))
         turn.add(ChatEvent.ToolResult(ToolOutcome("A", isError = false), "t1"))
         turn.add(ChatEvent.ToolUse("Read", json("""{"file_path":"b.ts"}"""), null))
         turn.add(ChatEvent.ToolResult(ToolOutcome("B", isError = true), null))
-        assertEquals(listOf("A", null, "B"), turn.blocks.map { (it as? ChatBlock.Tool)?.tool?.result?.output })
+        turn.add(ChatEvent.ToolResult(ToolOutcome("C", isError = false), "unknown"))
+        assertEquals(listOf("A", "B", "C"), turn.blocks.map { (it as? ChatBlock.Tool)?.tool?.result?.output })
+    }
+
+    @Test
+    fun `an exit code and an answered request come through as the server sends them`() {
+        val result = ChatEvent.from(json("""{"type":"tool_result","output":"x","isError":true,"exitCode":128,"toolUseId":"t"}""")) as ChatEvent.ToolResult
+        assertEquals(128, result.outcome.exitCode)
+        val turn = TurnBuilder(live = true)
+        turn.add(ChatEvent.from(json("""{"type":"approval_request","requestId":"r","tool":"Bash","input":{"command":"rm x"}}""")))
+        assertNull((turn.blocks.single() as ChatBlock.Tool).tool.approved)
+        // A replay sends it again once it was answered.
+        turn.add(ChatEvent.from(json("""{"type":"approval_request","requestId":"r","tool":"Bash","input":{"command":"rm x"},"approved":false}""")))
+        assertEquals(false, (turn.blocks.single() as ChatBlock.Tool).tool.approved)
     }
 
     @Test
@@ -149,14 +162,65 @@ class TranscriptTest {
     }
 
     @Test
-    fun `a card says what the call does in one line`() {
-        val use = ChatEvent.from(json("""{"type":"tool_use","tool":"Bash","input":{"command":"ls"},"toolUseId":"t1"}""")) as ChatEvent.ToolUse
-        assertEquals("ls", ToolSummary.detail(use.name, use.input))
-        // The first line with anything on it, as it is.
-        assertEquals("  git status", ToolSummary.detail("Bash", json("""{"command":"\n\n  git status\nmore"}""")))
-        assertEquals("ppm-db · db_query", ToolSummary.displayName("mcp__ppm-db__db_query"))
-        assertEquals("3 items", ToolSummary.detail("TodoWrite", json("""{"todos":[1,2,3]}""")))
-        assertEquals("b", ToolSummary.detail("Custom", json("""{"z":"","b":"b","a":1}""")))
+    fun `a step counts once however often it is sent, and a nested agent's steps add up`() {
+        val turn = TurnBuilder(live = true)
+        turn.add(ChatEvent.ToolUse("Agent", json("""{"description":"Plan"}"""), "a1"))
+        turn.add(ChatEvent.ToolUse("Read", json("""{"file_path":"/x/y.ts"}"""), "s1", parent = "a1"))
+        turn.add(ChatEvent.ToolUse("Read", json("""{"file_path":"/x/y.ts"}"""), "s1", parent = "a1"))
+        turn.add(ChatEvent.ToolUse("Task", json("""{"name":" scout ","description":"Look around"}"""), "a2", parent = "a1"))
+        turn.add(ChatEvent.ToolUse("Bash", json("""{"command":"ls"}"""), "s2", parent = "a2"))
+        turn.add(ChatEvent.ToolUse("Glob", json("""{"pattern":"*.kt"}"""), "s3", parent = "a2"))
+        val card = (turn.blocks.single() as ChatBlock.Tool).tool
+        // Read and the nested Task on the card itself, Bash and Glob inside the Task.
+        assertEquals(4, card.steps)
+        assertEquals("scout · Look around", card.lastStep)
+    }
+
+    @Test
+    fun `a history card counts the steps it carries`() {
+        val use = ChatEvent.from(
+            json(
+                """{"type":"tool_use","tool":"Agent","toolUseId":"a1","input":{"description":"Review"},"children":[
+                {"type":"text","content":"Looking"},
+                {"type":"tool_use","tool":"Grep","toolUseId":"c1","input":{"pattern":"TODO"}},
+                {"type":"tool_result","toolUseId":"c1","output":"none"},
+                {"type":"tool_use","tool":"Agent","toolUseId":"c2","input":{"prompt":"Check tests"},"children":[
+                  {"type":"tool_use","tool":"WebFetch","input":{"url":"https://example.com"}}
+                ]}
+                ]}""",
+            ),
+        )
+        val history = TurnBuilder(live = false)
+        history.add(use)
+        val card = (history.blocks.single() as ChatBlock.Tool).tool
+        assertEquals(3, card.steps)
+        assertEquals("Check tests", card.lastStep)
+        assertEquals("Fetch https://example.com", describeStep("WebFetch", json("""{"url":"https://example.com"}""")))
+        assertEquals("Edit b.ts", describeStep("Edit", json("""{"notebook_path":"","file_path":"C:\\a\\b.ts"}""")))
+        assertEquals("Bash", describeStep("Bash", json("""{"description":"","command":""}""")))
+    }
+
+    @Test
+    fun `a backgrounded agent ends when the server says so, on whichever turn holds its card`() {
+        val chat = ChatTranscript()
+        chat.handle(frame("""{"type":"phase_changed","phase":"thinking"}"""))
+        chat.handle(frame("""{"type":"tool_use","tool":"Agent","input":{"description":"Watch"},"toolUseId":"a1","streamSeq":1}"""))
+        chat.handle(frame("""{"type":"tool_result","output":"Async agent launched successfully.","toolUseId":"a1","streamSeq":2}"""))
+        chat.handle(frame("""{"type":"done","streamSeq":3}"""))
+        chat.handle(frame("""{"type":"phase_changed","phase":"idle"}"""))
+        // It works on after its turn: its calls count on that turn's card.
+        chat.handle(frame("""{"type":"tool_use","tool":"Read","input":{"file_path":"/a.ts"},"toolUseId":"c1","parentToolUseId":"a1","streamSeq":4}"""))
+        chat.handle(frame("""{"type":"text","content":"read it","parentToolUseId":"a1","streamSeq":5}"""))
+        assertNull(chat.live)
+        fun card() = chat.items.last().blocks.filterIsInstance<ChatBlock.Tool>().single().tool
+        assertEquals(1, card().steps)
+        assertEquals("Read a.ts", card().lastStep)
+        assertNull(card().bgStatus)
+        chat.handle(frame("""{"type":"subagent_status","toolUseId":"a1","status":"completed","streamSeq":6}"""))
+        assertEquals("completed", card().bgStatus)
+        // History stamps it on the call.
+        val use = ChatEvent.from(json("""{"type":"tool_use","tool":"Agent","input":{},"toolUseId":"a2","bgStatus":"failed"}""")) as ChatEvent.ToolUse
+        assertEquals("failed", use.bgStatus)
     }
 
     @Test
@@ -281,6 +345,9 @@ class TranscriptTest {
         chat.handle(frame("""{"type":"tool_use","tool":"AskUserQuestion","input":{"questions":[]},"toolUseId":"q"}"""))
         chat.handle(frame("""{"type":"approval_request","requestId":"r2","tool":"AskUserQuestion","input":{"questions":[]}}"""))
         chat.handle(frame("""{"type":"tool_result","output":"answered","toolUseId":"q"}"""))
+        // A subagent's question goes the same way, and is no step.
+        chat.handle(frame("""{"type":"tool_use","tool":"AskUserQuestion","input":{"questions":[]},"toolUseId":"q2","parentToolUseId":"nowhere"}"""))
+        chat.handle(frame("""{"type":"tool_result","output":"answered","toolUseId":"q2"}"""))
         chat.handle(frame("""{"type":"approval_resolved","requestId":"r2","approved":true,"answers":{"Which?":"A"}}"""))
         val tools = chat.live?.blocks.orEmpty().mapNotNull { (it as? ChatBlock.Tool)?.tool }
         assertEquals(listOf("Read", "Bash", "AskUserQuestion"), tools.map { it.name })

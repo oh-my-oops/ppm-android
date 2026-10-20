@@ -41,7 +41,7 @@ fun RelativeTime(date: Instant, style: TextStyle, modifier: Modifier = Modifier)
 }
 
 /** `basename()` of a path as the web writes it. */
-internal fun basename(path: String): String = path.split('/').lastOrNull { it.isNotEmpty() } ?: path
+internal fun basename(path: String): String = path.split('/', '\\').last()
 
 /** The web's `truncate(str, max)`: a prefix and an ellipsis. */
 internal fun truncate(text: String, max: Int): String = if (text.length > max) text.take(max) + "…" else text

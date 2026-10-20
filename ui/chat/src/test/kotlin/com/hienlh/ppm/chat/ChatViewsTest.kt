@@ -104,7 +104,9 @@ class ChatViewsTest {
         assertEquals("rm -rf /tmp/test", bash.detail)
         assertTrue("a command without a description is shown as code", bash.monoDetail)
         assertEquals("c.swift", toolSummary("Read", WireJson.parse("""{"file_path":"/a/b/c.swift"}""")).detail)
-        assertEquals("ppm-db · db_query", toolSummary("mcp__ppm-db__db_query", WireJson.parse("{}")).name)
+        // A tool the web has no line for is its name alone.
+        assertEquals(ToolSummaryText(name = "mcp__github__create_issue", detail = ""), toolSummary("mcp__github__create_issue", WireJson.parse("""{"title":"x"}""")))
+        assertEquals("b.ts", toolSummary("Edit", WireJson.parse("""{"file_path":"C:\\src\\b.ts"}""")).detail)
         assertEquals("1/2 done", toolSummary("TodoWrite", WireJson.parse("""{"todos":[{"status":"completed"},{"status":"pending"}]}""")).detail)
         assertEquals("#7 → done", toolSummary("TaskUpdate", WireJson.parse("""{"taskId":7,"status":"done"}""")).detail)
     }
@@ -167,6 +169,20 @@ class ChatViewsTest {
         assertTrue(isLongOutput("1\n2\n3\n4"))
         assertTrue(isLongOutput("x".repeat(201)))
         assertEquals(false, isLongOutput("1\n2\n3"))
+        // Folded, it shows four lines: those are all it lays out.
+        assertEquals("1\n2\n3\n4", collapsedPreview("1\n2\n3\n4\n5\n6"))
+        assertEquals("1\n2\n3\n4", collapsedPreview("1\n2\n3\n4"))
+        assertEquals(2_000, collapsedPreview("x".repeat(50_000)).length)
+    }
+
+    @Test
+    fun `a result hides when it only stood in for an image`() {
+        assertTrue(resultHasImagePlaceholder("""[{"type":"text","text":"[image · 12KB]"}]"""))
+        assertTrue(resultHasImagePlaceholder("""[{"type":"text","text":"Saved"},{"type":"text","text":"[image]"}]"""))
+        assertEquals(false, resultHasImagePlaceholder("[image]"))
+        assertEquals(false, resultHasImagePlaceholder("""[{"type":"text","text":"see [image] below"}]"""))
+        assertTrue(isAsyncAgentLaunchAck("Async agent launched successfully.\nagentId: a1"))
+        assertEquals(false, isAsyncAgentLaunchAck("Done."))
     }
 
     @Test

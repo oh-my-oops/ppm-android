@@ -46,6 +46,7 @@ import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ToolOutcome
+import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.double
 import com.hienlh.ppm.protocol.get
@@ -53,7 +54,9 @@ import com.hienlh.ppm.protocol.int
 import com.hienlh.ppm.protocol.prettyString
 import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.ToolBlock
-import com.hienlh.ppm.state.ToolSummary
+import com.hienlh.ppm.state.isAgent
+import com.hienlh.ppm.state.truthy
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 
@@ -65,16 +68,25 @@ private val monoText = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f)
 
 /**
  * A tool call as the web's `ToolCard` draws it (src/web/components/chat/tool-cards.tsx): a tinted
- * chip, a one-line summary, the status on the right, details when expanded. [turnRunning]: the
- * turn holding the call is still running, so a call without a result is in progress.
+ * chip, a one-line summary, the status on the right, details when expanded. [completed]: a call
+ * without a result is over anyway, its turn having ended or a later edit of the file it read
+ * having come back.
  */
 @Composable
-fun ToolCardView(tool: ToolBlock, turnRunning: Boolean, modifier: Modifier = Modifier) {
-    val isError = tool.result?.isError ?: false
-    val hasAnswers = tool.name == "AskUserQuestion" && tool.input["answers"] != null
-    val isDone = tool.result != null || hasAnswers || !turnRunning
-    if (tool.name == "Agent" || tool.name == "Task") {
-        AgentRow(tool, isDone, modifier)
+fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modifier) {
+    val result = tool.result
+    val isError = result?.isError ?: false
+    val hasAnswers = tool.name == "AskUserQuestion" && truthy(tool.input["answers"])
+    val wasApproved = tool.requestId != null && tool.approved != null
+    // A backgrounded agent answers its call the moment it starts, then runs on past its turn:
+    // only the status the server reports for it later says it is done.
+    val bgStatus = if (tool.isAgent) tool.bgStatus else null
+    val isBgAgent = tool.isAgent && (bgStatus != null || (result != null && !isError && isAsyncAgentLaunchAck(result.output)))
+    val bgRunning = isBgAgent && bgStatus == null
+    val bgFailed = bgStatus == "failed" || bgStatus == "stopped"
+    val isDone = !bgRunning && (result != null || hasAnswers || wasApproved || completed)
+    if (tool.isAgent) {
+        AgentRow(tool, if (isError || bgFailed) Status.FAILED else if (isDone) Status.DONE else Status.RUNNING, bgRunning, modifier)
         return
     }
     val tokens = LocalPpmTokens.current
@@ -105,8 +117,9 @@ fun ToolCardView(tool: ToolBlock, turnRunning: Boolean, modifier: Modifier = Mod
             ToolChip(ToolChipStyle.of(tool.name, tool.input, isError, tokens))
             ToolSummaryLine(tool.name, tool.input, Modifier.weight(1f))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (tool.steps > 0) {
-                    BasicText(stepCount(tool.steps), style = ppmText(10f, kind = FontKind.MONO).copy(color = tokens.text3.color))
+                // Codex's exit code for a shell call: its output can matter even when it failed.
+                result?.exitCode?.let { code ->
+                    BasicText("exit $code", style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = (if (code == 0) tokens.text3 else tokens.error).color))
                 }
                 StatusIcon(if (isError) Status.FAILED else if (isDone) Status.DONE else Status.RUNNING)
                 PpmIcon(if (expanded) ProductIcon.ChevronDown else ProductIcon.ChevronRight, 12.dp, tokens.text3.color)
@@ -118,16 +131,34 @@ fun ToolCardView(tool: ToolBlock, turnRunning: Boolean, modifier: Modifier = Mod
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 ToolDetails(tool.name, tool.input)
-                val result = tool.result
                 if (result != null && showsResult(tool.name, result)) CollapsibleOutput(result.output)
             }
         }
     }
 }
 
-/** A file change shows itself in the details; its "updated successfully" is noise. */
-private fun showsResult(name: String, result: ToolOutcome): Boolean =
-    !(name in setOf("Edit", "MultiEdit", "Write", "NotebookEdit") && !result.isError)
+/**
+ * A file change shows itself in the details, so its "updated successfully" is noise; an image
+ * read comes back as a stand-in for the picture. Failures always show.
+ */
+@Composable
+private fun showsResult(name: String, result: ToolOutcome): Boolean {
+    val carriedImage = remember(result.output) { resultHasImagePlaceholder(result.output) }
+    return result.isError || !(name in setOf("Edit", "MultiEdit", "Write", "NotebookEdit") || carriedImage)
+}
+
+/** The text an image block of a result is replaced with (`[image]`, `[image · 12KB]`), whole. */
+private val IMAGE_PLACEHOLDER = Regex("""^\[image(?: · [\d.]+(?:B|KB|MB))?]$""")
+
+/** Whether a result really carried an image (`resultHasImagePlaceholder` in shared/tool-result-content.ts). */
+internal fun resultHasImagePlaceholder(output: String): Boolean {
+    if (!output.startsWith("[")) return false
+    val blocks = WireJson.parseOrNull(output) as? JsonArray ?: return false
+    return blocks.any { it["type"].string == "text" && it["text"].string?.let(IMAGE_PLACEHOLDER::matches) == true }
+}
+
+/** A backgrounded agent's call answers this the moment the agent starts (`isAsyncAgentLaunchAck`). */
+internal fun isAsyncAgentLaunchAck(output: String): Boolean = output.contains("Async agent launched successfully")
 
 internal fun stepCount(n: Int): String = if (n == 1) "1 step" else "$n steps"
 
@@ -222,7 +253,7 @@ internal fun toolSummary(name: String, input: JsonElement): ToolSummaryText {
         }
         "AskUserQuestion" -> {
             val count = input["questions"].array?.size ?: 0
-            ToolSummaryText(name = name, detail = "$count question${if (count == 1) "" else "s"}${if (input["answers"] != null) " ✓" else ""}")
+            ToolSummaryText(name = name, detail = "$count question${if (count == 1) "" else "s"}${if (truthy(input["answers"])) " ✓" else ""}")
         }
         "ScheduleWakeup" -> {
             val reason = s("reason")
@@ -235,7 +266,7 @@ internal fun toolSummary(name: String, input: JsonElement): ToolSummaryText {
             val to = s("to")
             ToolSummaryText(ProductIcon.Send, name, if (to.isEmpty()) "" else "→ $to")
         }
-        else -> ToolSummaryText(name = ToolSummary.displayName(name), detail = ToolSummary.detail(name, input))
+        else -> ToolSummaryText(name = name, detail = "")
     }
 }
 
@@ -440,19 +471,29 @@ private fun AnsweredQuestions(input: JsonElement) {
 /** Longer than three lines or 200 characters: collapsed to four lines behind a toggle. */
 internal fun isLongOutput(output: String): Boolean = output.split("\n").size > 3 || output.length > 200
 
-/** A huge text stalls layout; the web scrolls it, nobody reads past this. */
-private fun clipped(output: String): String {
-    val limit = 20_000
-    return if (output.length <= limit) output else output.take(limit) + "\n… ${output.length - limit} more characters"
+/**
+ * What a collapsed output shows of [output]: four lines under a 64dp cut, so its first four lines
+ * (and of a line that never ends, more than four rows hold) are all it can show. Laying out the
+ * rest of a long one would only stall the list.
+ */
+internal fun collapsedPreview(output: String): String {
+    var end = 0
+    var preview = output
+    for (line in 0 until 4) {
+        val next = output.indexOf('\n', end)
+        if (next < 0) break
+        if (line == 3) preview = output.substring(0, next)
+        end = next + 1
+    }
+    return preview.take(2_000)
 }
 
-/** Raw output (`CollapsibleOutput`). */
+/** Raw output (`CollapsibleOutput`): collapsed as it first shows when long, then as the user leaves it. */
 @Composable
 private fun CollapsibleOutput(output: String) {
     val tokens = LocalPpmTokens.current
     val long = isLongOutput(output)
-    var collapsed by remember(output) { mutableStateOf(long) }
-    val text = remember(output) { clipped(output) }
+    var collapsed by remember { mutableStateOf(long) }
     Column(Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top)) {
         Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (long) {
@@ -469,9 +510,9 @@ private fun CollapsibleOutput(output: String) {
                 }
             }
             when {
-                collapsed -> Box(Modifier.heightIn(max = 64.dp).clipToBounds()) { Mono(text, tokens.text3) }
-                long -> Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) { Mono(text, tokens.text3) }
-                else -> Mono(text, tokens.text3)
+                collapsed -> Box(Modifier.heightIn(max = 64.dp).clipToBounds()) { Mono(remember(output) { collapsedPreview(output) }, tokens.text3) }
+                long -> Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) { Mono(output, tokens.text3) }
+                else -> Mono(output, tokens.text3)
             }
         }
     }
@@ -485,11 +526,10 @@ private fun CollapsibleOutput(output: String) {
  * that view yet, so the row does not open.
  */
 @Composable
-private fun AgentRow(tool: ToolBlock, isDone: Boolean, modifier: Modifier) {
+private fun AgentRow(tool: ToolBlock, status: Status, bgRunning: Boolean, modifier: Modifier) {
     val tokens = LocalPpmTokens.current
-    val handle = tool.input["name"].string?.takeIf { it.isNotBlank() }
+    val handle = tool.input["name"].string?.trim()?.ifEmpty { null }
     val description = truncate(tool.input["description"].string ?: tool.input["prompt"].string ?: "", 60)
-    val failed = tool.result?.isError ?: false
     val shape = RoundedCornerShape(11.dp)
     Row(
         modifier
@@ -518,10 +558,12 @@ private fun AgentRow(tool: ToolBlock, isDone: Boolean, modifier: Modifier) {
         }
         BasicText(text, Modifier.weight(1f), style = cardText, maxLines = 1, overflow = TextOverflow.Ellipsis, softWrap = false)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // `text-[10px]` on preflight's 1.5 line.
+            if (bgRunning) BasicText("running…", style = ppmText(10f, lineHeight = 15f).copy(color = tokens.accent.color))
             if (tool.steps > 0) {
-                BasicText(stepCount(tool.steps), style = ppmText(10f, kind = FontKind.MONO).copy(color = tokens.text3.color))
+                BasicText(stepCount(tool.steps), style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text3.color))
             }
-            StatusIcon(if (failed) Status.FAILED else if (isDone) Status.DONE else Status.RUNNING)
+            StatusIcon(status)
         }
     }
 }

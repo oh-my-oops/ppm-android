@@ -5,10 +5,6 @@ import com.hienlh.ppm.protocol.Compaction
 import com.hienlh.ppm.protocol.HistoryMessage
 import com.hienlh.ppm.protocol.ToolOutcome
 import com.hienlh.ppm.protocol.TurnUsage
-import com.hienlh.ppm.protocol.array
-import com.hienlh.ppm.protocol.get
-import com.hienlh.ppm.protocol.obj
-import com.hienlh.ppm.protocol.string
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import java.time.Instant
@@ -19,15 +15,21 @@ data class ToolBlock(
     val name: String,
     val input: JsonElement,
     val result: ToolOutcome? = null,
-    /** Tool calls made by the subagent this call started. */
-    val steps: Int = 0,
-    val lastStep: String? = null,
+    /** Agent/Task only: the calls the subagent this call started has made. */
+    val progress: AgentProgress? = null,
     /**
      * Set when the card stands for an approval request rather than a call: the web shows each
-     * request in the turn as well as in the prompt under it. No result ever comes for it.
+     * request in the turn as well as in the prompt under it.
      */
     val requestId: String? = null,
-)
+    /** On a request the server replayed after it was answered: what the answer was. */
+    val approved: Boolean? = null,
+    /** A backgrounded Agent/Task's end once it is reported: `completed`, `failed` or `stopped`. */
+    val bgStatus: String? = null,
+) {
+    val steps: Int get() = progress?.total ?: 0
+    val lastStep: String? get() = progress?.lastStep
+}
 
 sealed interface ChatBlock {
     data class Text(val text: String) : ChatBlock
@@ -113,6 +115,12 @@ class TurnBuilder(
 ) {
     private val list = mutableListOf<ChatBlock>()
     private val toolIndex = HashMap<String, Int>()
+
+    /** Every agent id in the turn, nested ones too, to the index of the card that counts its calls. */
+    private val agentCards = HashMap<String, Int>()
+
+    /** Live `AskUserQuestion` calls, which their approval requests stand for: their results go nowhere. */
+    private val askCalls = HashSet<String>()
     private val allText = StringBuilder()
     private val taskCallIds = HashSet<String>()
 
@@ -137,25 +145,43 @@ class TurnBuilder(
             is ChatEvent.Thinking -> if (event.parent == null) append(event.text, thinking = true)
             is ChatEvent.ToolUse -> addToolUse(event)
             is ChatEvent.ToolResult -> {
-                if (event.parent != null) return
                 val id = event.toolUseId
-                if (id != null) {
-                    toolIndex[id]?.let { setResult(event.outcome, it) }
-                } else {
-                    val index = list.indexOfLast(::isOpenTool)
-                    if (index >= 0) setResult(event.outcome, index)
-                }
+                if (event.parent != null || id in askCalls) return
+                // By id; otherwise, or when no card has it, the first card still without a result.
+                val index = id?.let { toolIndex[it] } ?: list.indexOfFirst { it is ChatBlock.Tool && it.tool.result == null }
+                if (index >= 0) setResult(event.outcome, index)
             }
             is ChatEvent.Error -> list += ChatBlock.Error(event.message)
             is ChatEvent.Approval -> {
                 val request = event.request
                 // A database change already has its `db_execute` card; its approval is only the prompt.
-                if (request.tool == "ppm:db_execute" || requestIndex(request.requestId) >= 0) return
-                list += ChatBlock.Tool(ToolBlock(toolUseId = null, name = request.tool, input = request.input, requestId = request.requestId))
+                if (request.tool == "ppm:db_execute") return
+                val index = requestIndex(request.requestId)
+                if (index >= 0) {
+                    // Sent again, as a replay sends it once it was answered.
+                    val block = (list[index] as ChatBlock.Tool).tool
+                    list[index] = ChatBlock.Tool(block.copy(name = request.tool, input = request.input, approved = request.approved))
+                    return
+                }
+                list += ChatBlock.Tool(
+                    ToolBlock(toolUseId = null, name = request.tool, input = request.input, requestId = request.requestId, approved = request.approved),
+                )
             }
             is ChatEvent.AccountRetry -> list += ChatBlock.Retry(event.reason ?: "Auth failed", event.accountLabel ?: "another account")
+            is ChatEvent.SubagentStatus -> setBgStatus(event.toolUseId, event.status)
             is ChatEvent.Done, is ChatEvent.SessionMigrated, is ChatEvent.StatusUpdate, is ChatEvent.AccountInfo, is ChatEvent.Other -> Unit
         }
+    }
+
+    /** Whether a call of the agent [id] counts on a card of this turn. */
+    fun hasAgent(id: String): Boolean = id in agentCards
+
+    /** A backgrounded agent of this turn ended; false when no card of the turn is its call. */
+    fun setBgStatus(toolUseId: String, status: String): Boolean {
+        val index = toolIndex[toolUseId] ?: return false
+        val block = (list[index] as? ChatBlock.Tool)?.tool?.takeIf { it.isAgent } ?: return false
+        list[index] = ChatBlock.Tool(block.copy(bgStatus = status))
+        return true
     }
 
     private fun addToolUse(use: ChatEvent.ToolUse) {
@@ -164,18 +190,25 @@ class TurnBuilder(
         if (use.name in TASK_TOOLS && (id == null || taskCallIds.add(id))) taskCalls++
         val existing = id?.let { toolIndex[it] }
         when {
-            parent != null -> addStep(parent, ToolSummary.title(use.name, use.input))
-            // As on the web: its approval request already stands for it in the turn. Its result,
-            // finding no card with its id, goes nowhere either.
-            live && use.name == "AskUserQuestion" -> Unit
+            // As on the web: its approval request already stands for it in the turn, a subagent's
+            // question too, and its result is dropped with it.
+            live && use.name == "AskUserQuestion" -> if (id != null) askCalls += id
+            parent != null -> addStep(parent, use)
             existing != null -> {
                 // The same call again, with its input complete or its result attached.
                 val block = (list[existing] as? ChatBlock.Tool)?.tool ?: return
-                list[existing] = ChatBlock.Tool(block.copy(name = use.name, input = use.input, result = use.result ?: block.result))
+                list[existing] = ChatBlock.Tool(
+                    block.copy(name = use.name, input = use.input, result = use.result ?: block.result, bgStatus = use.bgStatus ?: block.bgStatus),
+                )
             }
             else -> {
-                if (id != null) toolIndex[id] = list.size
-                list += ChatBlock.Tool(ToolBlock(toolUseId = id, name = use.name, input = use.input, result = use.result))
+                val isAgent = use.name == "Agent" || use.name == "Task"
+                val progress = if (isAgent) AgentProgress.of(use.children) else null
+                if (id != null) {
+                    toolIndex[id] = list.size
+                    if (progress != null) (listOf(id) + progress.nestedIds).forEach { agentCards[it] = list.size }
+                }
+                list += ChatBlock.Tool(ToolBlock(toolUseId = id, name = use.name, input = use.input, result = use.result, progress = progress, bgStatus = use.bgStatus))
             }
         }
     }
@@ -214,60 +247,23 @@ class TurnBuilder(
         list[index] = ChatBlock.Tool(block.copy(result = outcome))
     }
 
-    private fun addStep(parent: String, step: String) {
-        val index = toolIndex[parent] ?: return
+    private fun addStep(parent: String, use: ChatEvent.ToolUse) {
+        val index = agentCards[parent] ?: return
         val block = (list[index] as? ChatBlock.Tool)?.tool ?: return
-        list[index] = ChatBlock.Tool(block.copy(steps = block.steps + 1, lastStep = step))
+        list[index] = ChatBlock.Tool(block.withStep(parent, use) ?: return)
+        val id = use.toolUseId
+        if (id != null && (use.name == "Agent" || use.name == "Task")) agentCards[id] = index
     }
-
-    private fun isOpenTool(block: ChatBlock) = block is ChatBlock.Tool && block.tool.result == null && block.tool.requestId == null
 }
 
-object ToolSummary {
-    /** `mcp__ppm-db__db_query` reads as `ppm-db · db_query`. */
-    fun displayName(name: String): String {
-        if (!name.startsWith("mcp__")) return name
-        val parts = name.removePrefix("mcp__").split("__")
-        return if (parts.size == 2) "${parts[0]} · ${parts[1]}" else name
-    }
+/** An Agent/Task call rather than an approval request for one. */
+val ToolBlock.isAgent: Boolean get() = (name == "Agent" || name == "Task") && requestId == null
 
-    /** The one line that says what a call does: its command, file, pattern, URL…. */
-    fun detail(name: String, input: JsonElement): String {
-        val keys = when (name) {
-            "Bash" -> listOf("command")
-            "Read", "Write", "Edit", "MultiEdit" -> listOf("file_path", "path")
-            "NotebookEdit" -> listOf("notebook_path")
-            "Grep", "Glob" -> listOf("pattern")
-            "WebFetch" -> listOf("url")
-            "WebSearch" -> listOf("query")
-            "Agent", "Task" -> listOf("description", "prompt")
-            "Skill" -> listOf("skill", "command")
-            else -> emptyList()
-        }
-        for (key in keys) {
-            val value = input[key].string
-            if (!value.isNullOrEmpty()) return firstLine(value)
-        }
-        if (name == "TodoWrite") input["todos"].array?.let { return "${it.size} items" }
-        input.obj?.let { fields ->
-            for (key in fields.keys.sorted()) {
-                val value = fields[key].string
-                if (!value.isNullOrEmpty()) return firstLine(value)
-            }
-        }
-        return ""
-    }
-
-    fun title(name: String, input: JsonElement): String {
-        val detail = detail(name, input)
-        return if (detail.isEmpty()) displayName(name) else "${displayName(name)} $detail"
-    }
-
-    private fun firstLine(text: String): String {
-        // The first line that has anything on it.
-        val line = text.split('\n', '\r', '\u000B', '\u000C', '\u0085', ' ', ' ').firstOrNull { it.isNotEmpty() } ?: text
-        return if (line.length > 200) line.take(200) + "…" else line
-    }
+/** This agent card with [use], a call its agent [parent] or one under it made, counted; null when it is neither's. */
+fun ToolBlock.withStep(parent: String, use: ChatEvent.ToolUse): ToolBlock? {
+    if (!isAgent) return null
+    val progress = (progress ?: AgentProgress()).route(toolUseId, parent, use) ?: return null
+    return copy(progress = progress)
 }
 
 /** Claude's task tools: a call to one is what makes a chat's task list worth reading. */

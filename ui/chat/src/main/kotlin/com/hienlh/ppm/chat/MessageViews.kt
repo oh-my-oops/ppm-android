@@ -71,9 +71,11 @@ import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.TurnStop
+import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.TurnUsage
 import com.hienlh.ppm.state.ChatBlock
 import com.hienlh.ppm.state.ChatItem
+import com.hienlh.ppm.state.truthy
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -186,7 +188,7 @@ fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActi
                         if (growing) StreamingMark()
                     }
                     is ChatBlock.Thinking -> ThinkingBlock(block.text, growing)
-                    is ChatBlock.Tool -> ToolCardView(block.tool, turnRunning = live)
+                    is ChatBlock.Tool -> ToolCardView(block.tool, completed = !live || readSettled(blocks, index))
                     is ChatBlock.Error -> InlineError(block.message)
                     // The web quotes it into the answer as markdown of its own.
                     is ChatBlock.Retry -> Column {
@@ -200,6 +202,16 @@ fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActi
         if (actions != null && usage != null) TurnCostWarning(usage, Modifier.padding(top = 8.dp))
         // `-mt-1.5` against the column's `gap-2`: 2 px under the answer.
         if (actions != null) MessageActionBar(actions.timestamp, actions.copyText, Modifier.padding(top = 2.dp), actions.onReply)
+    }
+}
+
+/** A read with no result yet is over once a later edit of the same file came back, which needed it. */
+private fun readSettled(blocks: List<ChatBlock>, index: Int): Boolean {
+    val read = (blocks[index] as ChatBlock.Tool).tool
+    if (read.name != "Read" || read.result != null || read.requestId != null) return false
+    val path = read.input["file_path"]?.takeIf(::truthy) ?: return false
+    return blocks.subList(index + 1, blocks.size).any {
+        it is ChatBlock.Tool && it.tool.name == "Edit" && it.tool.requestId == null && it.tool.result != null && it.tool.input["file_path"] == path
     }
 }
 

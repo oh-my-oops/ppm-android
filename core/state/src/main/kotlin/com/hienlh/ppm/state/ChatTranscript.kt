@@ -392,7 +392,20 @@ class ChatTranscript {
 
     private fun apply(event: ChatEvent, replaying: Boolean, effects: MutableList<ChatEffect>, now: Long) {
         when (event) {
-            is ChatEvent.Text, is ChatEvent.Thinking, is ChatEvent.ToolUse, is ChatEvent.ToolResult, is ChatEvent.AccountRetry -> addToLive(event, now)
+            is ChatEvent.Text, is ChatEvent.Thinking, is ChatEvent.ToolUse, is ChatEvent.ToolResult, is ChatEvent.AccountRetry -> {
+                val parent = parentOf(event)
+                if (parent == null) {
+                    addToLive(event, now)
+                } else {
+                    // A backgrounded agent works on after the turn that started it ended: its calls
+                    // count on that turn's card (`routeToFinalizedParent`).
+                    if (event is ChatEvent.ToolUse && live?.hasAgent(parent) != true) stepFinalized(parent, event)
+                    live?.add(event)
+                }
+            }
+            is ChatEvent.SubagentStatus -> if (live?.setBgStatus(event.toolUseId, event.status) != true) {
+                updateFinalizedAgent(event.toolUseId) { it.copy(bgStatus = event.status) }
+            }
             is ChatEvent.Error -> if (live != null || phase.isRunning) {
                 addToLive(event, now)
             } else if (items.lastOrNull().let { it?.role != ChatItem.Role.SYSTEM || it.text != event.message }) {
@@ -421,6 +434,31 @@ class ChatTranscript {
             is ChatEvent.SessionMigrated -> effects += ChatEffect.AdoptSessionId(event.newSessionId)
             is ChatEvent.Other -> Unit
         }
+    }
+
+    private fun parentOf(event: ChatEvent): String? = when (event) {
+        is ChatEvent.Text -> event.parent
+        is ChatEvent.Thinking -> event.parent
+        is ChatEvent.ToolUse -> event.parent
+        is ChatEvent.ToolResult -> event.parent
+        else -> null
+    }
+
+    private fun stepFinalized(parent: String, use: ChatEvent.ToolUse) {
+        // The live turn drops a question's call; so does a finished one.
+        if (use.name == "AskUserQuestion") return
+        updateFinalizedAgent(parent) { it.withStep(parent, use) ?: it }
+    }
+
+    /** The newest message whose own Agent/Task card is the call [toolUseId], with that card changed. */
+    private fun updateFinalizedAgent(toolUseId: String, change: (ToolBlock) -> ToolBlock) {
+        fun isCard(block: ChatBlock) = block is ChatBlock.Tool && block.tool.isAgent && block.tool.toolUseId == toolUseId
+        val index = items.indexOfLast { item -> item.role == ChatItem.Role.ASSISTANT && item.blocks.any(::isCard) }
+        if (index < 0) return
+        val item = items[index]
+        val blocks = item.blocks.map { if (isCard(it)) ChatBlock.Tool(change((it as ChatBlock.Tool).tool)) else it }
+        if (blocks == item.blocks) return
+        items = items.toMutableList().also { it[index] = item.copy(blocks = blocks) }
     }
 
     private fun addToLive(event: ChatEvent, now: Long) {

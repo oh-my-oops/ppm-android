@@ -6,11 +6,11 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-/** What a tool answered. */
-data class ToolOutcome(val output: String, val isError: Boolean) {
+/** What a tool answered. [exitCode]: a shell tool's, as Codex reports it. */
+data class ToolOutcome(val output: String, val isError: Boolean, val exitCode: Int? = null) {
     companion object {
         fun from(json: JsonElement): ToolOutcome =
-            ToolOutcome(output = text(json["output"]), isError = json["isError"].bool ?: false)
+            ToolOutcome(output = text(json["output"]), isError = json["isError"].bool ?: false, exitCode = json["exitCode"].int)
 
         /** The output is a string today; a list of content blocks is read as their text. */
         fun text(value: JsonElement?): String = when {
@@ -22,8 +22,11 @@ data class ToolOutcome(val output: String, val isError: Boolean) {
     }
 }
 
-/** A tool waiting for the user (`approval_request`, or `session_state.pendingApproval`). */
-data class ApprovalRequest(val requestId: String, val tool: String, val input: JsonElement) {
+/**
+ * A tool waiting for the user (`approval_request`, or `session_state.pendingApproval`). [approved]
+ * is stamped by the server on a request it replays after it was answered.
+ */
+data class ApprovalRequest(val requestId: String, val tool: String, val input: JsonElement, val approved: Boolean? = null) {
     /** The questions of an `AskUserQuestion` request. */
     val questions: List<Question>
         get() = input["questions"].array.orEmpty().mapNotNull(Question::from)
@@ -31,7 +34,7 @@ data class ApprovalRequest(val requestId: String, val tool: String, val input: J
     companion object {
         fun from(json: JsonElement): ApprovalRequest? {
             val requestId = json["requestId"].string ?: return null
-            return ApprovalRequest(requestId, json["tool"].string ?: "unknown", json["input"] ?: JsonNull)
+            return ApprovalRequest(requestId, json["tool"].string ?: "unknown", json["input"] ?: JsonNull, json["approved"].bool)
         }
     }
 }
@@ -75,6 +78,10 @@ sealed interface ChatEvent {
         val parent: String? = null,
         /** The server copies a result onto its call in the replay buffer. */
         val result: ToolOutcome? = null,
+        /** A backgrounded Agent/Task's end in history: `completed`, `failed` or `stopped`. */
+        val bgStatus: String? = null,
+        /** An Agent/Task's own events in history, the subagent's calls among them. */
+        val children: List<ChatEvent>? = null,
     ) : ChatEvent
 
     data class ToolResult(val outcome: ToolOutcome, val toolUseId: String?, val parent: String? = null) : ChatEvent
@@ -94,6 +101,9 @@ sealed interface ChatEvent {
 
     /** The account the turn runs on. */
     data object AccountInfo : ChatEvent
+
+    /** A backgrounded Agent/Task ended ([status]: `completed`, `failed` or `stopped`), maybe turns after its call. */
+    data class SubagentStatus(val toolUseId: String, val status: String) : ChatEvent
     data class SessionMigrated(val newSessionId: String) : ChatEvent
 
     /** Anything else (`team_*`, …): not shown yet. */
@@ -111,6 +121,8 @@ sealed interface ChatEvent {
                     toolUseId = json["toolUseId"].string,
                     parent = parent,
                     result = json["result"]?.takeIf { it is JsonObject }?.let(ToolOutcome::from),
+                    bgStatus = json["bgStatus"].string,
+                    children = json["children"].array?.map(::from),
                 )
                 "tool_result" -> ToolResult(ToolOutcome.from(json), json["toolUseId"].string, parent)
                 "approval_request" -> ApprovalRequest.from(json)?.let(::Approval) ?: Other(type)
@@ -119,6 +131,11 @@ sealed interface ChatEvent {
                 "account_retry" -> AccountRetry(json["reason"].string, json["accountLabel"].string)
                 "status_update" -> StatusUpdate(json["message"].string ?: "", json["accountLabel"].string)
                 "account_info" -> AccountInfo
+                "subagent_status" -> {
+                    val id = json["toolUseId"].string
+                    val status = json["status"].string
+                    if (id.isNullOrEmpty() || status.isNullOrEmpty()) Other(type) else SubagentStatus(id, status)
+                }
                 "session_migrated" -> json["newSessionId"].string?.let(::SessionMigrated) ?: Other(type)
                 else -> Other(type)
             }
