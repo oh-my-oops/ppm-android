@@ -200,31 +200,59 @@ private fun zoneAt(rect: Rect, point: Offset, grid: List<List<String>>, panelId:
 /**
  * A tab's gestures besides the tap: picking it up (see [TabDrag]) and its menu — a finger held
  * still for the system's long press, as Chrome opens the web's, or a mouse's right button.
- * It watches ahead of the tab and the bar and takes the touch only once the tab is picked up,
- * so until then a tap is still the tab's and a swipe still scrolls the bar.
  */
-fun Modifier.tabGestures(drag: TabDrag, model: AppModel, tab: () -> DraggedTab, onMenu: (Offset) -> Unit): Modifier = composed {
+fun Modifier.tabGestures(drag: TabDrag, model: AppModel, tab: () -> DraggedTab, onMenu: (Offset) -> Unit): Modifier = pickUpGestures(
+    drag,
+    onPickUp = { grab, at, mouse -> drag.start(tab().copy(grab = grab), at, mouse) },
+    onMove = { drag.move(it, model.layout?.grid.orEmpty()) },
+    onDrop = { drag.drop(model) },
+    onCancel = { drag.cancel() },
+    onMenu = onMenu,
+)
+
+/**
+ * Picking something up to drag it, as a tab or a project row is: a finger resting [HOLD_MS] on
+ * it, or a mouse pressing it and moving. [onPickUp] gets where in it the pointer took it and where
+ * that is in the root, [onMove] the pointer in the root until [onDrop] (lifted) or [onCancel]. A
+ * finger then held still for the system's long press opens [onMenu] instead, and so does a mouse's
+ * right button; with no menu, a finger held still just keeps it. It watches ahead of what it is on
+ * and of any scroll around it, and takes the touch only once it has picked something up, so until
+ * then a tap is still a tap and a swipe still scrolls.
+ */
+internal fun Modifier.pickUpGestures(
+    key: Any?,
+    onPickUp: (grab: Offset, at: Offset, mouse: Boolean) -> Unit,
+    onMove: (Offset) -> Unit,
+    onDrop: () -> Unit,
+    onCancel: () -> Unit,
+    onMenu: ((Offset) -> Unit)? = null,
+): Modifier = composed {
     val haptics = LocalHapticFeedback.current
-    val dragged by rememberUpdatedState(tab)
+    val pickUp by rememberUpdatedState(onPickUp)
+    val move by rememberUpdatedState(onMove)
+    val drop by rememberUpdatedState(onDrop)
+    val cancel by rememberUpdatedState(onCancel)
     val menu by rememberUpdatedState(onMenu)
     val placed = remember { Placed() }
-    onGloballyPositioned { placed.coordinates = it }.pointerInput(drag) {
+    onGloballyPositioned { placed.coordinates = it }.pointerInput(key) {
         awaitEachGesture {
             val press = awaitPointerEvent(PointerEventPass.Initial)
             val down = press.changes.firstOrNull { it.changedToDownIgnoreConsumed() } ?: return@awaitEachGesture
             val mouse = down.type == PointerType.Mouse
             if (mouse && press.buttons.isSecondaryPressed) {
-                down.consume()
-                menu(down.position)
+                menu?.let {
+                    down.consume()
+                    it(down.position)
+                }
                 return@awaitEachGesture
             }
             if (mouse && !press.buttons.isPrimaryPressed) return@awaitEachGesture
             val picked = if (mouse) awaitMouseMove(down) else awaitHold(down)
             if (!picked) return@awaitEachGesture
             val start = placed.coordinates?.localToRoot(down.position) ?: return@awaitEachGesture
-            drag.start(dragged().copy(grab = down.position), start, mouse)
+            pickUp(down.position, start, mouse)
             val menuAt = down.uptimeMillis + viewConfiguration.longPressTimeoutMillis
-            var still = !mouse
+            var still = !mouse && menu != null
             var done = false
             try {
                 while (true) {
@@ -235,35 +263,35 @@ fun Modifier.tabGestures(drag: TabDrag, model: AppModel, tab: () -> DraggedTab, 
                         awaitPointerEvent(PointerEventPass.Initial)
                     }
                     if (event == null) {
-                        // Held still: the long press opens the menu. As on the web the label stays
-                        // until the finger lifts, and the tab is put down where it was.
+                        // Held still: the long press opens the menu. As on the web what follows the
+                        // finger stays until it lifts, and what it picked up is put down where it was.
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        menu(down.position)
+                        menu?.invoke(down.position)
                         consumeUntilUp(down.id)
                         break
                     }
                     val change = event.changes.firstOrNull { it.id == down.id } ?: break
                     change.consume()
                     if (still && (change.position - down.position).getDistance() > viewConfiguration.touchSlop) still = false
-                    placed.coordinates?.localToRoot(change.position)?.let { drag.move(it, model.layout?.grid.orEmpty()) }
+                    placed.coordinates?.localToRoot(change.position)?.let(move)
                     if (!change.pressed) {
                         done = true
-                        drag.drop(model)
+                        drop()
                         break
                     }
                 }
             } finally {
-                if (!done) drag.cancel()
+                if (!done) cancel()
             }
         }
     }
 }
 
-private class Placed {
+internal class Placed {
     var coordinates: LayoutCoordinates? = null
 }
 
-/** A finger that rests [HOLD_MS] within [HOLD_TOLERANCE] picks the tab up; one lifted, moved or scrolling first does not. */
+/** A finger that rests [HOLD_MS] within [HOLD_TOLERANCE] picks up what it is on; one lifted, moved or scrolling first does not. */
 private suspend fun AwaitPointerEventScope.awaitHold(down: PointerInputChange): Boolean {
     val tolerance = HOLD_TOLERANCE.toPx()
     val outcome = withTimeoutOrNull(HOLD_MS) {
@@ -283,7 +311,7 @@ private suspend fun AwaitPointerEventScope.awaitHold(down: PointerInputChange): 
     return outcome ?: true
 }
 
-/** A mouse picks the tab up as soon as it moves past the touch slop with the button down. */
+/** A mouse picks up what it pressed as soon as it moves past the touch slop with the button down. */
 private suspend fun AwaitPointerEventScope.awaitMouseMove(down: PointerInputChange): Boolean {
     while (true) {
         val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: return false
@@ -306,8 +334,7 @@ private val ghostShadow = ThemeShadow(0.0, 4.0, 16.0, 0.0, Rgba(0.0, 0.0, 0.0, 0
 /**
  * What follows the pointer. A finger gets the label (`showGhost`): the tab's title, white on
  * near-black, its middle on the finger and its bottom just above it (`translate(-50%, -130%)`).
- * A mouse gets the browser's drag image: the tab itself at 70 % — measured from Chrome on this
- * tablet — held where the pointer took it.
+ * A mouse gets the browser's drag image ([DragImage]).
  */
 @Composable
 fun BoxScope.TabDragGhost(drag: TabDrag) {
@@ -317,14 +344,7 @@ fun BoxScope.TabDragGhost(drag: TabDrag) {
     val snapshot = tab.snapshot
     Box(Modifier.matchParentSize().onGloballyPositioned { origin = it.positionInRoot() }) {
         if (drag.byMouse && snapshot != null) {
-            val size = with(LocalDensity.current) { DpSize(snapshot.size.width.toDp(), snapshot.size.height.toDp()) }
-            Box(
-                Modifier
-                    .offset { IntOffset((drag.at.x - origin.x - tab.grab.x).roundToInt(), (drag.at.y - origin.y - tab.grab.y).roundToInt()) }
-                    .size(size)
-                    .graphicsLayer(alpha = 0.7f)
-                    .drawBehind { drawLayer(snapshot) },
-            )
+            DragImage(snapshot, drag.at - origin, tab.grab)
             return@Box
         }
         BasicText(
@@ -348,14 +368,31 @@ fun BoxScope.TabDragGhost(drag: TabDrag) {
 }
 
 /**
+ * A browser's drag image: what is dragged ([snapshot]) at 70 % — measured from Chrome on this
+ * tablet —, held at [grab], where the pointer took it, under the pointer at [at].
+ */
+@Composable
+internal fun DragImage(snapshot: GraphicsLayer, at: Offset, grab: Offset) {
+    val size = with(LocalDensity.current) { DpSize(snapshot.size.width.toDp(), snapshot.size.height.toDp()) }
+    Box(
+        Modifier
+            .offset { IntOffset((at.x - grab.x).roundToInt(), (at.y - grab.y).roundToInt()) }
+            .size(size)
+            .graphicsLayer(alpha = 0.7f)
+            .drawBehind { drawLayer(snapshot) },
+    )
+}
+
+/**
  * Android's drag pointer, the closed hand Chrome shows while a mouse drags the tab. Attached all
  * along: an icon that changes under the pointer shows at once, one attached under it waits for
  * the pointer to come in.
  */
-fun Modifier.dragCursor(drag: TabDrag): Modifier {
-    val dragging = drag.tab != null && drag.byMouse
-    return pointerHoverIcon(if (dragging) grabbing else PointerIcon.Default, overrideDescendants = dragging)
-}
+fun Modifier.dragCursor(drag: TabDrag): Modifier = dragCursor(drag.tab != null && drag.byMouse)
+
+/** The same over anything a mouse is [dragging]. */
+fun Modifier.dragCursor(dragging: Boolean): Modifier =
+    pointerHoverIcon(if (dragging) grabbing else PointerIcon.Default, overrideDescendants = dragging)
 
 private val grabbing = PointerIcon(android.view.PointerIcon.TYPE_GRABBING)
 

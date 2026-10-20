@@ -12,6 +12,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,6 +50,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -64,11 +66,13 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.toRect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -236,16 +240,33 @@ private fun CountChip(count: Int) {
 // Projects
 
 /**
- * The project's avatar (`ProjectAvatar`): its colour — a picked hex or a palette gradient, else
- * the palette by position — with initials that tell it from the others; a circle, or the 7 px
- * squircle the desktop sidebar uses ([square]). An uploaded image is not drawn yet.
+ * The project's avatar (`ProjectAvatar`): its uploaded image, cropped to fill — nothing while it
+ * loads —, else its colour — a picked hex or a palette gradient, else the palette by position —
+ * with initials that tell it from the others; a circle, or the 7 px squircle the desktop sidebar
+ * uses ([square]). An image that will not load gives the colour and initials, as on the web.
  */
 @Composable
 fun ProjectAvatar(model: AppModel, project: ProjectInfo, size: Dp, square: Boolean = false) {
     val names = model.projects.map { it.name }
     val index = names.indexOf(project.name).coerceAtLeast(0)
+    val shape = if (square) RoundedCornerShape(7.dp) else CircleShape
+    if (project.image != null) {
+        var asked by remember(project.name, project.image) { mutableStateOf(false) }
+        val image by produceState<ImageBitmap?>(null, project.name, project.image) {
+            value = model.projectImage(project)
+            asked = true
+        }
+        image?.let {
+            Image(it, project.name, Modifier.size(size).clip(shape), contentScale = ContentScale.Crop)
+            return
+        }
+        if (!asked) {
+            Box(Modifier.size(size))
+            return
+        }
+    }
     Box(
-        Modifier.size(size).clip(if (square) RoundedCornerShape(7.dp) else CircleShape).background(projectFill(project.color ?: PROJECT_PALETTE[index % PROJECT_PALETTE.size])),
+        Modifier.size(size).clip(shape).background(projectFill(project.color ?: PROJECT_PALETTE[index % PROJECT_PALETTE.size])),
         contentAlignment = Alignment.Center,
     ) {
         BasicText(
@@ -302,6 +323,13 @@ internal fun projectInitials(name: String, all: List<String>): String {
     return if (index >= 0) "${index + 1}" else "?"
 }
 
+/** project-sort.ts's `SORT_OPTIONS`, shared by the project sheet and the desktop flyout. */
+internal val PROJECT_SORTS = listOf(
+    Triple("recent", "Recent", ProductIcon.Clock),
+    Triple("priority", "Priority", ProductIcon.ArrowDownUp),
+    Triple("name", "Name", ProductIcon.ArrowDownAZ),
+)
+
 /**
  * The projects (`ProjectBottomSheet`): a search, the order (Recent, Priority, Name), then each
  * project with its path. Adding and editing projects are left out until this app has them.
@@ -333,11 +361,7 @@ internal fun ProjectSheet(model: AppModel, onDismiss: () -> Unit) {
             Modifier.fillMaxWidth().line(top = false, tokens.border.color).padding(8.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            for ((mode, label, icon) in listOf(
-                Triple("recent", "Recent", ProductIcon.Clock),
-                Triple("priority", "Priority", ProductIcon.ArrowDownUp),
-                Triple("name", "Name", ProductIcon.ArrowDownAZ),
-            )) {
+            for ((mode, label, icon) in PROJECT_SORTS) {
                 val on = model.projectSortMode == mode
                 val color = if (on) tokens.accent else tokens.text3
                 Row(

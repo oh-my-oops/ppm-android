@@ -33,20 +33,24 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.toRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.toSize
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.ProjectAvatar
-import com.hienlh.ppm.app.ui.ProjectSheet
 import com.hienlh.ppm.app.ui.SessionHistoryPanel
 import com.hienlh.ppm.app.ui.unreadSessions
 import com.hienlh.ppm.design.FontKind
@@ -55,6 +59,8 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.protocol.ProjectInfo
+import com.hienlh.ppm.protocol.SessionUnread
 import kotlin.math.roundToInt
 
 /**
@@ -65,7 +71,10 @@ import kotlin.math.roundToInt
 @Composable
 fun Sidebar(model: AppModel) {
     val tokens = LocalPpmTokens.current
-    var projectsOpen by remember { mutableStateOf(false) }
+    // The switcher button on the screen while its flyout is open, and how far down the screen the shell reaches.
+    var flyoutAt by remember { mutableStateOf<Rect?>(null) }
+    var shellBottom by remember { mutableFloatStateOf(Float.MAX_VALUE) }
+    val switcher = remember { Placed() }
     if (model.sidebarCollapsed) {
         Column(Modifier.width(RAIL_WIDTH).fillMaxHeight().background(tokens.rail.color).edge(Edge.Right, tokens.border.color)) {
             Box(
@@ -79,12 +88,21 @@ fun Sidebar(model: AppModel) {
             NavSectionRail(model, Modifier.weight(1f))
         }
     } else {
-        Box(Modifier.width(model.sidebarWidth.dp).fillMaxHeight().background(tokens.panel.color).edge(Edge.Right, tokens.border.color)) {
+        Box(
+            Modifier
+                .width(model.sidebarWidth.dp)
+                .fillMaxHeight()
+                .onGloballyPositioned { shellBottom = it.positionOnScreen().y + it.size.height }
+                .background(tokens.panel.color)
+                .edge(Edge.Right, tokens.border.color),
+        ) {
             Column(Modifier.fillMaxSize()) {
                 Row(Modifier.fillMaxWidth().height(BAR_HEIGHT).edge(Edge.Bottom, tokens.border.color)) {
                     Wordmark(model)
                     Box(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 6.dp), contentAlignment = Alignment.CenterStart) {
-                        ProjectSwitcherButton(model, open = projectsOpen) { projectsOpen = true }
+                        ProjectSwitcherButton(model, open = flyoutAt != null, Modifier.onGloballyPositioned { switcher.coordinates = it }) {
+                            switcher.coordinates?.let { flyoutAt = Rect(it.positionOnScreen(), it.size.toSize()) }
+                        }
                     }
                 }
                 Row(Modifier.weight(1f).fillMaxWidth()) {
@@ -95,8 +113,7 @@ fun Sidebar(model: AppModel) {
             ResizeHandle(model, Modifier.align(Alignment.CenterEnd))
         }
     }
-    // Until the switcher's own flyout is built, the phone's project sheet.
-    if (projectsOpen) ProjectSheet(model) { projectsOpen = false }
+    flyoutAt?.let { ProjectFlyout(model, it, shellBottom) { flyoutAt = null } }
 }
 
 /** `w-[52px] border-r`, the wordmark that folds the sidebar: `text-sm font-extrabold text-primary tracking-tight`. */
@@ -120,12 +137,12 @@ private fun Wordmark(model: AppModel) {
  * up-down chevrons (`h-8 px-2 rounded-lg gap-[9px]`, lit while its list is open).
  */
 @Composable
-private fun ProjectSwitcherButton(model: AppModel, open: Boolean, onClick: () -> Unit) {
+private fun ProjectSwitcherButton(model: AppModel, open: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(12.dp)
     val project = model.currentProject
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .height(32.dp)
             .clip(shape)
@@ -137,21 +154,7 @@ private fun ProjectSwitcherButton(model: AppModel, open: Boolean, onClick: () ->
         horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         if (project != null) {
-            Box {
-                ProjectAvatar(model, project, 24.dp, square = true)
-                // `-top-0.5 -right-0.5 size-2 border-2 border-background`, in the most urgent unread kind's colour.
-                model.urgentUnread(project.name, model.unreadSessions())?.let { type ->
-                    Box(
-                        Modifier
-                            .align(Alignment.TopEnd)
-                            .offset(2.dp, (-2).dp)
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(tokens.notification(type).color)
-                            .border(2.dp, tokens.bgSolid.color, CircleShape),
-                    )
-                }
-            }
+            SwitcherAvatar(model, project, 24.dp, model.unreadSessions(), square = true)
         } else {
             Box(Modifier.size(24.dp).clip(CircleShape).background(tokens.panel2.color))
         }
@@ -172,6 +175,29 @@ private fun ProjectSwitcherButton(model: AppModel, open: Boolean, onClick: () ->
             }
         }
         PpmIcon(ProductIcon.ChevronsUpDown, 14.dp, tokens.text3.color)
+    }
+}
+
+/**
+ * The switcher's `Avatar`: the project's avatar with a dot on its corner in the most urgent unread
+ * kind's colour (`-top-0.5 -right-0.5 size-2 border-2 border-background`).
+ */
+@Composable
+internal fun SwitcherAvatar(model: AppModel, project: ProjectInfo, size: Dp, unread: Map<String, SessionUnread>, square: Boolean = false) {
+    val tokens = LocalPpmTokens.current
+    Box {
+        ProjectAvatar(model, project, size, square)
+        model.urgentUnread(project.name, unread)?.let { type ->
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(2.dp, (-2).dp)
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(tokens.notification(type).color)
+                    .border(2.dp, tokens.bgSolid.color, CircleShape),
+            )
+        }
     }
 }
 

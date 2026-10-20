@@ -1,6 +1,7 @@
 package com.hienlh.ppm.app
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -8,6 +9,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.client.ServerProfile
@@ -16,8 +19,10 @@ import com.hienlh.ppm.client.createTag
 import com.hienlh.ppm.client.deleteSession
 import com.hienlh.ppm.client.deleteSessions
 import com.hienlh.ppm.client.deleteTag
+import com.hienlh.ppm.client.projectImage
 import com.hienlh.ppm.client.putUiPrefs
 import com.hienlh.ppm.client.renameSession
+import com.hienlh.ppm.client.reorderProjects
 import com.hienlh.ppm.client.resetTags
 import com.hienlh.ppm.client.setDefaultTag
 import com.hienlh.ppm.client.setTag
@@ -52,12 +57,14 @@ import com.hienlh.ppm.state.workspace.tabSessionId
 import com.hienlh.ppm.state.workspace.workspaceRemote
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
@@ -570,6 +577,34 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         projectSortMode = mode
         val api = api ?: return
         scope.launch { quietly { api.putUiPrefs(buildJsonObject { put("projectSortMode", mode) }) } }
+    }
+
+    /** The Priority order dragged in the project switcher: shown at once, and kept for every device (`reorderProjects`). */
+    fun reorderProjects(order: List<String>) {
+        val byName = projects.associateBy { it.name }
+        projects = order.mapNotNull { byName[it] } + projects.filter { it.name !in order }
+        val api = api ?: return
+        scope.launch { quietly { api.reorderProjects(order) } }
+    }
+
+    /** Uploaded avatars being read or read, by project and version: one request however many avatars ask. */
+    private val projectImages = mutableMapOf<String, Deferred<ImageBitmap?>>()
+
+    /** A project's uploaded avatar; null when it has none or it would not load, where the web draws the initials. */
+    suspend fun projectImage(project: ProjectInfo): ImageBitmap? {
+        val version = project.image ?: return null
+        val api = api ?: return null
+        val key = "${project.name}\u0000$version"
+        val load = projectImages.getOrPut(key) {
+            scope.async {
+                quietly {
+                    val bytes = api.projectImage(project.name, version)
+                    withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }
+                }
+            }
+        }
+        // A failure is not kept: the next avatar drawn asks again, as an <img> mounted again does.
+        return load.await().also { if (it == null) projectImages.remove(key, load) }
     }
 
     /** Opening a project puts it first in the Recent order, on every device (`touchRecent`). */
