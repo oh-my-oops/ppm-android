@@ -6,6 +6,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.text.style.TextMotion
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 
@@ -36,7 +37,9 @@ enum class FontKind { SANS, MONO }
 /**
  * Text set as a CSS rule would: [kind] at [size] CSS pixels (sp, so the system font size still
  * scales it), and with [lineHeight] each line box is that tall, half the extra leading above
- * and half below.
+ * and half below. Glyphs keep their unhinted advances and fractional positions, as Chrome lays
+ * text out: Android's default snaps every advance to a whole pixel, which at 2.625x made a line
+ * 1–2 % narrower than the web's and wrapped it somewhere else.
  */
 fun ppmText(
     size: Float,
@@ -51,4 +54,5 @@ fun ppmText(
     fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
     lineHeight = lineHeight?.sp ?: TextUnit.Unspecified,
     lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
+    textMotion = TextMotion.Animated,
 )
