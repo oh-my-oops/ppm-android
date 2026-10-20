@@ -1,5 +1,7 @@
 package com.hienlh.ppm.design
 
+import android.graphics.Bitmap
+import android.graphics.BlurMaskFilter
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
@@ -12,20 +14,19 @@ import androidx.compose.ui.graphics.RadialGradientShader
 import androidx.compose.ui.graphics.Shader
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.shadow.Shadow
-import androidx.compose.ui.unit.DpOffset
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.addOutline
+import androidx.compose.ui.graphics.asAndroidPath
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.graphics.shadow.DropShadowPainter
 import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.invalidateDraw
-import androidx.compose.ui.node.requireGraphicsContext
 import androidx.compose.ui.geometry.Size
+import kotlin.math.ceil
 
 /** An sRGB colour with alpha, as the web's theme tokens write them. */
 @Immutable
@@ -204,44 +205,68 @@ private class RadialBrush(private val gradient: ThemeBackground.Radial) : Shader
 }
 
 /**
- * A CSS box-shadow, spread included (Compose's drop shadow takes the same four numbers), and only
- * outside the box, where CSS draws one: Compose's own `dropShadow` also fills the shape beneath, so
- * a see-through background showed it (the user's `bg-accent-wash` bubble came out grey).
+ * A CSS box-shadow, spread included, drawn only outside the box, where CSS draws one. Compose's
+ * own `dropShadow` also fills the shape beneath, so a see-through background showed it (the
+ * user's `bg-accent-wash` bubble came out grey). Its painter is no closer outside: it blurs with
+ * Skia's radius (σ = 0.58 r + 0.5) in a bitmap only one radius wider than the shape, which cut the
+ * blur short, and a bubble's `shadow-sm` came out half as dark again by the box, ending in a
+ * hard edge. CSS blurs with a standard deviation of half the blur radius, and so does this.
  */
-fun Modifier.ppmShadow(shadow: ThemeShadow, shape: Shape): Modifier = this then OuterShadowElement(
-    shape,
-    Shadow(
-        radius = shadow.blur.dp,
-        spread = shadow.spread.dp,
-        color = shadow.color.color,
-        offset = DpOffset(shadow.x.dp, shadow.y.dp),
-    ),
-)
+fun Modifier.ppmShadow(shadow: ThemeShadow, shape: Shape): Modifier = this then OuterShadowElement(shape, shadow)
 
-private data class OuterShadowElement(val shape: Shape, val shadow: Shadow) : ModifierNodeElement<OuterShadowNode>() {
+private data class OuterShadowElement(val shape: Shape, val shadow: ThemeShadow) : ModifierNodeElement<OuterShadowNode>() {
     override fun create() = OuterShadowNode(shape, shadow)
 
     override fun update(node: OuterShadowNode) = node.update(shape, shadow)
 }
 
-/** Compose's `SimpleDropShadowNode`, the shadow drawn with the box itself clipped out. */
-private class OuterShadowNode(var shape: Shape, var shadow: Shadow) : Modifier.Node(), DrawModifierNode {
-    private var painter: DropShadowPainter? = null
+private class OuterShadowNode(var shape: Shape, var shadow: ThemeShadow) : Modifier.Node(), DrawModifierNode {
+    /** The shadow's alpha, blurred, with room for the whole blur; drawn in the shadow's colour. */
+    private var mask: Bitmap? = null
+    private var maskKey: Any? = null
+    private var maskOrigin = Offset.Zero
     private val outline = Path()
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
 
-    fun update(shape: Shape, shadow: Shadow) {
+    fun update(shape: Shape, shadow: ThemeShadow) {
         if (shape == this.shape && shadow == this.shadow) return
         this.shape = shape
         this.shadow = shadow
-        painter = null
+        maskKey = null
         invalidateDraw()
     }
 
     override fun ContentDrawScope.draw() {
-        val painter = painter ?: requireGraphicsContext().shadowContext.createDropShadowPainter(shape, shadow).also { painter = it }
-        outline.reset()
-        outline.addOutline(shape.createOutline(size, layoutDirection, this))
-        clipPath(outline, ClipOp.Difference) { with(painter) { draw(size) } }
+        val key = Triple(size, density, layoutDirection)
+        if (key != maskKey) {
+            mask = shadowMask()
+            maskKey = key
+        }
+        mask?.let { bitmap ->
+            outline.reset()
+            outline.addOutline(shape.createOutline(size, layoutDirection, this))
+            paint.color = shadow.color.color.toArgb()
+            clipPath(outline, ClipOp.Difference) { drawContext.canvas.nativeCanvas.drawBitmap(bitmap, maskOrigin.x, maskOrigin.y, paint) }
+        }
         drawContent()
+    }
+
+    /** The box grown by the spread, as CSS grows it, and blurred: Android's blur radius r is σ = 0.57735 r + 0.5. */
+    private fun ContentDrawScope.shadowMask(): Bitmap? {
+        val sigma = shadow.blur.toFloat() / 2 * density
+        val spread = shadow.spread.toFloat() * density
+        val grown = Size(size.width + 2 * spread, size.height + 2 * spread)
+        if (grown.width <= 0f || grown.height <= 0f || shadow.color.a <= 0.0) return null
+        val margin = ceil(sigma * 3) + 1
+        val bitmap = Bitmap.createBitmap(ceil(grown.width + 2 * margin).toInt(), ceil(grown.height + 2 * margin).toInt(), Bitmap.Config.ALPHA_8)
+        val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        if (sigma > 0.5f) fill.maskFilter = BlurMaskFilter((sigma - 0.5f) / 0.57735f, BlurMaskFilter.Blur.NORMAL)
+        val path = Path().apply { addOutline(shape.createOutline(grown, layoutDirection, this@shadowMask)) }
+        android.graphics.Canvas(bitmap).apply {
+            translate(margin, margin)
+            drawPath(path.asAndroidPath(), fill)
+        }
+        maskOrigin = Offset(shadow.x.toFloat() * density - spread - margin, shadow.y.toFloat() * density - spread - margin)
+        return bitmap
     }
 }
