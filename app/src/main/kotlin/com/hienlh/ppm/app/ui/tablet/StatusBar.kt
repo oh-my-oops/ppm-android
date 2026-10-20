@@ -145,7 +145,7 @@ private fun DockToggle(model: AppModel, text: TextStyle) {
     val color = if (visible) tokens.accent else tokens.text3
     Row(
         Modifier
-            .clip(RoundedCornerShape(2.dp))
+            .clip(RoundedCornerShape(6.dp))
             .ppmClickable(pressedColor = tokens.panel2.opacity(0.15).color, onClickLabel = if (visible) "Hide panel" else "Show panel") {
                 model.setDockVisible(!visible)
             }
@@ -210,7 +210,7 @@ private fun ThemePicker(model: AppModel, text: TextStyle, compact: Boolean) {
     Box {
         Row(
             Modifier
-                .clip(RoundedCornerShape(2.dp))
+                .clip(RoundedCornerShape(6.dp))
                 .ppmClickable(pressedColor = tokens.panel2.opacity(0.4).color, onClickLabel = "Theme") { open = true }
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,

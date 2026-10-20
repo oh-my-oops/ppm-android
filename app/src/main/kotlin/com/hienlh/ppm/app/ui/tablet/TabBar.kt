@@ -301,7 +301,7 @@ private fun TabChip(
                         Modifier
                             .padding(start = 4.dp)
                             .size(16.dp)
-                            .clip(RoundedCornerShape(2.dp))
+                            .clip(RoundedCornerShape(6.dp))
                             .ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "Close tab", onClick = onClose),
                         contentAlignment = Alignment.Center,
                     ) { PpmIcon(ProductIcon.X, 12.dp, color.color) }
