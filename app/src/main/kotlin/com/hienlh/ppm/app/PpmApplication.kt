@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.hienlh.ppm.design.SyntaxHighlighter
 
 /**
  * Holds the [AppModel] for the life of the process, so the chats stay connected while the
@@ -18,6 +19,7 @@ class PpmApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        SyntaxHighlighter.get(this).warm()
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
                 val model = model ?: return

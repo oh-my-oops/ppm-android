@@ -18,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -77,12 +78,23 @@ data class MarkdownStyle(
     }
 }
 
-/** A message's markdown, drawn as the web's `.markdown-content` draws it. */
+/** A message's markdown, drawn as the web's `.markdown-content` draws it; [streaming] while it still grows. */
 @Composable
-fun MarkdownView(text: String, modifier: Modifier = Modifier, style: MarkdownStyle = MarkdownStyle.chat) {
+fun MarkdownView(text: String, modifier: Modifier = Modifier, style: MarkdownStyle = MarkdownStyle.chat, streaming: Boolean = false) {
     val blocks = remember(text) { Markdown.parse(text) }
-    MarkdownBlocks(blocks, style, modifier)
+    CompositionLocalProvider(LocalMarkdownStreaming provides streaming) {
+        MarkdownBlocks(blocks, style, modifier)
+    }
 }
+
+/** MdPre's test for a diagram: the web draws it with Mermaid, and as plain code until it can. */
+private val MERMAID_KEYWORDS = Regex(
+    "^(sequenceDiagram|flowchart|graph\\s|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|quadrantChart|requirementDiagram|" +
+        "gitGraph|mindmap|timeline|sankey|xychart|block-beta|packet-beta|architecture-beta|kanban)\\b",
+)
+
+private fun MarkdownBlock.Code.isDiagram(): Boolean =
+    language == "mermaid" || (language == null && MERMAID_KEYWORDS.containsMatchIn(text.trim()))
 
 /** Vertical margins collapse, as in CSS: the gap between two blocks is the larger of the two. */
 internal object MarkdownGaps {
@@ -117,7 +129,7 @@ private fun MarkdownBlockView(block: MarkdownBlock, style: MarkdownStyle, modifi
     when (block) {
         is MarkdownBlock.Paragraph -> InlineMarkdownText(block.text, style, modifier)
         is MarkdownBlock.Heading -> InlineMarkdownText(block.text, style.heading(block.level), modifier)
-        is MarkdownBlock.Code -> CodeBlockView(block.text, modifier)
+        is MarkdownBlock.Code -> CodeBlockView(block.text, block.language, modifier, highlight = !block.isDiagram())
         is MarkdownBlock.ListBlock -> MarkdownList(block, style, modifier)
         is MarkdownBlock.Quote -> {
             val border = tokens.border.color

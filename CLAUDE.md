@@ -40,6 +40,8 @@ cd android
 systemd-run --user --scope --quiet ./gradlew :core:protocol:test :core:client:test :core:state:test
 ```
 
+The build needs bun and the repository's `node_modules` (`bun install` at the root): `ui/design`'s `buildHighlighter` makes the code highlighting's assets from them — the web's Shiki as one script for WebView's JavaScript sandbox (`SyntaxHighlighter`), and every grammar — into `build/`, so nothing generated is in git. After touching Shiki or `scripts/highlighter/`, `node scripts/check-highlighter.mjs <dir>` (header says how) checks every sample block's colours against the web's Shiki, on V8 as the sandbox runs it.
+
 End-to-end tests (`EndToEndTest`) run only when a scratch server is named. `scripts/scratch-server.sh start [port]` runs this checkout's server with its own `PPM_HOME` under `/tmp` (never the real `~/.ppm`), a random password and a `demo` project, on `127.0.0.1` — which the emulator reaches as `10.0.2.2`:
 
 ```bash

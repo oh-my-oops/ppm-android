@@ -12,8 +12,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -22,13 +24,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmTheme
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.SyntaxHighlighter
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -39,28 +45,40 @@ import kotlinx.coroutines.launch
 internal const val CODE_SIZE = 12f
 internal const val CODE_LINE_HEIGHT = 12f * 20f / 14f
 
+/** The markdown being drawn is still streaming in: its code stays plain until it is done (`MdContext.isStreaming`). */
+internal val LocalMarkdownStreaming = compositionLocalOf { false }
+
 /**
  * A fenced code block (`.markdown-content pre`): 12px Monaspace on the page background inside a
  * 1px border, scrolling sideways, with the copy button a touch screen always shows
- * (`@media (hover: none)`).
+ * (`@media (hover: none)`). Once its message is done and [highlight] holds, Shiki colours it on
+ * the theme's own background (`.shiki-block`), from the first frame when it was coloured before.
  */
 @Composable
-fun CodeBlockView(code: String, modifier: Modifier = Modifier) {
+fun CodeBlockView(code: String, language: String?, modifier: Modifier = Modifier, highlight: Boolean = true) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(6.dp)
+    val enabled = highlight && !LocalMarkdownStreaming.current
+    val theme = LocalPpmTheme.current.shikiTheme
+    val highlighter = SyntaxHighlighter.get(LocalContext.current)
+    val highlighted by produceState(if (enabled) highlighter.cached(code, language, theme) else null, code, language, theme, enabled) {
+        value = if (enabled) highlighter.cached(code, language, theme) else null
+        if (enabled && value == null) value = highlighter.highlight(code, language, theme)
+    }
     Box(
         modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(tokens.bgSolid.color)
+            .background(highlighted?.background ?: tokens.bgSolid.color)
             .border(1.dp, tokens.border.color, shape),
     ) {
         Box(Modifier.horizontalScroll(rememberScrollState())) {
             BasicText(
-                code,
+                highlighted?.text ?: AnnotatedString(code),
                 // The padding sits inside the border's own pixel, as CSS's border box puts it.
                 Modifier.padding(start = 9.dp, top = 9.dp, end = 9.dp, bottom = 13.dp),
-                style = ppmText(CODE_SIZE, kind = FontKind.MONO, lineHeight = CODE_LINE_HEIGHT).copy(color = tokens.text.color),
+                style = ppmText(CODE_SIZE, kind = FontKind.MONO, lineHeight = CODE_LINE_HEIGHT)
+                    .copy(color = highlighted?.foreground ?: tokens.text.color),
                 softWrap = false,
             )
         }
