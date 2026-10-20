@@ -35,8 +35,12 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -292,19 +296,34 @@ fun SearchBox(state: TextFieldState, placeholder: String, modifier: Modifier = M
     var focused by remember { mutableStateOf(false) }
     // `py-1.5 text-xs` outside the phone layout: 30 px with the border.
     val mobile = LocalPpmMobile.current
+    val ring = tokens.accent.opacity(0.5).color
     Box(
         modifier
             .fillMaxWidth()
             .heightIn(min = if (mobile) 34.dp else 30.dp)
+            .drawBehind {
+                // `focus:ring-1 ring-primary/50`: a pixel outside the border, which stays.
+                if (focused) {
+                    val px = 1.dp.toPx()
+                    drawRoundRect(
+                        ring,
+                        Offset(-px / 2, -px / 2),
+                        Size(size.width + px, size.height + px),
+                        CornerRadius(8.dp.toPx() + px / 2),
+                        style = Stroke(px),
+                    )
+                }
+            }
             .clip(shape)
             .background(tokens.panel.color)
-            .border(1.dp, if (focused) tokens.accent.opacity(0.5).color else tokens.border.color, shape),
+            .border(1.dp, tokens.border.color, shape),
         contentAlignment = Alignment.CenterStart,
     ) {
+        // The icon sits `left-2.5` from the field's outer edge; the text `pl-8 pr-8` inside its border.
         Row(
-            Modifier.fillMaxWidth().padding(start = 10.dp, end = 32.dp),
+            Modifier.fillMaxWidth().padding(start = 10.dp, end = 33.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             PpmIcon(ProductIcon.Search, 14.dp, tokens.text3.color)
             PpmTextField(

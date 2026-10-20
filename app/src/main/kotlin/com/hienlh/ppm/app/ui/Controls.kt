@@ -54,11 +54,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
@@ -329,6 +336,7 @@ fun BottomSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier, background
                     .clickable(remember { MutableInteractionSource() }, indication = null, onClick = ::close),
             )
             val shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+            val border = tokens.border.color
             Column(
                 modifier
                     .align(Alignment.BottomCenter)
@@ -337,7 +345,10 @@ fun BottomSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier, background
                     .graphicsLayer { translationY = if (offset.value == Float.MAX_VALUE) size.height else offset.value }
                     .clip(shape)
                     .background(background ?: tokens.panel2.color)
-                    .border(1.dp, tokens.border.color, shape)
+                    .drawWithCache {
+                        val line = topBorder(size, 16.dp.toPx(), 1.dp.toPx())
+                        onDrawBehind { drawPath(line, border) }
+                    }
                     .draggable(
                         rememberDraggableState { delta -> scope.launch { offset.snapTo((offset.value + delta).coerceAtLeast(0f)) } },
                         Orientation.Vertical,
@@ -345,6 +356,7 @@ fun BottomSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier, background
                             if (offset.value > panelHeight * 0.25f || velocity > 1_500f) close() else offset.animateTo(0f, tween(150))
                         },
                     )
+                    .padding(top = 1.dp)
                     .navigationBarsPadding()
                     .imePadding()
                     .padding(bottom = 8.dp),
@@ -358,6 +370,20 @@ fun BottomSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier, background
         }
         BackHandler(onBack = ::close)
     }
+}
+
+/**
+ * `border-t` on a box with rounded top corners, as CSS draws it: the line follows the corners and
+ * thins to nothing where they meet the sides, which have no border. [radius] and [width] in pixels.
+ */
+private fun topBorder(size: Size, radius: Float, width: Float): Path {
+    val outer = Path().apply { addRoundRect(RoundRect(Rect(Offset.Zero, size), topLeft = CornerRadius(radius), topRight = CornerRadius(radius))) }
+    // The padding edge: its corners keep their width and lose the border's height.
+    val inner = Path().apply {
+        val corner = CornerRadius(radius, (radius - width).coerceAtLeast(0f))
+        addRoundRect(RoundRect(Rect(Offset(0f, width), size), topLeft = corner, topRight = corner))
+    }
+    return Path().apply { op(outer, inner, PathOperation.Difference) }
 }
 
 /** A sheet's menu row (`px-3 py-2.5 text-sm`): icon, label, pressed tint. */
@@ -415,8 +441,9 @@ fun SheetDivider() {
 }
 
 /**
- * The web's `AlertDialog`: a centred card with a title, a line of explanation and the two
- * buttons, the confirming one red when it destroys something.
+ * What the web asks with `window.confirm`, which the browser draws itself: a centred card with a
+ * title, a line of explanation and the two buttons, the confirming one red when it destroys
+ * something.
  */
 @Composable
 fun ConfirmDialog(
@@ -506,7 +533,8 @@ fun PromptDialog(
                     .clip(fieldShape)
                     .background(tokens.bgSolid.color)
                     .border(1.dp, (if (focused) tokens.accent else tokens.border).color, fieldShape)
-                    .padding(horizontal = 12.dp),
+                    // The rename sheet's field: `px-3` inside the border.
+                    .padding(horizontal = 13.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 PpmTextField(

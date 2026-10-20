@@ -269,16 +269,20 @@ private fun Logo() {
 private fun ServerChip(name: String) {
     val tokens = LocalPpmTokens.current
     Row(
-        Modifier.clip(CircleShape).background(tokens.panel2.color).border(1.dp, tokens.border.color, CircleShape).padding(horizontal = 10.dp, vertical = 2.dp),
+        Modifier.clip(CircleShape).background(tokens.panel2.color).border(1.dp, tokens.border.color, CircleShape).padding(horizontal = 11.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         PpmIcon(ProductIcon.Monitor, 12.dp, tokens.text3.color)
-        BasicText(name, style = ppmText(11f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text2.color), maxLines = 1)
+        // The page's 1.5 line height, inherited.
+        BasicText(name, style = ppmText(11f, kind = FontKind.MONO, lineHeight = 16.5f).copy(color = tokens.text2.color), maxLines = 1)
     }
 }
 
-/** `h-[50px] rounded-xl bg-surface-elevated`, the border lit while typing in it. */
+/**
+ * `h-[50px] rounded-xl bg-surface-elevated`, the border lit while typing in it. Its text starts at
+ * `px-3` inside the border; with a button at `right-2` it stops at `pr-12`, as the password's does.
+ */
 @Composable
 private fun LoginField(focused: Boolean, trailing: (@Composable () -> Unit)? = null, field: @Composable () -> Unit) {
     val tokens = LocalPpmTokens.current
@@ -290,10 +294,11 @@ private fun LoginField(focused: Boolean, trailing: (@Composable () -> Unit)? = n
             .clip(shape)
             .background(tokens.panel2.color)
             .border(1.dp, if (focused) tokens.accent.color else tokens.border.color, shape)
-            .padding(start = 12.dp, end = 8.dp),
+            .padding(start = 13.dp, end = if (trailing != null) 8.dp else 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.weight(1f)) { field() }
+        // 49 px from the edge less the 36 px button and its 8 px.
+        Box(Modifier.weight(1f).padding(end = if (trailing != null) 5.dp else 0.dp)) { field() }
         trailing?.invoke()
     }
 }

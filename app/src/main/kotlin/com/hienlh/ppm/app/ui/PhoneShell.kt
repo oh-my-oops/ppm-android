@@ -231,7 +231,7 @@ private fun CountChip(count: Int) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
     Box(
-        Modifier.height(18.dp).clip(shape).background(tokens.panel2.color).border(1.dp, tokens.border.color, shape).padding(horizontal = 6.dp),
+        Modifier.height(18.dp).clip(shape).background(tokens.panel2.color).border(1.dp, tokens.border.color, shape).padding(horizontal = 7.dp),
         contentAlignment = Alignment.Center,
     ) {
         BasicText("$count", style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color))
@@ -464,7 +464,7 @@ private fun TabSwitcherSheet(model: AppModel, onDismiss: () -> Unit, onLongPress
             Spacer(Modifier.weight(1f))
             val segment = RoundedCornerShape(12.dp)
             Row(
-                Modifier.clip(segment).background(tokens.bgSolid.color).border(1.dp, tokens.border.color, segment).padding(2.dp),
+                Modifier.clip(segment).background(tokens.bgSolid.color).border(1.dp, tokens.border.color, segment).padding(3.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 for ((mode, label) in listOf("default" to "Default", "recent" to "Recent")) {
@@ -505,7 +505,7 @@ private fun TabSwitcherSheet(model: AppModel, onDismiss: () -> Unit, onLongPress
         Box(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
             val shape = RoundedCornerShape(12.dp)
             Row(
-                Modifier.fillMaxWidth().height(40.dp).clip(shape).background(tokens.bgSolid.color).border(1.dp, tokens.border.color, shape).padding(horizontal = 12.dp),
+                Modifier.fillMaxWidth().height(40.dp).clip(shape).background(tokens.bgSolid.color).border(1.dp, tokens.border.color, shape).padding(horizontal = 13.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -765,7 +765,7 @@ private fun RenameSheet(model: AppModel, session: SessionInfo, onDismiss: () -> 
                     .clip(shape)
                     .background(tokens.bgSolid.color)
                     .border(1.dp, (if (focused) tokens.accent else tokens.border).color, shape)
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = 13.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 PpmTextField(

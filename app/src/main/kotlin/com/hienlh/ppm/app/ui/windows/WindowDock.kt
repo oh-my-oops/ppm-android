@@ -365,7 +365,8 @@ private fun MoreButton(count: Int, busy: Boolean, expanded: Boolean, modifier: M
             BasicText("+$count", style = MORE_TEXT.copy(color = color), maxLines = 1)
             PpmIcon(ProductIcon.ChevronUp, 12.dp, color, Modifier.rotate(turn))
         }
-        if (busy) WindowBusyDot(Modifier.align(Alignment.TopEnd).offset(2.dp, (-2).dp))
+        // `-right-0.5 -top-0.5` from inside the border: a pixel past the chip's edge.
+        if (busy) WindowBusyDot(Modifier.align(Alignment.TopEnd).offset(1.dp, (-1).dp))
     }
 }
 

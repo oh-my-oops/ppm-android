@@ -128,7 +128,7 @@ private fun DockHeader(
                             .clip(shape)
                             .border(1.dp, tokens.border.color, shape)
                             .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, fade = false) { open = true }
-                            .padding(horizontal = 8.dp),
+                            .padding(horizontal = 9.dp),
                         contentAlignment = Alignment.Center,
                     ) { BasicText("+${overflow.size}", style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color)) }
                     if (open) {
@@ -170,8 +170,8 @@ private fun DockPill(model: AppModel, tab: com.hienlh.ppm.state.workspace.Worksp
             .background(if (active) tokens.accent.opacity(0.1).color else Color.Transparent)
             .border(1.dp, (if (active) tokens.accent else tokens.border).color, shape)
             .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = if (active) Color.Transparent else tokens.panel2.color) { model.activate(tab.id, DOCK_PANEL_ID) }
-            // `px-2.5`, `px-1.5` without a label; the close button's `-mr-1` takes 4 px back.
-            .padding(start = if (showLabel) 10.dp else 6.dp, end = if (!showLabel) 6.dp else if (tab.closable) 6.dp else 10.dp),
+            // `px-2.5`, `px-1.5` without a label, inside the border; the close button's `-mr-1` takes 4 px back.
+            .padding(start = if (showLabel) 11.dp else 7.dp, end = if (!showLabel) 7.dp else if (tab.closable) 7.dp else 11.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {

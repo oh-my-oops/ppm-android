@@ -153,7 +153,8 @@ private fun ProjectSwitcherButton(model: AppModel, open: Boolean, modifier: Modi
             .background(if (open) tokens.panel2.color else Color.Transparent)
             .border(1.dp, if (open) tokens.border.color else Color.Transparent, shape)
             .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, shape = shape, onClickLabel = "Switch project", onClick = onClick)
-            .padding(horizontal = 8.dp),
+            // `px-2` inside a border that is there, transparent, while closed.
+            .padding(horizontal = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
@@ -277,7 +278,8 @@ private fun HistorySection(model: AppModel) {
 private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
     val unread = model.unreadSessions()
-    Column(modifier.width(RAIL_WIDTH).fillMaxHeight()) {
+    // `w-[52px] border-r`: the width holds the border a caller's [modifier] draws.
+    Column(Modifier.width(RAIL_WIDTH).then(modifier).fillMaxHeight()) {
         Column(
             Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 3.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,

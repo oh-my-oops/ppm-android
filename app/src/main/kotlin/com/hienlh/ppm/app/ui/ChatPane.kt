@@ -66,6 +66,7 @@ import com.hienlh.ppm.chat.CONTINUE_AFTER_STOP
 import com.hienlh.ppm.chat.ChatTranscriptView
 import com.hienlh.ppm.chat.RelativeTime
 import com.hienlh.ppm.chat.TurnStopBar
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.PpmIcon
@@ -434,7 +435,7 @@ private fun HistoryBarRow(model: AppModel, session: SessionInfo, unreadType: Str
             ProviderBadge(session.providerId)
             session.tag?.let { TagDot(it.color) }
             if (renaming) {
-                InlineRename(model, session, Modifier.weight(1f)) { renaming = false }
+                InlineRename(model, session, RenameField.HistoryBar, Modifier.weight(1f)) { renaming = false }
             } else {
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (bot) PpmIcon(ProductIcon.Bot, 12.dp, tokens.text2.color)
@@ -493,12 +494,21 @@ private fun RowIcon(icon: ProductIcon, tint: Rgba, hoverTint: Rgba, hoverFill: R
 }
 
 /**
- * Renaming in place (`bg-surface-elevated px-1 py-0.5 rounded border focus:border-primary`):
- * Return or leaving the field saves, the check saves, the cross gives up.
+ * The web's two rename fields, `bg-surface-elevated py-0.5 rounded border`: the history bar's is
+ * `text-[11px] px-1 focus:border-primary` and keeps the page's 1.5 line height, the History list's
+ * `text-xs px-1.5 focus:border-primary/50` with that size's own. On a phone both type at 16 px
+ * (`globals.css`), each keeping its line height's ratio.
  */
+enum class RenameField(val size: Float, val lineRatio: Float, val padding: Dp, val focusAlpha: Double) {
+    HistoryBar(11f, 1.5f, 4.dp, 1.0),
+    HistoryList(12f, 4f / 3f, 6.dp, 0.5),
+}
+
+/** Renaming in place, as [field]: Return or leaving the field saves, the check saves, the cross gives up. */
 @Composable
-fun InlineRename(model: AppModel, session: SessionInfo, modifier: Modifier = Modifier, onDone: () -> Unit) {
+fun InlineRename(model: AppModel, session: SessionInfo, field: RenameField, modifier: Modifier = Modifier, onDone: () -> Unit) {
     val tokens = LocalPpmTokens.current
+    val size = if (LocalPpmMobile.current) 16f else field.size
     val state = rememberTextFieldState(session.title)
     val focus = remember { FocusRequester() }
     var focused by remember { mutableStateOf(false) }
@@ -527,9 +537,9 @@ fun InlineRename(model: AppModel, session: SessionInfo, modifier: Modifier = Mod
                 }
                 .clip(shape)
                 .background(tokens.panel2.color)
-                .border(1.dp, (if (focused) tokens.accent else tokens.border).color, shape)
-                .padding(horizontal = 4.dp, vertical = 2.dp),
-            textStyle = ppmText(16f, lineHeight = 24f).copy(color = tokens.text.color),
+                .border(1.dp, (if (focused) tokens.accent.opacity(field.focusAlpha) else tokens.border).color, shape)
+                .padding(horizontal = field.padding + 1.dp, vertical = 3.dp),
+            textStyle = ppmText(size, lineHeight = size * field.lineRatio).copy(color = tokens.text.color),
             cursorBrush = SolidColor(tokens.accent.color),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             onKeyboardAction = { finish(save = true) },

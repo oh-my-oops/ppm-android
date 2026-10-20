@@ -271,7 +271,8 @@ private fun NeutralChip(icon: ProductIcon, label: String?, narrow: Boolean, labe
             .pointerHoverIcon(WebCursor.Default)
             .hoverable(source)
             .clickable(source, indication = null, onClick = onClick)
-            .padding(horizontal = if (narrow) 7.dp else 9.dp, vertical = 4.dp),
+            // `px-[9px] py-1` (`px-[7px]` narrow) inside the border.
+            .padding(horizontal = if (narrow) 8.dp else 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -313,7 +314,7 @@ private fun ModelChip(text: String, thinking: Boolean, disabled: Boolean, onClic
             .pointerHoverIcon(WebCursor.Default)
             .hoverable(source)
             .clickable(source, indication = null, enabled = !disabled, onClick = onClick)
-            .padding(horizontal = 9.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -352,7 +353,7 @@ private fun PromptCacheChip(cache: PromptCacheState?) {
             .clip(CircleShape)
             .background((if (cold) tokens.error.opacity(0.1) else tokens.panel2).color)
             .border(1.dp, (if (cold) tokens.error.opacity(0.4) else tokens.borderSoft).color, CircleShape)
-            .padding(horizontal = 9.dp, vertical = 4.dp),
+            .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -422,7 +423,8 @@ private fun ModePopover(current: PermissionMode, onDismiss: () -> Unit, pick: (P
                 .ppmShadow(tokens.shadowPanel, shape)
                 .clip(shape)
                 .background(tokens.panel2.over(tokens.bgSolid).color)
-                .border(1.dp, tokens.border.color, shape),
+                .border(1.dp, tokens.border.color, shape)
+                .padding(1.dp),
         ) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -436,7 +438,7 @@ private fun ModePopover(current: PermissionMode, onDismiss: () -> Unit, pick: (P
                         .clip(kbd)
                         .background(tokens.panel2.color)
                         .border(1.dp, tokens.border.color, kbd)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
                     style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text3.color),
                 )
             }

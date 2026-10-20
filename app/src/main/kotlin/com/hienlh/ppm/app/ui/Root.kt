@@ -238,7 +238,8 @@ private fun ErrorToast(message: String?, mobile: Boolean, narrow: Boolean, dark:
                         .background(tokens.panel.over(tokens.bgSolid).color)
                         .border(1.dp, tokens.border.color, shape)
                         .hoverable(overToast)
-                        .padding(16.dp),
+                        // sonner's `padding: 16px` inside its border (`box-sizing: border-box`).
+                        .padding(17.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {

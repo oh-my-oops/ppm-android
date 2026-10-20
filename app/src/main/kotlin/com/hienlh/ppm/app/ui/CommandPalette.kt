@@ -225,12 +225,14 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
                     card(
                         Modifier
                             .align(Alignment.BottomCenter)
+                            .widthIn(max = 448.dp)
                             .fillMaxWidth()
                             .heightIn(max = maxHeight * 0.8f)
                             .ppmShadow(SHADOW_2XL, shape)
                             .clip(shape)
                             .background(tokens.bgSolid.color)
                             .border(1.dp, tokens.border.color, shape)
+                            .padding(1.dp)
                             .navigationBarsPadding()
                             .imePadding(),
                         maxWidth >= 640.dp,
@@ -252,7 +254,8 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
                             .ppmShadow(SHADOW_2XL, shape)
                             .clip(shape)
                             .background(tokens.bgSolid.color)
-                            .border(1.dp, tokens.border.color, shape),
+                            .border(1.dp, tokens.border.color, shape)
+                            .padding(1.dp),
                         true,
                     )
                 }

@@ -108,9 +108,10 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
                     .clip(shape)
                     .background(tokens.panel2.color)
                     .border(1.dp, if (focused) tokens.accent.opacity(0.5).color else tokens.border.color, shape)
-                    .padding(start = 8.dp, end = 8.dp, top = vertical, bottom = vertical),
+                    // The icon sits `left-2` from the field's outer edge, the text `pl-7` inside its border.
+                    .padding(start = 8.dp, end = 9.dp, top = vertical, bottom = vertical),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
                 PpmIcon(ProductIcon.Search, 14.dp, tokens.text3.color)
                 PpmTextField(query, "Filter sessions…", Modifier.weight(1f), desktopStyle = ppmText(12f, lineHeight = 16f), onFocusChanged = { focused = it })
@@ -314,7 +315,7 @@ private fun SidebarSessionRow(model: AppModel, session: SessionInfo, unreadType:
             ProviderBadge(session.providerId)
             session.tag?.let { TagDot(it.color) }
             if (renaming) {
-                InlineRename(model, session, Modifier.weight(1f)) { renaming = false }
+                InlineRename(model, session, RenameField.HistoryList, Modifier.weight(1f)) { renaming = false }
             } else {
                 // The title is a button inside a line of the body's 16/24 text, so never under 24 px.
                 Column(Modifier.weight(1f).heightIn(min = 24.dp), verticalArrangement = Arrangement.Center) {
