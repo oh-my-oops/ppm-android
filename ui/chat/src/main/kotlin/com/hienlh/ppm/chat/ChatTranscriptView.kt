@@ -113,6 +113,8 @@ fun ChatTranscriptView(
     onDismiss: (String) -> Unit = {},
     /** Every error out of this view. */
     onClearErrors: () -> Unit = {},
+    /** A message picked to answer; null leaves Reply out. */
+    onReply: ((ReplyReference) -> Unit)? = null,
 ) {
     // When the running turn started, for the wait counter before anything streams.
     var turnStartedAt by remember { mutableStateOf<Instant?>(null) }
@@ -125,7 +127,7 @@ fun ChatTranscriptView(
                 CenteredNotice("Loading messages...", pulsing = true)
             state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null ->
                 Welcome(welcome)
-            else -> TranscriptList(state, turnStartedAt, onRespond, onLoadOlder, jumps, onDismiss, onClearErrors)
+            else -> TranscriptList(state, turnStartedAt, onRespond, onLoadOlder, jumps, onDismiss, onClearErrors, onReply)
         }
         state.historyError?.let { error ->
             HistoryErrorBanner(error, onReload, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
@@ -142,6 +144,7 @@ private fun TranscriptList(
     jumps: Flow<Int>,
     onDismiss: (String) -> Unit,
     onClearErrors: () -> Unit,
+    onReply: ((ReplyReference) -> Unit)?,
 ) {
     val rows = remember(state.items, state.isRunning) { TranscriptRows.of(state.items, state.isRunning) }
     val scope = rememberCoroutineScope()
@@ -195,11 +198,13 @@ private fun TranscriptList(
             }
             for (row in rows) {
                 item(key = row.item.id, contentType = row.item.role) {
+                    val reply = remember(row, state.sessionId, state.providerId, onReply) { replyAction(row, state, onReply) }
                     ChatMessageView(
                         row.item,
-                        row.actions,
+                        row.actions?.copy(onReply = reply),
                         Modifier.replyFlash(flashing == row.item.id, tokens.accent).padding(start = 16.dp, end = 16.dp, top = 16.dp),
                         replies,
+                        onReply = reply.takeIf { row.item.role == ChatItem.Role.USER },
                     ) { onDismiss(row.item.id) }
                 }
             }
@@ -472,23 +477,52 @@ internal fun indicatorLabel(state: ChatState): String? {
     }
 }
 
-/** Each message with whether it ends a turn, and that turn's text for Copy. */
+/**
+ * Each message with whether it ends a turn, that turn's text for Copy, and what its Reply quotes:
+ * a user's message itself, and for an answer the turn's last message with text. A turn is the
+ * run of answers since anything else.
+ */
 internal object TranscriptRows {
-    data class Row(val item: ChatItem, val actions: MessageActions?)
+    data class Row(val item: ChatItem, val actions: MessageActions?, val replyTarget: ChatItem? = null)
 
     fun of(items: List<ChatItem>, running: Boolean): List<Row> {
         val rows = ArrayList<Row>(items.size)
         val turnTexts = mutableListOf<String>()
+        var turnReply: ChatItem? = null
         items.forEachIndexed { index, item ->
-            if (item.role == ChatItem.Role.USER) turnTexts.clear()
-            if (item.role == ChatItem.Role.ASSISTANT && item.text.isNotEmpty()) turnTexts += item.text
+            if (item.role != ChatItem.Role.ASSISTANT) {
+                turnTexts.clear()
+                turnReply = null
+            } else if (item.text.isNotEmpty()) {
+                turnTexts += item.text
+                turnReply = item
+            }
             val next = items.getOrNull(index + 1)
             // The running turn's actions wait until it ends.
             val endsTurn = item.role == ChatItem.Role.ASSISTANT && next?.role != ChatItem.Role.ASSISTANT && !(running && next == null)
-            rows += Row(item, if (endsTurn) MessageActions(item.timestamp, turnTexts.joinToString("\n\n")) else null)
+            rows += when {
+                item.role == ChatItem.Role.USER -> Row(item, null, item)
+                endsTurn -> Row(item, MessageActions(item.timestamp, turnTexts.joinToString("\n\n")), turnReply)
+                else -> Row(item, null)
+            }
         }
         return rows
     }
+}
+
+/**
+ * Reply on [row] (`handleReply`): shown on a user's message only when it can be quoted, on an
+ * answer whenever its turn has text, and only in a chat with a session and a provider.
+ */
+private fun replyAction(row: TranscriptRows.Row, state: ChatState, onReply: ((ReplyReference) -> Unit)?): (() -> Unit)? {
+    val target = row.replyTarget ?: return null
+    val provider = state.providerId?.takeIf { it.isNotEmpty() } ?: return null
+    if (onReply == null || state.sessionId.isEmpty()) return null
+    if (row.item.role == ChatItem.Role.USER) {
+        val reply = MessageReply.create(target, state.sessionId, provider) ?: return null
+        return { onReply(reply) }
+    }
+    return { MessageReply.create(target, state.sessionId, provider)?.let(onReply) }
 }
 
 /** The empty states: a bot and one line. */

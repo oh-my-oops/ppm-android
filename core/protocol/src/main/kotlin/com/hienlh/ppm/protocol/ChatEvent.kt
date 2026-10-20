@@ -80,7 +80,8 @@ sealed interface ChatEvent {
     data class ToolResult(val outcome: ToolOutcome, val toolUseId: String?, val parent: String? = null) : ChatEvent
     data class Approval(val request: ApprovalRequest) : ChatEvent
     data class Error(val message: String) : ChatEvent
-    data object Done : ChatEvent
+    /** The turn ended; [lastMessageUuid] is the SDK's id for its last message. */
+    data class Done(val lastMessageUuid: String? = null) : ChatEvent
     data class SessionMigrated(val newSessionId: String) : ChatEvent
 
     /** Anything else (`account_info`, `team_*`, …): not shown yet. */
@@ -102,7 +103,7 @@ sealed interface ChatEvent {
                 "tool_result" -> ToolResult(ToolOutcome.from(json), json["toolUseId"].string, parent)
                 "approval_request" -> ApprovalRequest.from(json)?.let(::Approval) ?: Other(type)
                 "error" -> Error(json["message"].string ?: "Unknown error")
-                "done" -> Done
+                "done" -> Done(json["lastMessageUuid"].string)
                 "session_migrated" -> json["newSessionId"].string?.let(::SessionMigrated) ?: Other(type)
                 else -> Other(type)
             }

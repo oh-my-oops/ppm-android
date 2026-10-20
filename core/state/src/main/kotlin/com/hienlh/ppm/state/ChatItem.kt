@@ -128,7 +128,7 @@ class TurnBuilder(
                 if (request.tool == "ppm:db_execute" || requestIndex(request.requestId) >= 0) return
                 list += ChatBlock.Tool(ToolBlock(toolUseId = null, name = request.tool, input = request.input, requestId = request.requestId))
             }
-            ChatEvent.Done, is ChatEvent.SessionMigrated, is ChatEvent.Other -> Unit
+            is ChatEvent.Done, is ChatEvent.SessionMigrated, is ChatEvent.Other -> Unit
         }
     }
 

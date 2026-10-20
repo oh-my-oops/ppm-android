@@ -4,7 +4,9 @@ import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatFrame
+import com.hienlh.ppm.protocol.ChatReply
 import com.hienlh.ppm.protocol.HistoryPage
+import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.Reported
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.protocol.SessionStateFrame
@@ -21,6 +23,9 @@ sealed interface ChatEffect {
     data class AdoptSessionId(val id: String) : ChatEffect
 }
 
+/** A message the server refused: what was typed, what it quoted, and why ([message]). */
+data class RejectedSend(val content: String, val replyTo: ReplyReference?, val message: String)
+
 /**
  * What one chat shows, rebuilt from history pages and chat-socket frames. No I/O: frames go in,
  * effects come out, so every rule here runs in a plain unit test. It follows
@@ -33,6 +38,9 @@ class ChatTranscript {
     /** The assistant message being streamed; it joins [items] at `done`. */
     var live: TurnBuilder? = null
         private set
+
+    /** When [live] got its first event. */
+    private var liveStartedAt = 0L
     var phase: SessionPhase = SessionPhase.IDLE
         private set
     var pendingApproval: ApprovalRequest? = null
@@ -46,9 +54,12 @@ class ChatTranscript {
     var compacting = false
         private set
 
-    /** Something to tell the user that belongs to no message, such as a refused send. */
-    var notice: String? = null
+    /** A send the server refused, as it was typed and quoted, until the composer takes it back ([takeRejected]). */
+    var rejected: RejectedSend? = null
         private set
+
+    /** Sends the server may still refuse, by id: what a refusal hands back. Kept a minute, 20 at most. */
+    private val unanswered = LinkedHashMap<String, Unanswered>()
 
     /** Index of the first loaded message in the whole transcript; above 0, older ones exist. */
     var historyStart = 0
@@ -103,20 +114,23 @@ class ChatTranscript {
             }
             is ChatFrame.Event -> {
                 frame.streamSeq?.let { advance(it, effects) }
-                apply(frame.event, replaying = false, effects)
+                apply(frame.event, replaying = false, effects, now)
             }
             is ChatFrame.SessionState -> applySessionState(frame.state, now, effects)
             is ChatFrame.TurnEvents -> applySnapshot(frame.snapshot, now, effects)
             is ChatFrame.PhaseChanged -> applyPhase(frame.phase, effects)
             is ChatFrame.TurnStopped -> turnStop = frame.stop
             is ChatFrame.MessageRejected -> {
+                // Without an id, the latest send of the same text and reply (`message_rejected` in use-chat.ts).
                 val id = frame.clientMessageId
+                    ?: unanswered.entries.lastOrNull { it.value.content == frame.content && it.value.replyTo == frame.replyTo }?.key
+                val sent = id?.let(unanswered::remove)
                 val index = if (id == null) -1 else items.indexOfLast { it.id == id }
                 if (index >= 0) {
                     items = items.toMutableList().also { it.removeAt(index) }
                     if (index == items.size && live == null && phase == SessionPhase.INITIALIZING) phase = SessionPhase.IDLE
                 }
-                notice = frame.message
+                if (sent != null) rejected = RejectedSend(sent.content, sent.replyTo, frame.message)
             }
             is ChatFrame.UserMessage -> {
                 // Sent from another device; the sender never gets this echo.
@@ -143,23 +157,34 @@ class ChatTranscript {
     // User actions
 
     /** The message to put on the socket; the transcript shows it at once. */
-    fun send(content: String, options: TurnOptions = TurnOptions(), now: Long = System.currentTimeMillis()): ChatClientMessage.Message {
+    /**
+     * [content] shown at once, with [replyTo] quoted above it as the server will store it, and
+     * the frame that sends it.
+     */
+    fun send(
+        content: String,
+        options: TurnOptions = TurnOptions(),
+        now: Long = System.currentTimeMillis(),
+        replyTo: ReplyReference? = null,
+    ): ChatClientMessage.Message {
         localCounter++
         val id = "local-user-$localCounter-$now"
         activity++
         turnStop = null
-        notice = null
+        unanswered.values.removeAll { now - it.sentAt >= 60_000 }
+        unanswered[id] = Unanswered(content, replyTo, now)
+        if (unanswered.size > 20) unanswered.remove(unanswered.keys.first())
         // The server skips a pending approval when a message arrives.
         pendingApproval = null
         if (phase.isRunning) {
             // A follow-up: what streamed so far stays above the new message.
-            finalizeLive(now)
+            finalizeLive()
         } else {
             phase = SessionPhase.INITIALIZING
             turnFinalized = false
         }
-        appendUser(content, id, now)
-        return ChatClientMessage.Message(id, content, options)
+        appendUser(ChatReply.encode(content, replyTo), id, now)
+        return ChatClientMessage.Message(id, content, options, replyTo)
     }
 
     fun respond(request: ApprovalRequest, approved: Boolean, data: JsonElement? = null): ChatClientMessage.ApprovalResponse {
@@ -168,8 +193,9 @@ class ChatTranscript {
         return ChatClientMessage.ApprovalResponse(request.requestId, approved, data)
     }
 
-    fun dismissNotice() {
-        notice = null
+    /** The composer has the refused send back, or has offered it. */
+    fun takeRejected() {
+        rejected = null
     }
 
     /** `dismissMessage`: one message out of this view, such as an error's bubble. A reload brings back what history keeps. */
@@ -255,7 +281,7 @@ class ChatTranscript {
         replayTruncated = false
         val historyFresh = historyLoadedAt?.let { now - it < 5_000 } ?: false
         if (replayWasTruncated || wasRunning || !historyFresh) {
-            finalizeLive(now)
+            finalizeLive()
             effects += ChatEffect.ReloadHistory
             // The greeting and the answer to `ready` both say idle; one reload covers both.
             historyLoadedAt = now
@@ -278,7 +304,7 @@ class ChatTranscript {
             if (!(last?.role == ChatItem.Role.USER && last.text == user)) appendUser(user, now = now)
         }
         live = null
-        for (event in snapshot.events) apply(event, replaying = true, effects)
+        for (event in snapshot.events) apply(event, replaying = true, effects, now)
         replayTruncated = snapshot.truncated
         val seq = snapshot.streamSeq
         if (!snapshot.truncated && seq != null) {
@@ -303,16 +329,16 @@ class ChatTranscript {
         compacting = false
         // A turn can end after frames were lost (no `done` seen): reconcile from history.
         if (replayWasTruncated || (wasRunning && !turnFinalized)) {
-            finalizeLive(System.currentTimeMillis())
+            finalizeLive()
             effects += ChatEffect.ReloadHistory
         }
     }
 
-    private fun apply(event: ChatEvent, replaying: Boolean, effects: MutableList<ChatEffect>) {
+    private fun apply(event: ChatEvent, replaying: Boolean, effects: MutableList<ChatEffect>, now: Long) {
         when (event) {
-            is ChatEvent.Text, is ChatEvent.Thinking, is ChatEvent.ToolUse, is ChatEvent.ToolResult -> addToLive(event)
+            is ChatEvent.Text, is ChatEvent.Thinking, is ChatEvent.ToolUse, is ChatEvent.ToolResult -> addToLive(event, now)
             is ChatEvent.Error -> if (live != null || phase.isRunning) {
-                addToLive(event)
+                addToLive(event, now)
             } else if (items.lastOrNull().let { it?.role != ChatItem.Role.SYSTEM || it.text != event.message }) {
                 // A message of its own, as history keeps one; the same error twice in a row shows once.
                 localCounter++
@@ -324,12 +350,12 @@ class ChatTranscript {
                 )
             }
             is ChatEvent.Approval -> {
-                addToLive(event)
+                addToLive(event, now)
                 // On replay, `session_state.pendingApproval` is the authority.
                 if (!replaying) pendingApproval = event.request
             }
-            ChatEvent.Done -> {
-                finalizeLive(System.currentTimeMillis())
+            is ChatEvent.Done -> {
+                finalizeLive(event.lastMessageUuid)
                 turnFinalized = true
             }
             is ChatEvent.SessionMigrated -> effects += ChatEffect.AdoptSessionId(event.newSessionId)
@@ -337,23 +363,35 @@ class ChatTranscript {
         }
     }
 
-    private fun addToLive(event: ChatEvent) {
-        val turn = live ?: TurnBuilder(live = true).also { live = it }
+    private fun addToLive(event: ChatEvent, now: Long) {
+        val turn = live ?: TurnBuilder(live = true).also {
+            live = it
+            liveStartedAt = now
+        }
         turn.add(event)
     }
 
-    private fun finalizeLive(now: Long) {
+    /**
+     * The streamed answer as a message: stamped when it began streaming, as the web stamps it, and
+     * with the SDK's id once `done` names it, which is what finds it again after a reload.
+     */
+    private fun finalizeLive(sdkUuid: String? = null) {
         val turn = live ?: return
         live = null
         if (turn.isEmpty) return
         localCounter++
-        items = items + ChatItem("local-assistant-$localCounter", ChatItem.Role.ASSISTANT, turn.blocks, Instant.ofEpochMilli(now), answerText = turn.answerText)
+        items = items + ChatItem(
+            "local-assistant-$localCounter", ChatItem.Role.ASSISTANT, turn.blocks, Instant.ofEpochMilli(liveStartedAt),
+            sdkUuid = sdkUuid, answerText = turn.answerText,
+        )
     }
 
     private fun appendUser(content: String, id: String? = null, now: Long) {
         localCounter++
         items = items + ChatItem(id ?: "local-user-$localCounter", ChatItem.Role.USER, listOf(ChatBlock.Text(content)), Instant.ofEpochMilli(now))
     }
+
+    private class Unanswered(val content: String, val replyTo: ReplyReference?, val sentAt: Long)
 
     companion object {
         const val TAB_OPEN_UNSUPPORTED =

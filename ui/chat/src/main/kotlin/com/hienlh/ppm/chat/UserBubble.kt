@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -47,10 +48,13 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
@@ -68,6 +72,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
@@ -133,7 +138,7 @@ private fun fileName(path: String): String = path.split('/', '\\').last()
  * drawn faint and full width, with no action bar.
  */
 @Composable
-internal fun UserBubble(content: String, timestamp: Instant?, replies: ReplyTargets, modifier: Modifier = Modifier) {
+internal fun UserBubble(content: String, timestamp: Instant?, replies: ReplyTargets, modifier: Modifier = Modifier, onReply: (() -> Unit)? = null) {
     val tokens = LocalPpmTokens.current
     val parsed = remember(content) { ParsedUserMessage.parse(content) }
     val system = parsed.isSystemContext
@@ -184,7 +189,7 @@ internal fun UserBubble(content: String, timestamp: Instant?, replies: ReplyTarg
             }
             if (parsed.text.isNotEmpty()) BubbleText(parsed.text, system)
         }
-        if (!system) MessageActionBar(timestamp, remember(content) { ChatReply.decode(content).content })
+        if (!system) MessageActionBar(timestamp, remember(content) { ChatReply.decode(content).content }, onReply = onReply)
     }
 }
 
@@ -551,10 +556,18 @@ private fun TaskResult(markdown: String) {
 /**
  * `ReplyCard`: the message this one answers, as it was quoted — "Reply to you / AI", which jumps
  * to it while the chat holds it, two lines of the quote until "Show quote". On a phone both
- * buttons are 44 tall (`min-h-[44px] md:min-h-0`).
+ * buttons are 44 tall (`min-h-[44px] md:min-h-0`). Over the message box ([preview]) it reads
+ * "Replying to", and [onCancel] puts the cancel button at its end, 44 px square on every layout.
+ * Its buttons keep the arrow over a box that shows the I-beam.
  */
 @Composable
-private fun ReplyCard(reply: ReplyReference, onJump: (() -> Unit)?, modifier: Modifier = Modifier) {
+fun ReplyCard(
+    reply: ReplyReference,
+    onJump: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    preview: Boolean = false,
+    onCancel: (() -> Unit)? = null,
+) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     var expanded by remember(reply) { mutableStateOf(false) }
@@ -566,16 +579,32 @@ private fun ReplyCard(reply: ReplyReference, onJump: (() -> Unit)?, modifier: Mo
             .replyFrame(tokens.panel.opacity(0.6).color, tokens.border.color, tokens.accent.color)
             .padding(start = 10.dp, end = 9.dp, top = 5.dp, bottom = 5.dp),
     ) {
-        Box(
-            Modifier
-                .heightIn(min = minHeight)
-                .then(if (onJump != null) Modifier.ppmClickable(pressedColor = Color.Transparent, onClick = onJump) else Modifier),
-            contentAlignment = Alignment.CenterStart,
-        ) {
-            BasicText(
-                if (reply.role == ReplyReference.Role.USER) "Reply to you" else "Reply to AI",
-                style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = (if (onJump != null) tokens.accent else tokens.text2).color),
-            )
+        // `flex items-center justify-between gap-2`.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .heightIn(min = minHeight)
+                    .pointerHoverIcon(WebCursor.Default)
+                    .then(if (onJump != null) Modifier.ppmClickable(pressedColor = Color.Transparent, onClick = onJump) else Modifier),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                BasicText(
+                    (if (preview) "Replying to " else "Reply to ") + if (reply.role == ReplyReference.Role.USER) "you" else "AI",
+                    style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = (if (onJump != null) tokens.accent else tokens.text2).color),
+                )
+            }
+            if (onCancel != null) {
+                Spacer(Modifier.weight(1f).widthIn(min = 8.dp))
+                // `hover:bg-surface-hover` names a colour the app does not have: nothing lights.
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .pointerHoverIcon(WebCursor.Default)
+                        .ppmClickable(pressedColor = Color.Transparent, onClick = onCancel)
+                        .semantics { contentDescription = "Cancel reply" },
+                    contentAlignment = Alignment.Center,
+                ) { PpmIcon(ProductIcon.XCircle, 16.dp, tokens.text2.color) }
+            }
         }
         val quoteStyle = small.copy(color = tokens.text2.color)
         SelectionContainer {
@@ -587,11 +616,14 @@ private fun ReplyCard(reply: ReplyReference, onJump: (() -> Unit)?, modifier: Mo
         }
         val note = small.copy(color = tokens.text3.color)
         if (reply.truncated) BasicText("Quote shortened to 12,000 characters", Modifier.padding(top = 4.dp), note)
-        if (onJump == null) BasicText("Original message unavailable", Modifier.padding(top = 4.dp), note)
+        if (onJump == null && !preview) BasicText("Original message unavailable", Modifier.padding(top = 4.dp), note)
         // `text-primary hover:underline`, at once.
         val hover = rememberHover(instant = true)
         Box(
-            Modifier.heightIn(min = minHeight).ppmClickable(pressedColor = Color.Transparent, source = hover.source) { expanded = !expanded },
+            Modifier
+                .heightIn(min = minHeight)
+                .pointerHoverIcon(WebCursor.Default)
+                .ppmClickable(pressedColor = Color.Transparent, source = hover.source) { expanded = !expanded },
             contentAlignment = Alignment.CenterStart,
         ) {
             BasicText(

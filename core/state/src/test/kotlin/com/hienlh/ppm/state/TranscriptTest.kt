@@ -3,11 +3,14 @@ package com.hienlh.ppm.state
 import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatFrame
+import com.hienlh.ppm.protocol.ChatReply
 import com.hienlh.ppm.protocol.HistoryPage
+import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.protocol.ToolOutcome
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.get
+import java.time.Instant
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
@@ -54,6 +57,17 @@ class TranscriptTest {
         assertNull("live turn still open", chat.live)
         assertEquals(listOf("Hello"), chat.items.map { it.text })
         assertEquals(emptyList<ChatEffect>(), chat.handle(frame("""{"type":"phase_changed","phase":"idle"}""")))
+    }
+
+    @Test
+    fun `a streamed answer keeps the time it began and the SDK id done names`() {
+        val chat = ChatTranscript()
+        chat.handle(frame("""{"type":"text","content":"Hi","streamSeq":1}"""), now = 1_000)
+        chat.handle(frame("""{"type":"text","content":"!","streamSeq":2}"""), now = 4_000)
+        chat.handle(frame("""{"type":"done","sessionId":"s","lastMessageUuid":"uuid-9","streamSeq":3}"""), now = 9_000)
+        val answer = chat.items.single()
+        assertEquals(Instant.ofEpochMilli(1_000), answer.timestamp)
+        assertEquals("uuid-9", answer.sdkUuid)
     }
 
     @Test
@@ -226,16 +240,40 @@ class TranscriptTest {
     }
 
     @Test
-    fun `a send is shown at once, and a refusal takes it back and says why`() {
+    fun `a send is shown at once, and a refusal takes it back for the composer`() {
         val chat = ChatTranscript()
-        val message = chat.send("hello")
+        val reply = ReplyReference("s1", "mock", "m1", null, ReplyReference.Role.ASSISTANT, "2026-10-01T10:00:00.000Z", "earlier", truncated = false)
+        val message = chat.send("hello", replyTo = reply)
         assertEquals("hello", message.content)
+        assertEquals(reply, message.replyTo)
         assertEquals(SessionPhase.INITIALIZING, chat.phase)
         assertEquals(listOf(message.clientMessageId), chat.items.map { it.id })
+        // Shown as the server will store it: the quote travels inside the text.
+        assertEquals(ChatReply.encode("hello", reply), chat.items.single().text)
         chat.handle(ChatFrame.MessageRejected(message.clientMessageId, "Nope"))
         assertTrue(chat.items.isEmpty())
-        assertEquals("Nope", chat.notice)
+        assertEquals(RejectedSend("hello", reply, "Nope"), chat.rejected)
         assertEquals(SessionPhase.IDLE, chat.phase)
+        chat.takeRejected()
+        assertNull(chat.rejected)
+    }
+
+    @Test
+    fun `a refusal without an id finds the latest send of the same text and reply`() {
+        val chat = ChatTranscript()
+        chat.send("same", now = 1)
+        val second = chat.send("same", now = 2)
+        chat.handle(frame("""{"type":"message_rejected","content":"same","message":"Invalid reply reference for this session"}"""))
+        assertEquals(RejectedSend("same", null, "Invalid reply reference for this session"), chat.rejected)
+        assertEquals(1, chat.items.size)
+        assertTrue(chat.items.none { it.id == second.clientMessageId })
+    }
+
+    @Test
+    fun `a refusal of nothing this device sent hands nothing back`() {
+        val chat = ChatTranscript()
+        chat.handle(ChatFrame.MessageRejected("someone-else", "Nope"))
+        assertNull(chat.rejected)
     }
 
     @Test

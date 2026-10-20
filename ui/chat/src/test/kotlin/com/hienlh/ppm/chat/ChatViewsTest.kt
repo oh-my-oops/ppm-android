@@ -83,6 +83,23 @@ class ChatViewsTest {
         assertEquals(listOf(null, null, "A", null, "B"), done.map { it.actions?.copyText })
         // The running turn's actions wait until it ends.
         assertEquals(listOf(false, false, true, false, false), TranscriptRows.of(items, running = true).map { it.actions != null })
+        // Reply quotes a user's message itself, and for an answer the turn's last message with text.
+        assertEquals(listOf("u1", null, "a1", "u2", "a3"), done.map { it.replyTarget?.id })
+    }
+
+    @Test
+    fun `a turn is the run of answers since anything else`() {
+        val tool = ToolBlock(toolUseId = null, name = "Read", input = WireJson.parse("{}"))
+        val items = listOf(
+            message("u1", ChatItem.Role.USER, ChatBlock.Text("q")),
+            message("a1", ChatItem.Role.ASSISTANT, ChatBlock.Text("A")),
+            message("e1", ChatItem.Role.SYSTEM, ChatBlock.Text("Error")),
+            message("a2", ChatItem.Role.ASSISTANT, ChatBlock.Tool(tool)),
+        )
+        val rows = TranscriptRows.of(items, running = false)
+        assertEquals(listOf(null, "A", null, ""), rows.map { it.actions?.copyText })
+        // A turn of tool calls alone has nothing to quote.
+        assertEquals(listOf("u1", "a1", null, null), rows.map { it.replyTarget?.id })
     }
 
     @Test

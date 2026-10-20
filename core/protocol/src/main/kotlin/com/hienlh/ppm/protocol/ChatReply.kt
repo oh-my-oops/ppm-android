@@ -2,6 +2,8 @@ package com.hienlh.ppm.protocol
 
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -40,6 +42,19 @@ data class ReplyReference(
             appendJsString(quote)
             append(",\"truncated\":").append(truncated).append('}')
         }
+
+    /** The object the web sends as a message's `replyTo`. */
+    fun toJson(): JsonObject = buildJsonObject {
+        put("version", 1)
+        put("sessionId", sessionId)
+        put("providerId", providerId)
+        put("messageId", messageId)
+        sdkUuid?.let { put("sdkUuid", it) }
+        put("role", role.wire)
+        put("timestamp", timestamp)
+        put("quote", quote)
+        put("truncated", truncated)
+    }
 
     companion object {
         const val MAX_QUOTE_LENGTH = 12_000

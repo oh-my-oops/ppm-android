@@ -26,9 +26,11 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -36,6 +38,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
@@ -60,6 +63,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -67,6 +71,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.ui.tablet.TabletShell
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
@@ -152,7 +157,7 @@ fun PpmRoot(model: AppModel) {
                 Dialogs(model)
                 model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }
                 if (model.connectionLost) ConnectionLostOverlay(model)
-                ErrorToast(model.actionError, mobile, narrow = maxWidth <= 600.dp, dark = model.theme.isDark) { model.actionError = null }
+                ErrorToast(model.toast, mobile, narrow = maxWidth <= 600.dp, dark = model.theme.isDark) { model.toast = null }
             }
         }
     }
@@ -192,12 +197,13 @@ private fun Dialogs(model: AppModel) {
 }
 
 /**
- * The web's error toast (sonner with its close button): the message on the surface colour, for
- * four seconds or until closed. `top-center` on a phone — 16 px from three edges up to 600 px
- * wide, else 356 px wide and 24 px down — and `bottom-left`, 24 px in, on the desktop layout.
+ * The web's error toast (sonner with its close button): the title, the description under it and
+ * the action at the end, on the surface colour, for four seconds or until closed. `top-center` on
+ * a phone — 16 px from three edges up to 600 px wide, else 356 px wide and 24 px down — and
+ * `bottom-left`, 24 px in, on the desktop layout.
  */
 @Composable
-private fun ErrorToast(message: String?, mobile: Boolean, narrow: Boolean, dark: Boolean, onDismiss: () -> Unit) {
+private fun ErrorToast(message: ErrorToastMessage?, mobile: Boolean, narrow: Boolean, dark: Boolean, onDismiss: () -> Unit) {
     val tokens = LocalPpmTokens.current
     // Kept while it slides out, after the message itself is cleared.
     var shown by remember { mutableStateOf(message) }
@@ -255,8 +261,33 @@ private fun ErrorToast(message: String?, mobile: Boolean, narrow: Boolean, dark:
                     Box(Modifier.padding(end = 4.dp).size(16.dp)) {
                         PpmIcon(ProductIcon.OctagonXIcon, 16.dp, tokens.text.color, Modifier.offset(x = (-1).dp))
                     }
-                    // `[data-title]`: 500, its line 1.5.
-                    BasicText(shown.orEmpty(), Modifier.weight(1f), style = ppmText(13f, FontWeight.Medium, lineHeight = 19.5f).copy(color = tokens.text.color))
+                    // `[data-content]`, `gap: 2px`: the title at 500 on a 1.5 line, the description at 400
+                    // on 1.4, in sonner's own grey.
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        BasicText(shown?.title.orEmpty(), style = sonnerText(13f, FontWeight.Medium, lineHeight = 19.5f).copy(color = tokens.text.color))
+                        shown?.description?.let {
+                            BasicText(it, style = sonnerText(13f, FontWeight.Normal, lineHeight = 18.2f).copy(color = (if (dark) SONNER_DESCRIPTION_DARK else SONNER_DESCRIPTION).color))
+                        }
+                    }
+                    // `[data-button]`, `margin-left: auto`: 24 tall, the toast's colours swapped. It closes
+                    // the toast, then does what it says.
+                    shown?.action?.let { action ->
+                        Box(
+                            Modifier
+                                .height(24.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(tokens.text.color)
+                                .pointerHoverIcon(WebCursor.Pointer)
+                                .clickable(remember { MutableInteractionSource() }, indication = null, role = Role.Button) {
+                                    onDismiss()
+                                    action.run()
+                                }
+                                .padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            BasicText(action.label, style = sonnerText(12f, FontWeight.Medium, lineHeight = 18f).copy(color = surface.color))
+                        }
+                    }
                 }
                 // `closeButton`: a 20 px circle on the top-left corner, sonner's own colours under a
                 // mouse (and a finger), faded over its 200 ms `ease`, and its `cursor: pointer`. On a
@@ -299,6 +330,17 @@ private class SonnerClose(val border: Rgba, val icon: Rgba, val hoverFill: Rgba,
 
 /** CSS `ease`. */
 private val SONNER_EASE = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
+
+/**
+ * sonner sets its own `font-family: ui-sans-serif, system-ui, …` on the toaster, so the web's
+ * toasts are not in Geist: Chrome on Android draws them in the system font.
+ */
+private fun sonnerText(size: Float, weight: FontWeight, lineHeight: Float) =
+    ppmText(size, weight, lineHeight = lineHeight).copy(fontFamily = FontFamily.SansSerif)
+
+/** `[data-description]`: `#3f3f3f`, and `hsl(0, 0%, 91%)` on a dark toaster. */
+private val SONNER_DESCRIPTION = Rgba(63 / 255.0, 63 / 255.0, 63 / 255.0, 1.0)
+private val SONNER_DESCRIPTION_DARK = Rgba(0.91, 0.91, 0.91, 1.0)
 
 /** sonner's `0 4px 12px rgba(0, 0, 0, .1)`. */
 private val TOAST_SHADOW = ThemeShadow(0.0, 4.0, 12.0, 0.0, Rgba(0.0, 0.0, 0.0, 0.1))

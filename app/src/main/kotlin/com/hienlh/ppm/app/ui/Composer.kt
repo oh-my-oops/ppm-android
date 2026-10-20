@@ -43,6 +43,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -76,6 +77,7 @@ import androidx.compose.ui.window.PopupProperties
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
 import com.hienlh.ppm.app.tracksTextFocus
+import com.hienlh.ppm.chat.ReplyCard
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -101,6 +103,7 @@ import com.hienlh.ppm.state.ModelNames
 import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.PromptCacheStatus
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
 
 /** Chips of the composer row: 11.5 px, with the body's 1.5 line height. */
 private val chipText = ppmText(11.5f, lineHeight = 17.25f)
@@ -120,14 +123,17 @@ fun MobileComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: C
     var modelOpen by remember { mutableStateOf(false) }
     // The model can't change mid-turn: its sheet closes as the turn starts.
     LaunchedEffect(running) { if (running) modelOpen = false }
+    // A reply picked or cancelled, or a refused message put back, brings the keyboard here.
+    LaunchedEffect(tab) { snapshotFlow { tab.focusRequests }.drop(1).collect { focus.requestFocus() } }
 
     fun send() {
         val text = tab.draft.text.toString().trim()
         val now = chat.state.value
         if (text.isEmpty() || !now.canSend) return
         // The priority goes only with a message sent during a turn, and is Queue again after it.
-        chat.send(text, TurnOptions(permissionMode = tab.permissionMode?.value, priority = if (now.isRunning) tab.priority.value else null))
+        chat.send(text, TurnOptions(permissionMode = tab.permissionMode?.value, priority = if (now.isRunning) tab.priority.value else null), tab.replyTo)
         tab.draft.clearText()
+        tab.replyTo = null
         tab.priority = MessagePriority.DEFAULT
     }
 
@@ -146,6 +152,13 @@ fun MobileComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: C
             .clickable(remember { MutableInteractionSource() }, indication = null) { focus.requestFocus() }
             .padding(1.dp),
     ) {
+        // `px-2 md:px-4 pt-2`, and the card's own `mb-2`.
+        tab.replyTo?.let { reply ->
+            val inset = if (LocalPpmMobile.current) 8.dp else 16.dp
+            ReplyCard(reply, onJump = null, Modifier.padding(start = inset, end = inset, top = 8.dp, bottom = 8.dp), preview = true) {
+                tab.selectReply(null)
+            }
+        }
         // `flex flex-wrap items-center gap-1 px-2 pt-2 relative`: the mode panel opens over this row.
         Box(Modifier.fillMaxWidth()) {
             ChipsRow(model, tab, chat, state, narrow, onMode = { modeOpen = !modeOpen }, onModel = { modelOpen = true })

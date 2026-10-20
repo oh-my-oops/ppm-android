@@ -107,7 +107,13 @@ sealed interface ChatFrame {
     data class PhaseChanged(val phase: SessionPhase) : ChatFrame
     data class Ping(val streamSeq: Int?) : ChatFrame
     data class TurnStopped(val stop: TurnStop?) : ChatFrame
-    data class MessageRejected(val clientMessageId: String?, val message: String) : ChatFrame
+    /** The server refused a message; [content] and [replyTo] are the message as it arrived. */
+    data class MessageRejected(
+        val clientMessageId: String?,
+        val message: String,
+        val content: String? = null,
+        val replyTo: ReplyReference? = null,
+    ) : ChatFrame
     data class UserMessage(val content: String) : ChatFrame
     data class TitleUpdated(val title: String) : ChatFrame
 
@@ -151,6 +157,8 @@ sealed interface ChatFrame {
                 "message_rejected" -> MessageRejected(
                     clientMessageId = json["clientMessageId"].string,
                     message = json["message"].string ?: "Message could not be sent",
+                    content = json["content"].string,
+                    replyTo = ReplyReference.from(json["replyTo"]),
                 )
                 "user_message" -> UserMessage(json["content"].string ?: "")
                 "title_updated" -> TitleUpdated(json["title"].string ?: "")
@@ -196,8 +204,13 @@ sealed interface ChatClientMessage {
         override val json get() = buildJsonObject { put("type", "cancel") }
     }
 
-    data class Message(val clientMessageId: String, val content: String, val options: TurnOptions = TurnOptions()) :
-        ChatClientMessage {
+    /** [replyTo] travels beside the text, which is sent without it; the server checks it belongs to this chat. */
+    data class Message(
+        val clientMessageId: String,
+        val content: String,
+        val options: TurnOptions = TurnOptions(),
+        val replyTo: ReplyReference? = null,
+    ) : ChatClientMessage {
         override val json
             get() = buildJsonObject {
                 put("type", "message")
@@ -205,6 +218,7 @@ sealed interface ChatClientMessage {
                 put("content", content)
                 options.permissionMode?.let { put("permissionMode", it) }
                 options.priority?.let { put("priority", it) }
+                replyTo?.let { put("replyTo", it.toJson()) }
                 options.model?.let { put("model", it) }
                 options.effort?.let { put("effort", it) }
                 options.thinking?.let { put("thinking", it) }

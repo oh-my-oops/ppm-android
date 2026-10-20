@@ -6,6 +6,7 @@ import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ChatFrame
 import com.hienlh.ppm.protocol.PromptCacheState
+import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.protocol.TurnOptions
@@ -37,7 +38,8 @@ data class ChatState(
     val turnStop: TurnStop? = null,
     val title: String? = null,
     val compacting: Boolean = false,
-    val notice: String? = null,
+    /** A refused send for the composer to take back ([ChatController.takeRejected]). */
+    val rejected: RejectedSend? = null,
     val historyStart: Int = 0,
     val hasLoadedHistory: Boolean = false,
     val connection: ChatController.Connection = ChatController.Connection.Connecting,
@@ -113,12 +115,16 @@ class ChatController(
         socket = null
     }
 
-    /** [options] carries the composer's mode and priority; the model, effort and thinking are added here. */
-    fun send(text: String, options: TurnOptions = TurnOptions()) {
+    /**
+     * [options] carries the composer's mode and priority; the model, effort and thinking are added
+     * here. [replyTo] goes only if it quotes this chat: the server refuses any other.
+     */
+    fun send(text: String, options: TurnOptions = TurnOptions(), replyTo: ReplyReference? = null) {
         val content = text.trim()
         val socket = socket
         if (content.isEmpty() || socket == null || connection != Connection.Connected) return
-        socket.send(transcript.send(content, settings.turnOptions(options), clock()).json.toString())
+        val reply = replyTo?.takeIf { it.sessionId == sessionId && it.providerId == providerId }
+        socket.send(transcript.send(content, settings.turnOptions(options), clock(), reply).json.toString())
         publish()
     }
 
@@ -144,8 +150,8 @@ class ChatController(
         publish()
     }
 
-    fun dismissNotice() {
-        transcript.dismissNotice()
+    fun takeRejected() {
+        transcript.takeRejected()
         publish()
     }
 
@@ -318,7 +324,7 @@ class ChatController(
             turnStop = transcript.turnStop,
             title = transcript.title,
             compacting = transcript.compacting,
-            notice = transcript.notice,
+            rejected = transcript.rejected,
             historyStart = transcript.historyStart,
             hasLoadedHistory = transcript.hasLoadedHistory,
             connection = connection,

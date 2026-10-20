@@ -19,10 +19,7 @@ class MessageReplyTest {
     private fun user(content: String, id: String = "native-1", timestamp: String = time) =
         ChatItem.fromHistory(HistoryMessage(id, HistoryMessage.Role.USER, content, emptyList(), Instant.parse(timestamp), timestampText = timestamp))!!
 
-    private fun reference(text: String, id: String = "native-1") = ReplyReference(
-        sessionId = "s1", providerId = "codex", messageId = id, role = ReplyReference.Role.USER, timestamp = time,
-        quote = MessageReply.clipped(text), truncated = MessageReply.clipped(text) != text,
-    )
+    private fun reference(text: String, id: String = "native-1") = MessageReply.create(user(text, id), "s1", "codex")!!
 
     private val message = user("hello")
     private val reply = reference("hello")
@@ -57,6 +54,23 @@ class MessageReplyTest {
     @Test
     fun `a message of the runtime's own is never quoted`() {
         assertEquals("", MessageReply.text(user("<task-notification><status>completed</status></task-notification>Read it")))
+    }
+
+    @Test
+    fun `a reference is the web's, down to the time it is compared by`() {
+        assertEquals(ReplyReference("s1", "codex", "native-1", null, ReplyReference.Role.USER, time, "hello", truncated = false), reply)
+        // A message made on this device carries its time as `toISOString` writes it.
+        val local = ChatItem("local-user-1", ChatItem.Role.USER, listOf(ChatBlock.Text("hi")), Instant.parse("2026-10-01T10:00:00Z"))
+        assertEquals("2026-10-01T10:00:00.000Z", MessageReply.create(local, "s1", "codex")?.timestamp)
+        // …and is found again by it.
+        assertEquals(local, MessageReply.resolve(MessageReply.create(local, "s1", "codex")!!, listOf(local), "s1", "codex"))
+    }
+
+    @Test
+    fun `nothing to quote, nothing to reply to`() {
+        assertNull(MessageReply.create(user("<task-notification><status>completed</status></task-notification>"), "s1", "codex"))
+        assertNull(MessageReply.create(ChatItem("e1", ChatItem.Role.SYSTEM, listOf(ChatBlock.Text("Error")), Instant.parse(time)), "s1", "codex"))
+        assertNull(MessageReply.create(user("   "), "s1", "codex"))
     }
 
     @Test

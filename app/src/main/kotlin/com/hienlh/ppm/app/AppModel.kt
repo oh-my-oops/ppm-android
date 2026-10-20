@@ -42,6 +42,7 @@ import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.ProjectTags
 import com.hienlh.ppm.protocol.ProviderInfo
+import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.ServerInfo
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionTag
@@ -59,6 +60,7 @@ import com.hienlh.ppm.state.KeyBindings
 import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.PermissionMode
+import com.hienlh.ppm.state.RejectedSend
 import com.hienlh.ppm.state.windows.MAX_WINDOWS
 import com.hienlh.ppm.state.windows.WindowKind
 import com.hienlh.ppm.state.windows.WindowStore
@@ -318,7 +320,16 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** Settings' Add server was chosen: the connect screen shows over everything until it is done or cancelled. */
     var addingServer by mutableStateOf(false)
-    var actionError by mutableStateOf<String?>(null)
+
+    /** The error toast on screen, if any. */
+    var toast by mutableStateOf<ErrorToastMessage?>(null)
+
+    /** An error toast that is only its title. */
+    var actionError: String?
+        get() = toast?.title
+        set(value) {
+            toast = value?.let(::ErrorToastMessage)
+        }
 
     /** The session whose Delete was chosen, until the user confirms. */
     var confirmDeleteSession by mutableStateOf<SessionInfo?>(null)
@@ -1709,6 +1720,26 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
     /** For a message sent while the turn runs; back to Queue after each send. */
     var priority by mutableStateOf(MessagePriority.DEFAULT)
 
+    /** The message the next one answers, shown over the message box until it is sent or cancelled. */
+    var replyTo by mutableStateOf<ReplyReference?>(null)
+
+    /** Counts each time the message box is asked for the keyboard: a reply picked or cancelled, a refused message put back. */
+    var focusRequests by mutableIntStateOf(0)
+        private set
+
+    fun selectReply(reply: ReplyReference?) {
+        replyTo = reply
+        focusRequests++
+    }
+
+    /** A refused message back in the box (`restoreUnsentMessage`): after what is typed there, with the reply it carried. */
+    fun restore(rejected: RejectedSend) {
+        val typed = draft.text.toString()
+        draft.setTextAndPlaceCursorAtEnd(if (typed.isNotBlank()) "$typed\n\n${rejected.content}" else rejected.content)
+        replyTo = rejected.replyTo
+        focusRequests++
+    }
+
     fun start(api: ApiClient, scope: CoroutineScope) {
         if (controller != null) return
         historyList = HistoryList(api, project, scope)
@@ -1720,4 +1751,13 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
         controller?.stop()
         controller = null
     }
+}
+
+/**
+ * What `toast.error(title, { description, action })` shows: a title, a line under it, and one
+ * button that runs [action] and closes the toast. Each one is a toast of its own, even with the
+ * text of the last.
+ */
+class ErrorToastMessage(val title: String, val description: String? = null, val action: Action? = null) {
+    class Action(val label: String, val run: () -> Unit)
 }

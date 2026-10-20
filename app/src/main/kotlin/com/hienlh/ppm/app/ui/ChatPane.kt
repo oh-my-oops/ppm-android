@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
+import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.chat.CONTINUE_AFTER_STOP
 import com.hienlh.ppm.chat.ChatImages
@@ -110,6 +111,21 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
             model.retitleTab(tab.tabId, it)
         }
     }
+    // A message the server refused (`onMessageRejected`): back in the box when the box holds
+    // nothing it would join, else offered back from the toast.
+    LaunchedEffect(state.rejected) {
+        val rejected = state.rejected ?: return@LaunchedEffect
+        fun restore() {
+            tab.restore(rejected)
+            model.toast = ErrorToastMessage("Message not sent", "${rejected.message} Your text is back in the input.")
+        }
+        if (tab.draft.text.isBlank() && tab.replyTo == null) {
+            restore()
+        } else {
+            model.toast = ErrorToastMessage("Message not sent", rejected.message, ErrorToastMessage.Action("Restore", ::restore))
+        }
+        chat.takeRejected()
+    }
     BoxWithConstraints(modifier.fillMaxSize()) {
         // The chat's own `@container`: under 420 px the chips drop their words.
         val narrow = maxWidth <= 420.dp
@@ -132,9 +148,9 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     },
                     onDismiss = chat::dismissMessage,
                     onClearErrors = chat::clearErrors,
+                    onReply = tab::selectReply,
                 )
             }
-            state.notice?.let { NoticeBar(it) { chat.dismissNotice() } }
             val stop = state.turnStop
             if (stop != null && !state.isRunning) TurnStopBar(stop, onContinue = { chat.send(CONTINUE_AFTER_STOP) })
             // `border-t border-border bg-panel`, around the toolbar and the message box.
@@ -155,29 +171,6 @@ fun Modifier.line(top: Boolean, color: Color): Modifier = drawBehind {
     val y = if (top) 0f else size.height - 1.dp.toPx()
     drawRect(color, Offset(0f, y), Size(size.width, 1.dp.toPx()))
 }.padding(top = if (top) 1.dp else 0.dp, bottom = if (top) 0.dp else 1.dp)
-
-/** Something the server said about the last message, e.g. that it was refused. */
-@Composable
-private fun NoticeBar(text: String, dismiss: () -> Unit) {
-    val tokens = LocalPpmTokens.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(tokens.warning.opacity(0.1).color)
-            .line(top = true, tokens.warning.opacity(0.2).color)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        PpmIcon(ProductIcon.AlertCircle, 14.dp, tokens.warning.color)
-        BasicText(text, Modifier.weight(1f), style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text.color))
-        Box(
-            Modifier.clip(RoundedCornerShape(4.dp)).ppmClickable(pressedColor = tokens.panel2.color, onClick = dismiss).padding(2.dp),
-        ) {
-            PpmIcon(ProductIcon.X, 12.dp, tokens.text3.color)
-        }
-    }
-}
 
 /**
  * The row over the message box (`chat-history-bar.tsx`): History on the left; on the right the

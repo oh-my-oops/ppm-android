@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -76,8 +77,8 @@ import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.Instant
 
-/** The time and the Copy text under the last message of a finished turn. */
-data class MessageActions(val timestamp: Instant?, val copyText: String)
+/** The time, the Copy text and Reply under the last message of a finished turn. */
+data class MessageActions(val timestamp: Instant?, val copyText: String, val onReply: (() -> Unit)? = null)
 
 /** One message of the transcript (`MessageBubble` in message-list.tsx). */
 @Composable
@@ -86,10 +87,12 @@ fun ChatMessageView(
     actions: MessageActions?,
     modifier: Modifier = Modifier,
     replies: ReplyTargets = ReplyTargets.None,
+    /** Reply on a user's message; an answer's is in [actions]. */
+    onReply: (() -> Unit)? = null,
     onDismiss: () -> Unit = {},
 ) {
     when (item.role) {
-        ChatItem.Role.USER -> UserBubble(item.text, item.timestamp, replies, modifier)
+        ChatItem.Role.USER -> UserBubble(item.text, item.timestamp, replies, modifier, onReply)
         ChatItem.Role.ASSISTANT -> AssistantBlocks(item.blocks, live = false, actions = actions, modifier = modifier)
         ChatItem.Role.SYSTEM -> SystemMessage(item.text, onDismiss, modifier)
     }
@@ -97,9 +100,12 @@ fun ChatMessageView(
 
 // Action bar
 
-/** Time and Copy under a message (`MessageActionBar`). Reply, Edit and Fork are not in this app yet. */
+/**
+ * Time, Copy and Reply under a message (`MessageActionBar`). Reply is a 44 px target on a phone,
+ * which makes the row that tall. Edit and Fork are not in this app yet.
+ */
 @Composable
-internal fun MessageActionBar(timestamp: Instant?, copyText: String, modifier: Modifier = Modifier) {
+internal fun MessageActionBar(timestamp: Instant?, copyText: String, modifier: Modifier = Modifier, onReply: (() -> Unit)? = null) {
     val tokens = LocalPpmTokens.current
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         if (timestamp != null) {
@@ -110,6 +116,7 @@ internal fun MessageActionBar(timestamp: Instant?, copyText: String, modifier: M
             )
         }
         CopyActionButton(copyText)
+        if (onReply != null) ActionButton(ProductIcon.RotateCcw, "Reply", touchTarget = true, onClick = onReply)
     }
 }
 
@@ -129,9 +136,12 @@ internal fun CopyActionButton(text: String) {
     }
 }
 
-/** The action bar's ghost pill (`ActionButton`): subtle, `hover:text-text-primary hover:bg-surface`, and so while pressed. */
+/**
+ * The action bar's ghost pill (`ActionButton`): subtle, `hover:text-text-primary hover:bg-surface`,
+ * and so while pressed. A [touchTarget] is at least 44 px square on a phone, its content centred.
+ */
 @Composable
-internal fun ActionButton(icon: ProductIcon, label: String, onClick: () -> Unit) {
+internal fun ActionButton(icon: ProductIcon, label: String, touchTarget: Boolean = false, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -139,15 +149,17 @@ internal fun ActionButton(icon: ProductIcon, label: String, onClick: () -> Unit)
     val lit = (if (pressed) 1f else colorsFade(hovered)).toDouble()
     val color = tokens.text.mix(tokens.text3, lit).color
     val shape = RoundedCornerShape(8.dp)
+    val target = if (touchTarget && LocalPpmMobile.current) 44.dp else 0.dp
     Row(
         Modifier
             .clip(shape)
             .background(tokens.panel.opacity(lit).color)
             .hoverable(source)
             .clickable(source, indication = null, role = Role.Button, onClick = onClick)
+            .defaultMinSize(target, target)
             .padding(horizontal = 6.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
     ) {
         PpmIcon(icon, 14.dp, color)
         BasicText(label, style = ppmText(12f, lineHeight = 16f).copy(color = color))
@@ -159,21 +171,24 @@ internal fun ActionButton(icon: ProductIcon, label: String, onClick: () -> Unit)
 /** An answer's blocks in order — text, thinking, tool calls — then its action bar. */
 @Composable
 fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActions?, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        blocks.forEachIndexed { index, block ->
-            // The turn is streaming: its last text or thinking block is still growing.
-            val growing = live && index == blocks.lastIndex
-            when (block) {
-                is ChatBlock.Text -> Column {
-                    SelectionContainer { MarkdownView(block.text, streaming = growing) }
-                    if (growing) StreamingMark()
+    Column(modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            blocks.forEachIndexed { index, block ->
+                // The turn is streaming: its last text or thinking block is still growing.
+                val growing = live && index == blocks.lastIndex
+                when (block) {
+                    is ChatBlock.Text -> Column {
+                        SelectionContainer { MarkdownView(block.text, streaming = growing) }
+                        if (growing) StreamingMark()
+                    }
+                    is ChatBlock.Thinking -> ThinkingBlock(block.text, growing)
+                    is ChatBlock.Tool -> ToolCardView(block.tool, turnRunning = live)
+                    is ChatBlock.Error -> InlineError(block.message)
                 }
-                is ChatBlock.Thinking -> ThinkingBlock(block.text, growing)
-                is ChatBlock.Tool -> ToolCardView(block.tool, turnRunning = live)
-                is ChatBlock.Error -> InlineError(block.message)
             }
         }
-        if (actions != null) MessageActionBar(actions.timestamp, actions.copyText)
+        // `-mt-1.5` against the column's `gap-2`: 2 px under the answer.
+        if (actions != null) MessageActionBar(actions.timestamp, actions.copyText, Modifier.padding(top = 2.dp), actions.onReply)
     }
 }
 

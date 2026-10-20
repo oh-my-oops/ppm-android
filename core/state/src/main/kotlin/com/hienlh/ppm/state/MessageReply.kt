@@ -3,6 +3,8 @@ package com.hienlh.ppm.state
 import com.hienlh.ppm.protocol.ParsedUserMessage
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.jsTrim
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 /**
  * Finding a quoted message again (`message-reply-reference.ts`). The quote has to come out
@@ -37,12 +39,31 @@ object MessageReply {
             return if (reply.truncated) clipped(text) == reply.quote else text == reply.quote
         }
         val native = items.filter {
-            ((reply.sdkUuid != null && it.sdkUuid == reply.sdkUuid) || (it.id == reply.messageId && it.timestampText == reply.timestamp)) && matchesQuote(it)
+            ((reply.sdkUuid != null && it.sdkUuid == reply.sdkUuid) || (it.id == reply.messageId && stamp(it) == reply.timestamp)) && matchesQuote(it)
         }
         if (native.size == 1) return native[0]
         if (native.size > 1) return null
-        return items.filter { it.timestampText == reply.timestamp && matchesQuote(it) }.singleOrNull()
+        return items.filter { stamp(it) == reply.timestamp && matchesQuote(it) }.singleOrNull()
     }
+
+    /**
+     * What a Reply under [item] quotes (`createReplyReference`): its text up to
+     * [ReplyReference.MAX_QUOTE_LENGTH] code points. Null when it shows none to quote.
+     */
+    fun create(item: ChatItem, sessionId: String, providerId: String): ReplyReference? {
+        val role = role(item) ?: return null
+        val text = text(item)
+        if (text.isEmpty()) return null
+        val timestamp = stamp(item) ?: return null
+        val quote = clipped(text)
+        return ReplyReference(sessionId, providerId, item.id, item.sdkUuid, role, timestamp, quote, truncated = quote.length < text.length)
+    }
+
+    /** `message.timestamp`: as the server wrote it, or, for a message made here, as `toISOString` writes one. */
+    private fun stamp(item: ChatItem): String? = item.timestampText ?: item.timestamp?.let(ISO_MILLIS::format)
+
+    /** `Date.prototype.toISOString`: always milliseconds, always UTC. */
+    private val ISO_MILLIS = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC)
 
     private fun role(item: ChatItem): ReplyReference.Role? = when (item.role) {
         ChatItem.Role.USER -> ReplyReference.Role.USER
