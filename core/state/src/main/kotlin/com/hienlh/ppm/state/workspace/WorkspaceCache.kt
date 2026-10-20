@@ -44,12 +44,20 @@ class WorkspaceCache(
     private val remote: WorkspaceRemote,
     private val scope: CoroutineScope,
     private val now: () -> Long = System::currentTimeMillis,
+    /** Where the floating windows' panels are kept: on this device only, never sent. */
+    private val windowPanelsKey: String? = null,
 ) : LayoutStorage {
     private val pending = HashMap<String, Pending>()
 
     private class Pending(val layout: PanelLayout, val job: Job)
 
     override fun load(project: String): PanelLayout? = stored(project)?.layout?.let(::migrateLoadedLayout)
+
+    override fun loadWindowPanels(): String? = windowPanelsKey?.let(values::get)
+
+    override fun saveWindowPanels(text: String?) {
+        windowPanelsKey?.let { values.put(it, text) }
+    }
 
     override fun save(project: String, layout: PanelLayout) {
         write(project, SavedLayout(layout, ISO.format(Instant.ofEpochMilli(now()))))

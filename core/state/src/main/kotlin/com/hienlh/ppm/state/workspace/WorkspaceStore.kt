@@ -1,10 +1,16 @@
 package com.hienlh.ppm.state.workspace
 
 import com.hienlh.ppm.protocol.string
+import com.hienlh.ppm.state.windows.MAX_WINDOWS
+import com.hienlh.ppm.state.windows.Rect
+import com.hienlh.ppm.state.windows.WindowKind
+import com.hienlh.ppm.state.windows.WindowRuntimeState
+import com.hienlh.ppm.state.windows.WindowStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 
 /** Where a project's layout is read from and written to (this device's copy; see [WorkspaceCache]). */
 interface LayoutStorage {
@@ -12,6 +18,11 @@ interface LayoutStorage {
     fun load(project: String): PanelLayout?
 
     fun save(project: String, layout: PanelLayout)
+
+    /** The floating windows' panels ([saveWindowPanels]): this device's only, in no project's layout. */
+    fun loadWindowPanels(): String? = null
+
+    fun saveWindowPanels(text: String?) {}
 }
 
 /** Everything the workspace shows, as one immutable snapshot. */
@@ -59,8 +70,9 @@ enum class SplitDirection { Left, Right, Up, Down }
 
 /**
  * The tabs, panels and dock of the open project: a port of `usePanelStore`
- * (src/web/stores/panel-store.ts, with panel-utils.ts and dock-actions.ts). Floating windows come
- * with phase 02e; what opening a chat resolves from the web's local cache is up to the caller.
+ * (src/web/stores/panel-store.ts, with panel-utils.ts, dock-actions.ts and window-panel-actions.ts
+ * for tabs detached into [windows]). What opening a chat resolves from the web's local cache is up
+ * to the caller.
  *
  * Like the other controllers it is driven from one thread; [state] is what other threads read.
  */
@@ -70,11 +82,16 @@ class WorkspaceStore(
     private val isMobile: () -> Boolean,
     private val now: () -> Long = System::currentTimeMillis,
     private val randomId: () -> String = ::webRandomId,
+    /** The floating windows a tab can be detached into; none, none can. */
+    private val windows: WindowStore? = null,
 ) {
     private val _state = MutableStateFlow(defaultState())
     val state: StateFlow<WorkspaceState> = _state
 
     private val s: WorkspaceState get() = _state.value
+
+    /** The saved window panels join the panels once, before the first project reads them. */
+    private var windowPanelsHydrated = false
 
     private fun newPanelId() = "panel-${randomId()}"
 
@@ -93,6 +110,7 @@ class WorkspaceStore(
     // -----------------------------------------------------------------------------------------
 
     fun switchProject(projectName: String) {
+        hydrateWindowPanels()
         val st = s
         if (st.currentProject == projectName) return
 
@@ -213,13 +231,17 @@ class WorkspaceStore(
                 activeTabId = dock.activeTabId?.takeIf { it in ids } ?: remaining.lastOrNull()?.id,
             )
         }
+        // A window panel is off the grid, so the loop above never reaches it: a floating window
+        // would go on showing a tab of the project as it was.
+        val (stripped, emptied) = stripProjectFromWindowPanels(panels, projectName)
         commit(st.copy(
             projectGrids = st.projectGrids - projectName,
             projectFocused = st.projectFocused - projectName,
             projectDock = st.projectDock - projectName,
-            panels = panels,
+            panels = stripped,
             currentProject = null,
         ))
+        for (windowId in emptied) windows?.close(windowId)
         switchProject(projectName)
     }
 
@@ -256,6 +278,7 @@ class WorkspaceStore(
                     val existing = panel.tabs.firstOrNull { tabSessionId(it) == sid } ?: continue
                     rememberChatProvider(existing)
                     activateIn(panel.id, existing.id, focus = focusAfterActivate(panel.id))
+                    raiseWindowOf(panel.id)
                     return existing.id
                 }
             }
@@ -270,6 +293,7 @@ class WorkspaceStore(
                     it.type == "design" && it.metadata["designSlug"] == slug && (it.projectId ?: it.metadata["projectName"].string) == project
                 } ?: continue
                 activateIn(panel.id, existing.id, focus = focusAfterActivate(panel.id))
+                raiseWindowOf(panel.id)
                 return existing.id
             }
         }
@@ -284,6 +308,7 @@ class WorkspaceStore(
                 val panel = s.panels[opid] ?: continue
                 val existing = panel.tabs.firstOrNull { it.id == baseId || it.id.startsWith("$baseId@") } ?: continue
                 activateIn(panel.id, existing.id, focus = focusAfterActivate(panel.id))
+                raiseWindowOf(panel.id)
                 return existing.id
             }
         }
@@ -343,6 +368,8 @@ class WorkspaceStore(
         persist()
         // The dock has no empty state: its last tab closing hides it.
         if (pid == DOCK_PANEL_ID && activeProjectDockTabCount() == 0) setDockVisible(false)
+        // A window that lost its last tab closes with it: it can never show anything again.
+        if (isWindowPanelId(pid)) syncWindowPanel(pid)
     }
 
     fun setActiveTab(tabId: String, panelId: String? = null) {
@@ -405,6 +432,8 @@ class WorkspaceStore(
             ))
         }
         persist()
+        // Moving the last tab out of a window empties it exactly as closing that tab would.
+        if (isWindowPanelId(fromPanelId)) syncWindowPanel(fromPanelId)
     }
 
     /** Moves [tabId] into a new panel beside [targetPanelId] (or its own panel); false when the grid is full that way. */
@@ -531,6 +560,137 @@ class WorkspaceStore(
     }
 
     // -----------------------------------------------------------------------------------------
+    // Floating windows (window-panel-actions.ts, close-window.ts)
+    // -----------------------------------------------------------------------------------------
+
+    /**
+     * Detaches [tabId] into a new floating window and returns the window's id; null when that is
+     * refused — on a phone, for a tab type with a window of its own, with every window slot taken —
+     * and then nothing has changed. With [closeTabsOnClose] the window is the tab's home, and closing
+     * it closes the tab rather than handing it back.
+     */
+    fun popOutTab(tabId: String, fromPanelId: String, closeTabsOnClose: Boolean = false, rect: Rect? = null): String? {
+        val windows = windows ?: return null
+        if (isMobile()) return null
+        val tab = s.panels[fromPanelId]?.tab(tabId) ?: return null
+        if (tab.type in NON_POPPABLE_TAB_TYPES) return null
+        // At the cap `open` raises the oldest window and answers its id: the tab would land in an unrelated one.
+        if (windows.state.value.windows.size >= MAX_WINDOWS) return null
+
+        val windowId = windows.open(WindowKind.TabHost, buildJsonObject {
+            put("originPanelId", JsonPrimitive(fromPanelId))
+            put("title", JsonPrimitive(tab.title))
+            if (closeTabsOnClose) put("closeTabsOnClose", JsonPrimitive(true))
+        }, rect)
+        val panelId = windowPanelId(windowId)
+        commit(s.copy(panels = s.panels + (panelId to createPanel(panelId))))
+        moveTab(tabId, fromPanelId, panelId)
+        // moveTab focused the window's panel: the next tab opened would land inside it.
+        gridFocusTarget(s.grid, fromPanelId)?.let { commit(s.copy(focusedPanelId = it)) }
+        persist()
+        return windowId
+    }
+
+    /**
+     * Sends every tab of a window back to the grid, drops its panel and closes the window: to the
+     * panel the tabs came from while it exists (the dock too, never another window), else the
+     * focused grid panel. Nothing happens once the panel is gone.
+     */
+    fun redockFromWindow(windowId: String, originPanelId: String?) {
+        val panelId = windowPanelId(windowId)
+        val panel = s.panels[panelId] ?: return
+        val target = redockTarget(originPanelId)
+        if (target != null) for (tab in panel.tabs) moveTab(tab.id, panelId, target)
+        val st = s
+        val focus = gridFocusTarget(st.grid, target ?: st.focusedPanelId)
+        commit(st.copy(panels = st.panels - panelId, focusedPanelId = focus ?: st.focusedPanelId))
+        persist()
+        windows?.close(windowId)
+    }
+
+    /**
+     * The one way a user closes a window: its ×, Escape on its titlebar, the dock list's ×. A
+     * detached tab goes back to the grid, unless the window is its home (`closeTabsOnClose`), when
+     * its tabs close with it. The web hands the tab back when the window's body unmounts; here
+     * closing the window does.
+     */
+    fun closeWindow(windowId: String) {
+        val windows = windows ?: return
+        val win = windows.state.value.windows[windowId] ?: return
+        if (win.kind == WindowKind.TabHost) {
+            val panelId = windowPanelId(windowId)
+            val tabs = s.panels[panelId]?.tabs.orEmpty()
+            if (closesItsTabs(win) && tabs.isNotEmpty()) {
+                // The last one closing takes the window with it (syncWindowPanel).
+                for (tab in tabs) closeTab(tab.id, panelId)
+                return
+            }
+            redockFromWindow(windowId, win.payload?.get("originPanelId").string)
+        }
+        windows.close(windowId)
+    }
+
+    /**
+     * Every detached tab back to the grid, as when the web's window layer unmounts below 768 px:
+     * the phone layout has no windows to show them in. Other windows wait for the layer to return.
+     */
+    fun redockAllWindows() {
+        val windows = windows ?: return
+        for (win in windows.state.value.windows.values) {
+            if (win.kind == WindowKind.TabHost) redockFromWindow(win.id, win.payload?.get("originPanelId").string)
+        }
+    }
+
+    /**
+     * Mends the window panels against the windows alive (use-window-panel-reconcile.ts): run once
+     * per project load, after the windows were restored — or at once on a phone, where no window
+     * is alive and every detached tab comes home.
+     */
+    fun reconcileWindowPanels() {
+        val live = if (isMobile()) emptyList()
+        else windows?.state?.value?.windows?.values.orEmpty().filter { it.kind == WindowKind.TabHost }.map { it.id }
+        val st = s
+        val result = reconcileTabHostWindows(st.panels, st.grid, st.focusedPanelId, live)
+        if (result.changed) {
+            commit(st.copy(panels = result.panels, focusedPanelId = result.focusedPanelId))
+            persist()
+        }
+        for (windowId in result.windowIdsToClose) windows?.close(windowId)
+    }
+
+    /** A window and its panel go together: a panel emptied by a close or a move takes its window along. */
+    private fun syncWindowPanel(panelId: String) {
+        if (s.panels[panelId]?.tabs?.isNotEmpty() == true) return
+        if (panelId in s.panels) commit(s.copy(panels = s.panels - panelId))
+        windowIdFromPanelId(panelId)?.let { windows?.close(it) }
+    }
+
+    /** A tab found open in a window is only shown once that window comes forward, out of the dock if need be. */
+    private fun raiseWindowOf(panelId: String) {
+        windowIdFromPanelId(panelId)?.let { windows?.focus(it) }
+    }
+
+    /** The saved window panels join what is in memory, which wins: a saved twin can only be older. */
+    private fun hydrateWindowPanels() {
+        if (windowPanelsHydrated) return
+        windowPanelsHydrated = true
+        val loaded = loadWindowPanels(storage.loadWindowPanels())
+        if (loaded.isNotEmpty()) commit(s.copy(panels = loaded + s.panels))
+    }
+
+    /** Where detached tabs go home to. */
+    private fun redockTarget(originPanelId: String?): String? {
+        if (originPanelId != null && originPanelId in s.panels && !isWindowPanelId(originPanelId)) return originPanelId
+        return gridFocusTarget(s.grid, s.focusedPanelId)
+    }
+
+    /** A grid panel to hold focus: [preferred] while it is in the grid, else the first; null for an empty grid. */
+    private fun gridFocusTarget(grid: List<List<String>>, preferred: String?): String? {
+        val flat = grid.flatten()
+        return preferred?.takeIf { it in flat } ?: flat.firstOrNull()
+    }
+
+    // -----------------------------------------------------------------------------------------
     // Internals
     // -----------------------------------------------------------------------------------------
 
@@ -590,6 +750,12 @@ class WorkspaceStore(
     private fun commit(next: WorkspaceState) {
         val previous = _state.value
         _state.value = next
+        // Saved on every change. The web saves them at its moves and closes only, so a tab updated
+        // inside a window afterwards (a chat getting its session) stays saved as it was before.
+        if (previous.panels !== next.panels) {
+            val windowPanels = next.panels.filterKeys(::isWindowPanelId)
+            if (windowPanels != previous.panels.filterKeys(::isWindowPanelId)) storage.saveWindowPanels(saveWindowPanels(windowPanels))
+        }
         val tab = next.panels[next.focusedPanelId]?.activeTab
         val old = previous.panels[next.focusedPanelId]?.activeTab
         if (tab?.id == old?.id && tab?.metadata?.get("providerId") == old?.metadata?.get("providerId") &&
