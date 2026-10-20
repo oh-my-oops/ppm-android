@@ -172,6 +172,16 @@ class ChatTranscript {
         notice = null
     }
 
+    /** `dismissMessage`: one message out of this view, such as an error's bubble. A reload brings back what history keeps. */
+    fun dismissMessage(id: String) {
+        items = items.filterNot { it.id == id }
+    }
+
+    /** `clearErrors`: every system message out of this view. */
+    fun clearErrors() {
+        items = items.filterNot { it.role == ChatItem.Role.SYSTEM }
+    }
+
     // History
 
     /**
@@ -303,12 +313,13 @@ class ChatTranscript {
             is ChatEvent.Text, is ChatEvent.Thinking, is ChatEvent.ToolUse, is ChatEvent.ToolResult -> addToLive(event)
             is ChatEvent.Error -> if (live != null || phase.isRunning) {
                 addToLive(event)
-            } else {
+            } else if (items.lastOrNull().let { it?.role != ChatItem.Role.SYSTEM || it.text != event.message }) {
+                // A message of its own, as history keeps one; the same error twice in a row shows once.
                 localCounter++
                 items = items + ChatItem(
                     id = "local-error-$localCounter",
                     role = ChatItem.Role.SYSTEM,
-                    blocks = listOf(ChatBlock.Error(event.message)),
+                    blocks = listOf(ChatBlock.Text(event.message)),
                     timestamp = Instant.now(),
                 )
             }

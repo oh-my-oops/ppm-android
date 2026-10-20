@@ -2,15 +2,19 @@ package com.hienlh.ppm.chat
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -23,6 +27,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -33,6 +38,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -40,6 +47,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -47,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -118,15 +133,24 @@ private fun ToolApprovalCard(request: ApprovalRequest, respond: (Boolean, JsonEl
     }
 }
 
-/** `px-4 py-1.5 rounded text-xs font-medium text-white`, `hover:bg-…/80`, a shade lighter while pressed. */
+/**
+ * `px-4 py-1.5 rounded text-xs font-medium text-white`, `hover:bg-…/80`, a shade lighter while
+ * pressed. Its label stays centred when a row stretches it ([modifier]), as a `<button>`'s does.
+ */
 @Composable
-private fun SolidButton(title: String, color: Rgba, foreground: Color = Color.White, enabled: Boolean = true, onClick: () -> Unit) {
+private fun SolidButton(
+    title: String,
+    color: Rgba,
+    modifier: Modifier = Modifier,
+    foreground: Color = Color.White,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
     val shape = RoundedCornerShape(4.dp)
     // CSS `:hover` matches it disabled too: the web gives it no `disabled:hover:`.
     val hover = rememberHover()
-    BasicText(
-        title,
-        Modifier
+    Box(
+        modifier
             .alpha(if (enabled) 1f else 0.4f)
             .clip(shape)
             .background(color.opacity(1 - 0.2 * hover.lit).color)
@@ -134,18 +158,24 @@ private fun SolidButton(title: String, color: Rgba, foreground: Color = Color.Wh
             .pointerHoverIcon(if (enabled) WebCursor.Default else WebCursor.NotAllowed)
             .ppmClickable(enabled = enabled, pressedColor = Color.White.copy(alpha = 0.2f), source = hover.source, hoverWhileDisabled = true, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 6.dp),
-        xsMedium.copy(color = foreground),
-    )
+        contentAlignment = Alignment.Center,
+    ) { BasicText(title, style = xsMedium.copy(color = foreground)) }
 }
 
 /** `px-3 py-1.5 text-xs rounded border border-border bg-background hover:bg-surface-elevated`. */
 @Composable
-private fun OutlineButton(title: String, foreground: Rgba, horizontalPadding: Int = 12, enabled: Boolean = true, onClick: () -> Unit) {
+private fun OutlineButton(
+    title: String,
+    foreground: Rgba,
+    modifier: Modifier = Modifier,
+    horizontalPadding: Int = 12,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(4.dp)
-    BasicText(
-        title,
-        Modifier
+    Box(
+        modifier
             .alpha(if (enabled) 1f else 0.4f)
             .clip(shape)
             .background(tokens.bgSolid.color)
@@ -154,8 +184,8 @@ private fun OutlineButton(title: String, foreground: Rgba, horizontalPadding: In
             .pointerHoverIcon(if (enabled) WebCursor.Default else WebCursor.NotAllowed)
             .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, hoverWhileDisabled = true, onClick = onClick)
             .padding(horizontal = (horizontalPadding + 1).dp, vertical = 7.dp),
-        xs.copy(color = foreground.color),
-    )
+        contentAlignment = Alignment.Center,
+    ) { BasicText(title, style = xs.copy(color = foreground.color)) }
 }
 
 /**
@@ -196,10 +226,68 @@ private fun QuestionCard(questions: List<Question>, onSubmit: (JsonElement) -> U
         onSubmit(JsonObject(answers))
     }
 
+    // The keyboard's place among the options, "Other" last, ringed (`useQuestionKeyboard`): the
+    // first option of each question to begin with, then the one last picked, typed or moved to.
+    var focused by remember { mutableIntStateOf(0) }
+    LaunchedEffect(active) { focused = 0 }
+    val other = current.options.size
+    val card = remember { FocusRequester() }
+    val otherField = remember { FocusRequester() }
+    val otherSource = remember { MutableInteractionSource() }
+    val typing by otherSource.collectIsFocusedAsState()
+    LaunchedEffect(typing) { if (typing) focused = other }
+    // The web focuses the card as it appears, so its keys work at once.
+    LaunchedEffect(Unit) { runCatching { card.requestFocus() } }
+
+    fun pick(index: Int) {
+        if (index < other) select(current.options[index]) else if (index == other) otherField.requestFocus()
+    }
+
+    fun next() {
+        active = (active + 1).coerceAtMost(questions.lastIndex)
+    }
+
+    fun previous() {
+        active = (active - 1).coerceAtLeast(0)
+    }
+
+    fun onEnter() {
+        if (allAnswered) submit() else if (hasAnswer(active)) next()
+    }
+
+    fun onKey(event: KeyEvent): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        val key = event.key
+        val digit = digitOf(key)
+        when {
+            !typing && digit >= 1 -> if (digit - 1 < other) {
+                focused = digit - 1
+                pick(digit - 1)
+            }
+            !typing && (key == Key.O || digit == 0) -> {
+                otherField.requestFocus()
+                focused = other
+            }
+            key == Key.Tab && multiple -> if (event.isShiftPressed) previous() else next()
+            !typing && key == Key.DirectionLeft -> previous()
+            !typing && key == Key.DirectionRight -> next()
+            !typing && key == Key.DirectionUp -> focused = (focused - 1).coerceAtLeast(0)
+            !typing && key == Key.DirectionDown -> focused = (focused + 1).coerceAtMost(other)
+            !typing && key == Key.Spacebar -> pick(focused)
+            key == Key.Enter || key == Key.NumPadEnter -> onEnter()
+            key == Key.Escape && typing -> card.requestFocus()
+            else -> return false
+        }
+        return true
+    }
+
     val shape = RoundedCornerShape(12.dp)
     Column(
         modifier
             .fillMaxWidth()
+            .focusRequester(card)
+            .onPreviewKeyEvent(::onKey)
+            .focusable()
             .background(tokens.accent.opacity(0.05).color, shape)
             .border(2.dp, tokens.accent.opacity(0.3).color, shape)
             .padding(14.dp),
@@ -288,12 +376,16 @@ private fun QuestionCard(questions: List<Question>, onSubmit: (JsonElement) -> U
                     Row(
                         Modifier
                             .fillMaxWidth()
+                            .focusRing(focused == index)
                             .clip(optionShape)
                             .background(fill.color)
                             .border(1.dp, edge.color, optionShape)
                             // A `div role="button"` with `cursor-pointer`.
                             .pointerHoverIcon(WebCursor.Pointer)
-                            .ppmClickable(pressedColor = tokens.surfaceHover.color, source = hover.source) { select(option) }
+                            .ppmClickable(pressedColor = tokens.surfaceHover.color, source = hover.source) {
+                                select(option)
+                                focused = index
+                            }
                             .padding(horizontal = 11.dp, vertical = 9.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
@@ -305,29 +397,31 @@ private fun QuestionCard(questions: List<Question>, onSubmit: (JsonElement) -> U
                     }
                 }
                 OtherRow(
+                    ringed = focused == other,
+                    source = otherSource,
+                    focusRequester = otherField,
                     value = custom[active].orEmpty(),
                     onValueChange = { value ->
                         custom[active] = value
                         if (value.isNotEmpty()) picked[active] = emptyList()
                     },
-                    onDone = {
-                        if (allAnswered) submit() else if (hasAnswer(active)) active = (active + 1).coerceAtMost(questions.lastIndex)
-                    },
+                    onDone = ::onEnter,
                 )
             }
         }
-        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // A flex row, which stretches its buttons: Submit, with no border, as tall as Skip.
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp).height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val stretch = Modifier.fillMaxHeight()
             Spacer(Modifier.weight(1f))
             if (multiple) {
-                OutlineButton("← Prev", tokens.text, enabled = active > 0) { active = (active - 1).coerceAtLeast(0) }
-                OutlineButton("Next →", tokens.text, enabled = active < questions.lastIndex) {
-                    active = (active + 1).coerceAtMost(questions.lastIndex)
-                }
+                OutlineButton("← Prev", tokens.text, stretch, enabled = active > 0, onClick = ::previous)
+                OutlineButton("Next →", tokens.text, stretch, enabled = active < questions.lastIndex, onClick = ::next)
             }
-            OutlineButton("Skip", tokens.text2, horizontalPadding = 16, onClick = onSkip)
+            OutlineButton("Skip", tokens.text2, stretch, horizontalPadding = 16, onClick = onSkip)
             SolidButton(
                 if (allAnswered) "Submit ✓" else "Submit ($answered/${questions.size})",
                 tokens.accent,
+                stretch,
                 foreground = tokens.accentFg.color,
                 enabled = allAnswered,
                 onClick = ::submit,
@@ -351,16 +445,27 @@ private fun NumberSquare(text: String, selected: Boolean) {
     }
 }
 
-/** The "Other" answer: a dashed row with a field to type into. */
+/**
+ * The "Other" answer: a dashed row with a field to type into, [ringed] where the keyboard is. The
+ * field is `text-xs`, and 16 px on a phone (`globals.css`) with that size's line ratio.
+ */
 @Composable
-private fun OtherRow(value: String, onValueChange: (String) -> Unit, onDone: () -> Unit) {
+private fun OtherRow(
+    ringed: Boolean,
+    source: MutableInteractionSource,
+    focusRequester: FocusRequester,
+    value: String,
+    onValueChange: (String) -> Unit,
+    onDone: () -> Unit,
+) {
     val tokens = LocalPpmTokens.current
-    val source = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
+    val text = if (LocalPpmMobile.current) ppmText(16f, lineHeight = 64f / 3) else xs
     val dash = tokens.border.color
     Row(
         Modifier
             .fillMaxWidth()
+            .focusRing(ringed)
             .drawBehind {
                 val line = 1.dp.toPx()
                 drawRoundRect(
@@ -381,10 +486,11 @@ private fun OtherRow(value: String, onValueChange: (String) -> Unit, onDone: () 
             onValueChange,
             Modifier
                 .weight(1f)
+                .focusRequester(focusRequester)
                 .background(tokens.panel.color, fieldShape)
                 .border(1.dp, (if (focused) tokens.accent else tokens.border).color, fieldShape)
                 .padding(horizontal = 9.dp, vertical = 5.dp),
-            textStyle = xs.copy(color = tokens.text.color),
+            textStyle = text.copy(color = tokens.text.color),
             cursorBrush = SolidColor(tokens.accent.color),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { onDone() }),
@@ -392,10 +498,39 @@ private fun OtherRow(value: String, onValueChange: (String) -> Unit, onDone: () 
             interactionSource = source,
             decorationBox = { field ->
                 Box {
-                    if (value.isEmpty()) BasicText("Other (press O to type)...", style = xs.copy(color = tokens.text3.color))
+                    if (value.isEmpty()) BasicText("Other (press O to type)...", style = text.copy(color = tokens.text3.color))
                     field()
                 }
             },
         )
     }
 }
+
+/**
+ * `ring-2 ring-primary/40 ring-offset-1 ring-offset-background` around a `rounded` box, when [on]:
+ * a pixel of the background, then two of the ring, both outside the box, their corners rounded
+ * by how far out they sit, as a box-shadow's spread rounds them.
+ */
+@Composable
+private fun Modifier.focusRing(on: Boolean): Modifier {
+    if (!on) return this
+    val tokens = LocalPpmTokens.current
+    val ring = tokens.accent.opacity(0.4).color
+    val gap = tokens.bgSolid.color
+    return drawBehind {
+        val px = 1.dp.toPx()
+        val radius = 4.dp.toPx()
+        drawRoundRect(ring, Offset(-2 * px, -2 * px), Size(size.width + 4 * px, size.height + 4 * px), CornerRadius(radius + 2 * px), style = Stroke(2 * px))
+        drawRoundRect(gap, Offset(-px / 2, -px / 2), Size(size.width + px, size.height + px), CornerRadius(radius + px / 2), style = Stroke(px))
+    }
+}
+
+private val DIGITS = listOf(Key.Zero, Key.One, Key.Two, Key.Three, Key.Four, Key.Five, Key.Six, Key.Seven, Key.Eight, Key.Nine)
+private val NUMPAD_DIGITS = listOf(
+    Key.NumPad0, Key.NumPad1, Key.NumPad2, Key.NumPad3, Key.NumPad4,
+    Key.NumPad5, Key.NumPad6, Key.NumPad7, Key.NumPad8, Key.NumPad9,
+)
+
+/** The digit [key] types, on the main row or the keypad; -1 for any other key. */
+private fun digitOf(key: Key): Int = DIGITS.indexOf(key).takeIf { it >= 0 } ?: NUMPAD_DIGITS.indexOf(key)
+

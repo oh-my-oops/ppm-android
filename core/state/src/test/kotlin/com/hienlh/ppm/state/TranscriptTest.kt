@@ -247,6 +247,29 @@ class TranscriptTest {
     }
 
     @Test
+    fun `an error out of a turn is a message with its text, once in a row`() {
+        val chat = ChatTranscript()
+        chat.handle(frame("""{"type":"error","message":"Provider is offline"}"""))
+        chat.handle(frame("""{"type":"error","message":"Provider is offline"}"""))
+        assertEquals(listOf(ChatItem.Role.SYSTEM), chat.items.map { it.role })
+        assertEquals("Provider is offline", chat.items.single().text)
+        chat.handle(frame("""{"type":"error","message":"Still offline"}"""))
+        assertEquals(listOf("Provider is offline", "Still offline"), chat.items.map { it.text })
+    }
+
+    @Test
+    fun `dismiss takes one message out, clear every error and nothing else`() {
+        val chat = ChatTranscript()
+        chat.applyHistory(page(listOf(msg("u", "user", "hi"), msg("s", "system", "Old error"))), chat.activity)
+        chat.handle(frame("""{"type":"error","message":"New error"}"""))
+        chat.handle(frame("""{"type":"error","message":"Newer error"}"""))
+        chat.dismissMessage(chat.items.last().id)
+        assertEquals(listOf("hi", "Old error", "New error"), chat.items.map { it.text })
+        chat.clearErrors()
+        assertEquals(listOf("u"), chat.items.map { it.id })
+    }
+
+    @Test
     fun `tab_open is answered at once`() {
         val chat = ChatTranscript()
         val effects = chat.handle(frame("""{"type":"tab_open","requestId":"q1","tool":"open_file","filePath":"a.ts","projectName":"p"}"""))

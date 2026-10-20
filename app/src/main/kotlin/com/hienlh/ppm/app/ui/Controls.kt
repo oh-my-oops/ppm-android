@@ -18,10 +18,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.clickable
@@ -30,7 +31,9 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -359,9 +362,9 @@ fun BottomSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier, background
                         },
                     )
                     .padding(top = 1.dp)
-                    .navigationBarsPadding()
-                    .imePadding()
-                    .padding(bottom = 8.dp),
+                    // `pb-[max(0.5rem,env(safe-area-inset-bottom))]`, and just the keyboard's
+                    // height while it is up: the largest of the three.
+                    .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars).union(WindowInsets(bottom = 8.dp))),
             ) {
                 // Drag handle: `pt-3 pb-1`, `w-10 h-1 rounded-full bg-border`.
                 Box(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), contentAlignment = Alignment.Center) {

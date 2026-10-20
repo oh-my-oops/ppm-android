@@ -15,6 +15,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -79,11 +81,11 @@ data class MessageActions(val timestamp: Instant?, val copyText: String)
 
 /** One message of the transcript (`MessageBubble` in message-list.tsx). */
 @Composable
-fun ChatMessageView(item: ChatItem, actions: MessageActions?, modifier: Modifier = Modifier) {
+fun ChatMessageView(item: ChatItem, actions: MessageActions?, modifier: Modifier = Modifier, onDismiss: () -> Unit = {}) {
     when (item.role) {
         ChatItem.Role.USER -> UserBubble(item.text, item.timestamp, modifier)
         ChatItem.Role.ASSISTANT -> AssistantBlocks(item.blocks, live = false, actions = actions, modifier = modifier)
-        ChatItem.Role.SYSTEM -> SystemMessage(item.text, modifier)
+        ChatItem.Role.SYSTEM -> SystemMessage(item.text, onDismiss, modifier)
     }
 }
 
@@ -274,11 +276,17 @@ internal fun InlineError(message: String) {
     }
 }
 
-/** A system message: the web draws them all as errors. */
+/**
+ * A system message: the web draws them all as errors, each with its Dismiss — a 24 px `p-1` X in
+ * `error/70`, lit under a mouse. The web hides the X from 768 px up until a mouse is over the
+ * bubble (`md:opacity-0 md:group-hover:opacity-100`), which on a touch tablet leaves it invisible
+ * for good; this shows it always, as the web's `can-hover:` controls show on a touch screen.
+ */
 @Composable
-internal fun SystemMessage(text: String, modifier: Modifier = Modifier) {
+internal fun SystemMessage(text: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(12.dp)
+    val dismiss = rememberHover(instant = true)
     Row(
         modifier
             .fillMaxWidth()
@@ -292,6 +300,22 @@ internal fun SystemMessage(text: String, modifier: Modifier = Modifier) {
         SelectionContainer(Modifier.weight(1f)) {
             BasicText(text, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.error.color))
         }
+        val pressed by dismiss.source.collectIsPressedAsState()
+        val lit = pressed || dismiss.lit > 0f
+        Box(
+            Modifier
+                .size(24.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .ppmClickable(
+                    pressedColor = tokens.error.opacity(0.15).color,
+                    hoverColor = tokens.error.opacity(0.15).color,
+                    fade = false,
+                    onClickLabel = "Dismiss",
+                    source = dismiss.source,
+                    onClick = onDismiss,
+                ),
+            contentAlignment = Alignment.Center,
+        ) { PpmIcon(ProductIcon.XCircle, 16.dp, (if (lit) tokens.error else tokens.error.opacity(0.7)).color) }
     }
 }
 
@@ -431,7 +455,8 @@ fun TurnStopBar(stop: TurnStop, onContinue: () -> Unit, modifier: Modifier = Mod
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 PpmIcon(ProductIcon.Play, 14.dp, tokens.text.color)
-                BasicText("Continue", style = ppmText(size, FontWeight.Medium, lineHeight = size * 1.375f).copy(color = tokens.text.color))
+                // Outside the `leading-snug` block: the bar's own line, `text-xs` 16, `text-sm` 20.
+                BasicText("Continue", style = ppmText(size, FontWeight.Medium, lineHeight = if (mobile) 20f else 16f).copy(color = tokens.text.color))
             }
         }
     }

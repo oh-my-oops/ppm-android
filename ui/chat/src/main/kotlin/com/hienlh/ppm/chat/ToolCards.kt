@@ -496,6 +496,8 @@ private fun AgentRow(tool: ToolBlock, isDone: Boolean, modifier: Modifier) {
     Row(
         modifier
             .fillMaxWidth()
+            // `min-h-[44px]` where the primary pointer is coarse, as a touch screen is.
+            .heightIn(min = 44.dp)
             .clip(shape)
             .background(tokens.panel.color)
             .border(1.dp, tokens.border.color, shape)

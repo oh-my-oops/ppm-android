@@ -148,6 +148,16 @@ class ChatController(
         publish()
     }
 
+    fun dismissMessage(id: String) {
+        transcript.dismissMessage(id)
+        publish()
+    }
+
+    fun clearErrors() {
+        transcript.clearErrors()
+        publish()
+    }
+
     suspend fun loadOlder() {
         if (transcript.historyStart <= 0 || loadingOlder) return
         loadingOlder = true

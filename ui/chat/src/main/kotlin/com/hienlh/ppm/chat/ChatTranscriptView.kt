@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -65,6 +66,7 @@ import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.state.ChatBlock
@@ -93,6 +95,10 @@ fun ChatTranscriptView(
     jumps: Flow<Int> = emptyFlow(),
     /** Under the welcome while the chat has no message: the project's chats. */
     welcome: @Composable () -> Unit = {},
+    /** One message out of this view (an error's Dismiss), by id. */
+    onDismiss: (String) -> Unit = {},
+    /** Every error out of this view. */
+    onClearErrors: () -> Unit = {},
 ) {
     // When the running turn started, for the wait counter before anything streams.
     var turnStartedAt by remember { mutableStateOf<Instant?>(null) }
@@ -105,7 +111,7 @@ fun ChatTranscriptView(
                 CenteredNotice("Loading messages...", pulsing = true)
             state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null ->
                 Welcome(welcome)
-            else -> TranscriptList(state, turnStartedAt, onRespond, onLoadOlder, jumps)
+            else -> TranscriptList(state, turnStartedAt, onRespond, onLoadOlder, jumps, onDismiss, onClearErrors)
         }
         state.historyError?.let { error ->
             HistoryErrorBanner(error, onReload, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
@@ -120,6 +126,8 @@ private fun TranscriptList(
     onRespond: (ApprovalRequest, Boolean, JsonElement?) -> Unit,
     onLoadOlder: suspend () -> Unit,
     jumps: Flow<Int>,
+    onDismiss: (String) -> Unit,
+    onClearErrors: () -> Unit,
 ) {
     val rows = remember(state.items, state.isRunning) { TranscriptRows.of(state.items, state.isRunning) }
     val list = rememberLazyListState()
@@ -142,7 +150,7 @@ private fun TranscriptList(
             for (index in rows.indices.reversed()) {
                 val row = rows[index]
                 item(key = row.item.id, contentType = row.item.role) {
-                    ChatMessageView(row.item, row.actions, Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp))
+                    ChatMessageView(row.item, row.actions, Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp)) { onDismiss(row.item.id) }
                 }
             }
             if (state.historyStart > 0) {
@@ -157,6 +165,42 @@ private fun TranscriptList(
             jumps = jumps,
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 12.dp),
         )
+        val errors = rows.count { it.item.role == ChatItem.Role.SYSTEM }
+        if (errors > 1) ClearErrorsButton(errors, onClearErrors, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+    }
+}
+
+/** Tailwind's `shadow-md`, both layers. */
+private val shadowMd = listOf(
+    ThemeShadow(0.0, 4.0, 6.0, -1.0, Rgba(0.0, 0.0, 0.0, 0.1)),
+    ThemeShadow(0.0, 2.0, 4.0, -2.0, Rgba(0.0, 0.0, 0.0, 0.1)),
+)
+
+/**
+ * "Clear all errors (n)" over the top of the transcript while it shows more than one error
+ * (`rounded-full bg-error/15 border-error/25 px-3 py-1 text-xs`, `hover:bg-error/25` at once).
+ * The web blurs what is behind it too (`backdrop-blur-sm`), which this leaves out.
+ */
+@Composable
+private fun ClearErrorsButton(count: Int, onClick: () -> Unit, modifier: Modifier) {
+    val tokens = LocalPpmTokens.current
+    val hover = rememberHover(instant = true)
+    // A finger lights it as a mouse over it does.
+    val pressed by hover.source.collectIsPressedAsState()
+    var pill = modifier
+    for (shadow in shadowMd) pill = pill.ppmShadow(shadow, CircleShape)
+    Row(
+        pill
+            .clip(CircleShape)
+            .background(tokens.error.opacity(if (pressed || hover.lit > 0f) 0.25 else 0.15).color)
+            .border(1.dp, tokens.error.opacity(0.25).color, CircleShape)
+            .ppmClickable(pressedColor = Color.Transparent, source = hover.source, onClick = onClick)
+            .padding(horizontal = 13.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        PpmIcon(ProductIcon.XCircle, 14.dp, tokens.error.color)
+        BasicText("Clear all errors ($count)", style = ppmText(12f, lineHeight = 16f).copy(color = tokens.error.color))
     }
 }
 

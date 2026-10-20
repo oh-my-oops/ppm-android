@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInteropFilter
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -165,7 +166,24 @@ fun MenuIcon(icon: ProductIcon, tint: Rgba? = null) {
 @Composable
 fun MenuSeparator() {
     val tokens = LocalPpmTokens.current
-    Box(Modifier.padding(vertical = 4.dp).fillMaxWidth().height(1.dp).background(tokens.border.color))
+    Box(
+        Modifier
+            .padding(vertical = 4.dp)
+            .fillMaxWidth()
+            // `-mx-1`: out over the box's `p-1`, to its border.
+            .layout { measurable, constraints ->
+                if (!constraints.hasBoundedWidth) {
+                    val line = measurable.measure(constraints)
+                    return@layout layout(line.width, line.height) { line.place(0, 0) }
+                }
+                val out = 4.dp.roundToPx()
+                val width = constraints.maxWidth + 2 * out
+                val line = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+                layout(constraints.maxWidth, line.height) { line.place(-out, 0) }
+            }
+            .height(1.dp)
+            .background(tokens.border.color),
+    )
 }
 
 /**

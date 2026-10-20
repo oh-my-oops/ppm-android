@@ -125,6 +125,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                         SessionListPanel(model, list, onOpen = { model.replaceTab(tab.tabId, it) }, Modifier.padding(horizontal = 16.dp), without = tab.session.id)
                     }
                 },
+                onDismiss = chat::dismissMessage,
+                onClearErrors = chat::clearErrors,
             )
             state.notice?.let { NoticeBar(it) { chat.dismissNotice() } }
             val stop = state.turnStop
