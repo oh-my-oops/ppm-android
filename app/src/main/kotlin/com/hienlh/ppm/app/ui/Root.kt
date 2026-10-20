@@ -16,10 +16,12 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,7 +36,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
@@ -53,10 +54,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -71,7 +75,6 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.WebCursor
-import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -228,37 +231,51 @@ private fun ErrorToast(message: String?, mobile: Boolean, narrow: Boolean, dark:
     val from = if (mobile) -1 else 1
     Box(Modifier.fillMaxSize().then(placement), contentAlignment = if (mobile) Alignment.TopCenter else Alignment.BottomStart) {
         AnimatedVisibility(message != null, enter = fadeIn() + slideInVertically { from * it }, exit = fadeOut() + slideOutVertically { from * it }) {
-            val shape = RoundedCornerShape(8.dp)
+            // `--border-radius: var(--radius)`, and PPM defines no `--radius`: sonner's corners
+            // compute to 0. The web's quirk, kept.
+            val shape = RectangleShape
+            // `--normal-bg`, the popover colour: `--panel-2`.
+            val surface = tokens.panel2
             Box(if (mobile && narrow) Modifier.fillMaxWidth() else Modifier.width(356.dp)) {
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .ppmShadow(TOAST_SHADOW, shape)
                         .clip(shape)
-                        .background(tokens.panel.over(tokens.bgSolid).color)
+                        .background(surface.color)
                         .border(1.dp, tokens.border.color, shape)
                         .hoverable(overToast)
-                        // sonner's `padding: 16px` inside its border (`box-sizing: border-box`).
-                        .padding(17.dp),
+                        // sonner's `padding: 16px` inside its border (`box-sizing: border-box`), less
+                        // the 3 px the icon's `margin-left: -3px` takes back.
+                        .padding(start = 14.dp, top = 17.dp, end = 17.dp, bottom = 17.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    PpmIcon(ProductIcon.AlertCircle, 16.dp, tokens.text.color)
-                    BasicText(shown.orEmpty(), Modifier.weight(1f), style = ppmText(13f, lineHeight = 19.5f).copy(color = tokens.text.color))
+                    // `[data-icon]`: 16 px and `margin-right: 4px`, its svg `margin-left: -1px`.
+                    Box(Modifier.padding(end = 4.dp).size(16.dp)) {
+                        PpmIcon(ProductIcon.OctagonXIcon, 16.dp, tokens.text.color, Modifier.offset(x = (-1).dp))
+                    }
+                    // `[data-title]`: 500, its line 1.5.
+                    BasicText(shown.orEmpty(), Modifier.weight(1f), style = ppmText(13f, FontWeight.Medium, lineHeight = 19.5f).copy(color = tokens.text.color))
                 }
                 // `closeButton`: a 20 px circle on the top-left corner, sonner's own colours under a
-                // mouse (and a finger), faded over its 200 ms `ease`, and its `cursor: pointer`.
+                // mouse (and a finger), faded over its 200 ms `ease`, and its `cursor: pointer`. On a
+                // phone it takes taps 12 px around it, a 44 px target (globals.css).
                 val close = SonnerClose.of(dark, tokens.border, tokens.text)
                 val lit by animateFloatAsState(closeHover.lit, tween(200, easing = SONNER_EASE), label = "close")
+                val pressed by closeHover.source.collectIsPressedAsState()
+                val reach = if (mobile) 12.dp else 0.dp
                 Box(
                     Modifier
-                        .offset((-6).dp, (-6).dp)
+                        .offset((-6).dp - reach, (-6).dp - reach)
+                        .pointerHoverIcon(WebCursor.Pointer)
+                        .hoverable(closeHover.source)
+                        .clickable(closeHover.source, indication = null, onClickLabel = "Close toast", role = Role.Button, onClick = onDismiss)
+                        .padding(reach)
                         .size(20.dp)
                         .clip(CircleShape)
-                        .background(close.hoverFill.mix(tokens.panel.over(tokens.bgSolid), lit.toDouble()).color)
-                        .border(1.dp, close.hoverBorder.mix(close.border, lit.toDouble()).color, CircleShape)
-                        .pointerHoverIcon(WebCursor.Pointer)
-                        .ppmClickable(pressedColor = close.hoverFill.color, onClickLabel = "Close toast", source = closeHover.source, onClick = onDismiss),
+                        .background((if (pressed) close.hoverFill else close.hoverFill.mix(surface, lit.toDouble())).color)
+                        .border(1.dp, close.hoverBorder.mix(close.border, lit.toDouble()).color, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) { PpmIcon(ProductIcon.X, 12.dp, close.icon.color) }
             }

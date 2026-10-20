@@ -53,6 +53,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -504,7 +509,7 @@ enum class RenameField(val size: Float, val lineRatio: Float, val padding: Dp, v
     HistoryList(12f, 4f / 3f, 6.dp, 0.5),
 }
 
-/** Renaming in place, as [field]: Return or leaving the field saves, the check saves, the cross gives up. */
+/** Renaming in place, as [field]: Return or leaving the field saves, the check saves, Escape and the cross give up. */
 @Composable
 fun InlineRename(model: AppModel, session: SessionInfo, field: RenameField, modifier: Modifier = Modifier, onDone: () -> Unit) {
     val tokens = LocalPpmTokens.current
@@ -534,6 +539,11 @@ fun InlineRename(model: AppModel, session: SessionInfo, field: RenameField, modi
                 .tracksTextFocus(state)
                 .onFocusChanged {
                     if (it.isFocused) focused = true else if (focused) finish(save = true)
+                }
+                .onPreviewKeyEvent {
+                    val escape = it.type == KeyEventType.KeyDown && it.key == Key.Escape
+                    if (escape) finish(save = false)
+                    escape
                 }
                 .clip(shape)
                 .background(tokens.panel2.color)

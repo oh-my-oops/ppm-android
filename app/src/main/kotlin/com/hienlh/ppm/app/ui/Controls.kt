@@ -247,9 +247,10 @@ fun SecondaryButton(title: String, modifier: Modifier = Modifier, onClick: () ->
 }
 
 /**
- * A text field drawn as the web's inputs are: [placeholder] in the subtle colour while empty, the
- * accent caret. Inputs are 16px on a phone (`globals.css`), so that is the default size; outside
- * the phone layout a field takes its class's own size, [desktopStyle], where one is given.
+ * A text field drawn as the web's inputs are: [placeholder] in the subtle colour while empty (or
+ * the field's own [placeholderColor]), the accent caret. Inputs are 16px on a phone (`globals.css`),
+ * so that is the default size; outside the phone layout a field takes its class's own size,
+ * [desktopStyle], where one is given.
  */
 @Composable
 fun PpmTextField(
@@ -258,6 +259,7 @@ fun PpmTextField(
     modifier: Modifier = Modifier,
     style: TextStyle = ppmText(16f, lineHeight = 24f),
     desktopStyle: TextStyle? = null,
+    placeholderColor: Color? = null,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     onKeyboardAction: KeyboardActionHandler? = null,
     lineLimits: TextFieldLineLimits = TextFieldLineLimits.SingleLine,
@@ -282,7 +284,7 @@ fun PpmTextField(
         decorator = { field ->
             Box(contentAlignment = Alignment.CenterStart) {
                 if (state.text.isEmpty()) {
-                    BasicText(placeholder, style = style.copy(color = tokens.text3.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    BasicText(placeholder, style = style.copy(color = placeholderColor ?: tokens.text3.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 field()
             }

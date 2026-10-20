@@ -54,6 +54,7 @@ import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -71,6 +72,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = null) {
     val tokens = LocalPpmTokens.current
+    val fieldStyle = if (LocalPpmMobile.current) ppmText(16f, lineHeight = 24f) else FIELD_DESKTOP
     val scope = rememberCoroutineScope()
     val address = remember { TextFieldState() }
     val password = remember { TextFieldState() }
@@ -148,7 +150,8 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
                                 address,
                                 "Server address, e.g. 192.168.1.10:8080",
                                 Modifier.fillMaxWidth(),
-                                style = ppmText(16f, lineHeight = 24f),
+                                desktopStyle = FIELD_DESKTOP,
+                                placeholderColor = tokens.text2.color,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next, autoCorrectEnabled = false),
                                 onKeyboardAction = { passwordFocus.requestFocus() },
                                 focusRequester = addressFocus,
@@ -166,7 +169,7 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
                     }) {
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (password.text.isEmpty()) {
-                                BasicText("Password", style = ppmText(16f, lineHeight = 24f).copy(color = tokens.text3.color))
+                                BasicText("Password", style = fieldStyle.copy(color = tokens.text2.color))
                             }
                             BasicSecureTextField(
                                 state = password,
@@ -174,7 +177,7 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
                                     .fillMaxWidth()
                                     .focusRequester(passwordFocus)
                                     .onFocusChanged { if (it.isFocused) focused = "password" },
-                                textStyle = ppmText(16f, lineHeight = 24f).copy(color = tokens.text.color),
+                                textStyle = fieldStyle.copy(color = tokens.text.color),
                                 cursorBrush = SolidColor(tokens.accent.color),
                                 textObfuscationMode = if (showPassword) TextObfuscationMode.Visible else TextObfuscationMode.RevealLastTyped,
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
@@ -215,6 +218,12 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
         }
     }
 }
+
+/**
+ * The sign-in input's size outside the phone layout: `md:text-sm`, which its `text-[15px]` loses to
+ * (16 px on a phone, `max-md:text-base`). Its placeholder is `text-muted-foreground`, text-2.
+ */
+private val FIELD_DESKTOP = ppmText(14f, lineHeight = 20f)
 
 /** The theme's backdrop, an accent glow from above and a faint 26px dot grid. */
 @Composable
