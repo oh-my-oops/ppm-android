@@ -1,6 +1,7 @@
 package com.hienlh.ppm.app.ui.tablet
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,6 +46,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
@@ -121,7 +123,9 @@ fun TabBar(model: AppModel, panelId: String, tabs: List<WorkspaceTab>, activeTab
             .fillMaxWidth()
             .height(BAR_HEIGHT)
             .edge(Edge.Bottom, tokens.border.color)
-            .onGloballyPositioned { coordinates -> drag?.bars?.set(panelId, coordinates.boundsInRoot()) },
+            .onGloballyPositioned { coordinates -> drag?.bars?.set(panelId, coordinates.boundsInRoot()) }
+            // A double tap on the bar itself, not on a tab, opens the command palette.
+            .pointerInput(Unit) { detectTapGestures(onDoubleTap = { model.openPalette() }) },
     ) {
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
             Row(
@@ -147,14 +151,14 @@ fun TabBar(model: AppModel, panelId: String, tabs: List<WorkspaceTab>, activeTab
                     Box(Modifier.align(Alignment.CenterVertically).width(2.dp).height(24.dp).background(tokens.accent.color, CircleShape))
                 }
             }
-            // "+": the command palette on the web, which this app does not have yet; a new chat here until it does.
+            // "+": the command palette, for this panel.
             Box(
                 Modifier
                     .width(40.dp)
                     .fillMaxHeight()
-                    .ppmClickable(pressedColor = Color.Transparent, onClickLabel = "New chat") {
+                    .ppmClickable(pressedColor = Color.Transparent, onClickLabel = "Open command palette") {
                         model.focusPanel(panelId)
-                        model.scope.launch { model.newChat(panelId = panelId) }
+                        model.openPalette()
                     }
                     .padding(top = 2.dp),
                 contentAlignment = Alignment.Center,

@@ -92,6 +92,7 @@ fun PpmRoot(model: AppModel) {
             if (model.showSignIn) ConnectScreen(model, signIn = true, onCancel = { model.showSignIn = false })
             if (model.addingServer) ConnectScreen(model, signIn = false, onCancel = { model.addingServer = false })
             Dialogs(model)
+            model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }
             ErrorToast(model.actionError) { model.actionError = null }
         }
     }

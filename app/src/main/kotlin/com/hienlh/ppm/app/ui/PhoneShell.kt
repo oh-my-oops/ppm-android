@@ -162,14 +162,14 @@ private fun MobileNav(model: AppModel, onMenu: () -> Unit, onProjects: () -> Uni
                     if (project != null) ProjectAvatar(model, project, 28.dp) else PpmIcon(ProductIcon.Layers, 20.dp, tokens.text2.color)
                 }
                 NavDivider()
-                NavCell("New tab", { model.scope.launch { model.newChat() } }) { PpmIcon(ProductIcon.Plus, 20.dp, tokens.text2.color) }
+                NavCell("New tab", { model.openPalette() }) { PpmIcon(ProductIcon.Plus, 20.dp, tokens.text2.color) }
             }
             val active = model.activeTab
             if (active != null) {
                 CurrentTabButton(model, active, Modifier.weight(1f), onTabs)
             } else {
                 Row(
-                    Modifier.weight(1f).fillMaxHeight().ppmClickable(pressedColor = Color.Transparent) { model.scope.launch { model.newChat() } }.padding(horizontal = 12.dp),
+                    Modifier.weight(1f).fillMaxHeight().ppmClickable(pressedColor = Color.Transparent) { model.openPalette() }.padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
@@ -496,7 +496,7 @@ private fun TabSwitcherSheet(model: AppModel, onDismiss: () -> Unit, onLongPress
                     }
                     .ppmClickable(pressedColor = tokens.panel2.color, shape = CircleShape) {
                         onDismiss()
-                        model.scope.launch { model.newChat() }
+                        model.openPalette()
                     },
                 contentAlignment = Alignment.Center,
             ) { PpmIcon(ProductIcon.Plus, 16.dp, tokens.text3.color) }

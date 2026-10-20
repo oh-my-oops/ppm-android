@@ -3,6 +3,7 @@ package com.hienlh.ppm.app
 import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -23,6 +24,7 @@ import com.hienlh.ppm.client.deleteSessions
 import com.hienlh.ppm.client.deleteTag
 import com.hienlh.ppm.client.gitRepos
 import com.hienlh.ppm.client.gitStatus
+import com.hienlh.ppm.client.newChatProviderSettings
 import com.hienlh.ppm.client.projectImage
 import com.hienlh.ppm.client.putUiPrefs
 import com.hienlh.ppm.client.renameSession
@@ -238,6 +240,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** The session whose Delete was chosen, until the user confirms. */
     var confirmDeleteSession by mutableStateOf<SessionInfo?>(null)
+
+    /** What the command palette opened with while it is open; null while it is closed. */
+    var paletteQuery by mutableStateOf<String?>(null)
+        private set
+
+    /** Text for a new chat's message box, by session, until its tab shows (the web's `pendingMessage`). */
+    private val pendingDrafts = mutableMapOf<String, String>()
 
     /** The tag whose Delete was chosen in Manage tags, until the user confirms. */
     var confirmDeleteTag by mutableStateOf<SessionTag?>(null)
@@ -884,7 +893,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             val project = tab.projectId ?: tab.metaString("projectName") ?: state.currentProject ?: continue
             val session = sessions.firstOrNull { it.id == sessionId }
                 ?: SessionInfo(id = sessionId, providerId = tab.metaString("providerId") ?: "claude", title = tab.title)
-            chats[id] = ChatTab(id, session, project)
+            chats[id] = ChatTab(id, session, project).also { chat ->
+                pendingDrafts.remove(sessionId)?.let { chat.draft.setTextAndPlaceCursorAtEnd(it) }
+            }
         }
         val active = state.activeGridTab
         val api = api
@@ -964,6 +975,15 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** Settings opens as a tab on a phone, as on the web's (`openSettings`). */
     fun openSettings() = withWorkspace { it.openTab(NewTab("settings", "Settings")) }
+
+    /** Opens the command palette, its search holding [query]. */
+    fun openPalette(query: String = "") {
+        paletteQuery = query
+    }
+
+    fun closePalette() {
+        paletteQuery = null
+    }
 
     fun closeTab(tabId: String, panelId: String? = panelOf(tabId)) {
         workspace?.closeTab(tabId, panelId)
@@ -1153,14 +1173,22 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         }
     }
 
-    /** A new chat in a new tab (in [panelId] when given); the server's default provider when [providerId] is null. */
-    suspend fun newChat(providerId: String? = null, panelId: String? = null) {
+    /**
+     * A new chat in a new tab (in [panelId] when given). With no [providerId], the provider the
+     * web would pick: the last focused chat's when the server follows focus, else its default.
+     * [draft] waits in its message box, to be edited before it is sent.
+     */
+    suspend fun newChat(providerId: String? = null, panelId: String? = null, draft: String? = null) {
         val api = api ?: return
         val project = selectedProject ?: return
         try {
-            val session = api.createSession(project, providerId)
+            // Captured now, before another panel can take focus; unread, the server picks its default.
+            val focused = layout?.lastFocusedChatProviders?.get(project)
+            val provider = providerId ?: quietly { api.newChatProviderSettings() }?.resolve(focused)
+            val session = api.createSession(project, provider)
             if (selectedProject != project) return
             sessions = (listOf(session) + sessions.filter { it.id != session.id }).sortedForList()
+            if (draft != null) pendingDrafts[session.id] = draft
             openTab(session, panelId)
         } catch (error: CancellationException) {
             throw error

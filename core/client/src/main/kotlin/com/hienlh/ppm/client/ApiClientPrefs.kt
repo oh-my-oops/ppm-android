@@ -47,3 +47,19 @@ suspend fun ApiClient.uiPrefs(): UiPrefs = UiPrefs.from(call("GET", "/api/settin
 suspend fun ApiClient.putUiPrefs(changes: JsonObject) {
     call("PUT", "/api/settings/ui-prefs", body = changes)
 }
+
+/** How a new chat picks its provider: the part of `/api/settings/ai` the web keeps as `ChatPreparationSettings`. */
+data class NewChatProviderSettings(val defaultProvider: String? = null, val mode: String? = null) {
+    /** `resolveNewChatProvider`: the last focused chat's provider when the mode follows focus, else the default, else Claude. */
+    fun resolve(focusedProvider: String?): String =
+        if (mode == "follow-focus" && !focusedProvider.isNullOrEmpty() && focusedProvider != "default") {
+            focusedProvider
+        } else {
+            defaultProvider?.takeIf { it.isNotEmpty() } ?: "claude"
+        }
+}
+
+suspend fun ApiClient.newChatProviderSettings(): NewChatProviderSettings {
+    val data = call("GET", "/api/settings/ai")
+    return NewChatProviderSettings(data["default_provider"].string, data["new_chat_provider_mode"].string)
+}
