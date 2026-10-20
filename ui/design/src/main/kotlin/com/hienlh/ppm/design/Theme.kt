@@ -2,6 +2,9 @@ package com.hienlh.ppm.design
 
 import android.graphics.Bitmap
 import android.graphics.BlurMaskFilter
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
@@ -163,6 +166,16 @@ val LocalPpmTokens = staticCompositionLocalOf { BuiltInThemes.auroraDark.tokens 
 /** The web's `useIsMobile()`: the phone layout, where touch targets grow to 44px. */
 val LocalPpmMobile = staticCompositionLocalOf { false }
 
+/**
+ * Chrome's own text selection on Android, which the web keeps (it styles no `::selection`): the
+ * Holo blue at 40 % behind the text in every theme, and handles in Google blue, the lighter one
+ * when the system is dark. Measured on Android 16; neither follows the wallpaper's palette, though
+ * Chrome's toolbar does. Chrome also draws the selected text black, which Compose cannot, and its
+ * handles are ~22 dp to Compose's fixed 25.
+ */
+private val chromeSelection = TextSelectionColors(handleColor = Color(0xFF0B57D0), backgroundColor = Color(0x6633B5E5))
+private val chromeSelectionDark = TextSelectionColors(handleColor = Color(0xFFA8C7FA), backgroundColor = Color(0x6633B5E5))
+
 /** Provides [theme] below; [mobile] is the web's `(max-width: 767px)`. */
 @Composable
 fun PpmThemeProvider(theme: PpmTheme, mobile: Boolean, content: @Composable () -> Unit) {
@@ -170,6 +183,7 @@ fun PpmThemeProvider(theme: PpmTheme, mobile: Boolean, content: @Composable () -
         LocalPpmTheme provides theme,
         LocalPpmTokens provides if (mobile) theme.mobileTokens else theme.tokens,
         LocalPpmMobile provides mobile,
+        LocalTextSelectionColors provides if (isSystemInDarkTheme()) chromeSelectionDark else chromeSelection,
         content = content,
     )
 }
