@@ -38,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -390,7 +391,7 @@ private fun ToolDetails(name: String, input: JsonElement) {
             if (s("description").isNotEmpty()) {
                 BasicText(s("description"), style = ppmText(12f, lineHeight = 16f, italic = true).copy(color = tokens.text3.color))
             }
-            Mono(s("command"), tokens.text2)
+            Mono(s("command"), tokens.text2, breakAll = true)
         }
         "Read", "Write", "Edit", "MultiEdit", "NotebookEdit" -> FileDetails(name, input)
         "Glob" -> Mono(s("pattern") + if (s("path").isEmpty()) "" else " in ${s("path")}", tokens.text2)
@@ -411,7 +412,7 @@ private fun ToolDetails(name: String, input: JsonElement) {
                 ) {
                     PpmIcon(ProductIcon.Globe, 12.dp, tokens.accent.color, Modifier.padding(top = 2.dp))
                     BasicText(
-                        url,
+                        remember(url) { if (BREAK in url) url else breakAnywhere(url) },
                         style = monoText.copy(color = tokens.accent.color, textDecoration = if (hover.lit > 0f) TextDecoration.Underline else null),
                     )
                 }
@@ -458,7 +459,7 @@ private fun ToolDetails(name: String, input: JsonElement) {
             if (truthy(input["prompt"])) BasicText(s("prompt"), style = cardText.copy(color = tokens.text2.color))
             if (input["transparentBackground"].bool == true) BasicText("Transparent background", style = cardText.copy(color = tokens.text3.color))
         }
-        else -> Mono(if (input is JsonNull) "null" else input.prettyString, tokens.text2)
+        else -> Mono(if (input is JsonNull) "null" else input.prettyString, tokens.text2, breakAll = true)
     }
 }
 
@@ -467,7 +468,7 @@ private fun FileDetails(name: String, input: JsonElement) {
     val tokens = LocalPpmTokens.current
     fun s(key: String) = input[key].string ?: ""
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Mono(s("notebook_path").ifEmpty { s("file_path") }, tokens.text2)
+        Mono(s("notebook_path").ifEmpty { s("file_path") }, tokens.text2, breakAll = true)
         if (name == "Edit" && (s("old_string").isNotEmpty() || s("new_string").isNotEmpty())) {
             EditDiffView(s("old_string"), s("new_string"))
         }
@@ -490,11 +491,19 @@ private fun FileDetails(name: String, input: JsonElement) {
     }
 }
 
-/** `<pre class="font-mono whitespace-pre-wrap break-all">` at 12px. */
+/**
+ * `<pre class="font-mono whitespace-pre-wrap">` at 12px, `break-all` when [breakAll]: a line may
+ * then end inside a word, wherever Chrome would end it, and a copy comes out as [text] was.
+ */
 @Composable
-private fun Mono(text: String, color: Rgba, modifier: Modifier = Modifier) {
-    SelectionContainer(modifier.fillMaxWidth()) {
-        BasicText(text, style = monoText.copy(color = color.color))
+private fun Mono(text: String, color: Rgba, modifier: Modifier = Modifier, breakAll: Boolean = false, style: TextStyle = monoText) {
+    // A text that holds a U+200B of its own keeps the line breaker's breaks, so a copy can keep it.
+    val breaking = breakAll && BREAK !in text
+    val shown = if (breaking) remember(text) { breakAnywhere(text) } else text
+    WithoutBreaksOnCopy(breaking) {
+        SelectionContainer(modifier.fillMaxWidth()) {
+            BasicText(shown, style = style.copy(color = color.color))
+        }
     }
 }
 
@@ -690,7 +699,7 @@ private fun SendMessageOutcomeView(output: String, outcome: SendMessageOutcome) 
             OutputToggle(if (showRaw) "Hide raw" else "Show raw", ProductIcon.Code) { showRaw = !showRaw }
             if (showRaw) {
                 Box(Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState())) {
-                    SelectionContainer(Modifier.fillMaxWidth()) { BasicText(output, style = tinyMono.copy(color = tokens.text3.color)) }
+                    Mono(output, tokens.text3, breakAll = true, style = tinyMono)
                 }
             }
         }
@@ -755,9 +764,11 @@ private fun CollapsibleOutput(output: String) {
                 }
             }
             when {
-                collapsed -> Box(Modifier.heightIn(max = 64.dp).clipToBounds()) { Mono(remember(output) { collapsedPreview(output) }, tokens.text3) }
-                long -> Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) { Mono(output, tokens.text3) }
-                else -> Mono(output, tokens.text3)
+                collapsed -> Box(Modifier.heightIn(max = 64.dp).clipToBounds()) {
+                    Mono(remember(output) { collapsedPreview(output) }, tokens.text3, breakAll = true)
+                }
+                long -> Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) { Mono(output, tokens.text3, breakAll = true) }
+                else -> Mono(output, tokens.text3, breakAll = true)
             }
         }
     }

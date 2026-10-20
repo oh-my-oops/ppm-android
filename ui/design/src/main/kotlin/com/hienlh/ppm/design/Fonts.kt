@@ -25,9 +25,9 @@ import kotlin.math.floor
 /**
  * The web's two typefaces: Geist for the interface, Monaspace Argon for code and metadata. Both
  * ship inside the app (`res/font`, OFL). A weight the family lacks is matched as CSS matches it.
- * Geist carries one glyph its release lacks, an empty U+200B (`scripts/add-zero-width-space.py`,
- * `scripts/geist-web-subsets.py`), so the line breaks the app writes into a URL stay in Geist's
- * run and keep its kerning.
+ * Each carries one glyph its release lacks, an empty U+200B (`scripts/add-zero-width-space.py`,
+ * `scripts/geist-web-subsets.py`), so the line breaks the app writes into a URL or a command stay
+ * in the font's run: Geist keeps its kerning, Monaspace its texture healing.
  */
 object PpmFonts {
     /** From Android 10 the web's own files, [GeistWebFont]; before it Geist's static release, which sets Vietnamese a little narrower. */
@@ -56,7 +56,8 @@ object PpmFonts {
     /**
      * The very files the web loads (`@fontsource/monaspace-argon`: release 1.101, Latin only, at
      * 400 and 700). 1.400's vertical metrics set 11 px text nearly 2 px lower in its line than the
-     * web's. A character outside Latin falls back, as it does in the browser.
+     * web's. A character outside Latin falls back, as it does in the browser. Its licence reserves
+     * the name, so the copy with the U+200B is named PPM Mono.
      */
     val mono = FontFamily(
         Font(R.font.monaspace_argon_regular, FontWeight.Normal),

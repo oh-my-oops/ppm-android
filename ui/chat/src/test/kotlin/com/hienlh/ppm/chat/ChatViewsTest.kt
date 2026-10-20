@@ -207,6 +207,17 @@ class ChatViewsTest {
     }
 
     @Test
+    fun `break-all ends a line inside a word, but not before a closing mark or after an opening one`() {
+        val b = BREAK
+        assertEquals("b${b}a${b}s${b}e", breakAnywhere("base"))
+        // Spaces are the line breaker's own; a quote, a colon and a slash hold on to their neighbours.
+        assertEquals("\"q${b}u${b}e${b}r${b}y\": \"C${b}o", breakAnywhere("\"query\": \"Co"))
+        assertEquals("h${b}t${b}t${b}p${b}s://${b}d${b}o", breakAnywhere("https://do"))
+        val json = "{\"url\":\"https://example.com/a(b)\"}"
+        assertEquals(json, breakAnywhere(json).replace(b.toString(), ""))
+    }
+
+    @Test
     fun `a result hides when it only stood in for an image`() {
         assertTrue(resultHasImagePlaceholder("""[{"type":"text","text":"[image · 12KB]"}]"""))
         assertTrue(resultHasImagePlaceholder("""[{"type":"text","text":"Saved"},{"type":"text","text":"[image]"}]"""))
