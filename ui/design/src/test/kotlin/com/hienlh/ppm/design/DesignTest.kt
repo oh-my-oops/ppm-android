@@ -158,4 +158,22 @@ class DesignTest {
         assertEquals(1, Density(0.75f).cssBorderPx(1.dp))
         assertEquals(0, Density(2.625f).cssBorderPx(0.dp))
     }
+
+    @Test
+    fun `line-clamp keeps the last line whole when the ellipsis fits after it`() {
+        // Ten characters 10 px wide from x 0; "…" 15 px.
+        val right = { k: Int -> 10f * k }
+        val previous = { k: Int -> k - 1 }
+        val next = { k: Int -> k + 1 }
+        assertEquals(10, LineClamp.keep(0, 10, 120f, 15f, right, previous, next))
+        // Cut back only as far as the "…" needs, a character at a time: mid-word, as Chrome does.
+        assertEquals(9, LineClamp.keep(0, 10, 105f, 15f, right, previous, next))
+        assertEquals(8, LineClamp.keep(0, 10, 104.9f, 15f, right, previous, next))
+        // One character stays however narrow; an empty line keeps nothing.
+        assertEquals(1, LineClamp.keep(0, 10, 10f, 15f, right, previous, next))
+        assertEquals(4, LineClamp.keep(4, 4, 100f, 15f, right, previous, next))
+        // A character of two code units goes whole.
+        val pairs = { k: Int -> k - 2 }
+        assertEquals(6, LineClamp.keep(0, 10, 85f, 15f, right, pairs, { k: Int -> k + 2 }))
+    }
 }

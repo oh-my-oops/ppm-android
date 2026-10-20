@@ -63,6 +63,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.design.ClampedText
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -216,14 +217,7 @@ private fun BubbleText(text: String, system: Boolean) {
             if (expanded) {
                 BasicText(annotated, Modifier.heightIn(max = expandedLimit).verticalScroll(rememberScrollState()), style, inlineContent = inline)
             } else {
-                BasicText(
-                    annotated,
-                    style = style,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    onTextLayout = { clamped = it.hasVisualOverflow },
-                    inlineContent = inline,
-                )
+                ClampedText(annotated, style, maxLines = 2, preWrap = true, inlineContent = inline, onClamped = { clamped = it })
             }
         }
     }
@@ -614,7 +608,7 @@ fun ReplyCard(
             if (expanded) {
                 BasicText(reply.quote, Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()), quoteStyle)
             } else {
-                BasicText(reply.quote, style = quoteStyle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                ClampedText(AnnotatedString(reply.quote), quoteStyle, maxLines = 2, preWrap = true)
             }
         }
         val note = small.copy(color = tokens.text3.color)

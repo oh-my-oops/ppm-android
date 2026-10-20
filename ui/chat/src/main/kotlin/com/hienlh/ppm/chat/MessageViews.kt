@@ -49,12 +49,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.design.ClampedText
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -393,11 +394,10 @@ fun TurnStopBar(stop: TurnStop, onContinue: () -> Unit, modifier: Modifier = Mod
             Column(Modifier.weight(1f)) {
                 BasicText(title, style = ppmText(size, FontWeight.Medium, lineHeight = size * 1.375f).copy(color = tokens.error.color))
                 if (detail != null) {
-                    BasicText(
-                        detail,
-                        style = ppmText(size, lineHeight = size * 1.375f).copy(color = tokens.text2.color),
+                    ClampedText(
+                        AnnotatedString(detail),
+                        ppmText(size, lineHeight = size * 1.375f).copy(color = tokens.text2.color),
                         maxLines = if (mobile) 3 else 2,
-                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
