@@ -76,11 +76,16 @@ class Mouse:
         time.sleep(0.15)
 
     def measure(self):
-        self.move(1280, 800)
+        # From the middle of the screen, a quarter of its width and height across, which a phone
+        # in portrait has room for as well as the tablet.
+        size = subprocess.run(self.adb + ["shell", "wm", "size"], capture_output=True, text=True).stdout
+        w, h = map(int, re.findall(r"(\d+)x(\d+)", size)[-1])
+        self.move(w / 2, h / 2)
         x0, y0 = self.position()
-        self.nudge(320, 160)
+        ux, uy = round(w / 8), round(h / 8)
+        self.nudge(ux, uy)
         x1, y1 = self.position()
-        return (x1 - x0) / 320, (y1 - y0) / 160
+        return (x1 - x0) / ux, (y1 - y0) / uy
 
     def move(self, x, y):
         if self.held:
