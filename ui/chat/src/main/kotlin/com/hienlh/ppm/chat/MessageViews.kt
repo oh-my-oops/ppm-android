@@ -69,6 +69,7 @@ import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
+import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.TurnStop
 import com.hienlh.ppm.state.ChatBlock
 import com.hienlh.ppm.state.ChatItem
@@ -102,7 +103,8 @@ fun ChatMessageView(
 
 /**
  * Time, Copy and Reply under a message (`MessageActionBar`). Reply is a 44 px target on a phone,
- * which makes the row that tall. Edit and Fork are not in this app yet.
+ * which makes the row that tall. Edit and Fork are not in this app yet. The time's `title` is the
+ * full date.
  */
 @Composable
 internal fun MessageActionBar(timestamp: Instant?, copyText: String, modifier: Modifier = Modifier, onReply: (() -> Unit)? = null) {
@@ -112,11 +114,11 @@ internal fun MessageActionBar(timestamp: Instant?, copyText: String, modifier: M
             RelativeTime(
                 timestamp,
                 ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color, fontFeatureSettings = "tnum"),
-                Modifier.padding(end = 4.dp),
+                Modifier.webTitle(remember(timestamp) { PpmFormat.fullDate(timestamp) }).padding(end = 4.dp),
             )
         }
         CopyActionButton(copyText)
-        if (onReply != null) ActionButton(ProductIcon.RotateCcw, "Reply", touchTarget = true, onClick = onReply)
+        if (onReply != null) ActionButton(ProductIcon.RotateCcw, "Reply", "Reply to this message", touchTarget = true, onClick = onReply)
     }
 }
 
@@ -126,7 +128,7 @@ internal fun CopyActionButton(text: String) {
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
-    ActionButton(if (copied) ProductIcon.Check else ProductIcon.Copy, if (copied) "Copied" else "Copy") {
+    ActionButton(if (copied) ProductIcon.Check else ProductIcon.Copy, if (copied) "Copied" else "Copy", "Copy message to clipboard") {
         scope.launch {
             clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("message", text)))
             copied = true
@@ -138,10 +140,11 @@ internal fun CopyActionButton(text: String) {
 
 /**
  * The action bar's ghost pill (`ActionButton`): subtle, `hover:text-text-primary hover:bg-surface`,
- * and so while pressed. A [touchTarget] is at least 44 px square on a phone, its content centred.
+ * and so while pressed, with its [title] for a mouse. A [touchTarget] is at least 44 px square on a
+ * phone, its content centred.
  */
 @Composable
-internal fun ActionButton(icon: ProductIcon, label: String, touchTarget: Boolean = false, onClick: () -> Unit) {
+internal fun ActionButton(icon: ProductIcon, label: String, title: String, touchTarget: Boolean = false, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -155,6 +158,7 @@ internal fun ActionButton(icon: ProductIcon, label: String, touchTarget: Boolean
             .clip(shape)
             .background(tokens.panel.opacity(lit).color)
             .hoverable(source)
+            .webTitle(title)
             .clickable(source, indication = null, role = Role.Button, onClick = onClick)
             .defaultMinSize(target, target)
             .padding(horizontal = 6.dp, vertical = 4.dp),

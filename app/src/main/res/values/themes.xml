@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Only the window: everything inside is drawn by Compose. The background is Aurora
-         Dark's, so that the first frame is not a white flash. -->
-    <style name="Theme.Ppm" parent="android:Theme.DeviceDefault.NoActionBar">
+         Dark's, so that the first frame is not a white flash. The parent is the light one
+         because what Android draws itself takes its look from it: over Chrome a title's
+         tooltip is the light theme's dark box in either system mode, measured. -->
+    <style name="Theme.Ppm" parent="android:Theme.DeviceDefault.Light.NoActionBar">
         <item name="android:windowBackground">@color/ppm_launch_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>

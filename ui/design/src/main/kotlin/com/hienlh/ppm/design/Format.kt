@@ -34,6 +34,16 @@ object PpmFormat {
     }
 
     /**
+     * `new Date(iso).toLocaleString()`, the time's `title` in the action bar: the date and the time
+     * to the second in the device's locale, as Chrome writes them ("10/20/2026, 11:43:17 PM").
+     */
+    fun fullDate(date: Instant): String {
+        val locale = Locale.getDefault()
+        val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, "yMdjms")
+        return DateTimeFormatter.ofPattern(pattern, locale).withZone(ZoneId.systemDefault()).format(date)
+    }
+
+    /**
      * `getProjectInitials` (src/web/lib/project-avatar.ts): one letter when it is unique among the
      * projects, two when that is, else the project's 1-based position.
      */
