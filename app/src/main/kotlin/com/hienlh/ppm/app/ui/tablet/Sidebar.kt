@@ -40,6 +40,7 @@ import androidx.compose.ui.geometry.toRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalDensity
@@ -58,6 +59,7 @@ import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.ppmText
@@ -205,7 +207,8 @@ internal fun SwitcherAvatar(model: AppModel, project: ProjectInfo, size: Dp, unr
 
 /**
  * The sidebar's right edge (`absolute right-0 w-1 cursor-col-resize`), wider to the finger than to
- * the eye: the accent at 30 % under a mouse (`hover:bg-primary/30`), 50 % while held.
+ * the eye: the accent at 30 % under a mouse (`hover:bg-primary/30`), 50 % while held. The double
+ * arrow shows over the 4 px line alone, as on the web.
  */
 @Composable
 private fun ResizeHandle(model: AppModel, modifier: Modifier) {
@@ -221,6 +224,7 @@ private fun ResizeHandle(model: AppModel, modifier: Modifier) {
             .width(12.dp)
             .screenDrag(
                 horizontal = true,
+                cursor = WebCursor.ResizeHorizontal,
                 onStart = {
                     held = true
                     reached = model.sidebarWidth * density
@@ -240,6 +244,7 @@ private fun ResizeHandle(model: AppModel, modifier: Modifier) {
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
                 .width(4.dp)
+                .pointerHoverIcon(WebCursor.ResizeHorizontal)
                 .hoverable(hover.source)
                 .background(tokens.accent.opacity(if (held) 0.5 else 0.3 * hover.lit).color),
         )

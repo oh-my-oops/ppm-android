@@ -39,6 +39,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -56,6 +57,7 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.ThemeTokens
+import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -148,14 +150,15 @@ private fun SettingsRail(active: SettingsCategory, onSelect: (SettingsCategory) 
     ) {
         for (category in SettingsCategory.entries) {
             val on = category == active
-            // `px-2.5 py-2 rounded-md gap-2.5`: the active row in `bg-accent`, any other
-            // `hover:bg-accent/50 active:bg-accent`.
+            // `px-2.5 py-2 rounded-md gap-2.5 cursor-pointer`: the active row in `bg-accent`, any
+            // other `hover:bg-accent/50 active:bg-accent`.
             val shape = RoundedCornerShape(8.dp)
             Row(
                 Modifier
                     .fillMaxWidth()
                     .clip(shape)
                     .then(if (on) Modifier.background(tokens.panel2.color) else Modifier)
+                    .pointerHoverIcon(WebCursor.Pointer)
                     .ppmClickable(
                         pressedColor = tokens.panel2.color,
                         hoverColor = if (on) Color.Transparent else tokens.panel2.opacity(0.5).color,
@@ -185,14 +188,15 @@ private fun SettingsIndex(onSelect: (SettingsCategory) -> Unit) {
         Separator()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             for (category in SettingsCategory.entries) {
-                // `px-2.5 py-3 rounded-lg gap-3`, `hover:bg-accent/50 active:bg-accent`; the icon's
-                // tile turns `bg-accent` at once under a mouse (`group-hover:`, no transition).
+                // `px-2.5 py-3 rounded-lg gap-3 cursor-pointer`, `hover:bg-accent/50 active:bg-accent`;
+                // the icon's tile turns `bg-accent` at once under a mouse (`group-hover:`, no transition).
                 val shape = RoundedCornerShape(12.dp)
                 val hover = rememberHover(instant = true)
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .clip(shape)
+                        .pointerHoverIcon(WebCursor.Pointer)
                         .ppmClickable(
                             pressedColor = tokens.panel2.color,
                             hoverColor = tokens.panel2.opacity(0.5).color,
@@ -232,10 +236,14 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (!split) {
-                // The `ghost` button: `hover:bg-accent`, `dark:hover:bg-accent/50`.
+                // The `ghost` button: `hover:bg-accent`, `dark:hover:bg-accent/50`, `cursor-pointer`.
                 val ghost = ghostHover(tokens, model.theme.isDark)
                 Box(
-                    Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).ppmClickable(pressedColor = ghost, hoverColor = ghost, onClickLabel = "Back to settings list", onClick = onBack),
+                    Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .pointerHoverIcon(WebCursor.Pointer)
+                        .ppmClickable(pressedColor = ghost, hoverColor = ghost, onClickLabel = "Back to settings list", onClick = onBack),
                     contentAlignment = Alignment.Center,
                 ) { PpmIcon(ProductIcon.ArrowLeft, 16.dp, tokens.text.color) }
             }
@@ -349,7 +357,7 @@ internal fun ThemeSwatch(theme: PpmTheme) {
  * The web's `Button` in `default` (picked, with `ring-2 ring-primary`) or `outline`, `h-9 gap-2`.
  * The outline's `border` names no colour outside dark mode (`dark:border-input`), so in a light
  * theme it is Tailwind 4's default, the text colour. A mouse fades in `default`'s
- * `hover:bg-primary/90`, or the outline's own hover fill.
+ * `hover:bg-primary/90`, or the outline's own hover fill, over a `cursor-pointer`.
  */
 @Composable
 private fun ModeButton(label: String, icon: ProductIcon, on: Boolean, dark: Boolean, modifier: Modifier, onClick: () -> Unit) {
@@ -366,6 +374,7 @@ private fun ModeButton(label: String, icon: ProductIcon, on: Boolean, dark: Bool
                 if (on) tokens.accent.opacity(1 - 0.1 * hover.lit).color else outlineFill(tokens, dark, hover.lit.toDouble()),
             )
             .then(if (on) Modifier else Modifier.border(1.dp, outlineBorder(tokens, dark), shape))
+            .pointerHoverIcon(WebCursor.Pointer)
             .ppmClickable(
                 pressedColor = if (on) Color.Black.copy(alpha = 0.1f) else tokens.panel2.color,
                 shape = shape,

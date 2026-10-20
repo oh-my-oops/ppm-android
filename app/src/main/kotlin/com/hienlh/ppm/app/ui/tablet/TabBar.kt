@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.FlowRow
@@ -59,6 +60,7 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -87,6 +89,7 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
@@ -332,6 +335,7 @@ private fun ScrollArrow(left: Boolean, dot: String?, modifier: Modifier, onClick
  * along its left edge. A mouse over an inactive tab lights it (`hover:text-foreground
  * hover:bg-panel/60`), and its looks fade into each other as `transition-colors` does. The close
  * button stays visible: Chrome on a touch tablet never applies the `can-hover:` that hides it.
+ * `cursor-grab active:cursor-grabbing` over all of it, the close button too, which is a `<span>`.
  */
 @Composable
 private fun TabChip(
@@ -348,6 +352,7 @@ private fun TabChip(
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val hovered by source.collectIsHoveredAsState()
+    val pressed by source.collectIsPressedAsState()
     val lit = colorsFade(hovered && !active)
     val on = colorsFade(active)
     val color = tokens.accent.mix(tokens.text.mix(tokens.text2, lit.toDouble()), on.toDouble())
@@ -362,6 +367,7 @@ private fun TabChip(
     Box(
         modifier
             .fillMaxHeight()
+            .pointerHoverIcon(if (pressed) WebCursor.Grabbing else WebCursor.Grab)
             .onGloballyPositioned { drag?.chips?.set(tab.id, panelId to Rect(it.positionInRoot(), it.size.toSize())) }
             .then(if (drag == null) Modifier else Modifier.tabGestures(drag, model, { DraggedTab(tab.id, panelId, title, snapshot) }) { menuAt = it }),
     ) {

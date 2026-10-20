@@ -61,6 +61,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
@@ -71,9 +73,11 @@ import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.SettingsWindowContent
 import com.hienlh.ppm.app.ui.TabBody
+import com.hienlh.ppm.app.ui.tablet.LocalHeldCursor
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.windows.Bounds
@@ -328,6 +332,7 @@ private fun FloatingWindow(model: AppModel, store: WindowStore, win: WindowRunti
         }
         if (floating) {
             var resizeBase by remember { mutableStateOf(target) }
+            val held = LocalHeldCursor.current
             for (handle in ResizeHandle.entries) {
                 ResizeStrip(
                     handle,
@@ -337,9 +342,11 @@ private fun FloatingWindow(model: AppModel, store: WindowStore, win: WindowRunti
                         onDragStart = {
                             resizeBase = target
                             gesturing = true
+                            held.icon = handle.cursor
                         },
                         onDrag = { dx, dy -> shown = clampRect(applyResize(resizeBase, handle, dx, dy), bounds) },
                         onDragEnd = {
+                            held.icon = null
                             store.resize(win.id, shown)
                             gesturing = false
                         },
@@ -386,7 +393,9 @@ private fun TabHostWindowContent(model: AppModel, win: WindowRuntimeState) {
 /**
  * window-resize-handles.tsx at touch size: a 12 px strip centred on each edge, stopping 20 px
  * short of the corners, and a 20 px square on each corner — invisible, so the window looks the
- * same. In the frame's box widened by [OVERHANG] on every side.
+ * same. In the frame's box widened by [OVERHANG] on every side. Chrome on a touch tablet takes the
+ * touch sizes for a mouse too (`pointer: coarse`), and draws each handle's `n-resize` … `sw-resize`
+ * as one of four double arrows.
  */
 @Composable
 private fun BoxScope.ResizeStrip(handle: ResizeHandle, gesture: Modifier) {
@@ -403,8 +412,17 @@ private fun BoxScope.ResizeStrip(handle: ResizeHandle, gesture: Modifier) {
         ResizeHandle.SW -> Modifier.align(Alignment.BottomStart).size(corner)
         ResizeHandle.SE -> Modifier.align(Alignment.BottomEnd).size(corner)
     }
-    Box(placed.then(gesture))
+    Box(placed.pointerHoverIcon(handle.cursor).then(gesture))
 }
+
+/** The double arrow over a handle, and over the whole screen while it is dragged. */
+private val ResizeHandle.cursor: PointerIcon
+    get() = when (this) {
+        ResizeHandle.N, ResizeHandle.S -> WebCursor.ResizeVertical
+        ResizeHandle.W, ResizeHandle.E -> WebCursor.ResizeHorizontal
+        ResizeHandle.NW, ResizeHandle.SE -> WebCursor.ResizeTopLeft
+        ResizeHandle.NE, ResizeHandle.SW -> WebCursor.ResizeTopRight
+    }
 
 /** Where a window dragged past the right edge lands when let go: `rounded border-2 border-dashed border-primary bg-accent-wash`. */
 @Composable

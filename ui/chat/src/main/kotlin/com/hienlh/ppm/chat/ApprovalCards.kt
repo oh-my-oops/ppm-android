@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,6 +51,7 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -128,6 +130,8 @@ private fun SolidButton(title: String, color: Rgba, foreground: Color = Color.Wh
             .alpha(if (enabled) 1f else 0.4f)
             .clip(shape)
             .background(color.opacity(1 - 0.2 * hover.lit).color)
+            // Submit's `disabled:cursor-not-allowed`.
+            .pointerHoverIcon(if (enabled) WebCursor.Default else WebCursor.NotAllowed)
             .ppmClickable(enabled = enabled, pressedColor = Color.White.copy(alpha = 0.2f), source = hover.source, hoverWhileDisabled = true, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 6.dp),
         xsMedium.copy(color = foreground),
@@ -146,6 +150,8 @@ private fun OutlineButton(title: String, foreground: Rgba, horizontalPadding: In
             .clip(shape)
             .background(tokens.bgSolid.color)
             .border(1.dp, tokens.border.color, shape)
+            // Prev's and Next's `disabled:cursor-not-allowed`.
+            .pointerHoverIcon(if (enabled) WebCursor.Default else WebCursor.NotAllowed)
             .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, hoverWhileDisabled = true, onClick = onClick)
             .padding(horizontal = (horizontalPadding + 1).dp, vertical = 7.dp),
         xs.copy(color = foreground.color),
@@ -285,6 +291,8 @@ private fun QuestionCard(questions: List<Question>, onSubmit: (JsonElement) -> U
                             .clip(optionShape)
                             .background(fill.color)
                             .border(1.dp, edge.color, optionShape)
+                            // A `div role="button"` with `cursor-pointer`.
+                            .pointerHoverIcon(WebCursor.Pointer)
                             .ppmClickable(pressedColor = tokens.surfaceHover.color, source = hover.source) { select(option) }
                             .padding(horizontal = 11.dp, vertical = 9.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),

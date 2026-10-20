@@ -17,11 +17,13 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -31,6 +33,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -43,6 +47,7 @@ import com.hienlh.ppm.app.ui.windows.WindowLayer
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.colorsFade
 
 /**
@@ -52,8 +57,9 @@ import com.hienlh.ppm.design.colorsFade
 @Composable
 fun TabletShell(model: AppModel) {
     val drag = remember { TabDrag() }
-    CompositionLocalProvider(LocalTabDrag provides drag) {
-        Backdrop(Modifier.dragCursor(drag)) {
+    val held = remember { HeldCursor() }
+    CompositionLocalProvider(LocalTabDrag provides drag, LocalHeldCursor provides held) {
+        Backdrop(Modifier.dragCursor(drag, held)) {
             Row(Modifier.fillMaxSize().safeDrawingPadding()) {
                 Sidebar(model)
                 Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -91,10 +97,12 @@ fun Modifier.edge(edge: Edge, color: Color): Modifier = drawBehind {
 /**
  * The 1 px line between two resizable panes (panel-layout.tsx's `ResizeHandle`): `bg-border/30`,
  * the accent at 30% under a mouse and at 50% while held, a grip in its middle (always drawn: a
- * touch screen has no hover). It takes one pixel of the layout but a 16 dp strip of touch, laid
- * over both neighbours; only the pixel itself lights, as CSS's `:hover` covers the line and not
- * the grab area around it. [vertical] is a line between side-by-side panes; [onDrag] gets each
- * move in pixels.
+ * touch screen has no hover). It takes one pixel of the layout but a 20 dp strip of touch and
+ * mouse, laid over both neighbours: react-resizable-panels widens a separator to
+ * `resizeTargetMinimumSize.coarse`, as Chrome on Android reports a coarse pointer, and shows the
+ * double arrow (`ew-resize` / `ns-resize`) over all of it. Only the pixel itself lights, as CSS's
+ * `:hover` covers the line and not the grab area around it. [vertical] is a line between
+ * side-by-side panes; [onDrag] gets each move in pixels.
  */
 @Composable
 fun SplitHandle(vertical: Boolean, onDrag: (Float) -> Unit, onDragEnd: () -> Unit = {}) {
@@ -105,6 +113,7 @@ fun SplitHandle(vertical: Boolean, onDrag: (Float) -> Unit, onDragEnd: () -> Uni
     val lit = colorsFade(onLine || held).toDouble()
     val press = colorsFade(held).toDouble()
     val line = tokens.accent.opacity(0.5).mix(tokens.accent.opacity(0.3).mix(tokens.border.opacity(0.3), lit), press)
+    val cursor = if (vertical) WebCursor.ResizeHorizontal else WebCursor.ResizeVertical
     Box(
         (if (vertical) Modifier.width(1.dp).fillMaxHeight() else Modifier.height(1.dp).fillMaxWidth())
             .zIndex(1f)
@@ -112,7 +121,8 @@ fun SplitHandle(vertical: Boolean, onDrag: (Float) -> Unit, onDragEnd: () -> Uni
         contentAlignment = Alignment.Center,
     ) {
         Box(
-            (if (vertical) Modifier.fillMaxHeight().requiredWidth(16.dp) else Modifier.fillMaxWidth().requiredHeight(16.dp))
+            (if (vertical) Modifier.fillMaxHeight().requiredWidth(20.dp) else Modifier.fillMaxWidth().requiredHeight(20.dp))
+                .pointerHoverIcon(cursor)
                 .pointerInput(vertical) {
                     awaitPointerEventScope {
                         while (true) {
@@ -129,6 +139,7 @@ fun SplitHandle(vertical: Boolean, onDrag: (Float) -> Unit, onDragEnd: () -> Uni
                 }
                 .screenDrag(
                     horizontal = vertical,
+                    cursor = cursor,
                     onStart = { held = true },
                     onDrag = onDrag,
                     onEnd = {
@@ -144,15 +155,38 @@ fun SplitHandle(vertical: Boolean, onDrag: (Float) -> Unit, onDragEnd: () -> Uni
 }
 
 /**
+ * The cursor a drag keeps wherever the pointer goes. The web's handles keep theirs past their own
+ * edge — react-resizable-panels sets its cursor on `*` with `!important`, the sidebar sets it on
+ * the page and holds the pointer, and a window's edge keeps it too — while a Compose icon shows
+ * only over its own box, so the pointer turned back into the arrow once a drag outran its handle.
+ * The shell lays this one over everything.
+ */
+@Stable
+class HeldCursor {
+    var icon by mutableStateOf<PointerIcon?>(null)
+}
+
+val LocalHeldCursor = staticCompositionLocalOf { HeldCursor() }
+
+/**
  * A drag along one axis, measured on the screen. A handle moves with the edge it drags, and
  * `draggable` measures in the handle's own coordinates, so it saw the finger move only about half
  * as far (a 100 dp swipe moved the dock 52 dp). As on the web, the edge follows from the first
- * pixel, with no touch slop. [horizontal] drags along x; [onDrag] gets each move in pixels.
+ * pixel, with no touch slop. [horizontal] drags along x; [onDrag] gets each move in pixels;
+ * [cursor] is held until the drag ends.
  */
-fun Modifier.screenDrag(horizontal: Boolean, onStart: () -> Unit, onDrag: (Float) -> Unit, onEnd: () -> Unit): Modifier = composed {
+fun Modifier.screenDrag(
+    horizontal: Boolean,
+    cursor: PointerIcon,
+    onStart: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onEnd: () -> Unit,
+): Modifier = composed {
     val start by rememberUpdatedState(onStart)
     val move by rememberUpdatedState(onDrag)
     val end by rememberUpdatedState(onEnd)
+    val icon by rememberUpdatedState(cursor)
+    val held = LocalHeldCursor.current
     val placed = remember { PlacedAt() }
     onGloballyPositioned { placed.coordinates = it }.pointerInput(horizontal) {
         awaitEachGesture {
@@ -160,6 +194,7 @@ fun Modifier.screenDrag(horizontal: Boolean, onStart: () -> Unit, onDrag: (Float
             var last = placed.coordinates?.localToRoot(down.position) ?: return@awaitEachGesture
             down.consume()
             start()
+            held.icon = icon
             try {
                 // Every event of this finger up to and including its release, which can carry the
                 // last stretch of the move: `drag()` drops it (a 100 dp drag came out 95 dp).
@@ -174,6 +209,7 @@ fun Modifier.screenDrag(horizontal: Boolean, onStart: () -> Unit, onDrag: (Float
                     if (!change.pressed) break
                 }
             } finally {
+                held.icon = null
                 end()
             }
         }

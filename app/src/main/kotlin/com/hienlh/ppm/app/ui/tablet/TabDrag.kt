@@ -38,7 +38,6 @@ import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerType
@@ -62,6 +61,7 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.workspace.MAX_ROWS
@@ -391,17 +391,18 @@ internal fun DragImage(snapshot: GraphicsLayer, at: Offset, grab: Offset) {
 }
 
 /**
- * Android's drag pointer, the closed hand Chrome shows while a mouse drags the tab. Attached all
- * along: an icon that changes under the pointer shows at once, one attached under it waits for
- * the pointer to come in.
+ * Over everything, Android's drag pointer — the closed hand Chrome shows while a mouse drags the
+ * tab — or the cursor a resize has [held]. Attached all along: an icon that changes under the
+ * pointer shows at once, one attached under it waits for the pointer to come in.
  */
-fun Modifier.dragCursor(drag: TabDrag): Modifier = dragCursor(drag.tab != null && drag.byMouse)
+fun Modifier.dragCursor(drag: TabDrag, held: HeldCursor): Modifier {
+    val icon = if (drag.tab != null && drag.byMouse) WebCursor.Grabbing else held.icon
+    return pointerHoverIcon(icon ?: WebCursor.Default, overrideDescendants = icon != null)
+}
 
 /** The same over anything a mouse is [dragging]. */
 fun Modifier.dragCursor(dragging: Boolean): Modifier =
-    pointerHoverIcon(if (dragging) grabbing else PointerIcon.Default, overrideDescendants = dragging)
-
-private val grabbing = PointerIcon(android.view.PointerIcon.TYPE_GRABBING)
+    pointerHoverIcon(if (dragging) WebCursor.Grabbing else WebCursor.Default, overrideDescendants = dragging)
 
 /**
  * split-drop-overlay.tsx over a panel's content: the third a split would give the tab, washed in

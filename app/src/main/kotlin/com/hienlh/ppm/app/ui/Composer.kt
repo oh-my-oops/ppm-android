@@ -57,6 +57,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -82,6 +83,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.brightness
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.ppmClickable
@@ -138,6 +140,8 @@ fun MobileComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: C
             .clip(shape)
             .background(tokens.panel.color)
             .border(1.dp, tokens.border.color, shape)
+            // `cursor-text`: the I-beam over the whole box, its buttons back to the arrow.
+            .pointerHoverIcon(WebCursor.Text)
             // A tap on the box's padding goes to the text, as the web's container click does.
             .clickable(remember { MutableInteractionSource() }, indication = null) { focus.requestFocus() }
             .padding(1.dp),
@@ -264,6 +268,7 @@ private fun NeutralChip(icon: ProductIcon, label: String?, narrow: Boolean, labe
             .clip(CircleShape)
             .background(tokens.panel2.color)
             .border(1.dp, tokens.border.mix(tokens.borderSoft, lit).color, CircleShape)
+            .pointerHoverIcon(WebCursor.Default)
             .hoverable(source)
             .clickable(source, indication = null, onClick = onClick)
             .padding(horizontal = if (narrow) 7.dp else 9.dp, vertical = 4.dp),
@@ -304,6 +309,8 @@ private fun ModelChip(text: String, thinking: Boolean, disabled: Boolean, onClic
             .clip(CircleShape)
             .background(tokens.accentWash.color)
             .border(1.dp, tokens.accentWashBorder.color, CircleShape)
+            // `disabled:cursor-default`: the arrow either way.
+            .pointerHoverIcon(WebCursor.Default)
             .hoverable(source)
             .clickable(source, indication = null, enabled = !disabled, onClick = onClick)
             .padding(horizontal = 9.dp, vertical = 4.dp),
@@ -383,6 +390,8 @@ private fun SquareButton(
             .then(if (enabled) Modifier.ppmShadow(tokens.shadowFloat, shape) else Modifier)
             .clip(shape)
             .background(hoverFill.mix(fill, lit).color)
+            // Send's `disabled:cursor-not-allowed`.
+            .pointerHoverIcon(if (enabled) WebCursor.Default else WebCursor.NotAllowed)
             .hoverable(source)
             .clickable(source, indication = null, enabled = enabled, onClickLabel = label, onClick = onClick),
         contentAlignment = Alignment.Center,

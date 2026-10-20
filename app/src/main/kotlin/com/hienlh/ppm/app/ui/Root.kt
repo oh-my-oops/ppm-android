@@ -53,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
@@ -69,6 +70,7 @@ import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -244,7 +246,7 @@ private fun ErrorToast(message: String?, mobile: Boolean, narrow: Boolean, dark:
                     BasicText(shown.orEmpty(), Modifier.weight(1f), style = ppmText(13f, lineHeight = 19.5f).copy(color = tokens.text.color))
                 }
                 // `closeButton`: a 20 px circle on the top-left corner, sonner's own colours under a
-                // mouse (and a finger), faded over its 200 ms `ease`.
+                // mouse (and a finger), faded over its 200 ms `ease`, and its `cursor: pointer`.
                 val close = SonnerClose.of(dark, tokens.border, tokens.text)
                 val lit by animateFloatAsState(closeHover.lit, tween(200, easing = SONNER_EASE), label = "close")
                 Box(
@@ -254,6 +256,7 @@ private fun ErrorToast(message: String?, mobile: Boolean, narrow: Boolean, dark:
                         .clip(CircleShape)
                         .background(close.hoverFill.mix(tokens.panel.over(tokens.bgSolid), lit.toDouble()).color)
                         .border(1.dp, close.hoverBorder.mix(close.border, lit.toDouble()).color, CircleShape)
+                        .pointerHoverIcon(WebCursor.Pointer)
                         .ppmClickable(pressedColor = close.hoverFill.color, onClickLabel = "Close toast", source = closeHover.source, onClick = onDismiss),
                     contentAlignment = Alignment.Center,
                 ) { PpmIcon(ProductIcon.X, 12.dp, close.icon.color) }
