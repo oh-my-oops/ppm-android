@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -109,6 +110,9 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
             }
         }
     }
+
+    // Over the app (Add server, a password asked again), Back closes it rather than moving the tabs under it.
+    if (onCancel != null) BackHandler(onBack = onCancel)
 
     Box(Modifier.fillMaxSize().themeBackground(tokens.background)) {
         LoginBackdrop()

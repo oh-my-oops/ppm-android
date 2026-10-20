@@ -57,12 +57,21 @@ import com.hienlh.ppm.state.KeyBindings
 import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.PermissionMode
+import com.hienlh.ppm.state.workspace.DOCK_PANEL_ID
+import com.hienlh.ppm.state.workspace.NavEntry
+import com.hienlh.ppm.state.workspace.NavHistory
 import com.hienlh.ppm.state.workspace.NewTab
 import com.hienlh.ppm.state.workspace.SplitDirection
+import com.hienlh.ppm.state.workspace.UrlState
 import com.hienlh.ppm.state.workspace.WorkspaceCache
 import com.hienlh.ppm.state.workspace.WorkspaceState
 import com.hienlh.ppm.state.workspace.WorkspaceStore
 import com.hienlh.ppm.state.workspace.WorkspaceTab
+import com.hienlh.ppm.state.workspace.buildMetadataFromUrl
+import com.hienlh.ppm.state.workspace.buildTitleFromUrl
+import com.hienlh.ppm.state.workspace.parsePpmLink
+import com.hienlh.ppm.state.workspace.reopenedTab
+import com.hienlh.ppm.state.workspace.tabIdFromUrl
 import com.hienlh.ppm.state.workspace.tabSessionId
 import com.hienlh.ppm.state.workspace.workspaceRemote
 import kotlinx.coroutines.CancellationException
@@ -84,6 +93,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import okhttp3.HttpUrl
 
@@ -256,6 +267,16 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     var localUrl by mutableStateOf<String?>(null)
         private set
 
+    private val history = NavHistory()
+    private var historyServer: String? = null
+
+    /** Back has a tab to return to: the browser history `useUrlSync` builds, on this server. */
+    var canGoBack by mutableStateOf(false)
+        private set
+
+    /** A link that came before its server's projects were read, with that server's key: opened once they are. */
+    private var pendingLink: Pair<String, UrlState>? = null
+
     /** Settings' Add server was chosen: the connect screen shows over everything until it is done or cancelled. */
     var addingServer by mutableStateOf(false)
     var actionError by mutableStateOf<String?>(null)
@@ -348,6 +369,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** Called whenever the selected server changes, and again once its password is given. */
     private suspend fun openSelectedServer() {
+        if (serverKey != historyServer) {
+            historyServer = serverKey
+            history.clear()
+            canGoBack = false
+        }
         closeWorkspace()
         events?.stop()
         events = null
@@ -481,9 +507,15 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             }
             this.projects = projects
             projectsLoad = Load.Loaded
-            val last = debug?.project ?: prefs.get("lastProject.$serverKey")
+            // Only on the server it was for: that one may not have opened, and another opened since.
+            val link = pendingLink?.takeIf { it.first == serverKey }?.second
+            pendingLink = null
+            val linked = link?.projectName?.takeIf { name -> projects.any { it.name == name } }
+            link?.projectName?.takeIf { linked == null }?.let { actionError = noSuchProject(it) }
+            val last = linked ?: debug?.project ?: prefs.get("lastProject.$serverKey")
             when {
-                last != null && projects.any { it.name == last } -> openProject(last)
+                last != null && projects.any { it.name == last } ->
+                    openProject(last, then = link?.takeIf { linked != null }?.let { l -> { store: WorkspaceStore -> openFromLink(store, l, last) } })
                 projects.isNotEmpty() -> openProject(projects.first().name)
             }
         } catch (error: CancellationException) {
@@ -807,11 +839,16 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         }
     }
 
-    suspend fun openProject(name: String) {
+    /** Opens [name]; [then] runs on its tabs once they are shown, or at once when it is already open. */
+    suspend fun openProject(name: String, then: ((WorkspaceStore) -> Unit)? = null) {
         val api = api ?: return
-        if (name == selectedProject && sessionsLoad != Load.Idle) return
+        if (name == selectedProject && sessionsLoad != Load.Idle) {
+            then?.let(::withWorkspace)
+            return
+        }
         selectedProject = name
         waitingForWorkspace.clear()
+        then?.let { waitingForWorkspace += it }
         events?.project = name
         resetProjectState()
         if (debug == null) prefs.put("lastProject.$serverKey", name)
@@ -925,6 +962,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             store.state.collect { state ->
                 syncChats(state)
                 layout = state
+                recordNavigation(state)
             }
         }
     }
@@ -1071,6 +1109,112 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             )
             events?.markRead(session.id)
         }
+    }
+
+    /** `useUrlSync`'s pushState: the tab in front (the focused panel's, as the web's address follows it), in its project. */
+    private fun recordNavigation(state: WorkspaceState) {
+        val project = state.currentProject ?: return
+        val tabId = state.panels[state.focusedPanelId]?.activeTabId ?: return
+        history.record(NavEntry(project, tabId))
+        canGoBack = history.canGoBack
+    }
+
+    /**
+     * Android's Back, as the browser's: the tab shown before, in its own project (the web stays in
+     * the open one and opens the tab there), opened again from its address if it was closed since.
+     * An entry that cannot be shown any more is passed over.
+     */
+    fun goBack() {
+        while (true) {
+            val entry = history.back() ?: break
+            if (showEntry(entry)) break
+        }
+        canGoBack = history.canGoBack
+    }
+
+    private fun showEntry(entry: NavEntry): Boolean {
+        if (projects.none { it.name == entry.project }) return false
+        if (entry.project != selectedProject) {
+            scope.launch { openProject(entry.project) { store -> showTab(store, entry) } }
+            return true
+        }
+        return showTab(workspace ?: return false, entry)
+    }
+
+    private fun showTab(store: WorkspaceStore, entry: NavEntry): Boolean {
+        val state = store.state.value
+        val panel = (state.gridPanelIds + DOCK_PANEL_ID).mapNotNull { state.panels[it] }.firstOrNull { panel -> panel.tabs.any { it.id == entry.tabId } }
+        if (panel != null) {
+            activate(entry.tabId, panel.id)
+            return true
+        }
+        val tab = reopenedTab(entry.tabId, entry.project) ?: return false
+        if (tab.type == "settings") openSettings() else openNewTab(store, tab)
+        return true
+    }
+
+    /**
+     * A `ppm://<host>[:<port>]/project/{name}/{type}/{id}` link, opened as the web opens its own
+     * address at start: the link's server if it is not the open one, then the project, then the tab.
+     */
+    fun openLink(link: String) {
+        val parsed = parsePpmLink(link) ?: run {
+            actionError = "This is not a PPM link: $link"
+            return
+        }
+        val where = parsed.host + (parsed.port?.let { ":$it" } ?: "")
+        fun matches(url: HttpUrl) = url.host.equals(parsed.host, ignoreCase = true) && (parsed.port == null || parsed.port == url.port)
+        if (debug != null) {
+            if (!matches(debug.url)) {
+                actionError = "This link is for $where, not for the server open here."
+                return
+            }
+        } else {
+            val server = store.servers.value.firstOrNull { ApiClient.normalizedServerUrl(it.url)?.let(::matches) == true } ?: run {
+                actionError = "No server at $where is saved here. Add it in Settings, Servers."
+                return
+            }
+            if (store.selected?.id != server.id) {
+                pendingLink = server.id to parsed.state
+                store.select(server)
+                return
+            }
+        }
+        if (projectsLoad != Load.Loaded) {
+            pendingLink = serverKey to parsed.state
+            return
+        }
+        val name = parsed.state.projectName ?: return
+        if (projects.none { it.name == name }) {
+            actionError = noSuchProject(name)
+            return
+        }
+        scope.launch { openProject(name) { store -> openFromLink(store, parsed.state, name) } }
+    }
+
+    private fun noSuchProject(name: String) = "There is no project called \"$name\" on this server."
+
+    /** The link's tab, then its legacy `?openChat=`, as app.tsx opens them. */
+    private fun openFromLink(store: WorkspaceStore, link: UrlState, project: String) {
+        link.tabType?.let { openFromUrl(store, it, link.tabIdentifier, project) }
+        link.openChat?.let { openFromUrl(store, "chat", it, project) }
+    }
+
+    /** `autoOpenFromUrl`: the focused panel's tab with the address's id, or a new tab built from the address. */
+    private fun openFromUrl(store: WorkspaceStore, type: String, identifier: String?, project: String) {
+        // The web opens Settings as a window on the desktop layout; here it is a tab until windows come (E4).
+        if (type == "settings") return openSettings()
+        val state = store.state.value
+        val focused = state.panels[state.focusedPanelId]
+        val expected = tabIdFromUrl(type, identifier)
+        if (focused != null && focused.tabs.any { it.id == expected }) return activate(expected, focused.id)
+        val metadata = buildMetadataFromUrl(type, identifier, project) ?: return
+        openNewTab(store, NewTab(type, buildTitleFromUrl(type, identifier), projectId = project, metadata = metadata))
+    }
+
+    private fun openNewTab(store: WorkspaceStore, tab: NewTab) {
+        store.openTab(tab)
+        tab.metadata["sessionId"]?.jsonPrimitive?.contentOrNull?.let { events?.markRead(it) }
     }
 
     /** Shows a tab the user picked: its chat's unread clears even when it was marked by hand. */

@@ -2,6 +2,7 @@ package com.hienlh.ppm.app.ui
 
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
@@ -97,6 +98,11 @@ fun PpmRoot(model: AppModel) {
         view.keepScreenOn = keepAwake
         onDispose { view.keepScreenOn = false }
     }
+
+    // The browser's Back (`useUrlSync`): the tab shown before. Registered before the shells', so
+    // the drawer, a sheet or Settings' own pages close first; under the connection-lost overlay
+    // nothing moves, and Back leaves the app.
+    BackHandler(enabled = model.canGoBack && !model.connectionLost, onBack = model::goBack)
 
     // `useServerReload`, while the app is in front.
     val api = model.api
