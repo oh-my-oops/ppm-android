@@ -87,7 +87,9 @@ import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.ppmClickable
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.ProjectInfo
@@ -305,14 +307,21 @@ private fun Flyout(model: AppModel, drag: RowDrag, modifier: Modifier, onDismiss
         ) {
             for ((mode, label, icon) in PROJECT_SORTS) {
                 val on = model.projectSortMode == mode
-                val color = (if (on) tokens.accent else tokens.text3).color
+                // `hover:bg-surface-elevated hover:text-foreground` on the ones not picked.
+                val hover = rememberHover(enabled = !on)
+                val color = (if (on) tokens.accent else tokens.text.mix(tokens.text3, hover.lit.toDouble())).color
                 val pill = RoundedCornerShape(6.dp)
                 Row(
                     Modifier
                         .weight(1f)
                         .clip(pill)
                         .background(if (on) tokens.accent.opacity(0.12).color else Color.Transparent)
-                        .ppmClickable(pressedColor = Color.Transparent, onClickLabel = "Sort by ${label.lowercase()}") { model.pickProjectSort(mode) }
+                        .ppmClickable(
+                            pressedColor = Color.Transparent,
+                            hoverColor = if (on) Color.Transparent else tokens.panel2.color,
+                            onClickLabel = "Sort by ${label.lowercase()}",
+                            source = hover.source,
+                        ) { model.pickProjectSort(mode) }
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
@@ -359,9 +368,10 @@ private fun Flyout(model: AppModel, drag: RowDrag, modifier: Modifier, onDismiss
 }
 
 /**
- * A project (`rounded-lg`): on the accent's wash while it is the open one, else on
- * `surface-elevated` while highlighted (a mouse over it highlights it); its avatar, name and path
- * open it, and how long ago it was opened sits at the end. While dragged it fades to 40 %, and the
+ * A project (`rounded-lg`): on the accent's wash while it is the open one, else lit while
+ * highlighted (a mouse over it highlights it). The web lights it in `surface-elevated`, which is
+ * the flyout's own fill, so its highlight never shows; it is lit here in `surface-hover`, as the
+ * menus are. Its avatar, name and path open it, and how long ago it was opened sits at the end. While dragged it fades to 40 %, and the
  * row it would take the place of wears a 2 px accent ring.
  */
 @Composable
@@ -383,6 +393,7 @@ private fun ProjectRow(
     val active = project.name == model.selectedProject
     val snapshot = rememberGraphicsLayer()
     val hover by rememberUpdatedState(onHover)
+    val lit = colorsFade(highlighted)
     Row(
         Modifier
             .fillMaxWidth()
@@ -407,11 +418,7 @@ private fun ProjectRow(
                 drawLayer(snapshot)
             }
             .background(
-                when {
-                    active -> tokens.accent.opacity(0.12).color
-                    highlighted -> tokens.panel2.color
-                    else -> Color.Transparent
-                },
+                if (active) tokens.accent.opacity(0.12).color else tokens.surfaceHover.opacity(lit.toDouble()).color,
                 shape,
             )
             .pointerInput(Unit) {

@@ -51,6 +51,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ProjectTags
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionUnread
@@ -94,17 +95,19 @@ fun EmptyPanel(
                             }
                         }
                         if (onClosePanel != null) {
-                            // `px-4 py-3.5 rounded-md text-xs text-text-subtle`, an X before the words.
+                            // `px-4 py-3.5 rounded-md text-xs text-text-subtle hover:text-foreground`, an X before the words.
+                            val hover = rememberHover()
+                            val text = tokens.text.mix(tokens.text3, hover.lit.toDouble()).color
                             Row(
                                 Modifier
                                     .clip(RoundedCornerShape(8.dp))
-                                    .pressable(pressedColor = tokens.panel2.color, shape = RoundedCornerShape(8.dp), onClick = onClosePanel)
+                                    .pressable(pressedColor = tokens.panel2.color, shape = RoundedCornerShape(8.dp), source = hover.source, onClick = onClosePanel)
                                     .padding(horizontal = 16.dp, vertical = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                PpmIcon(ProductIcon.X, 14.dp, tokens.text3.color)
-                                BasicText("Close Panel", style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color))
+                                PpmIcon(ProductIcon.X, 14.dp, text)
+                                BasicText("Close Panel", style = ppmText(12f, lineHeight = 16f).copy(color = text))
                             }
                         }
                         val list = model.homeList
@@ -122,7 +125,7 @@ private fun Notice(text: String) {
     BasicText(text, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text2.color, textAlign = TextAlign.Center))
 }
 
-/** `px-2 py-3 rounded-md border bg-surface text-xs`, the icon at 20px over the label. */
+/** `px-2 py-3 rounded-md border bg-surface hover:bg-surface-elevated text-xs`, the icon at 20px over the label. */
 @Composable
 private fun QuickOpenTile(icon: ProductIcon, label: String, modifier: Modifier, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
@@ -132,8 +135,9 @@ private fun QuickOpenTile(icon: ProductIcon, label: String, modifier: Modifier, 
             .clip(shape)
             .background(tokens.panel.color)
             .border(1.dp, tokens.border.color, shape)
-            .pressable(pressedColor = tokens.panel2.color, shape = shape, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 12.dp),
+            .pressable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, shape = shape, onClick = onClick)
+            // A CSS border adds to the box; Compose draws it inside, so the padding takes it in.
+            .padding(horizontal = 9.dp, vertical = 13.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -177,18 +181,21 @@ private fun SessionListPanel(model: AppModel, list: HistoryList, onOpen: (Sessio
         if (recent.isNotEmpty()) {
             SessionGroup("Recent chats", recent, unread, model, onOpen, syncing = model.syncingSessions)
             if (allRecent.size > MAX_RECENT_SESSIONS) {
+                // `text-text-subtle hover:text-text-primary`.
+                val hover = rememberHover()
+                val text = tokens.text.mix(tokens.text3, hover.lit.toDouble()).color
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .pressable(pressedColor = Color.Transparent) { showAll = !showAll }
+                        .pressable(pressedColor = Color.Transparent, source = hover.source) { showAll = !showAll }
                         .padding(vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    PpmIcon(if (showAll) ProductIcon.ChevronUp else ProductIcon.ChevronDown, 12.dp, tokens.text3.color)
+                    PpmIcon(if (showAll) ProductIcon.ChevronUp else ProductIcon.ChevronDown, 12.dp, text)
                     BasicText(
                         if (showAll) "Show less" else "Show more (${allRecent.size - MAX_RECENT_SESSIONS})",
-                        style = ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text3.color),
+                        style = ppmText(11f, lineHeight = 16.5f).copy(color = text),
                     )
                 }
             }
@@ -212,7 +219,7 @@ private fun SessionGroup(
             BasicText(title, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color))
             if (syncing) PpmIcon(ProductIcon.Loader2, 10.dp, tokens.text3.color, Modifier.padding(start = 6.dp), spinning = true)
         }
-        Column(Modifier.fillMaxWidth().clip(shape).background(tokens.panel.color).border(1.dp, tokens.border.color, shape)) {
+        Column(Modifier.fillMaxWidth().clip(shape).background(tokens.panel.color).border(1.dp, tokens.border.color, shape).padding(1.dp)) {
             sessions.forEachIndexed { index, session ->
                 SessionRow(model, session, unread[session.id], last = index == sessions.lastIndex, onOpen = { onOpen(session) })
             }
@@ -222,7 +229,8 @@ private fun SessionGroup(
 
 /**
  * `px-3 py-2.5 gap-2.5`: provider, tag dot, title (semibold and tinted while unread), age, and the
- * pin — always shown on a touch screen, where nothing hovers. A long press opens the chat's
+ * pin — always shown, as Chrome on a touch screen never applies the `can-hover:` that hides it.
+ * A mouse lights the row (`hover:bg-surface-elevated`) and the pin. A long press opens the chat's
  * menu, without the rename and delete the web leaves out here.
  */
 @Composable
@@ -235,7 +243,7 @@ private fun SessionRow(model: AppModel, session: SessionInfo, unread: SessionUnr
         Row(
             Modifier
                 .fillMaxWidth()
-                .pressable(pressedColor = tokens.panel2.color, onLongClick = { menuAt = it }, onClick = onOpen)
+                .pressable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, onLongClick = { menuAt = it }, onClick = onOpen)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -250,20 +258,26 @@ private fun SessionRow(model: AppModel, session: SessionInfo, unread: SessionUnr
                 overflow = TextOverflow.Ellipsis,
             )
             session.updatedAt?.let { RelativeTime(it, ppmText(10f, lineHeight = 15f).copy(color = tokens.text3.color)) }
+            // `hover:text-primary/70` pinned, `hover:text-text-primary` not.
+            val pin = rememberHover()
             Box(
-                Modifier.size(20.dp).clip(RoundedCornerShape(4.dp)).pressable(pressedColor = tokens.panel2.color) {
+                Modifier.size(20.dp).clip(RoundedCornerShape(4.dp)).pressable(pressedColor = tokens.panel2.color, source = pin.source) {
                     model.scope.launch { model.togglePin(session) }
                 },
                 contentAlignment = Alignment.Center,
             ) {
-                PpmIcon(if (session.pinned) ProductIcon.PinOff else ProductIcon.Pin, 12.dp, if (session.pinned) tokens.accent.color else tokens.text3.color)
+                val tint = if (session.pinned) tokens.accent.opacity(0.7).mix(tokens.accent, pin.lit.toDouble()) else tokens.text.mix(tokens.text3, pin.lit.toDouble())
+                PpmIcon(if (session.pinned) ProductIcon.PinOff else ProductIcon.Pin, 12.dp, tint.color)
             }
         }
         if (!last) Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.opacity(0.5).color))
     }
 }
 
-/** `rounded-md border bg-surface` with the search icon inside on the left and a clear button on the right. */
+/**
+ * `rounded-md border bg-surface pl-8 pr-8` with the search icon inside on the left and, once there
+ * is text, a clear button on the right (`absolute right-2`).
+ */
 @Composable
 fun SearchBox(state: TextFieldState, placeholder: String, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
@@ -271,31 +285,43 @@ fun SearchBox(state: TextFieldState, placeholder: String, modifier: Modifier = M
     var focused by remember { mutableStateOf(false) }
     // `py-1.5 text-xs` outside the phone layout: 30 px with the border.
     val mobile = LocalPpmMobile.current
-    Row(
+    Box(
         modifier
             .fillMaxWidth()
             .heightIn(min = if (mobile) 34.dp else 30.dp)
             .clip(shape)
             .background(tokens.panel.color)
-            .border(1.dp, if (focused) tokens.accent.opacity(0.5).color else tokens.border.color, shape)
-            .padding(start = 10.dp, end = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .border(1.dp, if (focused) tokens.accent.opacity(0.5).color else tokens.border.color, shape),
+        contentAlignment = Alignment.CenterStart,
     ) {
-        PpmIcon(ProductIcon.Search, 14.dp, tokens.text3.color)
-        PpmTextField(
-            state,
-            placeholder,
-            Modifier.weight(1f).padding(vertical = if (mobile) 5.dp else 7.dp),
-            desktopStyle = ppmText(12f, lineHeight = 16f),
-            onFocusChanged = { focused = it },
-        )
+        Row(
+            Modifier.fillMaxWidth().padding(start = 10.dp, end = 32.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PpmIcon(ProductIcon.Search, 14.dp, tokens.text3.color)
+            PpmTextField(
+                state,
+                placeholder,
+                Modifier.weight(1f).padding(vertical = if (mobile) 5.dp else 7.dp),
+                desktopStyle = ppmText(12f, lineHeight = 16f),
+                onFocusChanged = { focused = it },
+            )
+        }
         if (state.text.isNotEmpty()) {
+            // The 14 px X 8 px in from the edge, as the web places it, in a 24 dp target;
+            // `text-text-subtle hover:text-text-primary`, at once.
+            val hover = rememberHover(instant = true)
             Box(
-                Modifier.size(24.dp).clip(RoundedCornerShape(4.dp)).pressable(pressedColor = tokens.panel2.color) { state.clearText() },
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 3.dp)
+                    .size(24.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .pressable(pressedColor = tokens.panel2.color, source = hover.source) { state.clearText() },
                 contentAlignment = Alignment.Center,
             ) {
-                PpmIcon(ProductIcon.X, 14.dp, tokens.text3.color)
+                PpmIcon(ProductIcon.X, 14.dp, tokens.text.mix(tokens.text3, hover.lit.toDouble()).color)
             }
         }
     }
@@ -319,7 +345,10 @@ fun TagChipBar(tags: ProjectTags, total: Int, selected: Int?, vertical: Dp = 6.d
     }
 }
 
-/** `rounded-md border px-2 py-1 text-[10px]`: All in the accent at 20% when on, a tag in its colour at 12.5%. */
+/**
+ * `rounded-md border px-2 py-1 text-[10px]`: All in the accent at 20% when on, a tag in its colour
+ * at 12.5%; one not picked lit under a mouse (`hover:bg-surface-elevated`).
+ */
 @Composable
 private fun TagChip(label: String, selected: Boolean, color: Rgba?, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
@@ -335,8 +364,9 @@ private fun TagChip(label: String, selected: Boolean, color: Rgba?, onClick: () 
             .clip(shape)
             .background(background.color)
             .border(1.dp, if (selected) tint.color else tokens.border.color, shape)
-            .pressable(pressedColor = tokens.panel2.color, shape = shape, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .pressable(pressedColor = tokens.panel2.color, hoverColor = if (selected) Color.Transparent else tokens.panel2.color, shape = shape, onClick = onClick)
+            // `px-2 py-1` past the border's own pixel.
+            .padding(horizontal = 9.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {

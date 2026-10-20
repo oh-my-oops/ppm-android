@@ -1,8 +1,5 @@
 package com.hienlh.ppm.app.ui.tablet
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -90,6 +87,7 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.SessionUnread
@@ -103,9 +101,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /** `TYPE_PRIORITY` in use-tab-overflow.ts: the most urgent unread wins an arrow's dot. */
 private val UNREAD_PRIORITY = mapOf("done" to 0, "question" to 1, "approval_request" to 2)
-
-/** Tailwind's `transition-colors`: 150 ms on `cubic-bezier(0.4, 0, 0.2, 1)`. */
-private val COLORS_FADE = tween<Float>(150, easing = FastOutSlowInEasing)
 
 /**
  * A panel's tab bar (tab-bar.tsx, default style): 41 px with its bottom border, the tabs scrolling
@@ -221,7 +216,7 @@ private fun AddTabButton(model: AppModel, panelId: String, modifier: Modifier) {
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val hovered by source.collectIsHoveredAsState()
-    val lit by animateFloatAsState(if (hovered) 1f else 0f, COLORS_FADE)
+    val lit = colorsFade(hovered)
     Box(
         modifier
             .width(40.dp)
@@ -353,8 +348,8 @@ private fun TabChip(
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val hovered by source.collectIsHoveredAsState()
-    val lit by animateFloatAsState(if (hovered && !active) 1f else 0f, COLORS_FADE)
-    val on by animateFloatAsState(if (active) 1f else 0f, COLORS_FADE)
+    val lit = colorsFade(hovered && !active)
+    val on = colorsFade(active)
     val color = tokens.accent.mix(tokens.text.mix(tokens.text2, lit.toDouble()), on.toDouble())
     val fill = tokens.panel2.mix(tokens.panel.opacity(0.6 * lit), on.toDouble())
     val chat = model.chat(tab.id)

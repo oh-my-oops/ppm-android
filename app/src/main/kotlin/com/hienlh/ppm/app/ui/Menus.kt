@@ -133,7 +133,7 @@ fun MenuItem(
             .fillMaxWidth()
             .clip(shape)
             .background(if (lit) highlight else Color.Transparent)
-            .ppmClickable(pressedColor = highlight, hoverColor = highlight, shape = shape, source = interactions, onClick = onClick)
+            .ppmClickable(pressedColor = highlight, hoverColor = highlight, fade = false, shape = shape, source = interactions, onClick = onClick)
             .padding(horizontal = 8.dp, vertical = vertical),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),

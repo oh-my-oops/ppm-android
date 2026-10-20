@@ -48,6 +48,7 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.ppmClickable
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.ResourceSample
 import kotlinx.coroutines.CancellationException
@@ -177,8 +178,9 @@ private fun GitCount(icon: ProductIcon, count: Int, text: TextStyle) {
 
 /**
  * The dock's toggle: its icon and the open project's dock tab count, in the accent while the dock
- * shows. The web's toggle opens a terminal in an empty dock, so until this app has terminals it
- * is offered only when there is something to show or hide.
+ * shows, and under a mouse `hover:bg-accent/15` (with the text lit while the dock is hidden). The
+ * web's toggle opens a terminal in an empty dock, so until this app has terminals it is offered
+ * only when there is something to show or hide.
  */
 @Composable
 private fun DockToggle(model: AppModel, text: TextStyle) {
@@ -186,13 +188,17 @@ private fun DockToggle(model: AppModel, text: TextStyle) {
     val visible = model.layout?.dock?.visible == true
     val count = model.dockTabs.size
     if (count == 0 && !visible) return
-    val color = if (visible) tokens.accent else tokens.text3
+    val hover = rememberHover()
+    val color = if (visible) tokens.accent else tokens.text.mix(tokens.text3, hover.lit.toDouble())
     Row(
         Modifier
             .clip(RoundedCornerShape(6.dp))
-            .ppmClickable(pressedColor = tokens.panel2.opacity(0.15).color, onClickLabel = if (visible) "Hide panel" else "Show panel") {
-                model.setDockVisible(!visible)
-            }
+            .ppmClickable(
+                pressedColor = tokens.panel2.opacity(0.15).color,
+                hoverColor = tokens.panel2.opacity(0.15).color,
+                onClickLabel = if (visible) "Hide panel" else "Show panel",
+                source = hover.source,
+            ) { model.setDockVisible(!visible) }
             .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -255,24 +261,34 @@ private fun Resources(api: ApiClient, text: TextStyle) {
     }
 }
 
-/** The palette and the theme's name (only the palette on a narrow bar); opens the six themes, for every device. */
+/**
+ * The palette and the theme's name (only the palette on a narrow bar), lit under a mouse
+ * (`hover:bg-accent/40 hover:text-text-primary`); opens the six themes, for every device.
+ */
 @Composable
 private fun ThemePicker(model: AppModel, text: TextStyle, compact: Boolean) {
     val tokens = LocalPpmTokens.current
     var open by remember { mutableStateOf(false) }
     val active = model.theme
+    val hover = rememberHover()
+    val lit = tokens.text.mix(tokens.text3, hover.lit.toDouble())
     Box {
         Row(
             Modifier
                 .clip(RoundedCornerShape(6.dp))
-                .ppmClickable(pressedColor = tokens.panel2.opacity(0.4).color, onClickLabel = "Theme") { open = true }
+                .ppmClickable(
+                    pressedColor = tokens.panel2.opacity(0.4).color,
+                    hoverColor = tokens.panel2.opacity(0.4).color,
+                    onClickLabel = "Theme",
+                    source = hover.source,
+                ) { open = true }
                 .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            PpmIcon(ProductIcon.Palette, 11.dp, (if (open) tokens.text else tokens.text3).color)
+            PpmIcon(ProductIcon.Palette, 11.dp, (if (open) tokens.text else lit).color)
             if (!compact) {
-                BasicText(active.name, Modifier.widthIn(max = 90.dp), style = text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                BasicText(active.name, Modifier.widthIn(max = 90.dp), style = text.copy(color = lit.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         if (open) {

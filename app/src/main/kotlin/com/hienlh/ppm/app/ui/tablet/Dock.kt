@@ -45,6 +45,7 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.ppmClickable
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.workspace.DOCK_PANEL_ID
 import com.hienlh.ppm.state.workspace.WorkspaceState
@@ -126,7 +127,7 @@ private fun DockHeader(
                             .height(24.dp)
                             .clip(shape)
                             .border(1.dp, tokens.border.color, shape)
-                            .ppmClickable(pressedColor = tokens.panel2.color) { open = true }
+                            .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, fade = false) { open = true }
                             .padding(horizontal = 8.dp),
                         contentAlignment = Alignment.Center,
                     ) { BasicText("+${overflow.size}", style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color)) }
@@ -153,7 +154,10 @@ private fun DockHeader(
     }
 }
 
-/** `h-6 rounded-full border`: the active pill in the accent on its wash, a label only where there is room. */
+/**
+ * `h-6 rounded-full border`: the active pill in the accent on its wash, a label only where there is
+ * room; another lit under a mouse (`hover:bg-surface-elevated`), its close button's X too.
+ */
 @Composable
 private fun DockPill(model: AppModel, tab: com.hienlh.ppm.state.workspace.WorkspaceTab, active: Boolean, showLabel: Boolean) {
     val tokens = LocalPpmTokens.current
@@ -165,7 +169,7 @@ private fun DockPill(model: AppModel, tab: com.hienlh.ppm.state.workspace.Worksp
             .clip(shape)
             .background(if (active) tokens.accent.opacity(0.1).color else Color.Transparent)
             .border(1.dp, (if (active) tokens.accent else tokens.border).color, shape)
-            .ppmClickable(pressedColor = tokens.panel2.color) { model.activate(tab.id, DOCK_PANEL_ID) }
+            .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = if (active) Color.Transparent else tokens.panel2.color) { model.activate(tab.id, DOCK_PANEL_ID) }
             // `px-2.5`, `px-1.5` without a label; the close button's `-mr-1` takes 4 px back.
             .padding(start = if (showLabel) 10.dp else 6.dp, end = if (!showLabel) 6.dp else if (tab.closable) 6.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -181,13 +185,20 @@ private fun DockPill(model: AppModel, tab: com.hienlh.ppm.state.workspace.Worksp
                 overflow = TextOverflow.Ellipsis,
             )
             if (tab.closable) {
+                val hover = rememberHover(instant = true)
                 Box(
                     Modifier
                         .size(16.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "Close ${tab.title}") { model.closeTab(tab.id, DOCK_PANEL_ID) },
+                        .ppmClickable(
+                            pressedColor = tokens.panel2.color,
+                            hoverColor = tokens.panel2.color,
+                            fade = false,
+                            onClickLabel = "Close ${tab.title}",
+                            source = hover.source,
+                        ) { model.closeTab(tab.id, DOCK_PANEL_ID) },
                     contentAlignment = Alignment.Center,
-                ) { PpmIcon(ProductIcon.X, 12.dp, color.color) }
+                ) { PpmIcon(ProductIcon.X, 12.dp, tokens.text.mix(color, hover.lit.toDouble()).color) }
             }
         }
     }
@@ -199,18 +210,20 @@ private fun PositionMenu(model: AppModel) {
     val tokens = LocalPpmTokens.current
     var open by remember { mutableStateOf(false) }
     val current = POSITIONS.firstOrNull { it.first == model.dockPosition } ?: POSITIONS[1]
+    val hover = rememberHover(instant = true)
+    val tint = tokens.text.mix(tokens.text3, hover.lit.toDouble()).color
     Box {
         Row(
             Modifier
                 .height(24.dp)
                 .clip(RoundedCornerShape(4.dp))
-                .ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "Panel position") { open = true }
+                .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, fade = false, onClickLabel = "Panel position", source = hover.source) { open = true }
                 .padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            PpmIcon(current.third, 14.dp, tokens.text3.color)
-            PpmIcon(ProductIcon.ChevronDown, 10.dp, tokens.text3.color)
+            PpmIcon(current.third, 14.dp, tint)
+            PpmIcon(ProductIcon.ChevronDown, 10.dp, tint)
         }
         if (open) {
             DropdownBelowEnd(onDismiss = { open = false }) {
@@ -241,12 +254,16 @@ private fun PositionMenu(model: AppModel) {
     }
 }
 
-/** `size-7 rounded text-text-subtle`, a 14 px icon. */
+/** `size-7 rounded text-text-subtle hover:bg-surface-elevated hover:text-foreground`, a 14 px icon. */
 @Composable
 private fun HeaderButton(icon: ProductIcon, label: String, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
+    val hover = rememberHover(instant = true)
     Box(
-        Modifier.size(28.dp).clip(RoundedCornerShape(4.dp)).ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = label, onClick = onClick),
+        Modifier
+            .size(28.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, fade = false, onClickLabel = label, source = hover.source, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { PpmIcon(icon, 14.dp, tokens.text3.color) }
+    ) { PpmIcon(icon, 14.dp, tokens.text.mix(tokens.text3, hover.lit.toDouble()).color) }
 }

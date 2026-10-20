@@ -29,6 +29,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -41,6 +43,7 @@ import com.hienlh.ppm.app.ui.windows.WindowLayer
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.colorsFade
 
 /**
  * The desktop layout (app.tsx from `md` up): the sidebar, then the working area — the panel grid
@@ -87,15 +90,21 @@ fun Modifier.edge(edge: Edge, color: Color): Modifier = drawBehind {
 
 /**
  * The 1 px line between two resizable panes (panel-layout.tsx's `ResizeHandle`): `bg-border/30`,
- * the accent while held, a grip in its middle (always drawn: a touch screen has no hover). It
- * takes one pixel of the layout but a 16 dp strip of touch, laid over both neighbours.
- * [vertical] is a line between side-by-side panes; [onDrag] gets each move in pixels.
+ * the accent at 30% under a mouse and at 50% while held, a grip in its middle (always drawn: a
+ * touch screen has no hover). It takes one pixel of the layout but a 16 dp strip of touch, laid
+ * over both neighbours; only the pixel itself lights, as CSS's `:hover` covers the line and not
+ * the grab area around it. [vertical] is a line between side-by-side panes; [onDrag] gets each
+ * move in pixels.
  */
 @Composable
 fun SplitHandle(vertical: Boolean, onDrag: (Float) -> Unit, onDragEnd: () -> Unit = {}) {
     val tokens = LocalPpmTokens.current
     var held by remember { mutableStateOf(false) }
-    val line = if (held) tokens.accent.opacity(0.5) else tokens.border.opacity(0.3)
+    var onLine by remember { mutableStateOf(false) }
+    // `transition-colors duration-150` between the three.
+    val lit = colorsFade(onLine || held).toDouble()
+    val press = colorsFade(held).toDouble()
+    val line = tokens.accent.opacity(0.5).mix(tokens.accent.opacity(0.3).mix(tokens.border.opacity(0.3), lit), press)
     Box(
         (if (vertical) Modifier.width(1.dp).fillMaxHeight() else Modifier.height(1.dp).fillMaxWidth())
             .zIndex(1f)
@@ -104,6 +113,20 @@ fun SplitHandle(vertical: Boolean, onDrag: (Float) -> Unit, onDragEnd: () -> Uni
     ) {
         Box(
             (if (vertical) Modifier.fillMaxHeight().requiredWidth(16.dp) else Modifier.fillMaxWidth().requiredHeight(16.dp))
+                .pointerInput(vertical) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull() ?: continue
+                            // A mouse moving with no button down; a finger never hovers.
+                            if (change.pressed) continue
+                            val at = if (vertical) change.position.x else change.position.y
+                            val middle = (if (vertical) size.width else size.height) / 2f
+                            val half = 0.5.dp.toPx()
+                            onLine = event.type != PointerEventType.Exit && at >= middle - half && at < middle + half
+                        }
+                    }
+                }
                 .screenDrag(
                     horizontal = vertical,
                     onStart = { held = true },

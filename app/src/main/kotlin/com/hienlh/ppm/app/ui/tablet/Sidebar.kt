@@ -1,6 +1,7 @@
 package com.hienlh.ppm.app.ui.tablet
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,6 +59,7 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.ppmClickable
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.SessionUnread
@@ -82,7 +84,7 @@ fun Sidebar(model: AppModel) {
                     .fillMaxWidth()
                     .height(BAR_HEIGHT)
                     .edge(Edge.Bottom, tokens.border.color)
-                    .ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "Expand sidebar") { model.toggleSidebar() },
+                    .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, onClickLabel = "Expand sidebar") { model.toggleSidebar() },
                 contentAlignment = Alignment.Center,
             ) { PpmIcon(ProductIcon.PanelLeftOpen, 16.dp, tokens.text2.color) }
             NavSectionRail(model, Modifier.weight(1f))
@@ -116,7 +118,7 @@ fun Sidebar(model: AppModel) {
     flyoutAt?.let { ProjectFlyout(model, it, shellBottom) { flyoutAt = null } }
 }
 
-/** `w-[52px] border-r`, the wordmark that folds the sidebar: `text-sm font-extrabold text-primary tracking-tight`. */
+/** `w-[52px] border-r hover:bg-surface-elevated`, the wordmark that folds the sidebar: `text-sm font-extrabold text-primary tracking-tight`. */
 @Composable
 private fun Wordmark(model: AppModel) {
     val tokens = LocalPpmTokens.current
@@ -125,7 +127,7 @@ private fun Wordmark(model: AppModel) {
             .width(RAIL_WIDTH)
             .fillMaxHeight()
             .edge(Edge.Right, tokens.border.color)
-            .ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "Toggle sidebar") { model.toggleSidebar() },
+            .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, onClickLabel = "Toggle sidebar") { model.toggleSidebar() },
         contentAlignment = Alignment.Center,
     ) {
         BasicText("PPM", style = ppmText(14f, FontWeight.ExtraBold, lineHeight = 14f).copy(color = tokens.accent.color, letterSpacing = (-0.35).sp))
@@ -134,7 +136,7 @@ private fun Wordmark(model: AppModel) {
 
 /**
  * The project switcher's button: the project's squircle, its name over its path, and the
- * up-down chevrons (`h-8 px-2 rounded-lg gap-[9px]`, lit while its list is open).
+ * up-down chevrons (`h-8 px-2 rounded-lg gap-[9px]`, lit while its list is open or a mouse is on it).
  */
 @Composable
 private fun ProjectSwitcherButton(model: AppModel, open: Boolean, modifier: Modifier, onClick: () -> Unit) {
@@ -148,7 +150,7 @@ private fun ProjectSwitcherButton(model: AppModel, open: Boolean, modifier: Modi
             .clip(shape)
             .background(if (open) tokens.panel2.color else Color.Transparent)
             .border(1.dp, if (open) tokens.border.color else Color.Transparent, shape)
-            .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, onClickLabel = "Switch project", onClick = onClick)
+            .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, shape = shape, onClickLabel = "Switch project", onClick = onClick)
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -201,12 +203,16 @@ internal fun SwitcherAvatar(model: AppModel, project: ProjectInfo, size: Dp, unr
     }
 }
 
-/** The sidebar's right edge (`absolute right-0 w-1 cursor-col-resize`), wider to the finger than to the eye. */
+/**
+ * The sidebar's right edge (`absolute right-0 w-1 cursor-col-resize`), wider to the finger than to
+ * the eye: the accent at 30 % under a mouse (`hover:bg-primary/30`), 50 % while held.
+ */
 @Composable
 private fun ResizeHandle(model: AppModel, modifier: Modifier) {
     val tokens = LocalPpmTokens.current
     val density = LocalDensity.current.density
     var held by remember { mutableStateOf(false) }
+    val hover = rememberHover()
     // The width the drag has reached, in pixels; the sidebar follows it whole dp by whole dp.
     var reached by remember { mutableFloatStateOf(0f) }
     Box(
@@ -229,7 +235,14 @@ private fun ResizeHandle(model: AppModel, modifier: Modifier) {
                 },
             ),
     ) {
-        if (held) Box(Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(4.dp).background(tokens.accent.opacity(0.5).color))
+        Box(
+            Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(4.dp)
+                .hoverable(hover.source)
+                .background(tokens.accent.opacity(if (held) 0.5 else 0.3 * hover.lit).color),
+        )
     }
 }
 
@@ -285,12 +298,14 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
 
 /**
  * A section (`size-[38px] rounded-[9px]`): the open one on the accent wash, the accent's 2 px bar
- * inset along its left edge and bending with its corners.
+ * inset along its left edge and bending with its corners; another lit under a mouse
+ * (`hover:bg-surface-elevated hover:text-foreground`).
  */
 @Composable
 private fun NavItem(icon: ProductIcon, label: String, active: Boolean, badge: Int, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(9.dp)
+    val hover = rememberHover(enabled = !active)
     Box(
         Modifier
             .size(38.dp)
@@ -309,10 +324,17 @@ private fun NavItem(icon: ProductIcon, label: String, active: Boolean, badge: In
                     Modifier
                 },
             )
-            .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, onClickLabel = label, onClick = onClick),
+            .ppmClickable(
+                pressedColor = tokens.panel2.color,
+                hoverColor = if (active) Color.Transparent else tokens.panel2.color,
+                shape = shape,
+                onClickLabel = label,
+                source = hover.source,
+                onClick = onClick,
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        PpmIcon(icon, 18.dp, (if (active) tokens.accent else tokens.text3).color)
+        PpmIcon(icon, 18.dp, (if (active) tokens.accent else tokens.text.mix(tokens.text3, hover.lit.toDouble())).color)
         if (badge > 0) {
             // `absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full bg-primary text-[10px] font-medium`.
             Box(
@@ -335,15 +357,19 @@ private fun NavItem(icon: ProductIcon, label: String, active: Boolean, badge: In
     }
 }
 
-/** A footer utility (`size-8 rounded-[7px]`, a 16 px icon in the subtle colour). */
+/** A footer utility (`size-8 rounded-[7px]`, a 16 px icon in the subtle colour, lit as a section is). */
 @Composable
 private fun FooterUtil(icon: ProductIcon, label: String, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(7.dp)
+    val hover = rememberHover()
     Box(
-        Modifier.size(32.dp).clip(shape).ppmClickable(pressedColor = tokens.panel2.color, shape = shape, onClickLabel = label, onClick = onClick),
+        Modifier
+            .size(32.dp)
+            .clip(shape)
+            .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, shape = shape, onClickLabel = label, source = hover.source, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { PpmIcon(icon, 16.dp, tokens.text3.color) }
+    ) { PpmIcon(icon, 16.dp, tokens.text.mix(tokens.text3, hover.lit.toDouble()).color) }
 }
 
 /** The rail's width, and the top bar's height, which the tab bars share. */

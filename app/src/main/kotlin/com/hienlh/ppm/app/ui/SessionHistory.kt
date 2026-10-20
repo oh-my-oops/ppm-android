@@ -51,6 +51,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ppmClickable
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.SessionInfo
@@ -114,9 +115,9 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
                 PpmIcon(ProductIcon.Search, 14.dp, tokens.text3.color)
                 PpmTextField(query, "Filter sessions…", Modifier.weight(1f), desktopStyle = ppmText(12f, lineHeight = 16f), onFocusChanged = { focused = it })
             }
-            SquareIconButton(ProductIcon.CalendarX2, enabled = !model.deletingOld) { model.askDeleteOld = true }
+            SquareIconButton(ProductIcon.CalendarX2, tokens.error, enabled = !model.deletingOld) { model.askDeleteOld = true }
             var refreshing by remember { mutableStateOf(false) }
-            SquareIconButton(ProductIcon.RefreshCw, spinning = refreshing || state.loading, enabled = !refreshing) {
+            SquareIconButton(ProductIcon.RefreshCw, tokens.text, spinning = refreshing || state.loading, enabled = !refreshing) {
                 scope.launch {
                     refreshing = true
                     model.refresh(list)
@@ -165,18 +166,21 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
                 }
                 if (state.hasMore(model.hasMoreSessions)) {
                     item(key = "more") {
+                        // `hover:text-text-secondary hover:bg-surface-elevated`.
+                        val hover = rememberHover(enabled = !state.loadingMore)
+                        val text = tokens.text2.mix(tokens.text3, hover.lit.toDouble()).color
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .ppmClickable(enabled = !state.loadingMore, pressedColor = tokens.panel2.color) {
+                                .ppmClickable(enabled = !state.loadingMore, pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, source = hover.source) {
                                     scope.launch { list.loadMore(model.sessions, model.hasMoreSessions) }
                                 }
                                 .padding(vertical = 6.dp),
                             horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (state.loadingMore) PpmIcon(ProductIcon.Loader2, 12.dp, tokens.text3.color, spinning = true)
-                            BasicText(if (state.loadingMore) "Loading..." else "Load more", style = ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text3.color))
+                            if (state.loadingMore) PpmIcon(ProductIcon.Loader2, 12.dp, text, spinning = true)
+                            BasicText(if (state.loadingMore) "Loading..." else "Load more", style = ppmText(11f, lineHeight = 16.5f).copy(color = text))
                         }
                     }
                 }
@@ -222,23 +226,30 @@ private fun SyncIndicator(syncing: Boolean, error: String?) {
     }
 }
 
-/** `flex size-6 items-center justify-center rounded`, a 14 px icon in the subtle colour. */
+/**
+ * `flex size-6 items-center justify-center rounded`, a 14 px icon in the subtle colour; under a
+ * mouse `hover:bg-surface-elevated` and the icon in [hoverTint], at once.
+ */
 @Composable
-private fun SquareIconButton(icon: ProductIcon, spinning: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+private fun SquareIconButton(icon: ProductIcon, hoverTint: Rgba, spinning: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
+    val hover = rememberHover(enabled, instant = true)
     Box(
         Modifier
             .alpha(if (enabled) 1f else 0.5f)
             .size(24.dp)
             .clip(RoundedCornerShape(4.dp))
-            .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, onClick = onClick),
+            .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, fade = false, source = hover.source, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        PpmIcon(icon, 14.dp, tokens.text3.color, spinning = spinning)
+        PpmIcon(icon, 14.dp, hoverTint.mix(tokens.text3, hover.lit.toDouble()).color, spinning = spinning)
     }
 }
 
-/** `rounded-full border px-2 py-0.5 text-[11px]`: All in the accent, a tag in its colour at `20` hex alpha. */
+/**
+ * `rounded-full border px-2 py-0.5 text-[11px]`: All in the accent, a tag in its colour at `20`
+ * hex alpha; one not picked lit under a mouse (`hover:bg-surface-elevated`).
+ */
 @Composable
 private fun PillChip(label: String, selected: Boolean, color: Rgba?, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
@@ -262,7 +273,12 @@ private fun PillChip(label: String, selected: Boolean, color: Rgba?, onClick: ()
             .clip(CircleShape)
             .background(fill)
             .border(1.dp, border.color, CircleShape)
-            .ppmClickable(pressedColor = tokens.panel2.color, shape = CircleShape, onClick = onClick)
+            .ppmClickable(
+                pressedColor = tokens.panel2.color,
+                hoverColor = if (selected) Color.Transparent else tokens.panel2.color,
+                shape = CircleShape,
+                onClick = onClick,
+            )
             // The padding plus the 1 px border, which CSS counts into the box and `border()` does not.
             .padding(horizontal = 9.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -275,7 +291,8 @@ private fun PillChip(label: String, selected: Boolean, color: Rgba?, onClick: ()
 
 /**
  * `px-2 py-1.5 gap-2`: provider, tag dot, the title at 13 px over its age, then pin, rename and
- * delete. Unread: tinted by what happened last and in semibold.
+ * delete. Unread: tinted by what happened last and in semibold. A mouse over it lights it in
+ * `surface-elevated`, over the tint too, as `hover:` outranks the tint's class.
  */
 @Composable
 private fun SidebarSessionRow(model: AppModel, session: SessionInfo, unreadType: String?, isUnread: Boolean, open: () -> Unit) {
@@ -289,7 +306,7 @@ private fun SidebarSessionRow(model: AppModel, session: SessionInfo, unreadType:
         Row(
             Modifier
                 .fillMaxWidth()
-                .pressable(pressedColor = tokens.panel2.color, enabled = !renaming, onLongClick = { menuAt = it }, onClick = open)
+                .pressable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, enabled = !renaming, onLongClick = { menuAt = it }, onClick = open)
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -312,13 +329,15 @@ private fun SidebarSessionRow(model: AppModel, session: SessionInfo, unreadType:
                     }
                     session.updatedAt?.let { RelativeTime(it, ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text3.color)) }
                 }
-                HistoryIcon(if (session.pinned) ProductIcon.PinOff else ProductIcon.Pin, if (session.pinned) tokens.accent else tokens.text3) {
-                    model.scope.launch { model.togglePin(session) }
+                if (session.pinned) {
+                    HistoryIcon(ProductIcon.PinOff, tokens.accent, tokens.accent.opacity(0.7)) { model.scope.launch { model.togglePin(session) } }
+                } else {
+                    HistoryIcon(ProductIcon.Pin, tokens.text3, tokens.text2) { model.scope.launch { model.togglePin(session) } }
                 }
                 // Rename and delete share one span, so no gap between them.
                 Row {
-                    HistoryIcon(ProductIcon.Pencil, tokens.text3) { renaming = true }
-                    HistoryIcon(ProductIcon.Trash2, tokens.text3) { model.confirmDeleteSession = session }
+                    HistoryIcon(ProductIcon.Pencil, tokens.text3, tokens.text2) { renaming = true }
+                    HistoryIcon(ProductIcon.Trash2, tokens.text3, tokens.error, tokens.error.opacity(0.2).color) { model.confirmDeleteSession = session }
                 }
             }
         }
@@ -328,11 +347,18 @@ private fun SidebarSessionRow(model: AppModel, session: SessionInfo, unreadType:
     }
 }
 
+/** `p-0.5 rounded` with a 12 px icon, in [hoverTint] under a mouse, on [hoverFill] where the web lights one. */
 @Composable
-private fun HistoryIcon(icon: ProductIcon, tint: Rgba, onClick: () -> Unit) {
+private fun HistoryIcon(icon: ProductIcon, tint: Rgba, hoverTint: Rgba, hoverFill: Color = Color.Transparent, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
-    Box(Modifier.clip(RoundedCornerShape(4.dp)).ppmClickable(pressedColor = tokens.panel2.color, onClick = onClick).padding(2.dp)) {
-        PpmIcon(icon, 12.dp, tint.color)
+    val hover = rememberHover()
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = hoverFill, source = hover.source, onClick = onClick)
+            .padding(2.dp),
+    ) {
+        PpmIcon(icon, 12.dp, hoverTint.mix(tint, hover.lit.toDouble()).color)
     }
 }
 
@@ -375,7 +401,7 @@ private fun SearchResults(model: AppModel, page: com.hienlh.ppm.protocol.ChatSea
 private fun SearchHitRow(hit: ChatSearchHit, open: () -> Unit) {
     val tokens = LocalPpmTokens.current
     Row(
-        Modifier.fillMaxWidth().ppmClickable(pressedColor = tokens.panel2.color, onClick = open).padding(horizontal = 8.dp, vertical = 6.dp),
+        Modifier.fillMaxWidth().ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, onClick = open).padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

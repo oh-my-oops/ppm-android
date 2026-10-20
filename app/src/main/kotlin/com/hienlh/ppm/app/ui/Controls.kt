@@ -82,6 +82,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.tracksTextFocus
+import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -105,6 +106,7 @@ import kotlinx.coroutines.launch
 fun Modifier.pressable(
     pressedColor: Color = LocalPpmTokens.current.surfaceHover.color,
     hoverColor: Color = Color.Transparent,
+    fade: Boolean = true,
     shape: Shape = RectangleShape,
     enabled: Boolean = true,
     source: MutableInteractionSource? = null,
@@ -118,11 +120,16 @@ fun Modifier.pressable(
     val haptics = LocalHapticFeedback.current
     val down = remember { PressPoint() }
     val menu by rememberUpdatedState(onLongClick)
+    val on = hovered && enabled
+    val lit = when {
+        hoverColor.alpha == 0f -> 0f
+        fade -> colorsFade(on)
+        else -> if (on) 1f else 0f
+    }
     val fill = when {
         !enabled -> Color.Transparent
         pressed -> pressedColor
-        hovered -> hoverColor
-        else -> Color.Transparent
+        else -> hoverColor.copy(alpha = hoverColor.alpha * lit)
     }
     return background(fill, shape)
         .hoverable(interactions, enabled)
