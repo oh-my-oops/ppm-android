@@ -13,6 +13,8 @@ import androidx.compose.ui.unit.sp
 /**
  * The web's two typefaces: Geist for the interface, Monaspace Argon for code and metadata. Both
  * ship inside the app (`res/font`, OFL). A weight the family lacks is matched as CSS matches it.
+ * Geist carries one glyph its release lacks, an empty U+200B (`scripts/add-zero-width-space.py`),
+ * so the line breaks the app writes into a URL stay in Geist's run and keep its kerning.
  */
 object PpmFonts {
     val sans = FontFamily(
