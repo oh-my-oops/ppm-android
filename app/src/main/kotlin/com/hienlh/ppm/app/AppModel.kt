@@ -58,6 +58,7 @@ import com.hienlh.ppm.state.KeyBindings
 import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.PermissionMode
+import com.hienlh.ppm.state.windows.MAX_WINDOWS
 import com.hienlh.ppm.state.windows.WindowKind
 import com.hienlh.ppm.state.windows.WindowStore
 import com.hienlh.ppm.state.windows.WindowsState
@@ -73,6 +74,7 @@ import com.hienlh.ppm.state.workspace.WorkspaceStore
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.state.workspace.buildMetadataFromUrl
 import com.hienlh.ppm.state.workspace.buildTitleFromUrl
+import com.hienlh.ppm.state.workspace.isWindowPanelId
 import com.hienlh.ppm.state.workspace.parsePpmLink
 import com.hienlh.ppm.state.workspace.reopenedTab
 import com.hienlh.ppm.state.workspace.tabIdFromUrl
@@ -180,6 +182,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** The first project of a server reads the server's copy of its tabs even when this device has one, as a page load does. */
     private var hydratedOnce = false
+
+    /** The project and layout the window panels were last mended for (`reconcileRunKey`). */
+    private var reconciledFor: String? = null
 
     /** The layout as drawn: the store's state, mirrored where Compose sees it. */
     var layout by mutableStateOf<WorkspaceState?>(null)
@@ -999,12 +1004,19 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         workspace = store
         windows = windowStore
         hydratedOnce = false
+        reconciledFor = null
         workspaceJob = scope.launch {
-            launch { windowStore.state.collect { windowState = it } }
+            launch {
+                windowStore.state.collect {
+                    windowState = it
+                    reconcileWindowPanels()
+                }
+            }
             store.state.collect { state ->
                 syncChats(state)
                 layout = state
                 recordNavigation(state)
+                reconcileWindowPanels()
             }
         }
     }
@@ -1060,11 +1072,33 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         }
     }
 
-    /** Follows the window's width; a wider window shows every grid panel, so their chats connect. */
+    /**
+     * Follows the window's width; a wider window shows every grid panel, so their chats connect.
+     * Narrowed past the desktop layout, the floating windows go, and a detached tab comes back
+     * to the grid rather than wait in a window nothing shows (as the web's layer unmounting does).
+     */
     fun setWindowWide(value: Boolean) {
         if (wide == value) return
         wide = value
+        if (!value) workspace?.redockAllWindows()
         workspace?.state?.value?.let(::syncChats)
+        reconcileWindowPanels()
+    }
+
+    /**
+     * use-window-panel-reconcile.ts: detached tabs and their windows are saved apart, so a start
+     * can bring back one without the other. Once per project and layout, the two are mended —
+     * on a tablet after the windows are back (else every panel looks orphaned), on a phone at
+     * once, where no window shows and every detached tab comes home.
+     */
+    private fun reconcileWindowPanels() {
+        val store = workspace ?: return
+        val project = store.state.value.currentProject ?: return
+        if (wide && !windowState.restored) return
+        val key = "$project|${!wide}"
+        if (reconciledFor == key) return
+        reconciledFor = key
+        store.reconcileWindowPanels()
     }
 
     /**
@@ -1094,8 +1128,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         val active = state.activeGridTab
         val api = api
         if (api != null) {
-            // A phone shows the focused panel's tab; the desktop layout shows each grid panel's.
-            val shown = if (wide) state.gridPanelIds.mapNotNull { state.panels[it]?.activeTab } else listOfNotNull(active)
+            // A phone shows the focused panel's tab; the desktop layout shows each grid panel's,
+            // and each floating window's (one in the dock too: its tab stays live, as on the web).
+            val shown = if (wide) {
+                (state.gridPanelIds + state.panels.keys.filter(::isWindowPanelId)).mapNotNull { state.panels[it]?.activeTab }
+            } else {
+                listOfNotNull(active)
+            }
             for (tab in shown) chats[tab.id]?.start(api, scope)
         }
         // A chat that comes forward by itself (restored, or next after a close) loses its unread
@@ -1283,12 +1322,27 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             return
         }
         val existing = windows.state.value.windows.values.firstOrNull { it.kind == WindowKind.Settings }
-        if (existing != null) windows.focus(existing.id) else windows.open(WindowKind.Settings)
+        when {
+            existing != null -> windows.focus(existing.id)
+            // At the cap the web's `open` raises the oldest window instead, which is not Settings.
+            windows.state.value.windows.size >= MAX_WINDOWS -> actionError = TOO_MANY_WINDOWS
+            else -> windows.open(WindowKind.Settings)
+        }
     }
 
     /** close-window.ts: a window's ×, Escape on its titlebar; a detached tab goes back to the grid. */
     fun closeWindow(id: String) {
         workspace?.closeWindow(id)
+    }
+
+    /**
+     * tab-pop-out-menu-item.tsx, "Open in window": the tab goes on, live, in a floating window of
+     * its own, and back to [panelId] when the window closes. The menu offers it only where it can
+     * work, so a refusal is the shared window cap.
+     */
+    fun popOutTab(tabId: String, panelId: String) {
+        val store = workspace ?: return
+        if (store.popOutTab(tabId, panelId) == null) actionError = TOO_MANY_WINDOWS
     }
 
     /**
@@ -1580,6 +1634,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 private val DOCK_POSITIONS = setOf("bottom", "left", "right")
 
 private val PROJECT_SORT_MODES = setOf("recent", "priority", "name")
+
+/** The web's toast when every window slot is taken. */
+private const val TOO_MANY_WINDOWS = "Too many windows open — close one first"
 
 const val SIDEBAR_MIN_WIDTH = 200
 const val SIDEBAR_DEFAULT_WIDTH = 280

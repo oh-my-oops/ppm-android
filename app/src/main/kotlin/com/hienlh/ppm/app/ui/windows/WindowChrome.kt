@@ -26,11 +26,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.Shader
+import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.layout.Layout
@@ -41,6 +47,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ui.runningSessions
+import com.hienlh.ppm.app.ui.tabTitle
 import com.hienlh.ppm.app.ui.tablet.Edge
 import com.hienlh.ppm.app.ui.tablet.edge
 import com.hienlh.ppm.app.ui.tabTypeIcon
@@ -48,6 +57,7 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.ThemeTokens
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.get
@@ -55,7 +65,13 @@ import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.windows.WindowKind
 import com.hienlh.ppm.state.windows.WindowRuntimeState
 import com.hienlh.ppm.state.windows.WindowVisualState
+import com.hienlh.ppm.state.workspace.WorkspaceTab
+import com.hienlh.ppm.state.workspace.tabSessionId
+import com.hienlh.ppm.state.workspace.windowPanelId
 import kotlinx.serialization.json.JsonObject
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 
 /** window-chrome-contract.ts `TITLEBAR_HEIGHT`, both skins. */
 private val TITLEBAR_HEIGHT = 36.dp
@@ -218,9 +234,10 @@ internal enum class TileSize(val box: Dp, val radius: Dp, val glyph: Dp) {
 }
 
 /**
- * `WindowTile`: the window's glyph in its colour, on a tile of that colour at 20 %. [muted] dims
- * it as a minimized window's (`opacity-55 saturate-50`, what spills past the tile included);
- * [content] sits on it, unclipped, as the busy dot does.
+ * `WindowTile`: the window's glyph in its colour, on a tile of that colour at 20 %; [filled] (a
+ * design), a white glyph on the colour itself, shading to 60 % of it towards the far corner.
+ * [muted] dims it as a minimized window's (`opacity-55 saturate-50`, what spills past the tile
+ * included); [content] sits on it, unclipped, as the busy dot does.
  */
 @Composable
 internal fun WindowTile(
@@ -228,18 +245,42 @@ internal fun WindowTile(
     tone: Rgba,
     size: TileSize,
     modifier: Modifier = Modifier,
+    filled: Boolean = false,
     muted: Boolean = false,
     content: @Composable BoxScope.() -> Unit = {},
 ) {
+    val shape = RoundedCornerShape(size.radius)
     Box(
         modifier
             .size(size.box)
             .then(if (muted) Modifier.drawWithContent { drawMuted() } else Modifier)
-            .background(tone.opacity(0.2).color, RoundedCornerShape(size.radius)),
+            .then(
+                if (filled) {
+                    Modifier.background(CssAngleGradient(140f, tone.color, tone.mix(BLACK, 0.6).color), shape)
+                } else {
+                    Modifier.background(tone.opacity(0.2).color, shape)
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        PpmIcon(icon, size.glyph, tone.color)
+        PpmIcon(icon, size.glyph, if (filled) Color.White else tone.color)
         content()
+    }
+}
+
+private val BLACK = Rgba(0.0, 0.0, 0.0, 1.0)
+
+/**
+ * CSS `linear-gradient(<angle>, from, to)`: the line through the box's centre at [degrees]
+ * (0 up, clockwise), as long as the box's corners reach along it.
+ */
+private class CssAngleGradient(private val degrees: Float, private val from: Color, private val to: Color) : ShaderBrush() {
+    override fun createShader(size: Size): Shader {
+        val angle = Math.toRadians(degrees.toDouble())
+        val direction = Offset(sin(angle).toFloat(), -cos(angle).toFloat())
+        val length = abs(size.width * direction.x) + abs(size.height * direction.y)
+        val half = direction * (length / 2)
+        return LinearGradientShader(size.center - half, size.center + half, listOf(from, to))
     }
 }
 
@@ -353,11 +394,35 @@ internal class WindowMeta(
     /** The kind in words, for the dock's window list. */
     val kindLabel: String,
     val busy: Boolean,
+    /** A design: its tile in the dock and the window list is filled with its own colour; the titlebar's is tinted like any other. */
+    val filled: Boolean = false,
 )
 
-/** `describeWindow`: each kind's glyph and colour. */
+/** `TAB_LABELS`: a detached tab's kind in words. */
+private val TAB_LABELS = mapOf(
+    "terminal" to "Terminal",
+    "chat" to "Chat",
+    "editor" to "Editor",
+    "design" to "Design",
+    "git-log" to "Git graph",
+    "git-diff" to "Diff",
+    "git-review" to "Review changes",
+    "session-review" to "Session review",
+    "database" to "Database",
+    "sqlite" to "Database",
+    "web-preview" to "Preview",
+    "android" to "Android",
+    "extension" to "Extension",
+    "extension-webview" to "Extension",
+)
+
+/**
+ * `describeWindow`: each kind's glyph and colour. A tab-host window is described by the tab in
+ * it — a detached terminal is a terminal, a design window is that design — under the tab's live
+ * title, since the one its payload took at pop-out goes stale; busy while that tab's chat runs a turn.
+ */
 @Composable
-internal fun windowMeta(win: WindowRuntimeState): WindowMeta {
+internal fun windowMeta(model: AppModel, win: WindowRuntimeState): WindowMeta {
     val tokens = LocalPpmTokens.current
     fun kind(icon: ProductIcon, tone: Rgba, label: String) = WindowMeta(null, icon, tone, null, label, busy = false)
     return when (win.kind) {
@@ -367,9 +432,46 @@ internal fun windowMeta(win: WindowRuntimeState): WindowMeta {
         WindowKind.RemoteDesktop -> kind(ProductIcon.Monitor, tokens.info, "Remote Desktop")
         WindowKind.Settings -> kind(ProductIcon.Settings, tokens.text3, "Settings")
         WindowKind.Logs -> kind(ProductIcon.ScrollText, tokens.text2, "Logs")
-        // A detached tab's window is described by its tab; with none resolved, a generic one.
-        WindowKind.TabHost -> kind(tabTypeIcon("editor"), tokens.accent, "Tab")
+        WindowKind.TabHost -> {
+            val tab = hostedTab(model, win.id) ?: return kind(tabTypeIcon("editor"), tokens.accent, "Tab")
+            val label = TAB_LABELS[tab.type] ?: "Tab"
+            val design = tab.type == "design"
+            val sessionId = tabSessionId(tab)
+            WindowMeta(
+                title = tabTitle(model, tab),
+                icon = tabTypeIcon(tab.type),
+                tone = when {
+                    design -> designTone(tab.metaString("designSlug") ?: tab.title, tokens)
+                    tab.type == "terminal" -> tokens.success
+                    tab.type == "chat" -> tokens.accent2
+                    tab.type == "git-log" || tab.type == "git-diff" || tab.type == "git-review" -> tokens.warning
+                    else -> tokens.accent
+                },
+                subtitle = tab.projectId?.let { "$label · $it" } ?: label,
+                kindLabel = label,
+                busy = sessionId != null && sessionId in model.runningSessions(),
+                filled = design,
+            )
+        }
     }
+}
+
+/** The tab a tab-host window shows: its panel's active tab, else its first. */
+internal fun hostedTab(model: AppModel, windowId: String): WorkspaceTab? {
+    val panel = model.layout?.panels?.get(windowPanelId(windowId)) ?: return null
+    return panel.activeTab ?: panel.tabs.firstOrNull()
+}
+
+/**
+ * `designTone`: the colour a design keeps in every session, the one its slug hashes to (a
+ * JavaScript string hash, 32-bit, over UTF-16 units).
+ */
+private fun designTone(slug: String, tokens: ThemeTokens): Rgba {
+    var hash = 0
+    for (ch in slug) hash = hash * 31 + ch.code
+    val tones = listOf(tokens.accent, tokens.accent2, tokens.success, tokens.warning, tokens.error, tokens.info)
+    // `Math.abs` of the smallest Int is positive in JavaScript, and itself in Kotlin.
+    return tones[(abs(hash.toLong()) % tones.size).toInt()]
 }
 
 /** window-content-registry.ts `windowTitle`: the payload's title, else the kind's name. */

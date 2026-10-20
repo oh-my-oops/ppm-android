@@ -76,6 +76,7 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.SessionUnread
+import com.hienlh.ppm.state.workspace.NON_POPPABLE_TAB_TYPES
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.state.workspace.tabSessionId
 import kotlinx.coroutines.flow.filterNotNull
@@ -330,9 +331,10 @@ private fun TabChip(
 }
 
 /**
- * A tab's menu (draggable-tab.tsx, with tab-bar.tsx's items for a chat): Mark as unread while the
- * chat has none and Set Tag while the project has tags, then Close, Close Others and Close to the
- * Right. Its window, dock and file items come with windows, terminals and the editor.
+ * A tab's menu (draggable-tab.tsx, with tab-bar.tsx's items for a chat): Open in window where
+ * the tablet can float it, Mark as unread while the chat has none and Set Tag while the project
+ * has tags, then Close, Close Others and Close to the Right. Its dock and file items come with
+ * terminals and the editor; picture-in-picture is not offered, as Chrome on Android has none.
  */
 @Composable
 private fun TabMenu(model: AppModel, tab: WorkspaceTab, panelId: String, at: Offset, onDismiss: () -> Unit) {
@@ -345,6 +347,11 @@ private fun TabMenu(model: AppModel, tab: WorkspaceTab, panelId: String, at: Off
         action()
     }
     ContextMenuPopup(at, onDismiss) {
+        // A tab with a window kind of its own would be shown twice.
+        if (model.wide && tab.type !in NON_POPPABLE_TAB_TYPES) {
+            MenuItem("Open in window", onClick = { pick { model.popOutTab(tab.id, panelId) } }, icon = { MenuIcon(ProductIcon.ExternalLink) })
+            MenuSeparator()
+        }
         if (sessionId != null && unread == null) {
             MenuItem("Mark as unread", onClick = { pick { model.markUnread(sessionId, tab.title) } }, icon = { MenuIcon(ProductIcon.Circle, tokens.accent) })
             MenuSeparator()

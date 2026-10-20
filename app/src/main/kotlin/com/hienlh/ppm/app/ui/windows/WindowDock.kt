@@ -152,7 +152,7 @@ internal fun WindowDock(model: AppModel, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
     val frontId = frontWindowId(windows)
     val frontIndex = list.indexOfFirst { it.id == frontId }
-    val metas = list.map { windowMeta(it) }
+    val metas = list.map { windowMeta(model, it) }
     val titles = list.mapIndexed { i, win -> metas[i].title?.takeIf { it.isNotEmpty() } ?: windowTitle(win.kind, win.payload) }
     var listOpen by remember { mutableStateOf(false) }
     val toggle = remember { MoreToggle() }
@@ -327,7 +327,7 @@ private fun DockChip(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            WindowTile(meta.icon, meta.tone, TileSize.Small, muted = state == ChipState.Min) {
+            WindowTile(meta.icon, meta.tone, TileSize.Small, filled = meta.filled, muted = state == ChipState.Min) {
                 if (busy) WindowBusyDot(Modifier.align(Alignment.TopEnd).offset(3.dp, (-3).dp))
             }
             if (showTitle) {
@@ -405,7 +405,7 @@ private fun WindowDockList(
 
     val shown = windows.filter { it.state != WindowVisualState.Minimized }
     val minimized = windows.filter { it.state == WindowVisualState.Minimized }
-    val metas = (shown + minimized).associate { it.id to windowMeta(it) }
+    val metas = (shown + minimized).associate { it.id to windowMeta(model, it) }
     fun titleOf(win: WindowRuntimeState) = metas[win.id]?.title?.takeIf { it.isNotEmpty() } ?: windowTitle(win.kind, win.payload)
     val q = query.text.toString().trim().lowercase()
     val matching = (shown + minimized).filter { q.isEmpty() || "${titleOf(it)} ${metas[it.id]?.kindLabel}".lowercase().contains(q) }.map { it.id }.toSet()
@@ -545,7 +545,7 @@ private fun WindowRow(meta: WindowMeta, title: String, front: Boolean, minimized
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            WindowTile(meta.icon, meta.tone, TileSize.Large, muted = minimized)
+            WindowTile(meta.icon, meta.tone, TileSize.Large, filled = meta.filled, muted = minimized)
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 BasicText(
                     title,

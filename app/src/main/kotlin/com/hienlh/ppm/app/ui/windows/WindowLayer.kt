@@ -12,13 +12,19 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -59,10 +65,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.SettingsWindowContent
+import com.hienlh.ppm.app.ui.TabBody
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
@@ -85,6 +93,8 @@ import com.hienlh.ppm.state.windows.windowsInRankOrder
 import com.hienlh.ppm.state.workspace.closesItsTabs
 import kotlin.math.abs
 import kotlin.math.floor
+import kotlin.math.max
+import kotlin.math.min
 import com.hienlh.ppm.state.windows.Rect as WindowRect
 
 /**
@@ -96,19 +106,35 @@ import com.hienlh.ppm.state.windows.Rect as WindowRect
 fun WindowLayer(model: AppModel) {
     val store = model.windows ?: return
     val state = model.windowState
+    // What the keyboard takes off the bottom beyond the system bars the shell already keeps clear of.
+    val keyboard = WindowInsets.ime.exclude(WindowInsets.systemBars.union(WindowInsets.displayCutout))
+    val density = LocalDensity.current
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds()) {
+        val raised = keyboard.getBottom(density)
         val bounds = Bounds(cssRound(maxWidth.value.toDouble()), cssRound(maxHeight.value.toDouble()))
+        // The store is given the layer as it is with the keyboard down: in Chrome the keyboard only
+        // shrinks the visual viewport, so it never clamps a window there, and here the clamp would last.
+        val full = bounds.copy(h = cssRound(with(density) { (constraints.maxHeight + raised).toDp() }.value.toDouble()))
         // Measured before the saved windows come back, so they return clamped to the real size.
-        LaunchedEffect(store, bounds) {
-            store.setBounds(bounds)
-            store.restoreAll(bounds)
+        LaunchedEffect(store, full) {
+            store.setBounds(full)
+            store.restoreAll(full)
         }
-        if (state.snapPreviewId != null) SnapGhost(state.bounds)
+        if (state.snapPreviewId != null) SnapGhost(bounds)
         val frontId = frontWindowId(state.windows)
         for (win in windowsInRankOrder(state.windows)) {
-            key(win.id) { FloatingWindow(model, store, win, state.bounds, focused = win.id == frontId) }
+            key(win.id) { FloatingWindow(model, store, win, bounds, keyboardUp = raised > 0, focused = win.id == frontId) }
         }
     }
+}
+
+/**
+ * A window while the keyboard is up: moved up, then shrunk, until it fits above it, so what is being
+ * typed into stays in sight. Only drawn so — the store keeps the rect, back once the keyboard goes.
+ */
+private fun aboveKeyboard(rect: WindowRect, bounds: Bounds): WindowRect {
+    val fitted = clampRect(rect, bounds)
+    return fitted.copy(y = min(fitted.y, max(0.0, bounds.h - fitted.h)))
 }
 
 /** `Math.round`, which CSS pixels go through before a window is placed. */
@@ -134,9 +160,9 @@ private val SHADOW_BEHIND_NEAR = ThemeShadow(0.0, 4.0, 6.0, -4.0, Rgba(0.0, 0.0,
  * neither laid out nor drawn: the dock brings it back.
  */
 @Composable
-private fun FloatingWindow(model: AppModel, store: WindowStore, win: WindowRuntimeState, bounds: Bounds, focused: Boolean) {
+private fun FloatingWindow(model: AppModel, store: WindowStore, win: WindowRuntimeState, bounds: Bounds, keyboardUp: Boolean, focused: Boolean) {
     val tokens = LocalPpmTokens.current
-    val target = displayedRect(win.state, win.rect, bounds)
+    val target = displayedRect(win.state, if (keyboardUp) aboveKeyboard(win.rect, bounds) else win.rect, bounds)
     val minimized = win.state == WindowVisualState.Minimized
     val maximized = win.state == WindowVisualState.Maximized
     val snapped = win.state == WindowVisualState.Snapped
@@ -283,7 +309,7 @@ private fun FloatingWindow(model: AppModel, store: WindowStore, win: WindowRunti
             WindowTitlebar(
                 windowsSkin = model.windowsSkin,
                 win = win,
-                meta = windowMeta(win),
+                meta = windowMeta(model, win),
                 focused = focused,
                 showSubtitle = !narrow,
                 modifier = titlebarModifier,
@@ -329,9 +355,30 @@ private fun FloatingWindow(model: AppModel, store: WindowStore, win: WindowRunti
 private fun WindowContent(model: AppModel, win: WindowRuntimeState) {
     when (win.kind) {
         WindowKind.Settings -> SettingsWindowContent(model, win)
+        WindowKind.TabHost -> TabHostWindowContent(model, win)
         else -> {
             val tokens = LocalPpmTokens.current
             BasicText("Not available in this app yet.", Modifier.padding(12.dp), style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color))
+        }
+    }
+}
+
+/**
+ * tab-host-window-content.tsx: a detached tab, shown as its panel showed it. A window brought
+ * back from last time can come before its tab does, and says "Loading…" until then — but not
+ * once a tab was here: the one on its way back to the grid leaves a moment before the window.
+ */
+@Composable
+private fun TabHostWindowContent(model: AppModel, win: WindowRuntimeState) {
+    val tab = hostedTab(model, win.id)
+    val seen = remember { BooleanArray(1) }
+    if (tab != null) seen[0] = true
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        if (tab != null) {
+            key(tab.id) { TabBody(model, tab) }
+        } else if (!seen[0]) {
+            val tokens = LocalPpmTokens.current
+            BasicText("Loading…", style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color))
         }
     }
 }
