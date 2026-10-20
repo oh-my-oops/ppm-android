@@ -150,11 +150,18 @@ private const val MAX_RECENT_SESSIONS = 5
 private const val FETCH_SESSIONS_LIMIT = 20
 
 /**
- * The chats under the tiles (`session-list-panel.tsx`): a title search, the tag chips, then the
- * pinned chats and the five most recent, with Show more. A long press opens the chat's menu.
+ * The chats under the tiles, and under an empty chat's welcome (`session-list-panel.tsx`): a
+ * title search, the tag chips, then the pinned chats and the five most recent, with Show more. A
+ * long press opens the chat's menu. [without] is left out of it.
  */
 @Composable
-private fun SessionListPanel(model: AppModel, list: HistoryList, onOpen: (SessionInfo) -> Unit) {
+fun SessionListPanel(
+    model: AppModel,
+    list: HistoryList,
+    onOpen: (SessionInfo) -> Unit,
+    modifier: Modifier = Modifier,
+    without: String? = null,
+) {
     val tokens = LocalPpmTokens.current
     val state by list.state.collectAsState()
     val unread = model.unreadSessions()
@@ -163,14 +170,14 @@ private fun SessionListPanel(model: AppModel, list: HistoryList, onOpen: (Sessio
     var showAll by rememberSaveable { mutableStateOf(false) }
     var selectedTag by rememberSaveable { mutableStateOf<Int?>(null) }
 
-    val sessions = state.sessions(model.sessions).take(FETCH_SESSIONS_LIMIT)
+    val sessions = state.sessions(model.sessions).filter { it.id != without }.take(FETCH_SESSIONS_LIMIT)
     if (sessions.isEmpty() && query.text.isEmpty()) return
     val filtered = selectedTag?.let { tag -> sessions.filter { it.tag?.id == tag } } ?: sessions
     val pinned = filtered.filter { it.pinned }
     val allRecent = filtered.filter { !it.pinned }
     val recent = if (showAll) allRecent else allRecent.take(MAX_RECENT_SESSIONS)
 
-    Column(Modifier.fillMaxWidth()) {
+    Column(modifier.fillMaxWidth()) {
         SearchBox(query, "Search chats...")
         Box(Modifier.padding(top = 12.dp)) {
             TagChipBar(model.tags, sessions.size, selectedTag) { selectedTag = it }

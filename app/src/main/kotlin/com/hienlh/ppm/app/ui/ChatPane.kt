@@ -112,6 +112,13 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                 onReload = { chat.reload() },
                 modifier = Modifier.weight(1f),
                 jumps = remember(tab.tabId) { model.chatJumps.filter { it.first == tab.tabId }.map { it.second } },
+                welcome = {
+                    // `w-full px-4`; picking a chat shows it in this tab. The chat itself is left out:
+                    // this app makes a new chat's session before its first message, the web after.
+                    tab.welcomeList?.let { list ->
+                        SessionListPanel(model, list, onOpen = { model.replaceTab(tab.tabId, it) }, Modifier.padding(horizontal = 16.dp), without = tab.session.id)
+                    }
+                },
             )
             state.notice?.let { NoticeBar(it) { chat.dismissNotice() } }
             val stop = state.turnStop

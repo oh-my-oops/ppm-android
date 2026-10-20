@@ -662,7 +662,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         sessions = sessions.filter { it.id != session.id }
         sidebarList?.remove(session.id)
         homeList?.remove(session.id)
-        chats.values.forEach { it.historyList?.remove(session.id) }
+        chats.values.forEach {
+            it.historyList?.remove(session.id)
+            it.welcomeList?.remove(session.id)
+        }
         closeSessionTabs(session.id)
         try {
             api.deleteSession(project, session.id, session.providerId)
@@ -724,7 +727,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         if (list != sessions) sessions = list.sortedForList()
         sidebarList?.patch(matches, change)
         homeList?.patch(matches, change)
-        for (tab in chats.values) tab.historyList?.patch(matches, change)
+        for (tab in chats.values) {
+            tab.historyList?.patch(matches, change)
+            tab.welcomeList?.patch(matches, change)
+        }
     }
 
     /** Opens what the search found. */
@@ -1671,6 +1677,10 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
     var historyList by mutableStateOf<HistoryList?>(null)
         private set
 
+    /** The chats under its welcome while it has no message (`chat-welcome.tsx`), searched apart from History. */
+    var welcomeList by mutableStateOf<HistoryList?>(null)
+        private set
+
     /** Whether its History shows Manage tags; kept while the History list is closed, as on the web. */
     var showsTagSettings by mutableStateOf(false)
 
@@ -1683,6 +1693,7 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
     fun start(api: ApiClient, scope: CoroutineScope) {
         if (controller != null) return
         historyList = HistoryList(api, project, scope)
+        welcomeList = HistoryList(api, project, scope)
         controller = ChatController(api, project, session, scope).also { it.start() }
     }
 

@@ -10,20 +10,24 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -87,6 +91,8 @@ fun ChatTranscriptView(
     modifier: Modifier = Modifier,
     /** Alt+↑ (-1) and Alt+↓ (1), for this chat only while its tab has the keyboard. */
     jumps: Flow<Int> = emptyFlow(),
+    /** Under the welcome while the chat has no message: the project's chats. */
+    welcome: @Composable () -> Unit = {},
 ) {
     // When the running turn started, for the wait counter before anything streams.
     var turnStartedAt by remember { mutableStateOf<Instant?>(null) }
@@ -98,7 +104,7 @@ fun ChatTranscriptView(
             !state.hasLoadedHistory && state.items.isEmpty() && state.historyError == null ->
                 CenteredNotice("Loading messages...", pulsing = true)
             state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null ->
-                CenteredNotice("Send a message to start a new conversation", pulsing = false)
+                Welcome(welcome)
             else -> TranscriptList(state, turnStartedAt, onRespond, onLoadOlder, jumps)
         }
         state.historyError?.let { error ->
@@ -288,6 +294,36 @@ private fun CenteredNotice(text: String, pulsing: Boolean) {
         val alpha by animateFloatAsState(if (faded) 0.5f else 1f, tween(1_000), label = "pulse")
         PpmIcon(ProductIcon.Bot, 40.dp, tokens.text3.color, Modifier.alpha(alpha))
         BasicText(text, Modifier.padding(top = 12.dp), ppmText(14f, lineHeight = 20f).copy(color = tokens.text2.color))
+    }
+}
+
+/**
+ * An empty chat (`chat-welcome.tsx`): the robot and "Send a message…" over [below], `gap-6`,
+ * centred together. Taller than the pane, they scroll from their top, where the web's
+ * `justify-center` would push the top out of reach.
+ */
+@Composable
+private fun Welcome(below: @Composable () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val viewport = maxHeight
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Column(
+                Modifier.fillMaxWidth().heightIn(min = viewport),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterVertically),
+            ) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    PpmIcon(ProductIcon.Bot, 40.dp, tokens.text3.color)
+                    BasicText(
+                        "Send a message to start a new conversation",
+                        Modifier.padding(top = 12.dp),
+                        ppmText(14f, lineHeight = 20f).copy(color = tokens.text2.color),
+                    )
+                }
+                below()
+            }
+        }
     }
 }
 
