@@ -115,12 +115,21 @@ fun PhoneShell(model: AppModel) {
     val ime = WindowInsets.ime.getBottom(density)
     val navBar = WindowInsets.navigationBars.getBottom(density)
     val nav = with(density) { NAV_HEIGHT.roundToPx() } + navBar
+    // A phone shows one panel, but editor-panel.tsx frames it as one of several while the grid
+    // holds more: 1 px, the accent at 30 % when it is the focused one. It moves everything inside
+    // by a pixel, so a line wraps where the web's does only with it.
+    val tokens = LocalPpmTokens.current
+    val frame = model.layout?.takeIf { it.gridPanelIds.size > 1 }?.let { layout ->
+        val focused = layout.focusedPanelId in layout.gridPanelIds
+        Modifier.border(1.dp, if (focused) tokens.accent.opacity(0.3).color else Color.Transparent).padding(1.dp)
+    } ?: Modifier
     Backdrop {
         Box(
             Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .padding(bottom = with(density) { maxOf(ime, nav).toDp() }),
+                .padding(bottom = with(density) { maxOf(ime, nav).toDp() })
+                .then(frame),
         ) {
             val tab = model.activeTab
             if (tab != null) key(tab.id) { TabBody(model, tab) } else EmptyPanel(model, onOpenSession = { model.openTab(it) })
