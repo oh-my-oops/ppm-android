@@ -14,9 +14,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.semantics.Role
 
 /** Tailwind's `transition-colors`: 150 ms on `cubic-bezier(0.4, 0, 0.2, 1)`. */
@@ -47,6 +54,10 @@ fun rememberHover(enabled: Boolean = true, instant: Boolean = false): Hover {
  * which also asks for a fine primary pointer and a touch screen keeps that coarse. It fades in
  * as `transition-colors` fades it, or at once where the web's has none ([fade] false). [source]
  * lets the caller read the hover as well, for a `hover:text-…` ([rememberHover]).
+ *
+ * CSS `:hover` still matches a disabled button, so where the web gives its `disabled:` look no
+ * `disabled:hover:` and no `pointer-events-none`, a mouse over it lights it all the same:
+ * [hoverWhileDisabled].
  */
 @Composable
 fun Modifier.ppmClickable(
@@ -58,24 +69,43 @@ fun Modifier.ppmClickable(
     role: Role = Role.Button,
     onClickLabel: String? = null,
     source: MutableInteractionSource? = null,
+    hoverWhileDisabled: Boolean = false,
     onClick: () -> Unit,
 ): Modifier {
     val own = remember { MutableInteractionSource() }
     val interactions = source ?: own
     val pressed by interactions.collectIsPressedAsState()
     val hovered by interactions.collectIsHoveredAsState()
-    val on = hovered && enabled
+    val hovers = enabled || hoverWhileDisabled
+    val on = hovered && hovers
     val lit = when {
         hoverColor.alpha == 0f -> 0f
         fade -> colorsFade(on)
         else -> if (on) 1f else 0f
     }
     val fill = when {
-        !enabled -> Color.Transparent
-        pressed -> pressedColor
+        pressed && enabled -> pressedColor
+        !hovers -> Color.Transparent
         else -> hoverColor.copy(alpha = hoverColor.alpha * lit)
     }
     return background(fill, shape)
-        .hoverable(interactions, enabled)
+        .hoverable(interactions, hovers)
         .clickable(interactions, indication = null, enabled = enabled, onClickLabel = onClickLabel, role = role, onClick = onClick)
+}
+
+/**
+ * CSS `filter: brightness([amount])` over everything drawn after it: each channel times [amount],
+ * alpha untouched, the box drawn alone first as a filter draws it.
+ */
+fun Modifier.brightness(amount: Float): Modifier = drawWithContent {
+    if (amount == 1f) {
+        drawContent()
+        return@drawWithContent
+    }
+    val paint = Paint().apply { colorFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToScale(amount, amount, amount, 1f) }) }
+    drawIntoCanvas { canvas ->
+        canvas.saveLayer(Rect(Offset.Zero, size), paint)
+        drawContent()
+        canvas.restore()
+    }
 }

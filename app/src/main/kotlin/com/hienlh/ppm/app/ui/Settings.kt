@@ -59,6 +59,7 @@ import com.hienlh.ppm.design.ThemeTokens
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.windows.WindowRuntimeState
@@ -147,14 +148,19 @@ private fun SettingsRail(active: SettingsCategory, onSelect: (SettingsCategory) 
     ) {
         for (category in SettingsCategory.entries) {
             val on = category == active
-            // `px-2.5 py-2 rounded-md gap-2.5`: the active row in `bg-accent`, any other `active:bg-accent`.
+            // `px-2.5 py-2 rounded-md gap-2.5`: the active row in `bg-accent`, any other
+            // `hover:bg-accent/50 active:bg-accent`.
             val shape = RoundedCornerShape(8.dp)
             Row(
                 Modifier
                     .fillMaxWidth()
                     .clip(shape)
                     .then(if (on) Modifier.background(tokens.panel2.color) else Modifier)
-                    .ppmClickable(pressedColor = tokens.panel2.color, shape = shape) { onSelect(category) }
+                    .ppmClickable(
+                        pressedColor = tokens.panel2.color,
+                        hoverColor = if (on) Color.Transparent else tokens.panel2.opacity(0.5).color,
+                        shape = shape,
+                    ) { onSelect(category) }
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -179,19 +185,26 @@ private fun SettingsIndex(onSelect: (SettingsCategory) -> Unit) {
         Separator()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             for (category in SettingsCategory.entries) {
-                // `px-2.5 py-3 rounded-lg gap-3`, `active:bg-accent`.
+                // `px-2.5 py-3 rounded-lg gap-3`, `hover:bg-accent/50 active:bg-accent`; the icon's
+                // tile turns `bg-accent` at once under a mouse (`group-hover:`, no transition).
                 val shape = RoundedCornerShape(12.dp)
+                val hover = rememberHover(instant = true)
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .clip(shape)
-                        .ppmClickable(pressedColor = tokens.panel2.color, shape = shape) { onSelect(category) }
+                        .ppmClickable(
+                            pressedColor = tokens.panel2.color,
+                            hoverColor = tokens.panel2.opacity(0.5).color,
+                            shape = shape,
+                            source = hover.source,
+                        ) { onSelect(category) }
                         .padding(horizontal = 10.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Box(
-                        Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(tokens.panel.color),
+                        Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(tokens.panel2.mix(tokens.panel, hover.lit.toDouble()).color),
                         contentAlignment = Alignment.Center,
                     ) { PpmIcon(category.icon, 16.dp, tokens.text2.color) }
                     Column(Modifier.weight(1f)) {
@@ -219,8 +232,10 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (!split) {
+                // The `ghost` button: `hover:bg-accent`, `dark:hover:bg-accent/50`.
+                val ghost = ghostHover(tokens, model.theme.isDark)
                 Box(
-                    Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "Back to settings list", onClick = onBack),
+                    Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).ppmClickable(pressedColor = ghost, hoverColor = ghost, onClickLabel = "Back to settings list", onClick = onBack),
                     contentAlignment = Alignment.Center,
                 ) { PpmIcon(ProductIcon.ArrowLeft, 16.dp, tokens.text.color) }
             }
@@ -281,7 +296,8 @@ private val THEME_MODES = listOf(
 
 /**
  * `rounded-lg border p-2 min-h-11`: the swatch, the name and its mode; the active one ringed with
- * a check. The 1 px border takes room, as CSS borders do, so the padding is 9.
+ * a check, any other `hover:bg-accent/40`. The 1 px border takes room, as CSS borders do, so the
+ * padding is 9.
  */
 @Composable
 private fun ThemeCard(theme: PpmTheme, active: Boolean, modifier: Modifier, onClick: () -> Unit) {
@@ -293,7 +309,12 @@ private fun ThemeCard(theme: PpmTheme, active: Boolean, modifier: Modifier, onCl
             .then(if (active) Modifier.ring(3.dp, tokens.accentWash.color, 12.dp) else Modifier)
             .clip(shape)
             .border(1.dp, (if (active) tokens.accent else tokens.border).color, shape)
-            .ppmClickable(pressedColor = tokens.panel2.opacity(0.4).color, shape = shape, onClick = onClick)
+            .ppmClickable(
+                pressedColor = tokens.panel2.opacity(0.4).color,
+                hoverColor = if (active) Color.Transparent else tokens.panel2.opacity(0.4).color,
+                shape = shape,
+                onClick = onClick,
+            )
             .padding(9.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
@@ -327,28 +348,30 @@ internal fun ThemeSwatch(theme: PpmTheme) {
 /**
  * The web's `Button` in `default` (picked, with `ring-2 ring-primary`) or `outline`, `h-9 gap-2`.
  * The outline's `border` names no colour outside dark mode (`dark:border-input`), so in a light
- * theme it is Tailwind 4's default, the text colour.
+ * theme it is Tailwind 4's default, the text colour. A mouse fades in `default`'s
+ * `hover:bg-primary/90`, or the outline's own hover fill.
  */
 @Composable
 private fun ModeButton(label: String, icon: ProductIcon, on: Boolean, dark: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
     val content = if (on) tokens.accentFg else tokens.text
+    val hover = rememberHover()
     Row(
         modifier
             .height(36.dp)
             .then(if (on) Modifier.ring(2.dp, tokens.accent.color, 8.dp) else Modifier.ppmShadow(SHADOW_XS, shape))
             .clip(shape)
             .background(
-                when {
-                    on -> tokens.accent.color
-                    // `dark:bg-input/30`; `--input` is the border colour.
-                    dark -> tokens.border.opacity(0.3).color
-                    else -> tokens.bgSolid.color
-                },
+                if (on) tokens.accent.opacity(1 - 0.1 * hover.lit).color else outlineFill(tokens, dark, hover.lit.toDouble()),
             )
             .then(if (on) Modifier else Modifier.border(1.dp, outlineBorder(tokens, dark), shape))
-            .ppmClickable(pressedColor = if (on) Color.Black.copy(alpha = 0.1f) else tokens.panel2.color, shape = shape, onClick = onClick)
+            .ppmClickable(
+                pressedColor = if (on) Color.Black.copy(alpha = 0.1f) else tokens.panel2.color,
+                shape = shape,
+                source = hover.source,
+                onClick = onClick,
+            )
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
@@ -360,6 +383,16 @@ private fun ModeButton(label: String, icon: ProductIcon, on: Boolean, dark: Bool
 
 /** The outline button's border: `dark:border-input` (the border colour), else the text colour. */
 private fun outlineBorder(tokens: ThemeTokens, dark: Boolean): Color = (if (dark) tokens.border else tokens.text).color
+
+/**
+ * The outline button's fill, [lit] of the way to its hover one: `bg-background` to `bg-accent`,
+ * or in dark mode `dark:bg-input/30` to `dark:hover:bg-input/50` (`--input` is the border colour).
+ */
+private fun outlineFill(tokens: ThemeTokens, dark: Boolean, lit: Double): Color =
+    if (dark) tokens.border.opacity(0.3 + 0.2 * lit).color else tokens.panel2.mix(tokens.bgSolid, lit).color
+
+/** The `ghost` button's hover fill: `hover:bg-accent`, `dark:hover:bg-accent/50`. */
+private fun ghostHover(tokens: ThemeTokens, dark: Boolean): Color = tokens.panel2.opacity(if (dark) 0.5 else 1.0).color
 
 /** `shadow-xs`, under an outline button. */
 private val SHADOW_XS = ThemeShadow(0.0, 1.0, 2.0, 0.0, Rgba(0.0, 0.0, 0.0, 0.05))
@@ -398,6 +431,9 @@ private fun ServersSection(model: AppModel) {
                 style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
             )
         }
+        // The web has no such list: a server is lit as a theme card is, the bin as a `ghost`
+        // button and Add server as an `outline` one.
+        val ghost = ghostHover(tokens, model.theme.isDark)
         for (server in servers) {
             val current = server.id == selected
             val shape = RoundedCornerShape(12.dp)
@@ -406,7 +442,11 @@ private fun ServersSection(model: AppModel) {
                     .fillMaxWidth()
                     .clip(shape)
                     .border(1.dp, (if (current) tokens.accent else tokens.border).color, shape)
-                    .ppmClickable(pressedColor = tokens.panel2.color, shape = shape) { if (!current) model.store.select(server) }
+                    .ppmClickable(
+                        pressedColor = tokens.panel2.color,
+                        hoverColor = if (current) Color.Transparent else tokens.panel2.opacity(0.4).color,
+                        shape = shape,
+                    ) { if (!current) model.store.select(server) }
                     .padding(start = 12.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -417,21 +457,22 @@ private fun ServersSection(model: AppModel) {
                 }
                 if (current) PpmIcon(ProductIcon.Check, 16.dp, tokens.accent.color)
                 Box(
-                    Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)).ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "Remove ${server.name}") { removing = server },
+                    Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)).ppmClickable(pressedColor = ghost, hoverColor = ghost, onClickLabel = "Remove ${server.name}") { removing = server },
                     contentAlignment = Alignment.Center,
                 ) { PpmIcon(ProductIcon.Trash2, 16.dp, tokens.text2.color) }
             }
         }
         val shape = RoundedCornerShape(8.dp)
+        val hover = rememberHover()
         Row(
             Modifier
                 .fillMaxWidth()
                 .height(36.dp)
                 .ppmShadow(SHADOW_XS, shape)
                 .clip(shape)
-                .background(if (model.theme.isDark) tokens.border.opacity(0.3).color else tokens.bgSolid.color)
+                .background(outlineFill(tokens, model.theme.isDark, hover.lit.toDouble()))
                 .border(1.dp, outlineBorder(tokens, model.theme.isDark), shape)
-                .ppmClickable(pressedColor = tokens.panel2.color, shape = shape) { model.addingServer = true },
+                .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, source = hover.source) { model.addingServer = true },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         ) {

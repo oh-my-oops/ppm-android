@@ -348,7 +348,8 @@ private fun ChatHistoryDropdown(model: AppModel, tab: ChatTab, list: HistoryList
                     }
                     if (state.hasMore(model.hasMoreSessions)) {
                         // `hover:text-text-secondary hover:bg-surface-elevated`.
-                        val hover = rememberHover(enabled = !state.loadingMore)
+                        // Lit while loading too: CSS `:hover` matches a disabled button.
+                        val hover = rememberHover()
                         val text = tokens.text2.mix(tokens.text3, hover.lit.toDouble()).color
                         Row(
                             Modifier
@@ -358,6 +359,7 @@ private fun ChatHistoryDropdown(model: AppModel, tab: ChatTab, list: HistoryList
                                     pressedColor = tokens.panel2.color,
                                     hoverColor = tokens.panel2.color,
                                     source = hover.source,
+                                    hoverWhileDisabled = true,
                                 ) {
                                     scope.launch { list.loadMore(model.sessions, model.hasMoreSessions) }
                                 }
@@ -379,12 +381,13 @@ private fun ChatHistoryDropdown(model: AppModel, tab: ChatTab, list: HistoryList
 @Composable
 private fun SmallIconButton(icon: ProductIcon, hoverTint: Rgba, spinning: Boolean = false, enabled: Boolean = true, size: Dp = 12.dp, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
-    val hover = rememberHover(enabled)
+    // Lit while disabled too: CSS `:hover` matches a disabled button.
+    val hover = rememberHover()
     Box(
         Modifier
             .alpha(if (enabled) 1f else 0.5f)
             .clip(RoundedCornerShape(4.dp))
-            .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, source = hover.source, onClick = onClick)
+            .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, source = hover.source, hoverWhileDisabled = true, onClick = onClick)
             .padding(2.dp),
     ) {
         PpmIcon(icon, size, hoverTint.mix(tokens.text3, hover.lit.toDouble()).color, spinning = spinning)

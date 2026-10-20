@@ -72,9 +72,11 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.state.formatShortcut
 import com.hienlh.ppm.state.scoreFileSearchFast
 import kotlinx.coroutines.launch
@@ -259,23 +261,22 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
     }
 }
 
-/** A result (`px-3 py-2 text-sm`): picked in the `accent` surface at 15%, hovered in `surface-elevated`. */
+/**
+ * A result (`px-3 py-2 text-sm transition-colors`): picked in the `accent` surface at 15% and the
+ * text colour, else hovered in `surface-elevated`, every change faded.
+ */
 @Composable
 private fun CommandRow(command: PaletteCommand, selected: Boolean) {
     val tokens = LocalPpmTokens.current
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
-    val color = (if (selected) tokens.text else tokens.text2).color
+    val picked = colorsFade(selected).toDouble()
+    val lit = colorsFade(hovered && !selected).toDouble()
+    val color = tokens.text.mix(tokens.text2, picked).color
     Row(
         Modifier
             .fillMaxWidth()
-            .background(
-                when {
-                    selected -> tokens.panel2.opacity(0.15).color
-                    hovered -> tokens.panel2.color
-                    else -> Color.Transparent
-                },
-            )
+            .background(tokens.panel2.opacity(0.15).mix(tokens.panel2.opacity(lit), picked).color)
             .hoverable(hover)
             .ppmClickable(pressedColor = tokens.panel2.color, onClick = command.action)
             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -294,14 +295,19 @@ private fun CommandRow(command: PaletteCommand, selected: Boolean) {
     }
 }
 
-/** "Ask AI: …" (`px-3 py-3`), the query in the text colour, cut at 60 characters. */
+/**
+ * "Ask AI: …" (`px-3 py-3`), the query in the text colour, cut at 60 characters;
+ * `hover:bg-accent/15 hover:text-text-primary` faded in.
+ */
 @Composable
 private fun AskAiRow(query: String, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
+    val hover = rememberHover()
+    val wash = tokens.panel2.opacity(0.15).color
     Row(
         Modifier
             .fillMaxWidth()
-            .ppmClickable(pressedColor = tokens.panel2.opacity(0.15).color, onClick = onClick)
+            .ppmClickable(pressedColor = wash, hoverColor = wash, source = hover.source, onClick = onClick)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -312,7 +318,7 @@ private fun AskAiRow(query: String, onClick: () -> Unit) {
                 append("Ask AI: ")
                 withStyle(SpanStyle(color = tokens.text.color, fontWeight = FontWeight.Medium)) { append(query.take(60)) }
             },
-            style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text2.color),
+            style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.mix(tokens.text2, hover.lit.toDouble()).color),
         )
     }
 }

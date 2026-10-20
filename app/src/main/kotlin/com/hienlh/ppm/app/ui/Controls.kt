@@ -52,6 +52,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -93,6 +94,7 @@ import com.hienlh.ppm.design.ProviderLogos
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.themeBackground
 import com.hienlh.ppm.protocol.SessionUnread
 import kotlinx.coroutines.launch
@@ -185,21 +187,37 @@ fun TagDot(color: String, size: Dp = 8.dp) {
     Box(Modifier.size(size).clip(CircleShape).background((Rgba.hex(color) ?: tokens.text3).color))
 }
 
-/** The web's default `Button`: accent fill, `primary-foreground` text. */
+/**
+ * The web's default `Button`: accent fill, `primary-foreground` text, all of it at half opacity
+ * while disabled. [hover] fades in its `hover:bg-primary/90`, for the places the web draws one;
+ * [radius], [fontSize] and [lineHeight] are its class's own where it sets them.
+ */
 @Composable
-fun PrimaryButton(title: String, modifier: Modifier = Modifier, enabled: Boolean = true, height: Dp = 44.dp, onClick: () -> Unit) {
+fun PrimaryButton(
+    title: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    height: Dp = 44.dp,
+    hover: Boolean = false,
+    radius: Dp = 12.dp,
+    fontSize: Float = 14f,
+    lineHeight: Float = 20f,
+    onClick: () -> Unit,
+) {
     val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(radius)
+    val hovered = rememberHover(enabled = hover && enabled)
     Box(
         modifier
             .fillMaxWidth()
             .height(height)
+            .alpha(if (enabled) 1f else 0.5f)
             .clip(shape)
-            .background(tokens.accent.opacity(if (enabled) 1.0 else 0.5).color)
-            .ppmClickable(enabled = enabled, pressedColor = Color.Black.copy(alpha = 0.1f), shape = shape, onClick = onClick),
+            .background(tokens.accent.opacity(1 - 0.1 * hovered.lit).color)
+            .ppmClickable(enabled = enabled, pressedColor = Color.Black.copy(alpha = 0.1f), shape = shape, source = hovered.source, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        BasicText(title, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.accentFg.color))
+        BasicText(title, style = ppmText(fontSize, FontWeight.Medium, lineHeight = lineHeight).copy(color = tokens.accentFg.color))
     }
 }
 

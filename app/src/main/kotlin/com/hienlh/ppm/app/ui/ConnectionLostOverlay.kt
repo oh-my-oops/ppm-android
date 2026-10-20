@@ -2,9 +2,6 @@ package com.hienlh.ppm.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.hoverable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +51,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import kotlinx.coroutines.launch
 
 private const val CLOUD_URL = "https://cloud.ppm.sh"
@@ -161,8 +159,8 @@ fun ConnectionLostOverlay(model: AppModel) {
 
 /**
  * `rounded-md px-4 py-2.5 text-sm font-medium`, full width: filled in the accent (`/90` under a
- * mouse), or outlined (`border-border`, `surface-elevated` under a mouse). Half opacity while
- * disabled. A touch has no colour of its own, as on the web.
+ * mouse), or outlined (`border-border`, `surface-elevated` under a mouse), faded in. Half opacity
+ * while disabled, when a mouse still lights it. A touch has no colour of its own, as on the web.
  */
 @Composable
 private fun OverlayButton(
@@ -175,23 +173,17 @@ private fun OverlayButton(
 ) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
-    val hover = remember { MutableInteractionSource() }
-    val hovered by hover.collectIsHoveredAsState()
-    val fill = when {
-        primary -> tokens.accent.opacity(if (hovered && enabled) 0.9 else 1.0).color
-        hovered && enabled -> tokens.panel2.color
-        else -> Color.Transparent
-    }
+    val hover = rememberHover()
+    val fill = if (primary) tokens.accent.opacity(1 - 0.1 * hover.lit) else tokens.panel2.opacity(hover.lit.toDouble())
     val color = (if (primary) tokens.accentFg else tokens.text).color
     Row(
         Modifier
             .fillMaxWidth()
             .alpha(if (enabled) 1f else 0.5f)
             .clip(shape)
-            .background(fill)
+            .background(fill.color)
             .then(if (primary) Modifier else Modifier.border(1.dp, tokens.border.color, shape))
-            .hoverable(hover)
-            .ppmClickable(enabled = enabled, pressedColor = Color.Transparent, onClick = onClick)
+            .ppmClickable(enabled = enabled, pressedColor = Color.Transparent, source = hover.source, hoverWhileDisabled = true, onClick = onClick)
             // The outline sits inside here and outside on the web: a pixel more each way.
             .padding(horizontal = if (primary) 16.dp else 17.dp, vertical = if (primary) 10.dp else 11.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),

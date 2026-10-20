@@ -120,14 +120,15 @@ private fun ToolApprovalCard(request: ApprovalRequest, respond: (Boolean, JsonEl
 @Composable
 private fun SolidButton(title: String, color: Rgba, foreground: Color = Color.White, enabled: Boolean = true, onClick: () -> Unit) {
     val shape = RoundedCornerShape(4.dp)
-    val hover = rememberHover(enabled)
+    // CSS `:hover` matches it disabled too: the web gives it no `disabled:hover:`.
+    val hover = rememberHover()
     BasicText(
         title,
         Modifier
             .alpha(if (enabled) 1f else 0.4f)
             .clip(shape)
             .background(color.opacity(1 - 0.2 * hover.lit).color)
-            .ppmClickable(enabled = enabled, pressedColor = Color.White.copy(alpha = 0.2f), source = hover.source, onClick = onClick)
+            .ppmClickable(enabled = enabled, pressedColor = Color.White.copy(alpha = 0.2f), source = hover.source, hoverWhileDisabled = true, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 6.dp),
         xsMedium.copy(color = foreground),
     )
@@ -145,7 +146,7 @@ private fun OutlineButton(title: String, foreground: Rgba, horizontalPadding: In
             .clip(shape)
             .background(tokens.bgSolid.color)
             .border(1.dp, tokens.border.color, shape)
-            .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, onClick = onClick)
+            .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, hoverWhileDisabled = true, onClick = onClick)
             .padding(horizontal = (horizontalPadding + 1).dp, vertical = 7.dp),
         xs.copy(color = foreground.color),
     )

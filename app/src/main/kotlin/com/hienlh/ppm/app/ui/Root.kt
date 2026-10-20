@@ -1,11 +1,15 @@
 package com.hienlh.ppm.app.ui
 
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -13,6 +17,9 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,6 +44,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -64,6 +72,7 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -138,7 +147,7 @@ fun PpmRoot(model: AppModel) {
                 Dialogs(model)
                 model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }
                 if (model.connectionLost) ConnectionLostOverlay(model)
-                ErrorToast(model.actionError, mobile, narrow = maxWidth <= 600.dp) { model.actionError = null }
+                ErrorToast(model.actionError, mobile, narrow = maxWidth <= 600.dp, dark = model.theme.isDark) { model.actionError = null }
             }
         }
     }
@@ -183,15 +192,29 @@ private fun Dialogs(model: AppModel) {
  * wide, else 356 px wide and 24 px down — and `bottom-left`, 24 px in, on the desktop layout.
  */
 @Composable
-private fun ErrorToast(message: String?, mobile: Boolean, narrow: Boolean, onDismiss: () -> Unit) {
+private fun ErrorToast(message: String?, mobile: Boolean, narrow: Boolean, dark: Boolean, onDismiss: () -> Unit) {
     val tokens = LocalPpmTokens.current
     // Kept while it slides out, after the message itself is cleared.
     var shown by remember { mutableStateOf(message) }
     if (message != null) shown = message
-    LaunchedEffect(message) {
-        if (message != null) {
-            delay(4_000)
+    // sonner holds the four seconds while a mouse is over the toast, and runs on from where they
+    // stopped once it leaves.
+    val overToast = remember { MutableInteractionSource() }
+    val closeHover = rememberHover(instant = true)
+    // Both read on every pass: behind `||` the second would leave the composition while the
+    // body is hovered, and come back too late to see the close button's Enter.
+    val overBody by overToast.collectIsHoveredAsState()
+    val overClose by closeHover.source.collectIsHoveredAsState()
+    val held = overBody || overClose
+    var left by remember(message) { mutableLongStateOf(4_000L) }
+    LaunchedEffect(message, held) {
+        if (message == null || held) return@LaunchedEffect
+        val start = SystemClock.uptimeMillis()
+        try {
+            delay(left)
             onDismiss()
+        } finally {
+            left -= SystemClock.uptimeMillis() - start
         }
     }
     val placement = when {
@@ -212,6 +235,7 @@ private fun ErrorToast(message: String?, mobile: Boolean, narrow: Boolean, onDis
                         .clip(shape)
                         .background(tokens.panel.over(tokens.bgSolid).color)
                         .border(1.dp, tokens.border.color, shape)
+                        .hoverable(overToast)
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -219,21 +243,41 @@ private fun ErrorToast(message: String?, mobile: Boolean, narrow: Boolean, onDis
                     PpmIcon(ProductIcon.AlertCircle, 16.dp, tokens.text.color)
                     BasicText(shown.orEmpty(), Modifier.weight(1f), style = ppmText(13f, lineHeight = 19.5f).copy(color = tokens.text.color))
                 }
-                // `closeButton`: a 20 px circle on the top-left corner.
+                // `closeButton`: a 20 px circle on the top-left corner, sonner's own colours under a
+                // mouse (and a finger), faded over its 200 ms `ease`.
+                val close = SonnerClose.of(dark, tokens.border, tokens.text)
+                val lit by animateFloatAsState(closeHover.lit, tween(200, easing = SONNER_EASE), label = "close")
                 Box(
                     Modifier
                         .offset((-6).dp, (-6).dp)
                         .size(20.dp)
                         .clip(CircleShape)
-                        .background(tokens.panel.over(tokens.bgSolid).color)
-                        .border(1.dp, tokens.border.color, CircleShape)
-                        .ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "Close toast", onClick = onDismiss),
+                        .background(close.hoverFill.mix(tokens.panel.over(tokens.bgSolid), lit.toDouble()).color)
+                        .border(1.dp, close.hoverBorder.mix(close.border, lit.toDouble()).color, CircleShape)
+                        .ppmClickable(pressedColor = close.hoverFill.color, onClickLabel = "Close toast", source = closeHover.source, onClick = onDismiss),
                     contentAlignment = Alignment.Center,
-                ) { PpmIcon(ProductIcon.X, 12.dp, tokens.text.color) }
+                ) { PpmIcon(ProductIcon.X, 12.dp, close.icon.color) }
             }
         }
     }
 }
+
+/**
+ * sonner's close button: on a light toaster its own greys (`--gray4` ring, `--gray12` glyph,
+ * `--gray2` / `--gray5` under a mouse); on a dark one the border and text PPM passes it, and its
+ * own `--normal-bg-hover` / `--normal-border-hover`, which PPM does not.
+ */
+private class SonnerClose(val border: Rgba, val icon: Rgba, val hoverFill: Rgba, val hoverBorder: Rgba) {
+    companion object {
+        fun of(dark: Boolean, border: Rgba, text: Rgba) =
+            if (dark) SonnerClose(border, text, grey(0.12), grey(0.25)) else SonnerClose(grey(0.93), grey(0.09), grey(0.973), grey(0.909))
+
+        private fun grey(lightness: Double) = Rgba(lightness, lightness, lightness, 1.0)
+    }
+}
+
+/** CSS `ease`. */
+private val SONNER_EASE = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
 
 /** sonner's `0 4px 12px rgba(0, 0, 0, .1)`. */
 private val TOAST_SHADOW = ThemeShadow(0.0, 4.0, 12.0, 0.0, Rgba(0.0, 0.0, 0.0, 0.1))

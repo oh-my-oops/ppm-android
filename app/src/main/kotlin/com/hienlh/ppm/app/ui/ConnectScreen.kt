@@ -193,7 +193,12 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
                     PrimaryButton(
                         if (busy) "Checking…" else "Unlock",
                         enabled = !busy && (signIn || address.text.isNotBlank()),
+                        // `h-[50px] w-full text-[15px]` on the `rounded-md` button, its line the body's 1.5.
                         height = 50.dp,
+                        hover = true,
+                        radius = 8.dp,
+                        fontSize = 15f,
+                        lineHeight = 22.5f,
                         onClick = ::connect,
                     )
                     if (onCancel != null) {

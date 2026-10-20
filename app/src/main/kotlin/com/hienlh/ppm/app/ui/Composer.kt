@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,11 +76,14 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
 import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.brightness
+import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -198,10 +203,10 @@ fun MobileComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: C
             )
             val hasContent = tab.draft.text.isNotBlank()
             if (running && !hasContent) {
-                SquareButton(ProductIcon.Square, 14.dp, tokens.error, Color.White, pressedFill = tokens.error.opacity(0.8), label = "Stop") { chat.cancel() }
+                SquareButton(ProductIcon.Square, 14.dp, tokens.error, Color.White, hoverFill = tokens.error.opacity(0.8), label = "Stop") { chat.cancel() }
             } else {
                 SquareButton(
-                    ProductIcon.ArrowUp, 16.dp, tokens.accent, tokens.accentFg.color, pressedFill = tokens.accent.opacity(0.9),
+                    ProductIcon.ArrowUp, 16.dp, tokens.accent, tokens.accentFg.color, hoverFill = tokens.accent.opacity(0.9),
                     label = "Send", enabled = hasContent && state.canSend, onClick = ::send,
                 )
             }
@@ -241,20 +246,25 @@ private fun ChipsRow(model: AppModel, tab: ChatTab, chat: ChatController, state:
 }
 
 /**
- * `px-[9px] py-1 rounded-full text-[11.5px] text-text-2 bg-panel-2 border border-border-soft`:
- * the mode and the priority. [label] null draws the icon alone, at `px-[7px]`.
+ * `px-[9px] py-1 rounded-full text-[11.5px] text-text-2 bg-panel-2 border border-border-soft`,
+ * `hover:text-text-primary hover:border-border` faded in: the mode and the priority. [label] null
+ * draws the icon alone, at `px-[7px]`.
  */
 @Composable
 private fun NeutralChip(icon: ProductIcon, label: String?, narrow: Boolean, labelMax: Dp = Dp.Unspecified, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val color = if (pressed) tokens.text else tokens.text2
+    val hovered by source.collectIsHoveredAsState()
+    val fade = colorsFade(hovered)
+    val lit = if (pressed) 1.0 else fade.toDouble()
+    val color = tokens.text.mix(tokens.text2, lit)
     Row(
         Modifier
             .clip(CircleShape)
             .background(tokens.panel2.color)
-            .border(1.dp, (if (pressed) tokens.border else tokens.borderSoft).color, CircleShape)
+            .border(1.dp, tokens.border.mix(tokens.borderSoft, lit).color, CircleShape)
+            .hoverable(source)
             .clickable(source, indication = null, onClick = onClick)
             .padding(horizontal = if (narrow) 7.dp else 9.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -274,17 +284,28 @@ private fun NeutralChip(icon: ProductIcon, label: String?, narrow: Boolean, labe
     }
 }
 
-/** `text-primary bg-accent-wash border border-accent-wash-border`, sparkles, a brain while thinking; 50% while the turn runs. */
+/**
+ * `text-primary bg-accent-wash border border-accent-wash-border`, sparkles, a brain while
+ * thinking; `hover:brightness-110` faded in. 50% while the turn runs, when a mouse over it still
+ * brightens it, as CSS `:hover` matches a disabled button.
+ */
 @Composable
 private fun ModelChip(text: String, thinking: Boolean, disabled: Boolean, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val hovered by source.collectIsHoveredAsState()
+    val fade = colorsFade(hovered)
+    val lit = if (pressed) 1f else fade
     Row(
         Modifier
             .alpha(if (disabled) 0.5f else 1f)
+            .brightness(1f + 0.1f * lit)
             .clip(CircleShape)
             .background(tokens.accentWash.color)
             .border(1.dp, tokens.accentWashBorder.color, CircleShape)
-            .clickable(remember { MutableInteractionSource() }, indication = null, enabled = !disabled, onClick = onClick)
+            .hoverable(source)
+            .clickable(source, indication = null, enabled = !disabled, onClick = onClick)
             .padding(horizontal = 9.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -333,14 +354,17 @@ private fun PromptCacheChip(cache: PromptCacheState?) {
     }
 }
 
-/** `size-9 rounded-[11px]` with the float shadow; 30% and flat when disabled. */
+/**
+ * `size-9 rounded-[11px]` with the float shadow, [hoverFill] under a mouse (faded in) or a finger;
+ * 30% and flat when disabled, when a mouse over it still lights it.
+ */
 @Composable
 private fun SquareButton(
     icon: ProductIcon,
     iconSize: Dp,
     fill: Rgba,
     tint: Color,
-    pressedFill: Rgba,
+    hoverFill: Rgba,
     label: String,
     enabled: Boolean = true,
     onClick: () -> Unit,
@@ -349,13 +373,17 @@ private fun SquareButton(
     val shape = RoundedCornerShape(11.dp)
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
+    val hovered by source.collectIsHoveredAsState()
+    val fade = colorsFade(hovered)
+    val lit = if (pressed && enabled) 1.0 else fade.toDouble()
     Box(
         Modifier
             .alpha(if (enabled) 1f else 0.3f)
             .size(36.dp)
             .then(if (enabled) Modifier.ppmShadow(tokens.shadowFloat, shape) else Modifier)
             .clip(shape)
-            .background((if (pressed && enabled) pressedFill else fill).color)
+            .background(hoverFill.mix(fill, lit).color)
+            .hoverable(source)
             .clickable(source, indication = null, enabled = enabled, onClickLabel = label, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -364,12 +392,14 @@ private fun SquareButton(
 }
 
 /**
- * The modes (`ModeSelector`, `w-72` on a phone): over the chips row with its left edge on the
- * row's, 4 px clear of it. A tap anywhere else closes it.
+ * The modes (`ModeSelector`, `w-72 md:w-80`): over the chips row with its left edge on the row's,
+ * 4 px clear of it. A tap anywhere else closes it. A row's `hover:bg-surface-elevated` is the
+ * popover's own fill on the web, so this lights it in the hover tint instead.
  */
 @Composable
 private fun ModePopover(current: PermissionMode, onDismiss: () -> Unit, pick: (PermissionMode) -> Unit) {
     val tokens = LocalPpmTokens.current
+    val width = if (LocalPpmMobile.current) 288.dp else 320.dp
     val room = with(LocalDensity.current) { 16.dp.roundToPx() }
     val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
     val provider = remember(room, gap) { AboveStart(room, gap) }
@@ -379,7 +409,7 @@ private fun ModePopover(current: PermissionMode, onDismiss: () -> Unit, pick: (P
         Column(
             Modifier
                 .padding(16.dp)
-                .width(288.dp)
+                .width(width)
                 .ppmShadow(tokens.shadowPanel, shape)
                 .clip(shape)
                 .background(tokens.panel2.over(tokens.bgSolid).color)
@@ -409,7 +439,7 @@ private fun ModePopover(current: PermissionMode, onDismiss: () -> Unit, pick: (P
                         Modifier
                             .fillMaxWidth()
                             .background(if (active) tokens.panel2.color else Color.Transparent)
-                            .ppmClickable(pressedColor = tokens.panel2.color) { pick(mode) }
+                            .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color) { pick(mode) }
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
@@ -518,7 +548,10 @@ private fun SectionLabel(text: String) {
     )
 }
 
-/** `flex items-center gap-3 px-3 min-h-[44px] text-sm`, lit and checked when chosen. */
+/**
+ * `flex items-center gap-3 px-3 min-h-[44px] text-sm`, lit and checked when chosen. Its
+ * `hover:bg-surface-elevated` is the sheet's own fill, so the hover tint lights it instead.
+ */
 @Composable
 private fun OptionRow(active: Boolean, onClick: () -> Unit, label: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
     val tokens = LocalPpmTokens.current
@@ -527,7 +560,7 @@ private fun OptionRow(active: Boolean, onClick: () -> Unit, label: @Composable a
             .fillMaxWidth()
             .heightIn(min = 44.dp)
             .background(if (active) tokens.panel2.color else Color.Transparent)
-            .ppmClickable(pressedColor = tokens.panel2.color, onClick = onClick)
+            .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color, onClick = onClick)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -537,7 +570,7 @@ private fun OptionRow(active: Boolean, onClick: () -> Unit, label: @Composable a
     }
 }
 
-/** `role="switch"`: a 36×20 track, its 16 px knob 2 px in when off and 16 px in when on. */
+/** `role="switch"`: a 36×20 track, its 16 px knob 2 px in when off and 16 px in when on; lit at once under a mouse. */
 @Composable
 private fun ThinkingRow(on: Boolean, onToggle: () -> Unit) {
     val tokens = LocalPpmTokens.current
@@ -546,7 +579,7 @@ private fun ThinkingRow(on: Boolean, onToggle: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .heightIn(min = 44.dp)
-            .ppmClickable(pressedColor = tokens.panel2.color, onClick = onToggle)
+            .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color, fade = false, onClick = onToggle)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
