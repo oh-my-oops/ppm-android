@@ -8,6 +8,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -72,6 +73,7 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatState
@@ -178,17 +180,27 @@ private fun ChatToolbar(model: AppModel, tab: ChatTab, chat: ChatController, sta
     }
 }
 
-/** `px-1.5 py-0.5 rounded text-[11px]`, accent-tinted while its panel is open. */
+/**
+ * `px-1.5 py-0.5 rounded text-[11px]`, accent-tinted while its panel is open, and otherwise
+ * `hover:text-foreground hover:bg-surface-elevated`.
+ */
 @Composable
 private fun ToolbarChip(icon: ProductIcon, title: String?, active: Boolean, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(4.dp)
-    val color = if (active) tokens.accent else tokens.text2
+    val hover = rememberHover(enabled = !active)
+    val color = if (active) tokens.accent else tokens.text.mix(tokens.text2, hover.lit.toDouble())
     Row(
         Modifier
             .clip(shape)
             .background(if (active) tokens.accent.opacity(0.1).color else Color.Transparent)
-            .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, onClick = onClick)
+            .ppmClickable(
+                pressedColor = tokens.panel2.color,
+                hoverColor = if (active) Color.Transparent else tokens.panel2.color,
+                shape = shape,
+                source = hover.source,
+                onClick = onClick,
+            )
             .padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -238,17 +250,24 @@ private fun ReloadButton(connected: Boolean, reload: () -> Unit) {
     }
 }
 
-/** Session actions that do not earn a place of their own (`chat-toolbar-overflow-menu.tsx`). */
+/**
+ * Session actions that do not earn a place of their own (`chat-toolbar-overflow-menu.tsx`),
+ * `hover:text-text-secondary hover:bg-surface-elevated`.
+ */
 @Composable
 private fun OverflowButton(model: AppModel, tab: ChatTab) {
     val tokens = LocalPpmTokens.current
     val unread = model.unreadSessions()[tab.session.id] != null
     var open by remember { mutableStateOf(false) }
+    val hover = rememberHover()
     Box(
-        Modifier.size(20.dp).clip(RoundedCornerShape(4.dp)).ppmClickable(pressedColor = tokens.panel2.color) { open = true },
+        Modifier
+            .size(20.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, source = hover.source) { open = true },
         contentAlignment = Alignment.Center,
     ) {
-        PpmIcon(ProductIcon.MoreHorizontal, 14.dp, tokens.text3.color)
+        PpmIcon(ProductIcon.MoreHorizontal, 14.dp, tokens.text2.mix(tokens.text3, hover.lit.toDouble()).color)
         if (open) {
             DropdownAboveEnd(onDismiss = { open = false }, minWidth = 190.dp) {
                 if (unread) {
@@ -291,8 +310,8 @@ private fun ChatHistoryDropdown(model: AppModel, tab: ChatTab, list: HistoryList
             PpmIcon(ProductIcon.Search, 12.dp, tokens.text3.color)
             // A phone's inputs are 16 px whatever the class says.
             PpmTextField(query, "Search sessions...", Modifier.weight(1f), desktopStyle = ppmText(11f, lineHeight = 16.5f))
-            SmallIconButton(ProductIcon.CalendarX2, enabled = !model.deletingOld) { model.askDeleteOld = true }
-            SmallIconButton(ProductIcon.RefreshCw, spinning = refreshing || state.loading || model.deletingOld, enabled = !refreshing) {
+            SmallIconButton(ProductIcon.CalendarX2, tokens.error, enabled = !model.deletingOld) { model.askDeleteOld = true }
+            SmallIconButton(ProductIcon.RefreshCw, tokens.text2, spinning = refreshing || state.loading || model.deletingOld, enabled = !refreshing) {
                 scope.launch {
                     refreshing = true
                     model.refresh(list)
@@ -303,7 +322,8 @@ private fun ChatHistoryDropdown(model: AppModel, tab: ChatTab, list: HistoryList
         val all = state.sessions(model.sessions)
         if (model.tags.tags.isNotEmpty()) {
             Box(Modifier.fillMaxWidth().line(top = false, line)) {
-                TagChipBar(model.tags, all.size, state.tag, vertical = 4.dp) { list.tag = it }
+                // These chips, unlike the session list's, have no `hover:`.
+                TagChipBar(model.tags, all.size, state.tag, vertical = 4.dp, hover = false) { list.tag = it }
             }
         }
         val sessions = state.shown(all)
@@ -327,18 +347,26 @@ private fun ChatHistoryDropdown(model: AppModel, tab: ChatTab, list: HistoryList
                         }
                     }
                     if (state.hasMore(model.hasMoreSessions)) {
+                        // `hover:text-text-secondary hover:bg-surface-elevated`.
+                        val hover = rememberHover(enabled = !state.loadingMore)
+                        val text = tokens.text2.mix(tokens.text3, hover.lit.toDouble()).color
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .ppmClickable(enabled = !state.loadingMore, pressedColor = tokens.panel2.color) {
+                                .ppmClickable(
+                                    enabled = !state.loadingMore,
+                                    pressedColor = tokens.panel2.color,
+                                    hoverColor = tokens.panel2.color,
+                                    source = hover.source,
+                                ) {
                                     scope.launch { list.loadMore(model.sessions, model.hasMoreSessions) }
                                 }
                                 .padding(vertical = 6.dp),
                             horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (state.loadingMore) PpmIcon(ProductIcon.Loader2, 12.dp, tokens.text3.color, spinning = true)
-                            BasicText(if (state.loadingMore) "Loading..." else "Load more", style = ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text3.color))
+                            if (state.loadingMore) PpmIcon(ProductIcon.Loader2, 12.dp, text, spinning = true)
+                            BasicText(if (state.loadingMore) "Loading..." else "Load more", style = ppmText(11f, lineHeight = 16.5f).copy(color = text))
                         }
                     }
                 }
@@ -347,18 +375,19 @@ private fun ChatHistoryDropdown(model: AppModel, tab: ChatTab, list: HistoryList
     }
 }
 
-/** `p-0.5 rounded` around a 12 px icon in the subtle colour. */
+/** `p-0.5 rounded` around a 12 px icon in the subtle colour, [hoverTint] under a mouse. */
 @Composable
-private fun SmallIconButton(icon: ProductIcon, spinning: Boolean = false, enabled: Boolean = true, size: Dp = 12.dp, onClick: () -> Unit) {
+private fun SmallIconButton(icon: ProductIcon, hoverTint: Rgba, spinning: Boolean = false, enabled: Boolean = true, size: Dp = 12.dp, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
+    val hover = rememberHover(enabled)
     Box(
         Modifier
             .alpha(if (enabled) 1f else 0.5f)
             .clip(RoundedCornerShape(4.dp))
-            .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, onClick = onClick)
+            .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, source = hover.source, onClick = onClick)
             .padding(2.dp),
     ) {
-        PpmIcon(icon, size, tokens.text3.color, spinning = spinning)
+        PpmIcon(icon, size, hoverTint.mix(tokens.text3, hover.lit.toDouble()).color, spinning = spinning)
     }
 }
 
@@ -375,7 +404,15 @@ private fun HistoryBarRow(model: AppModel, session: SessionInfo, unreadType: Str
     val color = if (isUnread) tokens.text else tokens.text2
     val bot = session.title.startsWith("[PPM]")
     val title = if (bot) session.title.drop(7) else session.title
-    Box(Modifier.fillMaxWidth().background(if (isUnread) tokens.notification(unreadType).opacity(0.1).color else Color.Transparent)) {
+    // `hover:bg-surface-elevated`, on the row itself, so it lights while renaming too.
+    val hover = rememberHover()
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .background(if (isUnread) tokens.notification(unreadType).opacity(0.1).color else Color.Transparent)
+            .background(tokens.panel2.opacity(hover.lit.toDouble()).color)
+            .hoverable(hover.source),
+    ) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -398,11 +435,16 @@ private fun HistoryBarRow(model: AppModel, session: SessionInfo, unreadType: Str
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                RowIcon(if (session.pinned) ProductIcon.PinOff else ProductIcon.Pin, if (session.pinned) tokens.accent else tokens.text3) {
+                RowIcon(
+                    if (session.pinned) ProductIcon.PinOff else ProductIcon.Pin,
+                    if (session.pinned) tokens.accent else tokens.text3,
+                    if (session.pinned) tokens.accent.opacity(0.7) else tokens.text2,
+                    fade = true,
+                ) {
                     model.scope.launch { model.togglePin(session) }
                 }
-                RowIcon(ProductIcon.Pencil, tokens.text3) { renaming = true }
-                RowIcon(ProductIcon.Trash2, tokens.text3) { model.confirmDeleteSession = session }
+                RowIcon(ProductIcon.Pencil, tokens.text3, tokens.text2) { renaming = true }
+                RowIcon(ProductIcon.Trash2, tokens.text3, tokens.error, hoverFill = tokens.error.opacity(0.2)) { model.confirmDeleteSession = session }
                 session.updatedAt?.let {
                     Box(Modifier.width(64.dp), contentAlignment = Alignment.CenterEnd) {
                         RelativeTime(it, ppmText(10f, lineHeight = 15f).copy(color = tokens.text3.color))
@@ -416,12 +458,27 @@ private fun HistoryBarRow(model: AppModel, session: SessionInfo, unreadType: Str
     }
 }
 
-/** `p-0.5 rounded` with a 12 px icon. */
+/**
+ * `p-0.5 rounded` with a 12 px icon in [tint], and [hoverTint] (on [hoverFill]) under a mouse: at
+ * once, as the web's `transition-opacity` leaves colours, unless [fade] (`transition-all`).
+ */
 @Composable
-private fun RowIcon(icon: ProductIcon, tint: Rgba, onClick: () -> Unit) {
+private fun RowIcon(icon: ProductIcon, tint: Rgba, hoverTint: Rgba, hoverFill: Rgba? = null, fade: Boolean = false, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
-    Box(Modifier.clip(RoundedCornerShape(4.dp)).ppmClickable(pressedColor = tokens.panel2.color, onClick = onClick).padding(2.dp)) {
-        PpmIcon(icon, 12.dp, tint.color)
+    val hover = rememberHover(instant = !fade)
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .ppmClickable(
+                pressedColor = tokens.panel2.color,
+                hoverColor = hoverFill?.color ?: Color.Transparent,
+                fade = fade,
+                source = hover.source,
+                onClick = onClick,
+            )
+            .padding(2.dp),
+    ) {
+        PpmIcon(icon, 12.dp, hoverTint.mix(tint, hover.lit.toDouble()).color)
     }
 }
 
@@ -468,7 +525,7 @@ fun InlineRename(model: AppModel, session: SessionInfo, modifier: Modifier = Mod
             onKeyboardAction = { finish(save = true) },
             lineLimits = TextFieldLineLimits.SingleLine,
         )
-        RowIcon(ProductIcon.Check, tokens.success) { finish(save = true) }
-        RowIcon(ProductIcon.X, tokens.text3) { finish(save = false) }
+        RowIcon(ProductIcon.Check, tokens.success, tokens.success.opacity(0.8)) { finish(save = true) }
+        RowIcon(ProductIcon.X, tokens.text3, tokens.text2) { finish(save = false) }
     }
 }

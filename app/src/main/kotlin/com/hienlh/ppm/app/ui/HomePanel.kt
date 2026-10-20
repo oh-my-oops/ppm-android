@@ -327,18 +327,18 @@ fun SearchBox(state: TextFieldState, placeholder: String, modifier: Modifier = M
     }
 }
 
-/** `TagChipBar`: All, then each tag with its count; the picked one in its colour. */
+/** `TagChipBar`: All, then each tag with its count; the picked one in its colour, the others lit under a mouse if [hover]. */
 @Composable
-fun TagChipBar(tags: ProjectTags, total: Int, selected: Int?, vertical: Dp = 6.dp, onSelect: (Int?) -> Unit) {
+fun TagChipBar(tags: ProjectTags, total: Int, selected: Int?, vertical: Dp = 6.dp, hover: Boolean = true, onSelect: (Int?) -> Unit) {
     if (tags.tags.isEmpty()) return
     val tokens = LocalPpmTokens.current
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = vertical),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        TagChip("All ($total)", selected == null, null) { onSelect(null) }
+        TagChip("All ($total)", selected == null, null, hover) { onSelect(null) }
         for (tag in tags.tags) {
-            TagChip("${tag.name} (${tags.counts[tag.id] ?: 0})", selected == tag.id, Rgba.hex(tag.color) ?: tokens.text3) {
+            TagChip("${tag.name} (${tags.counts[tag.id] ?: 0})", selected == tag.id, Rgba.hex(tag.color) ?: tokens.text3, hover) {
                 onSelect(if (selected == tag.id) null else tag.id)
             }
         }
@@ -350,7 +350,7 @@ fun TagChipBar(tags: ProjectTags, total: Int, selected: Int?, vertical: Dp = 6.d
  * at 12.5%; one not picked lit under a mouse (`hover:bg-surface-elevated`).
  */
 @Composable
-private fun TagChip(label: String, selected: Boolean, color: Rgba?, onClick: () -> Unit) {
+private fun TagChip(label: String, selected: Boolean, color: Rgba?, hover: Boolean, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
     val tint = color ?: tokens.accent
@@ -364,7 +364,7 @@ private fun TagChip(label: String, selected: Boolean, color: Rgba?, onClick: () 
             .clip(shape)
             .background(background.color)
             .border(1.dp, if (selected) tint.color else tokens.border.color, shape)
-            .pressable(pressedColor = tokens.panel2.color, hoverColor = if (selected) Color.Transparent else tokens.panel2.color, shape = shape, onClick = onClick)
+            .pressable(pressedColor = tokens.panel2.color, hoverColor = if (selected || !hover) Color.Transparent else tokens.panel2.color, shape = shape, onClick = onClick)
             // `px-2 py-1` past the border's own pixel.
             .padding(horizontal = 9.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,

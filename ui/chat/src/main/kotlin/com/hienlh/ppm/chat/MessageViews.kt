@@ -10,7 +10,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -59,9 +61,11 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.TurnStop
 import com.hienlh.ppm.state.ChatBlock
 import com.hienlh.ppm.state.ChatItem
@@ -130,9 +134,11 @@ internal fun UserBubble(text: String, timestamp: Instant?, modifier: Modifier = 
                 }
             }
             if (expanded || clamped) {
-                val color = tokens.accent.opacity(0.7).color
+                // `text-primary/70 hover:text-primary`.
+                val hover = rememberHover()
+                val color = tokens.accent.mix(tokens.accent.opacity(0.7), hover.lit.toDouble()).color
                 Row(
-                    Modifier.padding(top = 4.dp).ppmClickable(pressedColor = Color.Transparent) { expanded = !expanded },
+                    Modifier.padding(top = 4.dp).ppmClickable(pressedColor = Color.Transparent, source = hover.source) { expanded = !expanded },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
@@ -179,18 +185,21 @@ internal fun CopyActionButton(text: String) {
     }
 }
 
-/** The action bar's ghost pill (`ActionButton`): subtle, lit while pressed. */
+/** The action bar's ghost pill (`ActionButton`): subtle, `hover:text-text-primary hover:bg-surface`, and so while pressed. */
 @Composable
 internal fun ActionButton(icon: ProductIcon, label: String, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val color = if (pressed) tokens.text.color else tokens.text3.color
+    val hovered by source.collectIsHoveredAsState()
+    val lit = (if (pressed) 1f else colorsFade(hovered)).toDouble()
+    val color = tokens.text.mix(tokens.text3, lit).color
     val shape = RoundedCornerShape(8.dp)
     Row(
         Modifier
             .clip(shape)
-            .background(if (pressed) tokens.panel.color else Color.Transparent)
+            .background(tokens.panel.opacity(lit).color)
+            .hoverable(source)
             .clickable(source, indication = null, role = Role.Button, onClick = onClick)
             .padding(horizontal = 6.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -310,7 +319,7 @@ internal fun ThinkingBlock(text: String, streaming: Boolean) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .ppmClickable(pressedColor = tokens.panel.color) { expanded = !expanded }
+                .ppmClickable(pressedColor = tokens.panel.color, hoverColor = tokens.panel.color) { expanded = !expanded }
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -416,7 +425,7 @@ fun TurnStopBar(stop: TurnStop, onContinue: () -> Unit, modifier: Modifier = Mod
                     .clip(shape)
                     .background(tokens.bgSolid.color)
                     .border(1.dp, tokens.border.color, shape)
-                    .ppmClickable(pressedColor = tokens.panel.color, onClick = onContinue)
+                    .ppmClickable(pressedColor = tokens.panel.color, hoverColor = tokens.panel.color, onClick = onContinue)
                     .padding(horizontal = if (mobile) 17.dp else 11.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),

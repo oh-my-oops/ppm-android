@@ -52,6 +52,7 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.Question
 import com.hienlh.ppm.protocol.prettyString
@@ -115,23 +116,24 @@ private fun ToolApprovalCard(request: ApprovalRequest, respond: (Boolean, JsonEl
     }
 }
 
-/** `px-4 py-1.5 rounded text-xs font-medium text-white`, a shade lighter while pressed. */
+/** `px-4 py-1.5 rounded text-xs font-medium text-white`, `hover:bg-…/80`, a shade lighter while pressed. */
 @Composable
 private fun SolidButton(title: String, color: Rgba, foreground: Color = Color.White, enabled: Boolean = true, onClick: () -> Unit) {
     val shape = RoundedCornerShape(4.dp)
+    val hover = rememberHover(enabled)
     BasicText(
         title,
         Modifier
             .alpha(if (enabled) 1f else 0.4f)
             .clip(shape)
-            .background(color.color)
-            .ppmClickable(enabled = enabled, pressedColor = Color.White.copy(alpha = 0.2f), onClick = onClick)
+            .background(color.opacity(1 - 0.2 * hover.lit).color)
+            .ppmClickable(enabled = enabled, pressedColor = Color.White.copy(alpha = 0.2f), source = hover.source, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 6.dp),
         xsMedium.copy(color = foreground),
     )
 }
 
-/** `px-3 py-1.5 text-xs rounded border border-border bg-background`. */
+/** `px-3 py-1.5 text-xs rounded border border-border bg-background hover:bg-surface-elevated`. */
 @Composable
 private fun OutlineButton(title: String, foreground: Rgba, horizontalPadding: Int = 12, enabled: Boolean = true, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
@@ -143,7 +145,7 @@ private fun OutlineButton(title: String, foreground: Rgba, horizontalPadding: In
             .clip(shape)
             .background(tokens.bgSolid.color)
             .border(1.dp, tokens.border.color, shape)
-            .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, onClick = onClick)
+            .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, onClick = onClick)
             .padding(horizontal = (horizontalPadding + 1).dp, vertical = 7.dp),
         xs.copy(color = foreground.color),
     )
@@ -226,7 +228,11 @@ private fun QuestionCard(questions: List<Question>, onSubmit: (JsonElement) -> U
                         Modifier
                             .clip(RoundedCornerShape(4.dp))
                             .background(if (isActive) tokens.accent.color else Color.Transparent)
-                            .ppmClickable(pressedColor = tokens.surfaceHover.color) { active = index }
+                            // Only a tab neither open nor answered has `hover:bg-surface-elevated`.
+                            .ppmClickable(
+                                pressedColor = tokens.surfaceHover.color,
+                                hoverColor = if (isActive || done) Color.Transparent else tokens.panel2.color,
+                            ) { active = index }
                             .padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -267,13 +273,18 @@ private fun QuestionCard(questions: List<Question>, onSubmit: (JsonElement) -> U
                 current.options.forEachIndexed { index, option ->
                     val selected = option.label in picked[active].orEmpty()
                     val optionShape = RoundedCornerShape(4.dp)
+                    // Not picked: `hover:border-primary/40 hover:bg-primary/5`.
+                    val hover = rememberHover(enabled = !selected)
+                    val lit = hover.lit.toDouble()
+                    val fill = if (selected) tokens.accent.opacity(0.1) else tokens.accent.opacity(0.05).mix(tokens.bgSolid, lit)
+                    val edge = if (selected) tokens.accent else tokens.accent.opacity(0.4).mix(tokens.border, lit)
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .clip(optionShape)
-                            .background((if (selected) tokens.accent.opacity(0.1) else tokens.bgSolid).color)
-                            .border(1.dp, (if (selected) tokens.accent else tokens.border).color, optionShape)
-                            .ppmClickable(pressedColor = tokens.surfaceHover.color) { select(option) }
+                            .background(fill.color)
+                            .border(1.dp, edge.color, optionShape)
+                            .ppmClickable(pressedColor = tokens.surfaceHover.color, source = hover.source) { select(option) }
                             .padding(horizontal = 11.dp, vertical = 9.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {

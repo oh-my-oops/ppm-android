@@ -3,7 +3,6 @@ package com.hienlh.ppm.chat
 import android.content.ClipData
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,7 +22,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -31,7 +29,9 @@ import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -68,7 +68,10 @@ fun CodeBlockView(code: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** The code block's 24px copy button (`ActionBtn`): a check for 2 s after a copy. */
+/**
+ * The code block's 24px copy button (`ActionBtn`), `hover:bg-surface-elevated hover:text-text-primary`:
+ * a check for 2 s after a copy.
+ */
 @Composable
 internal fun CopyIconButton(text: String, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
@@ -76,13 +79,15 @@ internal fun CopyIconButton(text: String, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(4.dp)
+    val hover = rememberHover()
+    val lit = hover.lit.toDouble()
     Box(
         modifier
             .size(24.dp)
             .clip(shape)
-            .background(tokens.panel2.opacity(0.8).color)
+            .background(tokens.panel2.mix(tokens.panel2.opacity(0.8), lit).color)
             .border(1.dp, tokens.border.opacity(0.5).color, shape)
-            .clickable(role = Role.Button) {
+            .ppmClickable(pressedColor = tokens.panel2.color, source = hover.source) {
                 scope.launch {
                     clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("code", text)))
                     copied = true
@@ -93,6 +98,6 @@ internal fun CopyIconButton(text: String, modifier: Modifier = Modifier) {
             .semantics { contentDescription = "Copy" },
         contentAlignment = Alignment.Center,
     ) {
-        PpmIcon(if (copied) ProductIcon.Check else ProductIcon.Copy, 12.dp, tokens.text2.color)
+        PpmIcon(if (copied) ProductIcon.Check else ProductIcon.Copy, 12.dp, tokens.text.mix(tokens.text2, lit).color)
     }
 }

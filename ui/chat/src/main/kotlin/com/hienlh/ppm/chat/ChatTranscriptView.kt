@@ -57,6 +57,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -301,7 +302,8 @@ private fun HistoryErrorBanner(message: String, retry: () -> Unit, modifier: Mod
             .clip(shape)
             .background(tokens.panel.color)
             .border(1.dp, tokens.border.color, shape)
-            .ppmClickable(pressedColor = tokens.surfaceHover.color, onClick = retry)
+            // `hover:bg-surface-hover`, at once.
+            .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color, fade = false, onClick = retry)
             .padding(horizontal = 13.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -418,6 +420,7 @@ private fun ScrollNavigator(
         } else {
             val hover = remember { MutableInteractionSource() }
             val hovered by hover.collectIsHoveredAsState()
+            val lit = colorsFade(hovered).toDouble()
             // A 44px target around a 36px puck on a phone, as the web sizes it.
             Box(
                 Modifier
@@ -433,11 +436,11 @@ private fun ScrollNavigator(
                 Box(
                     Modifier
                         .size(if (mobile) 36.dp else 30.dp)
-                        .background((if (hovered) tokens.panel2 else tokens.panel2.opacity(0.55)).color, CircleShape)
+                        .background(tokens.panel2.mix(tokens.panel2.opacity(0.55), lit).color, CircleShape)
                         .border(1.dp, tokens.border.color, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    PpmIcon(ProductIcon.ChevronsUpDown, 15.dp, (if (hovered) tokens.text else tokens.text3).color)
+                    PpmIcon(ProductIcon.ChevronsUpDown, 15.dp, tokens.text.mix(tokens.text3, lit).color)
                 }
             }
         }
@@ -450,17 +453,18 @@ private fun NavRow(icon: ProductIcon, size: Int, height: Dp, enabled: Boolean, l
     val tokens = LocalPpmTokens.current
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
+    val lit = colorsFade(hovered && enabled).toDouble()
     val shape = RoundedCornerShape(9.dp)
     Box(
         Modifier
             .size(width = 34.dp, height = height)
             .alpha(if (enabled) 1f else 0.3f)
-            .background(if (hovered && enabled) tokens.panel2.color else Color.Transparent, shape)
+            .background(tokens.panel2.opacity(lit).color, shape)
             .hoverable(hover, enabled)
             .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, shape = shape, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        PpmIcon(icon, size.dp, (if (hovered && enabled) tokens.text else tokens.text2).color)
+        PpmIcon(icon, size.dp, tokens.text.mix(tokens.text2, lit).color)
     }
 }

@@ -44,6 +44,7 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeTokens
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ToolOutcome
 import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.double
@@ -97,7 +98,7 @@ fun ToolCardView(tool: ToolBlock, turnRunning: Boolean, modifier: Modifier = Mod
         Row(
             Modifier
                 .fillMaxWidth()
-                .ppmClickable(pressedColor = tokens.panel2.opacity(0.4).color) { expanded = !expanded }
+                .ppmClickable(pressedColor = tokens.panel2.opacity(0.4).color, hoverColor = tokens.panel2.opacity(0.4).color) { expanded = !expanded }
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -306,12 +307,17 @@ private fun ToolDetails(name: String, input: JsonElement) {
             val url = s("url")
             if (url.isNotEmpty()) {
                 val uriHandler = LocalUriHandler.current
+                // `hover:underline`, at once.
+                val hover = rememberHover(instant = true)
                 Row(
-                    Modifier.ppmClickable(pressedColor = tokens.surfaceHover.color) { runCatching { uriHandler.openUri(url) } },
+                    Modifier.ppmClickable(pressedColor = tokens.surfaceHover.color, source = hover.source) { runCatching { uriHandler.openUri(url) } },
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     PpmIcon(ProductIcon.Globe, 12.dp, tokens.accent.color, Modifier.padding(top = 2.dp))
-                    BasicText(url, style = monoText.copy(color = tokens.accent.color))
+                    BasicText(
+                        url,
+                        style = monoText.copy(color = tokens.accent.color, textDecoration = if (hover.lit > 0f) TextDecoration.Underline else null),
+                    )
                 }
             }
             if (s("prompt").isNotEmpty()) BasicText(truncate(s("prompt"), 100), style = cardText.copy(color = tokens.text3.color))
@@ -452,13 +458,16 @@ private fun CollapsibleOutput(output: String) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
         Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (long) {
+                // `text-text-subtle hover:text-text-secondary`.
+                val hover = rememberHover()
+                val color = tokens.text2.mix(tokens.text3, hover.lit.toDouble()).color
                 Row(
-                    Modifier.ppmClickable(pressedColor = tokens.surfaceHover.color) { collapsed = !collapsed },
+                    Modifier.ppmClickable(pressedColor = tokens.surfaceHover.color, source = hover.source) { collapsed = !collapsed },
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    PpmIcon(if (collapsed) ProductIcon.ChevronRight else ProductIcon.ChevronDown, 12.dp, tokens.text3.color)
-                    BasicText("Output (${output.split("\n").size} lines)", style = ppmText(10f).copy(color = tokens.text3.color))
+                    PpmIcon(if (collapsed) ProductIcon.ChevronRight else ProductIcon.ChevronDown, 12.dp, color)
+                    BasicText("Output (${output.split("\n").size} lines)", style = ppmText(10f).copy(color = color))
                 }
             }
             when {
