@@ -21,6 +21,8 @@ data class UiPrefs(
     val sidebarCollapsed: Boolean? = null,
     /** In CSS px, 200–600; null when never set or out of range, as the web reads it. */
     val sidebarWidth: Int? = null,
+    /** Keep the screen on while a turn runs; the web's default is on. */
+    val keepScreenAwake: Boolean? = null,
 ) {
     /** The same keys as the server's, which [from] reads back: what a device keeps between starts. */
     fun toJson(): JsonObject = buildJsonObject {
@@ -28,6 +30,7 @@ data class UiPrefs(
         put("recentOpen", JsonObject(recentOpen.mapValues { JsonPrimitive(it.value) }))
         sidebarCollapsed?.let { put("sidebarCollapsed", it) }
         sidebarWidth?.let { put("sidebarWidth", it) }
+        keepScreenAwake?.let { put("keepScreenAwake", it) }
     }
 
     companion object {
@@ -37,6 +40,7 @@ data class UiPrefs(
             recentOpen = json["recentOpen"].obj.orEmpty().mapNotNull { (name, at) -> at.long?.let { name to it } }.toMap(),
             sidebarCollapsed = json["sidebarCollapsed"].bool,
             sidebarWidth = json["sidebarWidth"].double?.takeIf { it in 200.0..600.0 }?.toInt(),
+            keepScreenAwake = json["keepScreenAwake"].bool,
         )
     }
 }

@@ -132,6 +132,7 @@ fun PhoneShell(model: AppModel) {
             onTabs = { tabsOpen = true },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+        CornerChrome(model, mobile = true)
         MobileDrawer(model, drawerOpen) { drawerOpen = false }
     }
     if (projectsOpen) ProjectSheet(model) { projectsOpen = false }

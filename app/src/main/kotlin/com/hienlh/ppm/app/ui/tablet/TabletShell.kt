@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.Backdrop
+import com.hienlh.ppm.app.ui.CornerChrome
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -56,6 +57,7 @@ fun TabletShell(model: AppModel) {
                     StatusBar(model)
                 }
             }
+            CornerChrome(model, mobile = false)
             TabDragGhost(drag)
         }
     }

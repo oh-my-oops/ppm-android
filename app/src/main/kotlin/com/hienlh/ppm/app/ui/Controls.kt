@@ -484,3 +484,10 @@ fun AppModel.unreadSessions(): Map<String, SessionUnread> = events?.unread?.coll
 /** The sessions with a turn running, kept current. */
 @Composable
 fun AppModel.runningSessions(): Set<String> = events?.running?.collectAsState()?.value.orEmpty()
+
+/**
+ * The screen is kept on (use-wake-lock.ts): a turn runs on any project of the open server and
+ * `keepScreenAwake` is on. Android lets go of it by itself while the app is out of sight.
+ */
+@Composable
+fun AppModel.screenKeptAwake(): Boolean = keepScreenAwake && runningSessions().isNotEmpty()

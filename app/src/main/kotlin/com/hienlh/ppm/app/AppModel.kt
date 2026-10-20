@@ -182,6 +182,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     var sidebarWidth by mutableIntStateOf(SIDEBAR_DEFAULT_WIDTH)
         private set
 
+    /** Keep the screen on while any turn runs (`keepScreenAwake`), shared like [sidebarCollapsed]. */
+    var keepScreenAwake by mutableStateOf(true)
+        private set
+
     /**
      * Where the dock sits: `bottom`, `left` or `right`. The web keeps it in the browser (the
      * server drops the key), so each device has its own.
@@ -376,6 +380,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                     projectOpenedAt = prefs.recentOpen
                     prefs.sidebarCollapsed?.let { sidebarCollapsed = it }
                     prefs.sidebarWidth?.let { sidebarWidth = it }
+                    prefs.keepScreenAwake?.let { keepScreenAwake = it }
                     saveUiPrefs()
                 }
                 projects
@@ -408,10 +413,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         projectOpenedAt = saved.recentOpen
         sidebarCollapsed = saved.sidebarCollapsed ?: false
         sidebarWidth = saved.sidebarWidth ?: SIDEBAR_DEFAULT_WIDTH
+        keepScreenAwake = saved.keepScreenAwake ?: true
     }
 
     private fun saveUiPrefs() {
-        prefs.put("uiPrefs.$serverKey", UiPrefs(projectSortMode, projectOpenedAt, sidebarCollapsed, sidebarWidth).toJson().toString())
+        prefs.put("uiPrefs.$serverKey", UiPrefs(projectSortMode, projectOpenedAt, sidebarCollapsed, sidebarWidth, keepScreenAwake).toJson().toString())
     }
 
     private fun startEvents(api: ApiClient) {

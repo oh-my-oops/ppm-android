@@ -34,6 +34,7 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.DropdownAboveEnd
 import com.hienlh.ppm.app.ui.MenuItem
 import com.hienlh.ppm.app.ui.ThemeSwatch
+import com.hienlh.ppm.app.ui.screenKeptAwake
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.design.BuiltInThemes
@@ -79,6 +80,7 @@ fun StatusBar(model: AppModel) {
                 DockToggle(model, text)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (model.screenKeptAwake()) Awake(text)
                 model.api?.let { Resources(it, text) }
                 ThemePicker(model, text, compact)
                 model.info?.version?.let { BasicText("v$it", Modifier.padding(horizontal = 4.dp), style = text, maxLines = 1) }
@@ -155,6 +157,16 @@ private fun DockToggle(model: AppModel, text: TextStyle) {
     ) {
         PpmIcon(ProductIcon.PanelBottom, 11.dp, color.color)
         if (count > 0) BasicText("$count", style = text.copy(color = color.color))
+    }
+}
+
+/** `WakeLockStatusBarItem`: the screen is being kept on while a turn runs. */
+@Composable
+private fun Awake(text: TextStyle) {
+    val color = LocalPpmTokens.current.warning.color
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        PpmIcon(ProductIcon.Sun, 12.dp, color)
+        BasicText("awake", style = text.copy(color = color), maxLines = 1)
     }
 }
 

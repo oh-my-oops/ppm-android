@@ -21,14 +21,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
@@ -42,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
@@ -82,6 +85,14 @@ fun PpmRoot(model: AppModel) {
     val selectedId by model.store.selectedId.collectAsState()
     LaunchedEffect(selectedId, servers.size) { model.showSelectedServer() }
 
+    // `useWakeLock`: the screen stays lit while any turn runs, in any project, if Settings allows.
+    val keepAwake = model.hasServer && model.screenKeptAwake()
+    val view = LocalView.current
+    DisposableEffect(view, keepAwake) {
+        view.keepScreenOn = keepAwake
+        onDispose { view.keepScreenOn = false }
+    }
+
     val focusManager = LocalFocusManager.current
     BoxWithConstraints(
         Modifier
@@ -103,7 +114,7 @@ fun PpmRoot(model: AppModel) {
             if (model.addingServer) ConnectScreen(model, signIn = false, onCancel = { model.addingServer = false })
             Dialogs(model)
             model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }
-            ErrorToast(model.actionError) { model.actionError = null }
+            ErrorToast(model.actionError, mobile, narrow = maxWidth <= 600.dp) { model.actionError = null }
         }
     }
 }
@@ -142,11 +153,12 @@ private fun Dialogs(model: AppModel) {
 }
 
 /**
- * The web's error toast (sonner, `top-center` on a phone, with its close button): the message on
- * the surface colour, for four seconds or until closed.
+ * The web's error toast (sonner with its close button): the message on the surface colour, for
+ * four seconds or until closed. `top-center` on a phone — 16 px from three edges up to 600 px
+ * wide, else 356 px wide and 24 px down — and `bottom-left`, 24 px in, on the desktop layout.
  */
 @Composable
-private fun ErrorToast(message: String?, onDismiss: () -> Unit) {
+private fun ErrorToast(message: String?, mobile: Boolean, narrow: Boolean, onDismiss: () -> Unit) {
     val tokens = LocalPpmTokens.current
     // Kept while it slides out, after the message itself is cleared.
     var shown by remember { mutableStateOf(message) }
@@ -157,10 +169,17 @@ private fun ErrorToast(message: String?, onDismiss: () -> Unit) {
             onDismiss()
         }
     }
-    Box(Modifier.fillMaxSize().statusBarsPadding().padding(top = 16.dp), contentAlignment = Alignment.TopCenter) {
-        AnimatedVisibility(message != null, enter = fadeIn() + slideInVertically { -it }, exit = fadeOut() + slideOutVertically { -it }) {
+    val placement = when {
+        !mobile -> Modifier.safeDrawingPadding().padding(24.dp)
+        narrow -> Modifier.statusBarsPadding().padding(16.dp)
+        else -> Modifier.statusBarsPadding().padding(top = 24.dp)
+    }
+    // Slid in from the edge it sits on.
+    val from = if (mobile) -1 else 1
+    Box(Modifier.fillMaxSize().then(placement), contentAlignment = if (mobile) Alignment.TopCenter else Alignment.BottomStart) {
+        AnimatedVisibility(message != null, enter = fadeIn() + slideInVertically { from * it }, exit = fadeOut() + slideOutVertically { from * it }) {
             val shape = RoundedCornerShape(8.dp)
-            Box(Modifier.padding(horizontal = 16.dp).widthIn(max = 356.dp).fillMaxWidth()) {
+            Box(if (mobile && narrow) Modifier.fillMaxWidth() else Modifier.width(356.dp)) {
                 Row(
                     Modifier
                         .fillMaxWidth()
