@@ -1,7 +1,6 @@
 package com.hienlh.ppm.chat
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -67,6 +66,9 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.WebCursor
+import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssBorderInset
+import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -100,8 +102,8 @@ private fun ToolApprovalCard(request: ApprovalRequest, respond: (Boolean, JsonEl
         modifier
             .fillMaxWidth()
             .background(tokens.warning.opacity(0.1).color, shape)
-            .border(2.dp, tokens.warning.opacity(0.4).color, shape)
-            .padding(14.dp),
+            .cssBorder(tokens.warning.opacity(0.4).color, shape, width = 2.dp)
+            .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -114,13 +116,13 @@ private fun ToolApprovalCard(request: ApprovalRequest, respond: (Boolean, JsonEl
             Modifier
                 .fillMaxWidth()
                 .background(tokens.bgSolid.color, pre)
-                .border(1.dp, tokens.border.color, pre)
+                .cssBorder(tokens.border.color, pre)
                 .horizontalScroll(rememberScrollState()),
         ) {
             SelectionContainer {
                 BasicText(
                     request.input.prettyString,
-                    Modifier.padding(9.dp),
+                    Modifier.padding(8.dp),
                     ppmText(12f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text2.color),
                     softWrap = false,
                 )
@@ -179,11 +181,11 @@ private fun OutlineButton(
             .alpha(if (enabled) 1f else 0.4f)
             .clip(shape)
             .background(tokens.bgSolid.color)
-            .border(1.dp, tokens.border.color, shape)
             // Prev's and Next's `disabled:cursor-not-allowed`.
             .pointerHoverIcon(if (enabled) WebCursor.Default else WebCursor.NotAllowed)
             .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, hoverWhileDisabled = true, onClick = onClick)
-            .padding(horizontal = (horizontalPadding + 1).dp, vertical = 7.dp),
+            .cssBorder(tokens.border.color, shape)
+            .padding(horizontal = horizontalPadding.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) { BasicText(title, style = xs.copy(color = foreground.color)) }
 }
@@ -289,8 +291,8 @@ private fun QuestionCard(questions: List<Question>, onSubmit: (JsonElement) -> U
             .onPreviewKeyEvent(::onKey)
             .focusable()
             .background(tokens.accent.opacity(0.05).color, shape)
-            .border(2.dp, tokens.accent.opacity(0.3).color, shape)
-            .padding(14.dp),
+            .cssBorder(tokens.accent.opacity(0.3).color, shape, width = 2.dp)
+            .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -310,8 +312,8 @@ private fun QuestionCard(questions: List<Question>, onSubmit: (JsonElement) -> U
                 Modifier
                     .fillMaxWidth()
                     .background(tokens.bgSolid.color, tabsShape)
-                    .border(1.dp, tokens.border.color, tabsShape)
-                    .padding(5.dp)
+                    .cssBorder(tokens.border.color, tabsShape)
+                    .padding(4.dp)
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
@@ -379,14 +381,14 @@ private fun QuestionCard(questions: List<Question>, onSubmit: (JsonElement) -> U
                             .focusRing(focused == index)
                             .clip(optionShape)
                             .background(fill.color)
-                            .border(1.dp, edge.color, optionShape)
                             // A `div role="button"` with `cursor-pointer`.
                             .pointerHoverIcon(WebCursor.Pointer)
                             .ppmClickable(pressedColor = tokens.surfaceHover.color, source = hover.source) {
                                 select(option)
                                 focused = index
                             }
-                            .padding(horizontal = 11.dp, vertical = 9.dp),
+                            .cssBorder(edge.color, optionShape)
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         NumberSquare("${index + 1}", selected)
@@ -467,7 +469,7 @@ private fun OtherRow(
             .fillMaxWidth()
             .focusRing(ringed)
             .drawBehind {
-                val line = 1.dp.toPx()
+                val line = cssBorderPx(1.dp).toFloat()
                 drawRoundRect(
                     dash,
                     topLeft = Offset(line / 2, line / 2),
@@ -476,7 +478,8 @@ private fun OtherRow(
                     style = Stroke(line, pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 2.dp.toPx()))),
                 )
             }
-            .padding(horizontal = 11.dp, vertical = 9.dp),
+            .cssBorderInset(1.dp)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         NumberSquare("O", selected = false)
@@ -488,8 +491,8 @@ private fun OtherRow(
                 .weight(1f)
                 .focusRequester(focusRequester)
                 .background(tokens.panel.color, fieldShape)
-                .border(1.dp, (if (focused) tokens.accent else tokens.border).color, fieldShape)
-                .padding(horizontal = 9.dp, vertical = 5.dp),
+                .cssBorder((if (focused) tokens.accent else tokens.border).color, fieldShape)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             textStyle = text.copy(color = tokens.text.color),
             cursorBrush = SolidColor(tokens.accent.color),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),

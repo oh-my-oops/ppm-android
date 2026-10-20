@@ -1,6 +1,5 @@
 package com.hienlh.ppm.app.ui.tablet
 
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -29,11 +27,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.EmptyPanel
 import com.hienlh.ppm.app.ui.TabBody
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.state.workspace.WorkspaceState
 import com.hienlh.ppm.state.workspace.visibleTabs
 
@@ -189,7 +187,7 @@ private fun EditorPanel(model: AppModel, state: WorkspaceState, panelId: String,
             .fillMaxSize()
             .then(
                 if (multiple) {
-                    Modifier.border(1.dp, if (focused) tokens.accent.opacity(0.3).color else Color.Transparent).padding(1.dp)
+                    Modifier.cssBorder(if (focused) tokens.accent.opacity(0.3).color else Color.Transparent)
                 } else {
                     Modifier
                 },

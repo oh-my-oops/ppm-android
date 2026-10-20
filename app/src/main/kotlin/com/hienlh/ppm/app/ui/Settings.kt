@@ -2,7 +2,6 @@ package com.hienlh.ppm.app.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -58,6 +57,7 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.ThemeTokens
 import com.hienlh.ppm.design.WebCursor
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -316,14 +316,14 @@ private fun ThemeCard(theme: PpmTheme, active: Boolean, modifier: Modifier, onCl
             .heightIn(min = 44.dp)
             .then(if (active) Modifier.ring(3.dp, tokens.accentWash.color, 12.dp) else Modifier)
             .clip(shape)
-            .border(1.dp, (if (active) tokens.accent else tokens.border).color, shape)
             .ppmClickable(
                 pressedColor = tokens.panel2.opacity(0.4).color,
                 hoverColor = if (active) Color.Transparent else tokens.panel2.opacity(0.4).color,
                 shape = shape,
                 onClick = onClick,
             )
-            .padding(9.dp),
+            .cssBorder((if (active) tokens.accent else tokens.border).color, shape)
+            .padding(8.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -348,7 +348,7 @@ private fun ThemeCard(theme: PpmTheme, active: Boolean, modifier: Modifier, onCl
 internal fun ThemeSwatch(theme: PpmTheme) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
-    Row(Modifier.clip(shape).border(1.dp, tokens.border.color, shape).padding(1.dp)) {
+    Row(Modifier.clip(shape).cssBorder(tokens.border.color, shape)) {
         for (color in theme.swatch) Box(Modifier.width(12.dp).height(24.dp).background(color.color))
     }
 }
@@ -373,7 +373,6 @@ private fun ModeButton(label: String, icon: ProductIcon, on: Boolean, dark: Bool
             .background(
                 if (on) tokens.accent.opacity(1 - 0.1 * hover.lit).color else outlineFill(tokens, dark, hover.lit.toDouble()),
             )
-            .then(if (on) Modifier else Modifier.border(1.dp, outlineBorder(tokens, dark), shape))
             .pointerHoverIcon(WebCursor.Pointer)
             .ppmClickable(
                 pressedColor = if (on) Color.Black.copy(alpha = 0.1f) else tokens.panel2.color,
@@ -381,6 +380,7 @@ private fun ModeButton(label: String, icon: ProductIcon, on: Boolean, dark: Bool
                 source = hover.source,
                 onClick = onClick,
             )
+            .then(if (on) Modifier else Modifier.cssBorder(outlineBorder(tokens, dark), shape))
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
@@ -450,12 +450,12 @@ private fun ServersSection(model: AppModel) {
                 Modifier
                     .fillMaxWidth()
                     .clip(shape)
-                    .border(1.dp, (if (current) tokens.accent else tokens.border).color, shape)
                     .ppmClickable(
                         pressedColor = tokens.panel2.color,
                         hoverColor = if (current) Color.Transparent else tokens.panel2.opacity(0.4).color,
                         shape = shape,
                     ) { if (!current) model.store.select(server) }
+                    .cssBorder((if (current) tokens.accent else tokens.border).color, shape)
                     .padding(start = 12.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -480,8 +480,8 @@ private fun ServersSection(model: AppModel) {
                 .ppmShadow(SHADOW_XS, shape)
                 .clip(shape)
                 .background(outlineFill(tokens, model.theme.isDark, hover.lit.toDouble()))
-                .border(1.dp, outlineBorder(tokens, model.theme.isDark), shape)
-                .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, source = hover.source) { model.addingServer = true },
+                .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, source = hover.source) { model.addingServer = true }
+                .cssBorder(outlineBorder(tokens, model.theme.isDark), shape),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         ) {

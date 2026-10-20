@@ -1,7 +1,6 @@
 package com.hienlh.ppm.app.ui.tablet
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,9 +43,10 @@ import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
-import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.state.workspace.DOCK_PANEL_ID
 import com.hienlh.ppm.state.workspace.WorkspaceState
 
@@ -126,9 +126,9 @@ private fun DockHeader(
                         Modifier
                             .height(24.dp)
                             .clip(shape)
-                            .border(1.dp, tokens.border.color, shape)
                             .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, fade = false) { open = true }
-                            .padding(horizontal = 9.dp),
+                            .cssBorder(tokens.border.color, shape)
+                            .padding(horizontal = 8.dp),
                         contentAlignment = Alignment.Center,
                     ) { BasicText("+${overflow.size}", style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color)) }
                     if (open) {
@@ -168,10 +168,10 @@ private fun DockPill(model: AppModel, tab: com.hienlh.ppm.state.workspace.Worksp
             .height(24.dp)
             .clip(shape)
             .background(if (active) tokens.accent.opacity(0.1).color else Color.Transparent)
-            .border(1.dp, (if (active) tokens.accent else tokens.border).color, shape)
             .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = if (active) Color.Transparent else tokens.panel2.color) { model.activate(tab.id, DOCK_PANEL_ID) }
-            // `px-2.5`, `px-1.5` without a label, inside the border; the close button's `-mr-1` takes 4 px back.
-            .padding(start = if (showLabel) 11.dp else 7.dp, end = if (!showLabel) 7.dp else if (tab.closable) 7.dp else 11.dp),
+            .cssBorder((if (active) tokens.accent else tokens.border).color, shape)
+            // `px-2.5`, `px-1.5` without a label; the close button's `-mr-1` takes 4 px back.
+            .padding(start = if (showLabel) 10.dp else 6.dp, end = if (!showLabel) 6.dp else if (tab.closable) 6.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {

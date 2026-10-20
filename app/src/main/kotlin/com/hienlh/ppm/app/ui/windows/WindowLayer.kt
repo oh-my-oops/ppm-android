@@ -4,7 +4,6 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -78,6 +77,8 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.WebCursor
+import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.windows.Bounds
@@ -305,10 +306,9 @@ private fun FloatingWindow(model: AppModel, store: WindowStore, win: WindowRunti
                 .fillMaxSize()
                 .then(if (focused) Modifier.ppmShadow(SHADOW_FRONT, frameShape) else Modifier.ppmShadow(SHADOW_BEHIND_NEAR, frameShape).ppmShadow(SHADOW_BEHIND, frameShape))
                 .background(tokens.panel.color, frameShape)
-                .border(1.dp, tokens.border.color, frameShape)
                 // Any press inside raises the window, its content's included.
                 .raiseOnPress(store, win.id)
-                .padding(1.dp),
+                .cssBorder(tokens.border.color, frameShape),
         ) {
             WindowTitlebar(
                 windowsSkin = model.windowsSkin,
@@ -436,7 +436,7 @@ private fun SnapGhost(bounds: Bounds) {
             .size(r.w.dp, r.h.dp)
             .background(tokens.accentWash.color, shape)
             .drawBehind {
-                val width = 2.dp.toPx()
+                val width = cssBorderPx(2.dp).toFloat()
                 // Chrome's dashes for a border this thick: twice as long as it is wide, a width apart.
                 drawRoundRect(
                     tokens.accent.color,

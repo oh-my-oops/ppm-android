@@ -15,7 +15,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.hoverable
@@ -77,9 +76,10 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.design.ProductIcon
-import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.WebCursor
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -249,11 +249,10 @@ private fun ErrorToast(message: ErrorToastMessage?, mobile: Boolean, narrow: Boo
                         .ppmShadow(TOAST_SHADOW, shape)
                         .clip(shape)
                         .background(surface.color)
-                        .border(1.dp, tokens.border.color, shape)
                         .hoverable(overToast)
-                        // sonner's `padding: 16px` inside its border (`box-sizing: border-box`), less
-                        // the 3 px the icon's `margin-left: -3px` takes back.
-                        .padding(start = 14.dp, top = 17.dp, end = 17.dp, bottom = 17.dp),
+                        .cssBorder(tokens.border.color, shape)
+                        // sonner's `padding: 16px`, less the 3 px the icon's `margin-left: -3px` takes back.
+                        .padding(start = 13.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
@@ -306,7 +305,7 @@ private fun ErrorToast(message: ErrorToastMessage?, mobile: Boolean, narrow: Boo
                         .size(20.dp)
                         .clip(CircleShape)
                         .background((if (pressed) close.hoverFill else close.hoverFill.mix(surface, lit.toDouble())).color)
-                        .border(1.dp, close.hoverBorder.mix(close.border, lit.toDouble()).color, CircleShape),
+                        .cssBorder(close.hoverBorder.mix(close.border, lit.toDouble()).color, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) { PpmIcon(ProductIcon.X, 12.dp, close.icon.color) }
             }

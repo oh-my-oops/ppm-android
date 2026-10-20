@@ -7,7 +7,6 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -89,6 +88,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -355,10 +355,9 @@ private fun MoreButton(count: Int, busy: Boolean, expanded: Boolean, modifier: M
             modifier
                 .height(22.dp)
                 .background(background, CHIP_SHAPE)
-                .border(1.dp, border, CHIP_SHAPE)
                 .ppmClickable(pressedColor = Color.Transparent, onClickLabel = label, onClick = onClick)
-                // Inside the 1 px border, which CSS counts into the box and `border()` does not.
-                .padding(start = 9.dp, end = 7.dp),
+                .cssBorder(border, CHIP_SHAPE)
+                .padding(start = 8.dp, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
@@ -420,8 +419,7 @@ private fun WindowDockList(
                 .let { SHADOW_LG.fold(it) { m, s -> m.ppmShadow(s, shape) } }
                 .clip(shape)
                 .background(tokens.panel2.color)
-                .border(1.dp, tokens.border.color, shape)
-                .padding(1.dp),
+                .cssBorder(tokens.border.color, shape),
         ) {
             Row(
                 Modifier.fillMaxWidth().padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 8.dp),
@@ -450,8 +448,8 @@ private fun WindowDockList(
                     .fillMaxWidth()
                     .height(30.dp)
                     .background(tokens.panel.color, fieldShape)
-                    .border(1.dp, (if (focused) tokens.accentWashBorder else tokens.borderSoft).color, fieldShape)
-                    .padding(horizontal = 9.dp),
+                    .cssBorder((if (focused) tokens.accentWashBorder else tokens.borderSoft).color, fieldShape)
+                    .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {

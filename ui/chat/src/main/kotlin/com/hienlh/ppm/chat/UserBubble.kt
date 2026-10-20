@@ -3,7 +3,6 @@ package com.hienlh.ppm.chat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -74,6 +73,9 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.colorsFade
+import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssBorderInset
+import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -154,7 +156,7 @@ internal fun UserBubble(content: String, timestamp: Instant?, replies: ReplyTarg
         for (shadow in shadowSm) bubble = bubble.ppmShadow(shadow, shape)
         val fill = if (system) tokens.panel.opacity(0.4) else tokens.accentWash
         val stroke = if (system) tokens.border.opacity(0.4) else tokens.accentWashBorder
-        Column(bubble.background(fill.color, shape).border(1.dp, stroke.color, shape).padding(horizontal = 13.dp, vertical = 9.dp)) {
+        Column(bubble.background(fill.color, shape).cssBorder(stroke.color, shape).padding(horizontal = 12.dp, vertical = 8.dp)) {
             parsed.replyTo?.let { ReplyCard(it, replies.jump(it), Modifier.padding(bottom = 8.dp)) }
             if (parsed.tags.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -291,8 +293,8 @@ private fun FilePathChip(path: String, lineHeight: Float, modifier: Modifier = M
         modifier
             .clip(shape)
             .background(tokens.panel.opacity(0.5).color)
-            .border(1.dp, tokens.border.opacity(0.5).color, shape)
-            .padding(horizontal = 7.dp, vertical = 3.dp),
+            .cssBorder(tokens.border.opacity(0.5).color, shape)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -316,8 +318,8 @@ private fun LabelChip(label: String, fill: Rgba, stroke: Rgba, color: Rgba, icon
         Modifier
             .padding(bottom = 2.dp)
             .background(fill.color, shape)
-            .border(1.dp, stroke.color, shape)
-            .padding(horizontal = 9.dp, vertical = 3.dp),
+            .cssBorder(stroke.color, shape)
+            .padding(horizontal = 8.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -335,8 +337,8 @@ private fun AttachmentChip(modifier: Modifier = Modifier, content: @Composable (
         modifier
             .clip(shape)
             .background(tokens.bgSolid.opacity(0.4).color)
-            .border(1.dp, tokens.border.opacity(0.6).color, shape)
-            .padding(horizontal = 7.dp, vertical = 3.dp),
+            .cssBorder(tokens.border.opacity(0.6).color, shape)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) { content() }
@@ -411,9 +413,9 @@ private fun TerminalBlockPreview(content: String) {
             Modifier
                 .clip(shape)
                 .background(fill.color)
-                .border(1.dp, stroke.color, shape)
                 .ppmClickable(pressedColor = Color.Transparent, source = hover.source) { expanded = !expanded }
-                .padding(horizontal = 9.dp, vertical = 5.dp),
+                .cssBorder(stroke.color, shape)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -430,9 +432,9 @@ private fun TerminalBlockPreview(content: String) {
                     .heightIn(max = 160.dp)
                     .clip(shape)
                     .background(tokens.bgSolid.color)
-                    .border(1.dp, tokens.border.color, shape)
+                    .cssBorder(tokens.border.color, shape)
                     .verticalScroll(rememberScrollState())
-                    .padding(9.dp),
+                    .padding(8.dp),
             ) {
                 BasicText(content, style = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text.color))
             }
@@ -451,9 +453,9 @@ private fun BadgePill(gap: Int, onClick: () -> Unit, content: @Composable (Color
         Modifier
             .clip(CircleShape)
             .background(tokens.panel.mix(tokens.panel.opacity(0.5), lit).color)
-            .border(1.dp, tokens.border.opacity(0.6).color, CircleShape)
             .ppmClickable(pressedColor = Color.Transparent, source = hover.source, onClick = onClick)
-            .padding(horizontal = 9.dp, vertical = 3.dp),
+            .cssBorder(tokens.border.opacity(0.6).color, CircleShape)
+            .padding(horizontal = 8.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(gap.dp),
     ) { content(tokens.text2.mix(tokens.text3, lit).color, lit.toFloat()) }
@@ -471,9 +473,9 @@ private fun BadgeBody(maxHeight: Int?, content: @Composable () -> Unit) {
             .then(if (maxHeight != null) Modifier.heightIn(max = maxHeight.dp) else Modifier)
             .clip(shape)
             .background(tokens.panel.opacity(0.3).color)
-            .border(1.dp, tokens.border.opacity(0.4).color, shape)
+            .cssBorder(tokens.border.opacity(0.4).color, shape)
             .then(if (maxHeight != null) Modifier.verticalScroll(rememberScrollState()) else Modifier)
-            .padding(horizontal = 9.dp, vertical = 7.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
     ) { content() }
 }
 
@@ -577,7 +579,8 @@ fun ReplyCard(
         modifier
             .fillMaxWidth()
             .replyFrame(tokens.panel.opacity(0.6).color, tokens.border.color, tokens.accent.color)
-            .padding(start = 10.dp, end = 9.dp, top = 5.dp, bottom = 5.dp),
+            .cssBorderInset(start = 2.dp, top = 1.dp, end = 1.dp, bottom = 1.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
         // `flex items-center justify-between gap-2`.
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -641,8 +644,8 @@ fun ReplyCard(
  */
 private fun Modifier.replyFrame(fill: Color, border: Color, accent: Color): Modifier = drawBehind {
     val radius = 8.dp.toPx()
-    val left = 2.dp.toPx()
-    val side = 1.dp.toPx()
+    val left = cssBorderPx(2.dp).toFloat()
+    val side = cssBorderPx(1.dp).toFloat()
     val outer = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(radius))) }
     val leftCorner = CornerRadius((radius - left).coerceAtLeast(0f), (radius - side).coerceAtLeast(0f))
     val rightCorner = CornerRadius((radius - side).coerceAtLeast(0f))

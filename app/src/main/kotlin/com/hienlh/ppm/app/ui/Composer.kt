@@ -5,7 +5,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -78,6 +77,7 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
 import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.chat.ReplyCard
+import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -88,6 +88,7 @@ import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.brightness
 import com.hienlh.ppm.design.colorsFade
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -145,12 +146,11 @@ fun MobileComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: C
             .ppmShadow(tokens.shadowFloat, shape)
             .clip(shape)
             .background(tokens.panel.color)
-            .border(1.dp, tokens.border.color, shape)
             // `cursor-text`: the I-beam over the whole box, its buttons back to the arrow.
             .pointerHoverIcon(WebCursor.Text)
             // A tap on the box's padding goes to the text, as the web's container click does.
             .clickable(remember { MutableInteractionSource() }, indication = null) { focus.requestFocus() }
-            .padding(1.dp),
+            .cssBorder(tokens.border.color, shape),
     ) {
         // `px-2 md:px-4 pt-2`, and the card's own `mb-2`.
         tab.replyTo?.let { reply ->
@@ -280,12 +280,12 @@ private fun NeutralChip(icon: ProductIcon, label: String?, narrow: Boolean, labe
         Modifier
             .clip(CircleShape)
             .background(tokens.panel2.color)
-            .border(1.dp, tokens.border.mix(tokens.borderSoft, lit).color, CircleShape)
             .pointerHoverIcon(WebCursor.Default)
             .hoverable(source)
             .clickable(source, indication = null, onClick = onClick)
-            // `px-[9px] py-1` (`px-[7px]` narrow) inside the border.
-            .padding(horizontal = if (narrow) 8.dp else 10.dp, vertical = 5.dp),
+            .cssBorder(tokens.border.mix(tokens.borderSoft, lit).color, CircleShape)
+            // `px-[9px] py-1` (`px-[7px]` narrow).
+            .padding(horizontal = if (narrow) 7.dp else 9.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -322,12 +322,12 @@ private fun ModelChip(text: String, thinking: Boolean, disabled: Boolean, onClic
             .brightness(1f + 0.1f * lit)
             .clip(CircleShape)
             .background(tokens.accentWash.color)
-            .border(1.dp, tokens.accentWashBorder.color, CircleShape)
             // `disabled:cursor-default`: the arrow either way.
             .pointerHoverIcon(WebCursor.Default)
             .hoverable(source)
             .clickable(source, indication = null, enabled = !disabled, onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .cssBorder(tokens.accentWashBorder.color, CircleShape)
+            .padding(horizontal = 9.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -365,8 +365,8 @@ private fun PromptCacheChip(cache: PromptCacheState?) {
         Modifier
             .clip(CircleShape)
             .background((if (cold) tokens.error.opacity(0.1) else tokens.panel2).color)
-            .border(1.dp, (if (cold) tokens.error.opacity(0.4) else tokens.borderSoft).color, CircleShape)
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .cssBorder((if (cold) tokens.error.opacity(0.4) else tokens.borderSoft).color, CircleShape)
+            .padding(horizontal = 9.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -436,11 +436,10 @@ private fun ModePopover(current: PermissionMode, onDismiss: () -> Unit, pick: (P
                 .ppmShadow(tokens.shadowPanel, shape)
                 .clip(shape)
                 .background(tokens.panel2.over(tokens.bgSolid).color)
-                .border(1.dp, tokens.border.color, shape)
-                .padding(1.dp),
+                .cssBorder(tokens.border.color, shape),
         ) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Bottom).padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 BasicText("Modes", Modifier.weight(1f), style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color))
@@ -450,12 +449,11 @@ private fun ModePopover(current: PermissionMode, onDismiss: () -> Unit, pick: (P
                     Modifier
                         .clip(kbd)
                         .background(tokens.panel2.color)
-                        .border(1.dp, tokens.border.color, kbd)
-                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                        .cssBorder(tokens.border.color, kbd)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
                     style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text3.color),
                 )
             }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
             Column(Modifier.padding(vertical = 4.dp)) {
                 for (mode in PermissionMode.entries) {
                     val active = mode == current
@@ -536,8 +534,7 @@ private fun ModelSheet(model: AppModel, chat: ChatController, state: ChatState, 
                     }
                 }
             }
-            Box(Modifier.width(1.dp).fillMaxHeight().background(tokens.border.color))
-            Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+            Column(Modifier.weight(1f).fillMaxHeight().cssBorder(tokens.border.color, sides = CssSides.Start).padding(vertical = 4.dp)) {
                 SectionLabel("Effort")
                 for (option in Effort.entries) {
                     OptionRow(active = option == effort, onClick = { chat.setEffort(option) }) {
@@ -554,7 +551,7 @@ private fun ModelSheet(model: AppModel, chat: ChatController, state: ChatState, 
                         }
                     }
                 }
-                Box(Modifier.padding(vertical = 4.dp).fillMaxWidth().height(1.dp).background(tokens.border.color))
+                Box(Modifier.padding(vertical = 4.dp).fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top))
                 ThinkingRow(state.thinking) { chat.setThinking(!state.thinking) }
             }
         }

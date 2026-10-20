@@ -1,7 +1,6 @@
 package com.hienlh.ppm.app.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.hoverable
@@ -73,6 +72,7 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.colorsFade
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -231,8 +231,7 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
                             .ppmShadow(SHADOW_2XL, shape)
                             .clip(shape)
                             .background(tokens.bgSolid.color)
-                            .border(1.dp, tokens.border.color, shape)
-                            .padding(1.dp)
+                            .cssBorder(tokens.border.color, shape)
                             .navigationBarsPadding()
                             .imePadding(),
                         maxWidth >= 640.dp,
@@ -254,8 +253,7 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
                             .ppmShadow(SHADOW_2XL, shape)
                             .clip(shape)
                             .background(tokens.bgSolid.color)
-                            .border(1.dp, tokens.border.color, shape)
-                            .padding(1.dp),
+                            .cssBorder(tokens.border.color, shape),
                         true,
                     )
                 }
@@ -346,9 +344,8 @@ private fun Kbd(text: String, horizontal: Int) {
         Modifier
             .clip(shape)
             .background(tokens.panel.color)
-            .border(1.dp, tokens.border.color, shape)
-            // A CSS border adds to the box; Compose draws it inside, so the padding takes it in.
-            .padding(horizontal = (horizontal + 1).dp, vertical = 3.dp),
+            .cssBorder(tokens.border.color, shape)
+            .padding(horizontal = horizontal.dp, vertical = 2.dp),
         style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text3.color),
         maxLines = 1,
     )

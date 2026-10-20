@@ -1,7 +1,6 @@
 package com.hienlh.ppm.app.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,11 +47,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.chat.RelativeTime
+import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ProjectTags
@@ -137,10 +138,9 @@ private fun QuickOpenTile(icon: ProductIcon, label: String, modifier: Modifier, 
         modifier
             .clip(shape)
             .background(tokens.panel.color)
-            .border(1.dp, tokens.border.color, shape)
             .pressable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, shape = shape, onClick = onClick)
-            // A CSS border adds to the box; Compose draws it inside, so the padding takes it in.
-            .padding(horizontal = 9.dp, vertical = 13.dp),
+            .cssBorder(tokens.border.color, shape)
+            .padding(horizontal = 8.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -229,7 +229,7 @@ private fun SessionGroup(
             BasicText(title, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color))
             if (syncing) PpmIcon(ProductIcon.Loader2, 10.dp, tokens.text3.color, Modifier.padding(start = 6.dp), spinning = true)
         }
-        Column(Modifier.fillMaxWidth().clip(shape).background(tokens.panel.color).border(1.dp, tokens.border.color, shape).padding(1.dp)) {
+        Column(Modifier.fillMaxWidth().clip(shape).background(tokens.panel.color).cssBorder(tokens.border.color, shape)) {
             sessions.forEachIndexed { index, session ->
                 SessionRow(model, session, unread[session.id], last = index == sessions.lastIndex, onOpen = { onOpen(session) })
             }
@@ -254,6 +254,8 @@ private fun SessionRow(model: AppModel, session: SessionInfo, unread: SessionUnr
             Modifier
                 .fillMaxWidth()
                 .pressable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, onLongClick = { menuAt = it }, onClick = onOpen)
+                // `border-b border-border/50 last:border-0`.
+                .then(if (last) Modifier else Modifier.cssBorder(tokens.border.opacity(0.5).color, sides = CssSides.Bottom))
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -280,7 +282,6 @@ private fun SessionRow(model: AppModel, session: SessionInfo, unread: SessionUnr
                 PpmIcon(if (session.pinned) ProductIcon.PinOff else ProductIcon.Pin, 12.dp, tint.color)
             }
         }
-        if (!last) Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.opacity(0.5).color))
     }
 }
 
@@ -293,8 +294,7 @@ fun SearchBox(state: TextFieldState, placeholder: String, modifier: Modifier = M
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
     var focused by remember { mutableStateOf(false) }
-    // `py-1.5 text-xs` and the border: 30 px, and on a phone 35.33, where inputs are 16 px but
-    // keep `text-xs`'s 4/3 line.
+    // `py-1.5 text-xs` and the border; on a phone inputs are 16 px but keep `text-xs`'s 4/3 line.
     val ring = tokens.accent.opacity(0.5).color
     Box(
         modifier
@@ -311,28 +311,21 @@ fun SearchBox(state: TextFieldState, placeholder: String, modifier: Modifier = M
                         style = Stroke(px),
                     )
                 }
-            }
-            .clip(shape)
-            .background(tokens.panel.color)
-            .border(1.dp, tokens.border.color, shape),
+            },
         contentAlignment = Alignment.CenterStart,
     ) {
-        // The icon sits `left-2.5` from the field's outer edge; the text `pl-8 pr-8` inside its border.
-        Row(
-            Modifier.fillMaxWidth().padding(start = 10.dp, end = 33.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
-        ) {
-            PpmIcon(ProductIcon.Search, 14.dp, tokens.text3.color)
+        // The input has the border and `pl-8 pr-8`; the icon sits `left-2.5` from its outer edge.
+        Box(Modifier.fillMaxWidth().clip(shape).background(tokens.panel.color).cssBorder(tokens.border.color, shape)) {
             PpmTextField(
                 state,
                 placeholder,
-                Modifier.weight(1f).padding(vertical = 7.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 6.dp),
                 style = ppmText(16f, lineHeight = 64f / 3),
                 desktopStyle = ppmText(12f, lineHeight = 16f),
                 onFocusChanged = { focused = it },
             )
         }
+        PpmIcon(ProductIcon.Search, 14.dp, tokens.text3.color, Modifier.padding(start = 10.dp))
         if (state.text.isNotEmpty()) {
             // The 14 px X 8 px in from the edge, as the web places it, in a 24 dp target;
             // `text-text-subtle hover:text-text-primary`, at once.
@@ -388,10 +381,9 @@ private fun TagChip(label: String, selected: Boolean, color: Rgba?, hover: Boole
         Modifier
             .clip(shape)
             .background(background.color)
-            .border(1.dp, if (selected) tint.color else tokens.border.color, shape)
             .pressable(pressedColor = tokens.panel2.color, hoverColor = if (selected || !hover) Color.Transparent else tokens.panel2.color, shape = shape, onClick = onClick)
-            // `px-2 py-1` past the border's own pixel.
-            .padding(horizontal = 9.dp, vertical = 5.dp),
+            .cssBorder(if (selected) tint.color else tokens.border.color, shape)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {

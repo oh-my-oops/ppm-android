@@ -49,12 +49,16 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeTokens
+import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssBorderInset
+import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.ppmText
 import kotlin.math.roundToInt
 
@@ -146,12 +150,12 @@ private fun MarkdownBlockView(block: MarkdownBlock, style: MarkdownStyle, modifi
                 block.blocks,
                 style.copy(italic = true, color = tokens.text2),
                 modifier
-                    .drawBehind { drawRect(border, size = Size(2.dp.toPx(), size.height)) }
-                    .padding(start = 14.dp),
+                    .cssBorder(border, width = 2.dp, sides = CssSides.Start)
+                    .padding(start = 12.dp),
             )
         }
         is MarkdownBlock.Table -> MarkdownTable(block.header, block.rows, style, modifier)
-        MarkdownBlock.Rule -> Box(modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
+        MarkdownBlock.Rule -> Box(modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top))
     }
 }
 
@@ -408,13 +412,13 @@ private fun TableCell(
             // Collapsed borders: each cell draws its top and left edges; the last row and column
             // close the table.
             .drawBehind {
-                val line = 1.dp.toPx()
+                val line = cssBorderPx(1.dp).toFloat()
                 drawRect(border, size = Size(size.width, line))
                 drawRect(border, size = Size(line, size.height))
                 if (lastColumn) drawRect(border, Offset(size.width - line, 0f), Size(line, size.height))
                 if (lastRow) drawRect(border, Offset(0f, size.height - line), Size(size.width, line))
             }
-            .padding(start = 1.dp, top = 1.dp, end = if (lastColumn) 1.dp else 0.dp, bottom = if (lastRow) 1.dp else 0.dp)
+            .cssBorderInset(start = 1.dp, top = 1.dp, end = if (lastColumn) 1.dp else 0.dp, bottom = if (lastRow) 1.dp else 0.dp)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         // `td` is `vertical-align: middle`, with `text-align: left`.
         contentAlignment = Alignment.CenterStart,

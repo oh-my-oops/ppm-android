@@ -3,7 +3,6 @@ package com.hienlh.ppm.app.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,14 +49,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.app.AppModel
-import com.hienlh.ppm.design.ppmClickable
-import com.hienlh.ppm.client.ApiClient
-import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
+import com.hienlh.ppm.client.ApiClient
+import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.themeBackground
@@ -264,7 +264,7 @@ private fun Logo() {
             .ppmShadow(tokens.shadowFloat, outer)
             .clip(outer)
             .background(tokens.bgSolid.color)
-            .border(1.dp, tokens.border.color, outer),
+            .cssBorder(tokens.border.color, outer),
         contentAlignment = Alignment.Center,
     ) {
         Box(Modifier.size(52.dp).clip(RoundedCornerShape(12.dp)).background(tokens.panel2.color), contentAlignment = Alignment.Center) {
@@ -278,7 +278,7 @@ private fun Logo() {
 private fun ServerChip(name: String) {
     val tokens = LocalPpmTokens.current
     Row(
-        Modifier.clip(CircleShape).background(tokens.panel2.color).border(1.dp, tokens.border.color, CircleShape).padding(horizontal = 11.dp, vertical = 3.dp),
+        Modifier.clip(CircleShape).background(tokens.panel2.color).cssBorder(tokens.border.color, CircleShape).padding(horizontal = 10.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -290,24 +290,23 @@ private fun ServerChip(name: String) {
 
 /**
  * `h-[50px] rounded-xl bg-surface-elevated`, the border lit while typing in it. Its text starts at
- * `px-3` inside the border; with a button at `right-2` it stops at `pr-12`, as the password's does.
+ * `px-3` inside the border; with a button at `right-2` from the outer edge it stops at `pr-12`, as
+ * the password's does.
  */
 @Composable
 private fun LoginField(focused: Boolean, trailing: (@Composable () -> Unit)? = null, field: @Composable () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(12.dp)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(50.dp)
-            .clip(shape)
-            .background(tokens.panel2.color)
-            .border(1.dp, if (focused) tokens.accent.color else tokens.border.color, shape)
-            .padding(start = 13.dp, end = if (trailing != null) 8.dp else 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // 49 px from the edge less the 36 px button and its 8 px.
-        Box(Modifier.weight(1f).padding(end = if (trailing != null) 5.dp else 0.dp)) { field() }
-        trailing?.invoke()
+    Box(Modifier.fillMaxWidth().height(50.dp), contentAlignment = Alignment.CenterEnd) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .clip(shape)
+                .background(tokens.panel2.color)
+                .cssBorder(if (focused) tokens.accent.color else tokens.border.color, shape)
+                .padding(start = 12.dp, end = if (trailing != null) 48.dp else 12.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) { field() }
+        if (trailing != null) Box(Modifier.padding(end = 8.dp)) { trailing() }
     }
 }

@@ -1,14 +1,12 @@
 package com.hienlh.ppm.chat
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -35,6 +33,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFonts
@@ -42,6 +41,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeTokens
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -92,8 +92,7 @@ fun ToolCardView(tool: ToolBlock, turnRunning: Boolean, modifier: Modifier = Mod
             .fillMaxWidth()
             .clip(shape)
             .background(tokens.panel.color)
-            .border(1.dp, (if (interactive) tokens.accentWashBorder else tokens.border).color, shape)
-            .padding(1.dp),
+            .cssBorder((if (interactive) tokens.accentWashBorder else tokens.border).color, shape),
     ) {
         Row(
             Modifier
@@ -424,8 +423,8 @@ private fun AnsweredQuestions(input: JsonElement) {
                             label,
                             Modifier
                                 .background((if (selected) tokens.accent.opacity(0.2) else Rgba(0.0, 0.0, 0.0, 0.0)).color, shape)
-                                .border(1.dp, (if (selected) tokens.accent else tokens.border).color, shape)
-                                .padding(horizontal = 7.dp, vertical = 3.dp),
+                                .cssBorder((if (selected) tokens.accent else tokens.border).color, shape)
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
                             cardText.copy(color = (if (selected) tokens.text else tokens.text3).color),
                         )
                     }
@@ -454,8 +453,7 @@ private fun CollapsibleOutput(output: String) {
     val long = isLongOutput(output)
     var collapsed by remember(output) { mutableStateOf(long) }
     val text = remember(output) { clipped(output) }
-    Column(Modifier.fillMaxWidth()) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
+    Column(Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top)) {
         Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (long) {
                 // `text-text-subtle hover:text-text-secondary`.
@@ -500,8 +498,8 @@ private fun AgentRow(tool: ToolBlock, isDone: Boolean, modifier: Modifier) {
             .heightIn(min = 44.dp)
             .clip(shape)
             .background(tokens.panel.color)
-            .border(1.dp, tokens.border.color, shape)
-            .padding(horizontal = 11.dp, vertical = 9.dp),
+            .cssBorder(tokens.border.color, shape)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {

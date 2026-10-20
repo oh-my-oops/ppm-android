@@ -4,7 +4,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -56,6 +55,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -86,9 +86,9 @@ fun MenuBox(modifier: Modifier = Modifier, minWidth: Dp = 128.dp, large: Boolean
                 .ppmShadow(if (large) shadowLg else shadowMd, shape)
                 .clip(shape)
                 .background(tokens.panel2.over(tokens.bgSolid).color)
-                .border(1.dp, tokens.text.color, shape)
-                // `p-1` inside the 1 px border, which CSS counts into the box and `border()` does not.
-                .padding(5.dp),
+                .cssBorder(tokens.text.color, shape)
+                // `p-1`.
+                .padding(4.dp),
             content = content,
         )
     }

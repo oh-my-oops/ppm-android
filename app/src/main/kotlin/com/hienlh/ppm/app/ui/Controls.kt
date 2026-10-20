@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -93,8 +92,6 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.tracksTextFocus
-import com.hienlh.ppm.design.colorsFade
-import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
@@ -102,6 +99,11 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.ProviderLogo
 import com.hienlh.ppm.design.ProviderLogos
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.colorsFade
+import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssBorderInset
+import com.hienlh.ppm.design.cssBorderPx
+import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -241,8 +243,8 @@ fun SecondaryButton(title: String, modifier: Modifier = Modifier, onClick: () ->
             .fillMaxWidth()
             .height(44.dp)
             .clip(shape)
-            .border(1.dp, tokens.border.color, shape)
-            .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, onClick = onClick),
+            .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, onClick = onClick)
+            .cssBorder(tokens.border.color, shape),
         contentAlignment = Alignment.Center,
     ) {
         BasicText(title, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text2.color))
@@ -351,7 +353,7 @@ fun BottomSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier, background
                     .clip(shape)
                     .background(background ?: tokens.panel2.color)
                     .drawWithCache {
-                        val line = topBorder(size, 16.dp.toPx(), 1.dp.toPx())
+                        val line = topBorder(size, 16.dp.toPx(), cssBorderPx(1.dp).toFloat())
                         onDrawBehind { drawPath(line, border) }
                     }
                     .draggable(
@@ -361,7 +363,7 @@ fun BottomSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier, background
                             if (offset.value > panelHeight * 0.25f || velocity > 1_500f) close() else offset.animateTo(0f, tween(150))
                         },
                     )
-                    .padding(top = 1.dp)
+                    .cssBorderInset(top = 1.dp)
                     // `pb-[max(0.5rem,env(safe-area-inset-bottom))]`, and just the keyboard's
                     // height while it is up: the largest of the three.
                     .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars).union(WindowInsets(bottom = 8.dp))),
@@ -469,7 +471,7 @@ fun ConfirmDialog(
                 .ppmShadow(tokens.shadowPanel, shape)
                 .clip(shape)
                 .background(tokens.panel2.over(tokens.bgSolid).color)
-                .border(1.dp, tokens.border.color, shape)
+                .cssBorder(tokens.border.color, shape)
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -525,7 +527,7 @@ fun PromptDialog(
                 .ppmShadow(tokens.shadowPanel, shape)
                 .clip(shape)
                 .background(tokens.panel2.over(tokens.bgSolid).color)
-                .border(1.dp, tokens.border.color, shape)
+                .cssBorder(tokens.border.color, shape)
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -537,9 +539,9 @@ fun PromptDialog(
                     .height(44.dp)
                     .clip(fieldShape)
                     .background(tokens.bgSolid.color)
-                    .border(1.dp, (if (focused) tokens.accent else tokens.border).color, fieldShape)
-                    // The rename sheet's field: `px-3` inside the border.
-                    .padding(horizontal = 13.dp),
+                        .cssBorder((if (focused) tokens.accent else tokens.border).color, fieldShape)
+                    // The rename sheet's field: `px-3`.
+                    .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 PpmTextField(

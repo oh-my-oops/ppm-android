@@ -1,7 +1,6 @@
 package com.hienlh.ppm.app.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,15 +43,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.chat.RelativeTime
-import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
-import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.state.ChatSearch
@@ -100,21 +99,26 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             val shape = RoundedCornerShape(8.dp)
             var focused by remember { mutableStateOf(false) }
-            // `py-1.5 text-xs` outside the phone layout, its 1 px border counted as CSS counts it.
-            val vertical = if (LocalPpmMobile.current) 6.dp else 7.dp
-            Row(
-                Modifier
-                    .weight(1f)
-                    .clip(shape)
-                    .background(tokens.panel2.color)
-                    .border(1.dp, if (focused) tokens.accent.opacity(0.5).color else tokens.border.color, shape)
-                    // The icon sits `left-2` from the field's outer edge, the text `pl-7` inside its border.
-                    .padding(start = 8.dp, end = 9.dp, top = vertical, bottom = vertical),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
-            ) {
-                PpmIcon(ProductIcon.Search, 14.dp, tokens.text3.color)
-                PpmTextField(query, "Filter sessions…", Modifier.weight(1f), desktopStyle = ppmText(12f, lineHeight = 16f), onFocusChanged = { focused = it })
+            // The input has the border and `py-1.5 pl-7 pr-2 text-xs` (on a phone 16 px with
+            // `text-xs`'s 4/3 line); the icon sits `left-2` from its outer edge.
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(shape)
+                        .background(tokens.panel2.color)
+                        .cssBorder(if (focused) tokens.accent.opacity(0.5).color else tokens.border.color, shape),
+                ) {
+                    PpmTextField(
+                        query,
+                        "Filter sessions…",
+                        Modifier.fillMaxWidth().padding(start = 28.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                        style = ppmText(16f, lineHeight = 64f / 3),
+                        desktopStyle = ppmText(12f, lineHeight = 16f),
+                        onFocusChanged = { focused = it },
+                    )
+                }
+                PpmIcon(ProductIcon.Search, 14.dp, tokens.text3.color, Modifier.padding(start = 8.dp))
             }
             SquareIconButton(ProductIcon.CalendarX2, tokens.error, enabled = !model.deletingOld) { model.askDeleteOld = true }
             var refreshing by remember { mutableStateOf(false) }
@@ -273,15 +277,14 @@ private fun PillChip(label: String, selected: Boolean, color: Rgba?, onClick: ()
         Modifier
             .clip(CircleShape)
             .background(fill)
-            .border(1.dp, border.color, CircleShape)
             .ppmClickable(
                 pressedColor = tokens.panel2.color,
                 hoverColor = if (selected) Color.Transparent else tokens.panel2.color,
                 shape = CircleShape,
                 onClick = onClick,
             )
-            // The padding plus the 1 px border, which CSS counts into the box and `border()` does not.
-            .padding(horizontal = 9.dp, vertical = 3.dp),
+            .cssBorder(border.color, CircleShape)
+            .padding(horizontal = 8.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {

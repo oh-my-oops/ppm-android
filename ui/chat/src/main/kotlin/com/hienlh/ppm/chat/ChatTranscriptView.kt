@@ -3,7 +3,6 @@ package com.hienlh.ppm.chat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.hoverable
@@ -74,6 +73,7 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.colorsFade
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -253,9 +253,9 @@ private fun ClearErrorsButton(count: Int, onClick: () -> Unit, modifier: Modifie
         pill
             .clip(CircleShape)
             .background(tokens.error.opacity(if (pressed || hover.lit > 0f) 0.25 else 0.15).color)
-            .border(1.dp, tokens.error.opacity(0.25).color, CircleShape)
             .ppmClickable(pressedColor = Color.Transparent, source = hover.source, onClick = onClick)
-            .padding(horizontal = 13.dp, vertical = 5.dp),
+            .cssBorder(tokens.error.opacity(0.25).color, CircleShape)
+            .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -585,10 +585,10 @@ private fun HistoryErrorBanner(message: String, retry: () -> Unit, modifier: Mod
             .padding(horizontal = 16.dp)
             .clip(shape)
             .background(tokens.panel.color)
-            .border(1.dp, tokens.border.color, shape)
             // `hover:bg-surface-hover`, at once.
             .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color, fade = false, onClick = retry)
-            .padding(horizontal = 13.dp, vertical = 9.dp),
+            .cssBorder(tokens.border.color, shape)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -678,8 +678,8 @@ private fun ScrollNavigator(
             Column(
                 SHADOW_LG.fold(Modifier as Modifier) { m, shadow -> m.ppmShadow(shadow, shape) }
                     .background(tokens.panel2.opacity(0.95).color, shape)
-                    .border(1.dp, tokens.border.color, shape)
-                    .padding(4.dp),
+                    .cssBorder(tokens.border.color, shape)
+                    .padding(3.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 val rowHeight = if (mobile) 36.dp else 30.dp
@@ -721,7 +721,7 @@ private fun ScrollNavigator(
                     Modifier
                         .size(if (mobile) 36.dp else 30.dp)
                         .background(tokens.panel2.mix(tokens.panel2.opacity(0.55), lit).color, CircleShape)
-                        .border(1.dp, tokens.border.color, CircleShape),
+                        .cssBorder(tokens.border.color, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
                     PpmIcon(ProductIcon.ChevronsUpDown, 15.dp, tokens.text.mix(tokens.text3, lit).color)

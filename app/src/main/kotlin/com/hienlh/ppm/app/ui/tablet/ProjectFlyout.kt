@@ -1,7 +1,6 @@
 package com.hienlh.ppm.app.ui.tablet
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
@@ -88,10 +87,11 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.colorsFade
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
-import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.SessionUnread
 import kotlinx.coroutines.launch
@@ -270,9 +270,7 @@ private fun Flyout(model: AppModel, drag: RowDrag, modifier: Modifier, onDismiss
             .ppmShadow(tokens.shadowPanel, shape)
             .clip(shape)
             .background(tokens.panel2.over(tokens.bgSolid).color)
-            .border(1.dp, tokens.border.color, shape)
-            // Inside the 1 px border, which CSS counts into the box and `border()` does not.
-            .padding(1.dp),
+            .cssBorder(tokens.border.color, shape),
     ) {
         Row(
             Modifier.fillMaxWidth().edge(Edge.Bottom, tokens.border.color).padding(horizontal = 10.dp, vertical = 8.dp),

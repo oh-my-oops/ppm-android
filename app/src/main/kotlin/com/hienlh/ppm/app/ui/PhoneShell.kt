@@ -14,7 +14,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -62,7 +61,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.toRect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -85,11 +83,14 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.chat.RelativeTime
+import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.ProjectInfo
@@ -121,7 +122,7 @@ fun PhoneShell(model: AppModel) {
     val tokens = LocalPpmTokens.current
     val frame = model.layout?.takeIf { it.gridPanelIds.size > 1 }?.let { layout ->
         val focused = layout.focusedPanelId in layout.gridPanelIds
-        Modifier.border(1.dp, if (focused) tokens.accent.opacity(0.3).color else Color.Transparent).padding(1.dp)
+        Modifier.cssBorder(if (focused) tokens.accent.opacity(0.3).color else Color.Transparent)
     } ?: Modifier
     Backdrop {
         Box(
@@ -160,9 +161,7 @@ private fun MobileNav(model: AppModel, onMenu: () -> Unit, onProjects: () -> Uni
         Row(Modifier.fillMaxWidth().height(NAV_HEIGHT), verticalAlignment = Alignment.CenterVertically) {
             // The fixed cluster, `border-r border-border`; the Terminal button waits for terminals.
             Row(
-                Modifier.fillMaxHeight().drawBehind {
-                    drawRect(tokens.border.color, Offset(size.width - 1.dp.toPx(), 0f), Size(1.dp.toPx(), size.height))
-                }.padding(end = 1.dp),
+                Modifier.fillMaxHeight().cssBorder(tokens.border.color, sides = CssSides.End),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 NavCell("Open menu", onMenu) { PpmIcon(ProductIcon.Menu, 20.dp, tokens.text2.color) }
@@ -215,9 +214,9 @@ private fun CurrentTabButton(model: AppModel, active: WorkspaceTab, modifier: Mo
         modifier
             .fillMaxHeight()
             .background(tokens.panel.color)
-            .drawBehind { drawRect(tokens.accent.color, Offset.Zero, Size(size.width, 2.dp.toPx())) }
             .ppmClickable(pressedColor = Color.Transparent, onClick = onClick)
-            .padding(start = 12.dp, end = 12.dp, top = 2.dp),
+            .cssBorder(tokens.accent.color, width = 2.dp, sides = CssSides.Top)
+            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -240,7 +239,7 @@ private fun CountChip(count: Int) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
     Box(
-        Modifier.height(18.dp).clip(shape).background(tokens.panel2.color).border(1.dp, tokens.border.color, shape).padding(horizontal = 7.dp),
+        Modifier.height(18.dp).clip(shape).background(tokens.panel2.color).cssBorder(tokens.border.color, shape).padding(horizontal = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         BasicText("$count", style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color))
@@ -473,7 +472,7 @@ private fun TabSwitcherSheet(model: AppModel, onDismiss: () -> Unit, onLongPress
             Spacer(Modifier.weight(1f))
             val segment = RoundedCornerShape(12.dp)
             Row(
-                Modifier.clip(segment).background(tokens.bgSolid.color).border(1.dp, tokens.border.color, segment).padding(3.dp),
+                Modifier.clip(segment).background(tokens.bgSolid.color).cssBorder(tokens.border.color, segment).padding(2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 for ((mode, label) in listOf("default" to "Default", "recent" to "Recent")) {
@@ -497,7 +496,7 @@ private fun TabSwitcherSheet(model: AppModel, onDismiss: () -> Unit, onLongPress
                     .size(32.dp)
                     .clip(CircleShape)
                     .drawBehind {
-                        val stroke = 1.dp.toPx()
+                        val stroke = cssBorderPx(1.dp).toFloat()
                         drawCircle(
                             tokens.border.color,
                             radius = size.minDimension / 2 - stroke / 2,
@@ -514,7 +513,7 @@ private fun TabSwitcherSheet(model: AppModel, onDismiss: () -> Unit, onLongPress
         Box(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
             val shape = RoundedCornerShape(12.dp)
             Row(
-                Modifier.fillMaxWidth().height(40.dp).clip(shape).background(tokens.bgSolid.color).border(1.dp, tokens.border.color, shape).padding(horizontal = 13.dp),
+                Modifier.fillMaxWidth().height(40.dp).clip(shape).background(tokens.bgSolid.color).cssBorder(tokens.border.color, shape).padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -773,8 +772,8 @@ private fun RenameSheet(model: AppModel, session: SessionInfo, onDismiss: () -> 
                     .height(44.dp)
                     .clip(shape)
                     .background(tokens.bgSolid.color)
-                    .border(1.dp, (if (focused) tokens.accent else tokens.border).color, shape)
-                    .padding(horizontal = 13.dp),
+                    .cssBorder((if (focused) tokens.accent else tokens.border).color, shape)
+                    .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 PpmTextField(
@@ -822,8 +821,7 @@ private fun MobileDrawer(model: AppModel, open: Boolean, onClose: () -> Unit) {
                 .fillMaxHeight()
                 .graphicsLayer { translationX = -(1f - slid) * size.width }
                 .background(tokens.bgSolid.color)
-                .drawBehind { drawRect(tokens.border.color, Offset(size.width - 1.dp.toPx(), 0f), Size(1.dp.toPx(), size.height)) }
-                .padding(end = 1.dp)
+                .cssBorder(tokens.border.color, sides = CssSides.End)
                 // Taps on the panel stay on it.
                 .clickable(remember { MutableInteractionSource() }, indication = null) {},
         ) {

@@ -2,6 +2,8 @@ package com.hienlh.ppm.design
 
 import androidx.compose.ui.graphics.vector.PathNode
 import androidx.compose.ui.graphics.vector.addPathNodes
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -144,5 +146,16 @@ class DesignTest {
         val other = PpmFormat.turnStop("API error.\nretry later\nplease", null)
         assertEquals("Stopped: API error", other.first)
         assertEquals("retry later please", other.second)
+    }
+
+    @Test
+    fun `a CSS border is as many device pixels as Chrome draws`() {
+        // Measured on the phone (2.625): `getComputedStyle` gives 0.761905px for 1px, 1.90476px for 2px.
+        assertEquals(2, Density(2.625f).cssBorderPx(1.dp))
+        assertEquals(5, Density(2.625f).cssBorderPx(2.dp))
+        assertEquals(2, Density(2f).cssBorderPx(1.dp))
+        // Never thinner than a pixel, and none at all for none.
+        assertEquals(1, Density(0.75f).cssBorderPx(1.dp))
+        assertEquals(0, Density(2.625f).cssBorderPx(0.dp))
     }
 }

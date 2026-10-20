@@ -2,7 +2,6 @@ package com.hienlh.ppm.chat
 
 import android.content.ClipData
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,6 +34,7 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.SyntaxHighlighter
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -65,18 +65,19 @@ fun CodeBlockView(code: String, language: String?, modifier: Modifier = Modifier
         value = if (enabled) highlighter.cached(code, language, theme) else null
         if (enabled && value == null) value = highlighter.highlight(code, language, theme)
     }
-    Box(
-        modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(highlighted?.background ?: tokens.bgSolid.color)
-            .border(1.dp, tokens.border.color, shape),
-    ) {
-        Box(Modifier.horizontalScroll(rememberScrollState())) {
+    Box(modifier.fillMaxWidth()) {
+        // The `pre` has the border; the copy button is placed in the box around it.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(highlighted?.background ?: tokens.bgSolid.color)
+                .cssBorder(tokens.border.color, shape)
+                .horizontalScroll(rememberScrollState()),
+        ) {
             BasicText(
                 highlighted?.text ?: AnnotatedString(code),
-                // The padding sits inside the border's own pixel, as CSS's border box puts it.
-                Modifier.padding(start = 9.dp, top = 9.dp, end = 9.dp, bottom = 13.dp),
+                Modifier.padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 12.dp),
                 style = ppmText(CODE_SIZE, kind = FontKind.MONO, lineHeight = CODE_LINE_HEIGHT)
                     .copy(color = highlighted?.foreground ?: tokens.text.color),
                 softWrap = false,
@@ -104,7 +105,6 @@ internal fun CopyIconButton(text: String, modifier: Modifier = Modifier) {
             .size(24.dp)
             .clip(shape)
             .background(tokens.panel2.mix(tokens.panel2.opacity(0.8), lit).color)
-            .border(1.dp, tokens.border.opacity(0.5).color, shape)
             .ppmClickable(pressedColor = tokens.panel2.color, source = hover.source) {
                 scope.launch {
                     clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("code", text)))
@@ -113,6 +113,7 @@ internal fun CopyIconButton(text: String, modifier: Modifier = Modifier) {
                     copied = false
                 }
             }
+            .cssBorder(tokens.border.opacity(0.5).color, shape)
             .semantics { contentDescription = "Copy" },
         contentAlignment = Alignment.Center,
     ) {

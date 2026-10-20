@@ -8,7 +8,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -21,7 +20,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -57,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFormat
@@ -65,6 +64,7 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.colorsFade
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -225,8 +225,8 @@ internal fun InlineError(message: String) {
         Modifier
             .fillMaxWidth()
             .background(tokens.error.opacity(0.1).color, shape)
-            .border(1.dp, tokens.error.opacity(0.2).color, shape)
-            .padding(horizontal = 9.dp, vertical = 7.dp),
+            .cssBorder(tokens.error.opacity(0.2).color, shape)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -252,8 +252,8 @@ internal fun SystemMessage(text: String, onDismiss: () -> Unit, modifier: Modifi
         modifier
             .fillMaxWidth()
             .background(tokens.error.opacity(0.1).color, shape)
-            .border(1.dp, tokens.error.opacity(0.2).color, shape)
-            .padding(horizontal = 13.dp, vertical = 9.dp),
+            .cssBorder(tokens.error.opacity(0.2).color, shape)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -297,8 +297,7 @@ internal fun ThinkingBlock(text: String, streaming: Boolean) {
             .fillMaxWidth()
             .clip(shape)
             .background(tokens.panel.opacity(0.3).color)
-            .border(1.dp, tokens.border.opacity(0.5).color, shape)
-            .padding(1.dp),
+            .cssBorder(tokens.border.opacity(0.5).color, shape),
     ) {
         val label = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color)
         Row(
@@ -384,8 +383,7 @@ fun TurnStopBar(stop: TurnStop, onContinue: () -> Unit, modifier: Modifier = Mod
     // `text-xs max-md:text-sm leading-snug`.
     val size = if (mobile) 14f else 12f
     val (title, detail) = PpmFormat.turnStop(stop.message, stop.subtype)
-    Column(modifier.fillMaxWidth().background(tokens.error.opacity(0.1).color)) {
-        Spacer(Modifier.fillMaxWidth().height(1.dp).background(tokens.error.opacity(0.2).color))
+    Column(modifier.fillMaxWidth().background(tokens.error.opacity(0.1).color).cssBorder(tokens.error.opacity(0.2).color, sides = CssSides.Top)) {
         Row(
             Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -409,9 +407,9 @@ fun TurnStopBar(stop: TurnStop, onContinue: () -> Unit, modifier: Modifier = Mod
                     .heightIn(min = if (mobile) 44.dp else 0.dp)
                     .clip(shape)
                     .background(tokens.bgSolid.color)
-                    .border(1.dp, tokens.border.color, shape)
                     .ppmClickable(pressedColor = tokens.panel.color, hoverColor = tokens.panel.color, onClick = onContinue)
-                    .padding(horizontal = if (mobile) 17.dp else 11.dp, vertical = 7.dp),
+                    .cssBorder(tokens.border.color, shape)
+                    .padding(horizontal = if (mobile) 16.dp else 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {

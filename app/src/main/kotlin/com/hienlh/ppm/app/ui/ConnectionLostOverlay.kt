@@ -1,7 +1,6 @@
 package com.hienlh.ppm.app.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +48,7 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.LucideIcon
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -182,10 +182,9 @@ private fun OverlayButton(
             .alpha(if (enabled) 1f else 0.5f)
             .clip(shape)
             .background(fill.color)
-            .then(if (primary) Modifier else Modifier.border(1.dp, tokens.border.color, shape))
             .ppmClickable(enabled = enabled, pressedColor = Color.Transparent, source = hover.source, hoverWhileDisabled = true, onClick = onClick)
-            // The outline sits inside here and outside on the web: a pixel more each way.
-            .padding(horizontal = if (primary) 16.dp else 17.dp, vertical = if (primary) 10.dp else 11.dp),
+            .then(if (primary) Modifier else Modifier.cssBorder(tokens.border.color, shape))
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {

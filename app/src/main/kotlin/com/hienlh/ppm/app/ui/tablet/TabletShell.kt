@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -27,9 +26,6 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -44,11 +40,13 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.Backdrop
 import com.hienlh.ppm.app.ui.CornerChrome
 import com.hienlh.ppm.app.ui.windows.WindowLayer
+import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.colorsFade
+import com.hienlh.ppm.design.cssBorder
 
 /**
  * The desktop layout (app.tsx from `md` up): the sidebar, then the working area — the panel grid
@@ -78,20 +76,15 @@ fun TabletShell(model: AppModel) {
 
 enum class Edge { Top, Bottom, Left, Right }
 
-/** A CSS 1 px border on one [edge]: drawn inside the box, the content moved off it (`border-box`). */
-fun Modifier.edge(edge: Edge, color: Color): Modifier = drawBehind {
-    val px = 1.dp.toPx()
-    when (edge) {
-        Edge.Top -> drawRect(color, Offset.Zero, Size(size.width, px))
-        Edge.Bottom -> drawRect(color, Offset(0f, size.height - px), Size(size.width, px))
-        Edge.Left -> drawRect(color, Offset.Zero, Size(px, size.height))
-        Edge.Right -> drawRect(color, Offset(size.width - px, 0f), Size(px, size.height))
-    }
-}.padding(
-    top = if (edge == Edge.Top) 1.dp else 0.dp,
-    bottom = if (edge == Edge.Bottom) 1.dp else 0.dp,
-    start = if (edge == Edge.Left) 1.dp else 0.dp,
-    end = if (edge == Edge.Right) 1.dp else 0.dp,
+/** A CSS 1 px border on one [edge] ([cssBorder]): drawn inside the box, the content moved off it (`border-box`). */
+fun Modifier.edge(edge: Edge, color: Color): Modifier = cssBorder(
+    color,
+    sides = when (edge) {
+        Edge.Top -> CssSides.Top
+        Edge.Bottom -> CssSides.Bottom
+        Edge.Left -> CssSides.Start
+        Edge.Right -> CssSides.End
+    },
 )
 
 /**

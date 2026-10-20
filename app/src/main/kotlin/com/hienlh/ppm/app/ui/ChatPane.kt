@@ -7,7 +7,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,12 +45,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -75,12 +72,14 @@ import com.hienlh.ppm.chat.ChatTranscriptView
 import com.hienlh.ppm.chat.LocalChatImages
 import com.hienlh.ppm.chat.RelativeTime
 import com.hienlh.ppm.chat.TurnStopBar
+import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -166,11 +165,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
     }
 }
 
-/** A CSS border on one edge: drawn inside the box, the content moved off it by the same pixel. */
-fun Modifier.line(top: Boolean, color: Color): Modifier = drawBehind {
-    val y = if (top) 0f else size.height - 1.dp.toPx()
-    drawRect(color, Offset(0f, y), Size(size.width, 1.dp.toPx()))
-}.padding(top = if (top) 1.dp else 0.dp, bottom = if (top) 0.dp else 1.dp)
+/** `border-t` or `border-b`. */
+fun Modifier.line(top: Boolean, color: Color): Modifier = cssBorder(color, sides = if (top) CssSides.Top else CssSides.Bottom)
 
 /**
  * The row over the message box (`chat-history-bar.tsx`): History on the left; on the right the
@@ -548,8 +544,8 @@ fun InlineRename(model: AppModel, session: SessionInfo, field: RenameField, modi
                 }
                 .clip(shape)
                 .background(tokens.panel2.color)
-                .border(1.dp, (if (focused) tokens.accent.opacity(field.focusAlpha) else tokens.border).color, shape)
-                .padding(horizontal = field.padding + 1.dp, vertical = 3.dp),
+                .cssBorder((if (focused) tokens.accent.opacity(field.focusAlpha) else tokens.border).color, shape)
+                .padding(horizontal = field.padding, vertical = 2.dp),
             textStyle = ppmText(size, lineHeight = size * field.lineRatio).copy(color = tokens.text.color),
             cursorBrush = SolidColor(tokens.accent.color),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),

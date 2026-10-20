@@ -2,7 +2,6 @@ package com.hienlh.ppm.app.ui.tablet
 
 import android.os.SystemClock
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -62,6 +61,8 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.WebCursor
+import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.workspace.MAX_ROWS
@@ -432,7 +433,7 @@ fun BoxScope.DropHighlight(zone: DropZone) {
         else -> Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(1f / 3) to
             RoundedCornerShape(bottomStart = radius, bottomEnd = radius)
     }
-    Box(place.background(tokens.accent.opacity(0.1).color, shape).border(2.dp, line, shape))
+    Box(place.background(tokens.accent.opacity(0.1).color, shape).cssBorder(line, shape, width = 2.dp))
 }
 
 /**
@@ -440,7 +441,7 @@ fun BoxScope.DropHighlight(zone: DropZone) {
  * width between along each side, and one dash on the middle of each rounded corner.
  */
 private fun Modifier.dashedBorder(width: Dp, color: Color, radius: Dp) = drawBehind {
-    val w = width.toPx()
+    val w = cssBorderPx(width).toFloat()
     val half = w / 2
     val r = radius.toPx() - half
     val left = half

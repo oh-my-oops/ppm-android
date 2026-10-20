@@ -2,7 +2,6 @@ package com.hienlh.ppm.app.ui.tablet
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.hoverable
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,9 +59,10 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.WebCursor
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
-import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.SessionUnread
 import kotlin.math.roundToInt
@@ -151,10 +151,10 @@ private fun ProjectSwitcherButton(model: AppModel, open: Boolean, modifier: Modi
             .height(32.dp)
             .clip(shape)
             .background(if (open) tokens.panel2.color else Color.Transparent)
-            .border(1.dp, if (open) tokens.border.color else Color.Transparent, shape)
             .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, shape = shape, onClickLabel = "Switch project", onClick = onClick)
             // `px-2` inside a border that is there, transparent, while closed.
-            .padding(horizontal = 9.dp),
+            .cssBorder(if (open) tokens.border.color else Color.Transparent, shape)
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
@@ -200,7 +200,7 @@ internal fun SwitcherAvatar(model: AppModel, project: ProjectInfo, size: Dp, unr
                     .size(8.dp)
                     .clip(CircleShape)
                     .background(tokens.notification(type).color)
-                    .border(2.dp, tokens.bgSolid.color, CircleShape),
+                    .cssBorder(tokens.bgSolid.color, CircleShape, width = 2.dp),
             )
         }
     }

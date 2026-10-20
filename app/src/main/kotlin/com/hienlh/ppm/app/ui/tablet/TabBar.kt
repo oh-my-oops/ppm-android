@@ -85,12 +85,15 @@ import com.hienlh.ppm.app.ui.pressable
 import com.hienlh.ppm.app.ui.runningSessions
 import com.hienlh.ppm.app.ui.tabTitle
 import com.hienlh.ppm.app.ui.unreadSessions
+import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.colorsFade
+import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssBorderInset
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.SessionUnread
@@ -227,7 +230,8 @@ private fun AddTabButton(model: AppModel, panelId: String, modifier: Modifier) {
                 model.focusPanel(panelId)
                 model.openPalette()
             }
-            .padding(top = 2.dp),
+            // `border-t-2 border-transparent`.
+            .cssBorderInset(top = 2.dp),
         contentAlignment = Alignment.Center,
     ) { PpmIcon(ProductIcon.Plus, 16.dp, tokens.text.mix(tokens.text2, lit.toDouble()).color) }
 }
@@ -382,17 +386,16 @@ private fun TabChip(
                 Modifier
                     .fillMaxHeight()
                     .background(fill.color)
-                    .drawBehind {
-                        drawRect(tokens.accent.opacity(on.toDouble()).color, Offset.Zero, Size(size.width, 2.dp.toPx()))
-                        drawRect(tokens.borderSoft.color, Offset(size.width - 1.dp.toPx(), 0f), Size(1.dp.toPx(), size.height))
-                    }
                     // A finger gets the hover's fill while it is down; a mouse has it already.
                     .pressable(
                         pressedColor = if (active || hovered) Color.Transparent else tokens.panel.opacity(0.6).color,
                         source = source,
                         onClick = onSelect,
                     )
-                    .padding(start = 12.dp, end = 13.dp, top = 2.dp),
+                    // `[border-right:1px_solid_var(--border-soft)]`, and `border-t-2` in the accent while active.
+                    .cssBorder(tokens.borderSoft.color, sides = CssSides.End)
+                    .cssBorder(tokens.accent.opacity(on.toDouble()).color, width = 2.dp, sides = CssSides.Top)
+                    .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
