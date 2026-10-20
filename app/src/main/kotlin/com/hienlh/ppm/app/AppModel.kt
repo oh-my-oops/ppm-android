@@ -50,6 +50,8 @@ import com.hienlh.ppm.protocol.sortedForList
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatSearch
 import com.hienlh.ppm.state.GlobalEvents
+import com.hienlh.ppm.state.HealthCheck
+import com.hienlh.ppm.state.HealthWatch
 import com.hienlh.ppm.state.HistoryList
 import com.hienlh.ppm.state.KeyBindings
 import com.hienlh.ppm.state.MessagePriority
@@ -240,6 +242,20 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     var showSignIn by mutableStateOf(false)
 
+    private var health = HealthWatch()
+
+    /** The connection-lost overlay is up: the server has not answered for 15 s. */
+    var connectionLost by mutableStateOf(false)
+        private set
+
+    /** The open server's named-tunnel hostname, read while it answered; in memory only, as on the web. */
+    var namedHostname by mutableStateOf<String?>(null)
+        private set
+
+    /** The open server's address on its own network, kept per server like the web's `ppm-last-local-url`. */
+    var localUrl by mutableStateOf<String?>(null)
+        private set
+
     /** Settings' Add server was chosen: the connect screen shows over everything until it is done or cancelled. */
     var addingServer by mutableStateOf(false)
     var actionError by mutableStateOf<String?>(null)
@@ -342,8 +358,12 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         selectedProject = null
         gitBranches.clear()
         keyBindings = KeyBindings()
+        health = HealthWatch()
+        connectionLost = false
+        namedHostname = null
         resetProjectState()
         restoreUiPrefs()
+        localUrl = prefs.get("localUrl.$serverKey")
         val api = if (debug != null) {
             ApiClient(debug.url, debug.password)
         } else {
@@ -358,10 +378,84 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         this.api = api
         openWorkspace(api)
         startEvents(api)
+        scope.launch { readAddresses(api) }
         coroutineScope {
             launch { loadTheme() }
             loadProjects()
         }
+    }
+
+    /**
+     * Where the connection-lost overlay can send the user: the named tunnel's hostname (the web
+     * reads it at start) and the server's own-network address (the web when its share popover
+     * opens; here at start, so the overlay can offer it the first time it is needed).
+     */
+    private suspend fun readAddresses(api: ApiClient) {
+        coroutineScope {
+            launch { quietly { api.namedTunnelHostname() }?.let { if (this@AppModel.api === api) namedHostname = it } }
+            launch {
+                val url = quietly { api.localUrl() }?.takeIf { it.startsWith("http://") || it.startsWith("https://") } ?: return@launch
+                if (this@AppModel.api !== api) return@launch
+                localUrl = url
+                prefs.put("localUrl.$serverKey", url)
+            }
+        }
+    }
+
+    /**
+     * use-server-reload.ts while the app is in front: [api]'s health every 10 s, every 2 s while
+     * it is down. When it answers after an outage the server is opened again, as the web
+     * reloads the page.
+     */
+    suspend fun watchHealth(api: ApiClient) {
+        while (true) {
+            delay(health.nextDelayMs)
+            val back = health.record(checkHealth(api), System.currentTimeMillis())
+            connectionLost = health.overlay
+            if (back) {
+                reopenServer()
+                return
+            }
+        }
+    }
+
+    /** The overlay's Retry: an answer opens the server again, anything else leaves the overlay up. */
+    suspend fun retryConnection() {
+        val api = api ?: return
+        if (health.retry(checkHealth(api))) {
+            connectionLost = false
+            reopenServer()
+        }
+    }
+
+    private suspend fun checkHealth(api: ApiClient): HealthCheck = try {
+        api.health()
+        HealthCheck.Up
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: PpmError.Unreachable) {
+        HealthCheck.NoAnswer
+    } catch (_: Exception) {
+        HealthCheck.Error
+    }
+
+    /** Everything read from the server again, as after the web's `location.reload()`. */
+    private fun reopenServer() {
+        opening?.cancel()
+        opening = scope.launch { openSelectedServer() }
+    }
+
+    /**
+     * The overlay's "Open on local network": the same server at its own-network address, kept as
+     * a server of its own beside this one (the web opens that address as another page).
+     */
+    fun openLocalNetwork() {
+        val url = localUrl ?: return
+        val current = store.selected ?: return
+        val token = store.token(current) ?: return
+        val target = ApiClient.normalizedServerUrl(url)
+        val known = store.servers.value.firstOrNull { ApiClient.normalizedServerUrl(it.url) == target }
+        if (known != null) store.select(known) else store.add("${current.name} (local network)", url, token)
     }
 
     suspend fun loadProjects() {

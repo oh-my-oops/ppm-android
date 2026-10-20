@@ -29,6 +29,27 @@ class DesignTest {
     }
 
     @Test
+    fun `every lucide icon parses and starts inside its 24x24 box`() {
+        assertEquals(15, LucideIcon.entries.size)
+        for (icon in LucideIcon.entries) {
+            for (d in icon.pathData) {
+                val nodes = addPathNodes(d)
+                assertTrue("$icon draws nothing", nodes.size > 1)
+                val (x, y) = when (val start = nodes.first()) {
+                    is PathNode.MoveTo -> start.x to start.y
+                    is PathNode.RelativeMoveTo -> start.dx to start.dy
+                    else -> error("$icon does not start with a move: $start")
+                }
+                assertTrue("$icon starts at $x,$y", x in 0f..24f && y in 0f..24f)
+            }
+        }
+        // Circles and rects are converted to closed paths, one per element.
+        assertEquals(5, LucideIcon.Network.pathData.size)
+        assertTrue(LucideIcon.Network.pathData.count { addPathNodes(it).last() == PathNode.Close } >= 3)
+        assertEquals(6, LucideIcon.ServerOff.pathData.size)
+    }
+
+    @Test
     fun `compact SVG numbers and arc flags`() {
         // `.5.5` is two numbers; `016 6` is flags 0 and 1, then x = 6.
         val nodes = addPathNodes("M0 0a6 6 0 016 6l-.5.5")

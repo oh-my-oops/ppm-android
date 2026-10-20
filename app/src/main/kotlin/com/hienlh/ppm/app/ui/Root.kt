@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -40,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -47,6 +49,9 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.tablet.TabletShell
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -93,6 +98,13 @@ fun PpmRoot(model: AppModel) {
         onDispose { view.keepScreenOn = false }
     }
 
+    // `useServerReload`, while the app is in front.
+    val api = model.api
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(api, lifecycle) {
+        if (api != null) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { model.watchHealth(api) }
+    }
+
     val focusManager = LocalFocusManager.current
     BoxWithConstraints(
         Modifier
@@ -104,17 +116,24 @@ fun PpmRoot(model: AppModel) {
         val mobile = maxWidth < 768.dp
         // The layout follows the window, not the device: a rotation or a split screen can cross it.
         SideEffect { model.setWindowWide(!mobile) }
-        PpmThemeProvider(theme, mobile) {
-            when {
-                !model.hasServer -> ConnectScreen(model, signIn = false)
-                mobile -> PhoneShell(model)
-                else -> TabletShell(model)
+        CompositionLocalProvider(LocalConnectionLost provides model.connectionLost) {
+            PpmThemeProvider(theme, mobile) {
+                // `backdrop-blur-sm` under the connection-lost overlay: CSS's blur(8px) is a sigma of 8,
+                // which Android's blur reaches at a radius of 13 (sigma = 0.577 radius + 0.5).
+                Box(Modifier.fillMaxSize().then(if (model.connectionLost) Modifier.blur(13.dp) else Modifier)) {
+                    when {
+                        !model.hasServer -> ConnectScreen(model, signIn = false)
+                        mobile -> PhoneShell(model)
+                        else -> TabletShell(model)
+                    }
+                }
+                if (model.showSignIn) ConnectScreen(model, signIn = true, onCancel = { model.showSignIn = false })
+                if (model.addingServer) ConnectScreen(model, signIn = false, onCancel = { model.addingServer = false })
+                Dialogs(model)
+                model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }
+                if (model.connectionLost) ConnectionLostOverlay(model)
+                ErrorToast(model.actionError, mobile, narrow = maxWidth <= 600.dp) { model.actionError = null }
             }
-            if (model.showSignIn) ConnectScreen(model, signIn = true, onCancel = { model.showSignIn = false })
-            if (model.addingServer) ConnectScreen(model, signIn = false, onCancel = { model.addingServer = false })
-            Dialogs(model)
-            model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }
-            ErrorToast(model.actionError, mobile, narrow = maxWidth <= 600.dp) { model.actionError = null }
         }
     }
 }

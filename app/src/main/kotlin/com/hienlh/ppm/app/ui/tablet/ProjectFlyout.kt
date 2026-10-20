@@ -80,6 +80,7 @@ import androidx.compose.ui.window.PopupProperties
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.PROJECT_SORTS
 import com.hienlh.ppm.app.ui.PpmTextField
+import com.hienlh.ppm.app.ui.closedByConnectionLost
 import com.hienlh.ppm.app.ui.unreadSessions
 import com.hienlh.ppm.chat.RelativeTime
 import com.hienlh.ppm.design.FontKind
@@ -116,6 +117,7 @@ private val AUTOSCROLL_STEP = 10.dp
  */
 @Composable
 fun ProjectFlyout(model: AppModel, anchor: Rect, limit: Float, onDismiss: () -> Unit) {
+    if (closedByConnectionLost(onDismiss)) return
     Popup(
         popupPositionProvider = WindowOrigin,
         onDismissRequest = onDismiss,

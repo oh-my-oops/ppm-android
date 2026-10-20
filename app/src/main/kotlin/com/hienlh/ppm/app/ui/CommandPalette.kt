@@ -154,6 +154,7 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
         if (command != null) command.action() else askAi()
     }
 
+    if (closedByConnectionLost(onDismiss)) return
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         LaunchedEffect(window) { window?.setDimAmount(0f) }

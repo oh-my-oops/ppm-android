@@ -60,6 +60,20 @@ class ApiClient(val baseUrl: HttpUrl, val token: String) {
         call("GET", "/api/auth/check")
     }
 
+    /** `GET /api/health`, which answers whenever the server runs. */
+    suspend fun health() {
+        call("GET", "/api/health")
+    }
+
+    /** The server's address on its own network (`/api/tunnel`'s `localUrl`), when it knows one. */
+    suspend fun localUrl(): String? = call("GET", "/api/tunnel")["localUrl"].string
+
+    /** The permanent hostname of the server's named tunnel, while it is set to one. */
+    suspend fun namedTunnelHostname(): String? {
+        val status = call("GET", "/api/tunnel/named/status")
+        return status["hostname"].string?.takeIf { status["mode"].string == "named" }
+    }
+
     suspend fun projects(): List<ProjectInfo> =
         call("GET", "/api/projects").array.orEmpty().mapNotNull(ProjectInfo::from)
 

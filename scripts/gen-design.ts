@@ -1,7 +1,7 @@
 // Generates the design module's data from the web app's own sources, so the Android app cannot
 // drift from the browser: the six built-in themes (src/web/theme/builtin), the product icons
-// (src/web/lib/icons.generated.tsx — Fluent System Icons) and the provider logos
-// (src/web/lib/provider-logos.tsx). Re-run after any of those change:
+// (src/web/lib/icons.generated.tsx — Fluent System Icons, and the few it keeps on lucide) and the
+// provider logos (src/web/lib/provider-logos.tsx). Re-run after any of those change:
 //
 //   bun android/scripts/gen-design.ts
 import { resolve } from "node:path";
@@ -167,6 +167,81 @@ ${[...exportsByGlyph.entries()]
 }
 `;
 
+// ── Lucide icons ───────────────────────────────────────────────────────────────
+
+const lucideNames: string[] = JSON.parse(/^export const LUCIDE_NAMES: readonly string\[\] = (\[.*\]);$/m.exec(iconSource)?.[1] ?? "[]");
+if (lucideNames.length === 0) throw new Error("icons.generated.tsx no longer lists LUCIDE_NAMES");
+const lucideDir = resolve(repo, "node_modules/lucide-react/dist/esm/icons");
+const lucideVersion: string = (await Bun.file(resolve(repo, "node_modules/lucide-react/package.json")).json()).version;
+
+type LucideNode = [string, Record<string, string>][];
+
+/** The icon's node list; a name lucide keeps as an alias re-exports the icon it now is. */
+async function lucideNode(name: string): Promise<LucideNode> {
+  let file = resolve(lucideDir, `${name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/([a-zA-Z])([0-9])/g, "$1-$2").toLowerCase()}.js`);
+  for (;;) {
+    const alias = /^export \{ default \} from '\.\/([a-z0-9-]+\.js)';$/m.exec(await Bun.file(file).text());
+    if (!alias) break;
+    file = resolve(lucideDir, alias[1]!);
+  }
+  const node = (await import(file)).__iconNode as LucideNode | undefined;
+  if (!node) throw new Error(`No icon node in ${file}`);
+  return node;
+}
+
+/** One SVG element of a lucide icon as path data, in its 24×24 box. */
+function elementPath([tag, a]: [string, Record<string, string>]): string {
+  const n = (k: string) => Number(a[k] ?? 0);
+  const points = () => (a.points ?? "").trim().split(/[\s,]+/).map(Number);
+  switch (tag) {
+    case "path":
+      return a.d!;
+    case "line":
+      return `M${n("x1")} ${n("y1")}L${n("x2")} ${n("y2")}`;
+    case "circle":
+    case "ellipse": {
+      const rx = tag === "circle" ? n("r") : n("rx");
+      const ry = tag === "circle" ? n("r") : n("ry");
+      return `M${n("cx") - rx} ${n("cy")}a${rx} ${ry} 0 1 0 ${2 * rx} 0a${rx} ${ry} 0 1 0 ${-2 * rx} 0z`;
+    }
+    case "rect": {
+      const [x, y, w, h] = [n("x"), n("y"), n("width"), n("height")];
+      // SVG: a missing radius takes the other one, and neither exceeds half the side.
+      const rx = Math.min(a.rx !== undefined ? n("rx") : n("ry"), w / 2);
+      const ry = Math.min(a.ry !== undefined ? n("ry") : n("rx"), h / 2);
+      if (rx === 0 || ry === 0) return `M${x} ${y}h${w}v${h}h${-w}z`;
+      return `M${x + rx} ${y}h${w - 2 * rx}a${rx} ${ry} 0 0 1 ${rx} ${ry}v${h - 2 * ry}a${rx} ${ry} 0 0 1 ${-rx} ${ry}` +
+        `h${-(w - 2 * rx)}a${rx} ${ry} 0 0 1 ${-rx} ${-ry}v${-(h - 2 * ry)}a${rx} ${ry} 0 0 1 ${rx} ${-ry}z`;
+    }
+    case "polyline":
+    case "polygon": {
+      const p = points();
+      const d = p.reduce((acc, v, i) => acc + (i % 2 === 0 ? `${i === 0 ? "M" : "L"}${v}` : ` ${v}`), "");
+      return tag === "polygon" ? `${d}z` : d;
+    }
+    default:
+      throw new Error(`Unsupported lucide element: ${tag}`);
+  }
+}
+
+const lucideIcons = await Promise.all(lucideNames.map(async (name) => ({ name, paths: (await lucideNode(name)).map(elementPath) })));
+const lucideKotlin = `${HEADER(`src/web/lib/icons.generated.tsx (LUCIDE_NAMES) and lucide-react ${lucideVersion}`)}
+/**
+ * The few icons the web keeps on lucide (lucide-react ${lucideVersion}, ISC), by their export name:
+ * outlines in a 24×24 box, stroked 2 wide with round caps and joins.
+ */
+enum class LucideIcon {
+${lucideIcons.map(({ name }) => `    ${name},`).join("\n")}
+    ;
+
+    /** SVG path data in a 24×24 view box, stroked rather than filled. */
+    val pathData: List<String>
+        get() = when (this) {
+${lucideIcons.map(({ name, paths }) => `            ${name} -> listOf(${paths.map(kt).join(", ")})`).join("\n")}
+        }
+}
+`;
+
 // ── Provider logos ─────────────────────────────────────────────────────────────
 
 const logoSource = await Bun.file(resolve(repo, "src/web/lib/provider-logos.tsx")).text();
@@ -188,5 +263,6 @@ ${Object.entries(logoPaths)
 
 await Bun.write(resolve(outDir, "Themes.generated.kt"), themeKotlin);
 await Bun.write(resolve(outDir, "ProductIcons.generated.kt"), iconKotlin);
+await Bun.write(resolve(outDir, "LucideIcons.generated.kt"), lucideKotlin);
 await Bun.write(resolve(outDir, "ProviderLogoPaths.generated.kt"), logoKotlin);
-console.log(`themes ${themes.length}, icons ${allExports.length} (${exportsByGlyph.size} glyphs), logos ${Object.keys(logoPaths).length}`);
+console.log(`themes ${themes.length}, icons ${allExports.length} (${exportsByGlyph.size} glyphs), lucide ${lucideIcons.length}, logos ${Object.keys(logoPaths).length}`);

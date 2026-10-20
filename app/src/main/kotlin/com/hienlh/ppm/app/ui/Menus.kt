@@ -152,6 +152,7 @@ private fun MenuPopup(
 ) {
     val room = with(LocalDensity.current) { ShadowRoom.roundToPx() }
     val provider = remember(place, room) { RoomyPosition(room, place) }
+    if (closedByConnectionLost(onDismiss)) return
     Popup(
         popupPositionProvider = provider,
         onDismissRequest = onDismiss,

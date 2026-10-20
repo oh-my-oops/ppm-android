@@ -21,6 +21,8 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathParser
@@ -44,13 +46,42 @@ val ProductIcon.vector: ImageVector
             .build()
     }
 
+private val lucideVectors = ConcurrentHashMap<LucideIcon, ImageVector>()
+
+/** The glyph in its 24×24 box, stroked black to be tinted: lucide's 2 wide, round caps and joins. */
+val LucideIcon.vector: ImageVector
+    get() = lucideVectors.getOrPut(this) {
+        ImageVector.Builder(name = name, defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
+            .apply {
+                for (d in pathData) {
+                    addPath(
+                        addPathNodes(d),
+                        stroke = SolidColor(Color.Black),
+                        strokeLineWidth = 2f,
+                        strokeLineCap = StrokeCap.Round,
+                        strokeLineJoin = StrokeJoin.Round,
+                    )
+                }
+            }
+            .build()
+    }
+
 /**
  * `<Icon className="size-4" />` — one of the web's product icons at [size], in [tint]. [spinning]
  * is Tailwind's `animate-spin` (one turn a second).
  */
 @Composable
-fun PpmIcon(icon: ProductIcon, size: Dp, tint: Color, modifier: Modifier = Modifier, spinning: Boolean = false) {
-    val painter = rememberVectorPainter(icon.vector)
+fun PpmIcon(icon: ProductIcon, size: Dp, tint: Color, modifier: Modifier = Modifier, spinning: Boolean = false) =
+    VectorIcon(icon.vector, size, tint, modifier, spinning)
+
+/** One of the icons the web keeps on lucide, drawn the same way. */
+@Composable
+fun PpmIcon(icon: LucideIcon, size: Dp, tint: Color, modifier: Modifier = Modifier, spinning: Boolean = false) =
+    VectorIcon(icon.vector, size, tint, modifier, spinning)
+
+@Composable
+private fun VectorIcon(vector: ImageVector, size: Dp, tint: Color, modifier: Modifier, spinning: Boolean) {
+    val painter = rememberVectorPainter(vector)
     var base = modifier.size(size)
     if (spinning) {
         val turn by rememberInfiniteTransition(label = "spin").animateFloat(

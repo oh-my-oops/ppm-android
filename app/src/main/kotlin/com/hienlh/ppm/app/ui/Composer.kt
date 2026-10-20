@@ -373,6 +373,7 @@ private fun ModePopover(current: PermissionMode, onDismiss: () -> Unit, pick: (P
     val room = with(LocalDensity.current) { 16.dp.roundToPx() }
     val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
     val provider = remember(room, gap) { AboveStart(room, gap) }
+    if (closedByConnectionLost(onDismiss)) return
     Popup(popupPositionProvider = provider, onDismissRequest = onDismiss, properties = PopupProperties(focusable = true, clippingEnabled = false)) {
         val shape = RoundedCornerShape(12.dp)
         Column(

@@ -260,6 +260,7 @@ fun BottomSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier, background
         if (offset.value == Float.MAX_VALUE) offset.snapTo(panelHeight)
         offset.animateTo(0f, tween(200))
     }
+    if (closedByConnectionLost(onDismiss)) return
     Dialog(
         onDismissRequest = ::close,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
@@ -375,6 +376,7 @@ fun ConfirmDialog(
     onDismiss: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
+    if (closedByConnectionLost(onDismiss)) return
     Dialog(onDismissRequest = onDismiss) {
         val shape = RoundedCornerShape(tokens.rad.dp)
         Column(
@@ -430,6 +432,7 @@ fun PromptDialog(
         onDismiss()
         onConfirm(value.text.toString())
     }
+    if (closedByConnectionLost(onDismiss)) return
     Dialog(onDismissRequest = onDismiss) {
         val shape = RoundedCornerShape(tokens.rad.dp)
         Column(
