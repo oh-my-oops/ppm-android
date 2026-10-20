@@ -213,6 +213,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     var explorerSkin by mutableStateOf<String?>(null)
         private set
 
+    /** A panel's tabs wrap onto more rows rather than scroll (`tabWrap`), shared like [sidebarCollapsed]. */
+    var tabWrap by mutableStateOf(false)
+        private set
+
     /** The open server's OS (`/api/system/host`), kept per server so the first frame already knows it. */
     var hostPlatform by mutableStateOf<String?>(null)
         private set
@@ -543,6 +547,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                     prefs.sidebarWidth?.let { sidebarWidth = it }
                     prefs.keepScreenAwake?.let { keepScreenAwake = it }
                     prefs.explorerSkin?.let { explorerSkin = it }
+                    prefs.tabWrap?.let { tabWrap = it }
                     saveUiPrefs()
                 }
                 projects
@@ -583,10 +588,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         sidebarWidth = saved.sidebarWidth ?: SIDEBAR_DEFAULT_WIDTH
         keepScreenAwake = saved.keepScreenAwake ?: true
         explorerSkin = saved.explorerSkin
+        tabWrap = saved.tabWrap ?: false
     }
 
     private fun saveUiPrefs() {
-        prefs.put("uiPrefs.$serverKey", UiPrefs(projectSortMode, projectOpenedAt, sidebarCollapsed, sidebarWidth, keepScreenAwake, explorerSkin).toJson().toString())
+        prefs.put("uiPrefs.$serverKey", UiPrefs(projectSortMode, projectOpenedAt, sidebarCollapsed, sidebarWidth, keepScreenAwake, explorerSkin, tabWrap).toJson().toString())
     }
 
     private fun startEvents(api: ApiClient) {
@@ -1442,6 +1448,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         sidebarCollapsed = !sidebarCollapsed
         saveUiPrefs()
         putUiPref { put("sidebarCollapsed", sidebarCollapsed) }
+    }
+
+    /** The tab bar's "Wrap Tabs" / "Scroll Tabs". */
+    fun toggleTabWrap() {
+        tabWrap = !tabWrap
+        saveUiPrefs()
+        putUiPref { put("tabWrap", tabWrap) }
     }
 
     /** Follows the drag; [saveSidebarWidth] sends the width the drag ended on. */

@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -46,6 +48,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +65,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
@@ -98,24 +104,45 @@ import kotlinx.coroutines.launch
 @Composable
 fun Modifier.pressable(
     pressedColor: Color = LocalPpmTokens.current.surfaceHover.color,
+    hoverColor: Color = Color.Transparent,
     shape: Shape = RectangleShape,
     enabled: Boolean = true,
+    source: MutableInteractionSource? = null,
     onLongClick: ((Offset) -> Unit)? = null,
     onClick: () -> Unit,
 ): Modifier {
-    val source = remember { MutableInteractionSource() }
-    val pressed by source.collectIsPressedAsState()
+    val own = remember { MutableInteractionSource() }
+    val interactions = source ?: own
+    val pressed by interactions.collectIsPressedAsState()
+    val hovered by interactions.collectIsHoveredAsState()
     val haptics = LocalHapticFeedback.current
     val down = remember { PressPoint() }
-    return background(if (pressed && enabled) pressedColor else Color.Transparent, shape)
+    val menu by rememberUpdatedState(onLongClick)
+    val fill = when {
+        !enabled -> Color.Transparent
+        pressed -> pressedColor
+        hovered -> hoverColor
+        else -> Color.Transparent
+    }
+    return background(fill, shape)
+        .hoverable(interactions, enabled)
         .then(
-            if (onLongClick == null) Modifier else Modifier.pointerInput(Unit) {
-                // Watches only: the press itself is still the clickable's.
-                awaitEachGesture { down.offset = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial).position }
+            if (onLongClick == null) Modifier else Modifier.pointerInput(enabled) {
+                awaitEachGesture {
+                    val press = awaitPointerEvent(PointerEventPass.Initial)
+                    val first = press.changes.firstOrNull { it.changedToDownIgnoreConsumed() } ?: return@awaitEachGesture
+                    // Watches only, the press itself being the clickable's — but a mouse's right
+                    // button is no click: it opens the menu the web opens on `contextmenu`.
+                    down.offset = first.position
+                    if (enabled && first.type == PointerType.Mouse && press.buttons.isSecondaryPressed) {
+                        first.consume()
+                        menu?.invoke(first.position)
+                    }
+                }
             },
         )
         .combinedClickable(
-            interactionSource = source,
+            interactionSource = interactions,
             indication = null,
             enabled = enabled,
             role = Role.Button,

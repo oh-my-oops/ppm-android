@@ -165,15 +165,22 @@ class TabDrag {
         insert = null
     }
 
-    /** The tab a point is before in the bar under it: the one it is on, or the next when past that one's middle. */
+    /**
+     * The tab a point is before in the bar under it: the one it is on, or the next when past that
+     * one's middle. Wrapped tabs are read a row at a time, so past the end of a row is before the
+     * first tab of the next.
+     */
     private fun barInsert(point: Offset): BarInsert? {
         val panelId = bars.entries.firstOrNull { it.value.contains(point) }?.key ?: return null
-        val spans = chips.entries.filter { it.value.first == panelId }.map { it.key to it.value.second }.sortedBy { it.second.left }
-        val index = spans.indexOfFirst { point.x < it.second.right }
+        val spans = chips.entries.filter { it.value.first == panelId }.map { it.key to it.value.second }
+            .sortedWith(compareBy({ it.second.top }, { it.second.left }))
+        val top = spans.lastOrNull { it.second.top <= point.y }?.second?.top ?: spans.firstOrNull()?.second?.top
+        val row = spans.filter { it.second.top == top }
+        val on = row.firstOrNull { point.x < it.second.right }
         val before = when {
-            index == -1 -> null
-            point.x < spans[index].second.center.x -> spans[index].first
-            else -> spans.getOrNull(index + 1)?.first
+            on == null -> row.lastOrNull()?.let { spans.getOrNull(spans.indexOf(it) + 1)?.first }
+            point.x < on.second.center.x -> on.first
+            else -> spans.getOrNull(spans.indexOf(on) + 1)?.first
         }
         return BarInsert(panelId, before)
     }

@@ -25,6 +25,8 @@ data class UiPrefs(
     val keepScreenAwake: Boolean? = null,
     /** The look of every floating window: `auto`, `windows` or `macos`. */
     val explorerSkin: String? = null,
+    /** A panel's tabs wrapped onto as many rows as they need, instead of scrolling sideways. */
+    val tabWrap: Boolean? = null,
 ) {
     /** The same keys as the server's, which [from] reads back: what a device keeps between starts. */
     fun toJson(): JsonObject = buildJsonObject {
@@ -34,6 +36,7 @@ data class UiPrefs(
         sidebarWidth?.let { put("sidebarWidth", it) }
         keepScreenAwake?.let { put("keepScreenAwake", it) }
         explorerSkin?.let { put("explorerSkin", it) }
+        tabWrap?.let { put("tabWrap", it) }
     }
 
     companion object {
@@ -45,6 +48,7 @@ data class UiPrefs(
             sidebarWidth = json["sidebarWidth"].double?.takeIf { it in 200.0..600.0 }?.toInt(),
             keepScreenAwake = json["keepScreenAwake"].bool,
             explorerSkin = json["explorerSkin"].string?.takeIf { it in EXPLORER_SKINS },
+            tabWrap = json["tabWrap"].bool,
         )
 
         private val EXPLORER_SKINS = setOf("auto", "windows", "macos")

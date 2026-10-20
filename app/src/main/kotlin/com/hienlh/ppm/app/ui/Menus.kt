@@ -5,6 +5,8 @@ import android.view.View
 import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +23,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,6 +60,7 @@ import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionTag
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -71,24 +77,36 @@ private val shadowLg = ThemeShadow(0.0, 10.0, 15.0, -3.0, Rgba(0.0, 0.0, 0.0, 0.
 fun MenuBox(modifier: Modifier = Modifier, minWidth: Dp = 128.dp, large: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
-    Column(
-        modifier
-            .width(IntrinsicSize.Max)
-            .widthIn(min = minWidth)
-            .ppmShadow(if (large) shadowLg else shadowMd, shape)
-            .clip(shape)
-            .background(tokens.panel2.over(tokens.bgSolid).color)
-            .border(1.dp, tokens.text.color, shape)
-            // `p-1` inside the 1 px border, which CSS counts into the box and `border()` does not.
-            .padding(5.dp),
-        content = content,
-    )
+    CompositionLocalProvider(LocalMenuMouse provides remember { MenuMouse() }) {
+        Column(
+            modifier
+                .width(IntrinsicSize.Max)
+                .widthIn(min = minWidth)
+                .ppmShadow(if (large) shadowLg else shadowMd, shape)
+                .clip(shape)
+                .background(tokens.panel2.over(tokens.bgSolid).color)
+                .border(1.dp, tokens.text.color, shape)
+                // `p-1` inside the 1 px border, which CSS counts into the box and `border()` does not.
+                .padding(5.dp),
+            content = content,
+        )
+    }
 }
 
+/** Which row of a menu the mouse is on, so that moving onto another closes an open submenu. */
+private class MenuMouse {
+    var on by mutableStateOf<Any?>(null)
+}
+
+private val LocalMenuMouse = compositionLocalOf<MenuMouse?> { null }
+
 /**
- * A menu row (`rounded-sm px-2 py-1.5 text-sm gap-2`), lit while pressed as `focus:bg-accent`
- * lights it. The web's icons carry `mr-2` on top of the gap ([iconEnd], 0 for a menu whose icons
- * do not); [vertical] is 12 where the web asks for `max-md:py-3`.
+ * A menu row (`rounded-sm px-2 py-1.5 text-sm gap-2`), lit while pressed or under the mouse, as
+ * Radix highlights the item it focuses. The web lights it in `bg-accent`, which is `--panel-2`,
+ * the menu's own fill, so the highlight never shows; it is lit here in `surface-hover`, as PPM's
+ * own popover rows are (window-dock-list.tsx). The web's icons carry `mr-2` on top of the gap
+ * ([iconEnd], 0 for a menu whose icons do not); [vertical] is 12 where the web asks for
+ * `max-md:py-3`; [lit] holds the highlight, as an open submenu's trigger keeps it.
  */
 @Composable
 fun MenuItem(
@@ -99,14 +117,23 @@ fun MenuItem(
     vertical: Dp = 6.dp,
     trailing: (@Composable () -> Unit)? = null,
     iconEnd: Dp = 8.dp,
+    lit: Boolean = false,
+    source: MutableInteractionSource? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(6.dp)
+    val own = remember { MutableInteractionSource() }
+    val interactions = source ?: own
+    val hovered by interactions.collectIsHoveredAsState()
+    val mouse = LocalMenuMouse.current
+    LaunchedEffect(hovered, mouse) { if (hovered) mouse?.on = interactions }
+    val highlight = tokens.surfaceHover.color
     Row(
         Modifier
             .fillMaxWidth()
             .clip(shape)
-            .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, onClick = onClick)
+            .background(if (lit) highlight else Color.Transparent)
+            .ppmClickable(pressedColor = highlight, hoverColor = highlight, shape = shape, source = interactions, onClick = onClick)
             .padding(horizontal = 8.dp, vertical = vertical),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -154,9 +181,10 @@ private fun MenuPopup(
     onDismiss: () -> Unit,
     minWidth: Dp = 128.dp,
     large: Boolean = false,
+    passThrough: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    PlacedPopup(place, onDismiss) { MenuBox(minWidth = minWidth, large = large, content = content) }
+    PlacedPopup(place, onDismiss, passThrough) { MenuBox(minWidth = minWidth, large = large, content = content) }
 }
 
 /**
@@ -312,16 +340,27 @@ private fun DropdownBelow(alignEnd: Boolean, onDismiss: () -> Unit, minWidth: Dp
 }
 
 /**
- * A row that opens a submenu beside it, as Radix's `SubTrigger` does on a tap: to the right,
- * or to the left when the screen has no room there.
+ * A row that opens a submenu beside it, as Radix's `SubTrigger` does — on a tap, which never
+ * closes it, or once the mouse has rested on it 100 ms — to the right, or to the left when the
+ * screen has no room there. It stays lit while open (`data-[state=open]:bg-accent`), and the
+ * mouse moving onto another row of its menu closes the submenu, as Radix's focus leaving it does.
  */
 @Composable
 fun SubMenuItem(label: String, icon: (@Composable () -> Unit)?, content: @Composable ColumnScope.(close: () -> Unit) -> Unit) {
     val tokens = LocalPpmTokens.current
     var open by remember { mutableStateOf(false) }
-    Box(Modifier.background(if (open) tokens.panel2.color else Color.Transparent, RoundedCornerShape(6.dp))) {
+    val source = remember { MutableInteractionSource() }
+    val hovered by source.collectIsHoveredAsState()
+    val mouse = LocalMenuMouse.current
+    LaunchedEffect(hovered) {
+        if (!hovered) return@LaunchedEffect
+        delay(100)
+        open = true
+    }
+    LaunchedEffect(mouse?.on) { if (mouse?.on != null && mouse.on !== source) open = false }
+    Box {
         // A `SubTrigger` has no `gap-2`: the label follows the icon's `mr-2` alone.
-        MenuItem(label, onClick = { open = !open }, icon = icon, iconEnd = 0.dp, trailing = { PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text2.color) })
+        MenuItem(label, onClick = { open = true }, icon = icon, iconEnd = 0.dp, trailing = { PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text2.color) }, lit = open, source = source)
         if (open) {
             val place = remember {
                 { anchor: IntRect, window: IntSize, box: IntSize ->
@@ -330,7 +369,9 @@ fun SubMenuItem(label: String, icon: (@Composable () -> Unit)?, content: @Compos
                     IntOffset(window.fitX(x, box), window.fitY(anchor.top, box))
                 }
             }
-            MenuPopup(place, onDismiss = { open = false }, large = true) { content { open = false } }
+            // Passing through to the menu under it, which a mouse moving back onto it has to reach,
+            // and so does the tap on one of its rows that closes this as well.
+            MenuPopup(place, onDismiss = { open = false }, large = true, passThrough = true) { content { open = false } }
         }
     }
 }

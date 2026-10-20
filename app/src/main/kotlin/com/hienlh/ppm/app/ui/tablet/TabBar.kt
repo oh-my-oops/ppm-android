@@ -1,15 +1,24 @@
 package com.hienlh.ppm.app.ui.tablet
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,10 +37,12 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
@@ -46,6 +57,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.changedToDown
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -54,6 +70,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
@@ -87,11 +104,15 @@ import kotlinx.coroutines.withTimeoutOrNull
 /** `TYPE_PRIORITY` in use-tab-overflow.ts: the most urgent unread wins an arrow's dot. */
 private val UNREAD_PRIORITY = mapOf("done" to 0, "question" to 1, "approval_request" to 2)
 
+/** Tailwind's `transition-colors`: 150 ms on `cubic-bezier(0.4, 0, 0.2, 1)`. */
+private val COLORS_FADE = tween<Float>(150, easing = FastOutSlowInEasing)
+
 /**
  * A panel's tab bar (tab-bar.tsx, default style): 41 px with its bottom border, the tabs scrolling
  * sideways with the "+" held at their end, and an arrow on each side with more tabs past it —
  * dotted when one of those has an unread chat. A tab added to the bar, and the active one when
- * the bar first shows, is scrolled into view.
+ * the bar first shows, is scrolled into view. With "Wrap Tabs" from the bar's own menu the tabs
+ * take as many rows as they need instead.
  */
 @Composable
 fun TabBar(model: AppModel, panelId: String, tabs: List<WorkspaceTab>, activeTabId: String?) {
@@ -102,6 +123,8 @@ fun TabBar(model: AppModel, panelId: String, tabs: List<WorkspaceTab>, activeTab
     val unread = model.unreadSessions()
     val running = model.runningSessions()
     val drag = LocalTabDrag.current
+    val wrap = model.tabWrap
+    var menuAt by remember { mutableStateOf<Offset?>(null) }
     DisposableEffect(drag, panelId) { onDispose { drag?.bars?.remove(panelId) } }
     // Each tab's span in the scrolled row, in pixels, to tell which ones are out of view.
     val spans = remember { mutableStateMapOf<String, IntRange>() }
@@ -111,7 +134,7 @@ fun TabBar(model: AppModel, panelId: String, tabs: List<WorkspaceTab>, activeTab
     LaunchedEffect(tabs.size, activeTabId) {
         val grew = tabs.size > shownCount
         shownCount = tabs.size
-        if (!grew || activeTabId == null) return@LaunchedEffect
+        if (!grew || activeTabId == null || model.tabWrap) return@LaunchedEffect
         // The new tab is placed in the frame after the one that added it.
         val span = withTimeoutOrNull(1_000) { snapshotFlow { spans[activeTabId] }.filterNotNull().first() } ?: return@LaunchedEffect
         when {
@@ -119,63 +142,141 @@ fun TabBar(model: AppModel, panelId: String, tabs: List<WorkspaceTab>, activeTab
             span.last > scroll.value + viewport -> scroll.animateScrollTo(span.last - viewport)
         }
     }
+    // The tabs, then the mark for a mouse dropping past the last of them.
+    val chips: @Composable RowScope.(Modifier) -> Unit = { size ->
+        for (tab in tabs) {
+            val sessionId = tabSessionId(tab)
+            val entry = sessionId?.let { unread[it] }?.takeIf { it.count > 0 }
+            TabChip(
+                model,
+                tab,
+                panelId,
+                active = tab.id == activeTabId,
+                unread = entry,
+                streaming = tab.type == "chat" && sessionId != null && sessionId in running,
+                modifier = size.onPlaced { spans[tab.id] = it.positionInParent().x.toInt().let { x -> x..x + it.size.width } },
+                onSelect = { model.activate(tab.id, panelId) },
+                onClose = { model.closeTab(tab.id, panelId) },
+            )
+        }
+        // `w-0.5 h-6 bg-primary rounded-full`.
+        if (drag?.insert == BarInsert(panelId, null)) {
+            Box(Modifier.align(Alignment.CenterVertically).width(2.dp).height(24.dp).background(tokens.accent.color, CircleShape))
+        }
+    }
     Box(
         Modifier
             .fillMaxWidth()
-            .height(BAR_HEIGHT)
+            .then(if (wrap) Modifier.heightIn(min = BAR_HEIGHT) else Modifier.height(BAR_HEIGHT))
             .edge(Edge.Bottom, tokens.border.color)
             .onGloballyPositioned { coordinates -> drag?.bars?.set(panelId, coordinates.boundsInRoot()) }
             // A double tap on the bar itself, not on a tab, opens the command palette.
-            .pointerInput(Unit) { detectTapGestures(onDoubleTap = { model.openPalette() }) },
+            .pointerInput(Unit) { detectTapGestures(onDoubleTap = { model.openPalette() }) }
+            .barMenuGestures { menuAt = it },
     ) {
-        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-            Row(
-                Modifier.weight(1f, fill = false).fillMaxHeight().onSizeChanged { viewport = it.width }.horizontalScroll(scroll),
-            ) {
-                for (tab in tabs) {
-                    val sessionId = tabSessionId(tab)
-                    val entry = sessionId?.let { unread[it] }?.takeIf { it.count > 0 }
-                    TabChip(
-                        model,
-                        tab,
-                        panelId,
-                        active = tab.id == activeTabId,
-                        unread = entry,
-                        streaming = tab.type == "chat" && sessionId != null && sessionId in running,
-                        modifier = Modifier.onPlaced { spans[tab.id] = it.positionInParent().x.toInt().let { x -> x..x + it.size.width } },
-                        onSelect = { model.activate(tab.id, panelId) },
-                        onClose = { model.closeTab(tab.id, panelId) },
-                    )
-                }
-                // A mouse dropping past the last tab: `w-0.5 h-6 bg-primary rounded-full`.
-                if (drag?.insert == BarInsert(panelId, null)) {
-                    Box(Modifier.align(Alignment.CenterVertically).width(2.dp).height(24.dp).background(tokens.accent.color, CircleShape))
-                }
-            }
-            // "+": the command palette, for this panel.
-            Box(
-                Modifier
-                    .width(40.dp)
-                    .fillMaxHeight()
-                    .ppmClickable(pressedColor = Color.Transparent, onClickLabel = "Open command palette") {
-                        model.focusPanel(panelId)
-                        model.openPalette()
+        if (wrap) {
+            // `flex-wrap`: 41 px rows, each ruled along its bottom in the soft border colour
+            // (`tabRowClass`), no arrows, and the "+" after the last tab.
+            FlowRow(
+                Modifier.fillMaxWidth().drawBehind {
+                    val pitch = BAR_HEIGHT.toPx()
+                    val px = 1.dp.toPx()
+                    var y = pitch - px
+                    while (y < size.height) {
+                        drawRect(tokens.borderSoft.color, Offset(0f, y), Size(size.width, px))
+                        y += pitch
                     }
-                    .padding(top = 2.dp),
-                contentAlignment = Alignment.Center,
-            ) { PpmIcon(ProductIcon.Plus, 16.dp, tokens.text2.color) }
-        }
-        val hidden = hiddenUnread(tabs, spans, unread, scroll.value, scroll.value + viewport)
-        if (scroll.value > 1) {
-            ScrollArrow(left = true, dot = hidden.first, Modifier.align(Alignment.CenterStart)) {
-                scope.launch { scroll.animateScrollTo(scroll.value - with(density) { 150.dp.roundToPx() }) }
+                },
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+                chips(Modifier.height(BAR_HEIGHT))
+                AddTabButton(model, panelId, Modifier.height(BAR_HEIGHT))
+            }
+        } else {
+            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.weight(1f, fill = false).fillMaxHeight().onSizeChanged { viewport = it.width }.horizontalScroll(scroll),
+                ) { chips(Modifier) }
+                AddTabButton(model, panelId, Modifier.fillMaxHeight())
+            }
+            val hidden = hiddenUnread(tabs, spans, unread, scroll.value, scroll.value + viewport)
+            if (scroll.value > 1) {
+                ScrollArrow(left = true, dot = hidden.first, Modifier.align(Alignment.CenterStart)) {
+                    scope.launch { scroll.animateScrollTo(scroll.value - with(density) { 150.dp.roundToPx() }) }
+                }
+            }
+            if (scroll.value < scroll.maxValue - 1) {
+                ScrollArrow(left = false, dot = hidden.second, Modifier.align(Alignment.CenterEnd).padding(end = 40.dp)) {
+                    scope.launch { scroll.animateScrollTo(scroll.value + with(density) { 150.dp.roundToPx() }) }
+                }
             }
         }
-        if (scroll.value < scroll.maxValue - 1) {
-            ScrollArrow(left = false, dot = hidden.second, Modifier.align(Alignment.CenterEnd).padding(end = 40.dp)) {
-                scope.launch { scroll.animateScrollTo(scroll.value + with(density) { 150.dp.roundToPx() }) }
+        menuAt?.let { at -> BarMenu(model, at) { menuAt = null } }
+    }
+}
+
+/** "+" (`tabAddButtonClass`): the command palette, for this panel; its glyph lit on hover. */
+@Composable
+private fun AddTabButton(model: AppModel, panelId: String, modifier: Modifier) {
+    val tokens = LocalPpmTokens.current
+    val source = remember { MutableInteractionSource() }
+    val hovered by source.collectIsHoveredAsState()
+    val lit by animateFloatAsState(if (hovered) 1f else 0f, COLORS_FADE)
+    Box(
+        modifier
+            .width(40.dp)
+            .ppmClickable(pressedColor = Color.Transparent, onClickLabel = "Open command palette", source = source) {
+                model.focusPanel(panelId)
+                model.openPalette()
+            }
+            .padding(top = 2.dp),
+        contentAlignment = Alignment.Center,
+    ) { PpmIcon(ProductIcon.Plus, 16.dp, tokens.text.mix(tokens.text2, lit.toDouble()).color) }
+}
+
+/**
+ * The bar's own menu, for a press no tab has taken for its own: a mouse's right button, or a
+ * finger held still for the system's long press, as Radix opens the web's on a touch held still.
+ */
+private fun Modifier.barMenuGestures(onMenu: (Offset) -> Unit): Modifier = composed {
+    val haptics = LocalHapticFeedback.current
+    val menu by rememberUpdatedState(onMenu)
+    pointerInput(Unit) {
+        awaitEachGesture {
+            val press = awaitPointerEvent()
+            val down = press.changes.firstOrNull { it.changedToDown() } ?: return@awaitEachGesture
+            if (down.type == PointerType.Mouse) {
+                if (press.buttons.isSecondaryPressed) {
+                    down.consume()
+                    menu(down.position)
+                }
+                return@awaitEachGesture
+            }
+            val held = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                var change: PointerInputChange? = down
+                while (change != null && change.pressed && !change.isConsumed && (change.position - down.position).getDistance() <= viewConfiguration.touchSlop) {
+                    change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
+                }
+            } == null
+            if (held) {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                menu(down.position)
             }
         }
+    }
+}
+
+/** `BarContextMenu`: the tabs wrapped onto rows or scrolling, and the command palette. */
+@Composable
+private fun BarMenu(model: AppModel, at: Offset, onDismiss: () -> Unit) {
+    fun pick(action: () -> Unit) {
+        onDismiss()
+        action()
+    }
+    ContextMenuPopup(at, onDismiss) {
+        MenuItem(if (model.tabWrap) "Scroll Tabs" else "Wrap Tabs", onClick = { pick { model.toggleTabWrap() } })
+        MenuSeparator()
+        MenuItem("Open Command Palette", onClick = { pick { model.openPalette() } })
     }
 }
 
@@ -233,7 +334,9 @@ private fun ScrollArrow(left: Boolean, dot: String?, modifier: Modifier, onClick
  * A tab (draggable-tab.tsx, default style): `px-3 h-[41px] gap-1 text-xs`, a 2 px top border in
  * the accent and the raised panel colour when active, a soft 1 px line on its right. Its icon
  * types while the chat's turn runs and carries the unread dot otherwise; a tag shows as a bar
- * along its left edge. The close button stays visible: a touch screen has no hover to show it.
+ * along its left edge. A mouse over an inactive tab lights it (`hover:text-foreground
+ * hover:bg-panel/60`), and its looks fade into each other as `transition-colors` does. The close
+ * button stays visible: Chrome on a touch tablet never applies the `can-hover:` that hides it.
  */
 @Composable
 private fun TabChip(
@@ -248,7 +351,12 @@ private fun TabChip(
     onClose: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
-    val color = if (active) tokens.accent else tokens.text2
+    val source = remember { MutableInteractionSource() }
+    val hovered by source.collectIsHoveredAsState()
+    val lit by animateFloatAsState(if (hovered && !active) 1f else 0f, COLORS_FADE)
+    val on by animateFloatAsState(if (active) 1f else 0f, COLORS_FADE)
+    val color = tokens.accent.mix(tokens.text.mix(tokens.text2, lit.toDouble()), on.toDouble())
+    val fill = tokens.panel2.mix(tokens.panel.opacity(0.6 * lit), on.toDouble())
     val chat = model.chat(tab.id)
     val tag = chat?.let { c -> model.sessions.firstOrNull { it.id == c.session.id }?.tag?.color }?.let(Rgba::hex)
     val title = tabTitle(model, tab)
@@ -272,12 +380,17 @@ private fun TabChip(
             Row(
                 Modifier
                     .fillMaxHeight()
-                    .background(if (active) tokens.panel2.color else Color.Transparent)
+                    .background(fill.color)
                     .drawBehind {
-                        if (active) drawRect(tokens.accent.color, Offset.Zero, Size(size.width, 2.dp.toPx()))
+                        drawRect(tokens.accent.opacity(on.toDouble()).color, Offset.Zero, Size(size.width, 2.dp.toPx()))
                         drawRect(tokens.borderSoft.color, Offset(size.width - 1.dp.toPx(), 0f), Size(1.dp.toPx(), size.height))
                     }
-                    .pressable(pressedColor = if (active) Color.Transparent else tokens.panel.opacity(0.6).color, onClick = onSelect)
+                    // A finger gets the hover's fill while it is down; a mouse has it already.
+                    .pressable(
+                        pressedColor = if (active || hovered) Color.Transparent else tokens.panel.opacity(0.6).color,
+                        source = source,
+                        onClick = onSelect,
+                    )
                     .padding(start = 12.dp, end = 13.dp, top = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -301,13 +414,13 @@ private fun TabChip(
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (tab.closable) {
-                    // `ml-1 rounded-sm p-0.5`, the X at 12 px.
+                    // `ml-1 rounded-sm p-0.5 hover:bg-surface-elevated`, the X at 12 px.
                     Box(
                         Modifier
                             .padding(start = 4.dp)
                             .size(16.dp)
                             .clip(RoundedCornerShape(6.dp))
-                            .ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "Close tab", onClick = onClose),
+                            .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, onClickLabel = "Close tab", onClick = onClose),
                         contentAlignment = Alignment.Center,
                     ) { PpmIcon(ProductIcon.X, 12.dp, color.color) }
                 }
