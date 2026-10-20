@@ -109,8 +109,9 @@ internal fun TaskTracker(tasks: List<TaskItem>) {
  * Where Chrome on Android finds the task glyphs, Geist having none: it walks the system's named
  * families in order and stops at the first that has one — Source Sans Pro for ✓ and ▶, Noto Serif
  * (`serif`) for ○ and ■ (`CSS.getPlatformFontsForNode`). Android's own fallback picks larger ones.
+ * Made on first use: the JVM tests load this file without Android's fonts.
  */
-private val SourceSansPro = FontFamily(Typeface.create("source-sans-pro", Typeface.NORMAL))
+private val SourceSansPro by lazy(LazyThreadSafetyMode.NONE) { FontFamily(Typeface.create("source-sans-pro", Typeface.NORMAL)) }
 
 /** One task: its glyph and its subject, struck through once done, the one under way lit. */
 @Composable
