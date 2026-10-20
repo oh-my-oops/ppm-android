@@ -48,7 +48,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.chat.RelativeTime
-import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.PpmIcon
@@ -294,13 +293,12 @@ fun SearchBox(state: TextFieldState, placeholder: String, modifier: Modifier = M
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
     var focused by remember { mutableStateOf(false) }
-    // `py-1.5 text-xs` outside the phone layout: 30 px with the border.
-    val mobile = LocalPpmMobile.current
+    // `py-1.5 text-xs` and the border: 30 px, and on a phone 35.33, where inputs are 16 px but
+    // keep `text-xs`'s 4/3 line.
     val ring = tokens.accent.opacity(0.5).color
     Box(
         modifier
             .fillMaxWidth()
-            .heightIn(min = if (mobile) 34.dp else 30.dp)
             .drawBehind {
                 // `focus:ring-1 ring-primary/50`: a pixel outside the border, which stays.
                 if (focused) {
@@ -329,7 +327,8 @@ fun SearchBox(state: TextFieldState, placeholder: String, modifier: Modifier = M
             PpmTextField(
                 state,
                 placeholder,
-                Modifier.weight(1f).padding(vertical = if (mobile) 5.dp else 7.dp),
+                Modifier.weight(1f).padding(vertical = 7.dp),
+                style = ppmText(16f, lineHeight = 64f / 3),
                 desktopStyle = ppmText(12f, lineHeight = 16f),
                 onFocusChanged = { focused = it },
             )
