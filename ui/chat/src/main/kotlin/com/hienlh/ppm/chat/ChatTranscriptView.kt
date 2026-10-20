@@ -708,10 +708,11 @@ private fun ScrollNavigator(
                     goUp()
                     jumped()
                 }
+                // `text-[10px]` under preflight's `line-height: 1.5`.
                 BasicText(
                     if (nav.total == 0) "0/0" else "${nav.position.coerceAtLeast(1)}/${nav.total}",
                     Modifier.padding(vertical = 1.dp),
-                    ppmText(10f, FontWeight.Medium, FontKind.MONO).copy(color = tokens.text3.color),
+                    ppmText(10f, FontWeight.Medium, FontKind.MONO, lineHeight = 15f).copy(color = tokens.text3.color),
                 )
                 NavRow(ProductIcon.ChevronDown, 15, rowHeight, enabled = !nav.atBottom, label = "Jump to next message") {
                     goDown()
