@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.background
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -138,10 +139,10 @@ private val chipText = ppmText(11.5f, lineHeight = 17.25f)
  * and Send, or Stop while the turn runs and nothing is typed. A phone draws the `md:hidden` rows,
  * a tablet the desktop ones. [narrow] is the chat's `@max-[420px]` — the mode and priority chips
  * keep only their icons, and on a tablet the chips stay on one line. The mic is left out until
- * this app has it.
+ * this app has it. [fileDrop] takes what is dropped on the text, where its own field would.
  */
 @Composable
-fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState, narrow: Boolean) {
+fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState, narrow: Boolean, fileDrop: ChatFileDrop) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     val running = state.isRunning
@@ -267,7 +268,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 AttachButton(mobile = true, onClick = attach)
                 // `text-sm py-1.5 max-h-20`, the `py-1.5` inside the 80 px; a phone's inputs are 16 px.
                 ComposerField(
-                    tab, focus, quietFocus, onKey, ::send, pasteImage,
+                    tab, focus, quietFocus, onKey, ::send, pasteImage, fileDrop,
                     style = ppmText(16f, lineHeight = INPUT_LINE),
                     padding = 6.dp,
                     maxHeight = 80.dp,
@@ -300,7 +301,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 AttachButton(mobile = false, onClick = attach)
                 // `text-sm leading-relaxed py-2 max-h-[90px]`, the `py-2` inside the 90 px.
                 ComposerField(
-                    tab, focus, quietFocus, onKey, ::send, pasteImage,
+                    tab, focus, quietFocus, onKey, ::send, pasteImage, fileDrop,
                     style = ppmText(14f, lineHeight = 14f * 1.625f),
                     padding = 8.dp,
                     maxHeight = 90.dp,
@@ -337,6 +338,7 @@ private fun ComposerField(
     onKey: (KeyEvent) -> Boolean,
     send: () -> Unit,
     pasteImage: (Uri) -> Unit,
+    fileDrop: ChatFileDrop,
     style: TextStyle,
     padding: Dp,
     maxHeight: Dp,
@@ -396,7 +398,8 @@ private fun ComposerField(
         onKeyboardAction = { send() },
         lineLimits = TextFieldLineLimits.MultiLine(),
         decorator = { field ->
-            Box(Modifier.padding(vertical = padding)) {
+            // Inside the field, so the drop lands here rather than in the field's own target.
+            Box(Modifier.dragAndDropTarget(shouldStartDragAndDrop = { true }, target = fileDrop).padding(vertical = padding)) {
                 if (tab.draft.text.isEmpty()) {
                     BasicText(placeholder, style = inputStyle.copy(color = tokens.text3.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }

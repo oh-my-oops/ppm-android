@@ -1,5 +1,9 @@
 package com.hienlh.ppm.app.ui
 
+import android.content.ContentResolver
+import android.net.Uri
+import android.view.DragEvent
+import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -7,10 +11,12 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,7 +50,11 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draganddrop.DragAndDropEvent
+import androidx.compose.ui.draganddrop.DragAndDropTarget
+import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -56,6 +66,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -65,7 +76,9 @@ import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
 import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.app.attach
 import com.hienlh.ppm.app.tracksTextFocus
+import com.hienlh.ppm.app.ui.tablet.dashedBorder
 import com.hienlh.ppm.chat.CONTINUE_AFTER_STOP
 import com.hienlh.ppm.chat.ChatImages
 import com.hienlh.ppm.chat.ChatTabs
@@ -132,10 +145,19 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         }
         chat.takeRejected()
     }
-    BoxWithConstraints(modifier.fillMaxSize()) {
+    val activity = LocalActivity.current
+    val context = LocalContext.current
+    val fileDrop = remember(tab) {
+        ChatFileDrop(tab) { uris, drag ->
+            activity?.requestDragAndDropPermissions(drag)
+            model.attach(context, tab, uris)
+        }
+    }
+    BoxWithConstraints(modifier.fillMaxSize().dragAndDropTarget(shouldStartDragAndDrop = { true }, target = fileDrop)) {
         // The chat's own `@container`: under 420 px the chips drop their words.
         val narrow = maxWidth <= 420.dp
-        Column(Modifier.fillMaxSize()) {
+        // `backdrop-blur-sm` under the drop overlay: CSS's blur(8px) is Android's at a radius of 13.
+        Column(Modifier.fillMaxSize().then(if (fileDrop.showing) Modifier.blur(13.dp) else Modifier)) {
             val images = remember(tab.project) {
                 object : ChatImages {
                     override suspend fun load(path: String) = model.chatImage(tab.project, path)
@@ -197,9 +219,79 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     val list = tab.historyList
                     if (historyOpen && list != null) ChatHistoryDropdown(model, tab, list) { historyOpen = false }
                 }
-                ChatComposer(model, tab, chat, state, narrow)
+                ChatComposer(model, tab, chat, state, narrow, fileDrop)
             }
         }
+        if (fileDrop.showing) DropFilesOverlay()
+    }
+}
+
+/**
+ * Files dragged in from another app, as `chat-tab.tsx` takes them: "Drop files to attach" over the
+ * chat while they hover it, then attached once wherever in it they are let go — the message box
+ * too, where the web attaches them twice. Chrome reports a drag of text files as text, so it shows
+ * no overlay for those, but still attaches them; plain text dropped here is swallowed, as the
+ * web's handlers swallow it. Also the message box's own target, to keep the drop from its field.
+ */
+class ChatFileDrop(private val tab: ChatTab, private val drop: (List<Uri>, DragEvent) -> Unit) : DragAndDropTarget {
+    /** Entries less exits, over the chat and the message box (`dragCounterRef`). */
+    private var depth = 0
+    private var files = false
+
+    val showing: Boolean
+        get() = tab.filesOver
+
+    private fun count(to: Int) {
+        depth = to
+        tab.filesOver = depth > 0 && files
+    }
+
+    override fun onStarted(event: DragAndDropEvent) {
+        val description = event.toAndroidDragEvent().clipDescription
+        files = description != null && (0 until description.mimeTypeCount).any { !description.getMimeType(it).startsWith("text/") }
+    }
+
+    override fun onEntered(event: DragAndDropEvent) {
+        count(depth + 1)
+    }
+
+    override fun onExited(event: DragAndDropEvent) {
+        count(maxOf(0, depth - 1))
+    }
+
+    override fun onEnded(event: DragAndDropEvent) {
+        count(0)
+    }
+
+    override fun onDrop(event: DragAndDropEvent): Boolean {
+        count(0)
+        val drag = event.toAndroidDragEvent()
+        val clip = drag.clipData ?: return true
+        val uris = (0 until clip.itemCount).mapNotNull { index -> clip.getItemAt(index).uri?.takeIf { it.scheme == ContentResolver.SCHEME_CONTENT } }
+        if (uris.isNotEmpty()) drop(uris, drag)
+        return true
+    }
+}
+
+/**
+ * `absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm
+ * border-2 border-dashed border-primary rounded-lg`: an upload arrow over "Drop files to
+ * attach", `gap-2 text-primary`.
+ */
+@Composable
+private fun BoxScope.DropFilesOverlay() {
+    val tokens = LocalPpmTokens.current
+    val radius = 12.dp
+    Column(
+        Modifier
+            .matchParentSize()
+            .background(tokens.bgSolid.opacity(0.8).color, RoundedCornerShape(radius))
+            .dashedBorder(2.dp, tokens.accent.color, radius),
+        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        PpmIcon(ProductIcon.Upload, 32.dp, tokens.accent.color)
+        BasicText("Drop files to attach", style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.accent.color))
     }
 }
 

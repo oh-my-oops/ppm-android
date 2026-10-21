@@ -1910,6 +1910,9 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
     /** Send was pressed while a file was still uploading: the message goes once none is (`pendingSend`). */
     var pendingSend by mutableStateOf(false)
 
+    /** Files are being dragged over the chat: its "Drop files to attach" overlay is up (`isDragging`). */
+    var filesOver by mutableStateOf(false)
+
     /** Whether Send has anything to send (`hasContent`): text, a file that did not fail, or an agent. */
     val hasContent: Boolean
         get() = draft.text.isNotBlank() || attachments.any { it.status != ComposerAttachment.Status.ERROR } || agent != null

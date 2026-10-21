@@ -55,6 +55,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
@@ -124,7 +125,11 @@ fun PhoneShell(model: AppModel) {
         val focused = layout.focusedPanelId in layout.gridPanelIds
         Modifier.cssBorder(if (focused) tokens.accent.opacity(0.3).color else Color.Transparent)
     } ?: Modifier
+    // Files dragged over the chat: its overlay comes after the web's fixed corners, so they go
+    // under it, blurred with the chat, inside the overlay's `rounded-lg`.
+    val covered = model.activeTab?.let { model.chat(it.id) }?.filesOver == true
     Backdrop {
+        if (covered) CornerChrome(model, mobile = true, Modifier.clip(RoundedCornerShape(12.dp)).blur(13.dp))
         Box(
             Modifier
                 .fillMaxSize()
@@ -142,7 +147,7 @@ fun PhoneShell(model: AppModel) {
             onTabs = { tabsOpen = true },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
-        CornerChrome(model, mobile = true)
+        if (!covered) CornerChrome(model, mobile = true)
         MobileDrawer(model, drawerOpen) { drawerOpen = false }
     }
     if (projectsOpen) ProjectSheet(model) { projectsOpen = false }

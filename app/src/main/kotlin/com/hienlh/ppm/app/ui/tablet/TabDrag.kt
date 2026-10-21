@@ -440,7 +440,7 @@ fun BoxScope.DropHighlight(zone: DropZone) {
  * `border-dashed` as Chrome draws it at 3 device pixels or more: dashes two widths long with one
  * width between along each side, and one dash on the middle of each rounded corner.
  */
-private fun Modifier.dashedBorder(width: Dp, color: Color, radius: Dp) = drawBehind {
+fun Modifier.dashedBorder(width: Dp, color: Color, radius: Dp) = drawBehind {
     val w = cssBorderPx(width).toFloat()
     val half = w / 2
     val r = radius.toPx() - half

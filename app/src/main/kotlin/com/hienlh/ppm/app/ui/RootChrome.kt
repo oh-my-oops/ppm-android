@@ -36,13 +36,14 @@ import com.hienlh.ppm.design.ppmText
  * What app.tsx pins over the layout: the beta ribbon in a top corner and, on a phone, the device
  * name top-left and the screen-awake pill between them (the desktop layout shows that in the
  * status bar instead). Each shell draws it over its content and under its drawer, as the web's
- * fixed `z-50` corners sit under the drawer that comes after them; menus and sheets are windows
- * of their own, over both.
+ * fixed `z-50` corners sit under the drawer that comes after them — and under a chat's drop
+ * overlay, which comes after them too; menus and sheets are windows of their own, over both.
+ * [modifier] goes inside the insets, so a blur stops where the shell's content does.
  */
 @Composable
-fun CornerChrome(model: AppModel, mobile: Boolean) {
+fun CornerChrome(model: AppModel, mobile: Boolean, modifier: Modifier = Modifier) {
     // Inside the same insets as the shell under it.
-    Box(Modifier.fillMaxSize().then(if (mobile) Modifier.statusBarsPadding() else Modifier.safeDrawingPadding())) {
+    Box(Modifier.fillMaxSize().then(if (mobile) Modifier.statusBarsPadding() else Modifier.safeDrawingPadding()).then(modifier)) {
         BetaRibbon(mobile, Modifier.align(if (mobile) Alignment.TopEnd else Alignment.TopStart))
         if (mobile) {
             model.info?.deviceName?.takeIf { it.isNotEmpty() }?.let { DeviceNameBadge(it, Modifier.align(Alignment.TopStart)) }
