@@ -94,8 +94,15 @@ private fun breaksBefore(c: Int) = if (c < 0x80) c > 0x20 && c.toChar() !in NO_B
 private fun breaksAfter(c: Int) = if (c < 0x80) c > 0x20 && c.toChar() !in NO_BREAK_AFTER else Character.isLetterOrDigit(c)
 
 /**
+ * What Android's line breaker will not start a line with even after a space (UAX #14 LB13),
+ * where Chrome ends a line at any space.
+ */
+private const val NO_BREAK_AFTER_SPACE = "!),./:;?]}"
+
+/**
  * `word-break: break-all`: a [BREAK] wherever Chrome may end a line inside a word, which no
- * Android line breaker offers. Spaces and everything else are left to the line breaker.
+ * Android line breaker offers, and before a run of spaces that only Chrome breaks after. Put
+ * before the spaces, it lets them hang at the end of the line as Chrome's do.
  */
 internal fun breakAnywhere(text: String): String = buildString(text.length * 2) {
     var previous = -1
@@ -103,6 +110,11 @@ internal fun breakAnywhere(text: String): String = buildString(text.length * 2) 
     while (i < text.length) {
         val c = text.codePointAt(i)
         if (previous >= 0 && breaksAfter(previous) && breaksBefore(c)) append(BREAK)
+        if (c == ' '.code && previous >= 0 && previous != ' '.code) {
+            var next = i
+            while (next < text.length && text[next] == ' ') next++
+            if (next < text.length && text[next] in NO_BREAK_AFTER_SPACE) append(BREAK)
+        }
         appendCodePoint(c)
         previous = c
         i += Character.charCount(c)

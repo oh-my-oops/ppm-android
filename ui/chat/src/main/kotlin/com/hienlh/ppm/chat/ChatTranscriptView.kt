@@ -220,7 +220,12 @@ private fun TranscriptList(
             if (index < 0) viewer?.show(listOf(self), 0) else viewer?.show(images.toMutableList().also { it[index] = self }, index)
         }
     }
-    CompositionLocalProvider(LocalOpenCards provides openCards, LocalChatGallery provides gallery) {
+    // A shell call's card opens as its output starts to stream in, once (`isStreamingBash`).
+    val streamed = remember { HashSet<String>() }
+    LaunchedEffect(state.bashOutput.keys) {
+        for (id in state.bashOutput.keys) if (streamed.add(id)) openCards[id] = true
+    }
+    CompositionLocalProvider(LocalOpenCards provides openCards, LocalChatGallery provides gallery, LocalBashOutput provides state.bashOutput) {
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
                 TaskTracker(state.tasks)

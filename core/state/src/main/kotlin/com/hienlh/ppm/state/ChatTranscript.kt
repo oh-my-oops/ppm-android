@@ -48,6 +48,13 @@ class ChatTranscript {
     var pendingApproval: ApprovalRequest? = null
         private set
 
+    /**
+     * What each shell call of the live turn has printed while it runs, by call (`bash_output`),
+     * until its result comes, the turn ends or it is stopped.
+     */
+    var bashOutput: Map<String, BashPartial> = emptyMap()
+        private set
+
     /** Kept out of [items] so that a history reload cannot erase it. */
     var turnStop: TurnStop? = null
         private set
@@ -209,6 +216,11 @@ class ChatTranscript {
     /** The composer has the refused send back, or has offered it. */
     fun takeRejected() {
         rejected = null
+    }
+
+    /** The turn was told to stop: no call streams its output any more (`cancelStreaming`). */
+    fun cancelled() {
+        bashOutput = emptyMap()
     }
 
     /** `dismissMessage`: one message out of this view, such as an error's bubble. A reload brings back what history keeps. */
@@ -391,6 +403,7 @@ class ChatTranscript {
     }
 
     private fun apply(event: ChatEvent, replaying: Boolean, effects: MutableList<ChatEffect>, now: Long) {
+        if (event is ChatEvent.ToolResult) event.toolUseId?.let { if (it in bashOutput) bashOutput = bashOutput - it }
         when (event) {
             is ChatEvent.Text, is ChatEvent.Thinking, is ChatEvent.ToolUse, is ChatEvent.ToolResult, is ChatEvent.AccountRetry -> {
                 val parent = parentOf(event)
@@ -402,6 +415,11 @@ class ChatTranscript {
                     if (event is ChatEvent.ToolUse && live?.hasAgent(parent) != true) stepFinalized(parent, event)
                     live?.add(event)
                 }
+            }
+            // Only while its card still runs: a backgrounded command prints on after its result.
+            is ChatEvent.BashOutput -> if (live?.unanswered(event.toolUseId)?.name in SHELL_TOOLS) {
+                val id = event.toolUseId
+                bashOutput = bashOutput + (id to (bashOutput[id]?.plus(event.content, event.lineCount) ?: BashPartial.of(event.content, event.lineCount)))
             }
             is ChatEvent.SubagentStatus -> if (live?.setBgStatus(event.toolUseId, event.status) != true) {
                 updateFinalizedAgent(event.toolUseId) { it.copy(bgStatus = event.status) }
@@ -428,6 +446,7 @@ class ChatTranscript {
                 finalizeLive(event.lastMessageUuid, event.usage)
                 turnFinalized = true
                 statusMessage = null
+                bashOutput = emptyMap()
             }
             is ChatEvent.StatusUpdate -> statusMessage = event.message + (event.accountLabel?.takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: "")
             is ChatEvent.AccountInfo -> statusMessage = null

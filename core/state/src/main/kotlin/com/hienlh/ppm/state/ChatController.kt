@@ -38,6 +38,8 @@ data class ChatState(
     val phase: SessionPhase = SessionPhase.IDLE,
     val pendingApproval: ApprovalRequest? = null,
     val turnStop: TurnStop? = null,
+    /** What each running shell call of the live turn has printed, by call. */
+    val bashOutput: Map<String, BashPartial> = emptyMap(),
     val title: String? = null,
     val compacting: Boolean = false,
     val connectingElapsed: Int = 0,
@@ -157,6 +159,8 @@ class ChatController(
 
     fun cancel() {
         socket?.send(ChatClientMessage.Cancel.json.toString())
+        transcript.cancelled()
+        publish()
     }
 
     fun respond(request: ApprovalRequest, approved: Boolean, data: JsonElement? = null) {
@@ -384,6 +388,7 @@ class ChatController(
             phase = transcript.phase,
             pendingApproval = transcript.pendingApproval,
             turnStop = transcript.turnStop,
+            bashOutput = transcript.bashOutput,
             title = transcript.title,
             compacting = transcript.compacting,
             connectingElapsed = transcript.connectingElapsed,

@@ -104,6 +104,13 @@ sealed interface ChatEvent {
 
     /** A backgrounded Agent/Task ended ([status]: `completed`, `failed` or `stopped`), maybe turns after its call. */
     data class SubagentStatus(val toolUseId: String, val status: String) : ChatEvent
+
+    /**
+     * What a running Bash / PowerShell call printed since the last of these ([content]), and how
+     * many lines it has printed in all. Live only: never buffered for a replay.
+     */
+    data class BashOutput(val toolUseId: String, val content: String, val lineCount: Int) : ChatEvent
+
     data class SessionMigrated(val newSessionId: String) : ChatEvent
 
     /** Anything else (`team_*`, …): not shown yet. */
@@ -136,6 +143,9 @@ sealed interface ChatEvent {
                     val status = json["status"].string
                     if (id.isNullOrEmpty() || status.isNullOrEmpty()) Other(type) else SubagentStatus(id, status)
                 }
+                "bash_output" -> json["toolUseId"].string?.takeIf { it.isNotEmpty() }
+                    ?.let { BashOutput(it, json["content"].string ?: "", json["lineCount"].int ?: 0) }
+                    ?: Other(type)
                 "session_migrated" -> json["newSessionId"].string?.let(::SessionMigrated) ?: Other(type)
                 else -> Other(type)
             }

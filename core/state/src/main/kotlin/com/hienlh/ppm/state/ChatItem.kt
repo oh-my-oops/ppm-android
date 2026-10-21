@@ -169,9 +169,14 @@ class TurnBuilder(
             }
             is ChatEvent.AccountRetry -> list += ChatBlock.Retry(event.reason ?: "Auth failed", event.accountLabel ?: "another account")
             is ChatEvent.SubagentStatus -> setBgStatus(event.toolUseId, event.status)
-            is ChatEvent.Done, is ChatEvent.SessionMigrated, is ChatEvent.StatusUpdate, is ChatEvent.AccountInfo, is ChatEvent.Other -> Unit
+            is ChatEvent.Done, is ChatEvent.SessionMigrated, is ChatEvent.StatusUpdate, is ChatEvent.AccountInfo, is ChatEvent.BashOutput,
+            is ChatEvent.Other -> Unit
         }
     }
+
+    /** This turn's own call [toolUseId] while it still waits for its result, or null. */
+    fun unanswered(toolUseId: String): ToolBlock? =
+        toolIndex[toolUseId]?.let { (list[it] as? ChatBlock.Tool)?.tool }?.takeIf { it.result == null }
 
     /** Whether a call of the agent [id] counts on a card of this turn. */
     fun hasAgent(id: String): Boolean = id in agentCards

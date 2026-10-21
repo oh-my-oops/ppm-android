@@ -215,6 +215,10 @@ class ChatViewsTest {
         assertEquals("h${b}t${b}t${b}p${b}s://${b}d${b}o", breakAnywhere("https://do"))
         val json = "{\"url\":\"https://example.com/a(b)\"}"
         assertEquals(json, breakAnywhere(json).replace(b.toString(), ""))
+        // Chrome ends a line at any space, before a dot or a slash too; Android only once told so.
+        assertEquals("t${b}s$b  ....", breakAnywhere("ts  ...."))
+        assertEquals("c${b}d$b ./${b}b", breakAnywhere("cd ./b"))
+        assertEquals("a b", breakAnywhere("a b"))
     }
 
     @Test

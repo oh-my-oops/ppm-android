@@ -32,6 +32,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -65,6 +67,8 @@ import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.prettyString
 import com.hienlh.ppm.protocol.string
+import com.hienlh.ppm.state.BashPartial
+import com.hienlh.ppm.state.SHELL_TOOLS
 import com.hienlh.ppm.state.ToolBlock
 import com.hienlh.ppm.state.isAgent
 import com.hienlh.ppm.state.truthy
@@ -72,6 +76,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlin.math.floor
+import kotlinx.coroutines.flow.drop
 
 /** `text-xs`: the cards' text, 12px on a 16px line. */
 private val cardText = ppmText(12f, lineHeight = 16f)
@@ -82,6 +87,9 @@ private val monoText = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f)
 /** `text-[10px]` inside a card, on the line `text-xs` sets: 10 × 4/3. */
 private val tinyText = ppmText(10f, lineHeight = 40f / 3)
 private val tinyMono = ppmText(10f, kind = FontKind.MONO, lineHeight = 40f / 3)
+
+/** `font-mono text-[11px]` on the card's line ratio. */
+private val streamMono = ppmText(11f, kind = FontKind.MONO, lineHeight = 44f / 3)
 
 /**
  * A tool call as the web's `ToolCard` draws it (src/web/components/chat/tool-cards.tsx): a tinted
@@ -128,6 +136,8 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
         if (isError && !sawError && isEdit) setExpanded(false)
         sawError = isError
     }
+    // A shell call still running shows what it has printed so far.
+    val partial = if (result == null && tool.name in SHELL_TOOLS) tool.toolUseId?.let { LocalBashOutput.current[it] } else null
     val interactive = tool.name in setOf("AskUserQuestion", "ExitPlanMode")
     val shape = RoundedCornerShape(11.dp)
     Column(
@@ -148,6 +158,7 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
             ToolChip(ToolChipStyle.of(tool.name, tool.input, isError, tokens))
             ToolSummaryLine(tool.name, tool.input, Modifier.weight(1f))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (partial != null) BasicText("${lines(partial.lineCount)} streaming…", style = tinyText.copy(color = tokens.warning.color))
                 // Codex's exit code for a shell call: its output can matter even when it failed.
                 result?.exitCode?.let { code ->
                     BasicText("exit $code", style = tinyMono.copy(color = (if (code == 0) tokens.text3 else tokens.error).color))
@@ -162,6 +173,7 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 ToolDetails(tool.name, tool.input)
+                if (partial != null) StreamingBashOutput(partial)
                 if (imagePath != null) ToolImagePreview(imagePath, tool.toolUseId)
                 // The preview names the file already, so the result's echo of it is left out.
                 if (result != null && showsResult(tool.name, result) && !(imagePath != null && !result.isError)) {
@@ -178,6 +190,43 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
  * closed card's picture, which has no `<img>` for it to collect. None, and each card keeps its own.
  */
 internal val LocalOpenCards = staticCompositionLocalOf<SnapshotStateMap<String, Boolean>?> { null }
+
+/** What each running shell call has printed so far, by call ([com.hienlh.ppm.state.ChatState.bashOutput]). */
+internal val LocalBashOutput = compositionLocalOf<Map<String, BashPartial>> { emptyMap() }
+
+private fun lines(n: Int) = if (n == 1) "1 line" else "$n lines"
+
+/**
+ * The output of a call still running (`StreamingBashOutput`): its last 200 lines, kept at the end
+ * as more comes in unless scrolled more than 20 px up from it.
+ */
+@Composable
+private fun StreamingBashOutput(output: BashPartial) {
+    val tokens = LocalPpmTokens.current
+    val scroll = rememberScrollState()
+    val slack = with(LocalDensity.current) { 20.dp.toPx() }
+    var scrolledUp by remember { mutableStateOf(false) }
+    // Read where a scroll leaves it, as `onScroll` does: more output coming in moves nothing.
+    LaunchedEffect(scroll) {
+        snapshotFlow { scroll.value }.drop(1).collect { scrolledUp = it < scroll.maxValue - slack }
+    }
+    LaunchedEffect(scroll) {
+        snapshotFlow { scroll.maxValue }.collect { if (!scrolledUp && it != Int.MAX_VALUE) scroll.scrollTo(it) }
+    }
+    Column(Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top).padding(top = 6.dp)) {
+        Row(
+            Modifier.padding(bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            PpmIcon(ProductIcon.Loader2, 12.dp, tokens.warning.color, spinning = true)
+            BasicText("Output (${lines(output.lineCount)}, streaming...)", style = tinyText.copy(color = tokens.warning.color))
+        }
+        Box(Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(scroll)) {
+            Mono(output.tail, tokens.text3, breakAll = true, style = streamMono)
+        }
+    }
+}
 
 /**
  * A file change shows itself in the details, so its "updated successfully" is noise; an image
@@ -690,7 +739,9 @@ private fun FileLink(label: String, icon: ProductIcon, color: Rgba, style: TextS
 internal fun Mono(text: String, color: Rgba, modifier: Modifier = Modifier, breakAll: Boolean = false, style: TextStyle = monoText) {
     // A text that holds a U+200B of its own keeps the line breaker's breaks, so a copy can keep it.
     val breaking = breakAll && BREAK !in text
-    val shown = if (breaking) remember(text) { breakAnywhere(text) } else text
+    // A `<pre>` ends its last line at a final newline; Compose would start an empty one after it.
+    val laid = text.removeSuffix("\n")
+    val shown = if (breaking) remember(laid) { breakAnywhere(laid) } else laid
     WithoutBreaksOnCopy(breaking) {
         SelectionContainer(modifier.fillMaxWidth()) {
             BasicText(shown, style = style.copy(color = color.color))
