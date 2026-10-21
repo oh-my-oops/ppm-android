@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -49,6 +48,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.client.ApiClient
@@ -117,102 +117,106 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
     if (onCancel != null) BackHandler(onBack = onCancel)
 
     Box(Modifier.fillMaxSize().themeBackground(tokens.background)) {
-        LoginBackdrop()
-        Column(
-            Modifier
-                .fillMaxSize()
-                .systemBarsPadding()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Column(Modifier.widthIn(max = 392.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Logo()
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        BasicText(
-                            "Unlock your workspace",
-                            style = ppmText(24f, FontWeight.SemiBold, lineHeight = 32f).copy(color = tokens.text.color, letterSpacing = (-0.6).sp, textAlign = TextAlign.Center),
-                        )
-                        BasicText(
-                            if (signIn) "Enter your access password to unlock" else "Enter the server's address and its access password",
-                            style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text2.color, textAlign = TextAlign.Center),
-                        )
-                    }
-                    if (signIn) ServerChip(model.serverName)
-                }
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (!signIn) {
-                        LoginField(focused = focused == "address") {
-                            PpmTextField(
-                                address,
-                                "Server address, e.g. 192.168.1.10:8080",
-                                Modifier.fillMaxWidth(),
-                                desktopStyle = FIELD_DESKTOP,
-                                placeholderColor = tokens.text2.color,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next, autoCorrectEnabled = false),
-                                onKeyboardAction = { passwordFocus.requestFocus() },
-                                focusRequester = addressFocus,
-                                onFocusChanged = { if (it) focused = "address" },
-                            )
-                        }
-                    }
-                    LoginField(focused = focused == "password", trailing = {
-                        Box(
-                            Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).ppmClickable(pressedColor = tokens.panel2.color) { showPassword = !showPassword },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            PpmIcon(if (showPassword) ProductIcon.EyeOff else ProductIcon.Eye, 18.dp, tokens.text3.color)
-                        }
-                    }) {
-                        Box(contentAlignment = Alignment.CenterStart) {
-                            if (password.text.isEmpty()) {
-                                BasicText("Password", style = fieldStyle.copy(color = tokens.text2.color))
-                            }
-                            BasicSecureTextField(
-                                state = password,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .focusRequester(passwordFocus)
-                                    .onFocusChanged { if (it.isFocused) focused = "password" },
-                                textStyle = fieldStyle.copy(color = tokens.text.color),
-                                cursorBrush = SolidColor(tokens.accent.color),
-                                textObfuscationMode = if (showPassword) TextObfuscationMode.Visible else TextObfuscationMode.RevealLastTyped,
-                                // The secure field's own options, which any passed in replace: without them the
-                                // keyboard is told it is plain text, learns the password and suggests it.
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false, imeAction = ImeAction.Go),
-                                onKeyboardAction = { connect() },
-                            )
-                        }
-                    }
-                    error?.let { message ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            PpmIcon(ProductIcon.AlertCircle, 15.dp, tokens.error.color, Modifier.padding(top = 2.dp))
-                            SelectionContainer {
-                                BasicText(message, style = ppmText(13f, lineHeight = 18f).copy(color = tokens.error.color))
-                            }
-                        }
-                    }
-                    PrimaryButton(
-                        if (busy) "Checking…" else "Unlock",
-                        enabled = !busy && (signIn || address.text.isNotBlank()),
-                        // `h-[50px] w-full text-[15px]` on the `rounded-md` button, its line the body's 1.5.
-                        height = 50.dp,
-                        hover = true,
-                        radius = 8.dp,
-                        fontSize = 15f,
-                        lineHeight = 22.5f,
-                        onClick = ::connect,
-                    )
-                    if (onCancel != null) {
-                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        // The keyboard pans the page rather than shrinking it, as Chrome's does: the card stays
+        // centred on the screen, and a field it covers is brought up into view.
+        KeyboardPannedPage {
+            LoginBackdrop()
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .systemBarsPadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Column(Modifier.widthIn(max = 392.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Logo()
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             BasicText(
-                                "Cancel",
-                                Modifier.clip(RoundedCornerShape(6.dp)).ppmClickable(pressedColor = tokens.panel2.color, onClick = onCancel).padding(horizontal = 12.dp, vertical = 8.dp),
-                                style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
+                                "Unlock your workspace",
+                                style = ppmText(24f, FontWeight.SemiBold, lineHeight = 32f).copy(color = tokens.text.color, letterSpacing = (-0.6).sp, textAlign = TextAlign.Center),
                             )
+                            BasicText(
+                                if (signIn) "Enter your access password to unlock" else "Enter the server's address and its access password",
+                                style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text2.color, textAlign = TextAlign.Center),
+                            )
+                        }
+                        if (signIn) ServerChip(model.serverName)
+                    }
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (!signIn) {
+                            LoginField(focused = focused == "address") {
+                                PpmTextField(
+                                    address,
+                                    "Server address, e.g. 192.168.1.10:8080",
+                                    Modifier.fillMaxWidth(),
+                                    desktopStyle = FIELD_DESKTOP,
+                                    placeholderColor = tokens.text2.color,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next, autoCorrectEnabled = false),
+                                    onKeyboardAction = { passwordFocus.requestFocus() },
+                                    focusRequester = addressFocus,
+                                    onFocusChanged = { if (it) focused = "address" },
+                                )
+                            }
+                        }
+                        LoginField(focused = focused == "password", trailing = {
+                            Box(
+                                Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).ppmClickable(pressedColor = tokens.panel2.color) { showPassword = !showPassword },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                PpmIcon(if (showPassword) ProductIcon.EyeOff else ProductIcon.Eye, 18.dp, tokens.text3.color)
+                            }
+                        }) {
+                            Box(contentAlignment = Alignment.CenterStart) {
+                                if (password.text.isEmpty()) {
+                                    BasicText("Password", style = fieldStyle.copy(color = tokens.text2.color))
+                                }
+                                BasicSecureTextField(
+                                    state = password,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .focusRequester(passwordFocus)
+                                        .tracksTextFocus(password)
+                                        .onFocusChanged { if (it.isFocused) focused = "password" },
+                                    textStyle = fieldStyle.copy(color = tokens.text.color),
+                                    cursorBrush = SolidColor(tokens.accent.color),
+                                    textObfuscationMode = if (showPassword) TextObfuscationMode.Visible else TextObfuscationMode.RevealLastTyped,
+                                    // The secure field's own options, which any passed in replace: without them the
+                                    // keyboard is told it is plain text, learns the password and suggests it.
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false, imeAction = ImeAction.Go),
+                                    onKeyboardAction = { connect() },
+                                )
+                            }
+                        }
+                        error?.let { message ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                PpmIcon(ProductIcon.AlertCircle, 15.dp, tokens.error.color, Modifier.padding(top = 2.dp))
+                                SelectionContainer {
+                                    BasicText(message, style = ppmText(13f, lineHeight = 18f).copy(color = tokens.error.color))
+                                }
+                            }
+                        }
+                        PrimaryButton(
+                            if (busy) "Checking…" else "Unlock",
+                            enabled = !busy && (signIn || address.text.isNotBlank()),
+                            // `h-[50px] w-full text-[15px]` on the `rounded-md` button, its line the body's 1.5.
+                            height = 50.dp,
+                            hover = true,
+                            radius = 8.dp,
+                            fontSize = 15f,
+                            lineHeight = 22.5f,
+                            onClick = ::connect,
+                        )
+                        if (onCancel != null) {
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                BasicText(
+                                    "Cancel",
+                                    Modifier.clip(RoundedCornerShape(6.dp)).ppmClickable(pressedColor = tokens.panel2.color, onClick = onCancel).padding(horizontal = 12.dp, vertical = 8.dp),
+                                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
+                                )
+                            }
                         }
                     }
                 }
