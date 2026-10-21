@@ -71,9 +71,9 @@ internal fun clearAttachmentCopies(context: Context) {
  * `processFiles`: each of [uris] into [tab]'s message box in turn — a chip at once, its thumbnail
  * as soon as the picture decodes, then the picture reduced, the file uploaded and the picture
  * read for sending inline when it may be. Nothing leaves a chip uploading: whatever fails marks
- * it failed instead.
+ * it failed instead. [raiseKeyboard] as [ChatTab.requestFocus] takes it.
  */
-fun AppModel.attach(context: Context, tab: ChatTab, uris: List<Uri>) {
+fun AppModel.attach(context: Context, tab: ChatTab, uris: List<Uri>, raiseKeyboard: Boolean = true) {
     val api = api ?: return
     val resolver = context.contentResolver
     val dir = attachmentsDir(context)
@@ -117,7 +117,7 @@ fun AppModel.attach(context: Context, tab: ChatTab, uris: List<Uri>) {
         }
         // The keyboard comes up, as Chrome brings it for the web's textarea on a phone. (On a tablet
         // the web focuses the phone layout's hidden textarea instead, so nothing gets focus there.)
-        tab.requestFocus()
+        tab.requestFocus(raiseKeyboard)
     }
 }
 

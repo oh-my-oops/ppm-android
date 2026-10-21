@@ -2,6 +2,7 @@ package com.hienlh.ppm.app.ui
 
 import android.app.Activity
 import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -28,6 +29,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.contextmenu.builder.item
+import androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys
+import androidx.compose.foundation.text.contextmenu.data.TextContextMenuSession
+import androidx.compose.foundation.text.contextmenu.modifier.appendTextContextMenuComponents
+import androidx.compose.foundation.text.contextmenu.modifier.filterTextContextMenuComponents
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -119,6 +125,41 @@ private fun attachChooser(context: Context, photo: File): Intent {
         .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
     val extra = listOf(camera, camcorder).filter { it.resolveActivity(context.packageManager) != null }
     return Intent.createChooser(files, null).putExtra(Intent.EXTRA_INITIAL_INTENTS, extra.toTypedArray<Parcelable>())
+}
+
+/**
+ * The text menu's Paste with a picture on the clipboard, as the web's `handlePaste` takes it: the
+ * picture goes to [onPaste] to be attached, in place of the text Paste would have put in. Autofill
+ * is left out, as Chrome offers none for a textarea.
+ */
+fun Modifier.pastesImages(context: Context, onPaste: (Uri) -> Unit): Modifier {
+    val paste: TextContextMenuSession.() -> Unit = {
+        close()
+        clipboardImage(context)?.let(onPaste)
+    }
+    return filterTextContextMenuComponents {
+        it.key != TextContextMenuKeys.AutofillKey && (it.key != TextContextMenuKeys.PasteKey || !clipboardHoldsImage(context))
+    }
+        .appendTextContextMenuComponents {
+            if (clipboardHoldsImage(context)) item(ImagePaste, context.getString(android.R.string.paste), 0, paste)
+        }
+}
+
+private object ImagePaste
+
+/** Whether the clipboard holds a picture, read from its description, which raises no "pasted" notice. */
+fun clipboardHoldsImage(context: Context): Boolean {
+    val description = context.getSystemService(ClipboardManager::class.java)?.primaryClipDescription ?: return false
+    return (0 until description.mimeTypeCount).any { description.getMimeType(it).startsWith("image/") }
+}
+
+/** The clipboard's first picture: Chrome hands a page that one file and nothing else. */
+fun clipboardImage(context: Context): Uri? {
+    val clip = context.getSystemService(ClipboardManager::class.java)?.primaryClip ?: return null
+    val resolver = context.contentResolver
+    return (0 until clip.itemCount).firstNotNullOfOrNull { index ->
+        clip.getItemAt(index).uri?.takeIf { runCatching { resolver.getType(it) }.getOrNull()?.startsWith("image/") == true }
+    }
 }
 
 /**

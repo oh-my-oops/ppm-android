@@ -1893,8 +1893,15 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
     /** Which past message ↑/↓ put in the box, counted back from the newest; -1 while it holds a draft. */
     var historyIndex = -1
 
-    /** Counts each time the message box is asked for the keyboard: a reply picked or cancelled, a refused message put back, files added. */
+    /**
+     * Counts each time the message box is asked for focus: a reply picked or cancelled, a refused
+     * message put back, files added or pasted, the box's padding or the agent's cross tapped.
+     */
     var focusRequests by mutableIntStateOf(0)
+        private set
+
+    /** Whether the last of those brings the keyboard, even to a box that kept its focus. */
+    var raisesKeyboard = true
         private set
 
     /** Files on their way into the next message, in the order they were added (`attachments`). */
@@ -1912,8 +1919,14 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
         requestFocus()
     }
 
-    /** The message box focused, keyboard and all. */
-    fun requestFocus() {
+    /**
+     * The message box focused, keyboard and all. Unless [raiseKeyboard] is false, the keyboard
+     * comes back even when Back put it away from a box still focused: on the web a tapped button
+     * took the focus, so its textarea's `focus()` is a fresh one. A paste leaves it as it is,
+     * since the textarea pasted into never lost the focus.
+     */
+    fun requestFocus(raiseKeyboard: Boolean = true) {
+        raisesKeyboard = raiseKeyboard
         focusRequests++
     }
 

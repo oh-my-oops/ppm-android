@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui
 
+import android.net.Uri
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -38,6 +39,7 @@ import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -51,6 +53,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -64,6 +67,10 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -143,13 +150,18 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
     var modelOpen by remember { mutableStateOf(false) }
     // The model can't change mid-turn: its sheet closes as the turn starts.
     LaunchedEffect(running) { if (running) modelOpen = false }
-    // A reply picked or cancelled, a refused message put back or files added bring the keyboard here,
-    // even one Back put away: the web's button took the focus, so Chrome raises it for the textarea.
+    // A press landing on the box while it has no focus: the focus a long press gives it brings no
+    // keyboard, as Chrome's brings none. A tap still raises it, and so does anything below.
+    val quietFocus = remember { mutableStateOf(false) }
+    // The box asked for focus brings the keyboard, even one Back put away: the web's button took the
+    // focus, so Chrome raises it for the textarea. A paste leaves it as it was.
     val keyboard = LocalSoftwareKeyboardController.current
     LaunchedEffect(tab) {
         snapshotFlow { tab.focusRequests }.drop(1).collect {
+            // A box focused quietly has no input session yet: dropping the flag starts one.
+            if (tab.raisesKeyboard) quietFocus.value = false
             focus.requestFocus()
-            keyboard?.show()
+            if (tab.raisesKeyboard) keyboard?.show()
         }
     }
 
@@ -157,6 +169,8 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
     fun send() = tab.submit()
     val context = LocalContext.current
     val attach = rememberAttachPicker { uris -> model.attach(context, tab, uris) }
+    // The box pasted into kept its focus, so the keyboard stays as it was.
+    val pasteImage: (Uri) -> Unit = { uri -> model.attach(context, tab, listOf(uri), raiseKeyboard = false) }
 
     /**
      * ↑/↓ through this chat's past messages, as a shell does: only from an empty box (so ↑ still
@@ -194,6 +208,10 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                     tab.permissionMode = (tab.permissionMode ?: PermissionMode.FALLBACK).next
                     true
                 }
+                // Ctrl+V, or the keyboard's own Paste, with a picture on the clipboard: as the menu's Paste.
+                (event.key == Key.Paste || event.key == Key.V && event.isCtrlPressed && !event.isShiftPressed && !event.isAltPressed) &&
+                    clipboardHoldsImage(context) ->
+                    clipboardImage(context)?.let(pasteImage) != null
                 else -> false
             }
         }
@@ -216,7 +234,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
             // `cursor-text`: the I-beam over the whole box, its buttons back to the arrow.
             .pointerHoverIcon(WebCursor.Text)
             // A tap on the box's padding goes to the text, as the web's container click does.
-            .clickable(remember { MutableInteractionSource() }, indication = null) { focus.requestFocus() }
+            .clickable(remember { MutableInteractionSource() }, indication = null) { tab.requestFocus() }
             .cssBorder(tokens.border.color, shape),
     ) {
         // `px-2 md:px-4 pt-2`, and the card's own `mb-2`.
@@ -229,7 +247,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
         tab.agent?.let { agent ->
             AgentChip(agent, Modifier.padding(start = inset, end = inset, top = 8.dp)) {
                 tab.agent = null
-                focus.requestFocus()
+                tab.requestFocus()
             }
         }
         AttachmentChips(tab.attachments, inset) { id -> model.removeAttachment(tab, id) }
@@ -249,7 +267,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 AttachButton(mobile = true, onClick = attach)
                 // `text-sm py-1.5 max-h-20`, the `py-1.5` inside the 80 px; a phone's inputs are 16 px.
                 ComposerField(
-                    tab, focus, onKey, ::send,
+                    tab, focus, quietFocus, onKey, ::send, pasteImage,
                     style = ppmText(16f, lineHeight = INPUT_LINE),
                     padding = 6.dp,
                     maxHeight = 80.dp,
@@ -282,7 +300,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 AttachButton(mobile = false, onClick = attach)
                 // `text-sm leading-relaxed py-2 max-h-[90px]`, the `py-2` inside the 90 px.
                 ComposerField(
-                    tab, focus, onKey, ::send,
+                    tab, focus, quietFocus, onKey, ::send, pasteImage,
                     style = ppmText(14f, lineHeight = 14f * 1.625f),
                     padding = 8.dp,
                     maxHeight = 90.dp,
@@ -307,14 +325,18 @@ private const val INPUT_LINE = 16f * 1.25f / 0.875f
 
 /**
  * The textarea: `rows={1}` growing with its text (`field-sizing: content`) up to [maxHeight], its
- * [padding] above and below inside that; [send] from the keyboard's action key.
+ * [padding] above and below inside that; [send] from the keyboard's action key, [pasteImage] for
+ * a picture pasted from the text menu. While [quietFocus] holds, gaining focus starts no input
+ * session, so no keyboard: set by a touch landing on the unfocused box, dropped as it loses focus.
  */
 @Composable
 private fun ComposerField(
     tab: ChatTab,
     focus: FocusRequester,
+    quietFocus: MutableState<Boolean>,
     onKey: (KeyEvent) -> Boolean,
     send: () -> Unit,
+    pasteImage: (Uri) -> Unit,
     style: TextStyle,
     padding: Dp,
     maxHeight: Dp,
@@ -323,12 +345,28 @@ private fun ComposerField(
 ) {
     val tokens = LocalPpmTokens.current
     val inputStyle = style.copy(color = tokens.text.color)
+    val context = LocalContext.current
+    var focused by remember { mutableStateOf(false) }
     BasicTextField(
         state = tab.draft,
         modifier = modifier
             .heightIn(max = maxHeight)
             .focusRequester(focus)
             .tracksTextFocus(tab.draft)
+            .onFocusChanged {
+                focused = it.isFocused
+                if (!it.isFocused) quietFocus.value = false
+            }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val finger = event.changes.any { it.type == PointerType.Touch || it.type == PointerType.Stylus }
+                        if (event.type == PointerEventType.Press && finger && !focused) quietFocus.value = true
+                    }
+                }
+            }
+            .pastesImages(context, pasteImage)
             .onPreviewKeyEvent(onKey)
             // An arrow the text has no line for stays in the box, as a textarea keeps it: the
             // caret goes to the start or the end (Blink's, but on Windows), where Compose would
@@ -350,7 +388,11 @@ private fun ComposerField(
         },
         textStyle = inputStyle,
         cursorBrush = SolidColor(tokens.accent.color),
-        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Send),
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.Sentences,
+            imeAction = ImeAction.Send,
+            showKeyboardOnFocus = !quietFocus.value,
+        ),
         onKeyboardAction = { send() },
         lineLimits = TextFieldLineLimits.MultiLine(),
         decorator = { field ->
