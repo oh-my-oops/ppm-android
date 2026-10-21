@@ -46,7 +46,9 @@ import com.hienlh.ppm.client.webFile
 import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.PpmTheme
 import com.hienlh.ppm.design.ViewerImage
+import com.hienlh.ppm.protocol.ChatDraft
 import com.hienlh.ppm.protocol.ChatSearchHit
+import com.hienlh.ppm.protocol.DraftAttachment
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.ProjectTags
 import com.hienlh.ppm.protocol.ProviderInfo
@@ -61,6 +63,8 @@ import com.hienlh.ppm.protocol.double
 import com.hienlh.ppm.protocol.sortedForList
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatSearch
+import com.hienlh.ppm.state.DraftLocalStore
+import com.hienlh.ppm.state.DraftSync
 import com.hienlh.ppm.state.GlobalEvents
 import com.hienlh.ppm.state.HealthCheck
 import com.hienlh.ppm.state.HealthWatch
@@ -141,6 +145,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** The main thread: every controller below is driven from it. */
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val prefs = PrefsStore(context)
+
+    /** Every message box's draft, in a file of its own: it is written on each keystroke. */
+    private val draftPrefs = PrefsStore(context, "ppm_drafts")
     val store = ServerStore(prefs, KeystoreSecrets(context))
 
     /** The tab switcher's order, `default` or `recent`, kept on this device as the web keeps it. */
@@ -307,8 +314,14 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     var windowVisible = true
         set(value) {
             field = value
-            // In the background Android may end the process at any time: the layout goes out now.
-            if (value) activeSessionId?.let { events?.seen(it) } else workspaceCache?.flush()
+            // In the background Android may end the process at any time: the layout goes out now,
+            // and so does each draft still waiting out its second.
+            if (value) {
+                activeSessionId?.let { events?.seen(it) }
+            } else {
+                workspaceCache?.flush()
+                for (chat in chats.values) chat.flushDraft()
+            }
         }
 
     var showSignIn by mutableStateOf(false)
@@ -1341,7 +1354,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             } else {
                 listOfNotNull(active)
             }
-            for (tab in shown) chats[tab.id]?.start(api, scope)
+            for (tab in shown) chats[tab.id]?.start(api, scope, DraftLocalStore(draftPrefs, serverKey))
         }
         // A chat that comes forward by itself (restored, or next after a close) loses its unread
         // unless it was marked by hand; one the user picks loses it either way (`activate`).
@@ -1917,9 +1930,56 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
     val hasContent: Boolean
         get() = draft.text.isNotBlank() || attachments.any { it.status != ComposerAttachment.Status.ERROR } || agent != null
 
+    /** The box's unsent message, kept on this device and on the server (`useDraft`); from [start] on. */
+    private var drafts: DraftSync? = null
+    private var draftLoad: Job? = null
+
+    /**
+     * The draft is still on its way (`draftLoading`): Reply waits for it, but for
+     * [DRAFT_GATE_MILLIS] at most, so a server that does not answer cannot keep it hidden.
+     */
+    var draftLoading by mutableStateOf(true)
+        private set
+
+    /** A loaded draft went into the box, for the box to take the focus at its end; its composer clears it. */
+    var draftFocus by mutableStateOf(false)
+
     fun selectReply(reply: ReplyReference?) {
         replyTo = reply
+        edited()
         requestFocus()
+    }
+
+    /**
+     * The box changed (`onContentChange`): typed in, a past message recalled, a refused one put
+     * back, a reply picked or dropped — or a file uploaded or taken out, which the web leaves to
+     * the next keystroke. Saved as the draft, with the files the server has. [text] is what the
+     * box is about to hold when the change is still being made.
+     */
+    fun edited(text: CharSequence = draft.text) {
+        val files = attachments.mapNotNull { file -> file.serverPath?.let { DraftAttachment(file.name, it) } }
+        drafts?.save(ChatDraft(text.toString(), files, replyTo))
+    }
+
+    /** The app is leaving the screen: a save still waiting goes now. */
+    fun flushDraft() {
+        drafts?.flush()
+    }
+
+    /**
+     * A draft that loaded (`initialValue`, `initialAttachments`, `draft.replyTo`): its text only
+     * into an empty box, since what was typed wins, the caret at its end ([draftFocus]); its files
+     * ahead of any added meanwhile; its reply unless one was picked, and only one into this chat,
+     * as the server refuses any other on every send.
+     */
+    private fun show(loaded: ChatDraft) {
+        if (loaded.content.isNotEmpty() && draft.text.isEmpty()) {
+            draft.setTextAndPlaceCursorAtEnd(loaded.content)
+            draftFocus = true
+        }
+        attachments.addAll(0, loaded.attachments.map { draftAttachment(it.name, it.path) })
+        val reply = loaded.replyTo
+        if (replyTo == null && reply?.sessionId == session.id && reply.providerId == session.providerId) replyTo = reply
     }
 
     /**
@@ -1973,6 +2033,8 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
             images,
             ready.filter { it.isImage }.mapNotNull { it.serverPath },
         )
+        // Only now: the message is on the session's socket.
+        drafts?.clear()
         for (attachment in attachments) attachment.file?.parentFile?.deleteRecursively()
         draft.clearText()
         attachments.clear()
@@ -1988,21 +2050,41 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
         val typed = draft.text.toString()
         draft.setTextAndPlaceCursorAtEnd(if (typed.isNotBlank()) "$typed\n\n${rejected.content}" else rejected.content)
         replyTo = rejected.replyTo
+        edited()
         requestFocus()
     }
 
-    fun start(api: ApiClient, scope: CoroutineScope) {
+    /** Its chat connected, and its draft loaded from [draftStore] or the server. */
+    fun start(api: ApiClient, scope: CoroutineScope, draftStore: DraftLocalStore) {
         if (controller != null) return
         historyList = HistoryList(api, project, scope)
         welcomeList = HistoryList(api, project, scope)
         controller = ChatController(api, project, session, scope).also { it.start() }
+        val drafts = DraftSync(api, project, tabId, session.id, draftStore, scope).also { drafts = it }
+        draftLoad = scope.launch {
+            // Past the gate a draft still goes in when it comes, into a box left empty.
+            val gate = launch {
+                delay(DRAFT_GATE_MILLIS)
+                draftLoading = false
+            }
+            val loaded = drafts.load()
+            gate.cancel()
+            draftLoading = false
+            loaded?.let(::show)
+        }
     }
 
+    /** The tab went: a save still waiting goes, as it would have a second later. */
     fun stop() {
+        draftLoad?.cancel()
+        drafts?.flush()
         controller?.stop()
         controller = null
     }
 }
+
+/** How long Reply may wait for a tab's draft (`GATE_RELEASE_MS`). */
+private const val DRAFT_GATE_MILLIS = 3_000L
 
 /**
  * What `toast.error(title, { description, action })` shows: a title, a line under it, and one

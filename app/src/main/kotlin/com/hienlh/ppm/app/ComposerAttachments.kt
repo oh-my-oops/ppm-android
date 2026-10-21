@@ -111,7 +111,12 @@ fun AppModel.attach(context: Context, tab: ChatTab, uris: List<Uri>, raiseKeyboa
                 { it.copy(status = ComposerAttachment.Status.ERROR) }
             }
             // Removed while it was on its way: its upload is left, as the web leaves it, but not the copy here.
-            if (!tab.update(id, finish)) withContext(Dispatchers.IO) { File(dir, id).deleteRecursively() }
+            if (!tab.update(id, finish)) {
+                withContext(Dispatchers.IO) { File(dir, id).deleteRecursively() }
+            } else if (tab.attachments.first { it.id == id }.serverPath != null) {
+                // On the server now, so the draft can name it.
+                tab.edited()
+            }
             replaced?.let { withContext(Dispatchers.IO) { it.delete() } }
             tab.sendIfQueued()
         }
@@ -119,6 +124,16 @@ fun AppModel.attach(context: Context, tab: ChatTab, uris: List<Uri>, raiseKeyboa
         // the web focuses the phone layout's hidden textarea instead, so nothing gets focus there.)
         tab.requestFocus(raiseKeyboard)
     }
+}
+
+/**
+ * A file a draft names (`initialAttachments`): uploaded already, with nothing on this device to
+ * preview. A picture is one by its uploaded type, where the web, guessing from an empty `File`,
+ * takes every one for a plain file.
+ */
+internal fun draftAttachment(name: String, path: String): ComposerAttachment {
+    val type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(path.substringAfterLast('/').substringAfterLast('.', "").lowercase())
+    return ComposerAttachment(UUID.randomUUID().toString(), name, type in INLINE_MEDIA_TYPES, ComposerAttachment.Status.READY, probed = true, serverPath = path)
 }
 
 /** [change] to the attachment [id] while it is still in the box; false once it was taken out. */
@@ -133,6 +148,7 @@ private fun ChatTab.update(id: String, change: (ComposerAttachment) -> ComposerA
 fun AppModel.removeAttachment(tab: ChatTab, id: String) {
     val attachment = tab.attachments.firstOrNull { it.id == id } ?: return
     tab.attachments.remove(attachment)
+    if (attachment.serverPath != null) tab.edited()
     attachment.file?.parentFile?.let { scope.launch(Dispatchers.IO) { it.deleteRecursively() } }
     val api = api
     if (api != null && attachment.serverPath != null) {

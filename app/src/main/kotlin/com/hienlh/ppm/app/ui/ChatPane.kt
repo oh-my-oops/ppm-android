@@ -207,7 +207,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     },
                     onDismiss = chat::dismissMessage,
                     onClearErrors = chat::clearErrors,
-                    onReply = tab::selectReply,
+                    // Not while the draft, which may carry a reply of its own, is on its way.
+                    onReply = if (tab.draftLoading) null else tab::selectReply,
                 )
             }
             val stop = state.turnStop

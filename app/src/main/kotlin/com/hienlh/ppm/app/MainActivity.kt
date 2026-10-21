@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.view.KeyEvent
 import android.view.KeyboardShortcutGroup
 import android.view.Menu
+import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -35,7 +36,18 @@ class MainActivity : ComponentActivity() {
         if (intent?.action == Intent.ACTION_VIEW) intent.dataString?.let(model::openLink)
     }
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean = shortcuts.dispatch(event) || super.dispatchKeyEvent(event)
+    // Chrome's activation-triggering input (TextInputFocus.activated): a finger as it lifts, a
+    // mouse as it presses, and a key the page hears, Escape aside.
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        val mouse = event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE
+        if (event.actionMasked == if (mouse) MotionEvent.ACTION_DOWN else MotionEvent.ACTION_UP) TextInputFocus.activate()
+        return super.dispatchTouchEvent(event)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && !event.isSystem && event.keyCode != KeyEvent.KEYCODE_ESCAPE) TextInputFocus.activate()
+        return shortcuts.dispatch(event) || super.dispatchKeyEvent(event)
+    }
 
     override fun onProvideKeyboardShortcuts(data: MutableList<KeyboardShortcutGroup>, menu: Menu?, deviceId: Int) {
         super.onProvideKeyboardShortcuts(data, menu, deviceId)

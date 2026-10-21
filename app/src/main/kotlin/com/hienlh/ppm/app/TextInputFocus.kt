@@ -44,6 +44,18 @@ object TextInputFocus {
     /** How many times a field was asked for focus: a tap can tell whether its handler asked. */
     private var asks = 0
 
+    /**
+     * The app has been touched or typed in since it started: Chrome's sticky user activation.
+     * Measured on Android Chrome, a `focus()` brings the keyboard on a page that has it, however
+     * long ago, and never on one that has not.
+     */
+    var activated = false
+        private set
+
+    fun activate() {
+        activated = true
+    }
+
     val focused: Boolean get() = state != null
 
     /** An IME is composing in it (Telex before the word is done, say). */

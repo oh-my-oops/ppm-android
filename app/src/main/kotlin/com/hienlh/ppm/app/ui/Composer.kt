@@ -93,6 +93,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
+import com.hienlh.ppm.app.TextInputFocus
 import com.hienlh.ppm.app.attach
 import com.hienlh.ppm.app.onEveryTap
 import com.hienlh.ppm.app.removeAttachment
@@ -134,6 +135,7 @@ import com.hienlh.ppm.state.stepHistory
 import kotlin.math.floor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 
 /** Chips of the composer row: 11.5 px, with the body's 1.5 line height. */
 private val chipText = ppmText(11.5f, lineHeight = 17.25f)
@@ -173,6 +175,22 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
             if (tab.raisesKeyboard) keyboard?.show()
         }
     }
+    // A draft that loaded is focused at its end (`initialValue`), on the desktop layout only: on a
+    // phone the web focuses that layout's textarea, which is hidden there. The keyboard comes with
+    // it as Chrome brings it for a `focus()`, once the app has been touched since it started.
+    val focusQuietly = remember { mutableStateOf(false) }
+    LaunchedEffect(tab, mobile) {
+        snapshotFlow { tab.draftFocus }.filter { it }.collect {
+            tab.draftFocus = false
+            if (mobile) return@collect
+            if (TextInputFocus.activated) {
+                tab.requestFocus()
+            } else if (TextInputFocus.field !== tab.draft) {
+                quietFocus.value = true
+                focusQuietly.value = true
+            }
+        }
+    }
 
     // The send lives on the tab, so one queued behind an upload still goes with this box off screen.
     fun send() = tab.submit()
@@ -196,6 +214,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
         tab.agent = agent
         tab.draft.setTextAndPlaceCursorAtEnd(text)
         if (tab.replyTo != null) tab.selectReply(null) else focus.requestFocus()
+        tab.edited()
         return true
     }
 
@@ -277,7 +296,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 AttachButton(mobile = true, onClick = attach)
                 // `text-sm py-1.5 max-h-20`, the `py-1.5` inside the 80 px; a phone's inputs are 16 px.
                 ComposerField(
-                    tab, focus, quietFocus, onKey, ::send, pasteImage, fileDrop,
+                    tab, focus, quietFocus, focusQuietly, onKey, ::send, pasteImage, fileDrop,
                     style = ppmText(16f, lineHeight = INPUT_LINE),
                     padding = 6.dp,
                     maxHeight = 80.dp,
@@ -310,7 +329,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 AttachButton(mobile = false, onClick = attach)
                 // `text-sm leading-relaxed py-2 max-h-[90px]`, the `py-2` inside the 90 px.
                 ComposerField(
-                    tab, focus, quietFocus, onKey, ::send, pasteImage, fileDrop,
+                    tab, focus, quietFocus, focusQuietly, onKey, ::send, pasteImage, fileDrop,
                     style = ppmText(14f, lineHeight = 14f * 1.625f),
                     padding = 8.dp,
                     maxHeight = 90.dp,
@@ -338,12 +357,14 @@ private const val INPUT_LINE = 16f * 1.25f / 0.875f
  * [padding] above and below inside that; [send] from the keyboard's action key, [pasteImage] for
  * a picture pasted from the text menu. While [quietFocus] holds, gaining focus starts no input
  * session, so no keyboard: set by a touch landing on the unfocused box, dropped as it loses focus.
+ * [focusQuietly] focuses it that way.
  */
 @Composable
 private fun ComposerField(
     tab: ChatTab,
     focus: FocusRequester,
     quietFocus: MutableState<Boolean>,
+    focusQuietly: MutableState<Boolean>,
     onKey: (KeyEvent) -> Boolean,
     send: () -> Unit,
     pasteImage: (Uri) -> Unit,
@@ -358,6 +379,15 @@ private fun ComposerField(
     val inputStyle = style.copy(color = tokens.text.color)
     val context = LocalContext.current
     var focused by remember { mutableStateOf(false) }
+    // From the composition that gave the field the options [quietFocus] sets, and on the value it
+    // composed: a focus asked of a field still holding the old ones brings the keyboard, and an
+    // effect started late would read the flag set since.
+    val focusNow = focusQuietly.value
+    LaunchedEffect(focusNow) {
+        if (!focusNow) return@LaunchedEffect
+        focus.requestFocus()
+        focusQuietly.value = false
+    }
     BasicTextField(
         state = tab.draft,
         modifier = modifier
@@ -391,11 +421,16 @@ private fun ComposerField(
                 }
                 true
             },
-        // Typing turns a recalled message back into a draft. Only what the user does runs this,
-        // not the recall's own writes; the IME runs it for a moved caret too, which the web's
-        // `onChange` never hears of, so only a changed text counts.
+        // Typing turns a recalled message back into a draft, and saves it. Only what the user does
+        // runs this, not the recall's own writes; the IME runs it for a moved caret too, which the
+        // web's `onChange` never hears of, so only a changed text counts.
         inputTransformation = remember(tab) {
-            InputTransformation { if (!asCharSequence().contentEquals(originalText)) tab.historyIndex = -1 }
+            InputTransformation {
+                if (!asCharSequence().contentEquals(originalText)) {
+                    tab.historyIndex = -1
+                    tab.edited(asCharSequence())
+                }
+            }
         },
         textStyle = inputStyle,
         cursorBrush = SolidColor(tokens.accent.color),
