@@ -11,13 +11,17 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,8 +41,8 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.selectAll
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -49,12 +53,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -66,16 +70,24 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
 import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.app.NewChatGate
 import com.hienlh.ppm.app.attach
 import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.app.ui.tablet.dashedBorder
@@ -83,6 +95,7 @@ import com.hienlh.ppm.chat.CONTINUE_AFTER_STOP
 import com.hienlh.ppm.chat.ChatImages
 import com.hienlh.ppm.chat.ChatTabs
 import com.hienlh.ppm.chat.ChatTranscriptView
+import com.hienlh.ppm.chat.FirstSendView
 import com.hienlh.ppm.chat.LocalChatImages
 import com.hienlh.ppm.chat.LocalChatTabs
 import com.hienlh.ppm.chat.LocalMarkdownImages
@@ -98,6 +111,7 @@ import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
@@ -126,9 +140,13 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
     // The title the server gives a new chat goes into every list and onto its tab, as the web's tab carries it.
     LaunchedEffect(state.title) {
         state.title?.takeIf { it.isNotEmpty() }?.let {
-            model.renameSession(tab.session.id, it)
+            tab.session?.let { session -> model.renameSession(session.id, it) }
             model.retitleTab(tab.tabId, it)
         }
+    }
+    // Text the tab was opened with is in the box now: once connected, the tab stops offering it.
+    LaunchedEffect(state.canSend, state.sessionId) {
+        if (state.canSend && state.sessionId != null) model.pendingMessageTaken(tab)
     }
     // A message the server refused (`onMessageRejected`): back in the box when the box holds
     // nothing it would join, else offered back from the toast.
@@ -158,6 +176,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         val narrow = maxWidth <= 420.dp
         // `backdrop-blur-sm` under the drop overlay: CSS's blur(8px) is Android's at a radius of 13.
         Column(Modifier.fillMaxSize().then(if (fileDrop.showing) Modifier.blur(13.dp) else Modifier)) {
+            if (tab.providerPending) NewChatGateLine(model, tab)
             val images = remember(tab.project) {
                 object : ChatImages {
                     override suspend fun load(path: String) = model.chatImage(tab.project, path)
@@ -173,14 +192,15 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     override suspend fun web(url: String) = model.webImage(url)
                 }
             }
-            val tabs = remember(tab.project, tab.session.id) {
+            val tabs = remember(tab.project, tab.session?.id) {
                 object : ChatTabs {
                     override fun openFile(path: String) = model.openFileTab(tab.project, path)
 
                     override fun openDiff(path: String, original: String, modified: String) = model.openDiffTab(tab.project, path, original, modified)
 
-                    override fun openToolFile(tool: String, path: String, line: Int?) =
-                        model.openToolFileTab(tab.project, tab.session.id, tool, path, line)
+                    override fun openToolFile(tool: String, path: String, line: Int?) {
+                        tab.session?.let { model.openToolFileTab(tab.project, it.id, tool, path, line) }
+                    }
 
                     override fun openFileOrSearch(path: String, line: SourceLine?) = model.openFileOrSearch(tab.project, path, line)
                 }
@@ -191,25 +211,29 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                 LocalMarkdownImages provides markdownImages,
                 LocalChatTabs provides tabs,
             ) {
-                ChatTranscriptView(
-                    state,
-                    onRespond = { request, approved, data -> chat.respond(request, approved, data) },
-                    onLoadEarlier = chat::loadEarlier,
-                    onReload = { chat.reload() },
-                    modifier = Modifier.weight(1f),
-                    jumps = remember(tab.tabId) { model.chatJumps.filter { it.first == tab.tabId }.map { it.second } },
-                    welcome = {
-                        // `w-full px-4`; picking a chat shows it in this tab. The chat itself is left out:
-                        // this app makes a new chat's session before its first message, the web after.
-                        tab.welcomeList?.let { list ->
-                            SessionListPanel(model, list, onOpen = { model.replaceTab(tab.tabId, it) }, Modifier.padding(horizontal = 16.dp), without = tab.session.id)
-                        }
-                    },
-                    onDismiss = chat::dismissMessage,
-                    onClearErrors = chat::clearErrors,
-                    // Not while the draft, which may carry a reply of its own, is on its way.
-                    onReply = if (tab.draftLoading) null else tab::selectReply,
-                )
+                val preview = tab.firstSendPreview
+                if (preview != null) {
+                    FirstSendView(preview.content, preview.timestamp, Modifier.weight(1f))
+                } else {
+                    ChatTranscriptView(
+                        state,
+                        onRespond = { request, approved, data -> chat.respond(request, approved, data) },
+                        onLoadEarlier = chat::loadEarlier,
+                        onReload = { chat.reload() },
+                        modifier = Modifier.weight(1f),
+                        jumps = remember(tab.tabId) { model.chatJumps.filter { it.first == tab.tabId }.map { it.second } },
+                        welcome = {
+                            // `w-full px-4`; picking a chat shows it in this tab.
+                            tab.welcomeList?.let { list ->
+                                SessionListPanel(model, list, onOpen = { model.replaceTab(tab.tabId, it) }, Modifier.padding(horizontal = 16.dp))
+                            }
+                        },
+                        onDismiss = chat::dismissMessage,
+                        onClearErrors = chat::clearErrors,
+                        // Not while the draft, which may carry a reply of its own, is on its way.
+                        onReply = if (tab.draftLoading) null else tab::selectReply,
+                    )
+                }
             }
             val stop = state.turnStop
             if (stop != null && !state.isRunning) TurnStopBar(stop, onContinue = { chat.send(CONTINUE_AFTER_STOP) })
@@ -298,6 +322,50 @@ private fun BoxScope.DropFilesOverlay() {
     }
 }
 
+/**
+ * The line over a new chat whose provider is still being resolved (new-chat-provider-gate.tsx):
+ * "Preparing chat…", or why it could not be and what to do about it — `flex flex-wrap items-center
+ * gap-2 px-3 py-1 text-xs text-muted-foreground`, its buttons `text-primary underline`.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun NewChatGateLine(model: AppModel, tab: ChatTab) {
+    val tokens = LocalPpmTokens.current
+    val style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color)
+    FlowRow(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).semantics { liveRegion = LiveRegionMode.Polite },
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        itemVerticalAlignment = Alignment.CenterVertically,
+    ) {
+        when (val gate = tab.gate) {
+            is NewChatGate.Unavailable -> {
+                BasicText("${gate.provider} is not available. Choose a provider for this chat.", style = style)
+                for (provider in gate.alternatives) {
+                    GateButton("Use ${provider.name}", style) { model.newChats.select(tab, provider.id, gate.settings) }
+                }
+                GateButton("Check again", style) { model.newChats.retry(tab) }
+            }
+            is NewChatGate.Failed -> {
+                BasicText("Could not load chat settings. ${gate.message}", style = style)
+                GateButton("Retry", style) { model.newChats.retry(tab) }
+            }
+            null -> BasicText("Preparing chat…", style = style)
+        }
+    }
+}
+
+/** A bare `<button>` of the gate line: its text only, in the primary colour and underlined. */
+@Composable
+private fun GateButton(label: String, style: TextStyle, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    BasicText(
+        label,
+        Modifier.pointerHoverIcon(WebCursor.Default).clickable(remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClick),
+        style = style.copy(color = tokens.accent.color, textDecoration = TextDecoration.Underline),
+    )
+}
+
 /** `border-t` or `border-b`. */
 fun Modifier.line(top: Boolean, color: Color): Modifier = cssBorder(color, sides = if (top) CssSides.Top else CssSides.Bottom)
 
@@ -318,7 +386,8 @@ private fun ChatToolbar(model: AppModel, tab: ChatTab, chat: ChatController, sta
         }
         Row(Modifier.padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             ReloadButton(state.canSend) { chat.reload() }
-            OverflowButton(model, tab)
+            // Its actions are a session's.
+            tab.session?.let { OverflowButton(model, it) }
         }
     }
 }
@@ -398,9 +467,9 @@ private fun ReloadButton(connected: Boolean, reload: () -> Unit) {
  * `hover:text-text-secondary hover:bg-surface-elevated`.
  */
 @Composable
-private fun OverflowButton(model: AppModel, tab: ChatTab) {
+private fun OverflowButton(model: AppModel, session: SessionInfo) {
     val tokens = LocalPpmTokens.current
-    val unread = model.unreadSessions()[tab.session.id] != null
+    val unread = model.unreadSessions()[session.id] != null
     var open by remember { mutableStateOf(false) }
     val hover = rememberHover()
     Box(
@@ -416,12 +485,12 @@ private fun OverflowButton(model: AppModel, tab: ChatTab) {
                 if (unread) {
                     MenuItem("Mark as read", onClick = {
                         open = false
-                        model.markRead(tab.session.id)
+                        model.markRead(session.id)
                     }, icon = { MenuIcon(ProductIcon.BellOff, tokens.warning) }, vertical = 12.dp)
                 } else {
                     MenuItem("Mark as unread", onClick = {
                         open = false
-                        model.markUnread(model.sessions.firstOrNull { it.id == tab.session.id } ?: tab.session)
+                        model.markUnread(model.sessions.firstOrNull { it.id == session.id } ?: session)
                     }, icon = { MenuIcon(ProductIcon.Circle, tokens.accent) }, vertical = 12.dp)
                 }
             }

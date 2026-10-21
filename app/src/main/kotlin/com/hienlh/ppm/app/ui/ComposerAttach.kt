@@ -42,6 +42,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerHoverIcon
@@ -168,7 +169,7 @@ fun clipboardImage(context: Context): Uri? {
  * hover:text-text-primary` on both.
  */
 @Composable
-fun AttachButton(mobile: Boolean, onClick: () -> Unit) {
+fun AttachButton(mobile: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -178,11 +179,13 @@ fun AttachButton(mobile: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
             .size(if (mobile) 32.dp else 34.dp)
+            // `disabled:opacity-50`.
+            .alpha(if (enabled) 1f else 0.5f)
             .clip(shape)
             .background(if (mobile) Color.Transparent else tokens.panel2.color.copy(alpha = tokens.panel2.color.alpha * lit.toFloat()))
             .pointerHoverIcon(WebCursor.Default)
             .hoverable(source)
-            .clickable(source, indication = null, onClickLabel = "Attach file", onClick = onClick)
+            .clickable(source, indication = null, enabled = enabled, onClickLabel = "Attach file", onClick = onClick)
             .semantics { contentDescription = "Attach file" },
         contentAlignment = Alignment.Center,
     ) {

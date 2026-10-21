@@ -123,7 +123,8 @@ fun ChatTranscriptView(
 ) {
     Box(modifier.fillMaxSize()) {
         when {
-            !state.hasLoadedHistory && state.items.isEmpty() && state.historyError == null ->
+            // A new chat has nothing to load until its first message makes the session.
+            state.sessionId != null && !state.hasLoadedHistory && state.items.isEmpty() && state.historyError == null ->
                 CenteredNotice("Loading messages...", pulsing = true)
             state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null ->
                 Welcome(welcome)
@@ -589,12 +590,13 @@ internal object TranscriptRows {
 private fun replyAction(row: TranscriptRows.Row, state: ChatState, onReply: ((ReplyReference) -> Unit)?): (() -> Unit)? {
     val target = row.replyTarget ?: return null
     val provider = state.providerId?.takeIf { it.isNotEmpty() } ?: return null
-    if (onReply == null || state.sessionId.isEmpty()) return null
+    val sessionId = state.sessionId?.takeIf { it.isNotEmpty() } ?: return null
+    if (onReply == null) return null
     if (row.item.role == ChatItem.Role.USER) {
-        val reply = MessageReply.create(target, state.sessionId, provider) ?: return null
+        val reply = MessageReply.create(target, sessionId, provider) ?: return null
         return { onReply(reply) }
     }
-    return { MessageReply.create(target, state.sessionId, provider)?.let(onReply) }
+    return { MessageReply.create(target, sessionId, provider)?.let(onReply) }
 }
 
 /** The empty states: a bot and one line. */

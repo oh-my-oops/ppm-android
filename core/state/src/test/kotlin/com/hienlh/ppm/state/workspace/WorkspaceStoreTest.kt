@@ -1,5 +1,6 @@
 package com.hienlh.ppm.state.workspace
 
+import com.hienlh.ppm.protocol.ChatPreparationSettings
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.string
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -515,5 +516,50 @@ class WorkspaceStoreTest {
         assertEquals(mapOf("app" to "codex"), store.s.lastFocusedChatProviders)
         store.openTab(NewTab("chat", "Chat", "app", meta("sessionId" to "s4")))
         assertEquals(mapOf("app" to "claude"), store.s.lastFocusedChatProviders)
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // A new chat's provider, before its first message
+    // ---------------------------------------------------------------------------------------
+
+    private val followFocus = ChatPreparationSettings("claude", "follow-focus", mapOf("codex" to "default"))
+
+    /** A new chat tab opened with [metadata], as it stands once open. */
+    private fun WorkspaceStore.openChat(vararg metadata: Pair<String, Any>): WorkspaceTab {
+        val id = openTab(NewTab("chat", "AI Chat", "app", meta(*metadata)))
+        return focused().tab(id)!!
+    }
+
+    @Test
+    fun `a new chat opens on the provider the cached settings name, when the project offers it`() {
+        var defaults: NewChatDefaults? = NewChatDefaults(followFocus, listOf("claude", "codex"))
+        val store = WorkspaceStore(MemoryStorage(), isMobile = { mobile }, now = { clock }, randomId = { "r${++ids}" }, newChatDefaults = { defaults })
+        store.switchProject("app")
+        store.openTab(NewTab("chat", "Chat", "app", meta("providerId" to "codex", "sessionId" to "s1")))
+        val warm = store.openChat("projectName" to "app")
+        assertTrue(warm.id, warm.id.startsWith("chat:codex/"))
+        assertEquals("codex", warm.metaString("providerId"))
+        assertEquals("default", warm.metaString("permissionMode"))
+        assertEquals("cache", warm.metaString("permissionModeSource"))
+        assertNull(warm.metadata["providerPending"])
+        // Nothing cached, or a provider the project does not offer: pending, with the focus it opened on.
+        defaults = NewChatDefaults(followFocus, listOf("claude"))
+        val pending = store.openChat("projectName" to "app")
+        assertTrue(pending.id, pending.id.startsWith("chat:default/"))
+        assertEquals(JsonPrimitive(true), pending.metadata["providerPending"])
+        assertEquals("codex", pending.metaString("focusedProviderOnOpen"))
+        assertNull(pending.metaString("providerId"))
+        defaults = null
+        assertEquals(JsonPrimitive(true), store.openChat("projectName" to "app").metadata["providerPending"])
+    }
+
+    @Test
+    fun `a new chat on a named provider takes the cached mode, unless it was opened with one on purpose`() {
+        val defaults = NewChatDefaults(ChatPreparationSettings("claude", null, mapOf("mock" to "plan")), null)
+        val store = WorkspaceStore(MemoryStorage(), isMobile = { mobile }, now = { clock }, randomId = { "r${++ids}" }, newChatDefaults = { defaults })
+        store.switchProject("app")
+        assertEquals("plan", store.openChat("providerId" to "mock", "permissionMode" to "default", "permissionModeSource" to "cache").metaString("permissionMode"))
+        assertEquals("default", store.openChat("providerId" to "mock", "permissionMode" to "default").metaString("permissionMode"))
+        assertNull(store.openChat("providerId" to "codex").metaString("permissionMode"))
     }
 }

@@ -148,6 +148,38 @@ class DraftsTest {
     }
 
     @Test
+    fun `a new chat's draft goes with its first message to the session it made, and is deleted where it was saved`() = withServer(saved, ok) { server, _ ->
+        val api = ApiClient(server.url("/"), "t")
+        val sync = DraftSync(api, "p", "tab-1", DraftSync.NEW_CHAT, store, this, 60_000)
+        val newKey = store.key("p", "tab-1", DraftSync.NEW_CHAT)
+        sync.save(ChatDraft("the first message"))
+        sync.cancelPendingSave()
+        sync.moveTo("s-9")
+        assertNull(store.read(newKey))
+        // The server has never had it under the session: this copy still wins there.
+        assertEquals(false, store.read(store.key("p", "tab-1", "s-9"))?.synced)
+        assertEquals(ChatDraft("the first message"), sync.load())
+        sync.save(ChatDraft("more"))
+        sync.flush()
+        assertEquals("PUT /api/project/p/chat/drafts/s-9", server.next().let { "${it.method} ${it.target}" })
+        sync.clear(DraftSync.NEW_CHAT)
+        assertEquals("DELETE /api/project/p/chat/drafts/__new__", server.next().let { "${it.method} ${it.target}" })
+        assertNull(store.read(store.key("p", "tab-1", "s-9")))
+    }
+
+    @Test
+    fun `a new chat takes the draft its preparation read, and asks itself only when that failed`() = withServer(row("asked itself")) { server, _ ->
+        val api = ApiClient(server.url("/"), "t")
+        val sync = DraftSync(api, "p", "tab-1", DraftSync.NEW_CHAT, store, this, 60_000)
+        assertEquals(ChatDraft("prepared"), sync.load { ChatDraft("prepared") })
+        // Read and found empty: no draft, and no second request.
+        assertNull(sync.load { null })
+        assertEquals(0, server.requestCount)
+        assertEquals(ChatDraft("asked itself"), sync.load { error("prepare failed") })
+        assertEquals("GET /api/project/p/chat/drafts/__new__", server.next().let { "${it.method} ${it.target}" })
+    }
+
+    @Test
     fun `leaving the screen sends a waiting save at once`() = withServer(saved) { server, drafts ->
         val sync = drafts(60_000)
         sync.save(ChatDraft("half"))

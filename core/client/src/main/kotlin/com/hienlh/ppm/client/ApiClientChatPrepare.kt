@@ -1,5 +1,6 @@
 package com.hienlh.ppm.client
 
+import com.hienlh.ppm.protocol.ChatPreparationSettings
 import com.hienlh.ppm.protocol.PickedAccount
 import com.hienlh.ppm.protocol.PreparedChat
 import kotlinx.serialization.json.buildJsonObject
@@ -18,6 +19,13 @@ suspend fun ApiClient.prepareChat(project: String, providerId: String?, focusedP
     return PreparedChat.from(call("POST", "${chatPath(project)}/prepare", body = body))
         ?: throw PpmError.BadResponse("Unexpected chat preparation.")
 }
+
+/**
+ * `getChatPreparationSettings`: what a new chat tab resolves its provider and mode from when its
+ * `/chat/prepare` failed — the provider part of the AI settings, nothing else of them.
+ */
+suspend fun ApiClient.chatPreparationSettings(): ChatPreparationSettings =
+    ChatPreparationSettings.from(call("GET", "/api/settings/ai")) ?: throw PpmError.BadResponse("Unexpected AI settings.")
 
 /**
  * `POST /chat/prewarm` (use-chat-prewarm.ts): the server starts the process a new chat's first

@@ -188,6 +188,27 @@ class EndToEndTest {
     }
 
     @Test
+    fun `a new chat's first message makes its session, then is answered on it`() = onMain {
+        val chat = ChatController(api, project, null, scope, providerId = "mock")
+        chat.start()
+        var session: SessionInfo? = null
+        try {
+            delay(200)
+            assertFalse(chat.state.value.canSend)
+            session = api.createSession(project, chat.providerId, title = "hello")
+            chat.adopt(session)
+            waitFor("the socket") { chat.state.value.canSend }
+            chat.send("hello")
+            chat.turnEnds(2)
+            assertEquals(session.id, chat.state.value.sessionId)
+            assertEquals(ChatItem.Role.ASSISTANT, chat.state.value.items[1].role)
+        } finally {
+            chat.stop()
+            session?.let { api.deleteSession(project, it.id, "mock") }
+        }
+    }
+
+    @Test
     fun `losing the connection mid-turn loses and repeats nothing`() = onMain {
         val chat = open(api.createSession(project, "mock"))
         try {
@@ -210,7 +231,7 @@ class EndToEndTest {
             }
             // Give a reload triggered at idle time to land, then compare with what the server kept.
             delay(500)
-            val page = api.history(project, chat.sessionId, "mock", limit = 50)
+            val page = api.history(project, chat.sessionId!!, "mock", limit = 50)
             val shown = chat.state.value.items.filter { it.role == ChatItem.Role.ASSISTANT }.map { it.text }.drop(1)
             val kept = page.messages.filter { it.role == HistoryMessage.Role.ASSISTANT }.map { it.content }.drop(1)
             assertEquals(kept, shown)

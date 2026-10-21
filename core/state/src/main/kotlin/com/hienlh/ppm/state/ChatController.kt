@@ -31,7 +31,8 @@ import kotlinx.serialization.json.JsonElement
 
 /** Everything one chat shows, as one value the UI collects. */
 data class ChatState(
-    val sessionId: String,
+    /** Null while a new chat waits for its first message, which creates the session. */
+    val sessionId: String?,
     val providerId: String? = null,
     val items: List<ChatItem> = emptyList(),
     /** The blocks of the assistant message being streamed. */
@@ -72,13 +73,18 @@ data class ChatState(
  * One open chat: loads its history, keeps its socket connected, and feeds both into a
  * [ChatTranscript]. Its work runs in a child of [parent], whose dispatcher must be a single
  * thread (the main one); call every method from that thread, and [stop] when the chat closes.
+ *
+ * A new chat has no [session] until its first message creates one (`useChat(null, …)`): until
+ * [adopt] it loads and connects nothing, its provider can still change, and the model, effort
+ * and thinking picked meanwhile ride on that first message.
  */
 class ChatController(
     private val api: ApiClient,
     val project: String,
-    session: SessionInfo,
+    session: SessionInfo?,
     parent: CoroutineScope,
     private val clock: () -> Long = System::currentTimeMillis,
+    providerId: String = session?.providerId ?: "claude",
 ) {
     sealed interface Connection {
         data object Connecting : Connection
@@ -88,11 +94,12 @@ class ChatController(
 
     val transcript = ChatTranscript()
     val settings = ChatSettings()
-    val providerId: String = session.providerId
-    var sessionId: String = session.id
+    var providerId: String = providerId
+        private set
+    var sessionId: String? = session?.id
         private set
 
-    private val _state = MutableStateFlow(ChatState(sessionId = session.id, providerId = session.providerId))
+    private val _state = MutableStateFlow(ChatState(sessionId = sessionId, providerId = providerId))
     val state: StateFlow<ChatState> = _state.asStateFlow()
 
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
@@ -114,15 +121,35 @@ class ChatController(
 
     fun start() {
         scope.launch {
-            // History first: a snapshot arriving before it would be merged into nothing.
-            loadInitialHistory()
-            if (!stopped) connect()
-        }
-        scope.launch {
             while (true) {
                 delay(5_000)
                 closeIfSilent()
             }
+        }
+        if (sessionId != null) open()
+    }
+
+    /** The session a new chat's first message created (`setSessionId`): its history is read, then its socket opened. */
+    fun adopt(session: SessionInfo) {
+        if (sessionId != null || stopped) return
+        sessionId = session.id
+        providerId = session.providerId
+        publish()
+        open()
+    }
+
+    /** The provider a chat with no session yet will start on (`handleProviderChange`); a session keeps its own. */
+    fun chooseProvider(id: String) {
+        if (sessionId != null || id == providerId) return
+        providerId = id
+        publish()
+    }
+
+    private fun open() {
+        scope.launch {
+            // History first: a snapshot arriving before it would be merged into nothing.
+            loadInitialHistory()
+            if (!stopped) connect()
         }
     }
 
@@ -199,6 +226,7 @@ class ChatController(
      * whatever asked can go away meanwhile.
      */
     fun loadEarlier() {
+        val session = sessionId ?: return
         if (loadingEarlier) return
         val before = transcript.historyStart
         val compact = transcript.unexpandedCompact
@@ -210,7 +238,7 @@ class ChatController(
         scope.launch {
             try {
                 if (before > 0) {
-                    transcript.prependHistory(api.history(project, sessionId, providerId, limit = 50, before = before), before)
+                    transcript.prependHistory(api.history(project, session, providerId, limit = 50, before = before), before)
                 } else if (compact != null && path != null) {
                     transcript.expand(compact.id, path, api.preCompactMessages(project, path, PreCompact.rawId(compact.id)))
                 }
@@ -236,8 +264,9 @@ class ChatController(
     // Socket
 
     private fun connect() {
+        val session = sessionId ?: return
         if (stopped) return
-        val socket = SocketConnection(api.chatSocketUrl(project, sessionId, providerId))
+        val socket = SocketConnection(api.chatSocketUrl(project, session, providerId))
         this.socket = socket
         closeReason = null
         lastFrameAt = clock()
@@ -309,9 +338,10 @@ class ChatController(
     // History
 
     private suspend fun loadInitialHistory() {
+        val session = sessionId ?: return
         val token = transcript.activity
         try {
-            val page = api.history(project, sessionId, providerId, limit = 50)
+            val page = api.history(project, session, providerId, limit = 50)
             page.canonicalSessionId?.let { sessionId = it }
             transcript.applyHistory(page, token, clock())
             historyError = null
@@ -325,6 +355,7 @@ class ChatController(
 
     /** Reloads what is shown. Overlapping requests collapse into one more run. */
     private fun reloadHistory() {
+        if (sessionId == null) return
         if (reloading) {
             reloadAgain = true
             return
@@ -337,9 +368,10 @@ class ChatController(
                     val token = transcript.activity
                     // The same window as shown: everything from the first loaded message on.
                     val start = if (transcript.hasLoadedHistory) transcript.historyStart else null
+                    val session = sessionId ?: break
                     try {
                         val page = api.history(
-                            project, sessionId, providerId,
+                            project, session, providerId,
                             limit = if (start == null) 50 else null, from = start,
                         )
                         page.canonicalSessionId?.let { sessionId = it }
@@ -363,8 +395,9 @@ class ChatController(
      * none while there are none. A failed read keeps what was there.
      */
     private fun askForTasks() {
+        val session = sessionId ?: return
         val calls = transcript.shown.sumOf { it.taskCalls } + (transcript.live?.taskCalls ?: 0)
-        val key = sessionId to calls
+        val key = session to calls
         if (key == tasksAskedFor) return
         tasksAskedFor = key
         tasksJob?.cancel()
@@ -372,7 +405,6 @@ class ChatController(
             tasks = emptyList()
             return
         }
-        val session = sessionId
         tasksJob = scope.launch {
             delay(300)
             try {

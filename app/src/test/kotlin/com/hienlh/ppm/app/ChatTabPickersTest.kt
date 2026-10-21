@@ -10,7 +10,7 @@ import org.junit.Test
 
 /** The pickers as `message-input.tsx` opens them and puts a pick in the box. */
 class ChatTabPickersTest {
-    private val tab = ChatTab("t", SessionInfo("s", "mock", "Chat"), "p")
+    private val tab = ChatTab("t", SessionInfo("s", "mock", "Chat"), "p", "mock")
 
     private fun type(text: String, caret: Int = text.length) {
         tab.draft.edit {

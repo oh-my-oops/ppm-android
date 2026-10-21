@@ -84,6 +84,8 @@ class WorkspaceStore(
     private val randomId: () -> String = ::webRandomId,
     /** The floating windows a tab can be detached into; none, none can. */
     private val windows: WindowStore? = null,
+    /** What a new chat tab is resolved from before its first paint, by project; none, each waits for its preparation. */
+    private val newChatDefaults: (project: String?) -> NewChatDefaults? = { null },
 ) {
     private val _state = MutableStateFlow(defaultState())
     val state: StateFlow<WorkspaceState> = _state
@@ -280,6 +282,19 @@ class WorkspaceStore(
         if (s.panels[pid] == null) return ""
 
         var tabDef = def
+        // A new chat opens with a provider and mode already, when this device's copy of the
+        // settings can name them; else pending, for its preparation to resolve.
+        if (tabDef.type == "chat" && !jsTruthyKey(tabDef, "sessionId") && !jsTruthyKey(tabDef, "providerId")) {
+            val project = tabDef.projectId ?: tabDef.metadata["projectName"].string ?: s.currentProject
+            val focused = project?.let { s.lastFocusedChatProviders[it] }
+            tabDef = tabDef.copy(metadata = tabDef.metadata.merged(resolveChatOpenMetadata(newChatDefaults(project), focused)))
+        } else if (tabDef.type == "chat" && !jsTruthyKey(tabDef, "sessionId")) {
+            val providerId = tabDef.metadata["providerId"].string
+            if (providerId != null) {
+                val project = tabDef.projectId ?: tabDef.metadata["projectName"].string ?: s.currentProject
+                tabDef = tabDef.copy(metadata = tabDef.metadata.merged(resolveChatOpenPermission(tabDef.metadata, providerId, newChatDefaults(project)?.settings)))
+            }
+        }
         if (tabDef.type == "terminal" && !jsTruthyKey(tabDef, "terminalIndex")) {
             tabDef = tabDef.copy(metadata = tabDef.metadata.merged(mapOf("terminalIndex" to JsonPrimitive(nextTerminalIndex()))))
         }

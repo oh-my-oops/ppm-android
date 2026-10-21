@@ -79,7 +79,6 @@ import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.state.formatShortcut
 import com.hienlh.ppm.state.scoreFileSearchFast
-import kotlinx.coroutines.launch
 
 /** At most this many matches are drawn (`MAX_RESULTS`). */
 private const val MAX_RESULTS = 100
@@ -121,7 +120,7 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
             action()
         }
         listOf(
-            PaletteCommand("New AI Chat", ProductIcon.MessageSquare, "ai assistant claude", formatShortcut(bindings.binding("open-chat")), run { model.scope.launch { model.newChat() } }),
+            PaletteCommand("New AI Chat", ProductIcon.MessageSquare, "ai assistant claude", formatShortcut(bindings.binding("open-chat")), run { model.newChat() }),
             PaletteCommand("Voice Input", ProductIcon.Mic, "speech microphone dictate voice", formatShortcut(bindings.binding("voice-input")), run { model.toggleVoiceInput() }),
             PaletteCommand("Settings", ProductIcon.Settings, "config preferences theme", formatShortcut(bindings.binding("open-settings")), run { model.openSettings() }),
         )
@@ -150,7 +149,7 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
         val message = text.trim()
         if (message.isEmpty()) return
         onDismiss()
-        model.scope.launch { model.newChat(draft = message) }
+        model.newChat(pendingMessage = message)
     }
     fun enter() {
         val command = shown.getOrNull(selected)

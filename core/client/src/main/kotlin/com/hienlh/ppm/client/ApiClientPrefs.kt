@@ -62,22 +62,6 @@ suspend fun ApiClient.putUiPrefs(changes: JsonObject) {
     call("PUT", "/api/settings/ui-prefs", body = changes)
 }
 
-/** How a new chat picks its provider: the part of `/api/settings/ai` the web keeps as `ChatPreparationSettings`. */
-data class NewChatProviderSettings(val defaultProvider: String? = null, val mode: String? = null) {
-    /** `resolveNewChatProvider`: the last focused chat's provider when the mode follows focus, else the default, else Claude. */
-    fun resolve(focusedProvider: String?): String =
-        if (mode == "follow-focus" && !focusedProvider.isNullOrEmpty() && focusedProvider != "default") {
-            focusedProvider
-        } else {
-            defaultProvider?.takeIf { it.isNotEmpty() } ?: "claude"
-        }
-}
-
-suspend fun ApiClient.newChatProviderSettings(): NewChatProviderSettings {
-    val data = call("GET", "/api/settings/ai")
-    return NewChatProviderSettings(data["default_provider"].string, data["new_chat_provider_mode"].string)
-}
-
 /** The keyboard shortcuts changed in Settings (`/api/settings/keybindings`), by action id; a value that is not text is left out. */
 suspend fun ApiClient.keybindings(): Map<String, String> =
     call("GET", "/api/settings/keybindings").obj.orEmpty().mapNotNull { (id, combo) -> combo.string?.let { id to it } }.toMap()

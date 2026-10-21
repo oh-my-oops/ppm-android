@@ -1,5 +1,6 @@
 package com.hienlh.ppm.state.workspace
 
+import com.hienlh.ppm.protocol.ChatPreparationSettings
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -223,4 +224,36 @@ internal fun jsText(value: JsonElement?): String? = when (value) {
     }
     is JsonObject -> "[object Object]"
     is JsonArray -> value.joinToString(",") { jsText(it).orEmpty() }
+}
+
+/** What a new chat tab is resolved from before any request answers: the cached AI settings, and the project's cached providers. */
+data class NewChatDefaults(val settings: ChatPreparationSettings?, val providers: List<String>?)
+
+/**
+ * `resolveChatOpenMetadata`: a new chat tab's provider and mode, "warm" from [defaults] so its
+ * first frame has both — a mode marked as a cached default, which its preparation may still
+ * replace. When they cannot name a provider the project offers, the pending placeholder instead.
+ */
+fun resolveChatOpenMetadata(defaults: NewChatDefaults?, focusedProvider: String?): Map<String, JsonElement?> {
+    val settings = defaults?.settings
+    val resolved = settings?.resolveProvider(focusedProvider)
+    if (settings != null && resolved != null && defaults.providers?.contains(resolved) == true) {
+        return mapOf(
+            "providerId" to JsonPrimitive(resolved),
+            "permissionMode" to JsonPrimitive(settings.permissionMode(resolved)),
+            "permissionModeSource" to JsonPrimitive("cache"),
+        )
+    }
+    return mapOf("providerPending" to JsonPrimitive(true), "focusedProviderOnOpen" to focusedProvider?.let(::JsonPrimitive))
+}
+
+/**
+ * `resolveChatOpenPermission`: a new chat opened on a known provider (`/clear`) gets the cached
+ * mode, so its chip is not blank until its preparation answers; a mode it was opened with on
+ * purpose is kept.
+ */
+fun resolveChatOpenPermission(metadata: JsonObject, providerId: String, settings: ChatPreparationSettings?): Map<String, JsonElement?> {
+    if (jsTruthy(metadata["permissionMode"]) && metadata["permissionModeSource"].let { (it as? JsonPrimitive)?.content } != "cache") return emptyMap()
+    val cached = settings?.permissionModes?.get(providerId)?.takeIf { it.isNotEmpty() } ?: return emptyMap()
+    return mapOf("permissionMode" to JsonPrimitive(cached), "permissionModeSource" to JsonPrimitive("cache"))
 }

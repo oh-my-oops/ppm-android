@@ -41,6 +41,20 @@ class ChatPrepareTest {
     }
 
     @Test
+    fun `without a preparation, a new chat reads only the provider part of the AI settings`() = withServer(
+        MockResponse.Builder().body(
+            """{"ok":true,"data":{"default_provider":"codex","new_chat_provider_mode":"follow-focus","max_turns":0,
+                "providers":{"claude":{"type":"agent-sdk","permission_mode":"plan"},"codex":{"type":"cli"}}}}""",
+        ).build(),
+    ) { server, api ->
+        val settings = api.chatPreparationSettings()
+        assertEquals("GET /api/settings/ai", server.takeRequest().let { "${it.method} ${it.target}" })
+        assertEquals("codex", settings.resolveProvider(null))
+        assertEquals("claude", settings.resolveProvider("claude"))
+        assertEquals(mapOf("claude" to "plan"), settings.permissionModes)
+    }
+
+    @Test
     fun `a prewarm carries only the picks that were made`() = withServer(
         MockResponse.Builder().code(202).body("""{"ok":true,"data":{"accepted":true}}""").build(),
         MockResponse.Builder().code(202).body("""{"ok":true,"data":{"accepted":true}}""").build(),

@@ -27,7 +27,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -77,7 +76,6 @@ fun EmptyPanel(
     onClosePanel: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
-    val scope = rememberCoroutineScope()
     BoxWithConstraints(modifier.fillMaxSize()) {
         val viewport = maxHeight
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -95,7 +93,7 @@ fun EmptyPanel(
                         // `grid-cols-3 gap-2 max-w-sm`: one tile keeps a third of the row.
                         BoxWithConstraints(Modifier.widthIn(max = 384.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
                             QuickOpenTile(ProductIcon.MessageSquare, "AI Chat", Modifier.width((maxWidth - 16.dp) / 3)) {
-                                scope.launch { model.newChat(panelId = panelId) }
+                                model.newChat(panelId = panelId)
                             }
                         }
                         if (onClosePanel != null) {
@@ -155,7 +153,7 @@ private const val FETCH_SESSIONS_LIMIT = 20
 /**
  * The chats under the tiles, and under an empty chat's welcome (`session-list-panel.tsx`): a
  * title search, the tag chips, then the pinned chats and the five most recent, with Show more. A
- * long press opens the chat's menu. [without] is left out of it.
+ * long press opens the chat's menu.
  */
 @Composable
 fun SessionListPanel(
@@ -163,7 +161,6 @@ fun SessionListPanel(
     list: HistoryList,
     onOpen: (SessionInfo) -> Unit,
     modifier: Modifier = Modifier,
-    without: String? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val state by list.state.collectAsState()
@@ -173,7 +170,7 @@ fun SessionListPanel(
     var showAll by rememberSaveable { mutableStateOf(false) }
     var selectedTag by rememberSaveable { mutableStateOf<Int?>(null) }
 
-    val sessions = state.sessions(model.sessions).filter { it.id != without }.take(FETCH_SESSIONS_LIMIT)
+    val sessions = state.sessions(model.sessions).take(FETCH_SESSIONS_LIMIT)
     if (sessions.isEmpty() && query.text.isEmpty()) return
     val filtered = selectedTag?.let { tag -> sessions.filter { it.tag?.id == tag } } ?: sessions
     val pinned = filtered.filter { it.pinned }

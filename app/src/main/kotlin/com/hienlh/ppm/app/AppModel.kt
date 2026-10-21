@@ -30,7 +30,6 @@ import com.hienlh.ppm.client.deleteTag
 import com.hienlh.ppm.client.gitRepos
 import com.hienlh.ppm.client.gitStatus
 import com.hienlh.ppm.client.keybindings
-import com.hienlh.ppm.client.newChatProviderSettings
 import com.hienlh.ppm.client.projectImage
 import com.hienlh.ppm.client.fsStat
 import com.hienlh.ppm.client.rawFile
@@ -48,9 +47,11 @@ import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.PpmTheme
 import com.hienlh.ppm.design.ViewerImage
 import com.hienlh.ppm.protocol.ChatDraft
+import com.hienlh.ppm.protocol.ChatReply
 import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.DraftAttachment
 import com.hienlh.ppm.protocol.FileMention
+import com.hienlh.ppm.protocol.PickedAccount
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.ProjectTags
 import com.hienlh.ppm.protocol.ProviderInfo
@@ -78,6 +79,8 @@ import com.hienlh.ppm.state.HistoryList
 import com.hienlh.ppm.state.KeyBindings
 import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
+import com.hienlh.ppm.state.NewChatCache
+import com.hienlh.ppm.state.workspace.NewChatDefaults
 import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.RejectedSend
 import com.hienlh.ppm.state.messageWithAttachments
@@ -126,6 +129,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
@@ -133,6 +137,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.time.Instant
 import okhttp3.HttpUrl
 
 /**
@@ -288,6 +293,12 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** The chat behind each chat tab in memory, by tab id; a tab whose chat has not started has none. */
     private val chats = mutableStateMapOf<String, ChatTab>()
 
+    /** The chat tabs with no session yet: their preparation, provider, account and first message. */
+    internal val newChats = NewChats(this)
+
+    /** This device's copy of what a new chat is resolved from, for the open server. */
+    internal val newChatCache: NewChatCache get() = NewChatCache(prefs, serverKey)
+
     /** The session of the tab in front when the chats were last synced, to tell when another one comes forward. */
     private var shownSession: String? = null
 
@@ -387,9 +398,6 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** What the command palette opened with while it is open; null while it is closed. */
     var paletteQuery by mutableStateOf<String?>(null)
         private set
-
-    /** Text for a new chat's message box, by session, until its tab shows (the web's `pendingMessage`). */
-    private val pendingDrafts = mutableMapOf<String, String>()
 
     /** The keyboard shortcuts in force: the server's overrides over the web's defaults. */
     var keyBindings by mutableStateOf(KeyBindings())
@@ -706,10 +714,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         return unread(project, unread).maxByOrNull { priority[it.type] ?: 0 }?.type
     }
 
-    /** A tab's title: the list's, which carries a rename made anywhere, else the tab's own. */
+    /** A tab's title: the list's, which carries a rename made anywhere, else the tab's own; a new chat's is its tab's. */
     fun title(tab: ChatTab, liveTitle: String?): String {
-        sessions.firstOrNull { it.id == tab.session.id }?.title?.takeIf { it.isNotEmpty() }?.let { return it }
-        return liveTitle?.takeIf { it.isNotEmpty() } ?: tab.session.title.ifEmpty { "New Chat" }
+        val session = tab.session ?: return tab.tabTitle.ifEmpty { "New Chat" }
+        sessions.firstOrNull { it.id == session.id }?.title?.takeIf { it.isNotEmpty() }?.let { return it }
+        return liveTitle?.takeIf { it.isNotEmpty() } ?: session.title.ifEmpty { "New Chat" }
     }
 
     /** A tab's live title, carried into the list as the web's chat tab does. */
@@ -1251,7 +1260,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         // One set of windows per server, as the web keeps one per origin.
         val windowStore = WindowStore(prefs, "windows.$serverKey")
         // Asked at each change, as the web asks `useIsMobile`: a phone opens every tab in the first panel.
-        val store = WorkspaceStore(cache, isMobile = { !wide }, windows = windowStore)
+        // A new chat tab is resolved from this device's cache before its first frame, as `openTab` resolves it.
+        val chatCache = newChatCache
+        val store = WorkspaceStore(cache, isMobile = { !wide }, windows = windowStore) { project ->
+            project?.let { NewChatDefaults(chatCache.settings(), chatCache.providers(it)?.map(ProviderInfo::id)) }
+        }
         workspaceCache = cache
         workspace = store
         windows = windowStore
@@ -1362,21 +1375,37 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         for (panel in state.panels.values) for (tab in panel.tabs) if (tab.type == "chat") live[tab.id] = tab
         for ((id, chat) in chats.toList()) {
             val tab = live[id]
-            if (tab == null || tabSessionId(tab) != chat.session.id) {
+            // A tab that went to another session is a new chat; one that got the session its first message made is the same.
+            if (tab == null || tabSessionId(tab) != chat.session?.id) {
                 chat.stop()
                 chats.remove(id)
             }
         }
         for ((id, tab) in live) {
-            if (id in chats) continue
-            val sessionId = tabSessionId(tab) ?: continue
+            val existing = chats[id]
+            if (existing != null) {
+                newChats.follow(existing, tab)
+                continue
+            }
             val project = tab.projectId ?: tab.metaString("projectName") ?: state.currentProject ?: continue
-            val session = sessions.firstOrNull { it.id == sessionId }
-                ?: SessionInfo(id = sessionId, providerId = tab.metaString("providerId") ?: "claude", title = tab.title)
-            chats[id] = ChatTab(id, session, project).also { chat ->
-                pendingDrafts.remove(sessionId)?.let { chat.draft.setTextAndPlaceCursorAtEnd(it) }
+            val sessionId = tabSessionId(tab)
+            val session = sessionId?.let { sessions.firstOrNull { it.id == sessionId } ?: SessionInfo(id = sessionId, providerId = tab.metaString("providerId") ?: "claude", title = tab.title) }
+            chats[id] = ChatTab(id, session, project, session?.providerId ?: tab.metaString("providerId") ?: "claude").also { chat ->
+                chat.permissionMode = PermissionMode.of(tab.metaString("permissionMode"))
+                // Text handed to a new tab to be edited before it is sent (`pendingMessage`): a fork's, "Ask AI"'s.
+                // A fork's quote becomes a reply in the fork, which copied the quoted message in.
+                tab.metaString("pendingMessage")?.let { pending ->
+                    val decoded = ChatReply.decode(pending)
+                    chat.draft.setTextAndPlaceCursorAtEnd(decoded.content)
+                    if (session != null) chat.replyTo = decoded.replyTo?.copy(sessionId = session.id)
+                    chat.tookPendingMessage = true
+                    chat.focusOnShow = true
+                }
                 chat.clientCommand = { text -> runClientCommand(chat, text) }
                 chat.closeMic = { voice.closeFor(chat) }
+                chat.firstSend = { message -> newChats.sendFirst(chat, message) }
+                chat.modePicked = { mode -> patchTabMetadata(id, "permissionMode" to JsonPrimitive(mode.value), "permissionModeSource" to JsonPrimitive("user")) }
+                newChats.follow(chat, tab)
             }
         }
         val active = state.activeGridTab
@@ -1389,7 +1418,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             } else {
                 listOfNotNull(active)
             }
-            for (tab in shown) chats[tab.id]?.start(api, scope, DraftLocalStore(draftPrefs, serverKey))
+            for (tab in shown) {
+                val chat = chats[tab.id]?.takeUnless { it.started } ?: continue
+                // Prepared first, so its draft and its gate join that one request.
+                newChats.prepare(chat)
+                chat.start(api, scope, DraftLocalStore(draftPrefs, serverKey), newChats.preparedDraft(chat))
+                newChats.started(chat)
+            }
         }
         // A chat that comes forward by itself (restored, or next after a close) loses its unread
         // unless it was marked by hand; one the user picks loses it either way (`activate`).
@@ -1809,11 +1844,57 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             activate(open.first.id)
             return
         }
+        // A first message still on its way must not land in the chat picked here.
+        chats[tabId]?.let { newChats.abandon(it, "You switched to another chat before it connected.") }
+        // A tab with a session is no new chat: nothing of one stays to be resolved, claimed or typed.
         store.updateTab(tabId) { tab ->
-            tab.copy(title = session.title.ifEmpty { "Chat" })
-                .withMetadata("sessionId" to JsonPrimitive(session.id), "providerId" to JsonPrimitive(session.providerId))
+            tab.copy(title = session.title.ifEmpty { "Chat" }).withMetadata(
+                "sessionId" to JsonPrimitive(session.id),
+                "providerId" to JsonPrimitive(session.providerId),
+                "providerPending" to null,
+                "focusedProviderOnOpen" to null,
+                "pickedAccountId" to null,
+                "pickedAccountLabel" to null,
+                "pickedAccountProvider" to null,
+                "pendingMessage" to null,
+            )
         }
         events?.markRead(session.id)
+    }
+
+    internal fun tabOf(tabId: String): WorkspaceTab? = workspace?.state?.value?.panelOf(tabId)?.tab(tabId)
+
+    /** A tab's metadata as the layout has it now (`currentTabMetadata`). */
+    internal fun tabMetadata(tabId: String): JsonObject? = tabOf(tabId)?.metadata
+
+    /** `patchTabMetadata`: [changes] merged into the tab's metadata, a null removing its key. */
+    internal fun patchTabMetadata(tabId: String, vararg changes: Pair<String, JsonElement?>) {
+        val store = workspace ?: return
+        if (tabOf(tabId) == null) return
+        store.updateTab(tabId) { it.withMetadata(*changes) }
+    }
+
+    /** A session made here goes into the list at once (`upsertSession`). */
+    internal fun addSession(project: String, session: SessionInfo) {
+        if (selectedProject != project) return
+        sessions = (listOf(session) + sessions.filter { it.id != session.id }).sortedForList()
+    }
+
+    /** The project's tags as a new chat's preparation read them (`seedTags`). */
+    internal fun seedTags(project: String, tags: ProjectTags) {
+        if (selectedProject == project) this.tags = tags
+    }
+
+    /** A refused password asks for it again, as any other refused request does. */
+    internal fun signInIfRefused(error: Exception) {
+        if (error is PpmError.Unauthorized) showSignIn = true
+    }
+
+    /** The chat took its tab's `pendingMessage` and is connected: the tab drops it, so it is not offered again. */
+    fun pendingMessageTaken(tab: ChatTab) {
+        if (!tab.tookPendingMessage) return
+        tab.tookPendingMessage = false
+        patchTabMetadata(tab.tabId, "pendingMessage" to null)
     }
 
     /** The title the server gives a chat goes onto its tab too, so every browser shows it (chat-tab.tsx). */
@@ -1823,53 +1904,42 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         store.updateTab(tabId) { it.copy(title = title) }
     }
 
-    /** A chat tab made on the web before its first message has no session yet; this gives it one. */
-    suspend fun startChat(tabId: String) {
-        val api = api ?: return
-        val project = selectedProject ?: return
-        val store = workspace ?: return
-        val provider = store.state.value.panelOf(tabId)?.tab(tabId)?.metaString("providerId")?.takeIf { it != "default" }
-        try {
-            val session = api.createSession(project, provider)
-            if (selectedProject != project || workspace !== store) return
-            sessions = (listOf(session) + sessions.filter { it.id != session.id }).sortedForList()
-            store.updateTab(tabId) { tab ->
-                tab.withMetadata(
-                    "sessionId" to JsonPrimitive(session.id),
-                    "providerId" to JsonPrimitive(session.providerId),
-                    "providerPending" to null,
-                    "focusedProviderOnOpen" to null,
-                )
-            }
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            actionError = describe(error)
-        }
-    }
-
     /**
-     * A new chat in a new tab (in [panelId] when given). With no [providerId], the provider the
-     * web would pick: the last focused chat's when the server follows focus, else its default.
-     * [draft] waits in its message box, to be edited before it is sent. A `/clear` names the chat
-     * it left in [clearedFrom], and its [title] if it was given one.
+     * A new chat in a new tab (in [panelId] when given), with no session until its first message
+     * (`openTab({ type: "chat", title: "AI Chat", metadata: { projectName } })`): the layout gives it
+     * the provider this device's cache resolves, else it waits on its preparation. A `/clear` names
+     * its [providerId], the [permissionMode] it ran in — a cached default the new chat's preparation
+     * may still replace — the chat it left in [clearedFrom], and its [title] if it was given one.
+     * [pendingMessage] waits in its message box, to be edited before it is sent.
      */
-    suspend fun newChat(providerId: String? = null, panelId: String? = null, draft: String? = null, title: String? = null, clearedFrom: String? = null) {
-        val api = api ?: return
+    fun newChat(
+        providerId: String? = null,
+        panelId: String? = null,
+        pendingMessage: String? = null,
+        title: String? = null,
+        clearedFrom: String? = null,
+        permissionMode: String? = null,
+    ) {
         val project = selectedProject ?: return
-        try {
-            // Captured now, before another panel can take focus; unread, the server picks its default.
-            val focused = layout?.lastFocusedChatProviders?.get(project)
-            val provider = providerId ?: quietly { api.newChatProviderSettings() }?.resolve(focused)
-            val session = api.createSession(project, provider, title, clearedFrom)
-            if (selectedProject != project) return
-            sessions = (listOf(session) + sessions.filter { it.id != session.id }).sortedForList()
-            if (draft != null) pendingDrafts[session.id] = draft
-            openTab(session, panelId)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            actionError = describe(error)
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = "chat",
+                    title = title?.takeIf { it.isNotEmpty() } ?: "AI Chat",
+                    projectId = project,
+                    metadata = buildJsonObject {
+                        put("projectName", project)
+                        providerId?.let { put("providerId", it) }
+                        if (permissionMode != null) {
+                            put("permissionMode", permissionMode)
+                            put("permissionModeSource", "cache")
+                        }
+                        clearedFrom?.let { put("clearedFrom", it) }
+                        pendingMessage?.let { put("pendingMessage", it) }
+                    },
+                ),
+                panelId,
+            )
         }
     }
 
@@ -1877,7 +1947,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     fun loadSlashItems(tab: ChatTab) {
         val api = api ?: return
         val store = slashItems ?: return
-        scope.launch { store.load(api, tab.project, tab.session.providerId, tab.session.id) }
+        // Not while the provider is still being resolved: the list would be another provider's.
+        if (tab.providerPending) return
+        scope.launch { store.load(api, tab.project, tab.providerId, tab.session?.id) }
     }
 
     /**
@@ -1891,7 +1963,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         tab.slashRefreshing = true
         scope.launch {
             try {
-                store.refresh(api, tab.project, tab.session.providerId, tab.session.id)
+                store.refresh(api, tab.project, tab.providerId, tab.session?.id)
             } finally {
                 tab.slashRefreshing = false
             }
@@ -1902,12 +1974,12 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     fun pickSlash(tab: ChatTab, item: SlashItem, raiseKeyboard: Boolean) {
         tab.pickSlash(item, raiseKeyboard)
         val api = api ?: return
-        slashItems?.recordUse(item, api, tab.project, tab.session.providerId)
+        slashItems?.recordUse(item, api, tab.project, tab.providerId)
     }
 
     /** What [ChatTab.clientCommand] answers: `/clear` opens a new chat beside [tab], one written while replying is refused. */
     private fun runClientCommand(tab: ChatTab, text: String): Boolean? {
-        val items = slashItems?.payload(tab.project, tab.session.providerId)?.items.orEmpty()
+        val items = slashItems?.payload(tab.project, tab.providerId)?.items.orEmpty()
         return when (val command = ClientCommand.of(text, items, replying = tab.replyTo != null)) {
             null -> null
             ClientCommand.Refused -> {
@@ -1915,7 +1987,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                 false
             }
             is ClientCommand.Clear -> {
-                scope.launch { newChat(tab.session.providerId, panelOf(tab.tabId), title = command.title, clearedFrom = tab.session.id) }
+                // The mode goes over as a cached default only: the new chat starts from the settings like any other.
+                newChat(tab.providerId, panelOf(tab.tabId), title = command.title, clearedFrom = tab.session?.id, permissionMode = tab.permissionMode?.value)
                 true
             }
         }
@@ -1965,12 +2038,70 @@ const val SIDEBAR_MAX_WIDTH = 600
 
 /**
  * The chat of one chat tab ([tabId] in the layout). Its connection starts when the tab is first
- * shown and stays up while the tab is open, so a tab behind still shows its turn streaming.
+ * shown and stays up while the tab is open, so a tab behind still shows its turn streaming. A new
+ * chat has no [session] until its first message makes one, which the tab then keeps ([adopt]).
  */
 @Stable
-class ChatTab(val tabId: String, val session: SessionInfo, val project: String) {
+class ChatTab(val tabId: String, session: SessionInfo?, val project: String, providerId: String) {
+    var session by mutableStateOf(session)
+        private set
+
+    /** Where its messages go: the session's provider, or before one the tab's. */
+    var providerId by mutableStateOf(providerId)
+        private set
+
     var controller by mutableStateOf<ChatController?>(null)
         private set
+
+    /** Its tab's metadata and title as the layout last had them (the web's `metadata` prop), kept by the model. */
+    internal var metadata: JsonObject = JsonObject(emptyMap())
+    var tabTitle by mutableStateOf("")
+        internal set
+
+    /** Its provider is still being resolved (`providerPending`): the gate line shows, the mode and model chips wait. */
+    var providerPending by mutableStateOf(false)
+        internal set
+
+    /** Why its provider could not be resolved; null while that is still being tried. */
+    var gate by mutableStateOf<NewChatGate?>(null)
+        internal set
+
+    /** The mode was picked by hand in this tab, so no preparation replaces it (`permissionChosenByUser`). */
+    internal var permissionChosenByUser = false
+
+    /** Its first message is on its way: its session is being made, then connected (`firstSendPending`). */
+    var firstSendPending by mutableStateOf(false)
+        private set
+
+    /** What shows in place of the transcript meanwhile. */
+    var firstSendPreview by mutableStateOf<FirstSendPreview?>(null)
+        private set
+
+    /** The first message in flight, and whether its session exists yet, so it waits for the socket. */
+    private var firstMessage: FirstMessage? = null
+    private var firstQueued = false
+
+    /** Counts first sends; one overtaken (put back, given up, the tab gone) stops at its next step. */
+    internal var firstSendAttempt = 0
+        private set
+    internal var firstSendJob: Job? = null
+
+    /** The accounts claimed for it before its session, one per provider (`useChatAccountClaim`). */
+    internal val claims = HashMap<String, Deferred<PickedAccount?>>()
+
+    /** Sends a first message when it has no session (set by the model). */
+    var firstSend: ((FirstMessage) -> Unit)? = null
+
+    /** Puts a mode picked in the composer on the tab too (set by the model). */
+    var modePicked: ((PermissionMode) -> Unit)? = null
+
+    /** It took its tab's `pendingMessage` into the box; the model drops it from the tab once the chat is connected. */
+    var tookPendingMessage = false
+
+    /** The box takes the focus once first shown (`autoFocus`): a new chat's, or one handed a `pendingMessage`. */
+    var focusOnShow = session == null
+
+    val started: Boolean get() = controller != null
 
     /** What is typed in this tab's message box, kept while another tab is in front. */
     val draft = TextFieldState()
@@ -2179,7 +2310,8 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
         }
         attachments.addAll(0, loaded.attachments.map { draftAttachment(it.name, it.path) })
         val reply = loaded.replyTo
-        if (replyTo == null && reply?.sessionId == session.id && reply.providerId == session.providerId) replyTo = reply
+        val session = session
+        if (replyTo == null && session != null && reply?.sessionId == session.id && reply.providerId == session.providerId) replyTo = reply
     }
 
     /**
@@ -2195,8 +2327,20 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
         TextInputFocus.asked()
     }
 
-    /** Send pressed (`handleSend`): the message now, or once the files still uploading are up. */
+    /**
+     * A mode picked in the composer (`handleModeChange`), kept on the tab; none while its provider
+     * resolves or its first message goes, when the web's box offers no change.
+     */
+    fun pickMode(mode: PermissionMode) {
+        if (providerPending || firstSendPending) return
+        permissionChosenByUser = true
+        permissionMode = mode
+        modePicked?.invoke(mode)
+    }
+
+    /** Send pressed (`handleSend`): the message now, or once the files still uploading are up; nothing while a first one goes. */
     fun submit() {
+        if (firstSendPending) return
         if (attachments.any { it.status == ComposerAttachment.Status.UPLOADING }) {
             if (draft.text.isNotBlank() || attachments.any { it.status != ComposerAttachment.Status.ERROR }) pendingSend = true
             return
@@ -2212,13 +2356,15 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
     /**
      * `executeSend` and the chat's `handleSend`: the text with its agent and attachments, the
      * pictures that fit inline, and every image's uploaded path; then an empty box, Queue again.
+     * A chat with no session hands it to [firstSend], which makes the session first.
      */
     private fun sendNow() {
         val chat = controller
         val typed = draft.text.toString().trim()
         val agent = agent
         val ready = attachments.filter { it.status == ComposerAttachment.Status.READY }
-        if (chat == null || (typed.isEmpty() && ready.isEmpty() && agent == null) || !chat.state.value.canSend) {
+        val first = session == null
+        if (chat == null || (typed.isEmpty() && ready.isEmpty() && agent == null) || (!first && !chat.state.value.canSend) || firstSendPending) {
             pendingSend = false
             return
         }
@@ -2241,17 +2387,82 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
             null -> {}
         }
         val images = selectInlineImages(ready.map { it.imageData })
+        val content = messageWithAttachments(text, ready, images)
+        val imagePaths = ready.filter { it.isImage }.mapNotNull { it.serverPath }
+        if (first) {
+            // Kept on this device before the box empties: until the message is on a socket, the
+            // draft is its only other copy. Only a save still waiting for the server is dropped.
+            edited()
+            drafts?.cancelPendingSave()
+            val message = FirstMessage(text, content, images, imagePaths, replyTo)
+            emptyBox()
+            firstSend?.invoke(message)
+            return
+        }
         // The priority goes only with a message sent during a turn, and is Queue again after it.
         chat.send(
-            messageWithAttachments(text, ready, images),
+            content,
             TurnOptions(permissionMode = permissionMode?.value, priority = if (chat.state.value.isRunning) priority.value else null),
             replyTo,
             images,
-            ready.filter { it.isImage }.mapNotNull { it.serverPath },
+            imagePaths,
         )
         // Only now: the message is on the session's socket.
         drafts?.clear()
         emptyBox()
+    }
+
+    /** A first message sent: shown over "Starting conversation...", the box closed to input meanwhile. Answers the attempt. */
+    internal fun beginFirstSend(message: FirstMessage): Int {
+        firstMessage = message
+        firstQueued = false
+        firstSendPending = true
+        firstSendPreview = FirstSendPreview(message.content, Instant.now())
+        return ++firstSendAttempt
+    }
+
+    /** The session its first message made: from now on this tab is that chat, its draft kept under it. */
+    internal fun adopt(session: SessionInfo) {
+        this.session = session
+        providerId = session.providerId
+        firstQueued = true
+        drafts?.moveTo(session.id)
+        controller?.adopt(session)
+    }
+
+    /** Before its session the tab may change provider (`setProviderId`), and the chat follows. */
+    internal fun chooseProvider(id: String) {
+        if (session != null || id == providerId) return
+        providerId = id
+        controller?.chooseProvider(id)
+    }
+
+    /** The new session's socket is up: the first message goes on it, and its draft, still under [DraftSync.NEW_CHAT], goes. */
+    internal fun flushFirst(permission: String?) {
+        val message = firstMessage ?: return
+        controller?.send(message.content, TurnOptions(permissionMode = permission), message.replyTo, message.images, message.imagePaths)
+        endFirstSend()
+        drafts?.clear(DraftSync.NEW_CHAT)
+    }
+
+    /** The first message given up on: what would follow stops, and once its session was made its `__new__` draft goes. */
+    internal fun abandonFirst() {
+        firstSendAttempt++
+        if (firstQueued) drafts?.clear(DraftSync.NEW_CHAT)
+    }
+
+    /** The first message back in the box after what is typed there, saved as the draft again, [reason] said beside it. */
+    internal fun restoreFirst(reason: String) {
+        val message = firstMessage
+        endFirstSend()
+        message?.let { restore(RejectedSend(it.content, it.replyTo, reason)) }
+    }
+
+    private fun endFirstSend() {
+        firstMessage = null
+        firstQueued = false
+        firstSendPending = false
+        firstSendPreview = null
     }
 
     /** The box after a send: no text, files, agent or reply, Queue again. */
@@ -2275,28 +2486,33 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
         requestFocus()
     }
 
-    /** Its chat connected, and its draft loaded from [draftStore] or the server. */
-    fun start(api: ApiClient, scope: CoroutineScope, draftStore: DraftLocalStore) {
+    /**
+     * Its chat connected (once it has a session), and its draft loaded from [draftStore], from
+     * what its preparation read ([preparedDraft]) or from the server.
+     */
+    fun start(api: ApiClient, scope: CoroutineScope, draftStore: DraftLocalStore, preparedDraft: (suspend () -> ChatDraft?)? = null) {
         if (controller != null) return
         historyList = HistoryList(api, project, scope)
         welcomeList = HistoryList(api, project, scope)
-        controller = ChatController(api, project, session, scope).also { it.start() }
-        val drafts = DraftSync(api, project, tabId, session.id, draftStore, scope).also { drafts = it }
+        controller = ChatController(api, project, session, scope, providerId = providerId).also { it.start() }
+        val drafts = DraftSync(api, project, tabId, session?.id ?: DraftSync.NEW_CHAT, draftStore, scope).also { drafts = it }
         draftLoad = scope.launch {
             // Past the gate a draft still goes in when it comes, into a box left empty.
             val gate = launch {
                 delay(DRAFT_GATE_MILLIS)
                 draftLoading = false
             }
-            val loaded = drafts.load()
+            val loaded = drafts.load(preparedDraft)
             gate.cancel()
             draftLoading = false
             loaded?.let(::show)
         }
     }
 
-    /** The tab went: a save still waiting goes, as it would have a second later, and its mic closes. */
+    /** The tab went: a save still waiting goes, as it would have a second later, its mic closes, and a first message waiting goes with it. */
     fun stop() {
+        firstSendAttempt++
+        firstSendJob?.cancel()
         closeMic?.invoke()
         draftLoad?.cancel()
         drafts?.flush()

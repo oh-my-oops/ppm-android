@@ -22,8 +22,6 @@ import com.hienlh.ppm.design.ProviderLogos
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.workspace.WorkspaceTab
-import com.hienlh.ppm.state.workspace.tabSessionId
-import kotlinx.coroutines.launch
 
 /**
  * What a tab shows. The layout is the web's, so it can hold every kind of tab the web opens;
@@ -34,29 +32,13 @@ import kotlinx.coroutines.launch
 fun TabBody(model: AppModel, tab: WorkspaceTab) {
     when (tab.type) {
         "settings" -> SettingsTab(model)
-        "chat" -> {
-            val chat = model.chat(tab.id)
-            when {
-                chat != null -> key(chat) { ChatPane(model, chat) }
-                tabSessionId(tab) == null -> UnstartedChat(model, tab)
-            }
-        }
+        "chat" -> model.chat(tab.id)?.let { chat -> key(chat) { ChatPane(model, chat) } }
         else -> TabPlaceholder(tabTypeIcon(tab.type), tab.title, "This tab is not in the Android app yet.")
     }
 }
 
-/** A chat tab the web opened before its first message: it gets a session once asked to. */
 @Composable
-private fun UnstartedChat(model: AppModel, tab: WorkspaceTab) {
-    TabPlaceholder(ProductIcon.MessageSquare, tab.title.ifEmpty { "New Chat" }, "This chat has no messages yet.") {
-        PrimaryButton("Start chat", Modifier.padding(top = 16.dp), height = 36.dp) {
-            model.scope.launch { model.startChat(tab.id) }
-        }
-    }
-}
-
-@Composable
-private fun TabPlaceholder(icon: ProductIcon, title: String, detail: String, action: @Composable () -> Unit = {}) {
+private fun TabPlaceholder(icon: ProductIcon, title: String, detail: String) {
     val tokens = LocalPpmTokens.current
     Column(
         Modifier.fillMaxSize().padding(24.dp),
@@ -75,7 +57,6 @@ private fun TabPlaceholder(icon: ProductIcon, title: String, detail: String, act
             Modifier.padding(top = 4.dp).widthIn(max = 320.dp),
             style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
         )
-        action()
     }
 }
 

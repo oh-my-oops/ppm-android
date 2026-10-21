@@ -162,7 +162,7 @@ fun rememberComposerPickers(model: AppModel, tab: ChatTab): ComposerPickers {
     val revision = slashStore?.revision?.collectAsState()?.value
     val slashQuery = tab.slashQuery
     val slash = remember(slashStore, revision, slashQuery) {
-        val payload = slashStore?.payload(tab.project, tab.session.providerId)
+        val payload = slashStore?.payload(tab.project, tab.providerId)
         if (slashQuery == null || payload == null) null else SlashPickerList(payload.items, slashQuery, payload.recentNames).takeIf { it.items.isNotEmpty() }
     }
 

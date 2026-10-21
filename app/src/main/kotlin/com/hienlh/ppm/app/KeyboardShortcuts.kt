@@ -9,7 +9,6 @@ import com.hienlh.ppm.state.DoubleShift
 import com.hienlh.ppm.state.KEY_ACTIONS
 import com.hienlh.ppm.state.KeyCombo
 import com.hienlh.ppm.state.KeyPress
-import kotlinx.coroutines.launch
 
 /**
  * The web's window-wide keyboard shortcuts (use-global-keybindings.ts) for a hardware keyboard:
@@ -91,7 +90,7 @@ class KeyboardShortcuts(private val model: AppModel) {
             toggleDock(press) -> Unit
             matches(press, "next-tab") -> model.cycleTab(forward = true)
             matches(press, "prev-tab") -> model.cycleTab(forward = false)
-            matches(press, "open-chat") -> model.scope.launch { model.newChat() }
+            matches(press, "open-chat") -> model.newChat()
             matches(press, "open-settings") -> model.openSettings()
             matches(press, "voice-input") -> model.toggleVoiceInput()
             jumpInChat(press) -> Unit

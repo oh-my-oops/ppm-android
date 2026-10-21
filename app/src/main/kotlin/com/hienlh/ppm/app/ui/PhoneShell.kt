@@ -605,7 +605,7 @@ private fun TabRow(
     val tokens = LocalPpmTokens.current
     val active = tab.id == model.activeTabId
     val chat = model.chat(tab.id)
-    val session = chat?.let { c -> model.sessions.firstOrNull { it.id == c.session.id } ?: c.session }
+    val session = chat?.session?.let { s -> model.sessions.firstOrNull { it.id == s.id } ?: s }
     // The tag's colour, else the project's when it is a plain colour (a palette gradient is not one).
     val bar = session?.tag?.color?.let(Rgba::hex) ?: chat?.let { model.currentProject?.color?.takeIf { it.startsWith("#") }?.let(Rgba::hex) }
     val shape = RoundedCornerShape(12.dp)
@@ -692,7 +692,7 @@ private fun TabMenuSheet(model: AppModel, id: String, onDismiss: () -> Unit, onR
     val tokens = LocalPpmTokens.current
     val tab = model.openTabs.firstOrNull { it.first.id == id }?.first
     val chat = model.chat(id)
-    val session = chat?.let { c -> model.sessions.firstOrNull { it.id == c.session.id } ?: c.session }
+    val session = chat?.session?.let { s -> model.sessions.firstOrNull { it.id == s.id } ?: s }
     val unread = session != null && model.unreadSessions()[session.id] != null
     BottomSheet(onDismiss) {
         BasicText(

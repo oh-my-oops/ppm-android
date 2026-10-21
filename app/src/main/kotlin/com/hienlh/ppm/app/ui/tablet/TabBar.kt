@@ -362,7 +362,7 @@ private fun TabChip(
     val color = tokens.accent.mix(tokens.text.mix(tokens.text2, lit.toDouble()), on.toDouble())
     val fill = tokens.panel2.mix(tokens.panel.opacity(0.6 * lit), on.toDouble())
     val chat = model.chat(tab.id)
-    val tag = chat?.let { c -> model.sessions.firstOrNull { it.id == c.session.id }?.tag?.color }?.let(Rgba::hex)
+    val tag = chat?.let { c -> c.session?.let { s -> model.sessions.firstOrNull { it.id == s.id } }?.tag?.color }?.let(Rgba::hex)
     val title = tabTitle(model, tab)
     val drag = LocalTabDrag.current
     var menuAt by remember { mutableStateOf<Offset?>(null) }

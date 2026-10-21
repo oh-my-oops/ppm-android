@@ -203,6 +203,19 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
             }
         }
     }
+    // A new chat's box, or one handed text to edit, takes the focus 100 ms after it first shows
+    // (`autoFocus`): the box of the layout on screen, so a phone's too.
+    LaunchedEffect(tab) {
+        if (!tab.focusOnShow) return@LaunchedEffect
+        tab.focusOnShow = false
+        delay(100)
+        if (TextInputFocus.activated) {
+            tab.requestFocus()
+        } else if (TextInputFocus.field !== tab.draft) {
+            quietFocus.value = true
+            focusQuietly.value = true
+        }
+    }
 
     // The send lives on the tab, so one queued behind an upload still goes with this box off screen.
     fun send() = tab.submit()
@@ -261,7 +274,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                     !event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed && !event.isShiftPressed ->
                     recall(event.key == Key.DirectionUp)
                 event.key == Key.Tab && event.isShiftPressed -> {
-                    tab.permissionMode = (tab.permissionMode ?: PermissionMode.FALLBACK).next
+                    tab.pickMode((tab.permissionMode ?: PermissionMode.FALLBACK).next)
                     true
                 }
                 // Ctrl+V, or the keyboard's own Paste, with a picture on the clipboard: as the menu's Paste.
@@ -274,9 +287,13 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
     }
     val hasContent = tab.hasContent
     val pickMode: (PermissionMode) -> Unit = { mode ->
-        tab.permissionMode = mode
+        tab.pickMode(mode)
         modeOpen = false
     }
+    // A new chat has no socket to wait for: its first message makes the session (Send asks no connection on the web).
+    val canSend = hasContent && (state.canSend || tab.session == null) && !tab.firstSendPending
+    // `disabled` while the first message goes: the text, the paperclip and the mic at half strength.
+    val locked = tab.firstSendPending
 
     val shape = RoundedCornerShape(tokens.rad.dp)
     Column(
@@ -313,7 +330,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
             // `flex flex-wrap items-center gap-1 px-2 pt-2 relative`: the mode panel opens over this row.
             Box(Modifier.fillMaxWidth()) {
                 ChipsRow(model, tab, chat, state, narrow, onMode = { modeOpen = !modeOpen }, onModel = { modelOpen = true })
-                if (modeOpen) ModePopover(mode, onDismiss = { modeOpen = false }, pick = pickMode)
+                if (modeOpen && !tab.providerPending) ModePopover(mode, onDismiss = { modeOpen = false }, pick = pickMode)
             }
             // `flex items-end gap-1 px-2 py-2`.
             Row(
@@ -321,7 +338,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                AttachButton(mobile = true, onClick = attach)
+                AttachButton(mobile = true, enabled = !locked, onClick = attach)
                 // `text-sm py-1.5 max-h-20`, the `py-1.5` inside the 80 px; a phone's inputs are 16 px.
                 ComposerField(
                     tab, focus, quietFocus, focusQuietly, onKey, ::keyboardSend, pasteImage, fileDrop,
@@ -329,13 +346,14 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                     padding = 6.dp,
                     maxHeight = 80.dp,
                     placeholder = if (running) "Follow-up..." else "Ask anything...",
+                    enabled = !locked,
                     modifier = Modifier.weight(1f),
                 )
-                if (micShown) MicButton(tab, mobile = true, onClick = toggleMic)
+                if (micShown) MicButton(tab, mobile = true, enabled = !locked, onClick = toggleMic)
                 if (running && !hasContent) {
                     SquareButton(ProductIcon.Square, 14.dp, tokens.error, Color.White, hoverFill = tokens.error.opacity(0.8), label = "Stop") { chat.cancel() }
                 } else {
-                    SendButton(tab, 16.dp, label = "Send", enabled = hasContent && state.canSend, onClick = ::send)
+                    SendButton(tab, 16.dp, label = "Send", enabled = canSend, onClick = ::send)
                 }
             }
         } else {
@@ -355,7 +373,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                AttachButton(mobile = false, onClick = attach)
+                AttachButton(mobile = false, enabled = !locked, onClick = attach)
                 // `text-sm leading-relaxed py-2 max-h-[90px]`, the `py-2` inside the 90 px.
                 ComposerField(
                     tab, focus, quietFocus, focusQuietly, onKey, ::keyboardSend, pasteImage, fileDrop,
@@ -363,13 +381,14 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                     padding = 8.dp,
                     maxHeight = 90.dp,
                     placeholder = if (running) "Follow-up or Stop..." else "Ask anything...",
+                    enabled = !locked,
                     modifier = Modifier.weight(1f),
                 )
-                if (micShown) MicButton(tab, mobile = false, onClick = toggleMic)
+                if (micShown) MicButton(tab, mobile = false, enabled = !locked, onClick = toggleMic)
                 if (running && !hasContent) {
                     SquareButton(ProductIcon.Square, 16.dp, tokens.error, Color.White, hoverFill = tokens.error.opacity(0.8), label = "Stop response") { chat.cancel() }
                 } else {
-                    SendButton(tab, 17.dp, label = "Send message", enabled = hasContent && state.canSend, onClick = ::send)
+                    SendButton(tab, 17.dp, label = "Send message", enabled = canSend, onClick = ::send)
                 }
             }
         }
@@ -403,6 +422,7 @@ private fun ComposerField(
     padding: Dp,
     maxHeight: Dp,
     placeholder: String,
+    enabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
@@ -421,6 +441,8 @@ private fun ComposerField(
     BasicTextField(
         state = tab.draft,
         modifier = modifier
+            // `disabled:opacity-50`.
+            .alpha(if (enabled) 1f else 0.5f)
             .heightIn(max = maxHeight)
             .focusRequester(focus)
             .tracksTextFocus(tab.draft)
@@ -464,6 +486,7 @@ private fun ComposerField(
                 }
             }
         },
+        enabled = enabled,
         textStyle = inputStyle,
         cursorBrush = SolidColor(tokens.accent.color),
         keyboardOptions = KeyboardOptions(
@@ -551,8 +574,12 @@ private fun ChipsRow(model: AppModel, tab: ChatTab, chat: ChatController, state:
         itemVerticalAlignment = Alignment.CenterVertically,
     ) {
         val mode = tab.permissionMode ?: PermissionMode.FALLBACK
-        NeutralChip(mode.icon, if (narrow) null else mode.label, narrow, labelMax = 100.dp, onClick = onMode)
-        ModelChip(ModelNames.chipLabel(name, state.effort ?: Effort.DEFAULT.value), state.thinking, disabled = running, onClick = onModel)
+        // While the provider resolves, nothing to pick a mode or a model for yet; while the first
+        // message goes, the model is fixed and a mode picked changes nothing.
+        if (!tab.providerPending) NeutralChip(mode.icon, if (narrow) null else mode.label, narrow, labelMax = 100.dp, onClick = onMode)
+        if (!tab.providerPending && !tab.firstSendPending) {
+            ModelChip(ModelNames.chipLabel(name, state.effort ?: Effort.DEFAULT.value), state.thinking, disabled = running, onClick = onModel)
+        }
         if (running) {
             NeutralChip(tab.priority.icon, if (narrow) null else tab.priority.label, narrow) { tab.priority = tab.priority.following }
         }
@@ -584,16 +611,21 @@ private fun DesktopChipsRow(
     val running = state.isRunning
     val name = modelName(model, chat, state)
     val mode = tab.permissionMode ?: PermissionMode.FALLBACK
+    // As on the phone: no mode while the provider resolves, no model then or while the first message goes.
     val modeChip = @Composable {
-        Box {
-            NeutralChip(mode.icon, if (narrow) null else mode.label, narrow, labelMax = 100.dp, onClick = onMode)
-            if (modeOpen) ModePopover(mode, onDismiss = onModeDismiss, pick = pickMode)
+        if (!tab.providerPending) {
+            Box {
+                NeutralChip(mode.icon, if (narrow) null else mode.label, narrow, labelMax = 100.dp, onClick = onMode)
+                if (modeOpen) ModePopover(mode, onDismiss = onModeDismiss, pick = pickMode)
+            }
         }
     }
     val modelChip = @Composable { modifier: Modifier ->
-        Box(modifier) {
-            ModelChip(ModelNames.chipLabel(name, state.effort ?: Effort.DEFAULT.value), state.thinking, disabled = running, onClick = onModel)
-            if (modelOpen) ModelPopover(model, chat, state, onDismiss = onModelDismiss)
+        if (!tab.providerPending && !tab.firstSendPending) {
+            Box(modifier) {
+                ModelChip(ModelNames.chipLabel(name, state.effort ?: Effort.DEFAULT.value), state.thinking, disabled = running, onClick = onModel)
+                if (modelOpen) ModelPopover(model, chat, state, onDismiss = onModelDismiss)
+            }
         }
     }
     val rest = @Composable {
@@ -754,7 +786,7 @@ private fun PromptCacheChip(cache: PromptCacheState?) {
  * The change of look fades as `transition-colors` fades it.
  */
 @Composable
-private fun MicButton(tab: ChatTab, mobile: Boolean, onClick: () -> Unit) {
+private fun MicButton(tab: ChatTab, mobile: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val listening = tab.voiceListening
     val transcribing = tab.voiceTranscribing
@@ -784,13 +816,13 @@ private fun MicButton(tab: ChatTab, mobile: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(10.dp)
     Box(
         Modifier
-            .alpha(if (transcribing) 0.5f else pulse)
+            .alpha(if (transcribing || !enabled) 0.5f else pulse)
             .size(if (mobile) 32.dp else 34.dp)
             .clip(shape)
             .background(tokens.error.mix(idleFill, open).color)
             .pointerHoverIcon(WebCursor.Default)
             .hoverable(source)
-            .clickable(source, indication = null, enabled = !transcribing, onClickLabel = label, onClick = onClick)
+            .clickable(source, indication = null, enabled = enabled && !transcribing, onClickLabel = label, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {

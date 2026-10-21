@@ -22,14 +22,4 @@ class UiPrefsTest {
         assertEquals(prefs, UiPrefs.from(Json.parseToJsonElement(prefs.toJson().toString())))
         assertEquals(UiPrefs(), UiPrefs.from(UiPrefs().toJson()))
     }
-
-    @Test
-    fun `a new chat follows the focused chat's provider only when the mode says so`() {
-        val follow = NewChatProviderSettings("codex", "follow-focus")
-        assertEquals("mock", follow.resolve("mock"))
-        assertEquals("codex", follow.resolve("default"))
-        assertEquals("codex", follow.resolve(null))
-        assertEquals("codex", NewChatProviderSettings("codex", "default").resolve("mock"))
-        assertEquals("claude", NewChatProviderSettings("", null).resolve("mock"))
-    }
 }
