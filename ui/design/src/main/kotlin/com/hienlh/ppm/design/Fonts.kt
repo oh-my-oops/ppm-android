@@ -19,6 +19,7 @@ import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextMotion
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
+import kotlin.concurrent.thread
 import kotlin.math.ceil
 import kotlin.math.floor
 
@@ -44,6 +45,11 @@ object PpmFonts {
         )
     }
 
+    /** Reads the system's fonts for [ChromeSystemFallback] now, off the main thread, so the first text does not wait for them. */
+    fun warm() {
+        if (Build.VERSION.SDK_INT >= 29) thread(name = "ppm-fonts") { ChromeSystemFallback.after("sans-serif") }
+    }
+
     /** Geist's ascender, 1005 of its 1000 units: what Chrome sizes a list's disc from. */
     const val SANS_ASCENT = 1.005f
 
@@ -59,11 +65,19 @@ object PpmFonts {
      * web's. A character outside Latin falls back, as it does in the browser. Its licence reserves
      * the name, so the copy with the U+200B is named PPM Mono.
      */
-    val mono = FontFamily(
-        Font(R.font.monaspace_argon_regular, FontWeight.Normal),
-        Font(R.font.monaspace_argon_bold, FontWeight.Bold),
-        Font(R.font.monaspace_argon_italic, FontWeight.Normal, FontStyle.Italic),
-    )
+    val mono = if (Build.VERSION.SDK_INT >= 29) {
+        FontFamily(
+            MonoWebFont(R.font.monaspace_argon_regular, FontWeight.Normal, FontStyle.Normal),
+            MonoWebFont(R.font.monaspace_argon_bold, FontWeight.Bold, FontStyle.Normal),
+            MonoWebFont(R.font.monaspace_argon_italic, FontWeight.Normal, FontStyle.Italic),
+        )
+    } else {
+        FontFamily(
+            Font(R.font.monaspace_argon_regular, FontWeight.Normal),
+            Font(R.font.monaspace_argon_bold, FontWeight.Bold),
+            Font(R.font.monaspace_argon_italic, FontWeight.Normal, FontStyle.Italic),
+        )
+    }
 
     /** Monaspace's typo ascender and descender, 1565 and 435 of its 2000 units, which Chrome takes (`USE_TYPO_METRICS`). */
     const val MONO_ASCENT = 0.7825f
@@ -113,7 +127,8 @@ object PpmFonts {
  * is tried first. Each character so takes
  * the file the browser takes it from, and a run is shaped within one file as there: a Vietnamese
  * word is kerned piece by piece, which makes it wider than one complete font sets it ("một" by
- * 0.6 px at 14 px) and wraps it where the web wraps it.
+ * 0.6 px at 14 px) and wraps it where the web wraps it. A character none of them has comes from
+ * the system font Chrome takes it from ([ChromeSystemFallback]).
  */
 @RequiresApi(29)
 private class GeistWebFont(override val weight: FontWeight, override val style: FontStyle) :
@@ -135,10 +150,7 @@ private class GeistWebFont(override val weight: FontWeight, override val style: 
                 .build()
             android.graphics.fonts.FontFamily.Builder(font).build()
         }
-        return Typeface.CustomFallbackBuilder(families.first())
-            .apply { families.drop(1).forEach { addCustomFallback(it) } }
-            .setStyle(android.graphics.fonts.FontStyle(weight.weight, slant))
-            .build()
+        return withChromeFallback(families, "sans-serif", weight, slant)
     }
 
     override fun equals(other: Any?) = other is GeistWebFont && other.weight == weight && other.style == style
@@ -155,6 +167,38 @@ private class GeistWebFont(override val weight: FontWeight, override val style: 
             R.font.geist_web_cyrillic_ext_italic,
         )
     }
+}
+
+/** Monaspace as [PpmFonts.mono] ships it, falling back where Chrome falls back from the web's code font ([ChromeSystemFallback]). */
+@RequiresApi(29)
+private class MonoWebFont(val file: Int, override val weight: FontWeight, override val style: FontStyle) :
+    AndroidFont(FontLoadingStrategy.Blocking, Loader, FontVariation.Settings()) {
+
+    private object Loader : TypefaceLoader {
+        override fun loadBlocking(context: Context, font: AndroidFont): Typeface = (font as MonoWebFont).typeface(context)
+
+        override suspend fun awaitLoad(context: Context, font: AndroidFont): Typeface = loadBlocking(context, font)
+    }
+
+    fun typeface(context: Context): Typeface {
+        val slant = if (style == FontStyle.Italic) android.graphics.fonts.FontStyle.FONT_SLANT_ITALIC else android.graphics.fonts.FontStyle.FONT_SLANT_UPRIGHT
+        val font = android.graphics.fonts.Font.Builder(context.resources, file).setWeight(weight.weight).setSlant(slant).build()
+        return withChromeFallback(listOf(android.graphics.fonts.FontFamily.Builder(font).build()), "monospace", weight, slant)
+    }
+
+    override fun equals(other: Any?) = other is MonoWebFont && other.file == file && other.weight == weight && other.style == style
+
+    override fun hashCode() = (file * 31 + weight.hashCode()) * 31 + style.hashCode()
+}
+
+/** [families] in turn, then the system fonts Chrome tries for a stack ending in [generic], then Android's fallback list. */
+@RequiresApi(29)
+private fun withChromeFallback(families: List<android.graphics.fonts.FontFamily>, generic: String, weight: FontWeight, slant: Int): Typeface {
+    val room = Typeface.CustomFallbackBuilder.getMaxCustomFallbackCount() - families.size
+    return Typeface.CustomFallbackBuilder(families.first())
+        .apply { (families.drop(1) + ChromeSystemFallback.after(generic).take(room)).forEach { addCustomFallback(it) } }
+        .setStyle(android.graphics.fonts.FontStyle(weight.weight, slant))
+        .build()
 }
 
 enum class FontKind { SANS, MONO }

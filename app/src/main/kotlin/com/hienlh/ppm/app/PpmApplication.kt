@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.SyntaxHighlighter
 
 /**
@@ -20,6 +21,7 @@ class PpmApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         SyntaxHighlighter.get(this).warm()
+        PpmFonts.warm()
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
                 val model = model ?: return
