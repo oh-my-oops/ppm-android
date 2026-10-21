@@ -2,6 +2,10 @@ package com.hienlh.ppm.state.workspace
 
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.string
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
@@ -236,6 +240,32 @@ class WorkspaceStoreTest {
         store.reloadProject("app")
         assertEquals(listOf(listOf("x")), store.s.grid)
         assertEquals("editor:z.ts", store.focused().activeTabId)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `a reload never publishes the project without the tabs that come back`() = runTest {
+        val chat = """{"id":"chat:mock/s1","type":"chat","title":"Chat","projectId":"app","metadata":{"sessionId":"s1","providerId":"mock"},"closable":true}"""
+        fun withTabs(tabs: String, active: String) = layout(
+            """{"panels":{"p1":{"id":"p1","tabs":[$tabs],"activeTabId":"$active","tabHistory":["$active"]}},"grid":[["p1"]],"focusedPanelId":"p1"}""",
+        )
+        val storage = MemoryStorage("app" to withTabs(chat, "chat:mock/s1"))
+        val store = store(storage)
+        store.switchProject("app")
+        // Another device opened a file beside the chat.
+        storage.layouts["app"] = withTabs(
+            """$chat,{"id":"editor:z.ts","type":"editor","title":"z","projectId":"app","metadata":{},"closable":true}""",
+            "editor:z.ts",
+        )
+        // Collected as the app collects it: each state as it is set.
+        val seen = mutableListOf<WorkspaceState>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { store.state.collect { seen += it } }
+        seen.clear()
+        store.reloadProject("app")
+        assertTrue(seen.isNotEmpty())
+        // A chat is ended when its tab leaves, so a tab gone for one state would start over.
+        for (state in seen) assertTrue(state.panels.values.any { panel -> panel.tabs.any { it.id == "chat:mock/s1" } })
+        assertEquals(listOf("chat:mock/s1", "editor:z.ts"), store.focused().tabs.map { it.id })
     }
 
     // ---------------------------------------------------------------------------------------

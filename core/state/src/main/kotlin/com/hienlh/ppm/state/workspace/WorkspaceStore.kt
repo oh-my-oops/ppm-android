@@ -116,7 +116,11 @@ class WorkspaceStore(
 
     fun switchProject(projectName: String) {
         hydrateWindowPanels()
-        val st = s
+        switchProject(s, projectName)
+    }
+
+    /** [switchProject] from [st], which a reload has not published. */
+    private fun switchProject(st: WorkspaceState, projectName: String) {
         if (st.currentProject == projectName) return
 
         val grids = st.projectGrids.toMutableMap()
@@ -220,8 +224,13 @@ class WorkspaceStore(
         }
     }
 
-    /** Forgets what is in memory for [projectName] and loads it again, e.g. after its copy was replaced by the server's. */
+    /**
+     * Forgets what is in memory for [projectName] and loads it again, e.g. after its copy was
+     * replaced by the server's. One state goes out, not the project gone and then back: a chat
+     * whose tab comes back would be ended in between and started over, losing what it showed.
+     */
     fun reloadProject(projectName: String) {
+        hydrateWindowPanels()
         val st = s
         val oldIds = st.projectGrids[projectName]?.flatten()?.toSet().orEmpty()
         // The dock panel is shared: only this project's tabs leave it.
@@ -239,15 +248,16 @@ class WorkspaceStore(
         // A window panel is off the grid, so the loop above never reaches it: a floating window
         // would go on showing a tab of the project as it was.
         val (stripped, emptied) = stripProjectFromWindowPanels(panels, projectName)
-        commit(st.copy(
+        switchProject(st.copy(
             projectGrids = st.projectGrids - projectName,
             projectFocused = st.projectFocused - projectName,
             projectDock = st.projectDock - projectName,
             panels = stripped,
             currentProject = null,
-        ))
+        ), projectName)
+        // The project coming back was a project change, which records the focused chat's provider.
+        rememberChatProvider(s.panels[s.focusedPanelId]?.activeTab)
         for (windowId in emptied) windows?.close(windowId)
-        switchProject(projectName)
     }
 
     // -----------------------------------------------------------------------------------------
