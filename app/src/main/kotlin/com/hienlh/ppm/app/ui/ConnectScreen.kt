@@ -180,7 +180,9 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
                                 textStyle = fieldStyle.copy(color = tokens.text.color),
                                 cursorBrush = SolidColor(tokens.accent.color),
                                 textObfuscationMode = if (showPassword) TextObfuscationMode.Visible else TextObfuscationMode.RevealLastTyped,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                                // The secure field's own options, which any passed in replace: without them the
+                                // keyboard is told it is plain text, learns the password and suggests it.
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false, imeAction = ImeAction.Go),
                                 onKeyboardAction = { connect() },
                             )
                         }
