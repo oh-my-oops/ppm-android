@@ -3,10 +3,14 @@ package com.hienlh.ppm.app
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusEventModifierNode
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.focus.FocusState
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -15,17 +19,24 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.SuspendingPointerInputModifierNode
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.node.DelegatingNode
+import androidx.compose.ui.node.LayoutAwareModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.PointerInputModifierNode
 import androidx.compose.ui.unit.IntSize
 
 /**
  * The text field holding focus, for the keyboard shortcuts: most of them stand aside while one
- * does, as the web's do for an input or a textarea, and all of them while its IME composes.
+ * does, as the web's do for an input or a textarea, and all of them while its IME composes. Where
+ * it is says how far the keyboard pans the page ([com.hienlh.ppm.app.ui.KeyboardPannedPage]).
  */
 object TextInputFocus {
-    private var state: TextFieldState? = null
+    private var state by mutableStateOf<TextFieldState?>(null)
+
+    /** Where the focused field is laid out, once it has been. */
+    private var placed: LayoutCoordinates? = null
 
     /** The field the press going on landed in, focused or not. */
     private var pressedIn: TextFieldState? = null
@@ -41,12 +52,25 @@ object TextInputFocus {
     /** What it holds, null with no field focused. */
     val text: String? get() = state?.text?.toString()
 
-    internal fun take(state: TextFieldState) {
+    /** The focused field, to observe: another one is a fresh focus. */
+    val field: Any? get() = state
+
+    /** Where the focused field lies in [page], null with none focused or one laid out elsewhere (a sheet's window). */
+    fun boundsIn(page: LayoutCoordinates): Rect? {
+        val field = placed?.takeIf { state != null && it.isAttached } ?: return null
+        if (!page.isAttached || field.findRootCoordinates() != page.findRootCoordinates()) return null
+        return page.localBoundingBoxOf(field, clipBounds = false)
+    }
+
+    internal fun take(state: TextFieldState, placed: LayoutCoordinates? = null) {
         this.state = state
+        this.placed = placed
     }
 
     internal fun release(state: TextFieldState) {
-        if (this.state === state) this.state = null
+        if (this.state !== state) return
+        this.state = null
+        placed = null
     }
 
     internal fun pressed(state: TextFieldState) {
@@ -138,7 +162,7 @@ private class EveryTapNode(var action: () -> Unit) : DelegatingNode(), PointerIn
     override fun onCancelPointerInput() = input.onCancelPointerInput()
 }
 
-/** Reports this text field, editing [state], to [TextInputFocus] while it has focus, and the presses landing in it. */
+/** Reports this text field, editing [state], to [TextInputFocus] while it has focus — where it is too — and the presses landing in it. */
 fun Modifier.tracksTextFocus(state: TextFieldState): Modifier = this then TextFocusElement(state)
 
 private data class TextFocusElement(val state: TextFieldState) : ModifierNodeElement<TextFocusNode>() {
@@ -151,9 +175,19 @@ private data class TextFocusElement(val state: TextFieldState) : ModifierNodeEle
     }
 }
 
-private class TextFocusNode(var state: TextFieldState) : Modifier.Node(), FocusEventModifierNode, PointerInputModifierNode {
+private class TextFocusNode(var state: TextFieldState) : Modifier.Node(), FocusEventModifierNode, PointerInputModifierNode, LayoutAwareModifierNode {
+    private var placed: LayoutCoordinates? = null
+    private var focused = false
+
     override fun onFocusEvent(focusState: FocusState) {
-        if (focusState.isFocused) TextInputFocus.take(state) else TextInputFocus.release(state)
+        focused = focusState.isFocused
+        if (focused) TextInputFocus.take(state, placed) else TextInputFocus.release(state)
+    }
+
+    override fun onPlaced(coordinates: LayoutCoordinates) {
+        placed = coordinates
+        // Focused before it was first laid out.
+        if (focused) TextInputFocus.take(state, coordinates)
     }
 
     override fun onPointerEvent(pointerEvent: PointerEvent, pass: PointerEventPass, bounds: IntSize) {

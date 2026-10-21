@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -104,7 +103,8 @@ import java.time.Instant
 /**
  * The phone layout (`md:hidden` in app.tsx): the active tab — or the home panel when none is
  * open — over the bottom nav, with the drawer, the project sheet and the tab switcher it opens.
- * The keyboard covers the nav, as it does over the web's fixed nav.
+ * The keyboard pans all of it up as Chrome pans its view over the page, which keeps its height
+ * ([KeyboardPannedPage]): the nav rides on the keyboard while the message box has focus.
  */
 @Composable
 fun PhoneShell(model: AppModel) {
@@ -114,7 +114,6 @@ fun PhoneShell(model: AppModel) {
     var tabMenu by remember { mutableStateOf<String?>(null) }
     var renaming by remember { mutableStateOf<SessionInfo?>(null) }
     val density = LocalDensity.current
-    val ime = WindowInsets.ime.getBottom(density)
     val navBar = WindowInsets.navigationBars.getBottom(density)
     val nav = with(density) { NAV_HEIGHT.roundToPx() } + navBar
     // A phone shows one panel, but editor-panel.tsx frames it as one of several while the grid
@@ -129,26 +128,28 @@ fun PhoneShell(model: AppModel) {
     // under it, blurred with the chat, inside the overlay's `rounded-lg`.
     val covered = model.activeTab?.let { model.chat(it.id) }?.filesOver == true
     Backdrop {
-        if (covered) CornerChrome(model, mobile = true, Modifier.clip(RoundedCornerShape(12.dp)).blur(13.dp))
-        Box(
-            Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .padding(bottom = with(density) { maxOf(ime, nav).toDp() })
-                .then(frame),
-        ) {
-            val tab = model.activeTab
-            if (tab != null) key(tab.id) { TabBody(model, tab) } else EmptyPanel(model, onOpenSession = { model.openTab(it) })
+        KeyboardPannedPage {
+            if (covered) CornerChrome(model, mobile = true, Modifier.clip(RoundedCornerShape(12.dp)).blur(13.dp))
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(bottom = with(density) { nav.toDp() })
+                    .then(frame),
+            ) {
+                val tab = model.activeTab
+                if (tab != null) key(tab.id) { TabBody(model, tab) } else EmptyPanel(model, onOpenSession = { model.openTab(it) })
+            }
+            MobileNav(
+                model,
+                onMenu = { drawerOpen = true },
+                onProjects = { projectsOpen = true },
+                onTabs = { tabsOpen = true },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+            if (!covered) CornerChrome(model, mobile = true)
+            MobileDrawer(model, drawerOpen) { drawerOpen = false }
         }
-        MobileNav(
-            model,
-            onMenu = { drawerOpen = true },
-            onProjects = { projectsOpen = true },
-            onTabs = { tabsOpen = true },
-            modifier = Modifier.align(Alignment.BottomCenter),
-        )
-        if (!covered) CornerChrome(model, mobile = true)
-        MobileDrawer(model, drawerOpen) { drawerOpen = false }
     }
     if (projectsOpen) ProjectSheet(model) { projectsOpen = false }
     if (tabsOpen) TabSwitcherSheet(model, onDismiss = { tabsOpen = false }, onLongPress = { tabMenu = it })
