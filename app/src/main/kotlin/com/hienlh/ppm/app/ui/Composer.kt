@@ -87,7 +87,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -133,6 +135,7 @@ import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.ParsedUserMessage
 import com.hienlh.ppm.protocol.PromptCacheState
+import com.hienlh.ppm.protocol.ProviderInfo
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.ChatState
@@ -144,6 +147,7 @@ import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.PromptCacheStatus
 import com.hienlh.ppm.state.stepHistory
 import kotlin.math.floor
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
@@ -577,6 +581,7 @@ private fun ChipsRow(model: AppModel, tab: ChatTab, chat: ChatController, state:
         // While the provider resolves, nothing to pick a mode or a model for yet; while the first
         // message goes, the model is fixed and a mode picked changes nothing.
         if (!tab.providerPending) NeutralChip(mode.icon, if (narrow) null else mode.label, narrow, labelMax = 100.dp, onClick = onMode)
+        if (choosesProvider(tab)) ProviderChip(model, tab)
         if (!tab.providerPending && !tab.firstSendPending) {
             ModelChip(ModelNames.chipLabel(name, state.effort ?: Effort.DEFAULT.value), state.thinking, disabled = running, onClick = onModel)
         }
@@ -638,6 +643,7 @@ private fun DesktopChipsRow(
     if (narrow) {
         Row(padding, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             modeChip()
+            if (choosesProvider(tab)) ProviderChip(model, tab)
             modelChip(Modifier.weight(1f, fill = false))
             rest()
         }
@@ -649,6 +655,7 @@ private fun DesktopChipsRow(
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
             modeChip()
+            if (choosesProvider(tab)) ProviderChip(model, tab)
             modelChip(Modifier)
             rest()
         }
@@ -671,7 +678,12 @@ private fun modelName(model: AppModel, chat: ChatController, state: ChatState): 
  * draws the icon alone, at `px-[7px]`.
  */
 @Composable
-private fun NeutralChip(icon: ProductIcon, label: String?, narrow: Boolean, labelMax: Dp = Dp.Unspecified, onClick: () -> Unit) {
+private fun NeutralChip(icon: ProductIcon, label: String?, narrow: Boolean, labelMax: Dp = Dp.Unspecified, onClick: () -> Unit) =
+    NeutralChip(label, narrow, labelMax, onClick) { color -> PpmIcon(icon, 12.dp, color) }
+
+/** [NeutralChip] with its own [leading] mark, drawn in the chip's text colour. */
+@Composable
+private fun NeutralChip(label: String?, narrow: Boolean, labelMax: Dp, onClick: () -> Unit, leading: @Composable (Color) -> Unit) {
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -693,7 +705,7 @@ private fun NeutralChip(icon: ProductIcon, label: String?, narrow: Boolean, labe
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         // An icon alone still takes the line's height, as the text beside it would.
-        Box(Modifier.height(17.25.dp), contentAlignment = Alignment.Center) { PpmIcon(icon, 12.dp, color.color) }
+        Box(Modifier.height(17.25.dp), contentAlignment = Alignment.Center) { leading(color.color) }
         if (label != null) {
             BasicText(
                 label,
@@ -957,6 +969,119 @@ private fun ModePopover(current: PermissionMode, onDismiss: () -> Unit, pick: (P
             }
         }
     }
+}
+
+/** The provider chip is offered (`onProviderChange`): before the session, its provider resolved, no first message on its way. */
+private fun choosesProvider(tab: ChatTab) = tab.session == null && !tab.providerPending && !tab.firstSendPending
+
+/** What the provider list said when last read on opening (`result`): failed keeps the list in hand. */
+private class ProviderRead(val providers: List<ProviderInfo>, val failed: Boolean)
+
+/**
+ * The provider of a chat with no session yet (`ProviderSelector`): its logo and name on a chip
+ * drawn as the mode's (the name `max-w-[80px] truncate capitalize`), over which its providers
+ * open. The list is the project's while fresh, read again each time it opens.
+ */
+@Composable
+private fun ProviderChip(model: AppModel, tab: ChatTab) {
+    val cache = model.newChats.preparationCache
+    var open by remember(tab) { mutableStateOf(false) }
+    var read by remember(tab) { mutableStateOf<ProviderRead?>(null) }
+    LaunchedEffect(tab, open) {
+        if (!open) return@LaunchedEffect
+        val api = model.api
+        read = try {
+            if (api == null) error("No server is open.")
+            ProviderRead(cache.providers(tab.project) { api.providers(tab.project) }, failed = false)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            ProviderRead(cache.peekProviders(tab.project) ?: emptyList(), failed = true)
+        }
+    }
+    val providers = read?.providers ?: cache.peekProviders(tab.project) ?: emptyList()
+    val current = tab.providerId
+    val name = providers.firstOrNull { it.id == current }?.name ?: current
+    Box {
+        NeutralChip(cssCapitalized(name), narrow = false, labelMax = 80.dp, onClick = { open = !open }) { ProviderBadge(current, 14.dp) }
+        if (open) {
+            val status = when {
+                read?.failed == true -> "Unable to load providers"
+                read != null -> "No providers available"
+                else -> "Loading providers..."
+            }
+            ProviderPopover(current, providers, status, onDismiss = { open = false }) { id ->
+                model.newChats.pickProvider(tab, id)
+                open = false
+            }
+        }
+    }
+}
+
+/**
+ * The providers (`w-56 rounded-lg border popover-solid shadow-panel`), over the chip with its left
+ * edge on the chip's, 4 px clear: "Provider", then a row each (`px-3 py-2 gap-3`), the chosen one
+ * lit and checked; [status] while there is none. A press anywhere else closes it and goes on.
+ */
+@Composable
+private fun ProviderPopover(current: String, providers: List<ProviderInfo>, status: String, onDismiss: () -> Unit, pick: (String) -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
+    PlacedPopup(remember(gap) { aboveStart(gap) }, onDismiss, passThrough = true) {
+        val shape = RoundedCornerShape(12.dp)
+        Column(
+            Modifier
+                .width(224.dp)
+                .ppmShadow(tokens.shadowPanel, shape)
+                .clip(shape)
+                .background(tokens.panel2.over(tokens.bgSolid).color)
+                .cssBorder(tokens.border.color, shape),
+        ) {
+            Row(Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Bottom).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                BasicText("Provider", style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color))
+            }
+            Column(Modifier.padding(vertical = 4.dp)) {
+                if (providers.isEmpty()) {
+                    BasicText(
+                        status,
+                        Modifier.padding(horizontal = 12.dp, vertical = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+                    )
+                }
+                for (provider in providers) {
+                    val active = provider.id == current
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(if (active) tokens.panel2.color else Color.Transparent)
+                            .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color) { pick(provider.id) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        ProviderBadge(provider.id, 16.dp)
+                        BasicText(
+                            cssCapitalized(provider.name),
+                            Modifier.weight(1f),
+                            style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color),
+                        )
+                        if (active) PpmIcon(ProductIcon.Check, 16.dp, tokens.accent.color)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** CSS `text-transform: capitalize`: each word's first letter in capitals, the rest as written. */
+private fun cssCapitalized(text: String): String {
+    val out = StringBuilder(text.length)
+    var start = true
+    for (c in text) {
+        out.append(if (start) c.titlecase() else c.toString())
+        start = c.isWhitespace()
+    }
+    return out.toString()
 }
 
 /** Over the anchor, left edges together, [gap] clear of it (`absolute bottom-full left-0 mb-1`), kept on screen. */

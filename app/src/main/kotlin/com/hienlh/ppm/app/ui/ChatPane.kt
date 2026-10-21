@@ -43,6 +43,7 @@ import androidx.compose.foundation.text.input.selectAll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -88,6 +89,8 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
 import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.NewChatGate
+import com.hienlh.ppm.app.PREWARM_SETTLE_MILLIS
+import com.hienlh.ppm.app.PrewarmAsk
 import com.hienlh.ppm.app.attach
 import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.app.ui.tablet.dashedBorder
@@ -147,6 +150,23 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
     // Text the tab was opened with is in the box now: once connected, the tab stops offering it.
     LaunchedEffect(state.canSend, state.sessionId) {
         if (state.canSend && state.sessionId != null) model.pendingMessageTaken(tab)
+    }
+    // A new chat on screen has the process its first message will run on started while that
+    // message is written (`useChatPrewarm`), with what it will carry: asked once the picks hold
+    // still, again as they change. Not while its provider resolves, which would warm a guess.
+    val prewarm = if (tab.session == null && !tab.providerPending) {
+        PrewarmAsk(tab.providerId, tab.permissionMode?.value, tab.claimedAccountId, chat.turnPicks)
+    } else {
+        null
+    }
+    DisposableEffect(tab, prewarm) {
+        tab.prewarm = prewarm
+        onDispose { if (tab.prewarm == prewarm) tab.prewarm = null }
+    }
+    LaunchedEffect(tab, prewarm) {
+        if (prewarm == null) return@LaunchedEffect
+        delay(PREWARM_SETTLE_MILLIS)
+        model.newChats.prewarm(tab, prewarm)
     }
     // A message the server refused (`onMessageRejected`): back in the box when the box holds
     // nothing it would join, else offered back from the toast.

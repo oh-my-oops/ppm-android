@@ -151,7 +151,8 @@ class ComposerPickers(
 @Composable
 fun rememberComposerPickers(model: AppModel, tab: ChatTab): ComposerPickers {
     val slashStore = model.slashItems
-    LaunchedEffect(tab, slashStore) {
+    // Read again for a provider picked, or resolved, before the session: the list is the provider's.
+    LaunchedEffect(tab, slashStore, tab.providerId, tab.providerPending) {
         if (slashStore == null) return@LaunchedEffect
         launch { snapshotFlow { tab.slashQuery != null }.drop(1).filter { it }.collect { model.loadSlashItems(tab) } }
         while (true) {
@@ -161,7 +162,7 @@ fun rememberComposerPickers(model: AppModel, tab: ChatTab): ComposerPickers {
     }
     val revision = slashStore?.revision?.collectAsState()?.value
     val slashQuery = tab.slashQuery
-    val slash = remember(slashStore, revision, slashQuery) {
+    val slash = remember(slashStore, revision, slashQuery, tab.providerId) {
         val payload = slashStore?.payload(tab.project, tab.providerId)
         if (slashQuery == null || payload == null) null else SlashPickerList(payload.items, slashQuery, payload.recentNames).takeIf { it.items.isNotEmpty() }
     }

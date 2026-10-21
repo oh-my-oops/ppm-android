@@ -66,6 +66,7 @@ import com.hienlh.ppm.protocol.ThemeSelection
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.double
 import com.hienlh.ppm.protocol.sortedForList
+import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatSearch
 import com.hienlh.ppm.state.ClientCommand
@@ -1404,6 +1405,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                 chat.clientCommand = { text -> runClientCommand(chat, text) }
                 chat.closeMic = { voice.closeFor(chat) }
                 chat.firstSend = { message -> newChats.sendFirst(chat, message) }
+                chat.prewarmTouch = { newChats.touchPrewarm(chat) }
                 chat.modePicked = { mode -> patchTabMetadata(id, "permissionMode" to JsonPrimitive(mode.value), "permissionModeSource" to JsonPrimitive("user")) }
                 newChats.follow(chat, tab)
             }
@@ -2054,9 +2056,13 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         private set
 
     /** Its tab's metadata and title as the layout last had them (the web's `metadata` prop), kept by the model. */
-    internal var metadata: JsonObject = JsonObject(emptyMap())
+    internal var metadata by mutableStateOf(JsonObject(emptyMap()))
     var tabTitle by mutableStateOf("")
         internal set
+
+    /** The account its claim names, while that claim is for its provider (`claimMatchesProvider`). */
+    val claimedAccountId: String?
+        get() = metadata["pickedAccountId"].string?.takeIf { it.isNotEmpty() && metadata["pickedAccountProvider"].string == providerId }
 
     /** Its provider is still being resolved (`providerPending`): the gate line shows, the mode and model chips wait. */
     var providerPending by mutableStateOf(false)
@@ -2088,6 +2094,15 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
 
     /** The accounts claimed for it before its session, one per provider (`useChatAccountClaim`). */
     internal val claims = HashMap<String, Deferred<PickedAccount?>>()
+
+    /** What its first message's process is warmed with while it is on screen (`useChatPrewarm`); null while it asks nothing. */
+    internal var prewarm: PrewarmAsk? = null
+
+    /** When that was last asked for, so writing asks again at most once a minute. */
+    internal var prewarmAskedAt = 0L
+
+    /** Someone wrote in the box (`touchPrewarm`); set by the model. */
+    var prewarmTouch: (() -> Unit)? = null
 
     /** Sends a first message when it has no session (set by the model). */
     var firstSend: ((FirstMessage) -> Unit)? = null
@@ -2288,6 +2303,11 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
      * box is about to hold when the change is still being made.
      */
     fun edited(text: CharSequence = draft.text) {
+        saveDraft(text)
+        prewarmTouch?.invoke()
+    }
+
+    private fun saveDraft(text: CharSequence = draft.text) {
         val files = attachments.mapNotNull { file -> file.serverPath?.let { DraftAttachment(file.name, it) } }
         drafts?.save(ChatDraft(text.toString(), files, replyTo))
     }
@@ -2392,7 +2412,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         if (first) {
             // Kept on this device before the box empties: until the message is on a socket, the
             // draft is its only other copy. Only a save still waiting for the server is dropped.
-            edited()
+            saveDraft()
             drafts?.cancelPendingSave()
             val message = FirstMessage(text, content, images, imagePaths, replyTo)
             emptyBox()

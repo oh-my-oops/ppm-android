@@ -3,6 +3,7 @@ package com.hienlh.ppm.app
 import com.hienlh.ppm.client.chatPreparationSettings
 import com.hienlh.ppm.client.pickAccount
 import com.hienlh.ppm.client.prepareChat
+import com.hienlh.ppm.client.prewarmChat
 import com.hienlh.ppm.protocol.AccountPick
 import com.hienlh.ppm.protocol.ChatDraft
 import com.hienlh.ppm.protocol.ChatPreparationSettings
@@ -12,8 +13,10 @@ import com.hienlh.ppm.protocol.PreparedChat
 import com.hienlh.ppm.protocol.ProviderInfo
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionInfo
+import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.string
+import com.hienlh.ppm.state.ChatPreparationCache
 import com.hienlh.ppm.state.ChatPreparations
 import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.workspace.WorkspaceTab
@@ -59,6 +62,9 @@ sealed interface NewChatGate {
 /** A tab's provider once resolved, and the mode it starts in (the gate's `PreparedChat`). */
 data class ResolvedProvider(val providerId: String, val permissionMode: String?)
 
+/** What a new chat's first message will run with (`useChatPrewarm`'s input): the process warmed for it serves only a match. */
+data class PrewarmAsk(val providerId: String, val permissionMode: String?, val accountId: String?, val picks: TurnOptions)
+
 /**
  * Every chat tab with no session yet: its one `/chat/prepare` (new-chat-prepare-client.ts), the
  * provider it resolves to while pending (new-chat-provider-gate.tsx), the account it claims
@@ -68,11 +74,11 @@ data class ResolvedProvider(val providerId: String, val permissionMode: String?)
 internal class NewChats(private val model: AppModel) {
     private val preparations = ChatPreparations(model.scope)
 
+    /** The settings and providers read for new chats, a minute at a time; the provider chip opens on it. */
+    internal val preparationCache = ChatPreparationCache(model.scope)
+
     /** The gate's resolution on its way, by tab (`inFlight`). */
     private val resolving = HashMap<String, Deferred<ResolvedProvider>>()
-
-    /** Bumped by Retry and Check again (`chatPreparationGeneration`): a resolution begun before them is out of date. */
-    private var generation = 0
 
     /**
      * The tab's one `/chat/prepare`, when it is first shown: none for a stretch without a session
@@ -99,6 +105,7 @@ internal class NewChats(private val model: AppModel) {
         ) { result, current ->
             cache.writeSettings(result.settings)
             cache.writeProviders(project, result.providers)
+            preparationCache.seedProviders(project, result.providers)
             result.slash?.let { slash?.seed(it, project, result.providerId) }
             result.tags?.let { model.seedTags(project, it) }
             if (current) applyPrepared(tabId, result)
@@ -305,7 +312,7 @@ internal class NewChats(private val model: AppModel) {
         resolving[tabId]?.let { return it }
         val api = model.api ?: return CompletableDeferred<ResolvedProvider>().apply { completeExceptionally(IllegalStateException("No server is open.")) }
         chat.gate = null
-        val generation = generation
+        val generation = preparationCache.generation
         val project = chat.project
         val focused = meta["focusedProviderOnOpen"].string
         val preparation = preparations[tabId]
@@ -318,14 +325,14 @@ internal class NewChats(private val model: AppModel) {
                 } else {
                     // The settings and providers the gate read before `/chat/prepare` existed.
                     coroutineScope {
-                        val read = async { bounded(PREPARE_MILLIS, PREPARATION_TIMED_OUT) { api.chatPreparationSettings() } }
-                        val offered = async { bounded(PREPARE_MILLIS, PREPARATION_TIMED_OUT) { api.providers(project) } }
+                        val read = async { preparationCache.settings(project) { api.chatPreparationSettings() } }
+                        val offered = async { preparationCache.providers(project) { api.providers(project) } }
                         val settings = read.await()
                         Triple(settings, offered.await(), settings.resolveProvider(focused))
                     }
                 }
                 if (model.chat(tabId) !== chat) throw IllegalStateException("Chat was closed.")
-                if (generation != this@NewChats.generation) throw IllegalStateException("Chat settings changed. Please retry.")
+                if (generation != preparationCache.generation) throw IllegalStateException("Chat settings changed. Please retry.")
                 val now = model.tabMetadata(tabId)
                 val known = now?.get("providerId").string
                 if (now?.get("providerPending").bool != true && known != null) {
@@ -357,8 +364,44 @@ internal class NewChats(private val model: AppModel) {
 
     /** Retry and Check again (`retry`): what was read before is dropped, and the provider is resolved again. */
     fun retry(chat: ChatTab) {
-        generation++
+        preparationCache.clear()
         resolveQuietly(chat)
+    }
+
+    /**
+     * A provider picked on the chip before the session (`handleProviderChange`): the tab moves to
+     * it in the mode it has, and claims an account there, as an account does not cross providers.
+     */
+    fun pickProvider(chat: ChatTab, providerId: String) {
+        if (chat.session != null || chat.providerPending || chat.firstSendPending || providerId == chat.providerId) return
+        model.patchTabMetadata(chat.tabId, "providerId" to JsonPrimitive(providerId))
+        chat.chooseProvider(providerId)
+        if (chat.started) claimInBackground(chat)
+    }
+
+    /**
+     * `useChatPrewarm`'s ask: the server starts the process [ask] describes, for the first message
+     * to run on rather than wait for one to boot. Only Claude starts one; nothing comes back, and
+     * a failure is let go.
+     */
+    fun prewarm(chat: ChatTab, ask: PrewarmAsk) {
+        val api = model.api ?: return
+        chat.prewarmAskedAt = System.currentTimeMillis()
+        val picks = ask.picks
+        model.scope.launch {
+            try {
+                api.prewarmChat(chat.project, ask.providerId, ask.permissionMode, ask.accountId, picks.model, picks.effort, picks.thinking)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** Someone writing in a new chat on screen (`touch`): asked again at most once a minute, which keeps its process while they write. */
+    fun touchPrewarm(chat: ChatTab) {
+        val ask = chat.prewarm ?: return
+        if (System.currentTimeMillis() - chat.prewarmAskedAt >= PREWARM_REASK_MILLIS) prewarm(chat, ask)
     }
 
     /**
@@ -481,8 +524,6 @@ internal class NewChats(private val model: AppModel) {
 /** `CHAT_PREPARATION_TIMEOUT_MS`. */
 private const val PREPARE_MILLIS = 30_000L
 
-private const val PREPARATION_TIMED_OUT = "Chat preparation timed out. Please retry."
-
 /** `pickAccountForTab`'s own bound. */
 private const val PICK_MILLIS = 30_000L
 
@@ -491,3 +532,9 @@ private const val SESSION_CREATE_MILLIS = 30_000L
 
 /** `PENDING_SEND_TIMEOUT_MS`. */
 private const val PENDING_SEND_MILLIS = 45_000L
+
+/** `SETTLE_MS`: how long the picks hold still before a prewarm is asked, so a tab passed through asks nothing. */
+internal const val PREWARM_SETTLE_MILLIS = 300L
+
+/** `REASK_MS`: the server keeps a warmed process 5 minutes. */
+private const val PREWARM_REASK_MILLIS = 60_000L

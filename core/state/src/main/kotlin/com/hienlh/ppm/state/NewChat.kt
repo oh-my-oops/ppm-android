@@ -13,6 +13,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -47,6 +48,78 @@ class NewChatCache(private val values: KeyValueStore, private val scope: String)
         val json = JsonArray(providers.map { buildJsonObject { put("id", it.id); put("name", it.name) } })
         values.put(providersKey(project), json.toString())
     }
+}
+
+/**
+ * What new chat tabs read before their session (chat-preparation-cache.ts), kept in memory for
+ * [ttlMillis]: the provider part of the AI settings, and each project's providers, which a tab's
+ * preparation seeds so the provider chip opens on a fresh list. One request at a time per key,
+ * bounded to [timeoutMillis]; a failed one is forgotten. [clear] drops both, and moves
+ * [generation] on so a resolution begun before it knows it is out of date. [scope] must be a
+ * supervisor on one thread, as the app's is.
+ */
+class ChatPreparationCache(
+    private val scope: CoroutineScope,
+    private val now: () -> Long = System::currentTimeMillis,
+    private val ttlMillis: Long = 60_000,
+    private val timeoutMillis: Long = 30_000,
+) {
+    private class Entry<T>(var value: T? = null, var expires: Long = 0, var request: Deferred<T>? = null)
+
+    private val settings = HashMap<String, Entry<ChatPreparationSettings>>()
+    private val providers = HashMap<String, Entry<List<ProviderInfo>>>()
+
+    /** Moved on by [clear] (`chatPreparationGeneration`). */
+    var generation = 0
+        private set
+
+    suspend fun settings(project: String, fetch: suspend () -> ChatPreparationSettings): ChatPreparationSettings = cached(settings, project, fetch)
+
+    suspend fun providers(project: String, fetch: suspend () -> List<ProviderInfo>): List<ProviderInfo> = cached(providers, project, fetch)
+
+    /** The project's providers while fresh, without asking (`peekChatProviders`). */
+    fun peekProviders(project: String): List<ProviderInfo>? = providers[project]?.takeIf { it.expires > now() }?.value
+
+    /** `seedChatProviders`: what a preparation answered, fresh from now. */
+    fun seedProviders(project: String, list: List<ProviderInfo>) {
+        providers[project] = Entry(list, now() + ttlMillis)
+    }
+
+    /** `clearChatPreparationCache`: Retry, Check again, or AI settings saved. */
+    fun clear() {
+        generation++
+        settings.clear()
+        providers.clear()
+    }
+
+    private suspend fun <T> cached(cache: HashMap<String, Entry<T>>, key: String, fetch: suspend () -> T): T {
+        val previous = cache[key]
+        previous?.value?.let { if (previous.expires > now()) return it }
+        previous?.request?.let { return it.await() }
+        val entry = Entry<T>()
+        cache[key] = entry
+        lateinit var request: Deferred<T>
+        request = scope.async(start = CoroutineStart.LAZY) {
+            try {
+                val value = withTimeoutOrNull(timeoutMillis) { Answer(fetch()) }?.value
+                    ?: throw IllegalStateException("Chat preparation timed out. Please retry.")
+                if (cache[key] === entry) {
+                    entry.value = value
+                    entry.expires = now() + ttlMillis
+                    entry.request = null
+                }
+                value
+            } catch (error: Exception) {
+                if (cache[key] === entry) cache.remove(key)
+                throw error
+            }
+        }
+        entry.request = request
+        request.start()
+        return request.await()
+    }
+
+    private class Answer<T>(val value: T)
 }
 
 /**

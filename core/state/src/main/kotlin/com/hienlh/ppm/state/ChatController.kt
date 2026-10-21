@@ -187,6 +187,9 @@ class ChatController(
 
     fun setThinking(enabled: Boolean) = pick(settings.pickThinking(enabled))
 
+    /** The model, effort and thinking the next message carries (`turnSettings`): what is known or picked, nothing else. */
+    val turnPicks: TurnOptions get() = settings.turnOptions(TurnOptions())
+
     private fun pick(frame: ChatClientMessage) {
         socket?.send(frame.json.toString())
         publish()

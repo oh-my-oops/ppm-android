@@ -9,6 +9,7 @@ import com.hienlh.ppm.state.workspace.MemoryValues
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -83,6 +84,57 @@ class NewChatTest {
         val error = runCatching { failed.await() }.exceptionOrNull()
         assertEquals("server down", error?.message)
         assertFalse(preparations.isPrepared("t2"))
+        scope.cancel()
+    }
+
+    @Test
+    fun `the preparation cache asks once while fresh, joins a request on its way, and forgets a failure`() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[kotlinx.coroutines.Job]))
+        var clock = 0L
+        val cache = ChatPreparationCache(scope, now = { clock }, ttlMillis = 1_000, timeoutMillis = 100)
+        val gate = CompletableDeferred<Unit>()
+        var asked = 0
+        val claude = listOf(ProviderInfo("claude", "Claude"))
+        val fetch: suspend () -> List<ProviderInfo> = { asked++; gate.await(); claude }
+        val first = scope.async { cache.providers("p", fetch) }
+        val joined = scope.async { cache.providers("p", fetch) }
+        delay(10)
+        assertNull(cache.peekProviders("p"))
+        gate.complete(Unit)
+        assertEquals(claude, first.await())
+        assertEquals(claude, joined.await())
+        assertEquals(claude, cache.peekProviders("p"))
+        assertEquals(claude, cache.providers("p", fetch))
+        assertEquals(1, asked)
+        // Stale: asked again.
+        clock = 1_000
+        assertNull(cache.peekProviders("p"))
+        cache.providers("p", fetch)
+        assertEquals(2, asked)
+        // A failure is not kept, and a request that never answers times out.
+        val failed = runCatching { cache.providers("q") { error("down") } }.exceptionOrNull()
+        assertEquals("down", failed?.message)
+        assertEquals(claude, cache.providers("q") { claude })
+        val silent = runCatching { cache.settings("p") { CompletableDeferred<ChatPreparationSettings>().await() } }.exceptionOrNull()
+        assertEquals("Chat preparation timed out. Please retry.", silent?.message)
+        scope.cancel()
+    }
+
+    @Test
+    fun `a seeded list opens fresh, and clear drops everything and moves the generation on`() = runBlocking {
+        val scope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[kotlinx.coroutines.Job]))
+        var clock = 0L
+        val cache = ChatPreparationCache(scope, now = { clock }, ttlMillis = 1_000)
+        val mock = listOf(ProviderInfo("mock", "Mock"))
+        cache.seedProviders("p", mock)
+        assertEquals(mock, cache.peekProviders("p"))
+        assertEquals(mock, cache.providers("p") { error("not asked") })
+        val before = cache.generation
+        cache.clear()
+        assertEquals(before + 1, cache.generation)
+        assertNull(cache.peekProviders("p"))
+        clock = 5
+        assertEquals(emptyList<ProviderInfo>(), cache.providers("p") { emptyList() })
         scope.cancel()
     }
 }
