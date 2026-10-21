@@ -79,6 +79,18 @@ class GlobalEventsTest {
         e.handle(json("""{"type":"git:commit-draft","projectName":"app","repo":"/w/app","message":"x","updatedAt":null}"""))
         assertEquals(listOf("app"), changed)
     }
+
+    @Test
+    fun `a file changed and a file list rebuilt are told apart, with their project`() {
+        val e = events()
+        val heard = mutableListOf<String>()
+        e.onFileChanged = { heard += "changed $it" }
+        e.onIndexChanged = { heard += "rebuilt $it" }
+        e.handle(json("""{"type":"file:changed","projectName":"app","path":"src/a.ts"}"""))
+        e.handle(json("""{"type":"files:index-changed","projectName":"app"}"""))
+        e.handle(json("""{"type":"file:changed","path":"no-project.ts"}"""))
+        assertEquals(listOf("changed app", "rebuilt app"), heard)
+    }
 }
 
 class SessionSearchTest {

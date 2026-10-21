@@ -100,11 +100,15 @@ class ApiClient(val baseUrl: HttpUrl, val token: String) {
         call(if (pinned) "PUT" else "DELETE", "${chatPath(project)}/sessions/${escape(sessionId)}/pin")
     }
 
-    /** A new session; the server's default provider when [providerId] is null. */
-    suspend fun createSession(project: String, providerId: String?, title: String? = null): SessionInfo {
+    /**
+     * A new session; the server's default provider when [providerId] is null. [clearedFrom] is the
+     * session a `/clear` left, which the server keeps as its lineage.
+     */
+    suspend fun createSession(project: String, providerId: String?, title: String? = null, clearedFrom: String? = null): SessionInfo {
         val body = buildJsonObject {
             if (providerId != null) put("providerId", providerId)
             if (title != null) put("title", title)
+            if (clearedFrom != null) put("clearedFrom", clearedFrom)
         }
         val json = call("POST", "${chatPath(project)}/sessions", body = body)
         return SessionInfo.from(json) ?: throw PpmError.BadResponse("Unexpected session.")

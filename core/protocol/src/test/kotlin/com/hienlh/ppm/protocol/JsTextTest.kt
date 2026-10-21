@@ -1,0 +1,40 @@
+package com.hienlh.ppm.protocol
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class JsTextTest {
+    private fun text(vararg points: Int) = buildString { points.forEach(::appendCodePoint) }
+
+    @Test
+    fun `lower case is what Chrome and Bun give, the sigma by Unicode's Final_Sigma`() {
+        // Each answer as node and bun print it; Android had `ς` for the first, fourth and sixth.
+        val cases = listOf(
+            "docs/" + text(0x39F, 0x394, 0x39F, 0x3A3) + ".md" to "docs/" + text(0x3BF, 0x3B4, 0x3BF, 0x3C3) + ".md",
+            text(0x39F, 0x394, 0x39F, 0x3A3) to text(0x3BF, 0x3B4, 0x3BF, 0x3C2),
+            text(0x391, 0x3A3, 0x3A, 0x392) to text(0x3B1, 0x3C3, 0x3A, 0x3B2),
+            text(0x391, 0x3A3, 0x27, 0x392) to text(0x3B1, 0x3C3, 0x27, 0x3B2),
+            text(0x391, 0x3A3, 0x301) to text(0x3B1, 0x3C2, 0x301),
+            text(0x391, 0x3A3, 0x301, 0x392) to text(0x3B1, 0x3C3, 0x301, 0x3B2),
+            text(0x3A3) to text(0x3C3),
+            text(0x61, 0x3A3) to text(0x61, 0x3C2),
+            text(0x130) + "stanbul" to text(0x69, 0x307) + "stanbul",
+            text(0x391, 0x2B0, 0x3A3) to text(0x3B1, 0x2B0, 0x3C2),
+            text(0x391, 0x3A3, 0x2B0) to text(0x3B1, 0x3C2, 0x2B0),
+            text(0x391, 0x345, 0x3A3, 0x345) to text(0x3B1, 0x345, 0x3C2, 0x345),
+            text(0x3A3, 0x3A3, 0x3A3) to text(0x3C3, 0x3C3, 0x3C2),
+            "README.md" to "readme.md",
+        )
+        for ((input, expected) in cases) assertEquals(input, expected, jsLowercase(input))
+    }
+
+    @Test
+    fun `white space is JavaScript's`() {
+        for (point in listOf(0x09, 0x0A, 0x0D, 0x20, 0xA0, 0x1680, 0x2000, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF)) {
+            assertTrue(point.toString(16), isJsSpace(Char(point)))
+        }
+        for (point in listOf(0x08, 0x0E, 0x85, 0x180E, 0x200B, 0x2060, 0x61)) assertFalse(point.toString(16), isJsSpace(Char(point)))
+    }
+}

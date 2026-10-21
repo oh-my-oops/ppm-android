@@ -77,6 +77,12 @@ class GlobalEvents(
     /** PPM wrote to a repository of this project (`git:changed`): a commit, a checkout, a push. */
     var onGitChanged: ((project: String) -> Unit)? = null
 
+    /** A file of this project changed on disk (`file:changed`). */
+    var onFileChanged: ((project: String) -> Unit)? = null
+
+    /** The server rebuilt this project's file list and it names other paths (`files:index-changed`). */
+    var onIndexChanged: ((project: String) -> Unit)? = null
+
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
     private var socket: SocketConnection? = null
 
@@ -169,6 +175,8 @@ class GlobalEvents(
             // Every phase from now on carries the new id, so the old one's `idle` never comes.
             "session:migrated" -> frame["oldSessionId"].string?.let { _running.value -= it }
             "git:changed" -> frame["projectName"].string?.let { onGitChanged?.invoke(it) }
+            "file:changed" -> frame["projectName"].string?.let { onFileChanged?.invoke(it) }
+            "files:index-changed" -> frame["projectName"].string?.let { onIndexChanged?.invoke(it) }
         }
     }
 

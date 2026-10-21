@@ -3,6 +3,7 @@ package com.hienlh.ppm.app
 import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.ui.text.TextRange
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Stable
@@ -49,6 +50,7 @@ import com.hienlh.ppm.design.ViewerImage
 import com.hienlh.ppm.protocol.ChatDraft
 import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.DraftAttachment
+import com.hienlh.ppm.protocol.FileMention
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.ProjectTags
 import com.hienlh.ppm.protocol.ProviderInfo
@@ -57,14 +59,18 @@ import com.hienlh.ppm.protocol.ServerInfo
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionTag
 import com.hienlh.ppm.protocol.SessionUnread
+import com.hienlh.ppm.protocol.SlashItem
+import com.hienlh.ppm.protocol.SlashTrigger
 import com.hienlh.ppm.protocol.ThemeSelection
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.double
 import com.hienlh.ppm.protocol.sortedForList
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatSearch
+import com.hienlh.ppm.state.ClientCommand
 import com.hienlh.ppm.state.DraftLocalStore
 import com.hienlh.ppm.state.DraftSync
+import com.hienlh.ppm.state.FileIndexStore
 import com.hienlh.ppm.state.GlobalEvents
 import com.hienlh.ppm.state.HealthCheck
 import com.hienlh.ppm.state.HealthWatch
@@ -75,6 +81,7 @@ import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.RejectedSend
 import com.hienlh.ppm.state.messageWithAttachments
+import com.hienlh.ppm.state.SlashItemsStore
 import com.hienlh.ppm.state.selectInlineImages
 import com.hienlh.ppm.state.windows.MAX_WINDOWS
 import com.hienlh.ppm.state.windows.WindowKind
@@ -155,6 +162,14 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         private set
 
     var api by mutableStateOf<ApiClient?>(null)
+        private set
+
+    /** Each project's `/` list per provider (`slash-items-cache.ts`), for the open server. */
+    var slashItems by mutableStateOf<SlashItemsStore?>(null)
+        private set
+
+    /** The open project's file list, which the `@` picker searches (the web's file-store index). */
+    var fileIndex by mutableStateOf<FileIndexStore?>(null)
         private set
     var info by mutableStateOf<ServerInfo?>(null)
         private set
@@ -463,6 +478,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         events?.stop()
         events = null
         api = null
+        slashItems = null
+        fileIndex = null
         info = null
         projects = emptyList()
         projectsLoad = Load.Idle
@@ -488,6 +505,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             ApiClient(url, token)
         }
         this.api = api
+        slashItems = SlashItemsStore(scope)
+        fileIndex = FileIndexStore(api, scope)
         openWorkspace(api)
         startEvents(api)
         scope.launch { readAddresses(api) }
@@ -649,6 +668,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         events.onReady = { scope.launch { refreshSessions(quiet = true) } }
         events.isShown = { id -> windowVisible && activeSessionId == id }
         events.onGitChanged = { gitChanged.tryEmit(it) }
+        // A change only marks the list stale; it is read again when a picker shows it.
+        events.onFileChanged = { fileIndex?.markStale(it) }
+        events.onIndexChanged = { fileIndex?.rebuilt(it) }
         this.events = events
         events.start()
     }
@@ -1150,6 +1172,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     }
 
     private fun resetProjectState() {
+        fileIndex?.reset()
         sessions = emptyList()
         sessionsLoad = Load.Idle
         hasMoreSessions = false
@@ -1342,6 +1365,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                 ?: SessionInfo(id = sessionId, providerId = tab.metaString("providerId") ?: "claude", title = tab.title)
             chats[id] = ChatTab(id, session, project).also { chat ->
                 pendingDrafts.remove(sessionId)?.let { chat.draft.setTextAndPlaceCursorAtEnd(it) }
+                chat.clientCommand = { text -> runClientCommand(chat, text) }
             }
         }
         val active = state.activeGridTab
@@ -1805,16 +1829,17 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /**
      * A new chat in a new tab (in [panelId] when given). With no [providerId], the provider the
      * web would pick: the last focused chat's when the server follows focus, else its default.
-     * [draft] waits in its message box, to be edited before it is sent.
+     * [draft] waits in its message box, to be edited before it is sent. A `/clear` names the chat
+     * it left in [clearedFrom], and its [title] if it was given one.
      */
-    suspend fun newChat(providerId: String? = null, panelId: String? = null, draft: String? = null) {
+    suspend fun newChat(providerId: String? = null, panelId: String? = null, draft: String? = null, title: String? = null, clearedFrom: String? = null) {
         val api = api ?: return
         val project = selectedProject ?: return
         try {
             // Captured now, before another panel can take focus; unread, the server picks its default.
             val focused = layout?.lastFocusedChatProviders?.get(project)
             val provider = providerId ?: quietly { api.newChatProviderSettings() }?.resolve(focused)
-            val session = api.createSession(project, provider)
+            val session = api.createSession(project, provider, title, clearedFrom)
             if (selectedProject != project) return
             sessions = (listOf(session) + sessions.filter { it.id != session.id }).sortedForList()
             if (draft != null) pendingDrafts[session.id] = draft
@@ -1823,6 +1848,54 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             throw error
         } catch (error: Exception) {
             actionError = describe(error)
+        }
+    }
+
+    /** Reads [tab]'s `/` list unless one read in the last half hour is held (`loadSlashItems`). */
+    fun loadSlashItems(tab: ChatTab) {
+        val api = api ?: return
+        val store = slashItems ?: return
+        scope.launch { store.load(api, tab.project, tab.session.providerId, tab.session.id) }
+    }
+
+    /**
+     * The slash picker's Refresh: the server reads skills from disk again, then [tab]'s list is
+     * read. Its arrows turn until the server has answered, whether or not the picker stays open.
+     */
+    fun refreshSlashItems(tab: ChatTab) {
+        val api = api ?: return
+        val store = slashItems ?: return
+        if (tab.slashRefreshing) return
+        tab.slashRefreshing = true
+        scope.launch {
+            try {
+                store.refresh(api, tab.project, tab.session.providerId, tab.session.id)
+            } finally {
+                tab.slashRefreshing = false
+            }
+        }
+    }
+
+    /** A slash item picked in [tab]: into its box, and first among the recent ones. */
+    fun pickSlash(tab: ChatTab, item: SlashItem, raiseKeyboard: Boolean) {
+        tab.pickSlash(item, raiseKeyboard)
+        val api = api ?: return
+        slashItems?.recordUse(item, api, tab.project, tab.session.providerId)
+    }
+
+    /** What [ChatTab.clientCommand] answers: `/clear` opens a new chat beside [tab], one written while replying is refused. */
+    private fun runClientCommand(tab: ChatTab, text: String): Boolean? {
+        val items = slashItems?.payload(tab.project, tab.session.providerId)?.items.orEmpty()
+        return when (val command = ClientCommand.of(text, items, replying = tab.replyTo != null)) {
+            null -> null
+            ClientCommand.Refused -> {
+                actionError = "Cancel reply before running this command"
+                false
+            }
+            is ClientCommand.Clear -> {
+                scope.launch { newChat(tab.session.providerId, panelOf(tab.tabId), title = command.title, clearedFrom = tab.session.id) }
+                true
+            }
         }
     }
 
@@ -1944,6 +2017,89 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
     /** A loaded draft went into the box, for the box to take the focus at its end; its composer clears it. */
     var draftFocus by mutableStateOf(false)
 
+    /** What is typed after the `/` that opened the slash picker (`slashFilter`); null while it is closed. */
+    var slashQuery by mutableStateOf<String?>(null)
+        private set
+
+    /** What is typed after the `@` that opened the file picker (`fileFilter`); null while it is closed. */
+    var fileQuery by mutableStateOf<String?>(null)
+        private set
+
+    /** The slash picker's highlighted row (`selectedIndex`), the first again whenever its query changes. */
+    var slashSelection by mutableIntStateOf(0)
+
+    /** The file picker's highlighted row, the first again whenever its query changes. */
+    var fileSelection by mutableIntStateOf(0)
+
+    /** The slash picker's Refresh is waiting on the server (`refreshing`): its arrows turn, and another press does nothing. */
+    var slashRefreshing by mutableStateOf(false)
+
+    /**
+     * Acts on a message the app runs itself (`handleInputSend`): false keeps it in the box, true
+     * when it ran, null for any other message. Set by the model.
+     */
+    var clientCommand: ((String) -> Boolean?)? = null
+
+    /**
+     * The pickers after the user changed the text (`updatePickerState`), from what is left of
+     * the caret: the slash picker first, else the file picker, else neither.
+     */
+    fun updatePickers(text: CharSequence, caret: Int) {
+        val before = text.subSequence(0, caret.coerceIn(0, text.length)).toString()
+        val slash = SlashTrigger.queryBefore(before)
+        showSlash(slash)
+        showFiles(if (slash == null) FileMention.queryBefore(before) else null)
+    }
+
+    fun closePickers() {
+        showSlash(null)
+        showFiles(null)
+    }
+
+    // A closed picker's filter is "" on the web, so one opened again on nothing typed keeps its row.
+    private fun showSlash(query: String?) {
+        if ((query ?: "") != (slashQuery ?: "")) slashSelection = 0
+        slashQuery = query
+    }
+
+    private fun showFiles(query: String?) {
+        if ((query ?: "") != (fileQuery ?: "")) fileSelection = 0
+        fileQuery = query
+    }
+
+    /**
+     * A slash item picked (`slashSelected`): an agent becomes the chip and its `/query` goes; any
+     * other takes the `/query`'s place as it is typed, with its sigil and a space, the caret after.
+     * [raiseKeyboard] as for [requestFocus]: a key leaves the box focused, a tap took the focus.
+     */
+    fun pickSlash(item: SlashItem, raiseKeyboard: Boolean) {
+        val text = draft.text.toString()
+        val caret = draft.selection.min
+        val before = text.substring(0, caret)
+        val head = if (item.type == "agent") SlashTrigger.stripQuery(before) else SlashTrigger.replaceQuery(before, item.invocation)
+        if (item.type == "agent") agent = item.name
+        draft.edit {
+            replace(0, length, head + text.substring(caret))
+            selection = TextRange(head.length)
+        }
+        closePickers()
+        // The web leaves the draft as it was until the next keystroke.
+        edited()
+        requestFocus(raiseKeyboard)
+    }
+
+    /** A file picked (`fileSelected`): `@path ` in place of the `@query` left of the caret, else at the end. */
+    fun pickFile(path: String, raiseKeyboard: Boolean) {
+        val picked = FileMention.pick(path, draft.text.toString(), draft.selection.min)
+        draft.edit {
+            replace(0, length, picked.text)
+            selection = TextRange(picked.caret)
+        }
+        showFiles(null)
+        edited()
+        requestFocus(raiseKeyboard)
+    }
+
     fun selectReply(reply: ReplyReference?) {
         replyTo = reply
         edited()
@@ -2024,6 +2180,19 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
         }
         // The agent goes in as words the model delegates on; the bubble turns them back into its chip.
         val text = if (agent != null) "Use the $agent agent to $typed".trimEnd() else typed
+        closePickers()
+        when (clientCommand?.invoke(text)) {
+            false -> {
+                pendingSend = false
+                return
+            }
+            true -> {
+                drafts?.clear()
+                emptyBox()
+                return
+            }
+            null -> {}
+        }
         val images = selectInlineImages(ready.map { it.imageData })
         // The priority goes only with a message sent during a turn, and is Queue again after it.
         chat.send(
@@ -2035,10 +2204,15 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
         )
         // Only now: the message is on the session's socket.
         drafts?.clear()
+        emptyBox()
+    }
+
+    /** The box after a send: no text, files, agent or reply, Queue again. */
+    private fun emptyBox() {
         for (attachment in attachments) attachment.file?.parentFile?.deleteRecursively()
         draft.clearText()
         attachments.clear()
-        this.agent = null
+        agent = null
         replyTo = null
         pendingSend = false
         priority = MessagePriority.DEFAULT

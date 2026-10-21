@@ -145,10 +145,11 @@ private val chipText = ppmText(11.5f, lineHeight = 17.25f)
  * and Send, or Stop while the turn runs and nothing is typed. A phone draws the `md:hidden` rows,
  * a tablet the desktop ones. [narrow] is the chat's `@max-[420px]` — the mode and priority chips
  * keep only their icons, and on a tablet the chips stay on one line. The mic is left out until
- * this app has it. [fileDrop] takes what is dropped on the text, where its own field would.
+ * this app has it. [fileDrop] takes what is dropped on the text, where its own field would; the
+ * [pickers] open over the box take its keys first.
  */
 @Composable
-fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState, narrow: Boolean, fileDrop: ChatFileDrop) {
+fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState, narrow: Boolean, fileDrop: ChatFileDrop, pickers: ComposerPickers) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     val running = state.isRunning
@@ -194,6 +195,11 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
 
     // The send lives on the tab, so one queued behind an upload still goes with this box off screen.
     fun send() = tab.submit()
+
+    // The keyboard's Send is the page's Return, which a picker on screen takes.
+    fun keyboardSend() {
+        if (!pickers.send()) send()
+    }
     val context = LocalContext.current
     val attach = rememberAttachPicker { uris -> model.attach(context, tab, uris) }
     // The box pasted into kept its focus, so the keyboard stays as it was.
@@ -221,6 +227,8 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
     val onKey: (KeyEvent) -> Boolean = { event ->
         if (event.type != KeyEventType.KeyDown) {
             false
+        } else if (pickers.key(event)) {
+            true
         } else {
             when {
                 // A keyboard's Return sends and Shift+Return breaks the line, as on the web.
@@ -296,7 +304,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 AttachButton(mobile = true, onClick = attach)
                 // `text-sm py-1.5 max-h-20`, the `py-1.5` inside the 80 px; a phone's inputs are 16 px.
                 ComposerField(
-                    tab, focus, quietFocus, focusQuietly, onKey, ::send, pasteImage, fileDrop,
+                    tab, focus, quietFocus, focusQuietly, onKey, ::keyboardSend, pasteImage, fileDrop,
                     style = ppmText(16f, lineHeight = INPUT_LINE),
                     padding = 6.dp,
                     maxHeight = 80.dp,
@@ -329,7 +337,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 AttachButton(mobile = false, onClick = attach)
                 // `text-sm leading-relaxed py-2 max-h-[90px]`, the `py-2` inside the 90 px.
                 ComposerField(
-                    tab, focus, quietFocus, focusQuietly, onKey, ::send, pasteImage, fileDrop,
+                    tab, focus, quietFocus, focusQuietly, onKey, ::keyboardSend, pasteImage, fileDrop,
                     style = ppmText(14f, lineHeight = 14f * 1.625f),
                     padding = 8.dp,
                     maxHeight = 90.dp,
@@ -421,13 +429,15 @@ private fun ComposerField(
                 }
                 true
             },
-        // Typing turns a recalled message back into a draft, and saves it. Only what the user does
-        // runs this, not the recall's own writes; the IME runs it for a moved caret too, which the
-        // web's `onChange` never hears of, so only a changed text counts.
+        // Typing turns a recalled message back into a draft, saves it and opens or closes the
+        // pickers. Only what the user does runs this, not the recall's or a pick's own writes; the
+        // IME runs it for a moved caret too, which the web's `onChange` never hears of, so only a
+        // changed text counts.
         inputTransformation = remember(tab) {
             InputTransformation {
                 if (!asCharSequence().contentEquals(originalText)) {
                     tab.historyIndex = -1
+                    tab.updatePickers(asCharSequence(), selection.min)
                     tab.edited(asCharSequence())
                 }
             }

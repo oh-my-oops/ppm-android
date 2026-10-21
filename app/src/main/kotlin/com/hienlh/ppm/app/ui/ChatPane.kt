@@ -220,7 +220,9 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     val list = tab.historyList
                     if (historyOpen && list != null) ChatHistoryDropdown(model, tab, list) { historyOpen = false }
                 }
-                ChatComposer(model, tab, chat, state, narrow, fileDrop)
+                val pickers = rememberComposerPickers(model, tab)
+                ComposerPickerList(model, tab, pickers)
+                ChatComposer(model, tab, chat, state, narrow, fileDrop, pickers)
             }
         }
         if (fileDrop.showing) DropFilesOverlay()
