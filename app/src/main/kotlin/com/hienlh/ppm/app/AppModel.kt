@@ -39,7 +39,9 @@ import com.hienlh.ppm.client.setDefaultTag
 import com.hienlh.ppm.client.setTag
 import com.hienlh.ppm.client.uiPrefs
 import com.hienlh.ppm.client.updateTag
+import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.PpmTheme
+import com.hienlh.ppm.design.ViewerImage
 import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.ProjectTags
@@ -335,6 +337,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** The session whose Delete was chosen, until the user confirms. */
     var confirmDeleteSession by mutableStateOf<SessionInfo?>(null)
+
+    /** The image lightbox, while it is open (`useImageOverlay`). */
+    var lightbox by mutableStateOf<LightboxRequest?>(null)
 
     /** What the command palette opened with while it is open; null while it is closed. */
     var paletteQuery by mutableStateOf<String?>(null)
@@ -870,23 +875,32 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         return load.await().also { if (it == null) projectImages.remove(key, load) }
     }
 
-    /** Images sent with messages, read or being read, by file name: the web's `imageBlobCache`, kept for the session. */
-    private val chatImages = mutableMapOf<String, Deferred<ImageBitmap?>>()
+    /** An image sent with a message: drawn, and its file, for the lightbox to save or copy. */
+    private class ChatUpload(val image: ImageBitmap, val bytes: ByteArray)
 
-    /** An image a message carries (`AuthImageThumbnail`); null when it will not load, and asked again next time. */
-    suspend fun chatImage(project: String, path: String): ImageBitmap? {
+    /** Images sent with messages, read or being read, by file name: the web's `imageBlobCache`, kept for the session. */
+    private val chatImages = mutableMapOf<String, Deferred<ChatUpload?>>()
+
+    private suspend fun chatUpload(project: String, path: String): ChatUpload? {
         val api = api ?: return null
         val key = path.split('/', '\\').last()
         val load = chatImages.getOrPut(key) {
             scope.async {
                 quietly {
                     val bytes = api.uploadedFile(project, path)
-                    withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }
+                    withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }?.let { ChatUpload(it, bytes) }
                 }
             }
         }
         return load.await().also { if (it == null) chatImages.remove(key, load) }
     }
+
+    /** An image a message carries (`AuthImageThumbnail`); null when it will not load, and asked again next time. */
+    suspend fun chatImage(project: String, path: String): ImageBitmap? = chatUpload(project, path)?.image
+
+    /** The same image's file, for the lightbox: the blob the web's thumbnail hands it. */
+    suspend fun chatImageFile(project: String, path: String): ViewerImage? =
+        chatUpload(project, path)?.let { ViewerImage(path.split('/', '\\').last(), it.bytes, null) }
 
     /**
      * An image a tool card previews (`useBlobUrl`): read each time a card asks, as the web reads it
@@ -1814,8 +1828,11 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
 /**
  * What `toast.error(title, { description, action })` shows: a title, a line under it, and one
  * button that runs [action] and closes the toast. Each one is a toast of its own, even with the
- * text of the last.
+ * text of the last. Not an [error], it is a plain `toast()`, with no icon.
  */
-class ErrorToastMessage(val title: String, val description: String? = null, val action: Action? = null) {
+class ErrorToastMessage(val title: String, val description: String? = null, val action: Action? = null, val error: Boolean = true) {
     class Action(val label: String, val run: () -> Unit)
 }
+
+/** The lightbox open on [images] at [index] (`useImageOverlay`'s state). */
+class LightboxRequest(val images: List<GalleryImage>, val index: Int)

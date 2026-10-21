@@ -65,6 +65,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.ClampedText
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.LucideIcon
@@ -72,6 +73,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.ViewerImage
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
@@ -98,9 +100,13 @@ fun interface ReplyTargets {
     }
 }
 
-/** An image sent with a message, read with the server's credentials (`useAuthBlob`); null when it will not load. */
-fun interface ChatImages {
+/** The images sent with a chat's messages, read with the server's credentials (`useAuthBlob`). */
+interface ChatImages {
+    /** The picture, for its thumbnail; null when it will not load. */
     suspend fun load(path: String): ImageBitmap?
+
+    /** Its file, for the lightbox; null when it will not load. */
+    suspend fun read(path: String): ViewerImage?
 }
 
 /** How this chat reads its images. None, and every thumbnail shows its broken-image icon. */
@@ -126,7 +132,7 @@ private val sky400 = Rgba(0.0, 187.79 / 255, 1.0, 1.0)
 /** `IMAGE_EXTS` in message-media.tsx. */
 private val IMAGE_EXTENSIONS = setOf(".png", ".jpg", ".jpeg", ".gif", ".webp")
 
-private fun isImagePath(path: String): Boolean {
+internal fun isImagePath(path: String): Boolean {
     val dot = path.lastIndexOf('.')
     return dot >= 0 && path.substring(dot).lowercase() in IMAGE_EXTENSIONS
 }
@@ -324,13 +330,20 @@ private fun LabelChip(label: String, fill: Rgba, stroke: Rgba, color: Rgba, icon
 
 /** An attachment's box: `rounded-md border-border/60 bg-background/40 px-1.5 py-0.5 text-[11px]`. */
 @Composable
-private fun AttachmentChip(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+private fun AttachmentChip(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
+    // An image's is a button: `hover:bg-surface transition-colors cursor-pointer`, lit while a finger is on it too.
+    val press = if (onClick == null) {
+        Modifier
+    } else {
+        Modifier.pointerHoverIcon(WebCursor.Pointer).ppmClickable(pressedColor = tokens.panel.color, hoverColor = tokens.panel.color, onClick = onClick)
+    }
     Row(
         modifier
             .clip(shape)
             .background(tokens.bgSolid.opacity(0.4).color)
+            .then(press)
             .cssBorder(tokens.border.opacity(0.6).color, shape)
             .padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -366,17 +379,22 @@ private sealed interface Thumbnail {
 
 /**
  * `AuthImageThumbnail`: a 16 px picture of the image in place of the icon, a pulsing square while
- * it loads and the image icon if it will not. The web opens it in its lightbox; this app has none
- * yet (3b.3), so a tap does nothing.
+ * it loads and the image icon if it will not. Once loaded, a tap opens it in the lightbox.
  */
 @Composable
 private fun ImageChip(path: String) {
     val tokens = LocalPpmTokens.current
     val images = LocalChatImages.current
+    val gallery = LocalChatGallery.current
     val thumbnail by produceState<Thumbnail>(Thumbnail.Loading, path, images) {
         value = images?.load(path)?.let(Thumbnail::Loaded) ?: Thumbnail.Failed
     }
-    AttachmentChip {
+    val open: () -> Unit = {
+        if (thumbnail is Thumbnail.Loaded && images != null) {
+            gallery?.open(GalleryImage(uploadImageKey(path), fileName(path)) { images.read(path) })
+        }
+    }
+    AttachmentChip(onClick = open) {
         val shape = RoundedCornerShape(6.dp)
         when (val shown = thumbnail) {
             is Thumbnail.Loaded -> Image(shown.image, fileName(path), Modifier.size(16.dp).clip(shape), contentScale = ContentScale.Crop)

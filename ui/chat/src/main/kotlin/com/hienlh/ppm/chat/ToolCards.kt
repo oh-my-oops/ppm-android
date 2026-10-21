@@ -32,6 +32,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -108,11 +110,17 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
     val isEdit = tool.name == "Edit" || tool.name == "MultiEdit"
     val imagePath = remember(tool.name, tool.input, tool.requestId) { imageReadPath(tool) }
     // An edit opens on its diff, unless it failed and the diff was never applied; an image read on
-    // the picture, which is the point of the card.
-    var expanded by remember { mutableStateOf((isEdit && !isError) || imagePath != null) }
-    // An edit that fails shows nothing worth opening on; it collapses once.
+    // the picture, which is the point of the card. Opened or closed by hand, it stays so.
+    val openCards = LocalOpenCards.current
+    val id = tool.toolUseId?.takeIf { openCards != null }
+    var ownOpen by remember { mutableStateOf<Boolean?>(null) }
+    val expanded = (if (id != null) openCards?.get(id) else ownOpen) ?: ((isEdit && !isError) || imagePath != null)
+    val setExpanded: (Boolean) -> Unit = { open -> if (id != null) openCards?.put(id, open) else ownOpen = open }
+    // An edit that fails shows nothing worth opening on: it closes as the failure comes in.
+    var sawError by remember { mutableStateOf(isError) }
     LaunchedEffect(isError) {
-        if (isError && isEdit) expanded = false
+        if (isError && !sawError && isEdit) setExpanded(false)
+        sawError = isError
     }
     val interactive = tool.name in setOf("AskUserQuestion", "ExitPlanMode")
     val shape = RoundedCornerShape(11.dp)
@@ -126,7 +134,7 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
         Row(
             Modifier
                 .fillMaxWidth()
-                .ppmClickable(pressedColor = tokens.panel2.opacity(0.4).color, hoverColor = tokens.panel2.opacity(0.4).color) { expanded = !expanded }
+                .ppmClickable(pressedColor = tokens.panel2.opacity(0.4).color, hoverColor = tokens.panel2.opacity(0.4).color) { setExpanded(!expanded) }
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -157,6 +165,13 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
         }
     }
 }
+
+/**
+ * Whether each card is open, by call, kept by the transcript: the web's keeps every card mounted,
+ * so one closed by hand stays closed after it scrolls away and back, and the lightbox leaves out a
+ * closed card's picture, which has no `<img>` for it to collect. None, and each card keeps its own.
+ */
+internal val LocalOpenCards = staticCompositionLocalOf<SnapshotStateMap<String, Boolean>?> { null }
 
 /**
  * A file change shows itself in the details, so its "updated successfully" is noise; an image

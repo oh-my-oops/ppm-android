@@ -59,6 +59,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
@@ -71,7 +73,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.app.LightboxRequest
 import com.hienlh.ppm.app.ui.tablet.TabletShell
+import com.hienlh.ppm.design.ImageViewer
+import com.hienlh.ppm.design.LocalImageViewer
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.PpmThemeProvider
@@ -141,11 +146,18 @@ fun PpmRoot(model: AppModel) {
         val mobile = maxWidth < 768.dp
         // The layout follows the window, not the device: a rotation or a split screen can cross it.
         SideEffect { model.setWindowWide(!mobile) }
-        CompositionLocalProvider(LocalConnectionLost provides model.connectionLost) {
+        val viewer = remember(model) { ImageViewer { images, index -> model.lightbox = LightboxRequest(images, index) } }
+        CompositionLocalProvider(LocalConnectionLost provides model.connectionLost, LocalImageViewer provides viewer) {
             PpmThemeProvider(theme, mobile) {
-                // `backdrop-blur-sm` under the connection-lost overlay: CSS's blur(8px) is a sigma of 8,
-                // which Android's blur reaches at a radius of 13 (sigma = 0.577 radius + 0.5).
-                Box(Modifier.fillMaxSize().then(if (model.connectionLost) Modifier.blur(13.dp) else Modifier)) {
+                // Chrome's own word on a download, which the web leaves to the browser.
+                val download = rememberImageDownload { saved ->
+                    model.toast = ErrorToastMessage("File downloaded", "${saved.name} (${downloadSize(saved.size)})", ErrorToastMessage.Action("Open", saved.open), error = false)
+                }
+                val context = LocalContext.current
+                val clipboard = LocalClipboard.current
+                // `backdrop-blur-sm` under the connection-lost overlay and the lightbox: CSS's blur(8px) is
+                // a sigma of 8, which Android's blur reaches at a radius of 13 (sigma = 0.577 radius + 0.5).
+                Box(Modifier.fillMaxSize().then(if (model.connectionLost || model.lightbox != null) Modifier.blur(13.dp) else Modifier)) {
                     when {
                         !model.hasServer -> ConnectScreen(model, signIn = false)
                         mobile -> PhoneShell(model)
@@ -156,6 +168,9 @@ fun PpmRoot(model: AppModel) {
                 if (model.addingServer) ConnectScreen(model, signIn = false, onCancel = { model.addingServer = false })
                 Dialogs(model)
                 model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }
+                model.lightbox?.let { request ->
+                    ImageLightbox(request, onClose = { model.lightbox = null }, onDownload = download, onCopy = { copyImage(context, clipboard, it) })
+                }
                 if (model.connectionLost) ConnectionLostOverlay(model)
                 ErrorToast(model.toast, mobile, narrow = maxWidth <= 600.dp, dark = model.theme.isDark) { model.toast = null }
             }
@@ -252,13 +267,15 @@ private fun ErrorToast(message: ErrorToastMessage?, mobile: Boolean, narrow: Boo
                         .hoverable(overToast)
                         .cssBorder(tokens.border.color, shape)
                         // sonner's `padding: 16px`, less the 3 px the icon's `margin-left: -3px` takes back.
-                        .padding(start = 13.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
+                        .padding(start = if (shown?.error != false) 13.dp else 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     // `[data-icon]`: 16 px and `margin-right: 4px`, its svg `margin-left: -1px`.
-                    Box(Modifier.padding(end = 4.dp).size(16.dp)) {
-                        PpmIcon(ProductIcon.OctagonXIcon, 16.dp, tokens.text.color, Modifier.offset(x = (-1).dp))
+                    if (shown?.error != false) {
+                        Box(Modifier.padding(end = 4.dp).size(16.dp)) {
+                            PpmIcon(ProductIcon.OctagonXIcon, 16.dp, tokens.text.color, Modifier.offset(x = (-1).dp))
+                        }
                     }
                     // `[data-content]`, `gap: 2px`: the title at 500 on a 1.5 line, the description at 400
                     // on 1.4, in sonner's own grey.

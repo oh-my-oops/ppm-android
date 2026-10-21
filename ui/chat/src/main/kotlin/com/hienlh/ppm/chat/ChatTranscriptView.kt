@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
@@ -39,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -68,6 +70,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalImageViewer
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
@@ -199,62 +202,81 @@ private fun TranscriptList(
     // The user's messages as items of that list, oldest first.
     val userItems = remember(rows, head) { rows.indices.filter { rows[it].item.role == ChatItem.Role.USER }.map { head + it } }
     val nav by remember(userItems, density) { derivedStateOf { list.messageNav(userItems, density) } }
-    Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
-            TaskTracker(state.tasks)
-            LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scroll.connection), state = list) {
-                if (state.hasEarlier) item(key = SENTINEL) { Spacer(Modifier.fillMaxWidth().height(1.dp)) }
-                if (state.loadingEarlier) item(key = SKELETON) { PreCompactSkeleton() }
-                for (row in rows) {
-                    item(key = row.item.id, contentType = row.item.role) {
-                        val reply = remember(row, state.sessionId, state.providerId, onReply) { replyAction(row, state, onReply) }
-                        val place = Modifier.replyFlash(flashing == row.item.id, tokens.accent).padding(start = 16.dp, end = 16.dp, top = 16.dp)
-                        val compaction = row.item.compaction
-                        val message: @Composable (Modifier) -> Unit = { modifier ->
-                            ChatMessageView(
-                                row.item,
-                                row.actions?.copy(onReply = reply),
-                                modifier,
-                                replies,
-                                onReply = reply.takeIf { row.item.role == ChatItem.Role.USER },
-                            ) { onDismiss(row.item.id) }
-                        }
-                        // Above the summary: the rule marks where the conversation was cut.
-                        if (compaction == null) {
-                            message(place)
-                        } else {
-                            Column(place.fillMaxWidth()) {
-                                CompactionDivider(compaction)
-                                message(Modifier)
+    // Which cards are open, and the pictures a tap opens the lightbox among: the whole chat's, as
+    // the web's transcript has every message mounted, the lazy list only those on screen.
+    val openCards = remember { mutableStateMapOf<String, Boolean>() }
+    val viewer = LocalImageViewer.current
+    val uploads = LocalChatImages.current
+    val toolImages = LocalToolImages.current
+    val items by rememberUpdatedState(state.items)
+    val streaming by rememberUpdatedState(live)
+    val gallery = remember(viewer, uploads, toolImages) {
+        ChatGallery { self ->
+            val images = galleryRefs(items, streaming) { tool -> tool.toolUseId?.let { openCards[it] } ?: true }
+                .map { galleryImage(it, uploads, toolImages) }
+            val index = images.indexOfFirst { it.key == self.key }
+            // The picture tapped is the one already in hand.
+            if (index < 0) viewer?.show(listOf(self), 0) else viewer?.show(images.toMutableList().also { it[index] = self }, index)
+        }
+    }
+    CompositionLocalProvider(LocalOpenCards provides openCards, LocalChatGallery provides gallery) {
+        Box(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize()) {
+                TaskTracker(state.tasks)
+                LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scroll.connection), state = list) {
+                    if (state.hasEarlier) item(key = SENTINEL) { Spacer(Modifier.fillMaxWidth().height(1.dp)) }
+                    if (state.loadingEarlier) item(key = SKELETON) { PreCompactSkeleton() }
+                    for (row in rows) {
+                        item(key = row.item.id, contentType = row.item.role) {
+                            val reply = remember(row, state.sessionId, state.providerId, onReply) { replyAction(row, state, onReply) }
+                            val place = Modifier.replyFlash(flashing == row.item.id, tokens.accent).padding(start = 16.dp, end = 16.dp, top = 16.dp)
+                            val compaction = row.item.compaction
+                            val message: @Composable (Modifier) -> Unit = { modifier ->
+                                ChatMessageView(
+                                    row.item,
+                                    row.actions?.copy(onReply = reply),
+                                    modifier,
+                                    replies,
+                                    onReply = reply.takeIf { row.item.role == ChatItem.Role.USER },
+                                ) { onDismiss(row.item.id) }
+                            }
+                            // Above the summary: the rule marks where the conversation was cut.
+                            if (compaction == null) {
+                                message(place)
+                            } else {
+                                Column(place.fillMaxWidth()) {
+                                    CompactionDivider(compaction)
+                                    message(Modifier)
+                                }
                             }
                         }
                     }
-                }
-                if (!live.isNullOrEmpty()) {
-                    item(key = "live") {
-                        AssistantBlocks(live, live = state.isRunning, actions = null, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp))
+                    if (!live.isNullOrEmpty()) {
+                        item(key = "live") {
+                            AssistantBlocks(live, live = state.isRunning, actions = null, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp))
+                        }
+                    }
+                    if (trailing) {
+                        item(key = "trailing") { Trailing(state, onRespond) }
                     }
                 }
-                if (trailing) {
-                    item(key = "trailing") { Trailing(state, onRespond) }
-                }
             }
+            ScrollNavigator(
+                nav,
+                goUp = { scope.launch { list.toPreviousMessage(userItems, density, scroll::release) } },
+                goDown = { scope.launch { list.toNextMessage(userItems, density, scroll::toEnd) } },
+                goBottom = { scope.launch { scroll.toEnd() } },
+                jumps = jumps,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 12.dp),
+            )
+            // Both over the top of the chat, the tracker too; the errors button above the other.
+            val earlierError = state.earlierError
+            if (earlierError != null && !state.loadingEarlier) {
+                EarlierErrorPill(earlierError, onLoadEarlier, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+            }
+            val errors = rows.count { it.item.role == ChatItem.Role.SYSTEM }
+            if (errors > 1) ClearErrorsButton(errors, onClearErrors, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
         }
-        ScrollNavigator(
-            nav,
-            goUp = { scope.launch { list.toPreviousMessage(userItems, density, scroll::release) } },
-            goDown = { scope.launch { list.toNextMessage(userItems, density, scroll::toEnd) } },
-            goBottom = { scope.launch { scroll.toEnd() } },
-            jumps = jumps,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 12.dp),
-        )
-        // Both over the top of the chat, the tracker too; the errors button above the other.
-        val earlierError = state.earlierError
-        if (earlierError != null && !state.loadingEarlier) {
-            EarlierErrorPill(earlierError, onLoadEarlier, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
-        }
-        val errors = rows.count { it.item.role == ChatItem.Role.SYSTEM }
-        if (errors > 1) ClearErrorsButton(errors, onClearErrors, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
     }
 }
 

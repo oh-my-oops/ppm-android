@@ -133,7 +133,13 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         // The chat's own `@container`: under 420 px the chips drop their words.
         val narrow = maxWidth <= 420.dp
         Column(Modifier.fillMaxSize()) {
-            val images = remember(tab.project) { ChatImages { model.chatImage(tab.project, it) } }
+            val images = remember(tab.project) {
+                object : ChatImages {
+                    override suspend fun load(path: String) = model.chatImage(tab.project, path)
+
+                    override suspend fun read(path: String) = model.chatImageFile(tab.project, path)
+                }
+            }
             val toolImages = remember(tab.project) { ToolImages { model.toolImage(tab.project, it) } }
             val tabs = remember(tab.project) {
                 object : ChatTabs {

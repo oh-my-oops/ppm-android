@@ -75,12 +75,15 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.GalleryImage
+import com.hienlh.ppm.design.LocalImageViewer
 import com.hienlh.ppm.design.LocalPpmTheme
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.ViewerImage
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderPx
@@ -168,17 +171,6 @@ interface ChatTabs {
 /** How this chat opens tabs; none, and its file buttons do nothing, as the web's do without a project. */
 val LocalChatTabs = staticCompositionLocalOf<ChatTabs?> { null }
 
-/** One image of a lightbox: its name and the file's bytes. */
-class ViewerImage(val name: String, val bytes: ByteArray, val type: String?)
-
-/** The lightbox (`useImageOverlay`): [images] to move between, opened on [index]. */
-fun interface ImageViewer {
-    fun show(images: List<ViewerImage>, index: Int)
-}
-
-/** None, and "full size" does nothing. */
-val LocalImageViewer = staticCompositionLocalOf<ImageViewer?> { null }
-
 // Geometry (image-preview-geometry.ts)
 
 internal const val TILE_MIN_RATIO = 0.62
@@ -258,6 +250,14 @@ private val shownImages by lazy {
     }
 }
 
+/** What the card of [toolUseId] showed of [path], while it is still kept. */
+internal fun toolImageShown(toolUseId: String?, path: String): ToolImage.Loaded? = toolUseId?.let { shownImages.get("$it\u0000$path") }
+
+/** [image] as that card's, read for it by someone else (the lightbox), so the card does not read it again. */
+internal fun toolImageKept(toolUseId: String?, path: String, image: ToolImage.Loaded) {
+    toolUseId?.let { shownImages.put("$it\u0000$path", image) }
+}
+
 // The panel
 
 /** `--img-*`: the stage's surfaces are veils over the picture, so each mode has its own. */
@@ -314,7 +314,7 @@ internal fun ToolImagePreview(path: String, cardKey: String?) {
         val narrow = maxWidth < 470.dp
         when (val shown = image) {
             is ToolImage.Failed -> ImagePreviewFailure(shown.code) { attempt++ }
-            is ToolImage.Loaded -> Stage(shown, path, narrow, colors)
+            is ToolImage.Loaded -> Stage(shown, path, cardKey, narrow, colors)
             null -> {
                 val aspect = naturalSizes[path]?.let { previewLayout(it, TILE_WIDTH).aspect } ?: FALLBACK_ASPECT
                 ImagePreviewSkeleton(aspect, narrow, colors) { Actions(path, narrow, colors, onFull = {}) }
@@ -329,12 +329,18 @@ private fun innerShape(radius: Float): Shape = with(LocalDensity.current) { Roun
 
 /** The picture on its stage: a tile beside the facts, or across the stage when it is a panorama. */
 @Composable
-private fun Stage(image: ToolImage.Loaded, path: String, narrow: Boolean, colors: StageColors) {
+private fun Stage(image: ToolImage.Loaded, path: String, cardKey: String?, narrow: Boolean, colors: StageColors) {
     val tokens = LocalPpmTokens.current
+    val gallery = LocalChatGallery.current
     val viewer = LocalImageViewer.current
     val layout = previewLayout(image.natural, TILE_WIDTH)
     val name = basename(path)
-    val openFull = { viewer?.show(listOf(ViewerImage(name, image.bytes, image.type)), 0) ?: Unit }
+    // The tile and "full size" open the lightbox on this picture, among the chat's others.
+    val openFull = {
+        val self = GalleryImage(toolImageKey(cardKey, path), name) { ViewerImage(name, image.bytes, image.type) }
+        if (gallery != null) gallery.open(self) else viewer?.show(listOf(self), 0)
+        Unit
+    }
     val shape = RoundedCornerShape(8.dp)
     val inner = innerShape(8f)
     val gap = if (narrow) 11.dp else 14.dp
