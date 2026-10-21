@@ -68,6 +68,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -142,8 +143,15 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
     var modelOpen by remember { mutableStateOf(false) }
     // The model can't change mid-turn: its sheet closes as the turn starts.
     LaunchedEffect(running) { if (running) modelOpen = false }
-    // A reply picked or cancelled, a refused message put back or files added bring the keyboard here.
-    LaunchedEffect(tab) { snapshotFlow { tab.focusRequests }.drop(1).collect { focus.requestFocus() } }
+    // A reply picked or cancelled, a refused message put back or files added bring the keyboard here,
+    // even one Back put away: the web's button took the focus, so Chrome raises it for the textarea.
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(tab) {
+        snapshotFlow { tab.focusRequests }.drop(1).collect {
+            focus.requestFocus()
+            keyboard?.show()
+        }
+    }
 
     // The send lives on the tab, so one queued behind an upload still goes with this box off screen.
     fun send() = tab.submit()
