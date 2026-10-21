@@ -764,11 +764,11 @@ private fun TodoList(todos: List<JsonElement>) {
                     "in_progress" -> "▶" to tokens.warning
                     else -> "○" to tokens.text3
                 }
-                BasicText(glyph, Modifier.alignByBaseline(), cardText.copy(color = color.color))
+                // `items-start` and the mark's `mt-0.5`: it sits 2 px below the text, and each row is 2 px taller for it.
+                BasicText(glyph, Modifier.padding(top = 2.dp), cardText.copy(color = color.color))
                 BasicText(
                     todo["content"].string ?: "",
-                    Modifier.alignByBaseline(),
-                    cardText.copy(
+                    style = cardText.copy(
                         color = (if (done) tokens.text3 else tokens.text2).color,
                         textDecoration = if (done) TextDecoration.LineThrough else null,
                     ),
