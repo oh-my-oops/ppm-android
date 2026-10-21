@@ -1879,6 +1879,12 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
     /** The message the next one answers, shown over the message box until it is sent or cancelled. */
     var replyTo by mutableStateOf<ReplyReference?>(null)
 
+    /** The subagent the next message delegates to, a chip over the box; sent as "Use the X agent to …". */
+    var agent by mutableStateOf<String?>(null)
+
+    /** Which past message ↑/↓ put in the box, counted back from the newest; -1 while it holds a draft. */
+    var historyIndex = -1
+
     /** Counts each time the message box is asked for the keyboard: a reply picked or cancelled, a refused message put back. */
     var focusRequests by mutableIntStateOf(0)
         private set

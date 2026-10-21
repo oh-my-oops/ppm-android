@@ -125,9 +125,9 @@ private const val SM_LINE = 20f / 14f
 private const val XS_LINE = 16f / 12f
 
 /** Tailwind's `sky-500`, `sky-600` and `sky-400`, as Chrome draws their `oklch()` in sRGB. */
-private val sky500 = Rgba(0.0, 165.69 / 255, 244.07 / 255, 1.0)
-private val sky600 = Rgba(0.0, 132.13 / 255, 209.05 / 255, 1.0)
-private val sky400 = Rgba(0.0, 187.79 / 255, 1.0, 1.0)
+val sky500 = Rgba(0.0, 165.69 / 255, 244.07 / 255, 1.0)
+val sky600 = Rgba(0.0, 132.13 / 255, 209.05 / 255, 1.0)
+val sky400 = Rgba(0.0, 187.79 / 255, 1.0, 1.0)
 
 /** `IMAGE_EXTS` in message-media.tsx. */
 private val IMAGE_EXTENSIONS = setOf(".png", ".jpg", ".jpeg", ".gif", ".webp")

@@ -197,7 +197,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     val list = tab.historyList
                     if (historyOpen && list != null) ChatHistoryDropdown(model, tab, list) { historyOpen = false }
                 }
-                MobileComposer(model, tab, chat, state, narrow)
+                ChatComposer(model, tab, chat, state, narrow)
             }
         }
     }
