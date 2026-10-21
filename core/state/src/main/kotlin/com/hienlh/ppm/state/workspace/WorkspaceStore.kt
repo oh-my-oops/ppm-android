@@ -90,6 +90,11 @@ class WorkspaceStore(
 
     private val s: WorkspaceState get() = _state.value
 
+    /** For the rules kept beside the store (`openAiTab`). */
+    internal val mobile: Boolean get() = isMobile()
+
+    internal fun clock(): Long = now()
+
     /** The saved window panels join the panels once, before the first project reads them. */
     private var windowPanelsHydrated = false
 

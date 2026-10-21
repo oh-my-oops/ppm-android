@@ -86,6 +86,51 @@ fun ClampedText(
     )
 }
 
+/**
+ * `truncate` (`overflow: hidden; text-overflow: ellipsis; white-space: nowrap`) as Chrome draws
+ * it (`NGLineTruncator::TruncateLine`): one line, cut back a character at a time until "…" fits
+ * after what is left, the "…" in the block's own [style]. Android's ellipsis instead takes the
+ * style of the run it lands in — a subtle mono detail's grey and its wider mono "…", where
+ * Chrome's is the line's colour in its own face.
+ *
+ * As [ClampedText], the whole line is laid out and clipped at the cut, so a selection is of the
+ * text itself; right-to-left text keeps Android's ellipsis.
+ */
+@Composable
+fun TruncatedText(
+    text: AnnotatedString,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    inlineContent: Map<String, InlineTextContent> = emptyMap(),
+) {
+    val bidi = remember(text) { Bidi.requiresBidi(text.text.toCharArray(), 0, text.length) }
+    if (bidi) {
+        BasicText(text, modifier, style, overflow = TextOverflow.Ellipsis, softWrap = false, maxLines = 1, inlineContent = inlineContent)
+        return
+    }
+    val measurer = rememberTextMeasurer()
+    val ellipsis = remember(measurer, style) { measurer.measure("…", style, maxLines = 1) }
+    var cut by remember { mutableStateOf<LineClamp.Cut?>(null) }
+    BasicText(
+        text,
+        modifier.drawWithContent {
+            val at = cut
+            if (at == null) {
+                drawContent()
+            } else {
+                clipRect(right = at.x) { this@drawWithContent.drawContent() }
+                drawText(ellipsis, topLeft = Offset(at.x, at.baseline - ellipsis.firstBaseline))
+            }
+        },
+        style,
+        onTextLayout = { layout -> cut = LineClamp.truncate(layout, ellipsis.getLineRight(0)) },
+        overflow = TextOverflow.Clip,
+        softWrap = false,
+        maxLines = 1,
+        inlineContent = inlineContent,
+    )
+}
+
 internal object LineClamp {
     /** The "…" goes at [x] on the last line shown, whose top is [top]; the text after [x] is hidden. */
     data class Cut(val x: Float, val top: Float, val baseline: Float)
@@ -108,6 +153,17 @@ internal object LineClamp {
         val characters = BreakIterator.getCharacterInstance().apply { setText(text) }
         val kept = keep(start, end, layout.layoutInput.constraints.maxWidth.toFloat(), ellipsis, right, characters::preceding, characters::following)
         return Cut(x = if (kept > start) right(kept) else layout.getLineLeft(line), top = layout.getLineTop(line), baseline = layout.getLineBaseline(line))
+    }
+
+    /** Where a `truncate` line is cut for an [ellipsis] that wide; null when the whole line fits. */
+    fun truncate(layout: TextLayoutResult, ellipsis: Float): Cut? {
+        val width = layout.layoutInput.constraints.maxWidth.toFloat()
+        val end = layout.getLineEnd(0, visibleEnd = true)
+        if (end == 0 || layout.getBoundingBox(end - 1).right <= width) return null
+        val characters = BreakIterator.getCharacterInstance().apply { setText(layout.layoutInput.text.text) }
+        val right = { k: Int -> layout.getBoundingBox(k - 1).right }
+        val kept = keep(0, end, width, ellipsis, right, characters::preceding, characters::following)
+        return Cut(x = if (kept > 0) right(kept) else layout.getLineLeft(0), top = layout.getLineTop(0), baseline = layout.getLineBaseline(0))
     }
 
     /**

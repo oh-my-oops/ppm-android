@@ -1,5 +1,7 @@
 package com.hienlh.ppm.client
 
+import com.hienlh.ppm.protocol.get
+import com.hienlh.ppm.protocol.string
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Request
@@ -72,4 +74,16 @@ suspend fun webFile(url: String): RawFile {
             }
         }
     }
+}
+
+/** What `GET /api/fs/stat` says of a path: the path it resolved to on the host, and whether it is a folder. */
+data class FsStat(val path: String, val name: String, val kind: String) {
+    val isDirectory: Boolean get() = kind == "directory"
+}
+
+/** `fsApi.stat`: [path] as the host reads it, `~` and all. */
+suspend fun ApiClient.fsStat(path: String): FsStat {
+    val data = call("GET", "/api/fs/stat", listOf("path" to path))
+    val resolved = data["path"].string ?: throw PpmError.BadResponse(ApiClient.NOT_PPM)
+    return FsStat(resolved, data["name"].string ?: "", data["kind"].string ?: "")
 }

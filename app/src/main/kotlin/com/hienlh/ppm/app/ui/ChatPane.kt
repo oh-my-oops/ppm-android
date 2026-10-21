@@ -150,11 +150,14 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     override suspend fun web(url: String) = model.webImage(url)
                 }
             }
-            val tabs = remember(tab.project) {
+            val tabs = remember(tab.project, tab.session.id) {
                 object : ChatTabs {
                     override fun openFile(path: String) = model.openFileTab(tab.project, path)
 
                     override fun openDiff(path: String, original: String, modified: String) = model.openDiffTab(tab.project, path, original, modified)
+
+                    override fun openToolFile(tool: String, path: String, line: Int?) =
+                        model.openToolFileTab(tab.project, tab.session.id, tool, path, line)
                 }
             }
             CompositionLocalProvider(

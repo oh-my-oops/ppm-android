@@ -1,0 +1,140 @@
+package com.hienlh.ppm.chat
+
+import com.hienlh.ppm.protocol.WireJson
+import com.hienlh.ppm.protocol.get
+import com.hienlh.ppm.protocol.string
+import com.hienlh.ppm.state.workspace.OPEN_FILE_TOOL
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.doubleOrNull
+import kotlin.math.floor
+
+/*
+ * A chat event read as a call of PPM's own tools, for the cards that show them: the tab tools
+ * (src/web/lib/tab-tool-call.ts) and the database tools (db-tool-call.ts). Claude names a tool
+ * `mcp__ppm-tabs__open_file`; Codex names it `ppm_tabs:open_file` and wraps the arguments as
+ * `{ server, tool, arguments }`, live and in the history read back alike.
+ */
+
+/** `open_file` / `open_preview`, with the path as the AI passed it: absolute, `~`-relative, or relative to the chat's project. */
+internal data class TabToolCall(val tool: String, val path: String, val line: Int? = null)
+
+/** The tab server's tools that take no file: their calls show in the generic card. */
+internal sealed interface DeviceToolCall {
+    data class OpenUrl(val url: String) : DeviceToolCall
+
+    data class ReadTerminal(val terminal: String? = null, val lines: Long? = null) : DeviceToolCall
+
+    data class RunInTerminal(val command: String, val cwd: String? = null) : DeviceToolCall
+}
+
+internal data class DbToolCall(
+    val tool: String,
+    val connection: String,
+    val sql: String,
+    val database: String? = null,
+    val reason: String? = null,
+    val expectedRows: Double? = null,
+)
+
+internal const val OPEN_URL_TOOL = "open_url"
+internal const val DB_EXECUTE_TOOL = "db_execute"
+
+private val TAB_TOOL_NAME = Regex("""(?:mcp__ppm-tabs__|ppm_tabs:)(open_file|open_preview)""")
+private val DEVICE_TOOL_NAME = Regex("""(?:mcp__ppm-tabs__|ppm_tabs:)(open_url|read_terminal|run_in_terminal)""")
+private val DB_TOOL_NAME = Regex("""(?:mcp__ppm-db__|ppm_db:)(db_query|open_query|db_execute)""")
+
+/** The highest line a tab opens at (`MAX_TAB_LINE`). */
+private const val MAX_TAB_LINE = 10_000_000
+
+/** What each database tool does, as its card names it (`DB_TOOL_LABELS`). */
+internal val DB_TOOL_LABELS = mapOf("db_query" to "Database query", "open_query" to "Open query", "db_execute" to "Database change")
+
+private fun JsonElement?.text(): String? = (this as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+/** A JSON number, as `typeof v === "number"` takes one. */
+private fun JsonElement?.number(): Double? = (this as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull
+
+/** The tab tool call an event is, under either provider's name, or null. */
+internal fun tabToolCall(name: String, input: JsonElement?): TabToolCall? {
+    val tool = TAB_TOOL_NAME.matchEntire(name)?.groupValues?.get(1) ?: return null
+    if (input !is JsonObject) return null
+    val args = if ("arguments" in input) input["arguments"] else input
+    if (args !is JsonObject) return null
+    val path = args["path"].text()?.takeIf { it.isNotBlank() } ?: return null
+    val line = args["line"].number()
+    val valid = tool == OPEN_FILE_TOOL && line != null && line == floor(line) && line >= 1 && line <= MAX_TAB_LINE
+    return TabToolCall(tool, path, if (valid) line!!.toInt() else null)
+}
+
+/** The `open_url` / `read_terminal` / `run_in_terminal` tool a tool name is, or null: the card's icon needs only that. */
+internal fun deviceToolOf(name: String): String? = DEVICE_TOOL_NAME.matchEntire(name)?.groupValues?.get(1)
+
+/** The `open_url` / `read_terminal` / `run_in_terminal` call an event is, under either provider's name, or null. */
+internal fun deviceToolCall(name: String, input: JsonElement?): DeviceToolCall? {
+    val tool = deviceToolOf(name) ?: return null
+    if (input !is JsonObject) return null
+    val args = (input["arguments"] as? JsonObject) ?: input
+    fun text(key: String) = args[key].text()?.takeIf { it.isNotBlank() }
+    return when (tool) {
+        OPEN_URL_TOOL -> text("url")?.let(DeviceToolCall::OpenUrl)
+        "run_in_terminal" -> text("command")?.let { DeviceToolCall.RunInTerminal(it, text("cwd")) }
+        else -> {
+            val lines = args["lines"].number()?.takeIf { it == floor(it) && it > 0 }
+            DeviceToolCall.ReadTerminal(text("terminal"), lines?.toLong())
+        }
+    }
+}
+
+/** The database tool a tool name is, under either provider's name, or null. */
+internal fun dbToolOf(name: String): String? = DB_TOOL_NAME.matchEntire(name)?.groupValues?.get(1)
+
+/** The database tool call an event is, under either provider's name, or null. */
+internal fun dbToolCall(name: String, input: JsonElement?): DbToolCall? {
+    val tool = dbToolOf(name) ?: return null
+    if (input !is JsonObject) return null
+    val args = (input["arguments"] as? JsonObject) ?: input
+    val connection = args["connection"].text() ?: return null
+    val sql = args["sql"].text() ?: return null
+    return DbToolCall(
+        tool,
+        connection,
+        sql,
+        database = args["database"].text()?.takeIf { it.isNotEmpty() },
+        reason = args["reason"].text()?.takeIf { it.isNotEmpty() },
+        expectedRows = args["expected_rows"].number(),
+    )
+}
+
+/** How Codex's events label an image block of a result (`mcpResultText`). */
+private val CODEX_IMAGE_LABEL = Regex("""\[image(?: [^\]\s]+)?]""")
+
+/** The stand-in a stored result has for an image block (`isImagePlaceholderText`). */
+private val PLACEHOLDER_BLOCK = Regex("""\[image(?: · [\d.]+(?:B|KB|MB))?]""")
+
+/** A tool result's text as the AI read it, without the stand-in for the screenshot (`tabToolResultText`). */
+internal fun tabToolResultText(output: String): String {
+    fun plain() = output.split("\n").filterNot(CODEX_IMAGE_LABEL::matches).joinToString("\n").trimEnd()
+    if (!output.startsWith("[")) return plain()
+    val blocks = WireJson.parseOrNull(output) as? JsonArray ?: return plain()
+    return blocks
+        .filter { it is JsonObject && it["type"].string == "text" && it["text"].text() != null }
+        .map { it["text"].text()!! }
+        .filterNot(PLACEHOLDER_BLOCK::matches)
+        .joinToString("\n\n")
+}
+
+private val PROBLEMS_FOUND = Regex("""^(\d+) problems? found\b""")
+
+/**
+ * How many problems an `open_preview` check reported, or null for any other result. Only the
+ * line `formatPreviewCheck` writes it on is read: the findings below it quote the page, which
+ * could otherwise put a count of its own there.
+ */
+internal fun previewProblemCount(text: String): Long? {
+    val line = text.split("\n").getOrNull(1) ?: ""
+    if (line.startsWith("No layout problems or runtime errors were found")) return 0
+    return PROBLEMS_FOUND.find(line)?.groupValues?.get(1)?.let { it.toLongOrNull() ?: Long.MAX_VALUE }
+}

@@ -44,7 +44,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.CssSides
@@ -55,6 +54,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeTokens
+import com.hienlh.ppm.design.TruncatedText
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
@@ -102,6 +102,12 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
     val bgRunning = isBgAgent && bgStatus == null
     val bgFailed = bgStatus == "failed" || bgStatus == "stopped"
     val isDone = !bgRunning && (result != null || hasAnswers || wasApproved || completed)
+    // The AI's tab tools get a card of their own, with an Open button beside the summary.
+    val tabCall = if (tool.requestId == null) remember(tool.name, tool.input) { tabToolCall(tool.name, tool.input) } else null
+    if (tabCall != null) {
+        TabToolCard(tabCall, tool.toolUseId, result?.output, isError, isDone, modifier)
+        return
+    }
     if (tool.isAgent) {
         AgentRow(tool, if (isError || bgFailed) Status.FAILED else if (isDone) Status.DONE else Status.RUNNING, bgRunning, modifier)
         return
@@ -227,11 +233,12 @@ internal data class ToolChipStyle(val icon: ProductIcon, val background: Rgba, v
             fun plain(icon: ProductIcon) = ToolChipStyle(icon, t.panel2, t.text2)
             if (isError && (name == "Bash" || name == "PowerShell")) return tinted(ProductIcon.Terminal, t.error)
             if ((name == "Agent" || name == "Task") && !input["name"].string.isNullOrBlank()) return tinted(ProductIcon.Users, t.accent2)
-            if (name.startsWith("mcp__ppm-db__")) {
-                return if (name.endsWith("db_execute")) tinted(ProductIcon.DatabaseZap, t.warning) else tinted(ProductIcon.Database, t.info)
+            dbToolOf(name)?.let { tool ->
+                return if (tool == DB_EXECUTE_TOOL) tinted(ProductIcon.DatabaseZap, t.warning) else tinted(ProductIcon.Database, t.info)
             }
-            if (name == "mcp__ppm-tabs__open_url") return tinted(ProductIcon.Globe, t.info)
-            if (name == "mcp__ppm-tabs__read_terminal" || name == "mcp__ppm-tabs__run_in_terminal") return plain(ProductIcon.Terminal)
+            deviceToolOf(name)?.let { tool ->
+                return if (tool == OPEN_URL_TOOL) tinted(ProductIcon.Globe, t.info) else plain(ProductIcon.Terminal)
+            }
             return when (name) {
                 "Read", "Glob", "LS" -> washed(ProductIcon.FileSearch)
                 "Grep", "Search", "WebSearch", "ToolSearch" -> washed(ProductIcon.Search)
@@ -276,7 +283,8 @@ internal fun StatusIcon(state: Status) {
 
 /**
  * The header's one line: an icon, the tool's name, then what it acted on. [detailIcon] opens the
- * detail and [endIcon] follows the line, as SendMessage's arrow and clock do.
+ * detail and [endIcon] follows the line, as SendMessage's arrow and clock do. [parts] follow the
+ * name as they are, for a line of several runs (PPM's own tools).
  */
 internal data class ToolSummaryText(
     val icon: ProductIcon? = null,
@@ -285,11 +293,17 @@ internal data class ToolSummaryText(
     val monoDetail: Boolean = false,
     val detailIcon: ProductIcon? = null,
     val endIcon: ProductIcon? = null,
+    val parts: List<SummaryPart> = emptyList(),
 )
+
+/** A run of a summary line: in the text's colour, or the detail's when [subtle]. */
+internal data class SummaryPart(val text: String, val subtle: Boolean = false, val mono: Boolean = false)
 
 /** `ToolSummary` in tool-cards.tsx. */
 internal fun toolSummary(name: String, input: JsonElement): ToolSummaryText {
     fun s(key: String): String = jsString(input[key])
+    dbToolCall(name, input)?.let { return dbToolSummary(it) }
+    deviceToolCall(name, input)?.let { return deviceToolSummary(it) }
     return when (name) {
         "Read", "Write", "Edit", "MultiEdit", "NotebookEdit" -> ToolSummaryText(name = name, detail = basename(s("file_path")))
         "Bash", "PowerShell" -> {
@@ -336,6 +350,44 @@ internal fun toolSummary(name: String, input: JsonElement): ToolSummaryText {
     }
 }
 
+/** `DbToolSummary`: what the tool does, on which connection, and its reason or first SQL line. */
+internal fun dbToolSummary(call: DbToolCall): ToolSummaryText {
+    val firstLine = call.sql.split("\n").firstOrNull { it.isNotBlank() }?.trim() ?: ""
+    val detail = if (call.tool == DB_EXECUTE_TOOL && call.reason != null) call.reason else firstLine
+    return ToolSummaryText(
+        name = DB_TOOL_LABELS.getValue(call.tool) + " ",
+        detail = "",
+        parts = listOfNotNull(
+            SummaryPart(call.connection + (call.database?.let { " / $it" } ?: "")),
+            if (detail.isEmpty()) null else SummaryPart(" · ${truncate(detail, 60)}", subtle = true, mono = detail != call.reason),
+        ),
+    )
+}
+
+private val HTTP_SCHEME = Regex("^https?://")
+
+/** `DeviceToolSummary`: what the tool did, and to what. */
+internal fun deviceToolSummary(call: DeviceToolCall): ToolSummaryText = when (call) {
+    is DeviceToolCall.OpenUrl -> ToolSummaryText(
+        name = "Open app ",
+        detail = "",
+        parts = listOf(SummaryPart(truncate(call.url.replaceFirst(HTTP_SCHEME, ""), 60), subtle = true, mono = true)),
+    )
+    is DeviceToolCall.RunInTerminal -> ToolSummaryText(
+        name = "Type in terminal ",
+        detail = "",
+        parts = listOf(SummaryPart(truncate(call.command, 60), subtle = true, mono = true)),
+    )
+    is DeviceToolCall.ReadTerminal -> ToolSummaryText(
+        name = "Read terminal",
+        detail = "",
+        parts = listOfNotNull(
+            call.terminal?.let { SummaryPart(" $it", subtle = true, mono = true) },
+            call.lines?.let { SummaryPart(" · $it lines", subtle = true) },
+        ),
+    )
+}
+
 /** `formatDelay`: 1800 → "30m", 90 → "1m 30s". */
 internal fun formatDelay(seconds: Double): String {
     if (!seconds.isFinite() || seconds <= 0) return "0s"
@@ -376,6 +428,12 @@ private fun ToolSummaryLine(name: String, input: JsonElement, modifier: Modifier
                 append(summary.detail)
             }
         }
+        // A mono run keeps the weight the mono face has: the web loads it at 400 only.
+        for (part in summary.parts) {
+            val color = (if (part.subtle) tokens.text3 else tokens.text).color
+            val style = if (part.mono) SpanStyle(color = color, fontFamily = PpmFonts.mono, fontWeight = FontWeight.Normal) else SpanStyle(color = color)
+            withStyle(style) { append(part.text) }
+        }
         if (summary.endIcon != null) appendInlineContent("endIcon")
     }
     val inline = buildMap {
@@ -384,15 +442,8 @@ private fun ToolSummaryLine(name: String, input: JsonElement, modifier: Modifier
         // `ml-1`.
         summary.endIcon?.let { put("endIcon", inlineIcon(it, tokens.text3.color, marginStart = 4f)) }
     }
-    BasicText(
-        text,
-        modifier,
-        style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color),
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        softWrap = false,
-        inlineContent = inline,
-    )
+    // `truncate`: the "…" in the line's own colour and face, whatever run it cuts.
+    TruncatedText(text, ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color), modifier, inline)
 }
 
 /** A `size-3 inline` icon in a line of card text, [marginStart] after what comes before it. */
@@ -425,6 +476,10 @@ private fun inlineIconDrop(): Dp = with(LocalDensity.current) {
 private fun ToolDetails(name: String, input: JsonElement) {
     val tokens = LocalPpmTokens.current
     fun s(key: String) = jsString(input[key])
+    val dbCall = remember(name, input) { dbToolCall(name, input) }
+    if (dbCall != null) return DbToolDetails(dbCall)
+    val deviceCall = remember(name, input) { deviceToolCall(name, input) }
+    if (deviceCall != null) return DeviceToolDetails(deviceCall)
     when (name) {
         "Bash", "PowerShell" -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (s("description").isNotEmpty()) {
@@ -502,6 +557,70 @@ private fun ToolDetails(name: String, input: JsonElement) {
     }
 }
 
+/** `DbToolDetails`: the connection, the reason the user read, the SQL, and the row count it expects. */
+@Composable
+private fun DbToolDetails(call: DbToolCall) {
+    val tokens = LocalPpmTokens.current
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val middle = Modifier.align(Alignment.CenterVertically)
+            BasicText("Connection", middle, cardText.copy(color = tokens.text3.color))
+            BasicText(call.connection, middle, ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
+            call.database?.let { database ->
+                val line = buildAnnotatedString {
+                    append("database ")
+                    withStyle(SpanStyle(color = tokens.text2.color, fontFamily = PpmFonts.mono)) { append(database) }
+                }
+                BasicText(line, middle, cardText.copy(color = tokens.text3.color))
+            }
+        }
+        call.reason?.let { BasicText(it, style = ppmText(12f, lineHeight = 16f, italic = true).copy(color = tokens.text2.color)) }
+        Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
+            Mono(call.sql, tokens.text2, breakAll = true)
+        }
+        call.expectedRows?.let { rows ->
+            val line = buildAnnotatedString {
+                append("Expected rows changed: ")
+                withStyle(SpanStyle(color = tokens.text2.color)) { append(jsNumberText(rows)) }
+            }
+            BasicText(line, style = cardText.copy(color = tokens.text3.color))
+        }
+    }
+}
+
+/** `DeviceToolDetails`: the address, the terminal read, or the command typed and where. */
+@Composable
+private fun DeviceToolDetails(call: DeviceToolCall) {
+    val tokens = LocalPpmTokens.current
+    when (call) {
+        is DeviceToolCall.OpenUrl -> Mono(call.url, tokens.text2, breakAll = true)
+        is DeviceToolCall.RunInTerminal -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Mono(call.command, tokens.text2, breakAll = true)
+            call.cwd?.let { cwd ->
+                val line = buildAnnotatedString {
+                    append("in ")
+                    withStyle(SpanStyle(color = tokens.text2.color, fontFamily = PpmFonts.mono)) {
+                        append(if (BREAK in cwd) cwd else breakAnywhere(cwd))
+                    }
+                }
+                BasicText(line, style = cardText.copy(color = tokens.text3.color))
+            }
+        }
+        is DeviceToolCall.ReadTerminal -> {
+            val line = buildAnnotatedString {
+                if (call.terminal != null) {
+                    append("Terminal ")
+                    withStyle(SpanStyle(color = tokens.text2.color, fontFamily = PpmFonts.mono)) { append(call.terminal) }
+                } else {
+                    append("The chat's terminals")
+                }
+                call.lines?.let { append(", last $it lines") }
+            }
+            BasicText(line, style = cardText.copy(color = tokens.text3.color))
+        }
+    }
+}
+
 @Composable
 private fun FileDetails(name: String, input: JsonElement) {
     val tokens = LocalPpmTokens.current
@@ -568,7 +687,7 @@ private fun FileLink(label: String, icon: ProductIcon, color: Rgba, style: TextS
  * then end inside a word, wherever Chrome would end it, and a copy comes out as [text] was.
  */
 @Composable
-private fun Mono(text: String, color: Rgba, modifier: Modifier = Modifier, breakAll: Boolean = false, style: TextStyle = monoText) {
+internal fun Mono(text: String, color: Rgba, modifier: Modifier = Modifier, breakAll: Boolean = false, style: TextStyle = monoText) {
     // A text that holds a U+200B of its own keeps the line breaker's breaks, so a copy can keep it.
     val breaking = breakAll && BREAK !in text
     val shown = if (breaking) remember(text) { breakAnywhere(text) } else text
@@ -884,7 +1003,8 @@ private fun AgentRow(tool: ToolBlock, status: Status, bgRunning: Boolean, modifi
             }
             tool.lastStep?.let { step -> withStyle(SpanStyle(color = tokens.text3.color)) { append(" · $step") } }
         }
-        BasicText(text, Modifier.weight(1f), style = cardText, maxLines = 1, overflow = TextOverflow.Ellipsis, softWrap = false)
+        // The row's own colour, which the "…" takes: the button inherits the body's `text-text`.
+        TruncatedText(text, cardText.copy(color = tokens.text.color), Modifier.weight(1f))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (bgRunning) BasicText("running…", style = tinyText.copy(color = tokens.accent.color))
             if (tool.steps > 0) BasicText(stepCount(tool.steps), style = tinyMono.copy(color = tokens.text3.color))

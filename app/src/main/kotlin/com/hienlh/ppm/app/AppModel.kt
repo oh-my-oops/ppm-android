@@ -29,6 +29,7 @@ import com.hienlh.ppm.client.gitStatus
 import com.hienlh.ppm.client.keybindings
 import com.hienlh.ppm.client.newChatProviderSettings
 import com.hienlh.ppm.client.projectImage
+import com.hienlh.ppm.client.fsStat
 import com.hienlh.ppm.client.rawFile
 import com.hienlh.ppm.client.uploadedFile
 import com.hienlh.ppm.client.putUiPrefs
@@ -80,6 +81,8 @@ import com.hienlh.ppm.state.workspace.WorkspaceCache
 import com.hienlh.ppm.state.workspace.WorkspaceState
 import com.hienlh.ppm.state.workspace.WorkspaceStore
 import com.hienlh.ppm.state.workspace.WorkspaceTab
+import com.hienlh.ppm.state.workspace.openAiTab
+import com.hienlh.ppm.state.workspace.resolveToolCallTarget
 import com.hienlh.ppm.state.workspace.buildMetadataFromUrl
 import com.hienlh.ppm.state.workspace.buildTitleFromUrl
 import com.hienlh.ppm.state.workspace.isWindowPanelId
@@ -951,6 +954,33 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                     },
                 ),
             )
+        }
+    }
+
+    /**
+     * A tab tool card's Open (`TabToolCard`): the file an `open_file` / `open_preview` call named,
+     * resolved on the host and opened beside the chat [sessionId] as the AI's own call opened it,
+     * in the chat's project, which is brought up first. What went wrong is a toast.
+     */
+    fun openToolFileTab(project: String, sessionId: String, tool: String, path: String, line: Int?) {
+        val api = api ?: return
+        val title = "Could not open ${path.split('/', '\\').last()}"
+        scope.launch {
+            val target = try {
+                resolveToolCallTarget(tool, path, line, project, projects.firstOrNull { it.name == project }?.path) { api.fsStat(it) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                toast = ErrorToastMessage(title, describe(error))
+                return@launch
+            }
+            openProject(project) { store ->
+                try {
+                    store.openAiTab(target, sessionId)
+                } catch (error: IllegalStateException) {
+                    toast = ErrorToastMessage(title, describe(error))
+                }
+            }
         }
     }
 

@@ -166,6 +166,12 @@ interface ChatTabs {
     fun openFile(path: String)
 
     fun openDiff(path: String, original: String, modified: String)
+
+    /**
+     * A tab tool card's Open: the file an `open_file` / `open_preview` call named, as the AI's
+     * own call opened it, beside the chat; what went wrong, if anything, is a toast.
+     */
+    fun openToolFile(tool: String, path: String, line: Int?)
 }
 
 /** How this chat opens tabs; none, and its file buttons do nothing, as the web's do without a project. */
