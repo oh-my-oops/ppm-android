@@ -3,6 +3,8 @@ package com.hienlh.ppm.protocol
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -205,12 +207,18 @@ sealed interface ChatClientMessage {
         override val json get() = buildJsonObject { put("type", "cancel") }
     }
 
-    /** [replyTo] travels beside the text, which is sent without it; the server checks it belongs to this chat. */
+    /**
+     * [replyTo] travels beside the text, which is sent without it; the server checks it belongs to
+     * this chat. [images] ride in the frame itself; [imagePaths] name the uploaded copies for a
+     * provider that takes a file rather than a payload (codex).
+     */
     data class Message(
         val clientMessageId: String,
         val content: String,
         val options: TurnOptions = TurnOptions(),
         val replyTo: ReplyReference? = null,
+        val images: List<InlineImage> = emptyList(),
+        val imagePaths: List<String> = emptyList(),
     ) : ChatClientMessage {
         override val json
             get() = buildJsonObject {
@@ -219,6 +227,20 @@ sealed interface ChatClientMessage {
                 put("content", content)
                 options.permissionMode?.let { put("permissionMode", it) }
                 options.priority?.let { put("priority", it) }
+                if (images.isNotEmpty()) {
+                    put(
+                        "images",
+                        buildJsonArray {
+                            for (image in images) {
+                                add(buildJsonObject {
+                                    put("data", image.data)
+                                    put("mediaType", image.mediaType)
+                                })
+                            }
+                        },
+                    )
+                }
+                if (imagePaths.isNotEmpty()) put("imagePaths", buildJsonArray { imagePaths.forEach { add(it) } })
                 replyTo?.let { put("replyTo", it.toJson()) }
                 options.model?.let { put("model", it) }
                 options.effort?.let { put("effort", it) }

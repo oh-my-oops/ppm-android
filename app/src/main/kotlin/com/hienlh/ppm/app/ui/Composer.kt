@@ -34,7 +34,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldLineLimits
-import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -67,6 +66,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -81,6 +81,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
+import com.hienlh.ppm.app.attach
+import com.hienlh.ppm.app.removeAttachment
 import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.chat.ReplyCard
 import com.hienlh.ppm.chat.sky400
@@ -106,7 +108,6 @@ import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.ParsedUserMessage
 import com.hienlh.ppm.protocol.PromptCacheState
-import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.ChatState
@@ -128,8 +129,8 @@ private val chipText = ppmText(11.5f, lineHeight = 17.25f)
  * The message box (`message-input.tsx`): the chips that set how the next turn runs over the text
  * and Send, or Stop while the turn runs and nothing is typed. A phone draws the `md:hidden` rows,
  * a tablet the desktop ones. [narrow] is the chat's `@max-[420px]` — the mode and priority chips
- * keep only their icons, and on a tablet the chips stay on one line. Attachments and the mic are
- * left out until this app has them.
+ * keep only their icons, and on a tablet the chips stay on one line. The mic is left out until
+ * this app has it.
  */
 @Composable
 fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState, narrow: Boolean) {
@@ -141,24 +142,13 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
     var modelOpen by remember { mutableStateOf(false) }
     // The model can't change mid-turn: its sheet closes as the turn starts.
     LaunchedEffect(running) { if (running) modelOpen = false }
-    // A reply picked or cancelled, or a refused message put back, brings the keyboard here.
+    // A reply picked or cancelled, a refused message put back or files added bring the keyboard here.
     LaunchedEffect(tab) { snapshotFlow { tab.focusRequests }.drop(1).collect { focus.requestFocus() } }
 
-    fun send() {
-        val typed = tab.draft.text.toString().trim()
-        val agent = tab.agent
-        val now = chat.state.value
-        if ((typed.isEmpty() && agent == null) || !now.canSend) return
-        // The agent goes in as words the model delegates on; the bubble turns them back into its chip.
-        val text = if (agent != null) "Use the $agent agent to $typed".trimEnd() else typed
-        // The priority goes only with a message sent during a turn, and is Queue again after it.
-        chat.send(text, TurnOptions(permissionMode = tab.permissionMode?.value, priority = if (now.isRunning) tab.priority.value else null), tab.replyTo)
-        tab.draft.clearText()
-        tab.agent = null
-        tab.replyTo = null
-        tab.priority = MessagePriority.DEFAULT
-        tab.historyIndex = -1
-    }
+    // The send lives on the tab, so one queued behind an upload still goes with this box off screen.
+    fun send() = tab.submit()
+    val context = LocalContext.current
+    val attach = rememberAttachPicker { uris -> model.attach(context, tab, uris) }
 
     /**
      * ↑/↓ through this chat's past messages, as a shell does: only from an empty box (so ↑ still
@@ -200,7 +190,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
             }
         }
     }
-    val hasContent = tab.draft.text.isNotBlank() || tab.agent != null
+    val hasContent = tab.hasContent
     val pickMode: (PermissionMode) -> Unit = { mode ->
         tab.permissionMode = mode
         modeOpen = false
@@ -234,6 +224,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 focus.requestFocus()
             }
         }
+        AttachmentChips(tab.attachments, inset) { id -> model.removeAttachment(tab, id) }
         val mode = tab.permissionMode ?: PermissionMode.FALLBACK
         if (mobile) {
             // `flex flex-wrap items-center gap-1 px-2 pt-2 relative`: the mode panel opens over this row.
@@ -247,6 +238,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
+                AttachButton(mobile = true, onClick = attach)
                 // `text-sm py-1.5 max-h-20`, the `py-1.5` inside the 80 px; a phone's inputs are 16 px.
                 ComposerField(
                     tab, focus, onKey, ::send,
@@ -259,10 +251,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 if (running && !hasContent) {
                     SquareButton(ProductIcon.Square, 14.dp, tokens.error, Color.White, hoverFill = tokens.error.opacity(0.8), label = "Stop") { chat.cancel() }
                 } else {
-                    SquareButton(
-                        ProductIcon.ArrowUp, 16.dp, tokens.accent, tokens.accentFg.color, hoverFill = tokens.accent.opacity(0.9),
-                        label = "Send", enabled = hasContent && state.canSend, onClick = ::send,
-                    )
+                    SendButton(tab, 16.dp, label = "Send", enabled = hasContent && state.canSend, onClick = ::send)
                 }
             }
         } else {
@@ -282,6 +271,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 verticalAlignment = Alignment.Bottom,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                AttachButton(mobile = false, onClick = attach)
                 // `text-sm leading-relaxed py-2 max-h-[90px]`, the `py-2` inside the 90 px.
                 ComposerField(
                     tab, focus, onKey, ::send,
@@ -294,10 +284,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 if (running && !hasContent) {
                     SquareButton(ProductIcon.Square, 16.dp, tokens.error, Color.White, hoverFill = tokens.error.opacity(0.8), label = "Stop response") { chat.cancel() }
                 } else {
-                    SquareButton(
-                        ProductIcon.ArrowUp, 17.dp, tokens.accent, tokens.accentFg.color, hoverFill = tokens.accent.opacity(0.9),
-                        label = "Send message", enabled = hasContent && state.canSend, onClick = ::send,
-                    )
+                    SendButton(tab, 17.dp, label = "Send message", enabled = hasContent && state.canSend, onClick = ::send)
                 }
             }
         }
@@ -643,6 +630,7 @@ private fun SquareButton(
     hoverFill: Rgba,
     label: String,
     enabled: Boolean = true,
+    spinning: Boolean = false,
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
@@ -665,8 +653,24 @@ private fun SquareButton(
             .clickable(source, indication = null, enabled = enabled, onClickLabel = label, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        PpmIcon(icon, iconSize, tint)
+        PpmIcon(icon, iconSize, tint, spinning = spinning)
     }
+}
+
+/**
+ * Send, or while a file is still uploading the send waiting on it: a 16 px spinner labelled
+ * "Cancel queued send", which a press takes back.
+ */
+@Composable
+private fun SendButton(tab: ChatTab, arrowSize: Dp, label: String, enabled: Boolean, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val queued = tab.pendingSend
+    SquareButton(
+        if (queued) ProductIcon.Loader2 else ProductIcon.ArrowUp, if (queued) 16.dp else arrowSize,
+        tokens.accent, tokens.accentFg.color, hoverFill = tokens.accent.opacity(0.9),
+        label = if (queued) "Cancel queued send" else label, enabled = enabled, spinning = queued,
+        onClick = { if (queued) tab.pendingSend = false else onClick() },
+    )
 }
 
 /**

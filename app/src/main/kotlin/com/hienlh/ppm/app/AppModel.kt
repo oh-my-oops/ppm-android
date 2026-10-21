@@ -3,10 +3,12 @@ package com.hienlh.ppm.app
 import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -54,6 +56,7 @@ import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionTag
 import com.hienlh.ppm.protocol.SessionUnread
 import com.hienlh.ppm.protocol.ThemeSelection
+import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.double
 import com.hienlh.ppm.protocol.sortedForList
 import com.hienlh.ppm.state.ChatController
@@ -67,6 +70,8 @@ import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.RejectedSend
+import com.hienlh.ppm.state.messageWithAttachments
+import com.hienlh.ppm.state.selectInlineImages
 import com.hienlh.ppm.state.windows.MAX_WINDOWS
 import com.hienlh.ppm.state.windows.WindowKind
 import com.hienlh.ppm.state.windows.WindowStore
@@ -277,6 +282,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     init {
         restoreUiPrefs()
+        // Message boxes start empty, so no copy of a file waiting in one can be wanted again.
+        val appContext = context.applicationContext
+        scope.launch(Dispatchers.IO) { clearAttachmentCopies(appContext) }
     }
 
     /** The theme picked on any device (`/api/settings/theme`). */
@@ -1885,13 +1893,76 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
     /** Which past message ↑/↓ put in the box, counted back from the newest; -1 while it holds a draft. */
     var historyIndex = -1
 
-    /** Counts each time the message box is asked for the keyboard: a reply picked or cancelled, a refused message put back. */
+    /** Counts each time the message box is asked for the keyboard: a reply picked or cancelled, a refused message put back, files added. */
     var focusRequests by mutableIntStateOf(0)
         private set
 
+    /** Files on their way into the next message, in the order they were added (`attachments`). */
+    val attachments = mutableStateListOf<ComposerAttachment>()
+
+    /** Send was pressed while a file was still uploading: the message goes once none is (`pendingSend`). */
+    var pendingSend by mutableStateOf(false)
+
+    /** Whether Send has anything to send (`hasContent`): text, a file that did not fail, or an agent. */
+    val hasContent: Boolean
+        get() = draft.text.isNotBlank() || attachments.any { it.status != ComposerAttachment.Status.ERROR } || agent != null
+
     fun selectReply(reply: ReplyReference?) {
         replyTo = reply
+        requestFocus()
+    }
+
+    /** The message box focused, keyboard and all. */
+    fun requestFocus() {
         focusRequests++
+    }
+
+    /** Send pressed (`handleSend`): the message now, or once the files still uploading are up. */
+    fun submit() {
+        if (attachments.any { it.status == ComposerAttachment.Status.UPLOADING }) {
+            if (draft.text.isNotBlank() || attachments.any { it.status != ComposerAttachment.Status.ERROR }) pendingSend = true
+            return
+        }
+        sendNow()
+    }
+
+    /** A send waiting on uploads goes as soon as none is left. */
+    fun sendIfQueued() {
+        if (pendingSend && attachments.none { it.status == ComposerAttachment.Status.UPLOADING }) sendNow()
+    }
+
+    /**
+     * `executeSend` and the chat's `handleSend`: the text with its agent and attachments, the
+     * pictures that fit inline, and every image's uploaded path; then an empty box, Queue again.
+     */
+    private fun sendNow() {
+        val chat = controller
+        val typed = draft.text.toString().trim()
+        val agent = agent
+        val ready = attachments.filter { it.status == ComposerAttachment.Status.READY }
+        if (chat == null || (typed.isEmpty() && ready.isEmpty() && agent == null) || !chat.state.value.canSend) {
+            pendingSend = false
+            return
+        }
+        // The agent goes in as words the model delegates on; the bubble turns them back into its chip.
+        val text = if (agent != null) "Use the $agent agent to $typed".trimEnd() else typed
+        val images = selectInlineImages(ready.map { it.imageData })
+        // The priority goes only with a message sent during a turn, and is Queue again after it.
+        chat.send(
+            messageWithAttachments(text, ready, images),
+            TurnOptions(permissionMode = permissionMode?.value, priority = if (chat.state.value.isRunning) priority.value else null),
+            replyTo,
+            images,
+            ready.filter { it.isImage }.mapNotNull { it.serverPath },
+        )
+        for (attachment in attachments) attachment.file?.parentFile?.deleteRecursively()
+        draft.clearText()
+        attachments.clear()
+        this.agent = null
+        replyTo = null
+        pendingSend = false
+        priority = MessagePriority.DEFAULT
+        historyIndex = -1
     }
 
     /** A refused message back in the box (`restoreUnsentMessage`): after what is typed there, with the reply it carried. */
@@ -1899,7 +1970,7 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
         val typed = draft.text.toString()
         draft.setTextAndPlaceCursorAtEnd(if (typed.isNotBlank()) "$typed\n\n${rejected.content}" else rejected.content)
         replyTo = rejected.replyTo
-        focusRequests++
+        requestFocus()
     }
 
     fun start(api: ApiClient, scope: CoroutineScope) {

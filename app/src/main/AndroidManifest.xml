@@ -3,6 +3,17 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- The camera and camcorder the paperclip's chooser offers beside Files, as Chrome's does.
+         Neither needs the CAMERA permission: the app never declares it, so the camera app asks. -->
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.VIDEO_CAPTURE" />
+        </intent>
+    </queries>
+
     <application
         android:name=".PpmApplication"
         android:allowBackup="false"
@@ -33,7 +44,8 @@
                 <data android:scheme="ppm" />
             </intent-filter>
         </activity>
-        <!-- Hands a picture copied in the lightbox to the app it is pasted into. -->
+        <!-- Hands a picture copied in the lightbox to the app it is pasted into, and the camera
+             the file to write a photo for the message box into. -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.images"

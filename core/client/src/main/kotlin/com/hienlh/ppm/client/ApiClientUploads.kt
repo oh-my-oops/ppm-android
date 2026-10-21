@@ -9,6 +9,8 @@ import okio.Buffer
 import okio.BufferedSink
 import okio.ForwardingSink
 import okio.buffer
+import okio.source
+import java.io.File
 import java.util.UUID
 
 /** A file to send with a chat message. */
@@ -31,6 +33,17 @@ suspend fun ApiClient.upload(
 }
 
 /**
+ * One file sent as [upload] sends it, read from disk while it goes out rather than held in memory
+ * — a video off the camera is tens of megabytes. Where the server saved it.
+ */
+suspend fun ApiClient.uploadFile(project: String, name: String, mimeType: String, file: File): UploadedFile? {
+    val boundary = "ppm-${UUID.randomUUID()}"
+    val media = "multipart/form-data; boundary=$boundary".toMediaTypeOrNull()
+    val request = request("POST", "${chatPath(project)}/upload", body = FilePartBody(file, partHead(name, mimeType, boundary), boundary, media))
+    return send(PpmHttp.client, request).array.orEmpty().firstNotNullOfOrNull(UploadedFile::from)
+}
+
+/**
  * The bytes of a file sent with a message (`GET /api/project/:p/chat/uploads/:filename`), named by
  * the path the message carries. The route is under a project, but every upload is reachable from any.
  */
@@ -46,16 +59,41 @@ suspend fun ApiClient.deleteUpload(project: String, path: String) {
 internal fun multipart(files: List<Upload>, boundary: String): ByteArray {
     val body = Buffer()
     for (file in files) {
-        // A quote or a line break in the name would end the header early.
-        val name = file.name.replace("\"", "%22").replace("\r", "").replace("\n", "")
-        body.writeUtf8("--$boundary\r\n")
-        body.writeUtf8("Content-Disposition: form-data; name=\"files\"; filename=\"$name\"\r\n")
-        body.writeUtf8("Content-Type: ${file.mimeType}\r\n\r\n")
+        body.writeUtf8(partHead(file.name, file.mimeType, boundary))
         body.write(file.data)
         body.writeUtf8("\r\n")
     }
     body.writeUtf8("--$boundary--\r\n")
     return body.readByteArray()
+}
+
+/** What goes ahead of one file's bytes in the body. */
+private fun partHead(fileName: String, mimeType: String, boundary: String): String {
+    // A quote or a line break in the name would end the header early.
+    val name = fileName.replace("\"", "%22").replace("\r", "").replace("\n", "")
+    return "--$boundary\r\n" +
+        "Content-Disposition: form-data; name=\"files\"; filename=\"$name\"\r\n" +
+        "Content-Type: $mimeType\r\n\r\n"
+}
+
+/** A one-file multipart body whose file is read as it is written. */
+private class FilePartBody(
+    private val file: File,
+    private val head: String,
+    private val boundary: String,
+    private val media: MediaType?,
+) : RequestBody() {
+    private val tail = "\r\n--$boundary--\r\n"
+
+    override fun contentType() = media
+
+    override fun contentLength() = head.toByteArray().size + file.length() + tail.toByteArray().size
+
+    override fun writeTo(sink: BufferedSink) {
+        sink.writeUtf8(head)
+        file.source().use { sink.writeAll(it) }
+        sink.writeUtf8(tail)
+    }
 }
 
 private class ProgressBody(

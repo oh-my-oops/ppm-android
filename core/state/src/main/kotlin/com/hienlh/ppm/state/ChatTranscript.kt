@@ -7,6 +7,7 @@ import com.hienlh.ppm.protocol.ChatFrame
 import com.hienlh.ppm.protocol.ChatReply
 import com.hienlh.ppm.protocol.HistoryMessage
 import com.hienlh.ppm.protocol.HistoryPage
+import com.hienlh.ppm.protocol.InlineImage
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.Reported
 import com.hienlh.ppm.protocol.SessionPhase
@@ -186,6 +187,8 @@ class ChatTranscript {
         options: TurnOptions = TurnOptions(),
         now: Long = System.currentTimeMillis(),
         replyTo: ReplyReference? = null,
+        images: List<InlineImage> = emptyList(),
+        imagePaths: List<String> = emptyList(),
     ): ChatClientMessage.Message {
         localCounter++
         val id = "local-user-$localCounter-$now"
@@ -204,7 +207,7 @@ class ChatTranscript {
             turnFinalized = false
         }
         appendUser(ChatReply.encode(content, replyTo), id, now)
-        return ChatClientMessage.Message(id, content, options, replyTo)
+        return ChatClientMessage.Message(id, content, options, replyTo, images, imagePaths)
     }
 
     fun respond(request: ApprovalRequest, approved: Boolean, data: JsonElement? = null): ChatClientMessage.ApprovalResponse {

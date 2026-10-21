@@ -6,6 +6,7 @@ import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatFrame
+import com.hienlh.ppm.protocol.InlineImage
 import com.hienlh.ppm.protocol.PromptCacheState
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionInfo
@@ -134,14 +135,21 @@ class ChatController(
 
     /**
      * [options] carries the composer's mode and priority; the model, effort and thinking are added
-     * here. [replyTo] goes only if it quotes this chat: the server refuses any other.
+     * here. [replyTo] goes only if it quotes this chat: the server refuses any other. [images] ride
+     * in the frame and [imagePaths] name their uploads; a message of pictures alone may have no text.
      */
-    fun send(text: String, options: TurnOptions = TurnOptions(), replyTo: ReplyReference? = null) {
+    fun send(
+        text: String,
+        options: TurnOptions = TurnOptions(),
+        replyTo: ReplyReference? = null,
+        images: List<InlineImage> = emptyList(),
+        imagePaths: List<String> = emptyList(),
+    ) {
         val content = text.trim()
         val socket = socket
-        if (content.isEmpty() || socket == null || connection != Connection.Connected) return
+        if ((content.isEmpty() && images.isEmpty()) || socket == null || connection != Connection.Connected) return
         val reply = replyTo?.takeIf { it.sessionId == sessionId && it.providerId == providerId }
-        socket.send(transcript.send(content, settings.turnOptions(options), clock(), reply).json.toString())
+        socket.send(transcript.send(content, settings.turnOptions(options), clock(), reply, images, imagePaths).json.toString())
         publish()
     }
 

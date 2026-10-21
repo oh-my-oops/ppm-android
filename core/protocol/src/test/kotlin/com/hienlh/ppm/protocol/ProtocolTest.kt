@@ -75,6 +75,10 @@ class ProtocolTest {
             ChatClientMessage.Message("c1", "hi").json,
         )
         assertEquals(
+            json("""{"type":"message","clientMessageId":"c1","content":"see","images":[{"data":"QUJD","mediaType":"image/png"}],"imagePaths":["/up/a.png"]}"""),
+            ChatClientMessage.Message("c1", "see", images = listOf(InlineImage("QUJD", "image/png")), imagePaths = listOf("/up/a.png")).json,
+        )
+        assertEquals(
             json("""{"type":"approval_response","requestId":"r","approved":true,"data":{"Q?":"A"}}"""),
             ChatClientMessage.ApprovalResponse("r", approved = true, data = json("""{"Q?":"A"}""")).json,
         )
