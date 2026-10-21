@@ -77,6 +77,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -88,9 +89,12 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
 import com.hienlh.ppm.app.attach
+import com.hienlh.ppm.app.onEveryTap
 import com.hienlh.ppm.app.removeAttachment
 import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.chat.ReplyCard
@@ -157,10 +161,14 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
     // The box asked for focus brings the keyboard, even one Back put away: the web's button took the
     // focus, so Chrome raises it for the textarea. A paste leaves it as it was.
     val keyboard = LocalSoftwareKeyboardController.current
+    val view = LocalView.current
     LaunchedEffect(tab) {
         snapshotFlow { tab.focusRequests }.drop(1).collect {
-            // A box focused quietly has no input session yet: dropping the flag starts one.
-            if (tab.raisesKeyboard) quietFocus.value = false
+            // A box focused quietly has no input session yet: dropping the flag starts one. Not with
+            // the keyboard up, where a tap left the flag behind: a new session drops the keyboard
+            // and brings it back.
+            val keyboardUp = ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime()) == true
+            if (tab.raisesKeyboard && !keyboardUp) quietFocus.value = false
             focus.requestFocus()
             if (tab.raisesKeyboard) keyboard?.show()
         }
@@ -241,7 +249,8 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
         // `px-2 md:px-4 pt-2`, and the card's own `mb-2`.
         val inset = if (mobile) 8.dp else 16.dp
         tab.replyTo?.let { reply ->
-            ReplyCard(reply, onJump = null, Modifier.padding(start = inset, end = inset, top = 8.dp, bottom = 8.dp), preview = true) {
+            // Its buttons do not stop their clicks, so the box's own gives the text the focus back.
+            ReplyCard(reply, onJump = null, Modifier.padding(start = inset, end = inset, top = 8.dp, bottom = 8.dp).onEveryTap { tab.requestFocus() }, preview = true) {
                 tab.selectReply(null)
             }
         }

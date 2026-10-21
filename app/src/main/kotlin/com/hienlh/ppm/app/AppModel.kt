@@ -1926,11 +1926,13 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
      * The message box focused, keyboard and all. Unless [raiseKeyboard] is false, the keyboard
      * comes back even when Back put it away from a box still focused: on the web a tapped button
      * took the focus, so its textarea's `focus()` is a fresh one. A paste leaves it as it is,
-     * since the textarea pasted into never lost the focus.
+     * since the textarea pasted into never lost the focus. Asked from a tap, it keeps the tap
+     * from taking the focus away first ([TextInputFocus.asked]).
      */
     fun requestFocus(raiseKeyboard: Boolean = true) {
         raisesKeyboard = raiseKeyboard
         focusRequests++
+        TextInputFocus.asked()
     }
 
     /** Send pressed (`handleSend`): the message now, or once the files still uploading are up. */

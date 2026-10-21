@@ -16,7 +16,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -58,7 +57,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.pointer.pointerHoverIcon
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -74,6 +72,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.LightboxRequest
+import com.hienlh.ppm.app.leavesTextOnTap
 import com.hienlh.ppm.app.ui.tablet.TabletShell
 import com.hienlh.ppm.design.ImageViewer
 import com.hienlh.ppm.design.LocalImageViewer
@@ -139,9 +138,9 @@ fun PpmRoot(model: AppModel) {
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
-            // A tap nothing else takes (the transcript, an empty stretch of a panel) leaves the text
-            // field, as a click outside an input does in a browser: the keyboard goes, shortcuts work.
-            .pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus() }) },
+            // A tap outside the text field leaves it, as a press outside an input does in a browser:
+            // the keyboard goes, shortcuts work.
+            .leavesTextOnTap(focusManager),
     ) {
         val mobile = maxWidth < 768.dp
         // The layout follows the window, not the device: a rotation or a split screen can cross it.
