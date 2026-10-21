@@ -29,6 +29,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -96,7 +97,9 @@ fun ChatMessageView(
 ) {
     when (item.role) {
         ChatItem.Role.USER -> UserBubble(item.text, item.timestamp, replies, modifier, onReply)
-        ChatItem.Role.ASSISTANT -> AssistantBlocks(item.blocks, live = false, actions = actions, modifier = modifier, usage = item.usage)
+        ChatItem.Role.ASSISTANT -> CompositionLocalProvider(LocalMarkdownImageScope provides item.id) {
+            AssistantBlocks(item.blocks, live = false, actions = actions, modifier = modifier, usage = item.usage)
+        }
         ChatItem.Role.SYSTEM -> SystemMessage(item.text, onDismiss, modifier)
     }
 }
@@ -174,9 +177,13 @@ internal fun ActionButton(icon: ProductIcon, label: String, title: String, touch
 
 // Assistant
 
-/** An answer's blocks in order — text, thinking, tool calls — then the turn's cost notice and its action bar. */
+/**
+ * An answer's blocks in order — text, thinking, tool calls — then the turn's cost notice and its
+ * action bar. Each text block's pictures are named by the message's scope and the block's place.
+ */
 @Composable
 fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActions?, modifier: Modifier = Modifier, usage: TurnUsage? = null) {
+    val scope = LocalMarkdownImageScope.current
     Column(modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             blocks.forEachIndexed { index, block ->
@@ -184,7 +191,9 @@ fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActi
                 val growing = live && index == blocks.lastIndex
                 when (block) {
                     is ChatBlock.Text -> Column {
-                        WithoutOnCopy(CODE_EDGE) { SelectionContainer { MarkdownView(block.text, streaming = growing) } }
+                        CompositionLocalProvider(LocalMarkdownImageScope provides scope?.let { "$it/$index" }) {
+                            WithoutOnCopy(CODE_EDGE) { SelectionContainer { MarkdownView(block.text, streaming = growing) } }
+                        }
                         if (growing) StreamingMark()
                     }
                     is ChatBlock.Thinking -> ThinkingBlock(block.text, growing)

@@ -162,9 +162,36 @@ class MarkdownTest {
         assertInline("[foo [bar](/uri)](/uri2)", "[foo bar](/uri2)", Span(5, 8, Kind.LINK, "/uri"))
         assertInline("[*a*](u)", "a", Span(0, 1, Kind.EMPHASIS), Span(0, 1, Kind.LINK, "u"))
         assertInline("<https://x.dev> <a@b.co>", "https://x.dev a@b.co", Span(0, 13, Kind.LINK, "https://x.dev"), Span(14, 20, Kind.LINK, "mailto:a@b.co"))
-        // Raw HTML stays text; an image is its alt text.
-        assertInline("<b>hi</b> ![alt](x.png)", "<b>hi</b> alt")
+        // Raw HTML stays text; an image is a slot, drawn as a block of its own.
+        assertInline("<b>hi</b> ![alt](x.png)", "<b>hi</b> $IMAGE_SLOT")
         assertInline("[not a link]", "[not a link]")
+    }
+
+    @Test
+    fun `an image is a slot in the text, with its source and its alt as plain text`() {
+        val parsed = inline("Before ![a *b*](/tmp/x.png) after, **bold ![](http://h/y.png) still**")
+        assertEquals("Before $IMAGE_SLOT after, bold $IMAGE_SLOT still", parsed.text)
+        assertEquals(listOf(InlineMarkdown.Image("/tmp/x.png", "a b"), InlineMarkdown.Image("http://h/y.png", "")), parsed.images)
+        // The bold runs on across the picture, as the `strong` holds the `<img>`.
+        assertEquals(listOf(Span(16, 28, Kind.STRONG)), parsed.spans)
+        // A bare address ends where a picture starts.
+        assertEquals(listOf(Span(0, 12, Kind.LINK, "http://x.dev")), inline("http://x.dev![a](b.png)").spans)
+    }
+
+    @Test
+    fun `an answer's pictures are found in every block, in the page's order`() {
+        val text = "![a](a.png)\n\n- item ![b](b.png)\n\n> ![c](c.png)\n\n| h |\n|---|\n| ![d](d.png) |\n\n```\n![e](e.png)\n```"
+        assertEquals(listOf("a.png", "b.png", "c.png", "d.png"), markdownImages(text).map { it.url })
+    }
+
+    @Test
+    fun `a picture is read from the server, from the web, or not at all`() {
+        assertEquals(MarkdownImageSource.LOCAL, markdownImageSource("/tmp/x.png"))
+        assertEquals(MarkdownImageSource.LOCAL, markdownImageSource("C:\\shots\\x.png"))
+        assertEquals(MarkdownImageSource.WEB, markdownImageSource("HTTPS://x.dev/a.png"))
+        for (src in listOf("images/x.png", "data:image/png;base64,AAAA", "file:///tmp/x.png", "")) {
+            assertEquals(src, MarkdownImageSource.NONE, markdownImageSource(src))
+        }
     }
 
     @Test

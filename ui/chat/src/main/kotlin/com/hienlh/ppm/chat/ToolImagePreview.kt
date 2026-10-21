@@ -240,11 +240,11 @@ private val IMAGE_EXTENSIONS = setOf(".png", ".jpg", ".jpeg", ".gif", ".webp", "
 private val naturalSizes = mutableMapOf<String, IntSize>()
 
 /**
- * What each card showed, by call and path. The web's transcript keeps a card mounted, so its
- * picture is read once; a lazy list lets it go off screen, and without this it would be read
- * again, skeleton and all, every time it scrolled back.
+ * What each card showed, by call and path, and each markdown picture by source. The web's
+ * transcript keeps a card mounted, so its picture is read once; a lazy list lets it go off
+ * screen, and without this it would be read again, skeleton and all, every time it scrolled back.
  */
-private val shownImages by lazy {
+internal val shownImages by lazy {
     object : LruCache<String, ToolImage.Loaded>(48 * 1024 * 1024) {
         override fun sizeOf(key: String, value: ToolImage.Loaded) = value.preview.width * value.preview.height * 4 + value.bytes.size
     }
@@ -325,7 +325,7 @@ internal fun ToolImagePreview(path: String, cardKey: String?) {
 
 /** A rounded box's inside, where `overflow-hidden` clips: its radius less the border, as Chrome snaps the border. */
 @Composable
-private fun innerShape(radius: Float): Shape = with(LocalDensity.current) { RoundedCornerShape(radius.dp.toPx() - cssBorderPx(1.dp)) }
+internal fun innerShape(radius: Float): Shape = with(LocalDensity.current) { RoundedCornerShape(radius.dp.toPx() - cssBorderPx(1.dp)) }
 
 /** The picture on its stage: a tile beside the facts, or across the stage when it is a panorama. */
 @Composable

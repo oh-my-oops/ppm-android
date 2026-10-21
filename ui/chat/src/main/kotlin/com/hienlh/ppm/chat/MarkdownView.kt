@@ -206,13 +206,45 @@ private fun MarkdownBlockView(block: MarkdownBlock, style: MarkdownStyle, modifi
     }
 }
 
-/** One paragraph of inline markdown: bold, italic, `code`, links, strikethrough. */
+/** One paragraph of inline markdown: bold, italic, `code`, links, strikethrough, and pictures between its lines. */
 @Composable
 internal fun InlineMarkdownText(source: String, style: MarkdownStyle, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
     val uriHandler = LocalUriHandler.current
     val parsed = remember(source) { InlineMarkdown.parse(source) }
     val text = remember(parsed, tokens, uriHandler, style.size) { parsed.annotated(tokens, uriHandler, style.size) }
+    if (parsed.images.isEmpty()) {
+        InlineText(text, style, modifier)
+        return
+    }
+    // Each `<img>` is a block, which cuts the paragraph's lines: the text either side of one keeps
+    // lines of its own, a break included, and whitespace alone none.
+    val pieces = remember(text) { text.cutAt(IMAGE_SLOT) }
+    val slots = remember(parsed) { parsed.text.indices.filter { parsed.text[it] == IMAGE_SLOT } }
+    Column(modifier) {
+        pieces.forEachIndexed { index, piece ->
+            if (piece.isNotBlank() || '\n' in piece) InlineText(piece, style)
+            parsed.images.getOrNull(index)?.let { MarkdownImage(it, style.around(parsed.spans, slots[index], tokens)) }
+        }
+    }
+}
+
+/** [this] cut at every [at], each piece keeping its styles. */
+private fun AnnotatedString.cutAt(at: Char): List<AnnotatedString> {
+    val pieces = mutableListOf<AnnotatedString>()
+    var start = 0
+    for (index in indices) {
+        if (this[index] != at) continue
+        pieces += subSequence(start, index)
+        start = index + 1
+    }
+    pieces += subSequence(start, length)
+    return pieces
+}
+
+@Composable
+private fun InlineText(text: AnnotatedString, style: MarkdownStyle, modifier: Modifier = Modifier) {
+    val tokens = LocalPpmTokens.current
     val boxes = remember(text) { text.getStringAnnotations(CODE_BOX, 0, text.length) }
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     BasicText(

@@ -39,6 +39,7 @@ import com.hienlh.ppm.client.setDefaultTag
 import com.hienlh.ppm.client.setTag
 import com.hienlh.ppm.client.uiPrefs
 import com.hienlh.ppm.client.updateTag
+import com.hienlh.ppm.client.webFile
 import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.PpmTheme
 import com.hienlh.ppm.design.ViewerImage
@@ -916,6 +917,20 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             return ToolImage.Failed(error.status.toString())
         } catch (_: PpmError.Unauthorized) {
             return ToolImage.Failed("401")
+        } catch (_: Exception) {
+            return ToolImage.Failed("network")
+        }
+        return withContext(Dispatchers.Default) { ToolImage.decode(file.bytes, file.contentType) }
+    }
+
+    /** A picture a message shows from the web (MdImage's plain `<img src>`), read from wherever it is. */
+    suspend fun webImage(url: String): ToolImage {
+        val file = try {
+            webFile(url)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: PpmError.Server) {
+            return ToolImage.Failed(error.status.toString())
         } catch (_: Exception) {
             return ToolImage.Failed("network")
         }

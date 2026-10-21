@@ -5,7 +5,8 @@ package com.hienlh.ppm.chat
  * struck through. The web parses chat text with remark (CommonMark, GFM with `singleTilde:
  * false`, remark-breaks); this follows CommonMark's inline algorithm — delimiter runs and their
  * flanking, the rule of three, a link closing on the nearest bracket — for what chat text uses.
- * Raw HTML stays text (the web renders it through rehype-raw), and an image shows its alt text.
+ * Raw HTML stays text (the web renders it through rehype-raw), and an image is an [IMAGE_SLOT] in
+ * the text with its source and alt text in [Parsed.images], for the paragraph to draw as a block.
  * Android has no system markdown parser, so this stands in for the Apple app's
  * `AttributedString(markdown:)`.
  */
@@ -15,18 +16,23 @@ object InlineMarkdown {
     /** [url] is set for a link only. */
     data class Span(val start: Int, val end: Int, val kind: Kind, val url: String? = null)
 
-    data class Parsed(val text: String, val spans: List<Span>)
+    /** `![alt](url)`: [alt] is the plain text of what the brackets hold, as remark gives `alt`. */
+    data class Image(val url: String, val alt: String)
+
+    /** [images] in the order of their [IMAGE_SLOT]s in [text]. */
+    data class Parsed(val text: String, val spans: List<Span>, val images: List<Image> = emptyList())
 
     fun parse(source: String): Parsed {
         val out = StringBuilder()
         val spans = mutableListOf<Span>()
-        render(Scanner(source).scan(), out, spans)
+        val images = mutableListOf<Image>()
+        render(Scanner(source).scan(), out, spans, images)
         val text = out.toString()
         autolink(text, spans)
-        return Parsed(text, spans.sortedWith(compareBy<Span> { it.start }.thenByDescending { it.end }.thenBy { it.kind }))
+        return Parsed(text, spans.sortedWith(compareBy<Span> { it.start }.thenByDescending { it.end }.thenBy { it.kind }), images)
     }
 
-    private fun render(nodes: List<Node>, out: StringBuilder, spans: MutableList<Span>) {
+    private fun render(nodes: List<Node>, out: StringBuilder, spans: MutableList<Span>, images: MutableList<Image>) {
         for (node in nodes) {
             when (node) {
                 is Node.Text -> out.append(node.text)
@@ -37,16 +43,23 @@ object InlineMarkdown {
                     out.append(node.text)
                     if (out.length > start) spans += Span(start, out.length, Kind.CODE)
                 }
-                is Node.Inline -> {
+                // The web's `<img>` is `display: block`: one slot here, where the paragraph is cut.
+                is Node.Inline -> if (node.kind == null) {
+                    out.append(IMAGE_SLOT)
+                    images += Image(node.url.orEmpty(), plain(node.children))
+                } else {
                     val start = out.length
-                    render(node.children, out, spans)
-                    if (node.kind != null && out.length > start) spans += Span(start, out.length, node.kind, node.url)
+                    render(node.children, out, spans, images)
+                    if (out.length > start) spans += Span(start, out.length, node.kind, node.url)
                 }
             }
         }
     }
 
-    private val bareUrl = Regex("https?://[^\\s<>\"'`]+")
+    private fun plain(nodes: List<Node>): String =
+        StringBuilder().also { render(nodes, it, mutableListOf(), mutableListOf()) }.toString().replace(IMAGE_SLOT.toString(), "")
+
+    private val bareUrl = Regex("https?://[^\\s<>\"'`\uE001]+")
 
     /** GFM's bare-URL links, minus the sentence's punctuation; never inside code or a link. */
     private fun autolink(text: String, spans: MutableList<Span>) {
@@ -81,7 +94,7 @@ object InlineMarkdown {
             var active = true
         }
 
-        /** [kind] null: an image, drawn as its alt text. */
+        /** [kind] null: an image. */
         class Inline(val kind: Kind?, val url: String?, val children: List<Node>) : Node
     }
 
@@ -415,3 +428,6 @@ object InlineMarkdown {
         else -> false
     }
 }
+
+/** Where an image stands in a paragraph's parsed text: a private-use character, cut out before it is drawn. */
+internal const val IMAGE_SLOT = ''

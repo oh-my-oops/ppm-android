@@ -2,6 +2,7 @@ package com.hienlh.ppm.client
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Request
 import java.io.IOException
 
 /** A file as the server serves it raw: its bytes and the type it was served as. */
@@ -38,6 +39,33 @@ suspend fun ApiClient.rawFile(project: String, path: String): RawFile {
                     }
                     throw PpmError.Server(it.code, "The server answered HTTP ${it.code}.")
                 }
+                RawFile(it.body.bytes(), it.header("Content-Type"))
+            } catch (error: IOException) {
+                throw PpmError.Unreachable(describe(error))
+            }
+        }
+    }
+}
+
+/**
+ * A picture a message shows from the web (`<img src="https://…">`): fetched as the browser
+ * fetches one, from wherever it is, with nothing of the server's sent along.
+ */
+suspend fun webFile(url: String): RawFile {
+    val request = try {
+        Request.Builder().url(url).header("Accept", "image/*,*/*;q=0.8").get().build()
+    } catch (_: IllegalArgumentException) {
+        throw PpmError.InvalidUrl()
+    }
+    val response = try {
+        PpmHttp.getClient.newCall(request).await()
+    } catch (error: IOException) {
+        throw PpmError.Unreachable(describe(error))
+    }
+    return withContext(Dispatchers.IO) {
+        response.use {
+            try {
+                if (!it.isSuccessful) throw PpmError.Server(it.code, "The server answered HTTP ${it.code}.")
                 RawFile(it.body.bytes(), it.header("Content-Type"))
             } catch (error: IOException) {
                 throw PpmError.Unreachable(describe(error))

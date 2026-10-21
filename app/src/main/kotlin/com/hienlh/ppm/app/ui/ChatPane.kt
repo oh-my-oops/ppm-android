@@ -72,7 +72,9 @@ import com.hienlh.ppm.chat.ChatTabs
 import com.hienlh.ppm.chat.ChatTranscriptView
 import com.hienlh.ppm.chat.LocalChatImages
 import com.hienlh.ppm.chat.LocalChatTabs
+import com.hienlh.ppm.chat.LocalMarkdownImages
 import com.hienlh.ppm.chat.LocalToolImages
+import com.hienlh.ppm.chat.MarkdownImages
 import com.hienlh.ppm.chat.RelativeTime
 import com.hienlh.ppm.chat.ToolImages
 import com.hienlh.ppm.chat.TurnStopBar
@@ -141,6 +143,13 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                 }
             }
             val toolImages = remember(tab.project) { ToolImages { model.toolImage(tab.project, it) } }
+            val markdownImages = remember(tab.project) {
+                object : MarkdownImages {
+                    override suspend fun local(path: String) = model.toolImage(tab.project, path)
+
+                    override suspend fun web(url: String) = model.webImage(url)
+                }
+            }
             val tabs = remember(tab.project) {
                 object : ChatTabs {
                     override fun openFile(path: String) = model.openFileTab(tab.project, path)
@@ -148,7 +157,12 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     override fun openDiff(path: String, original: String, modified: String) = model.openDiffTab(tab.project, path, original, modified)
                 }
             }
-            CompositionLocalProvider(LocalChatImages provides images, LocalToolImages provides toolImages, LocalChatTabs provides tabs) {
+            CompositionLocalProvider(
+                LocalChatImages provides images,
+                LocalToolImages provides toolImages,
+                LocalMarkdownImages provides markdownImages,
+                LocalChatTabs provides tabs,
+            ) {
                 ChatTranscriptView(
                     state,
                     onRespond = { request, approved, data -> chat.respond(request, approved, data) },

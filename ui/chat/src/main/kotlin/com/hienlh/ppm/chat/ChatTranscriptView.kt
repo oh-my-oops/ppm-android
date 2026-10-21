@@ -208,12 +208,13 @@ private fun TranscriptList(
     val viewer = LocalImageViewer.current
     val uploads = LocalChatImages.current
     val toolImages = LocalToolImages.current
+    val markdownImages = LocalMarkdownImages.current
     val items by rememberUpdatedState(state.items)
     val streaming by rememberUpdatedState(live)
-    val gallery = remember(viewer, uploads, toolImages) {
+    val gallery = remember(viewer, uploads, toolImages, markdownImages) {
         ChatGallery { self ->
             val images = galleryRefs(items, streaming) { tool -> tool.toolUseId?.let { openCards[it] } ?: true }
-                .map { galleryImage(it, uploads, toolImages) }
+                .map { galleryImage(it, uploads, toolImages, markdownImages) }
             val index = images.indexOfFirst { it.key == self.key }
             // The picture tapped is the one already in hand.
             if (index < 0) viewer?.show(listOf(self), 0) else viewer?.show(images.toMutableList().also { it[index] = self }, index)
@@ -253,7 +254,9 @@ private fun TranscriptList(
                     }
                     if (!live.isNullOrEmpty()) {
                         item(key = "live") {
-                            AssistantBlocks(live, live = state.isRunning, actions = null, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp))
+                            CompositionLocalProvider(LocalMarkdownImageScope provides LIVE_SCOPE) {
+                                AssistantBlocks(live, live = state.isRunning, actions = null, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp))
+                            }
                         }
                     }
                     if (trailing) {
