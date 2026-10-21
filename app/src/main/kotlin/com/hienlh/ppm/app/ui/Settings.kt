@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.tablet.Edge
 import com.hienlh.ppm.app.ui.tablet.edge
@@ -72,7 +73,7 @@ import kotlinx.serialization.json.put
 /**
  * Settings as a tab: on a phone the category list over the pane, a row opening its pane and
  * Back returning to the list. Only the categories this app has are listed — Appearance's theme,
- * and the servers it connects to, which the web has no need of.
+ * the servers it connects to, which the web has no need of, and Voice Input.
  */
 @Composable
 fun SettingsTab(model: AppModel) = SettingsBody(model, backReturnsToList = true)
@@ -127,14 +128,35 @@ private fun SettingsBody(
 /** `@[640px]`: the body's width from which the rail shows. */
 private val SPLIT_WIDTH = 640.dp
 
-enum class SettingsCategory(val id: String, val label: String, val subtitle: String, val icon: ProductIcon) {
-    Appearance("appearance", "Appearance", "Theme", ProductIcon.Palette),
-    Servers("servers", "Servers", "The PPM servers this app connects to", ProductIcon.HardDrive),
+enum class SettingsCategory(val id: String, val label: String, val subtitle: String, val icon: ProductIcon, val group: SettingsGroup) {
+    Appearance("appearance", "Appearance", "Theme", ProductIcon.Palette, SettingsGroup.Core),
+    Servers("servers", "Servers", "The PPM servers this app connects to", ProductIcon.HardDrive, SettingsGroup.Core),
+    Voice("voice", "Voice Input", "Speech to text for the chat box", ProductIcon.Mic, SettingsGroup.Ai),
+}
+
+/** `SETTINGS_GROUPS`, as far as this app's categories reach: the first has no heading. */
+enum class SettingsGroup(val label: String?) {
+    Core(null),
+    Ai("AI & Accounts"),
+    ;
+
+    val categories: List<SettingsCategory> get() = SettingsCategory.entries.filter { it.group == this }
+}
+
+/** A group's heading, `text-[11px] font-medium uppercase tracking-wide text-muted-foreground`. */
+@Composable
+private fun GroupHeading(label: String, modifier: Modifier) {
+    val tokens = LocalPpmTokens.current
+    BasicText(
+        label.uppercase(),
+        modifier,
+        style = ppmText(11f, FontWeight.Medium, lineHeight = 16.5f).copy(color = tokens.text2.color, letterSpacing = 0.025.em),
+    )
 }
 
 /**
- * settings-category-rail.tsx: `w-[210px] border-r`, every category at once in `p-2`. Both of this
- * app's sit in the web's first group, which has no heading.
+ * settings-category-rail.tsx: `w-[210px] border-r`, every category at once in `p-2 space-y-4`, a
+ * group's rows `space-y-1` under its heading (`px-2 pt-1`).
  */
 @Composable
 private fun SettingsRail(active: SettingsCategory, onSelect: (SettingsCategory) -> Unit) {
@@ -146,36 +168,39 @@ private fun SettingsRail(active: SettingsCategory, onSelect: (SettingsCategory) 
             .edge(Edge.Right, tokens.border.color)
             .verticalScroll(rememberScrollState())
             .padding(8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        for (category in SettingsCategory.entries) {
-            val on = category == active
-            // `px-2.5 py-2 rounded-md gap-2.5 cursor-pointer`: the active row in `bg-accent`, any
-            // other `hover:bg-accent/50 active:bg-accent`.
-            val shape = RoundedCornerShape(8.dp)
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(shape)
-                    .then(if (on) Modifier.background(tokens.panel2.color) else Modifier)
-                    .pointerHoverIcon(WebCursor.Pointer)
-                    .ppmClickable(
-                        pressedColor = tokens.panel2.color,
-                        hoverColor = if (on) Color.Transparent else tokens.panel2.opacity(0.5).color,
-                        shape = shape,
-                    ) { onSelect(category) }
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                PpmIcon(category.icon, 16.dp, (if (on) tokens.text else tokens.text2).color)
-                BasicText(category.label, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        for (group in SettingsGroup.entries) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            group.label?.let { GroupHeading(it, Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp)) }
+            for (category in group.categories) {
+                val on = category == active
+                // `px-2.5 py-2 rounded-md gap-2.5 cursor-pointer`: the active row in `bg-accent`, any
+                // other `hover:bg-accent/50 active:bg-accent`.
+                val shape = RoundedCornerShape(8.dp)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(shape)
+                        .then(if (on) Modifier.background(tokens.panel2.color) else Modifier)
+                        .pointerHoverIcon(WebCursor.Pointer)
+                        .ppmClickable(
+                            pressedColor = tokens.panel2.color,
+                            hoverColor = if (on) Color.Transparent else tokens.panel2.opacity(0.5).color,
+                            shape = shape,
+                        ) { onSelect(category) }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    PpmIcon(category.icon, 16.dp, (if (on) tokens.text else tokens.text2).color)
+                    BasicText(category.label, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }
 }
 
-/** `absolute inset-0 bg-background`: "Settings", then a row per category. */
+/** `absolute inset-0 bg-background`: "Settings", then a row per category in `p-3 space-y-5`, each group under its heading (`px-1 pb-1`). */
 @Composable
 private fun SettingsIndex(onSelect: (SettingsCategory) -> Unit) {
     val tokens = LocalPpmTokens.current
@@ -186,36 +211,39 @@ private fun SettingsIndex(onSelect: (SettingsCategory) -> Unit) {
             style = ppmText(14f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color),
         )
         Separator()
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            for (category in SettingsCategory.entries) {
-                // `px-2.5 py-3 rounded-lg gap-3 cursor-pointer`, `hover:bg-accent/50 active:bg-accent`;
-                // the icon's tile turns `bg-accent` at once under a mouse (`group-hover:`, no transition).
-                val shape = RoundedCornerShape(12.dp)
-                val hover = rememberHover(instant = true)
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(shape)
-                        .pointerHoverIcon(WebCursor.Pointer)
-                        .ppmClickable(
-                            pressedColor = tokens.panel2.color,
-                            hoverColor = tokens.panel2.opacity(0.5).color,
-                            shape = shape,
-                            source = hover.source,
-                        ) { onSelect(category) }
-                        .padding(horizontal = 10.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Box(
-                        Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(tokens.panel2.mix(tokens.panel, hover.lit.toDouble()).color),
-                        contentAlignment = Alignment.Center,
-                    ) { PpmIcon(category.icon, 16.dp, tokens.text2.color) }
-                    Column(Modifier.weight(1f)) {
-                        BasicText(category.label, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        BasicText(category.subtitle, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            for (group in SettingsGroup.entries) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                group.label?.let { GroupHeading(it, Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp)) }
+                for (category in group.categories) {
+                    // `px-2.5 py-3 rounded-lg gap-3 cursor-pointer`, `hover:bg-accent/50 active:bg-accent`;
+                    // the icon's tile turns `bg-accent` at once under a mouse (`group-hover:`, no transition).
+                    val shape = RoundedCornerShape(12.dp)
+                    val hover = rememberHover(instant = true)
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(shape)
+                            .pointerHoverIcon(WebCursor.Pointer)
+                            .ppmClickable(
+                                pressedColor = tokens.panel2.color,
+                                hoverColor = tokens.panel2.opacity(0.5).color,
+                                shape = shape,
+                                source = hover.source,
+                            ) { onSelect(category) }
+                            .padding(horizontal = 10.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Box(
+                            Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(tokens.panel2.mix(tokens.panel, hover.lit.toDouble()).color),
+                            contentAlignment = Alignment.Center,
+                        ) { PpmIcon(category.icon, 16.dp, tokens.text2.color) }
+                        Column(Modifier.weight(1f)) {
+                            BasicText(category.label, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            BasicText(category.subtitle, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text2.color)
                     }
-                    PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text2.color)
                 }
             }
         }
@@ -255,13 +283,14 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
             when (category) {
                 SettingsCategory.Appearance -> AppearanceSection(model)
                 SettingsCategory.Servers -> ServersSection(model)
+                SettingsCategory.Voice -> VoiceSection(model)
             }
         }
     }
 }
 
 @Composable
-private fun Separator() {
+internal fun Separator() {
     val tokens = LocalPpmTokens.current
     Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
 }
@@ -391,26 +420,26 @@ private fun ModeButton(label: String, icon: ProductIcon, on: Boolean, dark: Bool
 }
 
 /** The outline button's border: `dark:border-input` (the border colour), else the text colour. */
-private fun outlineBorder(tokens: ThemeTokens, dark: Boolean): Color = (if (dark) tokens.border else tokens.text).color
+internal fun outlineBorder(tokens: ThemeTokens, dark: Boolean): Color = (if (dark) tokens.border else tokens.text).color
 
 /**
  * The outline button's fill, [lit] of the way to its hover one: `bg-background` to `bg-accent`,
  * or in dark mode `dark:bg-input/30` to `dark:hover:bg-input/50` (`--input` is the border colour).
  */
-private fun outlineFill(tokens: ThemeTokens, dark: Boolean, lit: Double): Color =
+internal fun outlineFill(tokens: ThemeTokens, dark: Boolean, lit: Double): Color =
     if (dark) tokens.border.opacity(0.3 + 0.2 * lit).color else tokens.panel2.mix(tokens.bgSolid, lit).color
 
 /** The `ghost` button's hover fill: `hover:bg-accent`, `dark:hover:bg-accent/50`. */
-private fun ghostHover(tokens: ThemeTokens, dark: Boolean): Color = tokens.panel2.opacity(if (dark) 0.5 else 1.0).color
+internal fun ghostHover(tokens: ThemeTokens, dark: Boolean): Color = tokens.panel2.opacity(if (dark) 0.5 else 1.0).color
 
 /** `shadow-xs`, under an outline button. */
-private val SHADOW_XS = ThemeShadow(0.0, 1.0, 2.0, 0.0, Rgba(0.0, 0.0, 0.0, 0.05))
+internal val SHADOW_XS = ThemeShadow(0.0, 1.0, 2.0, 0.0, Rgba(0.0, 0.0, 0.0, 0.05))
 
 /**
  * Tailwind's `ring-N`: a solid [width] band outside the box, its corners following [radius]. A
  * box-shadow, so nothing is drawn under the box itself.
  */
-private fun Modifier.ring(width: Dp, color: Color, radius: Dp): Modifier = drawBehind {
+internal fun Modifier.ring(width: Dp, color: Color, radius: Dp): Modifier = drawBehind {
     val band = width.toPx()
     drawRoundRect(
         color,

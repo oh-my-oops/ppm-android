@@ -14,7 +14,7 @@ import kotlinx.coroutines.launch
 /**
  * The web's window-wide keyboard shortcuts (use-global-keybindings.ts) for a hardware keyboard:
  * [dispatch] sees each key before any view does. The actions this app has are wired; new file,
- * terminal, Source Control, search, Problems, voice, compare and extension keys come with their
+ * terminal, Source Control, search, Problems, compare and extension keys come with their
  * features. In a text field only the terminal panel toggle and the chat jumps run, and nothing
  * runs while an IME composes.
  */
@@ -66,7 +66,7 @@ class KeyboardShortcuts(private val model: AppModel) {
         val ids = buildList {
             add("command-palette")
             if (model.wide) addAll(listOf("toggle-sidebar", "toggle-dock"))
-            addAll(listOf("next-tab", "prev-tab", "open-chat", "open-settings", "chat-nav-prev", "chat-nav-next"))
+            addAll(listOf("next-tab", "prev-tab", "open-chat", "open-settings", "voice-input", "chat-nav-prev", "chat-nav-next"))
             for (n in 1..minOf(9, model.projects.size)) add("switch-project-$n")
         }
         val items = ids.mapNotNull { id ->
@@ -93,6 +93,7 @@ class KeyboardShortcuts(private val model: AppModel) {
             matches(press, "prev-tab") -> model.cycleTab(forward = false)
             matches(press, "open-chat") -> model.scope.launch { model.newChat() }
             matches(press, "open-settings") -> model.openSettings()
+            matches(press, "voice-input") -> model.toggleVoiceInput()
             jumpInChat(press) -> Unit
             else -> model.openProjectAt((1..9).firstOrNull { matches(press, "switch-project-$it") } ?: return false)
         }

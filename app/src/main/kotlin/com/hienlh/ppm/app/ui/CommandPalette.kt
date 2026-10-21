@@ -122,6 +122,7 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
         }
         listOf(
             PaletteCommand("New AI Chat", ProductIcon.MessageSquare, "ai assistant claude", formatShortcut(bindings.binding("open-chat")), run { model.scope.launch { model.newChat() } }),
+            PaletteCommand("Voice Input", ProductIcon.Mic, "speech microphone dictate voice", formatShortcut(bindings.binding("voice-input")), run { model.toggleVoiceInput() }),
             PaletteCommand("Settings", ProductIcon.Settings, "config preferences theme", formatShortcut(bindings.binding("open-settings")), run { model.openSettings() }),
         )
     }

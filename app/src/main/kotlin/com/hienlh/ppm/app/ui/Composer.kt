@@ -1,7 +1,15 @@
 package com.hienlh.ppm.app.ui
 
+import android.Manifest
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -46,6 +54,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -78,6 +87,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -144,9 +155,9 @@ private val chipText = ppmText(11.5f, lineHeight = 17.25f)
  * The message box (`message-input.tsx`): the chips that set how the next turn runs over the text
  * and Send, or Stop while the turn runs and nothing is typed. A phone draws the `md:hidden` rows,
  * a tablet the desktop ones. [narrow] is the chat's `@max-[420px]` — the mode and priority chips
- * keep only their icons, and on a tablet the chips stay on one line. The mic is left out until
- * this app has it. [fileDrop] takes what is dropped on the text, where its own field would; the
- * [pickers] open over the box take its keys first.
+ * keep only their icons, and on a tablet the chips stay on one line. [fileDrop] takes what is
+ * dropped on the text, where its own field would; the [pickers] open over the box take its keys
+ * first.
  */
 @Composable
 fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState, narrow: Boolean, fileDrop: ChatFileDrop, pickers: ComposerPickers) {
@@ -204,6 +215,15 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
     val attach = rememberAttachPicker { uris -> model.attach(context, tab, uris) }
     // The box pasted into kept its focus, so the keyboard stays as it was.
     val pasteImage: (Uri) -> Unit = { uri -> model.attach(context, tab, listOf(uri), raiseKeyboard = false) }
+
+    // The mic, for the engine Settings → Voice picked; asked for the microphone the first time.
+    val engine = model.voiceEngine
+    val micShown = model.voice.supported(engine)
+    val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> model.voice.permitted(granted) }
+    val toggleMic = { model.voice.toggle(tab, engine) { askMic.launch(Manifest.permission.RECORD_AUDIO) } }
+    // Mod+Shift+V and the palette reach the chat in front, which answers only with a mic to show.
+    val shortcutMic by rememberUpdatedState(if (micShown) toggleMic else null)
+    LaunchedEffect(tab) { model.voiceToggles.filter { it == tab.tabId }.collect { shortcutMic?.invoke() } }
 
     /**
      * ↑/↓ through this chat's past messages, as a shell does: only from an empty box (so ↑ still
@@ -311,6 +331,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                     placeholder = if (running) "Follow-up..." else "Ask anything...",
                     modifier = Modifier.weight(1f),
                 )
+                if (micShown) MicButton(tab, mobile = true, onClick = toggleMic)
                 if (running && !hasContent) {
                     SquareButton(ProductIcon.Square, 14.dp, tokens.error, Color.White, hoverFill = tokens.error.opacity(0.8), label = "Stop") { chat.cancel() }
                 } else {
@@ -344,6 +365,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                     placeholder = if (running) "Follow-up or Stop..." else "Ask anything...",
                     modifier = Modifier.weight(1f),
                 )
+                if (micShown) MicButton(tab, mobile = false, onClick = toggleMic)
                 if (running && !hasContent) {
                     SquareButton(ProductIcon.Square, 16.dp, tokens.error, Color.White, hoverFill = tokens.error.opacity(0.8), label = "Stop response") { chat.cancel() }
                 } else {
@@ -723,6 +745,69 @@ private fun PromptCacheChip(cache: PromptCacheState?) {
         BasicText(label, style = chipText.copy(color = color.color, fontFeatureSettings = "tnum"), maxLines = 1)
     }
 }
+
+/**
+ * The mic, labelled "Start voice input", "Stop voice input" or "Transcribing": the paperclip's box
+ * and colours while closed (`size-8` and a 16 px icon on a phone, `size-[34px]`, 17 px and
+ * `hover:bg-surface-elevated` on a tablet); open, `bg-error text-white animate-pulse` and the mic
+ * crossed out; while Whisper works on what it heard, a spinner at half strength taking no presses.
+ * The change of look fades as `transition-colors` fades it.
+ */
+@Composable
+private fun MicButton(tab: ChatTab, mobile: Boolean, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val listening = tab.voiceListening
+    val transcribing = tab.voiceTranscribing
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val hovered by source.collectIsHoveredAsState()
+    val lit = if (pressed && !transcribing) 1.0 else colorsFade(hovered).toDouble()
+    val open = colorsFade(listening).toDouble()
+    // `animate-pulse`: down to half and back every 2 s, each way on cubic-bezier(0.4, 0, 0.6, 1).
+    val pulse = if (listening) {
+        rememberInfiniteTransition(label = "pulse").animateFloat(
+            initialValue = 1f,
+            targetValue = 0.5f,
+            animationSpec = infiniteRepeatable(tween(1_000, easing = PULSE_EASING), RepeatMode.Reverse),
+            label = "pulse",
+        ).value
+    } else {
+        1f
+    }
+    val idleFill = if (mobile) tokens.panel2.opacity(0.0) else tokens.panel2.opacity(lit)
+    val idleIcon = tokens.text.mix(tokens.text3, lit)
+    val label = when {
+        transcribing -> "Transcribing"
+        listening -> "Stop voice input"
+        else -> "Start voice input"
+    }
+    val shape = RoundedCornerShape(10.dp)
+    Box(
+        Modifier
+            .alpha(if (transcribing) 0.5f else pulse)
+            .size(if (mobile) 32.dp else 34.dp)
+            .clip(shape)
+            .background(tokens.error.mix(idleFill, open).color)
+            .pointerHoverIcon(WebCursor.Default)
+            .hoverable(source)
+            .clickable(source, indication = null, enabled = !transcribing, onClickLabel = label, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        val icon = when {
+            transcribing -> ProductIcon.Loader2
+            listening -> ProductIcon.MicOff
+            else -> ProductIcon.Mic
+        }
+        PpmIcon(icon, if (mobile) 16.dp else 17.dp, WHITE.mix(idleIcon, open).color, spinning = transcribing)
+    }
+}
+
+/** Tailwind's `--animate-pulse` timing. */
+private val PULSE_EASING = CubicBezierEasing(0.4f, 0f, 0.6f, 1f)
+
+/** `text-white`. */
+private val WHITE = Rgba(1.0, 1.0, 1.0, 1.0)
 
 /**
  * `size-9 rounded-[11px]` with the float shadow, [hoverFill] under a mouse (faded in) or a finger;

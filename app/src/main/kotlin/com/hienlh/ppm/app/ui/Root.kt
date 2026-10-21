@@ -150,7 +150,7 @@ fun PpmRoot(model: AppModel) {
             PpmThemeProvider(theme, mobile) {
                 // Chrome's own word on a download, which the web leaves to the browser.
                 val download = rememberImageDownload { saved ->
-                    model.toast = ErrorToastMessage("File downloaded", "${saved.name} (${downloadSize(saved.size)})", ErrorToastMessage.Action("Open", saved.open), error = false)
+                    model.toast = ErrorToastMessage("File downloaded", "${saved.name} (${downloadSize(saved.size)})", ErrorToastMessage.Action("Open", saved.open), kind = ErrorToastMessage.Kind.PLAIN)
                 }
                 val context = LocalContext.current
                 val clipboard = LocalClipboard.current
@@ -256,6 +256,12 @@ private fun ErrorToast(message: ErrorToastMessage?, mobile: Boolean, narrow: Boo
             val shape = RectangleShape
             // `--normal-bg`, the popover colour: `--panel-2`.
             val surface = tokens.panel2
+            // The icons PPM gives sonner (components/ui/sonner.tsx).
+            val icon = when (shown?.kind) {
+                ErrorToastMessage.Kind.INFO -> ProductIcon.InfoIcon
+                ErrorToastMessage.Kind.PLAIN -> null
+                else -> ProductIcon.OctagonXIcon
+            }
             Box(if (mobile && narrow) Modifier.fillMaxWidth() else Modifier.width(356.dp)) {
                 Row(
                     Modifier
@@ -266,14 +272,14 @@ private fun ErrorToast(message: ErrorToastMessage?, mobile: Boolean, narrow: Boo
                         .hoverable(overToast)
                         .cssBorder(tokens.border.color, shape)
                         // sonner's `padding: 16px`, less the 3 px the icon's `margin-left: -3px` takes back.
-                        .padding(start = if (shown?.error != false) 13.dp else 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
+                        .padding(start = if (icon != null) 13.dp else 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     // `[data-icon]`: 16 px and `margin-right: 4px`, its svg `margin-left: -1px`.
-                    if (shown?.error != false) {
+                    if (icon != null) {
                         Box(Modifier.padding(end = 4.dp).size(16.dp)) {
-                            PpmIcon(ProductIcon.OctagonXIcon, 16.dp, tokens.text.color, Modifier.offset(x = (-1).dp))
+                            PpmIcon(icon, 16.dp, tokens.text.color, Modifier.offset(x = (-1).dp))
                         }
                     }
                     // `[data-content]`, `gap: 2px`: the title at 500 on a 1.5 line, the description at 400

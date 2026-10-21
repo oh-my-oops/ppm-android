@@ -398,6 +398,16 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** Alt+↑ / Alt+↓ for a chat, by its tab's id: -1 for the user's previous message, 1 for the next. */
     val chatJumps = MutableSharedFlow<Pair<String, Int>>(extraBufferCapacity = 8)
 
+    /** The chat mic, one for every message box. */
+    val voice = VoiceInput(context, scope, api = { api }, toast = { toast = it })
+
+    /** What the mic listens with, kept on this device (`voiceEngine`): Settings → Voice picks it. */
+    var voiceEngine by mutableStateOf(VoiceEngine.of(prefs.get("voiceEngine")))
+        private set
+
+    /** Mod+Shift+V and the palette's Voice Input (`toggle-voice-input`), by the tab whose box should answer. */
+    val voiceToggles = MutableSharedFlow<String>(extraBufferCapacity = 8)
+
     /** The tag whose Delete was chosen in Manage tags, until the user confirms. */
     var confirmDeleteTag by mutableStateOf<SessionTag?>(null)
 
@@ -1059,7 +1069,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             !wide || windows == null -> toast = ErrorToastMessage(
                 "${path.trimEnd('/', '\\').split('/', '\\').last()} is a folder",
                 "Folders do not open in the Android app yet.",
-                error = false,
+                kind = ErrorToastMessage.Kind.PLAIN,
             )
             windows.state.value.windows.size >= MAX_WINDOWS -> actionError = TOO_MANY_WINDOWS
             else -> windows.open(WindowKind.Explorer, buildJsonObject { put("path", path) })
@@ -1366,6 +1376,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             chats[id] = ChatTab(id, session, project).also { chat ->
                 pendingDrafts.remove(sessionId)?.let { chat.draft.setTextAndPlaceCursorAtEnd(it) }
                 chat.clientCommand = { text -> runClientCommand(chat, text) }
+                chat.closeMic = { voice.closeFor(chat) }
             }
         }
         val active = state.activeGridTab
@@ -1629,6 +1640,17 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     fun jumpInChat(direction: Int) {
         val tabId = activeTabId ?: return
         chatJumps.tryEmit(tabId to direction)
+    }
+
+    /** Opens or closes the mic of the chat in front, which does nothing for a tab that is not a chat. */
+    fun toggleVoiceInput() {
+        val tabId = activeTabId ?: return
+        voiceToggles.tryEmit(tabId)
+    }
+
+    fun selectVoiceEngine(engine: VoiceEngine) {
+        voiceEngine = engine
+        prefs.put("voiceEngine", engine.id)
     }
 
     fun closeTab(tabId: String, panelId: String? = panelOf(tabId)) {
@@ -2040,6 +2062,18 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
      */
     var clientCommand: ((String) -> Boolean?)? = null
 
+    /** The mic is open for this box (`isListening`): its button is red and pulses. */
+    var voiceListening by mutableStateOf(false)
+
+    /** Whisper is turning what this box's mic heard into text (`isTranscribing`); the mic waits for it. */
+    var voiceTranscribing by mutableStateOf(false)
+
+    /** What the box held as the mic opened, trimmed: what it hears goes after it (`preVoiceTextRef`). */
+    internal var preVoiceText = ""
+
+    /** Closes the mic of a box being sent from, dropping what it would still write. Set by the model. */
+    var closeMic: (() -> Unit)? = null
+
     /**
      * The pickers after the user changed the text (`updatePickerState`), from what is left of
      * the caret: the slash picker first, else the file picker, else neither.
@@ -2098,6 +2132,16 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
         showFiles(null)
         edited()
         requestFocus(raiseKeyboard)
+    }
+
+    /**
+     * What the mic heard so far (`voiceResultCb`), after what the box held as it opened, with the
+     * caret at the end; the pickers are left as they were, as the web's write does not reach them.
+     */
+    fun voiceResult(text: String) {
+        draft.setTextAndPlaceCursorAtEnd(if (preVoiceText.isNotEmpty()) "$preVoiceText $text" else text)
+        // The web leaves the draft as it was until the next keystroke.
+        edited()
     }
 
     fun selectReply(reply: ReplyReference?) {
@@ -2181,6 +2225,9 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
         // The agent goes in as words the model delegates on; the bubble turns them back into its chip.
         val text = if (agent != null) "Use the $agent agent to $typed".trimEnd() else typed
         closePickers()
+        // Sending closes the mic, whatever becomes of the message: what it would still write
+        // would land in the box the message just left.
+        if (voiceListening) closeMic?.invoke()
         when (clientCommand?.invoke(text)) {
             false -> {
                 pendingSend = false
@@ -2248,8 +2295,9 @@ class ChatTab(val tabId: String, val session: SessionInfo, val project: String) 
         }
     }
 
-    /** The tab went: a save still waiting goes, as it would have a second later. */
+    /** The tab went: a save still waiting goes, as it would have a second later, and its mic closes. */
     fun stop() {
+        closeMic?.invoke()
         draftLoad?.cancel()
         drafts?.flush()
         controller?.stop()
@@ -2263,10 +2311,12 @@ private const val DRAFT_GATE_MILLIS = 3_000L
 /**
  * What `toast.error(title, { description, action })` shows: a title, a line under it, and one
  * button that runs [action] and closes the toast. Each one is a toast of its own, even with the
- * text of the last. Not an [error], it is a plain `toast()`, with no icon.
+ * text of the last. Its [kind] is the icon in front: `toast.info`'s, or a plain `toast()`'s none.
  */
-class ErrorToastMessage(val title: String, val description: String? = null, val action: Action? = null, val error: Boolean = true) {
+class ErrorToastMessage(val title: String, val description: String? = null, val action: Action? = null, val kind: Kind = Kind.ERROR) {
     class Action(val label: String, val run: () -> Unit)
+
+    enum class Kind { ERROR, INFO, PLAIN }
 }
 
 /** The lightbox open on [images] at [index] (`useImageOverlay`'s state). */

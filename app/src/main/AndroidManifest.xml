@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The chat mic: asked for the first time it is pressed. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- The camera and camcorder the paperclip's chooser offers beside Files, as Chrome's does.
          Neither needs the CAMERA permission: the app never declares it, so the camera app asks. -->
@@ -11,6 +13,10 @@
         </intent>
         <intent>
             <action android:name="android.media.action.VIDEO_CAPTURE" />
+        </intent>
+        <!-- The speech recognisers the mic can use, Google's first as Chrome picks it. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
         </intent>
     </queries>
 
