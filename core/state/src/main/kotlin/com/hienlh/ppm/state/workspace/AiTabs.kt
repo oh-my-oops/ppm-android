@@ -176,7 +176,7 @@ fun WorkspaceStore.openAiTab(target: AiTabTarget, sessionId: String): String {
 }
 
 /** Absolute, or `~`-relative: a path the host resolves on its own. */
-private val HOST_PATH = Regex("""^(/|[a-z]:[/\\]|~(?:[/\\]|$))""", RegexOption.IGNORE_CASE)
+internal val HOST_PATH = Regex("""^(/|[a-z]:[/\\]|~(?:[/\\]|$))""", RegexOption.IGNORE_CASE)
 
 /**
  * The tab a tool card's Open button opens, from the call's own [path] (`resolveToolCallTarget`):

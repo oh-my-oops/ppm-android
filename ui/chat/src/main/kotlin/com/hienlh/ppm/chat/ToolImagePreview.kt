@@ -90,6 +90,7 @@ import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.state.workspace.SourceLine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.nio.ByteBuffer
@@ -172,6 +173,12 @@ interface ChatTabs {
      * own call opened it, beside the chat; what went wrong, if anything, is a toast.
      */
     fun openToolFile(tool: String, path: String, line: Int?)
+
+    /**
+     * A file a message names, by a link or an inline `path:line` (`openFileOrSearch`): opened at
+     * [line] when the host has it, a folder in the explorer, and anything else searched for.
+     */
+    fun openFileOrSearch(path: String, line: SourceLine?)
 }
 
 /** How this chat opens tabs; none, and its file buttons do nothing, as the web's do without a project. */

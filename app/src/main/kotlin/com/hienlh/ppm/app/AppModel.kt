@@ -72,9 +72,11 @@ import com.hienlh.ppm.state.windows.WindowKind
 import com.hienlh.ppm.state.windows.WindowStore
 import com.hienlh.ppm.state.windows.WindowsState
 import com.hienlh.ppm.state.workspace.DOCK_PANEL_ID
+import com.hienlh.ppm.state.workspace.FileNavigation
 import com.hienlh.ppm.state.workspace.NavEntry
 import com.hienlh.ppm.state.workspace.NavHistory
 import com.hienlh.ppm.state.workspace.NewTab
+import com.hienlh.ppm.state.workspace.SourceLine
 import com.hienlh.ppm.state.workspace.SplitDirection
 import com.hienlh.ppm.state.workspace.UrlState
 import com.hienlh.ppm.state.workspace.WorkspaceCache
@@ -82,6 +84,7 @@ import com.hienlh.ppm.state.workspace.WorkspaceState
 import com.hienlh.ppm.state.workspace.WorkspaceStore
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.state.workspace.openAiTab
+import com.hienlh.ppm.state.workspace.resolveFileNavigation
 import com.hienlh.ppm.state.workspace.resolveToolCallTarget
 import com.hienlh.ppm.state.workspace.buildMetadataFromUrl
 import com.hienlh.ppm.state.workspace.buildTitleFromUrl
@@ -981,6 +984,42 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                     toast = ErrorToastMessage(title, describe(error))
                 }
             }
+        }
+    }
+
+    /**
+     * A file a chat message names in [project], by a link or an inline `path:line`
+     * (`useMarkdownFileNavigation`): an editor tab at the lines named, a folder in an explorer, and
+     * anything the host cannot open searched for in the palette.
+     */
+    fun openFileOrSearch(project: String, path: String, line: SourceLine?) {
+        val api = api ?: return
+        if (path.isEmpty()) return
+        val root = projects.firstOrNull { it.name == project }?.path
+        scope.launch {
+            when (val open = resolveFileNavigation(path, line, project, root, System.currentTimeMillis()) { api.fsStat(it) }) {
+                is FileNavigation.Editor -> withWorkspace { store ->
+                    val id = store.openTab(open.tab)
+                    // A tab already open is only brought forward: the lines are handed to it too.
+                    if (open.reveal && id.isNotEmpty()) store.updateTab(id) { it.copy(metadata = open.tab.metadata) }
+                }
+                is FileNavigation.Folder -> openExplorer(open.path)
+                is FileNavigation.Search -> openPalette(open.query)
+            }
+        }
+    }
+
+    /** open-explorer.ts: a folder in an explorer window on a tablet. A phone's full-screen explorer is not in the app yet. */
+    private fun openExplorer(path: String) {
+        val windows = windows
+        when {
+            !wide || windows == null -> toast = ErrorToastMessage(
+                "${path.trimEnd('/', '\\').split('/', '\\').last()} is a folder",
+                "Folders do not open in the Android app yet.",
+                error = false,
+            )
+            windows.state.value.windows.size >= MAX_WINDOWS -> actionError = TOO_MANY_WINDOWS
+            else -> windows.open(WindowKind.Explorer, buildJsonObject { put("path", path) })
         }
     }
 

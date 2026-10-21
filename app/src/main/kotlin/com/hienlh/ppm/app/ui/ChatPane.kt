@@ -93,6 +93,7 @@ import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatState
 import com.hienlh.ppm.state.HistoryList
+import com.hienlh.ppm.state.workspace.SourceLine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
@@ -158,6 +159,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
 
                     override fun openToolFile(tool: String, path: String, line: Int?) =
                         model.openToolFileTab(tab.project, tab.session.id, tool, path, line)
+
+                    override fun openFileOrSearch(path: String, line: SourceLine?) = model.openFileOrSearch(tab.project, path, line)
                 }
             }
             CompositionLocalProvider(

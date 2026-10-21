@@ -74,6 +74,7 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderInset
 import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.ppmText
+import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
@@ -211,8 +212,9 @@ private fun MarkdownBlockView(block: MarkdownBlock, style: MarkdownStyle, modifi
 internal fun InlineMarkdownText(source: String, style: MarkdownStyle, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
     val uriHandler = LocalUriHandler.current
+    val tabs = LocalChatTabs.current
     val parsed = remember(source) { InlineMarkdown.parse(source) }
-    val text = remember(parsed, tokens, uriHandler, style.size) { parsed.annotated(tokens, uriHandler, style.size) }
+    val text = remember(parsed, tokens, uriHandler, tabs, style.size) { parsed.annotated(tokens, uriHandler, style.size, tabs) }
     if (parsed.images.isEmpty()) {
         InlineText(text, style, modifier)
         return
@@ -246,12 +248,22 @@ private fun AnnotatedString.cutAt(at: Char): List<AnnotatedString> {
 private fun InlineText(text: AnnotatedString, style: MarkdownStyle, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
     val boxes = remember(text) { text.getStringAnnotations(CODE_BOX, 0, text.length) }
+    val files = remember(text) { text.getStringAnnotations(FILE_CODE, 0, text.length) }
+    val color = (style.color ?: tokens.text).color
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     BasicText(
         text,
-        if (boxes.isEmpty()) modifier else modifier.drawBehind { layout?.let { drawCodeBoxes(it, boxes, tokens) } },
-        style = ppmText(style.size, style.weight, lineHeight = style.lineHeight, italic = style.italic)
-            .copy(color = (style.color ?: tokens.text).color),
+        if (boxes.isEmpty()) {
+            modifier
+        } else {
+            modifier.drawBehind {
+                layout?.let {
+                    drawCodeBoxes(it, boxes, tokens)
+                    drawDottedUnderlines(it, files, color)
+                }
+            }
+        },
+        style = ppmText(style.size, style.weight, lineHeight = style.lineHeight, italic = style.italic).copy(color = color),
         onTextLayout = { if (boxes.isNotEmpty()) layout = it },
         inlineContent = codeEdges(),
     )
@@ -274,6 +286,9 @@ private const val CODE_END_ID = "code-end"
 /** Annotates each inline code's box: the code and the [CODE_EDGE]s around it. */
 internal const val CODE_BOX = "ppm.code-box"
 
+/** Annotates the text of an inline code that names a file, which is underlined with dots. */
+internal const val FILE_CODE = "ppm.file-code"
+
 /** One side of a code's box: `padding-inline: 0.25rem` and the 1px border, 12.5 px at 2.625. */
 private fun Density.codeEdgePx(): Float = 4.dp.toPx() + cssBorderPx(1.dp)
 
@@ -294,8 +309,11 @@ private fun codeEdges(): Map<String, InlineTextContent> {
     }
 }
 
-/** The text with its spans, for text of [size] CSS pixels. */
-internal fun InlineMarkdown.Parsed.annotated(tokens: ThemeTokens, uriHandler: UriHandler, size: Float): AnnotatedString {
+/**
+ * The text with its spans, for text of [size] CSS pixels. A link and an inline code that name a
+ * file open it through [tabs] (`MdLink`, `MdCode`); any other link opens what the system can.
+ */
+internal fun InlineMarkdown.Parsed.annotated(tokens: ThemeTokens, uriHandler: UriHandler, size: Float, tabs: ChatTabs? = null): AnnotatedString {
     val code = spans.filter { it.kind == InlineMarkdown.Kind.CODE }.sortedBy { it.start }
     // Where an offset of the text lands once every code has an edge before and after it.
     fun at(offset: Int) = offset + code.sumOf { if (it.end <= offset) 2 else if (it.start < offset) 1 else 0 }
@@ -320,13 +338,24 @@ internal fun InlineMarkdown.Parsed.annotated(tokens: ThemeTokens, uriHandler: Ur
                 InlineMarkdown.Kind.EMPHASIS -> addStyle(SpanStyle(fontStyle = FontStyle.Italic), start, end)
                 InlineMarkdown.Kind.STRIKE -> addStyle(SpanStyle(textDecoration = TextDecoration.LineThrough), start, end)
                 // In em: a span's size in sp is rounded to a whole pixel, 31.5 to 32 at 2.625, and every character set wider.
-                InlineMarkdown.Kind.CODE -> addStyle(SpanStyle(fontFamily = PpmFonts.mono, fontSize = (INLINE_CODE_SIZE / size).em), start + 1, end - 1)
+                InlineMarkdown.Kind.CODE -> {
+                    addStyle(SpanStyle(fontFamily = PpmFonts.mono, fontSize = (INLINE_CODE_SIZE / size).em), start + 1, end - 1)
+                    // The whole `<code>` is what a tap lands on, its padding included.
+                    val file = FileTargets.inlineCode(text.substring(span.start, span.end)) ?: continue
+                    addLink(LinkAnnotation.Clickable(FILE_CODE) { tabs?.openFileOrSearch(file.path, file.line) }, start, end)
+                    addStringAnnotation(FILE_CODE, "", start + 1, end - 1)
+                }
                 InlineMarkdown.Kind.LINK -> {
                     val url = span.url ?: continue
+                    val file = FileTargets.link(url)
+                    val open = FileTargets.url(url)
                     addLink(
-                        LinkAnnotation.Url(url, TextLinkStyles(SpanStyle(color = tokens.accent.color))) {
-                            // A path or an unknown scheme has nothing to open it; that is no crash.
-                            runCatching { uriHandler.openUri(url) }
+                        LinkAnnotation.Url(open ?: url, TextLinkStyles(SpanStyle(color = tokens.accent.color))) {
+                            when {
+                                file != null -> tabs?.openFileOrSearch(file.path, file.line)
+                                // No app may take the scheme; that is no crash.
+                                open != null -> runCatching { uriHandler.openUri(open) }
+                            }
                         },
                         start,
                         end,
@@ -388,6 +417,40 @@ private fun DrawScope.drawCodeBoxes(layout: TextLayoutResult, boxes: List<Annota
                     CornerRadius(radius - border / 2),
                     style = Stroke(border),
                 )
+            }
+        }
+    }
+}
+
+/**
+ * `MdCode`'s `text-decoration: underline dotted` under a file's code, as Chrome draws it: a tenth
+ * of the code's size thick, in square dots that long with gaps as long from where the code's text
+ * starts on each line, through any glyph in the way. It starts under the baseline by half its
+ * thickness rounded up to a whole CSS pixel, one, then snapped to a device pixel, and is centred
+ * on the whole device pixels below that.
+ */
+private fun DrawScope.drawDottedUnderlines(layout: TextLayoutResult, codes: List<AnnotatedString.Range<String>>, color: Color) {
+    val css = INLINE_CODE_SIZE / 10f
+    val thickness = css.sp.toPx()
+    val dot = thickness.roundToInt().coerceAtLeast(1).toFloat()
+    val gap = ceil(css / 2f).sp.toPx()
+    val edge = codeEdgePx()
+    for (code in codes) {
+        val first = layout.getLineForOffset(code.start)
+        val last = layout.getLineForOffset(code.end - 1)
+        for (line in first..last) {
+            val start = maxOf(code.start, layout.getLineStart(line))
+            val end = minOf(code.end, layout.getLineEnd(line, visibleEnd = true))
+            if (end <= start) continue
+            // On its first line the text starts past the start edge, a whole pixel here and 12.5 in
+            // Chrome: the dots start where Chrome's text does.
+            val shift = if (line == first) layout.getBoundingBox(code.start - 1).left + edge - layout.getBoundingBox(start).left else 0f
+            val right = layout.getBoundingBox(end - 1).right + shift
+            val top = (layout.getLineBaseline(line) + gap).roundToInt() + (dot - thickness) / 2
+            var x = floor(layout.getBoundingBox(start).left + shift)
+            while (x < right) {
+                drawRect(color, Offset(x, top), Size(minOf(dot, right - x), thickness))
+                x += 2 * dot
             }
         }
     }

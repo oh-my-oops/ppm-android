@@ -1,0 +1,9095 @@
+[
+ {
+  "text": "src/app.ts:120",
+  "split": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": null
+   }
+  },
+  "link": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": null
+   }
+  },
+  "code": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": null
+   }
+  },
+  "mdLink": {
+   "href": "src/app.ts:120",
+   "file": {
+    "path": "src/app.ts",
+    "line": {
+     "start": 120,
+     "end": null
+    }
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src/app.ts:120:5",
+  "split": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": null
+   }
+  },
+  "link": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": null
+   }
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src/app.ts:120:5",
+   "file": {
+    "path": "src/app.ts",
+    "line": {
+     "start": 120,
+     "end": null
+    }
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src/app.ts:120-140",
+  "split": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": 140
+   }
+  },
+  "link": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": 140
+   }
+  },
+  "code": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": 140
+   }
+  },
+  "mdLink": {
+   "href": "src/app.ts:120-140",
+   "file": {
+    "path": "src/app.ts",
+    "line": {
+     "start": 120,
+     "end": 140
+    }
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src/app.ts#L120",
+  "split": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": null
+   }
+  },
+  "link": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": null
+   }
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src/app.ts#L120",
+   "file": {
+    "path": "src/app.ts",
+    "line": {
+     "start": 120,
+     "end": null
+    }
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src/app.ts#L120-L140",
+  "split": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": 140
+   }
+  },
+  "link": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": 140
+   }
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src/app.ts#L120-L140",
+   "file": {
+    "path": "src/app.ts",
+    "line": {
+     "start": 120,
+     "end": 140
+    }
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src/app.ts#L120-140",
+  "split": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": 140
+   }
+  },
+  "link": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": 140
+   }
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src/app.ts#L120-140",
+   "file": {
+    "path": "src/app.ts",
+    "line": {
+     "start": 120,
+     "end": 140
+    }
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "D:/Projects/nxsys/src/PaymentForm.tsx:160",
+  "split": {
+   "path": "D:/Projects/nxsys/src/PaymentForm.tsx",
+   "line": {
+    "start": 160,
+    "end": null
+   }
+  },
+  "link": {
+   "path": "D:/Projects/nxsys/src/PaymentForm.tsx",
+   "line": {
+    "start": 160,
+    "end": null
+   }
+  },
+  "code": {
+   "path": "D:/Projects/nxsys/src/PaymentForm.tsx",
+   "line": {
+    "start": 160,
+    "end": null
+   }
+  },
+  "mdLink": {
+   "href": "D:/Projects/nxsys/src/PaymentForm.tsx:160",
+   "file": {
+    "path": "D:/Projects/nxsys/src/PaymentForm.tsx",
+    "line": {
+     "start": 160,
+     "end": null
+    }
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "C:/repo/app.ts",
+  "split": {
+   "path": "C:/repo/app.ts",
+   "line": null
+  },
+  "link": {
+   "path": "C:/repo/app.ts",
+   "line": null
+  },
+  "code": {
+   "path": "C:/repo/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "C:/repo/app.ts",
+   "file": {
+    "path": "C:/repo/app.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src/app.ts",
+  "split": {
+   "path": "src/app.ts",
+   "line": null
+  },
+  "link": {
+   "path": "src/app.ts",
+   "line": null
+  },
+  "code": {
+   "path": "src/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "src/app.ts",
+   "file": {
+    "path": "src/app.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "",
+  "split": {
+   "path": "",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "README",
+  "split": {
+   "path": "README",
+   "line": null
+  },
+  "link": {
+   "path": "README",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "README",
+   "file": {
+    "path": "README",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "app:tsx",
+  "split": {
+   "path": "app:tsx",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "app:tsx",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "app.ts:0",
+  "split": null,
+  "link": null,
+  "code": {
+   "path": "app.ts",
+   "line": {
+    "start": 0,
+    "end": null
+   }
+  },
+  "mdLink": {
+   "href": "app.ts:0",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "app.ts#L0",
+  "split": null,
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "app.ts#L0",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "app.ts:10-9",
+  "split": null,
+  "link": null,
+  "code": {
+   "path": "app.ts",
+   "line": {
+    "start": 10,
+    "end": 9
+   }
+  },
+  "mdLink": {
+   "href": "app.ts:10-9",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "app.ts:9007199254740992",
+  "split": null,
+  "link": null,
+  "code": {
+   "path": "app.ts",
+   "line": {
+    "start": 9007199254740992,
+    "end": null
+   }
+  },
+  "mdLink": {
+   "href": "app.ts:9007199254740992",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "app.ts#L1-L9007199254740992",
+  "split": null,
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "app.ts#L1-L9007199254740992",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "app.ts:9007199254740991",
+  "split": {
+   "path": "app.ts",
+   "line": {
+    "start": 9007199254740991,
+    "end": null
+   }
+  },
+  "link": {
+   "path": "app.ts",
+   "line": {
+    "start": 9007199254740991,
+    "end": null
+   }
+  },
+  "code": {
+   "path": "app.ts",
+   "line": {
+    "start": 9007199254740991,
+    "end": null
+   }
+  },
+  "mdLink": {
+   "href": "app.ts:9007199254740991",
+   "file": {
+    "path": "app.ts",
+    "line": {
+     "start": 9007199254740991,
+     "end": null
+    }
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "C:/Users/PC/project/src/app.ts",
+  "split": {
+   "path": "C:/Users/PC/project/src/app.ts",
+   "line": null
+  },
+  "link": {
+   "path": "C:/Users/PC/project/src/app.ts",
+   "line": null
+  },
+  "code": {
+   "path": "C:/Users/PC/project/src/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "C:/Users/PC/project/src/app.ts",
+   "file": {
+    "path": "C:/Users/PC/project/src/app.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "C:\\Users\\PC\\project\\src\\app.ts",
+  "split": {
+   "path": "C:\\Users\\PC\\project\\src\\app.ts",
+   "line": null
+  },
+  "link": {
+   "path": "C:\\Users\\PC\\project\\src\\app.ts",
+   "line": null
+  },
+  "code": {
+   "path": "C:\\Users\\PC\\project\\src\\app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "C:%5CUsers%5CPC%5Cproject%5Csrc%5Capp.ts",
+   "file": {
+    "path": "C:\\Users\\PC\\project\\src\\app.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "/Users/alex/project/src/app.ts",
+  "split": {
+   "path": "/Users/alex/project/src/app.ts",
+   "line": null
+  },
+  "link": {
+   "path": "/Users/alex/project/src/app.ts",
+   "line": null
+  },
+  "code": {
+   "path": "/Users/alex/project/src/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "/Users/alex/project/src/app.ts",
+   "file": {
+    "path": "/Users/alex/project/src/app.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "./src/app.ts",
+  "split": {
+   "path": "./src/app.ts",
+   "line": null
+  },
+  "link": {
+   "path": "./src/app.ts",
+   "line": null
+  },
+  "code": {
+   "path": "./src/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "./src/app.ts",
+   "file": {
+    "path": "./src/app.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "../shared/app.ts",
+  "split": {
+   "path": "../shared/app.ts",
+   "line": null
+  },
+  "link": {
+   "path": "../shared/app.ts",
+   "line": null
+  },
+  "code": {
+   "path": "../shared/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "../shared/app.ts",
+   "file": {
+    "path": "../shared/app.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "Dockerfile",
+  "split": {
+   "path": "Dockerfile",
+   "line": null
+  },
+  "link": {
+   "path": "Dockerfile",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "Dockerfile",
+   "file": {
+    "path": "Dockerfile",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "Makefile",
+  "split": {
+   "path": "Makefile",
+   "line": null
+  },
+  "link": {
+   "path": "Makefile",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "Makefile",
+   "file": {
+    "path": "Makefile",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".gitignore",
+  "split": {
+   "path": ".gitignore",
+   "line": null
+  },
+  "link": {
+   "path": ".gitignore",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".gitignore",
+   "file": {
+    "path": ".gitignore",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "schema.custom-extension",
+  "split": {
+   "path": "schema.custom-extension",
+   "line": null
+  },
+  "link": {
+   "path": "schema.custom-extension",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "schema.custom-extension",
+   "file": {
+    "path": "schema.custom-extension",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src/components",
+  "split": {
+   "path": "src/components",
+   "line": null
+  },
+  "link": {
+   "path": "src/components",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src/components",
+   "file": {
+    "path": "src/components",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src/components/",
+  "split": {
+   "path": "src/components/",
+   "line": null
+  },
+  "link": {
+   "path": "src/components/",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src/components/",
+   "file": {
+    "path": "src/components/",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "docs",
+  "split": {
+   "path": "docs",
+   "line": null
+  },
+  "link": {
+   "path": "docs",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "docs",
+   "file": {
+    "path": "docs",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "docs/",
+  "split": {
+   "path": "docs/",
+   "line": null
+  },
+  "link": {
+   "path": "docs/",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "docs/",
+   "file": {
+    "path": "docs/",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "~/project/README.md",
+  "split": {
+   "path": "~/project/README.md",
+   "line": null
+  },
+  "link": {
+   "path": "~/project/README.md",
+   "line": null
+  },
+  "code": {
+   "path": "~/project/README.md",
+   "line": null
+  },
+  "mdLink": {
+   "href": "~/project/README.md",
+   "file": {
+    "path": "~/project/README.md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src/app/[slug]/page.tsx",
+  "split": {
+   "path": "src/app/[slug]/page.tsx",
+   "line": null
+  },
+  "link": {
+   "path": "src/app/[slug]/page.tsx",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src/app/%5Bslug%5D/page.tsx",
+   "file": {
+    "path": "src/app/[slug]/page.tsx",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "/C:/Users/PC/app.ts",
+  "split": {
+   "path": "/C:/Users/PC/app.ts",
+   "line": null
+  },
+  "link": {
+   "path": "C:/Users/PC/app.ts",
+   "line": null
+  },
+  "code": {
+   "path": "/C:/Users/PC/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "/C:/Users/PC/app.ts",
+   "file": {
+    "path": "C:/Users/PC/app.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "file:///C:/Users/PC/My%20Project/app.ts",
+  "split": {
+   "path": "file:///C:/Users/PC/My%20Project/app.ts",
+   "line": null
+  },
+  "link": {
+   "path": "C:/Users/PC/My Project/app.ts",
+   "line": null
+  },
+  "code": {
+   "path": "file:///C:/Users/PC/My%20Project/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "file:///C:/Users/PC/My%20Project/app.ts",
+   "file": {
+    "path": "C:/Users/PC/My Project/app.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "file:///home/alex/app.ts",
+  "split": {
+   "path": "file:///home/alex/app.ts",
+   "line": null
+  },
+  "link": {
+   "path": "/home/alex/app.ts",
+   "line": null
+  },
+  "code": {
+   "path": "file:///home/alex/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "file:///home/alex/app.ts",
+   "file": {
+    "path": "/home/alex/app.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "file://localhost/home/alex/app.ts",
+  "split": {
+   "path": "file://localhost/home/alex/app.ts",
+   "line": null
+  },
+  "link": {
+   "path": "/home/alex/app.ts",
+   "line": null
+  },
+  "code": {
+   "path": "file://localhost/home/alex/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "file://localhost/home/alex/app.ts",
+   "file": {
+    "path": "/home/alex/app.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "file://localhost/C:/Users/PC/app.ts",
+  "split": {
+   "path": "file://localhost/C:/Users/PC/app.ts",
+   "line": null
+  },
+  "link": {
+   "path": "C:/Users/PC/app.ts",
+   "line": null
+  },
+  "code": {
+   "path": "file://localhost/C:/Users/PC/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "file://localhost/C:/Users/PC/app.ts",
+   "file": {
+    "path": "C:/Users/PC/app.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "./t%C3%A0i%20li%E1%BB%87u/%5Bslug%5D.md",
+  "split": {
+   "path": "./t%C3%A0i%20li%E1%BB%87u/%5Bslug%5D.md",
+   "line": null
+  },
+  "link": {
+   "path": "./tài liệu/[slug].md",
+   "line": null
+  },
+  "code": {
+   "path": "./t%C3%A0i%20li%E1%BB%87u/%5Bslug%5D.md",
+   "line": null
+  },
+  "mdLink": {
+   "href": "./t%C3%A0i%20li%E1%BB%87u/%5Bslug%5D.md",
+   "file": {
+    "path": "./tài liệu/[slug].md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "/C:/My%20Project/src/%5Bslug%5D.ts#L12-L18",
+  "split": {
+   "path": "/C:/My%20Project/src/%5Bslug%5D.ts",
+   "line": {
+    "start": 12,
+    "end": 18
+   }
+  },
+  "link": {
+   "path": "C:/My Project/src/[slug].ts",
+   "line": {
+    "start": 12,
+    "end": 18
+   }
+  },
+  "code": null,
+  "mdLink": {
+   "href": "/C:/My%20Project/src/%5Bslug%5D.ts#L12-L18",
+   "file": {
+    "path": "C:/My Project/src/[slug].ts",
+    "line": {
+     "start": 12,
+     "end": 18
+    }
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "docs/guide.md#installation",
+  "split": {
+   "path": "docs/guide.md#installation",
+   "line": null
+  },
+  "link": {
+   "path": "docs/guide.md",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "docs/guide.md#installation",
+   "file": {
+    "path": "docs/guide.md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#installation",
+  "split": {
+   "path": "#installation",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#installation",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "https://example.com/app.ts",
+  "split": {
+   "path": "https://example.com/app.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "https://example.com/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "https://example.com/app.ts",
+   "file": null,
+   "url": "https://example.com/app.ts"
+  }
+ },
+ {
+  "text": "http://example.com/app.ts:10",
+  "split": {
+   "path": "http://example.com/app.ts",
+   "line": {
+    "start": 10,
+    "end": null
+   }
+  },
+  "link": null,
+  "code": {
+   "path": "http://example.com/app.ts",
+   "line": {
+    "start": 10,
+    "end": null
+   }
+  },
+  "mdLink": {
+   "href": "http://example.com/app.ts:10",
+   "file": null,
+   "url": "http://example.com/app.ts:10"
+  }
+ },
+ {
+  "text": "//example.com/app.ts",
+  "split": {
+   "path": "//example.com/app.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "//example.com/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "//example.com/app.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "mailto:person@example.com",
+  "split": {
+   "path": "mailto:person@example.com",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "mailto:person@example.com",
+   "file": null,
+   "url": "mailto:person@example.com"
+  }
+ },
+ {
+  "text": "javascript:alert(1)",
+  "split": {
+   "path": "javascript:alert(1)",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "javascript:alert(1)",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "data:text/plain,hello.ts",
+  "split": {
+   "path": "data:text/plain,hello.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "data:text/plain,hello.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "data:text/plain,hello.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "vscode://file/C:/app.ts",
+  "split": {
+   "path": "vscode://file/C:/app.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "vscode://file/C:/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "vscode://file/C:/app.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "custom:app.ts",
+  "split": {
+   "path": "custom:app.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "custom:app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "custom:app.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "file://server/share/app.ts",
+  "split": {
+   "path": "file://server/share/app.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "file://server/share/app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "file://server/share/app.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src/*.ts",
+  "split": {
+   "path": "src/*.ts",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "src/*.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src/app?.ts",
+  "split": {
+   "path": "src/app?.ts",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "src/app?.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "app.ts?raw=1",
+  "split": {
+   "path": "app.ts?raw=1",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "app.ts?raw=1",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "bad%ZZ.ts",
+  "split": {
+   "path": "bad%ZZ.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "bad%ZZ.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "bad%ZZ.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "bad%.ts",
+  "split": {
+   "path": "bad%.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "bad%.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "bad%25.ts",
+   "file": {
+    "path": "bad%.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "bad%C3.ts",
+  "split": {
+   "path": "bad%C3.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "bad%C3.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "bad%C3.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src/%00app.ts",
+  "split": {
+   "path": "src/%00app.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "src/%00app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "src/%00app.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src/%0Aapp.ts",
+  "split": {
+   "path": "src/%0Aapp.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "src/%0Aapp.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "src/%0Aapp.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src/\u0000app.ts",
+  "split": {
+   "path": "src/\u0000app.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "src/\u0000app.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "src/%00app.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src/\napp.ts",
+  "split": {
+   "path": "src/\napp.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "src/\napp.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "src/%0Aapp.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src/\rapp.ts",
+  "split": {
+   "path": "src/\rapp.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "src/\rapp.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "src/%0Dapp.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src/\tapp.ts",
+  "split": {
+   "path": "src/\tapp.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "src/\tapp.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "src/%09app.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "package.json",
+  "split": {
+   "path": "package.json",
+   "line": null
+  },
+  "link": {
+   "path": "package.json",
+   "line": null
+  },
+  "code": {
+   "path": "package.json",
+   "line": null
+  },
+  "mdLink": {
+   "href": "package.json",
+   "file": {
+    "path": "package.json",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "bun test",
+  "split": {
+   "path": "bun test",
+   "line": null
+  },
+  "link": {
+   "path": "bun test",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "bun%20test",
+   "file": {
+    "path": "bun test",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "  src/a.ts:12  ",
+  "split": {
+   "path": "  src/a.ts:12  ",
+   "line": null
+  },
+  "link": {
+   "path": "  src/a.ts:12  ",
+   "line": null
+  },
+  "code": {
+   "path": "src/a.ts",
+   "line": {
+    "start": 12,
+    "end": null
+   }
+  },
+  "mdLink": {
+   "href": "%20%20src/a.ts:12%20%20",
+   "file": {
+    "path": "  src/a.ts:12  ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src/a.ts:0",
+  "split": null,
+  "link": null,
+  "code": {
+   "path": "src/a.ts",
+   "line": {
+    "start": 0,
+    "end": null
+   }
+  },
+  "mdLink": {
+   "href": "src/a.ts:0",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src/a.ts:20-10",
+  "split": null,
+  "link": null,
+  "code": {
+   "path": "src/a.ts",
+   "line": {
+    "start": 20,
+    "end": 10
+   }
+  },
+  "mdLink": {
+   "href": "src/a.ts:20-10",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src/a.TS",
+  "split": {
+   "path": "src/a.TS",
+   "line": null
+  },
+  "link": {
+   "path": "src/a.TS",
+   "line": null
+  },
+  "code": {
+   "path": "src/a.TS",
+   "line": null
+  },
+  "mdLink": {
+   "href": "src/a.TS",
+   "file": {
+    "path": "src/a.TS",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "a.ts:12\n",
+  "split": {
+   "path": "a.ts:12\n",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "a.ts",
+   "line": {
+    "start": 12,
+    "end": null
+   }
+  },
+  "mdLink": {
+   "href": "a.ts:12%0A",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": " src/a.ts﻿",
+  "split": {
+   "path": " src/a.ts﻿",
+   "line": null
+  },
+  "link": {
+   "path": " src/a.ts﻿",
+   "line": null
+  },
+  "code": {
+   "path": "src/a.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "%C2%A0src/a.ts%EF%BB%BF",
+   "file": {
+    "path": " src/a.ts﻿",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src/app.ts:120:5",
+  "split": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": null
+   }
+  },
+  "link": {
+   "path": "src/app.ts",
+   "line": {
+    "start": 120,
+    "end": null
+   }
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src/app.ts:120:5",
+   "file": {
+    "path": "src/app.ts",
+    "line": {
+     "start": 120,
+     "end": null
+    }
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src/{a,b}.ts",
+  "split": {
+   "path": "src/{a,b}.ts",
+   "line": null
+  },
+  "link": {
+   "path": "src/{a,b}.ts",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src/%7Ba,b%7D.ts",
+   "file": {
+    "path": "src/{a,b}.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "x.output",
+  "split": {
+   "path": "x.output",
+   "line": null
+  },
+  "link": {
+   "path": "x.output",
+   "line": null
+  },
+  "code": {
+   "path": "x.output",
+   "line": null
+  },
+  "mdLink": {
+   "href": "x.output",
+   "file": {
+    "path": "x.output",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "Makefile.makefile",
+  "split": {
+   "path": "Makefile.makefile",
+   "line": null
+  },
+  "link": {
+   "path": "Makefile.makefile",
+   "line": null
+  },
+  "code": {
+   "path": "Makefile.makefile",
+   "line": null
+  },
+  "mdLink": {
+   "href": "Makefile.makefile",
+   "file": {
+    "path": "Makefile.makefile",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "notes.MD:3-4",
+  "split": {
+   "path": "notes.MD",
+   "line": {
+    "start": 3,
+    "end": 4
+   }
+  },
+  "link": {
+   "path": "notes.MD",
+   "line": {
+    "start": 3,
+    "end": 4
+   }
+  },
+  "code": {
+   "path": "notes.MD",
+   "line": {
+    "start": 3,
+    "end": 4
+   }
+  },
+  "mdLink": {
+   "href": "notes.MD:3-4",
+   "file": {
+    "path": "notes.MD",
+    "line": {
+     "start": 3,
+     "end": 4
+    }
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "a b.ts",
+  "split": {
+   "path": "a b.ts",
+   "line": null
+  },
+  "link": {
+   "path": "a b.ts",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "a%20b.ts",
+   "file": {
+    "path": "a b.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "C:/a.ts:7",
+  "split": {
+   "path": "C:/a.ts",
+   "line": {
+    "start": 7,
+    "end": null
+   }
+  },
+  "link": {
+   "path": "C:/a.ts",
+   "line": {
+    "start": 7,
+    "end": null
+   }
+  },
+  "code": {
+   "path": "C:/a.ts",
+   "line": {
+    "start": 7,
+    "end": null
+   }
+  },
+  "mdLink": {
+   "href": "C:/a.ts:7",
+   "file": {
+    "path": "C:/a.ts",
+    "line": {
+     "start": 7,
+     "end": null
+    }
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%E0%A4%A",
+  "split": {
+   "path": "%E0%A4%A",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%E0%A4%25A",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%ED%A0%80.ts",
+  "split": {
+   "path": "%ED%A0%80.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "%ED%A0%80.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "%ED%A0%80.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%C0%AF.ts",
+  "split": {
+   "path": "%C0%AF.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "%C0%AF.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "%C0%AF.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%F4%90%80%80.ts",
+  "split": {
+   "path": "%F4%90%80%80.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "%F4%90%80%80.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "%F4%90%80%80.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%F0%9F%98%80.ts",
+  "split": {
+   "path": "%F0%9F%98%80.ts",
+   "line": null
+  },
+  "link": {
+   "path": "😀.ts",
+   "line": null
+  },
+  "code": {
+   "path": "%F0%9F%98%80.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "%F0%9F%98%80.ts",
+   "file": {
+    "path": "😀.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%e2%82%ac.md",
+  "split": {
+   "path": "%e2%82%ac.md",
+   "line": null
+  },
+  "link": {
+   "path": "€.md",
+   "line": null
+  },
+  "code": {
+   "path": "%e2%82%ac.md",
+   "line": null
+  },
+  "mdLink": {
+   "href": "%e2%82%ac.md",
+   "file": {
+    "path": "€.md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "a+b%20c.ts",
+  "split": {
+   "path": "a+b%20c.ts",
+   "line": null
+  },
+  "link": {
+   "path": "a+b c.ts",
+   "line": null
+  },
+  "code": {
+   "path": "a+b%20c.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "a+b%20c.ts",
+   "file": {
+    "path": "a+b c.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "/\\server\\share.ts",
+  "split": {
+   "path": "/\\server\\share.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "/\\server\\share.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "/%5Cserver%5Cshare.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\\\\server\\share.ts",
+  "split": {
+   "path": "\\\\server\\share.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "\\\\server\\share.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "%5C%5Cserver%5Cshare.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\\/x.ts",
+  "split": {
+   "path": "\\/x.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "\\/x.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "%5C/x.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "a.ts :12",
+  "split": {
+   "path": "a.ts :12",
+   "line": null
+  },
+  "link": {
+   "path": "a.ts :12",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "a.ts%E2%80%A8:12",
+   "file": {
+    "path": "a.ts ",
+    "line": {
+     "start": 12,
+     "end": null
+    }
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src/app.ts:١٢",
+  "split": {
+   "path": "src/app.ts:١٢",
+   "line": null
+  },
+  "link": {
+   "path": "src/app.ts:١٢",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src/app.ts:%D9%A1%D9%A2",
+   "file": {
+    "path": "src/app.ts:١٢",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "my file.ts",
+  "split": {
+   "path": "my file.ts",
+   "line": null
+  },
+  "link": {
+   "path": "my file.ts",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "my%20file.ts",
+   "file": {
+    "path": "my file.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "tài liệu.md",
+  "split": {
+   "path": "tài liệu.md",
+   "line": null
+  },
+  "link": {
+   "path": "tài liệu.md",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "t%C3%A0i%20li%E1%BB%87u.md",
+   "file": {
+    "path": "tài liệu.md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "bad%.ts",
+  "split": {
+   "path": "bad%.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "bad%.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "bad%25.ts",
+   "file": {
+    "path": "bad%.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "100%.md",
+  "split": {
+   "path": "100%.md",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "100%.md",
+   "line": null
+  },
+  "mdLink": {
+   "href": "100%25.md",
+   "file": {
+    "path": "100%.md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "a%2",
+  "split": {
+   "path": "a%2",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "a%252",
+   "file": {
+    "path": "a%2",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "a\"b<c>.ts",
+  "split": {
+   "path": "a\"b<c>.ts",
+   "line": null
+  },
+  "link": {
+   "path": "a\"b<c>.ts",
+   "line": null
+  },
+  "code": {
+   "path": "a\"b<c>.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "a%22b%3Cc%3E.ts",
+   "file": {
+    "path": "a\"b<c>.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "a|b^c`d.ts",
+  "split": {
+   "path": "a|b^c`d.ts",
+   "line": null
+  },
+  "link": {
+   "path": "a|b^c`d.ts",
+   "line": null
+  },
+  "code": {
+   "path": "a|b^c`d.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "a%7Cb%5Ec%60d.ts",
+   "file": {
+    "path": "a|b^c`d.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "x\ud800.ts",
+  "split": {
+   "path": "x\ud800.ts",
+   "line": null
+  },
+  "link": {
+   "path": "x\ud800.ts",
+   "line": null
+  },
+  "code": {
+   "path": "x\ud800.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "x%EF%BF%BD.ts",
+   "file": {
+    "path": "x�.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "x\udc00y.md",
+  "split": {
+   "path": "x\udc00y.md",
+   "line": null
+  },
+  "link": {
+   "path": "x\udc00y.md",
+   "line": null
+  },
+  "code": {
+   "path": "x\udc00y.md",
+   "line": null
+  },
+  "mdLink": {
+   "href": "x%EF%BF%BDy.md",
+   "file": {
+    "path": "x�y.md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "😀.md",
+  "split": {
+   "path": "😀.md",
+   "line": null
+  },
+  "link": {
+   "path": "😀.md",
+   "line": null
+  },
+  "code": {
+   "path": "😀.md",
+   "line": null
+  },
+  "mdLink": {
+   "href": "%F0%9F%98%80.md",
+   "file": {
+    "path": "😀.md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "https://example.com/a b",
+  "split": {
+   "path": "https://example.com/a b",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "https://example.com/a%20b",
+   "file": null,
+   "url": "https://example.com/a%20b"
+  }
+ },
+ {
+  "text": "HTTPS://x.dev",
+  "split": {
+   "path": "HTTPS://x.dev",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "HTTPS://x.dev",
+   "file": null,
+   "url": "HTTPS://x.dev"
+  }
+ },
+ {
+  "text": "//cdn.dev/a.ts",
+  "split": {
+   "path": "//cdn.dev/a.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "//cdn.dev/a.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "//cdn.dev/a.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "mailto:a@b.c",
+  "split": {
+   "path": "mailto:a@b.c",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "mailto:a@b.c",
+   "line": null
+  },
+  "mdLink": {
+   "href": "mailto:a@b.c",
+   "file": null,
+   "url": "mailto:a@b.c"
+  }
+ },
+ {
+  "text": "MailTo:a@b.c",
+  "split": {
+   "path": "MailTo:a@b.c",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "MailTo:a@b.c",
+   "line": null
+  },
+  "mdLink": {
+   "href": "MailTo:a@b.c",
+   "file": null,
+   "url": "MailTo:a@b.c"
+  }
+ },
+ {
+  "text": "irc://x",
+  "split": {
+   "path": "irc://x",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "irc://x",
+   "file": null,
+   "url": "irc://x"
+  }
+ },
+ {
+  "text": "xmpp:a@b",
+  "split": {
+   "path": "xmpp:a@b",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "xmpp:a@b",
+   "file": null,
+   "url": "xmpp:a@b"
+  }
+ },
+ {
+  "text": "tel:123",
+  "split": {
+   "path": "tel",
+   "line": {
+    "start": 123,
+    "end": null
+   }
+  },
+  "link": {
+   "path": "tel",
+   "line": {
+    "start": 123,
+    "end": null
+   }
+  },
+  "code": null,
+  "mdLink": {
+   "href": "tel:123",
+   "file": {
+    "path": "tel",
+    "line": {
+     "start": 123,
+     "end": null
+    }
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "ftp://x/a.ts",
+  "split": {
+   "path": "ftp://x/a.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "ftp://x/a.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "ftp://x/a.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "javascript:alert(1)",
+  "split": {
+   "path": "javascript:alert(1)",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "javascript:alert(1)",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "./a.ts?x=1",
+  "split": {
+   "path": "./a.ts?x=1",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "./a.ts?x=1",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "/abs/path?x=1",
+  "split": {
+   "path": "/abs/path?x=1",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "/abs/path?x=1",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "a:b/c",
+  "split": {
+   "path": "a:b/c",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "a:b/c",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "a/b:c",
+  "split": {
+   "path": "a/b:c",
+   "line": null
+  },
+  "link": {
+   "path": "a/b:c",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "a/b:c",
+   "file": {
+    "path": "a/b:c",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#top",
+  "split": {
+   "path": "#top",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#top",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "?q=1",
+  "split": {
+   "path": "?q=1",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "?q=1",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src%ZZ",
+  "split": {
+   "path": "src%ZZ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "src%ZZ",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\n \\#L]localhost",
+  "split": {
+   "path": "\n \\#L]localhost",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A%20%5C#L%5Dlocalhost",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "file://[%srcésrcC:",
+  "split": {
+   "path": "file://[%srcésrcC:",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "file://%5B%src%C3%A9srcC:",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%ZZ00",
+  "split": {
+   "path": "%ZZ00",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%ZZ00",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ":src é ",
+  "split": {
+   "path": ":src é ",
+   "line": null
+  },
+  "link": {
+   "path": ":src é ",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ":src%E2%80%A8%C3%A9%E2%80%A8",
+   "file": {
+    "path": ":src é ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#Lfile://%ZZ.L-",
+  "split": {
+   "path": "#Lfile://%ZZ.L-",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#Lfile://%ZZ.L-",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src/L#[/%20",
+  "split": {
+   "path": "src/L#[/%20",
+   "line": null
+  },
+  "link": {
+   "path": "src/L",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src/L#%5B/%20",
+   "file": {
+    "path": "src/L",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "-",
+  "split": {
+   "path": "-",
+   "line": null
+  },
+  "link": {
+   "path": "-",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "-",
+   "file": {
+    "path": "-",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "é9007199254740993src",
+  "split": {
+   "path": "é9007199254740993src",
+   "line": null
+  },
+  "link": {
+   "path": "é9007199254740993src",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A99007199254740993src",
+   "file": {
+    "path": "é9007199254740993src",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "file://.ts",
+  "split": {
+   "path": "file://.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "file://.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "file://.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "L/.#L",
+  "split": {
+   "path": "L/.#L",
+   "line": null
+  },
+  "link": {
+   "path": "L/.",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "L/.#L",
+   "file": {
+    "path": "L/.",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "?\t.md.ts0",
+  "split": {
+   "path": "?\t.md.ts0",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "?%09.md.ts0",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "#L{]\nC:-",
+  "split": {
+   "path": "#L{]\nC:-",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#L%7B%5D%0AC:-",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": " 0%~%C3%A0",
+  "split": {
+   "path": " 0%~%C3%A0",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%E2%80%A80%25~%C3%A0",
+   "file": {
+    "path": " 0%~à",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "?",
+  "split": {
+   "path": "?",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "?",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": " ##L{{%C3%A0#",
+  "split": {
+   "path": " ##L{{%C3%A0#",
+   "line": null
+  },
+  "link": {
+   "path": " ",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%E2%80%A8##L%7B%7B%C3%A0#",
+   "file": {
+    "path": " ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "x",
+  "split": {
+   "path": "x",
+   "line": null
+  },
+  "link": {
+   "path": "x",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "x",
+   "file": {
+    "path": "x",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "a \\localhost x",
+  "split": {
+   "path": "a \\localhost x",
+   "line": null
+  },
+  "link": {
+   "path": "a \\localhost x",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "a%20%5Clocalhost%20x",
+   "file": {
+    "path": "a \\localhost x",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "~ a.md{é",
+  "split": {
+   "path": "~ a.md{é",
+   "line": null
+  },
+  "link": {
+   "path": "~ a.md{é",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "~%E2%80%A8a.md%7B%C3%A9",
+   "file": {
+    "path": "~ a.md{é",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "file://12file://",
+  "split": {
+   "path": "file://12file://",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "file://12file://",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src",
+  "split": {
+   "path": "src",
+   "line": null
+  },
+  "link": {
+   "path": "src",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src",
+   "file": {
+    "path": "src",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "-12",
+  "split": {
+   "path": "-12",
+   "line": null
+  },
+  "link": {
+   "path": "-12",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "-12",
+   "file": {
+    "path": "-12",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "/.tsé%localhost\t",
+  "split": {
+   "path": "/.tsé%localhost\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "/.ts%C3%A9%localhost%09",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "x",
+  "split": {
+   "path": "x",
+   "line": null
+  },
+  "link": {
+   "path": "x",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "x",
+   "file": {
+    "path": "x",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "C:# ",
+  "split": {
+   "path": "C:# ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "C:#%E2%80%A8",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "12aa%C3%A0",
+  "split": {
+   "path": "12aa%C3%A0",
+   "line": null
+  },
+  "link": {
+   "path": "12aaà",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "12aa%C3%A0",
+   "file": {
+    "path": "12aaà",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%20* \\localhost\n",
+  "split": {
+   "path": "%20* \\localhost\n",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%20*%E2%80%A8%5Clocalhost%0A",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "afile://",
+  "split": {
+   "path": "afile://",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "afile://",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\\}",
+  "split": {
+   "path": "\\}",
+   "line": null
+  },
+  "link": {
+   "path": "\\}",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%5C%7D",
+   "file": {
+    "path": "\\}",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".ts.:?.]\t",
+  "split": {
+   "path": ".ts.:?.]\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ".ts.:?.%5D%09",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "129007199254740993\\%ZZ:",
+  "split": {
+   "path": "129007199254740993\\%ZZ:",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "129007199254740993%5C%ZZ:",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "file://?%C3%A0a]file://file://",
+  "split": {
+   "path": "file://?%C3%A0a]file://file://",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "file://?%C3%A0a%5Dfile://file://",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": " ",
+  "split": {
+   "path": " ",
+   "line": null
+  },
+  "link": {
+   "path": " ",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20",
+   "file": {
+    "path": " ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%file://a%ZZ",
+  "split": {
+   "path": "%file://a%ZZ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%file://a%ZZ",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "*src9007199254740993\n.md",
+  "split": {
+   "path": "*src9007199254740993\n.md",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "*src9007199254740993%0A.md",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "*",
+  "split": {
+   "path": "*",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "*",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "0",
+  "split": {
+   "path": "0",
+   "line": null
+  },
+  "link": {
+   "path": "0",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "0",
+   "file": {
+    "path": "0",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "file://00srcL",
+  "split": {
+   "path": "file://00srcL",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "file://00srcL",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "}]]]a%20",
+  "split": {
+   "path": "}]]]a%20",
+   "line": null
+  },
+  "link": {
+   "path": "}]]]a ",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%7D%5D%5D%5Da%20",
+   "file": {
+    "path": "}]]]a ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "./#12",
+  "split": {
+   "path": "./#12",
+   "line": null
+  },
+  "link": {
+   "path": "./",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "./#12",
+   "file": {
+    "path": "./",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%%C3%A0.ts",
+  "split": {
+   "path": "%%C3%A0.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "%%C3%A0.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "%25%C3%A0.ts",
+   "file": {
+    "path": "%à.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "00:localhostsrcL\nsrc",
+  "split": {
+   "path": "00:localhostsrcL\nsrc",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "00:localhostsrcL%0Asrc",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "/-/",
+  "split": {
+   "path": "/-/",
+   "line": null
+  },
+  "link": {
+   "path": "/-/",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "/-/",
+   "file": {
+    "path": "/-/",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "}%C3%A0src",
+  "split": {
+   "path": "}%C3%A0src",
+   "line": null
+  },
+  "link": {
+   "path": "}àsrc",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%7D%C3%A0src",
+   "file": {
+    "path": "}àsrc",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%%20",
+  "split": {
+   "path": "%%20",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%25%20",
+   "file": {
+    "path": "% ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".",
+  "split": {
+   "path": ".",
+   "line": null
+  },
+  "link": {
+   "path": ".",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".",
+   "file": {
+    "path": ".",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\n\nL:\txL",
+  "split": {
+   "path": "\n\nL:\txL",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A%0AL:%09xL",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "C:.md*~",
+  "split": {
+   "path": "C:.md*~",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "C:.md*~",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": " %20*000",
+  "split": {
+   "path": " %20*000",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%E2%80%A8%20*000",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\t:?9007199254740993C:{9007199254740993",
+  "split": {
+   "path": "\t:?9007199254740993C:{9007199254740993",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09:?9007199254740993C:%7B9007199254740993",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ":%ZZ[localhost*{}",
+  "split": {
+   "path": ":%ZZ[localhost*{}",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ":%ZZ%5Blocalhost*%7B%7D",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "/00file://0\\\t",
+  "split": {
+   "path": "/00file://0\\\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "/00file://0%5C%09",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "}00?#L%:",
+  "split": {
+   "path": "}00?#L%:",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%7D00?#L%25:",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "}",
+  "split": {
+   "path": "}",
+   "line": null
+  },
+  "link": {
+   "path": "}",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%7D",
+   "file": {
+    "path": "}",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#LC::?localhost",
+  "split": {
+   "path": "#LC::?localhost",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#LC::?localhost",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "0?L",
+  "split": {
+   "path": "0?L",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "0?L",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%C3%A0%20é",
+  "split": {
+   "path": "%C3%A0%20é",
+   "line": null
+  },
+  "link": {
+   "path": "à é",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A0%20%C3%A9",
+   "file": {
+    "path": "à é",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#",
+  "split": {
+   "path": "#",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "#L%ZZ00%20",
+  "split": {
+   "path": "#L%ZZ00%20",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#L%ZZ00%20",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "?~{-.md%20\t",
+  "split": {
+   "path": "?~{-.md%20\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "?~%7B-.md%20%09",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "~~src%ZZ{",
+  "split": {
+   "path": "~~src%ZZ{",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "~~src%ZZ%7B",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "#L00%C3%A0.ts",
+  "split": {
+   "path": "#L00%C3%A0.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "#L00%C3%A0.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "#L00%C3%A0.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\n90071992547409930",
+  "split": {
+   "path": "\n90071992547409930",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A90071992547409930",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "file://?",
+  "split": {
+   "path": "file://?",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "file://?",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "-12x*",
+  "split": {
+   "path": "-12x*",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "-12x*",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "{?",
+  "split": {
+   "path": "{?",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%7B?",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%ZZ%ZZ{",
+  "split": {
+   "path": "%ZZ%ZZ{",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%ZZ%ZZ%7B",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%20",
+  "split": {
+   "path": "%20",
+   "line": null
+  },
+  "link": {
+   "path": " ",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20",
+   "file": {
+    "path": " ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "afile://#",
+  "split": {
+   "path": "afile://#",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "afile://#",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\tL9007199254740993",
+  "split": {
+   "path": "\tL9007199254740993",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09L9007199254740993",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "#",
+  "split": {
+   "path": "#",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src-~%",
+  "split": {
+   "path": "src-~%",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "src-~%25",
+   "file": {
+    "path": "src-~%",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "x-file://x\nfile://",
+  "split": {
+   "path": "x-file://x\nfile://",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "x-file://x%0Afile://",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%20~",
+  "split": {
+   "path": "%20~",
+   "line": null
+  },
+  "link": {
+   "path": " ~",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20~",
+   "file": {
+    "path": " ~",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "..md]12aa",
+  "split": {
+   "path": "..md]12aa",
+   "line": null
+  },
+  "link": {
+   "path": "..md]12aa",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "..md%5D12aa",
+   "file": {
+    "path": "..md]12aa",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "{9007199254740993C:localhost",
+  "split": {
+   "path": "{9007199254740993C:localhost",
+   "line": null
+  },
+  "link": {
+   "path": "{9007199254740993C:localhost",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%7B9007199254740993C:localhost",
+   "file": {
+    "path": "{9007199254740993C:localhost",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": " :~}}*x",
+  "split": {
+   "path": " :~}}*x",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%20:~%7D%7D*x",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ".md*C:a",
+  "split": {
+   "path": ".md*C:a",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ".md*C:a",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "-",
+  "split": {
+   "path": "-",
+   "line": null
+  },
+  "link": {
+   "path": "-",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "-",
+   "file": {
+    "path": "-",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "}\ta%C3%A0",
+  "split": {
+   "path": "}\ta%C3%A0",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%7D%09a%C3%A0",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "?localhost[\nsrc :",
+  "split": {
+   "path": "?localhost[\nsrc :",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "?localhost%5B%0Asrc%20:",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": " 9007199254740993~",
+  "split": {
+   "path": " 9007199254740993~",
+   "line": null
+  },
+  "link": {
+   "path": " 9007199254740993~",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%209007199254740993~",
+   "file": {
+    "path": " 9007199254740993~",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "-\n",
+  "split": {
+   "path": "-\n",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "-%0A",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "0\tlocalhost]~",
+  "split": {
+   "path": "0\tlocalhost]~",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "0%09localhost%5D~",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "00.",
+  "split": {
+   "path": "00.",
+   "line": null
+  },
+  "link": {
+   "path": "00.",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "00.",
+   "file": {
+    "path": "00.",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "{:}L?",
+  "split": {
+   "path": "{:}L?",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%7B:%7DL?",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ".ts%C3%A0%C3%A0 .*",
+  "split": {
+   "path": ".ts%C3%A0%C3%A0 .*",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ".ts%C3%A0%C3%A0%20.*",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "0*00",
+  "split": {
+   "path": "0*00",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "0*00",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "a?.ts }]",
+  "split": {
+   "path": "a?.ts }]",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "a?.ts%E2%80%A8%7D%5D",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "C:.ts00LlocalhostL",
+  "split": {
+   "path": "C:.ts00LlocalhostL",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "C:.ts00LlocalhostL",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%20localhost1200",
+  "split": {
+   "path": "%20localhost1200",
+   "line": null
+  },
+  "link": {
+   "path": " localhost1200",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20localhost1200",
+   "file": {
+    "path": " localhost1200",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "alocalhost%20%ZZ?",
+  "split": {
+   "path": "alocalhost%20%ZZ?",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "alocalhost%20%ZZ?",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\\%C3%A0#.ts00",
+  "split": {
+   "path": "\\%C3%A0#.ts00",
+   "line": null
+  },
+  "link": {
+   "path": "\\à",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%5C%C3%A0#.ts00",
+   "file": {
+    "path": "\\à",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".ts",
+  "split": {
+   "path": ".ts",
+   "line": null
+  },
+  "link": {
+   "path": ".ts",
+   "line": null
+  },
+  "code": {
+   "path": ".ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": ".ts",
+   "file": {
+    "path": ".ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%%",
+  "split": {
+   "path": "%%",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%25%25",
+   "file": {
+    "path": "%%",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%209007199254740993",
+  "split": {
+   "path": "%209007199254740993",
+   "line": null
+  },
+  "link": {
+   "path": " 9007199254740993",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%209007199254740993",
+   "file": {
+    "path": " 9007199254740993",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%ZZ/.x0#L[",
+  "split": {
+   "path": "%ZZ/.x0#L[",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%ZZ/.x0#L%5B",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "{#L",
+  "split": {
+   "path": "{#L",
+   "line": null
+  },
+  "link": {
+   "path": "{",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%7B#L",
+   "file": {
+    "path": "{",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "x/Lsrc",
+  "split": {
+   "path": "x/Lsrc",
+   "line": null
+  },
+  "link": {
+   "path": "x/Lsrc",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "x/Lsrc",
+   "file": {
+    "path": "x/Lsrc",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".ts.md]{x",
+  "split": {
+   "path": ".ts.md]{x",
+   "line": null
+  },
+  "link": {
+   "path": ".ts.md]{x",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".ts.md%5D%7Bx",
+   "file": {
+    "path": ".ts.md]{x",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "x?[%C3%A0élocalhost:",
+  "split": {
+   "path": "x?[%C3%A0élocalhost:",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "x?%5B%C3%A0%C3%A9localhost:",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src#:",
+  "split": {
+   "path": "src#:",
+   "line": null
+  },
+  "link": {
+   "path": "src",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src#:",
+   "file": {
+    "path": "src",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": " file://src9007199254740993file://\t",
+  "split": {
+   "path": " file://src9007199254740993file://\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%20file://src9007199254740993file://%09",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "xx~localhost00",
+  "split": {
+   "path": "xx~localhost00",
+   "line": null
+  },
+  "link": {
+   "path": "xx~localhost00",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "xx~localhost00",
+   "file": {
+    "path": "xx~localhost00",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%\n%ZZ",
+  "split": {
+   "path": "%\n%ZZ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%25%0A%ZZ",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "#L.mda~~\t",
+  "split": {
+   "path": "#L.mda~~\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#L.mda~~%09",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\n",
+  "split": {
+   "path": "\n",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "file://#L%C3%A0:%ZZx",
+  "split": {
+   "path": "file://#L%C3%A0:%ZZx",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "file://#L%C3%A0:%ZZx",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "é%C3%A0",
+  "split": {
+   "path": "é%C3%A0",
+   "line": null
+  },
+  "link": {
+   "path": "éà",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A9%C3%A0",
+   "file": {
+    "path": "éà",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "localhost#Llocalhost0:\t",
+  "split": {
+   "path": "localhost#Llocalhost0:\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "localhost#Llocalhost0:%09",
+   "file": {
+    "path": "localhost",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "000%ZZ ",
+  "split": {
+   "path": "000%ZZ ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "000%ZZ%E2%80%A8",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "*L?\\",
+  "split": {
+   "path": "*L?\\",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "*L?%5C",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "0é#: \\",
+  "split": {
+   "path": "0é#: \\",
+   "line": null
+  },
+  "link": {
+   "path": "0é",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "0%C3%A9#:%E2%80%A8%5C",
+   "file": {
+    "path": "0é",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#L%20#L",
+  "split": {
+   "path": "#L%20#L",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#L%20#L",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "[",
+  "split": {
+   "path": "[",
+   "line": null
+  },
+  "link": {
+   "path": "[",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%5B",
+   "file": {
+    "path": "[",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "C:\\.md%{",
+  "split": {
+   "path": "C:\\.md%{",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "C:%5C.md%25%7B",
+   "file": {
+    "path": "C:\\.md%{",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "00",
+  "split": {
+   "path": "00",
+   "line": null
+  },
+  "link": {
+   "path": "00",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "00",
+   "file": {
+    "path": "00",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%20.\\",
+  "split": {
+   "path": "%20.\\",
+   "line": null
+  },
+  "link": {
+   "path": " .\\",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20.%5C",
+   "file": {
+    "path": " .\\",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "12{%% a9007199254740993",
+  "split": {
+   "path": "12{%% a9007199254740993",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "12%7B%25%25%20a9007199254740993",
+   "file": {
+    "path": "12{%% a9007199254740993",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%C3%A0#L%20C:%20src{",
+  "split": {
+   "path": "%C3%A0#L%20C:%20src{",
+   "line": null
+  },
+  "link": {
+   "path": "à",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A0#L%20C:%20src%7B",
+   "file": {
+    "path": "à",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "120a*-",
+  "split": {
+   "path": "120a*-",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "120a*-",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%.ts\t/?#Lfile://",
+  "split": {
+   "path": "%.ts\t/?#Lfile://",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%25.ts%09/?#Lfile://",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\t}",
+  "split": {
+   "path": "\t}",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09%7D",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%9007199254740993 \nfile://",
+  "split": {
+   "path": "%9007199254740993 \nfile://",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%9007199254740993%20%0Afile://",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "x",
+  "split": {
+   "path": "x",
+   "line": null
+  },
+  "link": {
+   "path": "x",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "x",
+   "file": {
+    "path": "x",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "?%20}:.ts",
+  "split": {
+   "path": "?%20}:.ts",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "?%20%7D:.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "12~ 0%20localhost00",
+  "split": {
+   "path": "12~ 0%20localhost00",
+   "line": null
+  },
+  "link": {
+   "path": "12~ 0 localhost00",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "12~%E2%80%A80%20localhost00",
+   "file": {
+    "path": "12~ 0 localhost00",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".mda12[",
+  "split": {
+   "path": ".mda12[",
+   "line": null
+  },
+  "link": {
+   "path": ".mda12[",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".mda12%5B",
+   "file": {
+    "path": ".mda12[",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "a~00",
+  "split": {
+   "path": "a~00",
+   "line": null
+  },
+  "link": {
+   "path": "a~00",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "a~00",
+   "file": {
+    "path": "a~00",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "aL.#LC:%ZZ",
+  "split": {
+   "path": "aL.#LC:%ZZ",
+   "line": null
+  },
+  "link": {
+   "path": "aL.",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "aL.#LC:%ZZ",
+   "file": {
+    "path": "aL.",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\nL:",
+  "split": {
+   "path": "\nL:",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0AL:",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "12#L#L: ",
+  "split": {
+   "path": "12#L#L: ",
+   "line": null
+  },
+  "link": {
+   "path": "12",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "12#L#L:%E2%80%A8",
+   "file": {
+    "path": "12",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%-localhost\\",
+  "split": {
+   "path": "%-localhost\\",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%25-localhost%5C",
+   "file": {
+    "path": "%-localhost\\",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#L\\/",
+  "split": {
+   "path": "#L\\/",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#L%5C/",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "#a",
+  "split": {
+   "path": "#a",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#a",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%ZZ%20:%.ts",
+  "split": {
+   "path": "%ZZ%20:%.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "%ZZ%20:%.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "%ZZ%20:%25.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "{#L/9007199254740993x~",
+  "split": {
+   "path": "{#L/9007199254740993x~",
+   "line": null
+  },
+  "link": {
+   "path": "{",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%7B#L/9007199254740993x~",
+   "file": {
+    "path": "{",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "{.md#L%ZZ",
+  "split": {
+   "path": "{.md#L%ZZ",
+   "line": null
+  },
+  "link": {
+   "path": "{.md",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%7B.md#L%ZZ",
+   "file": {
+    "path": "{.md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".?file://:C:ésrc",
+  "split": {
+   "path": ".?file://:C:ésrc",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ".?file://:C:%C3%A9src",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ".",
+  "split": {
+   "path": ".",
+   "line": null
+  },
+  "link": {
+   "path": ".",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".",
+   "file": {
+    "path": ".",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "]%ZZ/\t",
+  "split": {
+   "path": "]%ZZ/\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%5D%ZZ/%09",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\n",
+  "split": {
+   "path": "\n",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "12.md*{L%20",
+  "split": {
+   "path": "12.md*{L%20",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "12.md*%7BL%20",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ".ts\n%C3%A0/-\\",
+  "split": {
+   "path": ".ts\n%C3%A0/-\\",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ".ts%0A%C3%A0/-%5C",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "9007199254740993?%20\\%20",
+  "split": {
+   "path": "9007199254740993?%20\\%20",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "9007199254740993?%20%5C%20",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "{{\\12*",
+  "split": {
+   "path": "{{\\12*",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%7B%7B%5C12*",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "00:",
+  "split": {
+   "path": "00:",
+   "line": null
+  },
+  "link": {
+   "path": "00:",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "00:",
+   "file": {
+    "path": "00:",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "12.md#?C:#src",
+  "split": {
+   "path": "12.md#?C:#src",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "12.md#?C:#src",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%C3%A0%file://%C3%A0.ts\t{",
+  "split": {
+   "path": "%C3%A0%file://%C3%A0.ts\t{",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A0%file://%C3%A0.ts%09%7B",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\n",
+  "split": {
+   "path": "\n",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ".md..md",
+  "split": {
+   "path": ".md..md",
+   "line": null
+  },
+  "link": {
+   "path": ".md..md",
+   "line": null
+  },
+  "code": {
+   "path": ".md..md",
+   "line": null
+  },
+  "mdLink": {
+   "href": ".md..md",
+   "file": {
+    "path": ".md..md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "*C:%ZZlocalhost%C3%A0\\\n",
+  "split": {
+   "path": "*C:%ZZlocalhost%C3%A0\\\n",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "*C:%ZZlocalhost%C3%A0%5C%0A",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\\]} %20",
+  "split": {
+   "path": "\\]} %20",
+   "line": null
+  },
+  "link": {
+   "path": "\\]}  ",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%5C%5D%7D%20%20",
+   "file": {
+    "path": "\\]}  ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#L\n#Lsrc",
+  "split": {
+   "path": "#L\n#Lsrc",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#L%0A#Lsrc",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%C3%A0:-",
+  "split": {
+   "path": "%C3%A0:-",
+   "line": null
+  },
+  "link": {
+   "path": "à:-",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A0:-",
+   "file": {
+    "path": "à:-",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": " \n\\L?",
+  "split": {
+   "path": " \n\\L?",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%E2%80%A8%0A%5CL?",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "localhost[-*",
+  "split": {
+   "path": "localhost[-*",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "localhost%5B-*",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%20%C3%A0{: ",
+  "split": {
+   "path": "%20%C3%A0{: ",
+   "line": null
+  },
+  "link": {
+   "path": " à{: ",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20%C3%A0%7B:%E2%80%A8",
+   "file": {
+    "path": " à{: ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "aL",
+  "split": {
+   "path": "aL",
+   "line": null
+  },
+  "link": {
+   "path": "aL",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "aL",
+   "file": {
+    "path": "aL",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "0.ts0[x]?",
+  "split": {
+   "path": "0.ts0[x]?",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "0.ts0%5Bx%5D?",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "xC:.ts\\",
+  "split": {
+   "path": "xC:.ts\\",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "xC:.ts%5C",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "C:/",
+  "split": {
+   "path": "C:/",
+   "line": null
+  },
+  "link": {
+   "path": "C:/",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "C:/",
+   "file": {
+    "path": "C:/",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "/",
+  "split": {
+   "path": "/",
+   "line": null
+  },
+  "link": {
+   "path": "/",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "/",
+   "file": {
+    "path": "/",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ":%src#L",
+  "split": {
+   "path": ":%src#L",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ":%src#L",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "?%20%2000%2012}",
+  "split": {
+   "path": "?%20%2000%2012}",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "?%20%2000%2012%7D",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "# ",
+  "split": {
+   "path": "# ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#%E2%80%A8",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "-/",
+  "split": {
+   "path": "-/",
+   "line": null
+  },
+  "link": {
+   "path": "-/",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "-/",
+   "file": {
+    "path": "-/",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\\#%C3%A0\n",
+  "split": {
+   "path": "\\#%C3%A0\n",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%5C#%C3%A0%0A",
+   "file": {
+    "path": "\\",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\t",
+  "split": {
+   "path": "\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "src%",
+  "split": {
+   "path": "src%",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "src%25",
+   "file": {
+    "path": "src%",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "[.mdfile://009007199254740993#",
+  "split": {
+   "path": "[.mdfile://009007199254740993#",
+   "line": null
+  },
+  "link": {
+   "path": "[.mdfile://009007199254740993",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%5B.mdfile://009007199254740993#",
+   "file": {
+    "path": "[.mdfile://009007199254740993",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".{[",
+  "split": {
+   "path": ".{[",
+   "line": null
+  },
+  "link": {
+   "path": ".{[",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".%7B%5B",
+   "file": {
+    "path": ".{[",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "~\n12file://file://",
+  "split": {
+   "path": "~\n12file://file://",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "~%0A12file://file://",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "{xlocalhost?\\/[",
+  "split": {
+   "path": "{xlocalhost?\\/[",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%7Bxlocalhost?%5C/%5B",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "0:aéx~0",
+  "split": {
+   "path": "0:aéx~0",
+   "line": null
+  },
+  "link": {
+   "path": "0:aéx~0",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "0:a%C3%A9x~0",
+   "file": {
+    "path": "0:aéx~0",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "9007199254740993localhost/\\ ",
+  "split": {
+   "path": "9007199254740993localhost/\\ ",
+   "line": null
+  },
+  "link": {
+   "path": "9007199254740993localhost/\\ ",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "9007199254740993localhost/%5C%20",
+   "file": {
+    "path": "9007199254740993localhost/\\ ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".ts0",
+  "split": {
+   "path": ".ts0",
+   "line": null
+  },
+  "link": {
+   "path": ".ts0",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".ts0",
+   "file": {
+    "path": ".ts0",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "-#L\n12axlocalhost",
+  "split": {
+   "path": "-#L\n12axlocalhost",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "-#L%0A12axlocalhost",
+   "file": {
+    "path": "-",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "9007199254740993.%C3%A0src%C3%A0",
+  "split": {
+   "path": "9007199254740993.%C3%A0src%C3%A0",
+   "line": null
+  },
+  "link": {
+   "path": "9007199254740993.àsrcà",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "9007199254740993.%C3%A0src%C3%A0",
+   "file": {
+    "path": "9007199254740993.àsrcà",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ":\\] }",
+  "split": {
+   "path": ":\\] }",
+   "line": null
+  },
+  "link": {
+   "path": ":\\] }",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ":%5C%5D%E2%80%A8%7D",
+   "file": {
+    "path": ":\\] }",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "{.md.md%20?",
+  "split": {
+   "path": "{.md.md%20?",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%7B.md.md%20?",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\t90071992547409930%ZZ%20.ts",
+  "split": {
+   "path": "\t90071992547409930%ZZ%20.ts",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "90071992547409930%ZZ%20.ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": "%0990071992547409930%ZZ%20.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "C:src ",
+  "split": {
+   "path": "C:src ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "C:src%20",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": " [.md",
+  "split": {
+   "path": " [.md",
+   "line": null
+  },
+  "link": {
+   "path": " [.md",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20%5B.md",
+   "file": {
+    "path": " [.md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".md#",
+  "split": {
+   "path": ".md#",
+   "line": null
+  },
+  "link": {
+   "path": ".md",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".md#",
+   "file": {
+    "path": ".md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#",
+  "split": {
+   "path": "#",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "a#9007199254740993 .file://",
+  "split": {
+   "path": "a#9007199254740993 .file://",
+   "line": null
+  },
+  "link": {
+   "path": "a",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "a#9007199254740993%20.file://",
+   "file": {
+    "path": "a",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "##",
+  "split": {
+   "path": "##",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "##",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "localhost.md?xC:.ts",
+  "split": {
+   "path": "localhost.md?xC:.ts",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "localhost.md?xC:.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%C3%A0L~:~}-",
+  "split": {
+   "path": "%C3%A0L~:~}-",
+   "line": null
+  },
+  "link": {
+   "path": "àL~:~}-",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A0L~:~%7D-",
+   "file": {
+    "path": "àL~:~}-",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\tlocalhost.md{%20#",
+  "split": {
+   "path": "\tlocalhost.md{%20#",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09localhost.md%7B%20#",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%ZZ12é.md#",
+  "split": {
+   "path": "%ZZ12é.md#",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%ZZ12%C3%A9.md#",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": " }L%ZZ",
+  "split": {
+   "path": " }L%ZZ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%E2%80%A8%7DL%ZZ",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "file://:",
+  "split": {
+   "path": "file://:",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "file://:",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "a9007199254740993x[/%ZZ[",
+  "split": {
+   "path": "a9007199254740993x[/%ZZ[",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "a9007199254740993x%5B/%ZZ%5B",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "}L",
+  "split": {
+   "path": "}L",
+   "line": null
+  },
+  "link": {
+   "path": "}L",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%7DL",
+   "file": {
+    "path": "}L",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\t9007199254740993 file://*%C3%A0",
+  "split": {
+   "path": "\t9007199254740993 file://*%C3%A0",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%099007199254740993%20file://*%C3%A0",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%ZZ]%C3%A09007199254740993.ts.ts%C3%A0",
+  "split": {
+   "path": "%ZZ]%C3%A09007199254740993.ts.ts%C3%A0",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%ZZ%5D%C3%A09007199254740993.ts.ts%C3%A0",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%ZZ",
+  "split": {
+   "path": "%ZZ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%ZZ",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": " #00 -~",
+  "split": {
+   "path": " #00 -~",
+   "line": null
+  },
+  "link": {
+   "path": " ",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20#00%20-~",
+   "file": {
+    "path": " ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "file://9007199254740993[~",
+  "split": {
+   "path": "file://9007199254740993[~",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "file://9007199254740993%5B~",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "0%20%9007199254740993",
+  "split": {
+   "path": "0%20%9007199254740993",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "0%20%9007199254740993",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "12 src]{12",
+  "split": {
+   "path": "12 src]{12",
+   "line": null
+  },
+  "link": {
+   "path": "12 src]{12",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "12%E2%80%A8src%5D%7B12",
+   "file": {
+    "path": "12 src]{12",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": " #Lsrc\\",
+  "split": {
+   "path": " #Lsrc\\",
+   "line": null
+  },
+  "link": {
+   "path": " ",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20#Lsrc%5C",
+   "file": {
+    "path": " ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "é",
+  "split": {
+   "path": "é",
+   "line": null
+  },
+  "link": {
+   "path": "é",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A9",
+   "file": {
+    "path": "é",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%C:localhost%200é",
+  "split": {
+   "path": "%C:localhost%200é",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%25C:localhost%200%C3%A9",
+   "file": {
+    "path": "%C:localhost 0é",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%20}12[9007199254740993file://src",
+  "split": {
+   "path": "%20}12[9007199254740993file://src",
+   "line": null
+  },
+  "link": {
+   "path": " }12[9007199254740993file://src",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20%7D12%5B9007199254740993file://src",
+   "file": {
+    "path": " }12[9007199254740993file://src",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "élocalhostx12#/",
+  "split": {
+   "path": "élocalhostx12#/",
+   "line": null
+  },
+  "link": {
+   "path": "élocalhostx12",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A9localhostx12#/",
+   "file": {
+    "path": "élocalhostx12",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "x:00-[%ZZ",
+  "split": {
+   "path": "x:00-[%ZZ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "x:00-%5B%ZZ",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "a\t~:",
+  "split": {
+   "path": "a\t~:",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "a%09~:",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "~000src#",
+  "split": {
+   "path": "~000src#",
+   "line": null
+  },
+  "link": {
+   "path": "~000src",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "~000src#",
+   "file": {
+    "path": "~000src",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "file://*",
+  "split": {
+   "path": "file://*",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "file://*",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\\~12#file://",
+  "split": {
+   "path": "\\~12#file://",
+   "line": null
+  },
+  "link": {
+   "path": "\\~12",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%5C~12#file://",
+   "file": {
+    "path": "\\~12",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "12",
+  "split": {
+   "path": "12",
+   "line": null
+  },
+  "link": {
+   "path": "12",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "12",
+   "file": {
+    "path": "12",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "L%20..ts\\/%",
+  "split": {
+   "path": "L%20..ts\\/%",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "L%20..ts%5C/%25",
+   "file": {
+    "path": "L ..ts\\/%",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".md0",
+  "split": {
+   "path": ".md0",
+   "line": null
+  },
+  "link": {
+   "path": ".md0",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".md0",
+   "file": {
+    "path": ".md0",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "-[",
+  "split": {
+   "path": "-[",
+   "line": null
+  },
+  "link": {
+   "path": "-[",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "-%5B",
+   "file": {
+    "path": "-[",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "x00]file://",
+  "split": {
+   "path": "x00]file://",
+   "line": null
+  },
+  "link": {
+   "path": "x00]file://",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "x00%5Dfile://",
+   "file": {
+    "path": "x00]file://",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".mdx#L%C3%A0a0",
+  "split": {
+   "path": ".mdx#L%C3%A0a0",
+   "line": null
+  },
+  "link": {
+   "path": ".mdx",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".mdx#L%C3%A0a0",
+   "file": {
+    "path": ".mdx",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".md",
+  "split": {
+   "path": ".md",
+   "line": null
+  },
+  "link": {
+   "path": ".md",
+   "line": null
+  },
+  "code": {
+   "path": ".md",
+   "line": null
+  },
+  "mdLink": {
+   "href": ".md",
+   "file": {
+    "path": ".md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "}?.ts00",
+  "split": {
+   "path": "}?.ts00",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%7D?.ts00",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "C:  9007199254740993/ ",
+  "split": {
+   "path": "C:  9007199254740993/ ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "C:%20%209007199254740993/%E2%80%A8",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%90071992547409930file://src",
+  "split": {
+   "path": "%90071992547409930file://src",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%90071992547409930file://src",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "012",
+  "split": {
+   "path": "012",
+   "line": null
+  },
+  "link": {
+   "path": "012",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "012",
+   "file": {
+    "path": "012",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".éL.ts#[",
+  "split": {
+   "path": ".éL.ts#[",
+   "line": null
+  },
+  "link": {
+   "path": ".éL.ts",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".%C3%A9L.ts#%5B",
+   "file": {
+    "path": ".éL.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".mdlocalhost12?",
+  "split": {
+   "path": ".mdlocalhost12?",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ".mdlocalhost12?",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%20[ .",
+  "split": {
+   "path": "%20[ .",
+   "line": null
+  },
+  "link": {
+   "path": " [ .",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20%5B%20.",
+   "file": {
+    "path": " [ .",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": " %20",
+  "split": {
+   "path": " %20",
+   "line": null
+  },
+  "link": {
+   "path": "  ",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%E2%80%A8%20",
+   "file": {
+    "path": "  ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".mdx",
+  "split": {
+   "path": ".mdx",
+   "line": null
+  },
+  "link": {
+   "path": ".mdx",
+   "line": null
+  },
+  "code": {
+   "path": ".mdx",
+   "line": null
+  },
+  "mdLink": {
+   "href": ".mdx",
+   "file": {
+    "path": ".mdx",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "{~}C:src.",
+  "split": {
+   "path": "{~}C:src.",
+   "line": null
+  },
+  "link": {
+   "path": "{~}C:src.",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%7B~%7DC:src.",
+   "file": {
+    "path": "{~}C:src.",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\\]}00 %ZZé",
+  "split": {
+   "path": "\\]}00 %ZZé",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%5C%5D%7D00%20%ZZ%C3%A9",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "[9007199254740993",
+  "split": {
+   "path": "[9007199254740993",
+   "line": null
+  },
+  "link": {
+   "path": "[9007199254740993",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%5B9007199254740993",
+   "file": {
+    "path": "[9007199254740993",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "[src%20-",
+  "split": {
+   "path": "[src%20-",
+   "line": null
+  },
+  "link": {
+   "path": "[src -",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%5Bsrc%20-",
+   "file": {
+    "path": "[src -",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "?x",
+  "split": {
+   "path": "?x",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "?x",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\n",
+  "split": {
+   "path": "\n",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\n]{C:{%ZZ",
+  "split": {
+   "path": "\n]{C:{%ZZ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A%5D%7BC:%7B%ZZ",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "é",
+  "split": {
+   "path": "é",
+   "line": null
+  },
+  "link": {
+   "path": "é",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A9",
+   "file": {
+    "path": "é",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".ts\\\n[%%20",
+  "split": {
+   "path": ".ts\\\n[%%20",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ".ts%5C%0A%5B%25%20",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "?00}00#L",
+  "split": {
+   "path": "?00}00#L",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "?00%7D00#L",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "-file://",
+  "split": {
+   "path": "-file://",
+   "line": null
+  },
+  "link": {
+   "path": "-file://",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "-file://",
+   "file": {
+    "path": "-file://",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%20.%C3%A0%20éx#",
+  "split": {
+   "path": "%20.%C3%A0%20éx#",
+   "line": null
+  },
+  "link": {
+   "path": " .à éx",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20.%C3%A0%20%C3%A9x#",
+   "file": {
+    "path": " .à éx",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "0/0% :#",
+  "split": {
+   "path": "0/0% :#",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "0/0%25%20:#",
+   "file": {
+    "path": "0/0% :",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%/",
+  "split": {
+   "path": "%/",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%25/",
+   "file": {
+    "path": "%/",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "[90071992547409930localhost#",
+  "split": {
+   "path": "[90071992547409930localhost#",
+   "line": null
+  },
+  "link": {
+   "path": "[90071992547409930localhost",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%5B90071992547409930localhost#",
+   "file": {
+    "path": "[90071992547409930localhost",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "/L#",
+  "split": {
+   "path": "/L#",
+   "line": null
+  },
+  "link": {
+   "path": "/L",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "/L#",
+   "file": {
+    "path": "/L",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "é\\",
+  "split": {
+   "path": "é\\",
+   "line": null
+  },
+  "link": {
+   "path": "é\\",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A9%5C",
+   "file": {
+    "path": "é\\",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "0",
+  "split": {
+   "path": "0",
+   "line": null
+  },
+  "link": {
+   "path": "0",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "0",
+   "file": {
+    "path": "0",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "00 file://00",
+  "split": {
+   "path": "00 file://00",
+   "line": null
+  },
+  "link": {
+   "path": "00 file://00",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "00%20file://00",
+   "file": {
+    "path": "00 file://00",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "-#L",
+  "split": {
+   "path": "-#L",
+   "line": null
+  },
+  "link": {
+   "path": "-",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "-#L",
+   "file": {
+    "path": "-",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "}L~",
+  "split": {
+   "path": "}L~",
+   "line": null
+  },
+  "link": {
+   "path": "}L~",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%7DL~",
+   "file": {
+    "path": "}L~",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "/9007199254740993",
+  "split": {
+   "path": "/9007199254740993",
+   "line": null
+  },
+  "link": {
+   "path": "/9007199254740993",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "/9007199254740993",
+   "file": {
+    "path": "/9007199254740993",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#L{~\t]",
+  "split": {
+   "path": "#L{~\t]",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#L%7B~%09%5D",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%20.md 12C:.ts",
+  "split": {
+   "path": "%20.md 12C:.ts",
+   "line": null
+  },
+  "link": {
+   "path": " .md 12C:.ts",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20.md%2012C:.ts",
+   "file": {
+    "path": " .md 12C:.ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#~",
+  "split": {
+   "path": "#~",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#~",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "L::file://{.",
+  "split": {
+   "path": "L::file://{.",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "L::file://%7B.",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "12]%",
+  "split": {
+   "path": "12]%",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "12%5D%25",
+   "file": {
+    "path": "12]%",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ":",
+  "split": {
+   "path": ":",
+   "line": null
+  },
+  "link": {
+   "path": ":",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ":",
+   "file": {
+    "path": ":",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\n\\\n",
+  "split": {
+   "path": "\n\\\n",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A%5C%0A",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "00.",
+  "split": {
+   "path": "00.",
+   "line": null
+  },
+  "link": {
+   "path": "00.",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "00.",
+   "file": {
+    "path": "00.",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "]localhost*~~.md",
+  "split": {
+   "path": "]localhost*~~.md",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%5Dlocalhost*~~.md",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\t\t~ \\",
+  "split": {
+   "path": "\t\t~ \\",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09%09~%20%5C",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "0#/[",
+  "split": {
+   "path": "0#/[",
+   "line": null
+  },
+  "link": {
+   "path": "0",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "0#/%5B",
+   "file": {
+    "path": "0",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "localhost%C3%A0{-9007199254740993{/",
+  "split": {
+   "path": "localhost%C3%A0{-9007199254740993{/",
+   "line": null
+  },
+  "link": {
+   "path": "localhostà{-9007199254740993{/",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "localhost%C3%A0%7B-9007199254740993%7B/",
+   "file": {
+    "path": "localhostà{-9007199254740993{/",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": " localhost}",
+  "split": {
+   "path": " localhost}",
+   "line": null
+  },
+  "link": {
+   "path": " localhost}",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%E2%80%A8localhost%7D",
+   "file": {
+    "path": " localhost}",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "a#L\t",
+  "split": {
+   "path": "a#L\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "a#L%09",
+   "file": {
+    "path": "a",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%C3%A0}",
+  "split": {
+   "path": "%C3%A0}",
+   "line": null
+  },
+  "link": {
+   "path": "à}",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A0%7D",
+   "file": {
+    "path": "à}",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": " ",
+  "split": {
+   "path": " ",
+   "line": null
+  },
+  "link": {
+   "path": " ",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20",
+   "file": {
+    "path": " ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%20file://x.src",
+  "split": {
+   "path": "%20file://x.src",
+   "line": null
+  },
+  "link": {
+   "path": " file://x.src",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20file://x.src",
+   "file": {
+    "path": " file://x.src",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\n.tsL:\nsrc[",
+  "split": {
+   "path": "\n.tsL:\nsrc[",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A.tsL:%0Asrc%5B",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ".%#L ?é\t",
+  "split": {
+   "path": ".%#L ?é\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ".%25#L%20?%C3%A9%09",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\t?ésrc",
+  "split": {
+   "path": "\t?ésrc",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09?%C3%A9src",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%C3%A0]",
+  "split": {
+   "path": "%C3%A0]",
+   "line": null
+  },
+  "link": {
+   "path": "à]",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A0%5D",
+   "file": {
+    "path": "à]",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "a/xlocalhost.\t",
+  "split": {
+   "path": "a/xlocalhost.\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "a/xlocalhost.%09",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%ZZ{.L?",
+  "split": {
+   "path": "%ZZ{.L?",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%ZZ%7B.L?",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "}~",
+  "split": {
+   "path": "}~",
+   "line": null
+  },
+  "link": {
+   "path": "}~",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%7D~",
+   "file": {
+    "path": "}~",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "localhost12C:",
+  "split": {
+   "path": "localhost12C:",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "localhost12C:",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\t\\",
+  "split": {
+   "path": "\t\\",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09%5C",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ".%ZZ{é[",
+  "split": {
+   "path": ".%ZZ{é[",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ".%ZZ%7B%C3%A9%5B",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "C:0%20]%%ZZ?",
+  "split": {
+   "path": "C:0%20]%%ZZ?",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "C:0%20%5D%25%ZZ?",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "a",
+  "split": {
+   "path": "a",
+   "line": null
+  },
+  "link": {
+   "path": "a",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "a",
+   "file": {
+    "path": "a",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "éé#%ZZ",
+  "split": {
+   "path": "éé#%ZZ",
+   "line": null
+  },
+  "link": {
+   "path": "éé",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A9%C3%A9#%ZZ",
+   "file": {
+    "path": "éé",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src/12srcsrc",
+  "split": {
+   "path": "src/12srcsrc",
+   "line": null
+  },
+  "link": {
+   "path": "src/12srcsrc",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src/12srcsrc",
+   "file": {
+    "path": "src/12srcsrc",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#LlocalhostL",
+  "split": {
+   "path": "#LlocalhostL",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#LlocalhostL",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%%C3%A0",
+  "split": {
+   "path": "%%C3%A0",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%25%C3%A0",
+   "file": {
+    "path": "%à",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "0000\\a0file://",
+  "split": {
+   "path": "0000\\a0file://",
+   "line": null
+  },
+  "link": {
+   "path": "0000\\a0file://",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "0000%5Ca0file://",
+   "file": {
+    "path": "0000\\a0file://",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "-localhostL.",
+  "split": {
+   "path": "-localhostL.",
+   "line": null
+  },
+  "link": {
+   "path": "-localhostL.",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "-localhostL.",
+   "file": {
+    "path": "-localhostL.",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%C3%A0",
+  "split": {
+   "path": "%C3%A0",
+   "line": null
+  },
+  "link": {
+   "path": "à",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A0",
+   "file": {
+    "path": "à",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "{:a",
+  "split": {
+   "path": "{:a",
+   "line": null
+  },
+  "link": {
+   "path": "{:a",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%7B:a",
+   "file": {
+    "path": "{:a",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "00x%20#src\n9007199254740993",
+  "split": {
+   "path": "00x%20#src\n9007199254740993",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "00x%20#src%0A9007199254740993",
+   "file": {
+    "path": "00x ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\t}\n",
+  "split": {
+   "path": "\t}\n",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09%7D%0A",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "localhost% ",
+  "split": {
+   "path": "localhost% ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "localhost%25%E2%80%A8",
+   "file": {
+    "path": "localhost% ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%#{00",
+  "split": {
+   "path": "%#{00",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%25#%7B00",
+   "file": {
+    "path": "%",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "C:%éx#é[",
+  "split": {
+   "path": "C:%éx#é[",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "C:%25%C3%A9x#%C3%A9%5B",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ".tssrc 00%}",
+  "split": {
+   "path": ".tssrc 00%}",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ".tssrc%E2%80%A800%25%7D",
+   "file": {
+    "path": ".tssrc 00%}",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\t",
+  "split": {
+   "path": "\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": " a ~localhost/",
+  "split": {
+   "path": " a ~localhost/",
+   "line": null
+  },
+  "link": {
+   "path": " a ~localhost/",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%E2%80%A8a%E2%80%A8~localhost/",
+   "file": {
+    "path": " a ~localhost/",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "0x#L?",
+  "split": {
+   "path": "0x#L?",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "0x#L?",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ".ts#Lsrc\n#?%",
+  "split": {
+   "path": ".ts#Lsrc\n#?%",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ".ts#Lsrc%0A#?%25",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "file://%ZZ00",
+  "split": {
+   "path": "file://%ZZ00",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "file://%ZZ00",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\n%C:\\~",
+  "split": {
+   "path": "\n%C:\\~",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A%25C:%5C~",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "/#",
+  "split": {
+   "path": "/#",
+   "line": null
+  },
+  "link": {
+   "path": "/",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "/#",
+   "file": {
+    "path": "/",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".",
+  "split": {
+   "path": ".",
+   "line": null
+  },
+  "link": {
+   "path": ".",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".",
+   "file": {
+    "path": ".",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "/%C3%A0%20",
+  "split": {
+   "path": "/%C3%A0%20",
+   "line": null
+  },
+  "link": {
+   "path": "/à ",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "/%C3%A0%20",
+   "file": {
+    "path": "/à ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%20~file://",
+  "split": {
+   "path": "%20~file://",
+   "line": null
+  },
+  "link": {
+   "path": " ~file://",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20~file://",
+   "file": {
+    "path": " ~file://",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "srcé{",
+  "split": {
+   "path": "srcé{",
+   "line": null
+  },
+  "link": {
+   "path": "srcé{",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src%C3%A9%7B",
+   "file": {
+    "path": "srcé{",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "//",
+  "split": {
+   "path": "//",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "//",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\t/]?",
+  "split": {
+   "path": "\t/]?",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09/%5D?",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "00x *.ts",
+  "split": {
+   "path": "00x *.ts",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "00x%20*.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "*9007199254740993]}9007199254740993",
+  "split": {
+   "path": "*9007199254740993]}9007199254740993",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "*9007199254740993%5D%7D9007199254740993",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "x00 00",
+  "split": {
+   "path": "x00 00",
+   "line": null
+  },
+  "link": {
+   "path": "x00 00",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "x00%2000",
+   "file": {
+    "path": "x00 00",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "9007199254740993..md localhost#Llocalhost",
+  "split": {
+   "path": "9007199254740993..md localhost#Llocalhost",
+   "line": null
+  },
+  "link": {
+   "path": "9007199254740993..md localhost",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "9007199254740993..md%20localhost#Llocalhost",
+   "file": {
+    "path": "9007199254740993..md localhost",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%C3%A0L9007199254740993#L%C3%A0]",
+  "split": {
+   "path": "%C3%A0L9007199254740993#L%C3%A0]",
+   "line": null
+  },
+  "link": {
+   "path": "àL9007199254740993",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A0L9007199254740993#L%C3%A0%5D",
+   "file": {
+    "path": "àL9007199254740993",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\t",
+  "split": {
+   "path": "\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "[%",
+  "split": {
+   "path": "[%",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%5B%25",
+   "file": {
+    "path": "[%",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "~",
+  "split": {
+   "path": "~",
+   "line": null
+  },
+  "link": {
+   "path": "~",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "~",
+   "file": {
+    "path": "~",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src",
+  "split": {
+   "path": "src",
+   "line": null
+  },
+  "link": {
+   "path": "src",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "src",
+   "file": {
+    "path": "src",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": " }12L~%C3%A0%",
+  "split": {
+   "path": " }12L~%C3%A0%",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%E2%80%A8%7D12L~%C3%A0%25",
+   "file": {
+    "path": " }12L~à%",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%#%ZZ",
+  "split": {
+   "path": "%#%ZZ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%25#%ZZ",
+   "file": {
+    "path": "%",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%9007199254740993#",
+  "split": {
+   "path": "%9007199254740993#",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%9007199254740993#",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ".",
+  "split": {
+   "path": ".",
+   "line": null
+  },
+  "link": {
+   "path": ".",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".",
+   "file": {
+    "path": ".",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src*12",
+  "split": {
+   "path": "src*12",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "src*12",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "12%20:%%C3%A0",
+  "split": {
+   "path": "12%20:%%C3%A0",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "12%20:%25%C3%A0",
+   "file": {
+    "path": "12 :%à",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "/.00.mdsrc",
+  "split": {
+   "path": "/.00.mdsrc",
+   "line": null
+  },
+  "link": {
+   "path": "/.00.mdsrc",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "/.00.mdsrc",
+   "file": {
+    "path": "/.00.mdsrc",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#:*:00 ",
+  "split": {
+   "path": "#:*:00 ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#:*:00%E2%80%A8",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "*-",
+  "split": {
+   "path": "*-",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "*-",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "[[#0C:0C:",
+  "split": {
+   "path": "[[#0C:0C:",
+   "line": null
+  },
+  "link": {
+   "path": "[[",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%5B%5B#0C:0C:",
+   "file": {
+    "path": "[[",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\né",
+  "split": {
+   "path": "\né",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A%C3%A9",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%ZZC: [00",
+  "split": {
+   "path": "%ZZC: [00",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%ZZC:%E2%80%A8%5B00",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "é",
+  "split": {
+   "path": "é",
+   "line": null
+  },
+  "link": {
+   "path": "é",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A9",
+   "file": {
+    "path": "é",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".md",
+  "split": {
+   "path": ".md",
+   "line": null
+  },
+  "link": {
+   "path": ".md",
+   "line": null
+  },
+  "code": {
+   "path": ".md",
+   "line": null
+  },
+  "mdLink": {
+   "href": ".md",
+   "file": {
+    "path": ".md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".md##LL 12file://",
+  "split": {
+   "path": ".md##LL 12file://",
+   "line": null
+  },
+  "link": {
+   "path": ".md",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".md##LL%E2%80%A812file://",
+   "file": {
+    "path": ".md",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "a%C3%A0",
+  "split": {
+   "path": "a%C3%A0",
+   "line": null
+  },
+  "link": {
+   "path": "aà",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "a%C3%A0",
+   "file": {
+    "path": "aà",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": " .mdL#\n",
+  "split": {
+   "path": " .mdL#\n",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%20.mdL#%0A",
+   "file": {
+    "path": " .mdL",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#L?{:L",
+  "split": {
+   "path": "#L?{:L",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#L?%7B:L",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "  L",
+  "split": {
+   "path": "  L",
+   "line": null
+  },
+  "link": {
+   "path": "  L",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20%E2%80%A8L",
+   "file": {
+    "path": "  L",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "é.md ",
+  "split": {
+   "path": "é.md ",
+   "line": null
+  },
+  "link": {
+   "path": "é.md ",
+   "line": null
+  },
+  "code": {
+   "path": "é.md",
+   "line": null
+  },
+  "mdLink": {
+   "href": "%C3%A9.md%E2%80%A8",
+   "file": {
+    "path": "é.md ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "/0file://C:a%20",
+  "split": {
+   "path": "/0file://C:a%20",
+   "line": null
+  },
+  "link": {
+   "path": "/0file://C:a ",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "/0file://C:a%20",
+   "file": {
+    "path": "/0file://C:a ",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "9007199254740993",
+  "split": {
+   "path": "9007199254740993",
+   "line": null
+  },
+  "link": {
+   "path": "9007199254740993",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "9007199254740993",
+   "file": {
+    "path": "9007199254740993",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": " %20.ts:\té:",
+  "split": {
+   "path": " %20.ts:\té:",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%E2%80%A8%20.ts:%09%C3%A9:",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "}}file://#-",
+  "split": {
+   "path": "}}file://#-",
+   "line": null
+  },
+  "link": {
+   "path": "}}file://",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%7D%7Dfile://#-",
+   "file": {
+    "path": "}}file://",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\n.ts.0:/",
+  "split": {
+   "path": "\n.ts.0:/",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A.ts.0:/",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ".",
+  "split": {
+   "path": ".",
+   "line": null
+  },
+  "link": {
+   "path": ".",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".",
+   "file": {
+    "path": ".",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\t%a",
+  "split": {
+   "path": "\t%a",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09%25a",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "[%ZZ.ts}\n0012",
+  "split": {
+   "path": "[%ZZ.ts}\n0012",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%5B%ZZ.ts%7D%0A0012",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "-file://#L}file://%ZZ\t",
+  "split": {
+   "path": "-file://#L}file://%ZZ\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "-file://#L%7Dfile://%ZZ%09",
+   "file": {
+    "path": "-file://",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "/\n9007199254740993\\}0",
+  "split": {
+   "path": "/\n9007199254740993\\}0",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "/%0A9007199254740993%5C%7D0",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%ZZ.tsL}",
+  "split": {
+   "path": "%ZZ.tsL}",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%ZZ.tsL%7D",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "12{file://\n%C3%A0 %",
+  "split": {
+   "path": "12{file://\n%C3%A0 %",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "12%7Bfile://%0A%C3%A0%20%25",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\n 12#",
+  "split": {
+   "path": "\n 12#",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A%E2%80%A812#",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ".ts",
+  "split": {
+   "path": ".ts",
+   "line": null
+  },
+  "link": {
+   "path": ".ts",
+   "line": null
+  },
+  "code": {
+   "path": ".ts",
+   "line": null
+  },
+  "mdLink": {
+   "href": ".ts",
+   "file": {
+    "path": ".ts",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%209007199254740993%20\\%ZZ",
+  "split": {
+   "path": "%209007199254740993%20\\%ZZ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%209007199254740993%20%5C%ZZ",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\\}",
+  "split": {
+   "path": "\\}",
+   "line": null
+  },
+  "link": {
+   "path": "\\}",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%5C%7D",
+   "file": {
+    "path": "\\}",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\tfile://localhost",
+  "split": {
+   "path": "\tfile://localhost",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09file://localhost",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "x12%ZZ/",
+  "split": {
+   "path": "x12%ZZ/",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "x12%ZZ/",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "}]120~",
+  "split": {
+   "path": "}]120~",
+   "line": null
+  },
+  "link": {
+   "path": "}]120~",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%7D%5D120~",
+   "file": {
+    "path": "}]120~",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "}0*.ts{L",
+  "split": {
+   "path": "}0*.ts{L",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%7D0*.ts%7BL",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ".%C3%A0\\[",
+  "split": {
+   "path": ".%C3%A0\\[",
+   "line": null
+  },
+  "link": {
+   "path": ".à\\[",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ".%C3%A0%5C%5B",
+   "file": {
+    "path": ".à\\[",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": " %C3%A0#a\tlocalhost",
+  "split": {
+   "path": " %C3%A0#a\tlocalhost",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%20%C3%A0#a%09localhost",
+   "file": {
+    "path": " à",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "#LL}:#L",
+  "split": {
+   "path": "#LL}:#L",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#LL%7D:#L",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "\n] x *src",
+  "split": {
+   "path": "\n] x *src",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%0A%5D%20x%E2%80%A8*src",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "[\t./.",
+  "split": {
+   "path": "[\t./.",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%5B%09./.",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "[a",
+  "split": {
+   "path": "[a",
+   "line": null
+  },
+  "link": {
+   "path": "[a",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%5Ba",
+   "file": {
+    "path": "[a",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "\t\tC:%ZZ0-#L",
+  "split": {
+   "path": "\t\tC:%ZZ0-#L",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%09%09C:%ZZ0-#L",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ".ts%~.",
+  "split": {
+   "path": ".ts%~.",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ".ts%25~.",
+   "file": {
+    "path": ".ts%~.",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%ZZ src*",
+  "split": {
+   "path": "%ZZ src*",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%ZZ%20src*",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "C:src~é[\n",
+  "split": {
+   "path": "C:src~é[\n",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "C:src~%C3%A9%5B%0A",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "*: .ts",
+  "split": {
+   "path": "*: .ts",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "*:%20.ts",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "0129007199254740993{",
+  "split": {
+   "path": "0129007199254740993{",
+   "line": null
+  },
+  "link": {
+   "path": "0129007199254740993{",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "0129007199254740993%7B",
+   "file": {
+    "path": "0129007199254740993{",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "aC:12file://x[",
+  "split": {
+   "path": "aC:12file://x[",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "aC:12file://x%5B",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%ZZ{.tsxfile://\tfile://",
+  "split": {
+   "path": "%ZZ{.tsxfile://\tfile://",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%ZZ%7B.tsxfile://%09file://",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ":src\\file://",
+  "split": {
+   "path": ":src\\file://",
+   "line": null
+  },
+  "link": {
+   "path": ":src\\file://",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ":src%5Cfile://",
+   "file": {
+    "path": ":src\\file://",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "?file://.md",
+  "split": {
+   "path": "?file://.md",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "?file://.md",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%20C:%ZZ.md",
+  "split": {
+   "path": "%20C:%ZZ.md",
+   "line": null
+  },
+  "link": null,
+  "code": {
+   "path": "%20C:%ZZ.md",
+   "line": null
+  },
+  "mdLink": {
+   "href": "%20C:%ZZ.md",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "a.ts%ZZ#L~",
+  "split": {
+   "path": "a.ts%ZZ#L~",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "a.ts%ZZ#L~",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%20].ts12",
+  "split": {
+   "path": "%20].ts12",
+   "line": null
+  },
+  "link": {
+   "path": " ].ts12",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20%5D.ts12",
+   "file": {
+    "path": " ].ts12",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": " .ts12%",
+  "split": {
+   "path": " .ts12%",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%20.ts12%25",
+   "file": {
+    "path": " .ts12%",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "9007199254740993%ZZ",
+  "split": {
+   "path": "9007199254740993%ZZ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "9007199254740993%ZZ",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "*",
+  "split": {
+   "path": "*",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "*",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "#",
+  "split": {
+   "path": "#",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "%C3%A0",
+  "split": {
+   "path": "%C3%A0",
+   "line": null
+  },
+  "link": {
+   "path": "à",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%C3%A0",
+   "file": {
+    "path": "à",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "]\t%*.}",
+  "split": {
+   "path": "]\t%*.}",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%5D%09%25*.%7D",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "C:srcC:%20x0",
+  "split": {
+   "path": "C:srcC:%20x0",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "C:srcC:%20x0",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "12a",
+  "split": {
+   "path": "12a",
+   "line": null
+  },
+  "link": {
+   "path": "12a",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "12a",
+   "file": {
+    "path": "12a",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "src*?*#L%20~",
+  "split": {
+   "path": "src*?*#L%20~",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "src*?*#L%20~",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "#L[-[\\[",
+  "split": {
+   "path": "#L[-[\\[",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "#L%5B-%5B%5C%5B",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": ":",
+  "split": {
+   "path": ":",
+   "line": null
+  },
+  "link": {
+   "path": ":",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": ":",
+   "file": {
+    "path": ":",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": " }00",
+  "split": {
+   "path": " }00",
+   "line": null
+  },
+  "link": {
+   "path": " }00",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%E2%80%A8%7D00",
+   "file": {
+    "path": " }00",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "/",
+  "split": {
+   "path": "/",
+   "line": null
+  },
+  "link": {
+   "path": "/",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "/",
+   "file": {
+    "path": "/",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": ".? ",
+  "split": {
+   "path": ".? ",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": ".?%E2%80%A8",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "C:/ax00%",
+  "split": {
+   "path": "C:/ax00%",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "C:/ax00%25",
+   "file": {
+    "path": "C:/ax00%",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "%",
+  "split": {
+   "path": "%",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%25",
+   "file": {
+    "path": "%",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "?00",
+  "split": {
+   "path": "?00",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "?00",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": " %x\t",
+  "split": {
+   "path": " %x\t",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%20%25x%09",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": " }file://#L#L9007199254740993.",
+  "split": {
+   "path": " }file://#L#L9007199254740993.",
+   "line": null
+  },
+  "link": {
+   "path": " }file://",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "%20%7Dfile://#L#L9007199254740993.",
+   "file": {
+    "path": " }file://",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "[[\nL-%2012",
+  "split": {
+   "path": "[[\nL-%2012",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%5B%5B%0AL-%2012",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "12 .mdlocalhost#Lé%",
+  "split": {
+   "path": "12 .mdlocalhost#Lé%",
+   "line": null
+  },
+  "link": {
+   "path": "12 .mdlocalhost",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "12%20.mdlocalhost#L%C3%A9%25",
+   "file": {
+    "path": "12 .mdlocalhost",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "{{L*file://}",
+  "split": {
+   "path": "{{L*file://}",
+   "line": null
+  },
+  "link": null,
+  "code": null,
+  "mdLink": {
+   "href": "%7B%7BL*file://%7D",
+   "file": null,
+   "url": null
+  }
+ },
+ {
+  "text": "00x#src",
+  "split": {
+   "path": "00x#src",
+   "line": null
+  },
+  "link": {
+   "path": "00x",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "00x#src",
+   "file": {
+    "path": "00x",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "9007199254740993-",
+  "split": {
+   "path": "9007199254740993-",
+   "line": null
+  },
+  "link": {
+   "path": "9007199254740993-",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "9007199254740993-",
+   "file": {
+    "path": "9007199254740993-",
+    "line": null
+   },
+   "url": null
+  }
+ },
+ {
+  "text": "localhost",
+  "split": {
+   "path": "localhost",
+   "line": null
+  },
+  "link": {
+   "path": "localhost",
+   "line": null
+  },
+  "code": null,
+  "mdLink": {
+   "href": "localhost",
+   "file": {
+    "path": "localhost",
+    "line": null
+   },
+   "url": null
+  }
+ }
+]

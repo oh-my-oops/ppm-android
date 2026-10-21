@@ -8,6 +8,7 @@ import com.hienlh.ppm.chat.InlineMarkdown.Kind
 import com.hienlh.ppm.chat.InlineMarkdown.Span
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmFonts
+import com.hienlh.ppm.state.workspace.SourceLine
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -237,5 +238,38 @@ class MarkdownTest {
         assertNotNull(link.linkInteractionListener)
         link.linkInteractionListener!!.onClick(link)
         assertEquals(listOf("https://ppm.dev/x"), opened)
+    }
+
+    @Test
+    fun `a file's code and a link to a file open it, and an unsafe link opens nothing`() {
+        val opened = mutableListOf<String>()
+        val handler = object : UriHandler {
+            override fun openUri(uri: String) {
+                opened += uri
+            }
+        }
+        val files = mutableListOf<Pair<String, SourceLine?>>()
+        val tabs = object : ChatTabs {
+            override fun openFile(path: String) = Unit
+
+            override fun openDiff(path: String, original: String, modified: String) = Unit
+
+            override fun openToolFile(tool: String, path: String, line: Int?) = Unit
+
+            override fun openFileOrSearch(path: String, line: SourceLine?) {
+                files += path to line
+            }
+        }
+        val source = "`src/a.ts:12` `bun test` [doc](docs/my%20guide.md#setup) [x](javascript:alert(1)) [web](<https://x.dev/a b>)"
+        val text = inline(source).annotated(BuiltInThemes.auroraDark.tokens, handler, 14f, tabs)
+        // Only the path is underlined, and the tap takes its box in, edges and all.
+        val underlined = text.getStringAnnotations(FILE_CODE, 0, text.length).map { text.text.substring(it.start, it.end) }
+        assertEquals(listOf("src/a.ts:12"), underlined)
+        val links = text.getLinkAnnotations(0, text.length)
+        assertEquals("${CODE_EDGE}src/a.ts:12$CODE_EDGE", text.text.substring(links[0].start, links[0].end))
+        assertEquals(listOf("src/a.ts:12", "doc", "x", "web"), links.map { text.text.substring(it.start, it.end).trim(CODE_EDGE) })
+        for (link in links) link.item.linkInteractionListener!!.onClick(link.item)
+        assertEquals(listOf("src/a.ts" to SourceLine(12), "docs/my guide.md" to null), files)
+        assertEquals(listOf("https://x.dev/a%20b"), opened)
     }
 }

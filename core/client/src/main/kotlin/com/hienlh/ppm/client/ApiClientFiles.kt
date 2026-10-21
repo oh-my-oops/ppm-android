@@ -76,8 +76,11 @@ suspend fun webFile(url: String): RawFile {
     }
 }
 
-/** What `GET /api/fs/stat` says of a path: the path it resolved to on the host, and whether it is a folder. */
-data class FsStat(val path: String, val name: String, val kind: String) {
+/**
+ * What `GET /api/fs/stat` says of a path: the path it resolved to on the host, and whether it is a
+ * folder. A link is described as itself, a `symlink`, with what it points at in [target].
+ */
+data class FsStat(val path: String, val name: String, val kind: String, val target: String? = null) {
     val isDirectory: Boolean get() = kind == "directory"
 }
 
@@ -85,5 +88,5 @@ data class FsStat(val path: String, val name: String, val kind: String) {
 suspend fun ApiClient.fsStat(path: String): FsStat {
     val data = call("GET", "/api/fs/stat", listOf("path" to path))
     val resolved = data["path"].string ?: throw PpmError.BadResponse(ApiClient.NOT_PPM)
-    return FsStat(resolved, data["name"].string ?: "", data["kind"].string ?: "")
+    return FsStat(resolved, data["name"].string ?: "", data["kind"].string ?: "", data["target"].string)
 }
