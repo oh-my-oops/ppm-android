@@ -109,16 +109,68 @@ internal fun breakAnywhere(text: String): String = buildString(text.length * 2) 
     var i = 0
     while (i < text.length) {
         val c = text.codePointAt(i)
-        if (previous >= 0 && breaksAfter(previous) && breaksBefore(c)) append(BREAK)
-        if (c == ' '.code && previous >= 0 && previous != ' '.code) {
-            var next = i
-            while (next < text.length && text[next] == ' ') next++
-            if (next < text.length && text[next] in NO_BREAK_AFTER_SPACE) append(BREAK)
-        }
+        if (breaksBetween(text, i, previous, c)) append(BREAK)
         appendCodePoint(c)
         previous = c
         i += Character.charCount(c)
     }
+}
+
+/** Columns from one tab stop to the next: Tailwind's preflight sets `tab-size: 4`. */
+private const val TAB_SIZE = 4
+
+/**
+ * [text] as a `white-space: pre-wrap` block of monospace lays it out: a tab as the spaces up to
+ * the next stop of [TAB_SIZE] columns (a copy then holds the spaces), and with [breakAll] a
+ * [BREAK] wherever [breakAnywhere] puts one. [style] goes on the `[start, end)` [spans] of [text].
+ */
+internal fun preText(text: String, breakAll: Boolean, spans: List<Pair<Int, Int>> = emptyList(), style: SpanStyle? = null): AnnotatedString {
+    val starts = IntArray(text.length)
+    val ends = IntArray(text.length)
+    val out = StringBuilder(text.length * 2)
+    var previous = -1
+    var column = 0
+    var i = 0
+    while (i < text.length) {
+        val c = text.codePointAt(i)
+        val size = Character.charCount(c)
+        if (breakAll && breaksBetween(text, i, previous, c)) out.append(BREAK)
+        for (k in 0 until size) starts[i + k] = out.length
+        when (c) {
+            '\t'.code -> {
+                val n = TAB_SIZE - column % TAB_SIZE
+                repeat(n) { out.append(' ') }
+                column += n
+            }
+            '\n'.code -> {
+                out.append('\n')
+                column = 0
+            }
+            else -> {
+                out.appendCodePoint(c)
+                column++
+            }
+        }
+        for (k in 0 until size) ends[i + k] = out.length
+        previous = c
+        i += size
+    }
+    return buildAnnotatedString {
+        append(out)
+        if (style != null) for ((start, end) in spans) if (end > start) addStyle(style, starts[start], ends[end - 1])
+    }
+}
+
+private fun isBlank(c: Int) = c == ' '.code || c == '\t'.code
+
+/** Whether [breakAnywhere] puts a [BREAK] before [c], at [i] of [text], after [previous] (-1 at the start). */
+private fun breaksBetween(text: String, i: Int, previous: Int, c: Int): Boolean {
+    if (previous < 0) return false
+    if (breaksAfter(previous) && breaksBefore(c)) return true
+    if (!isBlank(c) || isBlank(previous)) return false
+    var next = i
+    while (next < text.length && isBlank(text[next].code)) next++
+    return next < text.length && text[next] in NO_BREAK_AFTER_SPACE
 }
 
 /** [content] copied to the clipboard without the [BREAK]s [breakAnywhere] put in it: a pasted URL has to be the URL. */

@@ -72,9 +72,10 @@ class ChatViewsTest {
         )
         assertEquals(0, diff.extra)
         assertEquals(listOf(8 to 9) to listOf(8 to 9), EditDiff.wordRanges("let x = 1", "let x = 2"))
+        // An empty side has no line at all.
         val long = EditDiff.rows("", (1..20).joinToString("\n"))
         assertEquals(12, long.rows.size)
-        assertEquals(9, long.extra)
+        assertEquals(8, long.extra)
     }
 
     @Test
@@ -93,6 +94,8 @@ class ChatViewsTest {
         val (removed, inserted) = EditDiff.diff("ABCABBA".toList(), "CBABAC".toList())
         // Myers' own example: an edit distance of 5.
         assertEquals(5, removed.count { it } + inserted.count { it })
+        // A line that gains a line break after it is not the same line: the web shows it replaced.
+        assertEquals(listOf(EditDiff.Kind.EQUAL, EditDiff.Kind.DEL, EditDiff.Kind.INS, EditDiff.Kind.INS), EditDiff.rows("a\nb", "a\nb\nc").rows.map { it.kind })
     }
 
     @Test
@@ -219,6 +222,28 @@ class ChatViewsTest {
         assertEquals("t${b}s$b  ....", breakAnywhere("ts  ...."))
         assertEquals("c${b}d$b ./${b}b", breakAnywhere("cd ./b"))
         assertEquals("a b", breakAnywhere("a b"))
+        // A diff line keeps its changed words marked: on the word itself, not on the break before it.
+        val word = androidx.compose.ui.text.SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+        val marked = preText("let xy = 1", true, listOf(4 to 6, 9 to 10), word)
+        assertEquals(breakAnywhere("let xy = 1"), marked.text)
+        assertEquals(listOf("x${b}y", "1"), marked.spanStyles.map { marked.text.substring(it.start, it.end) })
+        assertEquals(0, preText("", true, listOf(0 to 0), word).spanStyles.size)
+    }
+
+    @Test
+    fun `a tab reaches the next stop of four columns, as tab-size 4 lays it out`() {
+        val b = BREAK
+        assertEquals("    x", preText("\tx", false).text)
+        assertEquals("ab  c", preText("ab\tc", false).text)
+        assertEquals("abcd    e", preText("abcd\te", false).text)
+        assertEquals("a\n        b", preText("a\n\t\tb", false).text)
+        assertEquals("a${b}b  c", preText("ab\tc", true).text)
+        // Android would not start a line with the dot after a tab either.
+        assertEquals("t$b   ..", preText("t\t..", true).text)
+        // A changed tab is marked as wide as it is drawn.
+        val word = androidx.compose.ui.text.SpanStyle(fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+        val marked = preText("x\ty", false, listOf(1 to 2), word)
+        assertEquals(listOf("   "), marked.spanStyles.map { marked.text.substring(it.start, it.end) })
     }
 
     @Test

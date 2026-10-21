@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.unit.Dp
@@ -733,7 +734,8 @@ private fun FileLink(label: String, icon: ProductIcon, color: Rgba, style: TextS
 
 /**
  * `<pre class="font-mono whitespace-pre-wrap">` at 12px, `break-all` when [breakAll]: a line may
- * then end inside a word, wherever Chrome would end it, and a copy comes out as [text] was.
+ * then end inside a word, wherever Chrome would end it, and a copy comes out as [text] was but
+ * for its tabs, which [preText] lays out as spaces.
  */
 @Composable
 internal fun Mono(text: String, color: Rgba, modifier: Modifier = Modifier, breakAll: Boolean = false, style: TextStyle = monoText) {
@@ -741,7 +743,7 @@ internal fun Mono(text: String, color: Rgba, modifier: Modifier = Modifier, brea
     val breaking = breakAll && BREAK !in text
     // A `<pre>` ends its last line at a final newline; Compose would start an empty one after it.
     val laid = text.removeSuffix("\n")
-    val shown = if (breaking) remember(laid) { breakAnywhere(laid) } else laid
+    val shown = remember(laid, breaking) { if (breaking || '\t' in laid) preText(laid, breaking) else AnnotatedString(laid) }
     WithoutBreaksOnCopy(breaking) {
         SelectionContainer(modifier.fillMaxWidth()) {
             BasicText(shown, style = style.copy(color = color.color))
