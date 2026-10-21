@@ -6,14 +6,18 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredWidth
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Stable
@@ -39,6 +43,7 @@ import androidx.compose.ui.zIndex
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.Backdrop
 import com.hienlh.ppm.app.ui.CornerChrome
+import com.hienlh.ppm.app.ui.KeyboardPannedPage
 import com.hienlh.ppm.app.ui.windows.WindowLayer
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -51,6 +56,8 @@ import com.hienlh.ppm.design.cssBorder
 /**
  * The desktop layout (app.tsx from `md` up): the sidebar, then the working area — the panel grid
  * with the dock, the floating windows over it — over the status bar, which spans the working area only.
+ * The keyboard pans it all up as Chrome pans its view over the page ([KeyboardPannedPage]): under
+ * a message box the status bar sits on the keyboard.
  */
 @Composable
 fun TabletShell(model: AppModel) {
@@ -58,17 +65,20 @@ fun TabletShell(model: AppModel) {
     val held = remember { HeldCursor() }
     CompositionLocalProvider(LocalTabDrag provides drag, LocalHeldCursor provides held) {
         Backdrop(Modifier.dragCursor(drag, held)) {
-            Row(Modifier.fillMaxSize().safeDrawingPadding()) {
-                Sidebar(model)
-                Column(Modifier.weight(1f).fillMaxHeight()) {
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
-                        PanelArea(model)
-                        WindowLayer(model)
+            KeyboardPannedPage {
+                // Clear of the system bars, not of the keyboard: that one pans the page.
+                Row(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
+                    Sidebar(model)
+                    Column(Modifier.weight(1f).fillMaxHeight()) {
+                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                            PanelArea(model)
+                            WindowLayer(model)
+                        }
+                        StatusBar(model)
                     }
-                    StatusBar(model)
                 }
+                CornerChrome(model, mobile = false)
             }
-            CornerChrome(model, mobile = false)
             TabDragGhost(drag)
         }
     }
