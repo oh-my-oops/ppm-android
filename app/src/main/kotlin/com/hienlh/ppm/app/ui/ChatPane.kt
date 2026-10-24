@@ -62,6 +62,7 @@ import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -74,7 +75,10 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
@@ -82,9 +86,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
@@ -110,9 +116,11 @@ import com.hienlh.ppm.chat.LocalToolImages
 import com.hienlh.ppm.chat.MarkdownImages
 import com.hienlh.ppm.chat.RelativeTime
 import com.hienlh.ppm.chat.RunningAgentsBar
+import com.hienlh.ppm.chat.TeamActivityPanel
 import com.hienlh.ppm.chat.ToolImages
 import com.hienlh.ppm.chat.TurnStopBar
 import com.hienlh.ppm.client.teamActivity
+import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -122,16 +130,19 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.client.chatUsage
+import com.hienlh.ppm.protocol.AgentSource
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.TeamMemberActivity
 import com.hienlh.ppm.protocol.UsageInfo
 import com.hienlh.ppm.protocol.agentTranscriptProvider
 import com.hienlh.ppm.state.AgentActivityWatch
 import com.hienlh.ppm.state.AgentSessionIdentity
+import com.hienlh.ppm.state.AgentSessionPayload
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatState
 import com.hienlh.ppm.state.HistoryList
@@ -141,6 +152,7 @@ import com.hienlh.ppm.state.UsageScope
 import com.hienlh.ppm.state.payload
 import com.hienlh.ppm.state.pollTeamActivity
 import com.hienlh.ppm.state.workspace.SourceLine
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
@@ -360,6 +372,28 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     val list = tab.historyList
                     if (panel == ToolbarPanel.History && list != null) ChatHistoryDropdown(model, tab, list) { panel = null }
                     if (panel == ToolbarPanel.Config) AiSettingsPanel(model)
+                    if (panel == ToolbarPanel.Team && state.team.hasTeams) {
+                        // `border-t border-border/30 bg-surface px-3 py-2`, with no scroll of its own: each tab has one.
+                        CssColumn(
+                            Modifier.fillMaxWidth().background(tokens.panel.color).line(top = true, tokens.border.opacity(0.3).color).padding(horizontal = 12.dp),
+                            top = 8.dp,
+                            bottom = 8.dp,
+                        ) {
+                            TeamActivityPanel(
+                                state.team.names,
+                                state.team.messages,
+                                agentIdentity.sessionId.ifEmpty { null },
+                                fetch = { team -> api?.teamActivity(team) ?: error("Not connected") },
+                                onOpenMember = { team, member ->
+                                    val source = AgentSource.Member(team, member)
+                                    model.openAgentSession(
+                                        AgentSessionPayload(agentIdentity.projectName, agentIdentity.providerId, agentIdentity.sessionId, source, title = "Session — $member"),
+                                        null,
+                                    )
+                                },
+                            )
+                        }
+                    }
                     if (panel == ToolbarPanel.Usage && (isClaude || tab.providerId == "codex")) {
                         val shown = usage?.usage ?: UsageInfo()
                         val selectAccount: (suspend (String, String?) -> String?)? = if (!tab.providerPending && !tab.firstSendPending) {
@@ -513,7 +547,7 @@ private fun GateButton(label: String, style: TextStyle, onClick: () -> Unit) {
 }
 
 /** The panel the toolbar has open under it; one at a time. */
-private enum class ToolbarPanel { History, Config, Usage }
+private enum class ToolbarPanel { History, Config, Usage, Team }
 
 /** `border-t` or `border-b`. */
 fun Modifier.line(top: Boolean, color: Color): Modifier = cssBorder(color, sides = if (top) CssSides.Top else CssSides.Bottom)
@@ -535,53 +569,102 @@ private fun ChatToolbar(
     toggle: (ToolbarPanel) -> Unit,
     usageChip: (@Composable () -> Unit)?,
 ) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
+    // `py-1` around the tallest control, kept to the fraction: the gear and the menu are 20 px, a
+    // chip that shows words 20.5, so the bar is 73.5 px or 74.8 as the web's, where whole pixels made it 75.
+    CssColumn(Modifier.fillMaxWidth(), top = 4.dp, bottom = 4.dp) {
         Row(
-            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+            Modifier.cssHeight(if (narrow && usageChip == null) 20.dp else 20.5.dp).fillMaxWidth().padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            ToolbarChip(ProductIcon.History, if (narrow) null else "History", active = panel == ToolbarPanel.History) { toggle(ToolbarPanel.History) }
-            val provider = tab.providerId
-            if (tab.session != null && provider.isNotEmpty() && provider != "mock") {
-                ToolbarChip(if (narrow) null else capitalized(provider), active = panel == ToolbarPanel.Config, onClick = { toggle(ToolbarPanel.Config) }) { color ->
-                    ProviderBadge(provider, foreground = color)
+            // `overflow-x-auto` clips up and down too; the Team chip's dot just fits, its top on the row's.
+            ToolbarChips(Modifier.weight(1f).clipToBounds().horizontalScroll(rememberScrollState())) {
+                ToolbarChip(ProductIcon.History, if (narrow) null else "History", active = panel == ToolbarPanel.History) { toggle(ToolbarPanel.History) }
+                val provider = tab.providerId
+                if (tab.session != null && provider.isNotEmpty() && provider != "mock") {
+                    ToolbarChip(if (narrow) null else capitalized(provider), active = panel == ToolbarPanel.Config, onClick = { toggle(ToolbarPanel.Config) }, lead = 16f) { color ->
+                        ProviderBadge(provider, foreground = color)
+                    }
+                } else {
+                    SettingsGearButton(active = panel == ToolbarPanel.Config) { toggle(ToolbarPanel.Config) }
                 }
-            } else {
-                SettingsGearButton(active = panel == ToolbarPanel.Config) { toggle(ToolbarPanel.Config) }
+                usageChip?.invoke()
+                if (state.team.hasTeams) {
+                    TeamChip(narrow, active = panel == ToolbarPanel.Team, unread = state.team.unread > 0) {
+                        toggle(ToolbarPanel.Team)
+                        chat.markTeamRead()
+                    }
+                }
             }
-            usageChip?.invoke()
-        }
-        Row(Modifier.padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            ReloadButton(state.canSend) { chat.reload() }
-            // Its actions are a session's.
-            tab.session?.let { OverflowButton(model, it) }
+            Row(Modifier.padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                ReloadButton(state.canSend) { chat.reload() }
+                // Its actions are a session's.
+                tab.session?.let { OverflowButton(model, it) }
+            }
         }
     }
 }
 
 @Composable
 private fun ToolbarChip(icon: ProductIcon, title: String?, active: Boolean, onClick: () -> Unit) =
-    ToolbarChip(title, active, onClick) { color ->
-        Box(Modifier.size(12.dp, 16.5.dp), contentAlignment = Alignment.Center) { PpmIcon(icon, 12.dp, color) }
+    ToolbarChip(title, active, onClick) { color -> PpmIcon(icon, 12.dp, color) }
+
+/** What [ToolbarChips] spaces a chip by: its width in CSS px, exactly, where it measures whole pixels. */
+private data class ChipWidth(val css: Float)
+
+/** A [ToolbarChip]'s exact width: `px-1.5` around its [lead] icon, then `gap-1` and its words if it shows them. */
+@Composable
+private fun chipWidth(title: String?, lead: Float = 12f): ChipWidth {
+    if (title == null) return ChipWidth(6f + lead + 6f)
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val words = remember(title, density) {
+        val line = measurer.measure(title, ppmText(11f, lineHeight = 16.5f), softWrap = false, maxLines = 1)
+        (line.getLineRight(0) - line.getLineLeft(0)) / density.density
     }
+    return ChipWidth(6f + lead + 4f + words + 6f)
+}
+
+/**
+ * The chips of a `flex items-center gap-1` row where Chrome puts them: each [ChipWidth] and gap
+ * after the last, kept in fractions of a pixel, on the pixel that rounds to. At 2.625x a 24 px chip
+ * measures 64 px for its 63 and a 4 px gap spaces 11 for 10.5, which put the Team chip 4 px right
+ * of the web's. A chip without a [ChipWidth] counts as wide as it measures.
+ */
+@Composable
+private fun ToolbarChips(modifier: Modifier, content: @Composable () -> Unit) {
+    Layout(content, modifier) { measurables, constraints ->
+        val gap = 4.dp.toPx()
+        val lefts = IntArray(measurables.size)
+        var at = 0f
+        val placeables = measurables.mapIndexed { index, measurable ->
+            if (index > 0) at += gap
+            lefts[index] = at.roundToInt()
+            val placeable = measurable.measure(Constraints(maxHeight = constraints.maxHeight))
+            at += (measurable.layoutId as? ChipWidth)?.let { it.css * density } ?: placeable.width.toFloat()
+            placeable
+        }
+        val width = placeables.indices.maxOfOrNull { lefts[it] + placeables[it].width } ?: 0
+        val height = placeables.maxOfOrNull { it.height } ?: 0
+        layout(width.coerceIn(constraints.minWidth, constraints.maxWidth), height.coerceIn(constraints.minHeight, constraints.maxHeight)) {
+            placeables.forEachIndexed { index, placeable -> placeable.place(lefts[index], ((height - placeable.height) / 2f).roundToInt()) }
+        }
+    }
+}
 
 /**
  * `px-1.5 py-0.5 rounded text-[11px]`, accent-tinted while its panel is open, and otherwise
  * `hover:text-foreground hover:bg-surface-elevated`; [leading] is drawn in the chip's colour.
  */
 @Composable
-private fun ToolbarChip(title: String?, active: Boolean, onClick: () -> Unit, leading: @Composable (Color) -> Unit) {
+private fun ToolbarChip(title: String?, active: Boolean, onClick: () -> Unit, lead: Float = 12f, leading: @Composable (Color) -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(4.dp)
     val hover = rememberHover(enabled = !active)
     val color = if (active) tokens.accent else tokens.text.mix(tokens.text2, hover.lit.toDouble())
     Row(
         Modifier
+            .layoutId(chipWidth(title, lead))
             .clip(shape)
             .background(if (active) tokens.accent.opacity(0.1).color else Color.Transparent)
             .ppmClickable(
@@ -601,6 +684,28 @@ private fun ToolbarChip(title: String?, active: Boolean, onClick: () -> Unit, le
 }
 
 /**
+ * The Team chip (`relative`, as the History chip otherwise), with a pulsing accent dot over its
+ * top right corner while messages came in since the panel was last opened.
+ */
+@Composable
+private fun TeamChip(narrow: Boolean, active: Boolean, unread: Boolean, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val title = if (narrow) null else "Team"
+    Box(Modifier.layoutId(chipWidth(title))) {
+        ToolbarChip(ProductIcon.Users, title, active, onClick)
+        if (unread) {
+            // `animate-pulse`: down to half and back every 2 s.
+            val dim by rememberInfiniteTransition(label = "pulse").animateFloat(
+                1f, 0.5f,
+                infiniteRepeatable(tween(1_000, easing = CubicBezierEasing(0.4f, 0f, 0.6f, 1f)), RepeatMode.Reverse),
+                label = "dot",
+            )
+            Box(Modifier.align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp).size(8.dp).alpha(dim).clip(CircleShape).background(tokens.accent.color))
+        }
+    }
+}
+
+/**
  * AI settings before a chat has a provider of its own (`p-1 rounded`, a 12 px gear): accent-tinted
  * while open, else `text-text-subtle hover:text-text-secondary hover:bg-surface-elevated`.
  */
@@ -612,6 +717,7 @@ private fun SettingsGearButton(active: Boolean, onClick: () -> Unit) {
     val color = if (active) tokens.accent else tokens.text2.mix(tokens.text3, hover.lit.toDouble())
     Box(
         Modifier
+            .layoutId(ChipWidth(20f))
             .clip(shape)
             .background(if (active) tokens.accent.opacity(0.1).color else Color.Transparent)
             .ppmClickable(
@@ -621,7 +727,8 @@ private fun SettingsGearButton(active: Boolean, onClick: () -> Unit) {
                 source = hover.source,
                 onClick = onClick,
             )
-            .padding(4.dp),
+            .size(20.dp),
+        contentAlignment = Alignment.Center,
     ) {
         PpmIcon(ProductIcon.Settings2, 12.dp, color.color)
     }

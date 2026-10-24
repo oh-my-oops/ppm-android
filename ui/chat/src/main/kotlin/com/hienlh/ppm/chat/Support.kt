@@ -196,6 +196,14 @@ internal fun breakMark(text: CharSequence, i: Int, codeEnd: Boolean = false, cod
     }
 }
 
+/** [text] with [breakMark]'s marks in it, for Android to end its lines where Chrome ends them. */
+internal fun chromeBreaks(text: String): String = buildString(text.length + 8) {
+    for (i in text.indices) {
+        breakMark(text, i)?.let { append(it) }
+        append(text[i])
+    }
+}
+
 /** Whether a code's box needs a [JOIN] between its start edge and [first], or its [last] and its end edge. */
 internal fun joinsCodeStart(first: Char): Boolean = first.code >= 0x80
 

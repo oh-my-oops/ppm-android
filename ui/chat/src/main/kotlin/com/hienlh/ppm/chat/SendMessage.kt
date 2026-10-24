@@ -1,5 +1,7 @@
 package com.hienlh.ppm.chat
 
+import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.ThemeTokens
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.get
@@ -117,6 +119,15 @@ internal val TEAM_BADGES: Map<String, Pair<String, TeamBadgeTone>> = mapOf(
     "plan_approval_request" to ("plan review" to TeamBadgeTone.PRIMARY),
     "plan_approval_response" to ("plan reply" to TeamBadgeTone.PRIMARY),
 )
+
+/** A badge's fill and text in [tokens]: `bg-<tone>/20 text-<tone>`. */
+internal fun TeamBadgeTone.colors(tokens: ThemeTokens): Pair<Rgba, Rgba> = when (this) {
+    TeamBadgeTone.PRIMARY -> tokens.accent.opacity(0.2) to tokens.accent
+    TeamBadgeTone.WARNING -> tokens.warning.opacity(0.2) to tokens.warning
+    TeamBadgeTone.SUCCESS -> tokens.success.opacity(0.2) to tokens.success
+    TeamBadgeTone.ERROR -> tokens.error.opacity(0.2) to tokens.error
+    TeamBadgeTone.MUTED -> tokens.text3.opacity(0.2) to tokens.text3
+}
 
 /** JavaScript's `String(v ?? "")` for a JSON value. */
 internal fun jsString(value: JsonElement?): String = when (value) {

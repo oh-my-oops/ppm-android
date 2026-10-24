@@ -906,14 +906,7 @@ private fun Badge(label: String, fill: Rgba, text: Rgba, modifier: Modifier = Mo
 private fun KindBadge(kind: String) {
     val tokens = LocalPpmTokens.current
     val badge = TEAM_BADGES[kind]
-    val (fill, text) = when (badge?.second) {
-        TeamBadgeTone.PRIMARY -> tokens.accent.opacity(0.2) to tokens.accent
-        TeamBadgeTone.WARNING -> tokens.warning.opacity(0.2) to tokens.warning
-        TeamBadgeTone.SUCCESS -> tokens.success.opacity(0.2) to tokens.success
-        TeamBadgeTone.ERROR -> tokens.error.opacity(0.2) to tokens.error
-        TeamBadgeTone.MUTED -> tokens.text3.opacity(0.2) to tokens.text3
-        null -> tokens.panel2 to tokens.text3
-    }
+    val (fill, text) = badge?.second?.colors(tokens) ?: (tokens.panel2 to tokens.text3)
     BasicText(
         badge?.first ?: kind,
         Modifier.background(fill.color, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
