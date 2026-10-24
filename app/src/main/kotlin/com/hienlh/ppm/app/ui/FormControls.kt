@@ -102,6 +102,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.roundToIntRect
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -715,7 +716,8 @@ private fun BoxScope.ResizeGrip(onDrag: (Float) -> Unit) {
  * border-input bg-background px-3`): 44 tall on a phone, 28 from 640 px; 16 px text on a phone
  * (globals.css), 11 px elsewhere, on a `line-height: normal` line; Chrome's own 4 px before the
  * text and its chevron at the end. Focused it wears `ring-2` in the accent, and it keeps the focus
- * once its list closes, as Chrome's does. A tap opens Chrome's list ([ChromeSelectDialog]).
+ * once its list closes, as Chrome's does. A tap opens Chrome's list: the dropdown on a tablet
+ * ([ChromeSelectDropdown]), the dialog on a phone ([ChromeSelectDialog]).
  */
 @Composable
 fun NativeSelect(
@@ -733,6 +735,7 @@ fun NativeSelect(
     val fontSize = if (mobile) 16f else 11f
     var open by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
+    var anchor by remember { mutableStateOf(IntRect.Zero) }
     val focus = remember { FocusRequester() }
     fun takeFocus() {
         TextInputFocus.asked()
@@ -745,6 +748,7 @@ fun NativeSelect(
         modifier
             .fillMaxWidth()
             .cssHeight(if (wide) 28.dp else 44.dp)
+            .onGloballyPositioned { anchor = it.boundsInWindow().roundToIntRect() }
             .alpha(if (enabled) 1f else 0.5f)
             .drawBehind {
                 if (!focused) return@drawBehind
@@ -792,19 +796,20 @@ fun NativeSelect(
         )
     }
     if (open) {
-        ChromeSelectDialog(
-            value,
-            options,
-            onPick = {
-                open = false
-                focus.requestFocus()
-                if (it != value) onChange(it)
-            },
-            onDismiss = {
-                open = false
-                focus.requestFocus()
-            },
-        )
+        fun pick(picked: String) {
+            open = false
+            focus.requestFocus()
+            if (picked != value) onChange(picked)
+        }
+        fun dismiss() {
+            open = false
+            focus.requestFocus()
+        }
+        if (opensChromeDropdown(LocalContext.current)) {
+            ChromeSelectDropdown(anchor, options.map { it.label }, options.indexOfFirst { it.value == value }, { pick(options[it].value) }, ::dismiss)
+        } else {
+            ChromeSelectDialog(value, options, ::pick, ::dismiss)
+        }
     }
 }
 
