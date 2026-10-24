@@ -43,6 +43,7 @@ import androidx.compose.foundation.text.input.KeyboardActionHandler
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -52,6 +53,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -79,6 +81,7 @@ import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
@@ -103,6 +106,7 @@ import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderInset
 import com.hienlh.ppm.design.cssBorderPx
+import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -310,12 +314,23 @@ fun PpmTextField(
 }
 
 /**
+ * Where in its first pixel a [BottomSheet]'s content starts as Chrome lays it out: the handle's
+ * 20dp is 52.5 px at 2.625x and drawn as 53, so the content is half a pixel higher than where it is
+ * put. A [CssColumn] given it as its `top` stacks its rows from there.
+ */
+val LocalSheetContentTop = staticCompositionLocalOf { 0.dp }
+
+/**
  * The web's `BottomSheet` (`mobile-bottom-sheet.tsx`): a 40% black backdrop, the panel on the
  * bottom edge with a 16px top radius and a drag handle, sliding up in 200 ms; a tap on the
  * backdrop, Back or a swipe down closes it. Drawn in a window of its own, so that it covers the
  * bottom bar and rises with the keyboard. [background] replaces `bg-popover` where a sheet's
  * class does (`bg-background` on the project sheet). While not [dismissible] (an `onClose` that
- * ignores the call), it stays, and a swipe springs back.
+ * ignores the call), it stays, and a swipe springs back. [bottomPadding] is the panel's
+ * `pb-[max(0.5rem,env(safe-area-inset-bottom))]`, or the keyboard's height while it is up — a
+ * sheet whose class drops the padding (`p-0`) keeps only the navigation bar's, which Chrome's
+ * page never reaches under. [overlay] is drawn over the sheet and its backdrop, where the page's
+ * fixed corners stay above a sheet given a lower `zIndex`.
  */
 @Composable
 fun BottomSheet(
@@ -323,6 +338,8 @@ fun BottomSheet(
     modifier: Modifier = Modifier,
     background: Color? = null,
     dismissible: Boolean = true,
+    bottomPadding: WindowInsets = WindowInsets.ime.union(WindowInsets.navigationBars).union(WindowInsets(bottom = 8.dp)),
+    overlay: (@Composable BoxScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
@@ -383,16 +400,17 @@ fun BottomSheet(
                         },
                     )
                     .cssBorderInset(top = 1.dp)
-                    // `pb-[max(0.5rem,env(safe-area-inset-bottom))]`, and just the keyboard's
-                    // height while it is up: the largest of the three.
-                    .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars).union(WindowInsets(bottom = 8.dp))),
+                    .windowInsetsPadding(bottomPadding),
             ) {
-                // Drag handle: `pt-3 pb-1`, `w-10 h-1 rounded-full bg-border`.
-                Box(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), contentAlignment = Alignment.Center) {
+                // Drag handle: `pt-3 pb-1`, `w-10 h-1 rounded-full bg-border`. 20dp rounded once, as Chrome
+                // snaps it: 53 px at 2.625x, where its three parts rounded apiece come to 54.
+                Box(Modifier.fillMaxWidth().cssHeight(20.dp).padding(top = 12.dp, bottom = 4.dp), contentAlignment = Alignment.Center) {
                     Box(Modifier.width(40.dp).height(4.dp).clip(CircleShape).background(tokens.border.color))
                 }
-                content()
+                val contentTop = with(LocalDensity.current) { (20.dp.toPx() - 20.dp.roundToPx()).toDp() }
+                CompositionLocalProvider(LocalSheetContentTop provides contentTop) { content() }
             }
+            overlay?.invoke(this)
         }
         BackHandler(onBack = ::close)
     }

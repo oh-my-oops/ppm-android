@@ -116,6 +116,29 @@ class ChatViewsTest {
         assertEquals("#7 → done", toolSummary("TaskUpdate", WireJson.parse("""{"taskId":7,"status":"done"}""")).detail)
     }
 
+    @Test
+    fun `an Agent card in the session window leads with its handle, and its answer reads as markdown`() {
+        assertEquals(
+            ToolSummaryText(ProductIcon.Bot, "Agent", "Map the router"),
+            toolSummary("Agent", WireJson.parse("""{"description":"","prompt":"Map the router"}""")),
+        )
+        assertEquals(
+            ToolSummaryText(name = "Task ", detail = "", parts = listOf(SummaryPart("scout"), SummaryPart(" · " + "d".repeat(44) + "…", subtle = true))),
+            toolSummary("Task", WireJson.parse("""{"name":" scout ","description":"${"d".repeat(45)}"}""")),
+        )
+        assertEquals("One\n\nTwo", agentResultText("""[{"type":"text","text":"One"},{"type":"image"},{"type":"text","text":""},{"type":"text","text":"Two"}]"""))
+        assertEquals("quoted", agentResultText("\"quoted\""))
+        assertEquals("Done.", agentResultText("Done."))
+        assertEquals("All tests pass.", agentResultText("All tests pass."))
+        // Raw for JSON with no text in it, and for what only looks like the SDK's array.
+        assertNull(agentResultText("""[{"type":"image"}]"""))
+        assertNull(agentResultText("42"))
+        assertNull(agentResultText("-1.5e3"))
+        assertNull(agentResultText("null"))
+        assertNull(agentResultText("""[{"type":"text","text":"cut"""))
+        assertNull(agentResultText(""))
+    }
+
     private fun message(id: String, role: ChatItem.Role, vararg blocks: ChatBlock) = ChatItem(id, role, blocks.toList(), null)
 
     @Test

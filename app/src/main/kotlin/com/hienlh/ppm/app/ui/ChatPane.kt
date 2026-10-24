@@ -96,19 +96,23 @@ import com.hienlh.ppm.app.PrewarmAsk
 import com.hienlh.ppm.app.attach
 import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.app.ui.tablet.dashedBorder
+import com.hienlh.ppm.chat.AgentSessionOpener
 import com.hienlh.ppm.chat.CONTINUE_AFTER_STOP
 import com.hienlh.ppm.chat.ChatImages
 import com.hienlh.ppm.chat.ChatTabs
 import com.hienlh.ppm.chat.ChatTranscriptView
 import com.hienlh.ppm.chat.FirstSendView
+import com.hienlh.ppm.chat.LocalAgentSessionOpener
 import com.hienlh.ppm.chat.LocalChatImages
 import com.hienlh.ppm.chat.LocalChatTabs
 import com.hienlh.ppm.chat.LocalMarkdownImages
 import com.hienlh.ppm.chat.LocalToolImages
 import com.hienlh.ppm.chat.MarkdownImages
 import com.hienlh.ppm.chat.RelativeTime
+import com.hienlh.ppm.chat.RunningAgentsBar
 import com.hienlh.ppm.chat.ToolImages
 import com.hienlh.ppm.chat.TurnStopBar
+import com.hienlh.ppm.client.teamActivity
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -123,13 +127,19 @@ import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.client.chatUsage
 import com.hienlh.ppm.protocol.SessionInfo
+import com.hienlh.ppm.protocol.TeamMemberActivity
 import com.hienlh.ppm.protocol.UsageInfo
+import com.hienlh.ppm.protocol.agentTranscriptProvider
+import com.hienlh.ppm.state.AgentActivityWatch
+import com.hienlh.ppm.state.AgentSessionIdentity
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatState
 import com.hienlh.ppm.state.HistoryList
 import com.hienlh.ppm.state.UsageCache
 import com.hienlh.ppm.state.UsageReader
 import com.hienlh.ppm.state.UsageScope
+import com.hienlh.ppm.state.payload
+import com.hienlh.ppm.state.pollTeamActivity
 import com.hienlh.ppm.state.workspace.SourceLine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filter
@@ -219,6 +229,30 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
             if (moved) paneScope.launch { usageReader.read(refresh = false) }
         }
     }
+    // The session this chat's Agent cards and running agents belong to (`AgentSessionContext`).
+    val agentIdentity = AgentSessionIdentity(tab.project, agentTranscriptProvider(tab.providerId), tab.session?.id ?: state.sessionId.orEmpty())
+    val agentOpener = remember(agentIdentity) { AgentSessionOpener(agentIdentity, model::openAgentSession) }
+    // Who is running (`useAgentActivity`), and the team's members (`useTeamActivityFeed`) for their type and start.
+    val channel = model.events
+    val agentActivity = remember(channel, agentIdentity) {
+        if (channel != null && agentIdentity.sessionId.isNotEmpty() && agentIdentity.projectName.isNotEmpty()) {
+            AgentActivityWatch(channel, agentIdentity.projectName, agentIdentity.providerId, agentIdentity.sessionId)
+        } else {
+            null
+        }
+    }
+    DisposableEffect(agentActivity) {
+        agentActivity?.start()
+        onDispose { agentActivity?.stop() }
+    }
+    val runningAgents = agentActivity?.running?.collectAsState()?.value.orEmpty()
+    val primaryTeam = state.team.primary
+    var teamMembers by remember(primaryTeam) { mutableStateOf(emptyList<TeamMemberActivity>()) }
+    val api = model.api
+    LaunchedEffect(primaryTeam, api) {
+        if (primaryTeam == null || api == null) return@LaunchedEffect
+        pollTeamActivity({ api.teamActivity(primaryTeam) }) { teamMembers = it.members }
+    }
     val pickedLabel = tab.servingAccount?.label ?: tab.claimedAccountLabel
     val pickedAccountId = tab.servingAccount?.id ?: tab.claimedAccountId
     val isClaude = tab.providerId.isEmpty() || tab.providerId == "claude"
@@ -269,6 +303,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                 LocalToolImages provides toolImages,
                 LocalMarkdownImages provides markdownImages,
                 LocalChatTabs provides tabs,
+                LocalAgentSessionOpener provides agentOpener,
             ) {
                 val preview = tab.firstSendPreview
                 if (preview != null) {
@@ -294,6 +329,13 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     )
                 }
             }
+            // Agents still working: the last thing under the conversation.
+            RunningAgentsBar(
+                runningAgents,
+                teamMembers,
+                remember(state.items, state.live, state.liveStartedAt) { state.itemsWithLive() },
+                onOpen = { model.openAgentSession(it.payload(agentIdentity, primaryTeam.orEmpty()), null) },
+            )
             val stop = state.turnStop
             if (stop != null && !state.isRunning) TurnStopBar(stop, onContinue = { chat.send(CONTINUE_AFTER_STOP) })
             // `border-t border-border bg-panel`, around the toolbar and the message box.

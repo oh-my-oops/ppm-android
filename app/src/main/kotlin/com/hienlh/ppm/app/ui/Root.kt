@@ -175,6 +175,7 @@ fun PpmRoot(model: AppModel) {
                 if (model.showSignIn) ConnectScreen(model, signIn = true, onCancel = { model.showSignIn = false })
                 if (model.addingServer) ConnectScreen(model, signIn = false, onCancel = { model.addingServer = false })
                 Dialogs(model)
+                model.agentSheet?.let { AgentSessionSheet(model, it) }
                 model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }
                 model.lightbox?.let { request ->
                     ImageLightbox(request, onClose = { model.lightbox = null }, onDownload = download, onCopy = { copyImage(context, clipboard, it) })

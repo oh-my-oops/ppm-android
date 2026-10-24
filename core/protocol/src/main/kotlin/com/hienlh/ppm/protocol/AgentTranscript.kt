@@ -32,6 +32,19 @@ sealed interface AgentSource {
             put("memberName", memberName)
         }
     }
+
+    companion object {
+        /** [toJson] read back, as a window's payload keeps it; null for anything else. */
+        fun from(json: JsonElement?): AgentSource? = when (json["kind"].string) {
+            "card" -> json["cardId"].string?.let(::Card)
+            "member" -> {
+                val teamName = json["teamName"].string
+                val memberName = json["memberName"].string
+                if (teamName != null && memberName != null) Member(teamName, memberName) else null
+            }
+            else -> null
+        }
+    }
 }
 
 /** One window or sheet per session (`fallbackKey`): opening the same one again focuses it. */

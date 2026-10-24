@@ -62,6 +62,8 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
+import com.hienlh.ppm.design.webTitle
+import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ToolOutcome
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.array
@@ -71,12 +73,14 @@ import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.BashPartial
 import com.hienlh.ppm.state.SHELL_TOOLS
 import com.hienlh.ppm.state.ToolBlock
+import com.hienlh.ppm.state.agentCardPayload
 import com.hienlh.ppm.state.isAgent
 import com.hienlh.ppm.state.isAsyncAgentLaunchAck
 import com.hienlh.ppm.state.truthy
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.math.floor
 import kotlinx.coroutines.flow.drop
 
@@ -93,14 +97,19 @@ private val tinyMono = ppmText(10f, kind = FontKind.MONO, lineHeight = 40f / 3)
 /** `font-mono text-[11px]` on the card's line ratio. */
 private val streamMono = ppmText(11f, kind = FontKind.MONO, lineHeight = 44f / 3)
 
+/** Where a card is drawn: the chat, or an agent's session window, which expands an Agent card in place. */
+enum class ToolCardVariant { Chat, Window }
+
 /**
  * A tool call as the web's `ToolCard` draws it (src/web/components/chat/tool-cards.tsx): a tinted
  * chip, a one-line summary, the status on the right, details when expanded. [completed]: a call
  * without a result is over anyway, its turn having ended or a later edit of the file it read
- * having come back.
+ * having come back. In the chat an Agent/Task call is one row that opens its session; in the
+ * session [ToolCardVariant.Window] it is a card like any other, its subagent's steps ([nested])
+ * under its details — the window is already the live view of that work.
  */
 @Composable
-fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modifier) {
+fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modifier, variant: ToolCardVariant = ToolCardVariant.Chat, nested: List<ChatEvent>? = null) {
     val result = tool.result
     val isError = result?.isError ?: false
     val hasAnswers = tool.name == "AskUserQuestion" && truthy(tool.input["answers"])
@@ -118,8 +127,11 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
         TabToolCard(tabCall, tool.toolUseId, result?.output, isError, isDone, modifier)
         return
     }
-    if (tool.isAgent) {
-        AgentRow(tool, if (isError || bgFailed) Status.FAILED else if (isDone) Status.DONE else Status.RUNNING, bgRunning, modifier)
+    if (tool.isAgent && variant == ToolCardVariant.Chat) {
+        val opener = LocalAgentSessionOpener.current
+        AgentRow(tool, if (isError || bgFailed) Status.FAILED else if (isDone) Status.DONE else Status.RUNNING, bgRunning, modifier) {
+            opener?.open?.invoke(agentCardPayload(tool, opener.identity, null), tool.children?.events.orEmpty())
+        }
         return
     }
     val tokens = LocalPpmTokens.current
@@ -140,7 +152,7 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
     }
     // A shell call still running shows what it has printed so far.
     val partial = if (result == null && tool.name in SHELL_TOOLS) tool.toolUseId?.let { LocalBashOutput.current[it] } else null
-    val interactive = tool.name in setOf("AskUserQuestion", "ExitPlanMode")
+    val interactive = tool.name in setOf("AskUserQuestion", "ExitPlanMode") || tool.isAgent
     val shape = RoundedCornerShape(11.dp)
     Column(
         modifier
@@ -161,11 +173,13 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
             ToolSummaryLine(tool.name, tool.input, Modifier.weight(1f))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (partial != null) BasicText("${lines(partial.lineCount)} streaming…", style = tinyText.copy(color = tokens.warning.color))
+                if (!nested.isNullOrEmpty() && partial == null) BasicText(stepCount(nested.size), style = tinyMono.copy(color = tokens.text3.color))
+                if (bgRunning) BasicText("running…", style = tinyText.copy(color = tokens.accent.color))
                 // Codex's exit code for a shell call: its output can matter even when it failed.
                 result?.exitCode?.let { code ->
                     BasicText("exit $code", style = tinyMono.copy(color = (if (code == 0) tokens.text3 else tokens.error).color))
                 }
-                StatusIcon(if (isError) Status.FAILED else if (isDone) Status.DONE else Status.RUNNING)
+                StatusIcon(if (isError || bgFailed) Status.FAILED else if (isDone) Status.DONE else Status.RUNNING)
                 PpmIcon(if (expanded) ProductIcon.ChevronDown else ProductIcon.ChevronRight, 12.dp, tokens.text3.color)
             }
         }
@@ -176,6 +190,7 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
             ) {
                 ToolDetails(tool.name, tool.input)
                 if (partial != null) StreamingBashOutput(partial)
+                if (!nested.isNullOrEmpty()) SubagentChildren(nested, window = false)
                 if (imagePath != null) ToolImagePreview(imagePath, tool.toolUseId)
                 // The preview names the file already, so the result's echo of it is left out.
                 if (result != null && showsResult(tool.name, result) && !(imagePath != null && !result.isError)) {
@@ -379,6 +394,16 @@ internal fun toolSummary(name: String, input: JsonElement): ToolSummaryText {
             val reason = s("reason")
             ToolSummaryText(ProductIcon.Clock, name, "in ${formatDelay(s("delaySeconds").toDoubleOrNull() ?: 0.0)}${if (reason.isEmpty()) "" else " — ${truncate(reason, 50)}"}")
         }
+        "Agent", "Task" -> {
+            // The handle leads when there is one: it names the teammate, and SendMessage reaches it by it.
+            val handle = input["name"].string?.trim()?.ifEmpty { null }
+            val task = truncate(s("description").ifEmpty { s("prompt") }, if (handle != null) 44 else 60)
+            if (handle == null) {
+                ToolSummaryText(ProductIcon.Bot, name, task)
+            } else {
+                ToolSummaryText(name = "$name ", detail = "", parts = listOf(SummaryPart(handle), SummaryPart(" · $task", subtle = true)))
+            }
+        }
         "TaskCreate" -> ToolSummaryText(ProductIcon.ListTodo, name, truncate(s("subject"), 60))
         "TaskUpdate" -> ToolSummaryText(ProductIcon.ListTodo, name, "#${s("taskId")} → ${s("status")}")
         "TaskStop" -> ToolSummaryText(ProductIcon.ListTodo, name, "#${s("taskId")} stopped")
@@ -562,6 +587,7 @@ private fun ToolDetails(name: String, input: JsonElement) {
             if (s("prompt").isNotEmpty()) BasicText(truncate(s("prompt"), 100), style = cardText.copy(color = tokens.text3.color))
         }
         "SendMessage" -> SendMessageDetails(input)
+        "Agent", "Task" -> AgentDetails(input)
         "ToolSearch" -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Mono(s("query"), tokens.text2)
             if (truthy(input["max_results"])) BasicText("Max results: ${s("max_results")}", style = cardText.copy(color = tokens.text3.color))
@@ -831,13 +857,48 @@ private fun TaskStatusBadge(status: String) {
     )
 }
 
-/** `MiniMarkdown`: a card's markdown at the card's 12px, in the secondary colour, scrolling past [maxHeight]. */
+/**
+ * `MiniMarkdown`: markdown at the text size around it — a card's 12px unless told otherwise — in
+ * the secondary colour, scrolling past [maxHeight].
+ */
 @Composable
-private fun MiniMarkdown(content: String, maxHeight: Dp) {
+internal fun MiniMarkdown(content: String, maxHeight: Dp, size: Float = 12f, lineHeightRatio: Float = 16f / 12f, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
-    Box(Modifier.fillMaxWidth().heightIn(max = maxHeight).verticalScroll(rememberScrollState())) {
-        MarkdownView(content, style = MarkdownStyle(size = 12f, lineHeightRatio = 16f / 12f, color = tokens.text2))
+    Box(modifier.fillMaxWidth().heightIn(max = maxHeight).verticalScroll(rememberScrollState())) {
+        MarkdownView(content, style = MarkdownStyle(size = size, lineHeightRatio = lineHeightRatio, color = tokens.text2))
     }
+}
+
+/** An Agent/Task call as the session window details it: the teammate's name, the task, its type and prompt. */
+@Composable
+private fun AgentDetails(input: JsonElement) {
+    val tokens = LocalPpmTokens.current
+    fun s(key: String) = jsString(input[key])
+    val handle = input["name"].string?.trim()?.ifEmpty { null }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (handle != null) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                val middle = Modifier.align(Alignment.CenterVertically)
+                BasicText("Name", middle, cardText.copy(color = tokens.text3.color))
+                BasicText(handle, middle, ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
+                Badge("teammate", tokens.accent2.opacity(0.15), tokens.accent2, middle)
+                if (input["isolation"].string == "worktree") Badge("worktree", tokens.panel2, tokens.text3, middle)
+            }
+        }
+        if (truthy(input["description"])) BasicText(s("description"), style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color))
+        if (truthy(input["subagent_type"])) BasicText("Type: ${s("subagent_type")}", style = cardText.copy(color = tokens.text3.color))
+        if (truthy(input["prompt"])) MiniMarkdown(s("prompt"), maxHeight = 192.dp)
+    }
+}
+
+/** `inline-block rounded px-1.5 py-0.5 text-[10px]`. */
+@Composable
+private fun Badge(label: String, fill: Rgba, text: Rgba, modifier: Modifier = Modifier) {
+    BasicText(
+        label,
+        modifier.background(fill.color, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+        tinyText.copy(color = text.color),
+    )
 }
 
 /** A badge for a message kind (`KindBadge`); prose gets none. */
@@ -916,11 +977,57 @@ private fun SendMessageDetails(input: JsonElement) {
 
 // Output
 
-/** A result as the web shows it (`ToolResultView`): SendMessage's delivery line, else the raw output. */
+/**
+ * A result as the web shows it (`ToolResultView`): SendMessage's delivery line, an agent's answer
+ * as markdown with its raw form a tap away, else the raw output.
+ */
 @Composable
 private fun ToolResultView(name: String, output: String) {
     val outcome = remember(name, output) { if (name == "SendMessage") SendMessageOutcome.parse(output) else null }
-    if (outcome != null) SendMessageOutcomeView(output, outcome) else CollapsibleOutput(output)
+    val agentText = remember(name, output) { if (name == "Agent" || name == "Task") agentResultText(output) else null }
+    when {
+        outcome != null -> SendMessageOutcomeView(output, outcome)
+        agentText != null -> AgentResultView(output, agentText)
+        else -> CollapsibleOutput(output)
+    }
+}
+
+/**
+ * What an agent answered: the text blocks of the SDK's `[{type:"text",text}]` joined by a blank
+ * line, a JSON string, or plain text that does not open like such an array. Null for anything
+ * else, which shows raw.
+ */
+internal fun agentResultText(output: String): String? {
+    // A bare word is a literal to the tree parser, where `JSON.parse` throws.
+    val parsed = WireJson.parseOrNull(output)?.takeUnless { it is JsonPrimitive && !it.isString && !it.isJsonLiteral() }
+        ?: return output.takeIf { it.isNotEmpty() && !it.startsWith("[{") }
+    if (parsed is JsonArray) {
+        val texts = parsed.filter { it["type"].string == "text" && !it["text"].string.isNullOrEmpty() }.joinToString("\n\n") { it["text"].string!! }
+        if (texts.isNotEmpty()) return texts
+    }
+    return (parsed as? JsonPrimitive)?.takeIf { it.isString }?.content
+}
+
+private val JSON_NUMBER = Regex("-?(0|[1-9]\\d*)(\\.\\d+)?([eE][+-]?\\d+)?")
+
+private fun JsonPrimitive.isJsonLiteral() = content == "true" || content == "false" || content == "null" || JSON_NUMBER.matches(content.trim())
+
+/** An agent's answer in markdown up to 240dp, the raw output behind "Show raw". */
+@Composable
+private fun AgentResultView(output: String, text: String) {
+    val tokens = LocalPpmTokens.current
+    var showRaw by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top)) {
+        Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            MiniMarkdown(text, maxHeight = 240.dp)
+            OutputToggle(if (showRaw) "Hide raw" else "Show raw", ProductIcon.Code) { showRaw = !showRaw }
+            if (showRaw) {
+                Box(Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState())) {
+                    Mono(output, tokens.text3, breakAll = true, style = tinyMono)
+                }
+            }
+        }
+    }
 }
 
 /** Whether the message arrived, with the runtime's JSON one tap away (`SendMessageOutcomeView`). */
@@ -1019,12 +1126,11 @@ private fun CollapsibleOutput(output: String) {
 // Agent
 
 /**
- * An `Agent`/`Task` call: one line with the step count and the step it is on
- * (`AgentCardSummary`). The web opens the subagent's session from here; this app does not have
- * that view yet, so the row does not open.
+ * An `Agent`/`Task` call in the chat: one line with the step count and the step it is on, which
+ * opens the subagent's session (`AgentCardSummary`) — a tap, no expanding in place.
  */
 @Composable
-private fun AgentRow(tool: ToolBlock, status: Status, bgRunning: Boolean, modifier: Modifier) {
+private fun AgentRow(tool: ToolBlock, status: Status, bgRunning: Boolean, modifier: Modifier, onOpen: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val handle = tool.input["name"].string?.trim()?.ifEmpty { null }
     val description = truncate(tool.input["description"].string ?: tool.input["prompt"].string ?: "", 60)
@@ -1037,6 +1143,8 @@ private fun AgentRow(tool: ToolBlock, status: Status, bgRunning: Boolean, modifi
             .clip(shape)
             .background(tokens.panel.color)
             .cssBorder(tokens.border.color, shape)
+            .webTitle(if (handle != null) "Open $handle's session" else "Open agent session")
+            .ppmClickable(pressedColor = tokens.panel2.opacity(0.4).color, hoverColor = tokens.panel2.opacity(0.4).color, onClick = onOpen)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1060,6 +1168,7 @@ private fun AgentRow(tool: ToolBlock, status: Status, bgRunning: Boolean, modifi
             if (bgRunning) BasicText("running…", style = tinyText.copy(color = tokens.accent.color))
             if (tool.steps > 0) BasicText(stepCount(tool.steps), style = tinyMono.copy(color = tokens.text3.color))
             StatusIcon(status)
+            PpmIcon(ProductIcon.ChevronRight, 12.dp, tokens.text3.color)
         }
     }
 }

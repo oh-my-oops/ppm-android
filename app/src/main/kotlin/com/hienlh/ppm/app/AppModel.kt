@@ -49,6 +49,7 @@ import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.PpmTheme
 import com.hienlh.ppm.design.ViewerImage
 import com.hienlh.ppm.protocol.ChatDraft
+import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatReply
 import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.DraftAttachment
@@ -69,6 +70,9 @@ import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.double
 import com.hienlh.ppm.protocol.sortedForList
 import com.hienlh.ppm.protocol.string
+import com.hienlh.ppm.state.AgentSessionFallbacks
+import com.hienlh.ppm.state.AgentSessionOpening
+import com.hienlh.ppm.state.AgentSessionPayload
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatSearch
 import com.hienlh.ppm.state.ClientCommand
@@ -83,6 +87,8 @@ import com.hienlh.ppm.state.KeyBindings
 import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.NewChatCache
+import com.hienlh.ppm.state.agentSessionKeysOnScreen
+import com.hienlh.ppm.state.agentSessionOpening
 import com.hienlh.ppm.state.workspace.NewChatDefaults
 import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.RejectedSend
@@ -406,6 +412,14 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** The image lightbox, while it is open (`useImageOverlay`). */
     var lightbox by mutableStateOf<LightboxRequest?>(null)
+
+    /** The agent session the phone's sheet shows (`useAgentSessionSheetStore`). */
+    var agentSheet by mutableStateOf<AgentSessionPayload?>(null)
+        private set
+
+    /** What the chat held of each agent session on screen, shown until the hub streams it. */
+    var agentFallbacks by mutableStateOf(AgentSessionFallbacks())
+        private set
 
     /** Something drawn over the whole app as CSS's `fixed inset-0` draws it: a usage panel gone fullscreen. */
     var screenOverlay by mutableStateOf<(@Composable () -> Unit)?>(null)
@@ -1271,6 +1285,42 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     fun providerName(id: String): String = providers.firstOrNull { it.id == id }?.name ?: id.replaceFirstChar { it.uppercase() }
 
+    // Agent sessions
+
+    /**
+     * Opens an agent's or teammate's session (`useOpenAgentSession`): the sheet on a phone; on a
+     * tablet its window, brought forward when it is open already. At the window cap the oldest
+     * agent window makes room, and with none to, the open is refused rather than closing a window
+     * the user is still using. [fallback]: the steps the chat holds of it.
+     */
+    fun openAgentSession(payload: AgentSessionPayload, fallback: List<ChatEvent>?) {
+        // Nothing the hub can stream without a session.
+        if (payload.sessionId.isEmpty()) return
+        if (fallback != null) agentFallbacks = agentFallbacks.with(payload.key, fallback)
+        val store = windows
+        val opening = if (store == null) AgentSessionOpening.Sheet else agentSessionOpening(store.state.value, payload.key, sheet = !wide)
+        when (opening) {
+            AgentSessionOpening.Sheet -> agentSheet = payload
+            is AgentSessionOpening.Focus -> store?.focus(opening.windowId)
+            is AgentSessionOpening.Open -> {
+                opening.closeFirst?.let { store?.close(it) }
+                store?.open(WindowKind.AgentSession, payload.toJson(), opening.rect)
+            }
+            AgentSessionOpening.Refused -> toast = ErrorToastMessage("Too many windows open", "Close one to open this session.")
+        }
+        pruneAgentFallbacks()
+    }
+
+    fun closeAgentSheet() {
+        agentSheet = null
+        pruneAgentFallbacks()
+    }
+
+    /** Lets go of the steps of every session no window or sheet shows any more. */
+    private fun pruneAgentFallbacks() {
+        agentFallbacks = agentFallbacks.pruned(agentSessionKeysOnScreen(windows?.state?.value?.windows?.values.orEmpty(), agentSheet))
+    }
+
     // Tabs
 
     private fun openWorkspace(api: ApiClient) {
@@ -1293,6 +1343,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                 windowStore.state.collect {
                     windowState = it
                     reconcileWindowPanels()
+                    pruneAgentFallbacks()
                 }
             }
             store.state.collect { state ->
@@ -1314,6 +1365,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         layout = null
         windows = null
         windowState = WindowsState()
+        // Another server's agent sessions are not this one's to stream.
+        agentSheet = null
+        agentFallbacks = AgentSessionFallbacks()
         chats.values.forEach { it.stop() }
         chats.clear()
         shownSession = null

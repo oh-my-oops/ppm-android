@@ -12,10 +12,12 @@ import androidx.compose.ui.node.LayoutModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.ParentDataModifierNode
 import androidx.compose.ui.node.invalidateMeasurement
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -178,21 +180,23 @@ private class CssExactNode(var exact: CssExact, var reads: Boolean) : Modifier.N
 
 /**
  * Text whose lines are [lineHeight] CSS pixels apart: a [CssColumn] counts it as its lines times
- * that, as Chrome does, rather than the whole pixels it measures.
+ * that, as Chrome does, rather than the whole pixels it measures. Held to [max] (`max-h-*`), it
+ * counts as that once it reaches it.
  */
-fun Modifier.cssLines(lineHeight: Float): Modifier = this then CssLinesElement(lineHeight)
+fun Modifier.cssLines(lineHeight: Float, max: Dp = Dp.Unspecified): Modifier = this then CssLinesElement(lineHeight, max)
 
-private data class CssLinesElement(val lineHeight: Float) : ModifierNodeElement<CssLinesNode>() {
-    override fun create() = CssLinesNode(lineHeight)
+private data class CssLinesElement(val lineHeight: Float, val max: Dp) : ModifierNodeElement<CssLinesNode>() {
+    override fun create() = CssLinesNode(lineHeight, max)
 
     override fun update(node: CssLinesNode) {
-        if (node.lineHeight == lineHeight) return
+        if (node.lineHeight == lineHeight && node.max == max) return
         node.lineHeight = lineHeight
+        node.max = max
         node.invalidateMeasurement()
     }
 }
 
-private class CssLinesNode(var lineHeight: Float) : Modifier.Node(), LayoutModifierNode, ParentDataModifierNode {
+private class CssLinesNode(var lineHeight: Float, var max: Dp) : Modifier.Node(), LayoutModifierNode, ParentDataModifierNode {
     private val exact = CssExact()
 
     override fun Density.modifyParentData(parentData: Any?): Any = exact
@@ -200,9 +204,64 @@ private class CssLinesNode(var lineHeight: Float) : Modifier.Node(), LayoutModif
     override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
         val placeable = measurable.measure(constraints)
         val line = lineHeight.sp.toPx()
-        exact.height = max(1, (placeable.height / line).roundToInt()) * line
+        exact.height = if (max.isSpecified && placeable.height >= max.roundToPx()) max.toPx() else max(1, (placeable.height / line).roundToInt()) * line
         exact.reported = placeable.height
         return layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
+}
+
+/**
+ * The items of a lazy list stacked as Chrome stacks blocks [gap] apart: each item's exact height,
+ * as a [CssColumn] counts it, added to the exact tops above it, and each item as tall as the pixels
+ * from its rounded top to the next one's, its gap included. Rounded an item at a time, 43.3 px
+ * lines and 10.5 px gaps put every other card a pixel lower than the web's.
+ *
+ * An item measured before the one above it (a list opened at its end, rows scrolled in from above)
+ * starts on a whole pixel, as in a plain list, until that one is measured and it is measured again.
+ */
+class CssLazyStack internal constructor(internal val gap: Float) {
+    internal val tops = HashMap<Int, Float>()
+    internal val heights = HashMap<Int, Float>()
+}
+
+@Composable
+fun rememberCssLazyStack(gap: Dp): CssLazyStack {
+    val px = with(LocalDensity.current) { gap.toPx() }
+    return remember(px) { CssLazyStack(px) }
+}
+
+/** The [index]th item of a lazy list laid out by [stack], its content at the top; the [last] has no gap under it. */
+fun Modifier.cssLazyItem(stack: CssLazyStack, index: Int, last: Boolean): Modifier = this then CssLazyItemElement(stack, index, last)
+
+private data class CssLazyItemElement(val stack: CssLazyStack, val index: Int, val last: Boolean) : ModifierNodeElement<CssLazyItemNode>() {
+    override fun create() = CssLazyItemNode(stack, index, last)
+
+    override fun update(node: CssLazyItemNode) {
+        if (node.stack === stack && node.index == index && node.last == last) return
+        node.stack = stack
+        node.index = index
+        node.last = last
+        node.invalidateMeasurement()
+    }
+}
+
+private class CssLazyItemNode(var stack: CssLazyStack, var index: Int, var last: Boolean) : Modifier.Node(), LayoutModifierNode {
+    override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
+        val placeable = measurable.measure(constraints)
+        val data = measurable.parentData as? CssExact
+        val exact = when {
+            data == null || data.height.isNaN() -> placeable.height.toFloat()
+            !data.fixed.isNaN() -> data.fixed
+            data.reported >= 0 -> data.height + (placeable.height - data.reported)
+            else -> data.height
+        }
+        val above = stack.tops[index - 1]?.let { top -> stack.heights[index - 1]?.let { top + it + stack.gap } }
+        val top = above ?: stack.tops[index] ?: 0f
+        stack.tops[index] = top
+        stack.heights[index] = exact
+        val bottom = top + exact + if (last) 0f else stack.gap
+        val height = bottom.roundToInt() - top.roundToInt()
+        return layout(placeable.width, height) { placeable.place(0, 0) }
     }
 }
 

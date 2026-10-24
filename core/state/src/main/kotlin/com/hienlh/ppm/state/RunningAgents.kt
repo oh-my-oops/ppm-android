@@ -142,7 +142,7 @@ private fun agentInput(events: List<ChatEvent>, cardId: String): JsonElement? {
     return null
 }
 
-private fun addressableName(input: JsonElement): String? = input["name"].string?.trim()?.takeIf { it.isNotEmpty() }
+internal fun addressableName(input: JsonElement): String? = input["name"].string?.trim()?.takeIf { it.isNotEmpty() }
 
 /** What a row of the bar shows (`AgentView`): who, the prompt it was given, its step, and for how long it has run. */
 data class RunningAgentView(val row: RunningAgentRow, val name: String, val prompt: String?, val step: String?, val elapsed: String?)

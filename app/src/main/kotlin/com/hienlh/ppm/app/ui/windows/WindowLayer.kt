@@ -66,6 +66,7 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.SettingsWindowContent
 import com.hienlh.ppm.app.ui.TabBody
 import com.hienlh.ppm.app.ui.tablet.LocalHeldCursor
+import com.hienlh.ppm.chat.AgentSessionContent
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
@@ -74,6 +75,7 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.state.AgentSessionPayload
 import com.hienlh.ppm.state.windows.Bounds
 import com.hienlh.ppm.state.windows.ResizeHandle
 import com.hienlh.ppm.state.windows.WindowKind
@@ -339,6 +341,10 @@ private fun WindowContent(model: AppModel, win: WindowRuntimeState) {
     when (win.kind) {
         WindowKind.Settings -> SettingsWindowContent(model, win)
         WindowKind.TabHost -> TabHostWindowContent(model, win)
+        WindowKind.AgentSession -> {
+            val payload = remember(win.payload) { AgentSessionPayload.from(win.payload) }
+            AgentSessionContent(payload, model.events, payload?.let { model.agentFallbacks[it.key] })
+        }
         else -> {
             val tokens = LocalPpmTokens.current
             BasicText("Not available in this app yet.", Modifier.padding(12.dp), style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color))
