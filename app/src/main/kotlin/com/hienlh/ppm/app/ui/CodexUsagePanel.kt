@@ -472,7 +472,7 @@ private fun DialogButton(
 }
 
 /** CSS's `ease`, what tw-animate-css enters with. */
-private val CssEase = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
+internal val CssEase = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
 
 /**
  * The web's `Dialog` around `DialogContent className="sm:max-w-sm"` (shadcn): a 50% black

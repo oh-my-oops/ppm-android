@@ -66,8 +66,8 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /** Tailwind's `shadow-md` and `shadow-lg`, by their larger layer. */
-private val shadowMd = ThemeShadow(0.0, 4.0, 6.0, -1.0, Rgba(0.0, 0.0, 0.0, 0.1))
-private val shadowLg = ThemeShadow(0.0, 10.0, 15.0, -3.0, Rgba(0.0, 0.0, 0.0, 0.1))
+internal val shadowMd = ThemeShadow(0.0, 4.0, 6.0, -1.0, Rgba(0.0, 0.0, 0.0, 0.1))
+internal val shadowLg = ThemeShadow(0.0, 10.0, 15.0, -3.0, Rgba(0.0, 0.0, 0.0, 0.1))
 
 /**
  * A Radix menu's box: `min-w-[8rem] rounded-md border bg-popover p-1`, opaque as `.popover-solid`
