@@ -215,6 +215,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     private var sessionsReadAt: Long? = null
     private var syncsRunning by mutableIntStateOf(0)
 
+    /** The debug launch's session, once opened: every later read of the list leaves the tabs alone. */
+    private var debugSessionOpened = false
+
     /** Reads of the shared page under way; the list says it is syncing while there are any. */
     val syncingSessions: Boolean get() = syncsRunning > 0
 
@@ -1188,7 +1191,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             syncsRunning--
         }
         if (selectedProject != name) return
-        debug?.session?.let { id -> sessions.firstOrNull { it.id == id }?.let(::openTab) }
+        if (debugSessionOpened) return
+        debug?.session?.let { id -> sessions.firstOrNull { it.id == id }?.let { debugSessionOpened = true; openTab(it) } }
     }
 
     private fun resetProjectState() {
