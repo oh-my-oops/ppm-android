@@ -1,6 +1,7 @@
 package com.hienlh.ppm.state
 
 import com.hienlh.ppm.client.ApiClient
+import com.hienlh.ppm.protocol.OutboundTeamMessage
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.TeamActivityFeed
 import com.hienlh.ppm.protocol.TeamMemberActivity
@@ -63,6 +64,18 @@ class TeamActivityTest {
         assertEquals("m20", live.messages.first().text)
         assertEquals(MAX_TEAM_MESSAGES + 20, live.unread)
         assertEquals("m20", TeamActivity().merged(many).messages.first().text)
+    }
+
+    @Test
+    fun `the conversation puts the replies among the inbox in time order, newest two hundred`() {
+        val inbox = listOf(message("lead", "2026-10-25T08:00:01Z", "go"), message("lead", "2026-10-25T08:00:09Z", "next"))
+        val replies = listOf(OutboundTeamMessage("tester", "team-lead", "done", "2026-10-25T08:00:05Z", "Finished"))
+        val shown = teamConversation(inbox, replies)
+        assertEquals(listOf("go", "done", "next"), shown.map { it.text })
+        assertEquals(TeamMessage("tester", "team-lead", "done", "2026-10-25T08:00:05Z", "Finished"), shown[1])
+        val many = (0 until MAX_TEAM_CONVERSATION + 30).map { message("lead", "2026-10-25T08:%02d:%02dZ".format(it / 60, it % 60), "m$it") }
+        assertEquals(MAX_TEAM_CONVERSATION, teamConversation(many, emptyList()).size)
+        assertEquals("m30", teamConversation(many, emptyList()).first().text)
     }
 
     @Test
