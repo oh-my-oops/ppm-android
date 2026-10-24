@@ -5,6 +5,7 @@ import com.hienlh.ppm.client.SocketConnection
 import com.hienlh.ppm.client.teamMessages
 import com.hienlh.ppm.client.teams
 import com.hienlh.ppm.protocol.ApprovalRequest
+import com.hienlh.ppm.protocol.BackgroundShell
 import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatFrame
@@ -74,6 +75,10 @@ data class ChatState(
     val liveAccount: PickedAccount? = null,
     /** The session's agent teams and what their inboxes received. */
     val team: TeamActivity = TeamActivity(),
+    /** The commands the AI left running in the background, stopped ones included. */
+    val backgroundShells: List<BackgroundShell> = emptyList(),
+    /** The MCP servers this chat's Claude cannot use until someone signs in. */
+    val mcpNeedsAuth: List<String> = emptyList(),
 ) {
     val isRunning: Boolean get() = phase.isRunning
     val canSend: Boolean get() = connection == ChatController.Connection.Connected
@@ -219,6 +224,12 @@ class ChatController(
         socket?.send(ChatClientMessage.Cancel.json.toString())
         transcript.cancelled()
         publish()
+    }
+
+    /** Asks the AI to stop a background command; the next `background_registry` says `stopping`. */
+    fun killBackgroundShell(shellId: String) {
+        if (shellId.isEmpty()) return
+        socket?.send(ChatClientMessage.KillBackgroundShell(shellId).json.toString())
     }
 
     fun respond(request: ApprovalRequest, approved: Boolean, data: JsonElement? = null) {
@@ -528,6 +539,8 @@ class ChatController(
             promptCache = settings.promptCache,
             liveAccount = liveAccount,
             team = team,
+            backgroundShells = transcript.backgroundShells,
+            mcpNeedsAuth = transcript.mcpNeedsAuth,
         )
     }
 

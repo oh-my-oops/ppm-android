@@ -1,11 +1,13 @@
 package com.hienlh.ppm.client
 
+import com.hienlh.ppm.protocol.McpSignInDismissals
 import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.double
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.long
 import com.hienlh.ppm.protocol.obj
 import com.hienlh.ppm.protocol.string
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -27,6 +29,8 @@ data class UiPrefs(
     val explorerSkin: String? = null,
     /** A panel's tabs wrapped onto as many rows as they need, instead of scrolling sideways. */
     val tabWrap: Boolean? = null,
+    /** The MCP servers whose sign-in bar was hidden; null when the stored value is not a list. */
+    val mcpSignInDismissed: List<String>? = null,
 ) {
     /** The same keys as the server's, which [from] reads back: what a device keeps between starts. */
     fun toJson(): JsonObject = buildJsonObject {
@@ -37,6 +41,7 @@ data class UiPrefs(
         keepScreenAwake?.let { put("keepScreenAwake", it) }
         explorerSkin?.let { put("explorerSkin", it) }
         tabWrap?.let { put("tabWrap", it) }
+        mcpSignInDismissed?.let { names -> put("mcpSignInDismissed", JsonArray(names.map(::JsonPrimitive))) }
     }
 
     companion object {
@@ -49,6 +54,7 @@ data class UiPrefs(
             keepScreenAwake = json["keepScreenAwake"].bool,
             explorerSkin = json["explorerSkin"].string?.takeIf { it in EXPLORER_SKINS },
             tabWrap = json["tabWrap"].bool,
+            mcpSignInDismissed = McpSignInDismissals.sanitized(json["mcpSignInDismissed"]),
         )
 
         private val EXPLORER_SKINS = setOf("auto", "windows", "macos")

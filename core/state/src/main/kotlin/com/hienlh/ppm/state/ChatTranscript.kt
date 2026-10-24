@@ -1,6 +1,7 @@
 package com.hienlh.ppm.state
 
 import com.hienlh.ppm.protocol.ApprovalRequest
+import com.hienlh.ppm.protocol.BackgroundShell
 import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatFrame
@@ -82,6 +83,14 @@ class ChatTranscript {
 
     /** A send the server refused, as it was typed and quoted, until the composer takes it back ([takeRejected]). */
     var rejected: RejectedSend? = null
+        private set
+
+    /** The commands the AI left running in the background, stopped ones included, as the server's last `background_registry` listed them. */
+    var backgroundShells: List<BackgroundShell> = emptyList()
+        private set
+
+    /** The MCP servers the session's Claude cannot use until someone signs in, as the server last listed them. */
+    var mcpNeedsAuth: List<String> = emptyList()
         private set
 
     /** Sends the server may still refuse, by id: what a refusal hands back. Kept a minute, 20 at most. */
@@ -179,6 +188,8 @@ class ChatTranscript {
             is ChatFrame.TabOpen -> effects += ChatEffect.Send(
                 ChatClientMessage.TabOpenResult(frame.requestId, opened = false, error = TAB_OPEN_UNSUPPORTED),
             )
+            is ChatFrame.BackgroundRegistry -> backgroundShells = frame.shells
+            is ChatFrame.McpStatus -> mcpNeedsAuth = frame.needsAuth
         }
         return effects
     }
@@ -331,6 +342,7 @@ class ChatTranscript {
     }
 
     private fun applySessionState(state: SessionStateFrame, now: Long, effects: MutableList<ChatEffect>) {
+        mcpNeedsAuth = state.mcpNeedsAuth
         val wasRunning = phase.isRunning
         phase = state.phase
         val stop = state.turnStop

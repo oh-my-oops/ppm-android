@@ -90,3 +90,6 @@ suspend fun ApiClient.fsStat(path: String): FsStat {
     val resolved = data["path"].string ?: throw PpmError.BadResponse(ApiClient.NOT_PPM)
     return FsStat(resolved, data["name"].string ?: "", data["kind"].string ?: "", data["target"].string)
 }
+
+/** `GET /api/fs/read`: a text file anywhere on the host, as the background output panel reads a command's `.output`. */
+suspend fun ApiClient.fsRead(path: String): String = call("GET", "/api/fs/read", listOf("path" to path))["content"].string.orEmpty()

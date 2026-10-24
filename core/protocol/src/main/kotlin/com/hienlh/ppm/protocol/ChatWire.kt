@@ -90,6 +90,11 @@ data class SessionStateFrame(
      * "nothing known" — and a cache written for another model is no use anyway.
      */
     val promptCache: PromptCacheState? = null,
+    /**
+     * The MCP servers the session's Claude cannot use until someone signs in. Every greeting says
+     * it; one that leaves it out (a session no chat has opened yet) means none, as on the web.
+     */
+    val mcpNeedsAuth: List<String> = emptyList(),
 )
 
 /** `turn_events`: every buffered event of the running turn — a full snapshot, not a delta. */
@@ -127,7 +132,22 @@ sealed interface ChatFrame {
     /** The AI asked this device to open a tab (`open_file`, `open_preview`); it waits for an answer. */
     data class TabOpen(val requestId: String) : ChatFrame
 
+    /**
+     * Every background command the session has, whole (`background_registry`): sent when one
+     * starts, is asked to stop or stops, and to a client that connects while any are known.
+     */
+    data class BackgroundRegistry(val shells: List<BackgroundShell>) : ChatFrame
+
+    /**
+     * The MCP servers the session's Claude cannot use until someone signs in (`mcp_status`), the
+     * whole list each time: from its `init`, and again after a sign-in anywhere.
+     */
+    data class McpStatus(val needsAuth: List<String>) : ChatFrame
+
     companion object {
+        /** A list of server names; anything but an array is none (`Array.isArray(list) ? list : []`). */
+        private fun names(json: JsonElement?): List<String> = json.array.orEmpty().mapNotNull { it.string }
+
         fun from(json: JsonElement): ChatFrame {
             val seq = json["streamSeq"].int
             return when (json["type"].string ?: "") {
@@ -144,6 +164,7 @@ sealed interface ChatFrame {
                         effort = json["effort"].string?.ifEmpty { null },
                         thinking = json["thinking"].bool,
                         promptCache = PromptCacheState.from(json["promptCache"]),
+                        mcpNeedsAuth = names(json["mcpNeedsAuth"]),
                     ),
                 )
                 "turn_events" -> TurnEvents(
@@ -171,6 +192,8 @@ sealed interface ChatFrame {
                 }
                 "compact_status" -> CompactStatus(json["status"].string == "compacting")
                 "tab_open" -> json["requestId"].string?.let(::TabOpen) ?: Event(ChatEvent.from(json), seq)
+                "background_registry" -> BackgroundRegistry(json["shells"].array.orEmpty().mapNotNull(BackgroundShell::from))
+                "mcp_status" -> McpStatus(names(json["needsAuth"]))
                 else -> Event(ChatEvent.from(json), seq)
             }
         }
@@ -281,6 +304,15 @@ sealed interface ChatClientMessage {
                 put("requestId", requestId)
                 put("approved", approved)
                 if (data != null) put("data", data)
+            }
+    }
+
+    /** Asks the AI to stop a background command; the next `background_registry` says `stopping`. */
+    data class KillBackgroundShell(val shellId: String) : ChatClientMessage {
+        override val json
+            get() = buildJsonObject {
+                put("type", "kill_background_shell")
+                put("shellId", shellId)
             }
     }
 
