@@ -12,6 +12,7 @@ import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.Reported
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.protocol.SessionStateFrame
+import com.hienlh.ppm.protocol.TeamMessage
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.TurnSnapshot
 import com.hienlh.ppm.protocol.TurnStop
@@ -24,6 +25,12 @@ sealed interface ChatEffect {
     data class Send(val message: ChatClientMessage) : ChatEffect
     data object ReloadHistory : ChatEffect
     data class AdoptSessionId(val id: String) : ChatEffect
+
+    /** The session has the agent team [name]: worth following, and its inbox history worth reading (`team_detected`). */
+    data class TeamDetected(val name: String) : ChatEffect
+
+    /** Messages a team's inbox just received (`team_inbox`). */
+    data class TeamMessages(val messages: List<TeamMessage>) : ChatEffect
 }
 
 /** A message the server refused: what was typed, what it quoted, and why ([message]). */
@@ -43,7 +50,8 @@ class ChatTranscript {
         private set
 
     /** When [live] got its first event. */
-    private var liveStartedAt = 0L
+    var liveStartedAt = 0L
+        private set
     var phase: SessionPhase = SessionPhase.IDLE
         private set
     var pendingApproval: ApprovalRequest? = null
@@ -410,14 +418,7 @@ class ChatTranscript {
         when (event) {
             is ChatEvent.Text, is ChatEvent.Thinking, is ChatEvent.ToolUse, is ChatEvent.ToolResult, is ChatEvent.AccountRetry -> {
                 val parent = parentOf(event)
-                if (parent == null) {
-                    addToLive(event, now)
-                } else {
-                    // A backgrounded agent works on after the turn that started it ended: its calls
-                    // count on that turn's card (`routeToFinalizedParent`).
-                    if (event is ChatEvent.ToolUse && live?.hasAgent(parent) != true) stepFinalized(parent, event)
-                    live?.add(event)
-                }
+                if (parent == null) addToLive(event, now) else routeChild(parent, event)
             }
             // Only while its card still runs: a backgrounded command prints on after its result.
             is ChatEvent.BashOutput -> if (live?.unanswered(event.toolUseId)?.name in SHELL_TOOLS) {
@@ -427,17 +428,23 @@ class ChatTranscript {
             is ChatEvent.SubagentStatus -> if (live?.setBgStatus(event.toolUseId, event.status) != true) {
                 updateFinalizedAgent(event.toolUseId) { it.copy(bgStatus = event.status) }
             }
-            is ChatEvent.Error -> if (live != null || phase.isRunning) {
-                addToLive(event, now)
-            } else if (items.lastOrNull().let { it?.role != ChatItem.Role.SYSTEM || it.text != event.message }) {
-                // A message of its own, as history keeps one; the same error twice in a row shows once.
-                localCounter++
-                items = items + ChatItem(
-                    id = "local-error-$localCounter",
-                    role = ChatItem.Role.SYSTEM,
-                    blocks = listOf(ChatBlock.Text(event.message)),
-                    timestamp = Instant.now(),
-                )
+            is ChatEvent.Error -> {
+                val parent = event.parent
+                when {
+                    // A subagent's error is its card's, never a line of the turn.
+                    parent != null -> routeChild(parent, event)
+                    live != null || phase.isRunning -> addToLive(event, now)
+                    items.lastOrNull().let { it?.role != ChatItem.Role.SYSTEM || it.text != event.message } -> {
+                        // A message of its own, as history keeps one; the same error twice in a row shows once.
+                        localCounter++
+                        items = items + ChatItem(
+                            id = "local-error-$localCounter",
+                            role = ChatItem.Role.SYSTEM,
+                            blocks = listOf(ChatBlock.Text(event.message)),
+                            timestamp = Instant.now(),
+                        )
+                    }
+                }
             }
             is ChatEvent.Approval -> {
                 addToLive(event, now)
@@ -454,6 +461,8 @@ class ChatTranscript {
             is ChatEvent.StatusUpdate -> statusMessage = event.message + (event.accountLabel?.takeIf { it.isNotEmpty() }?.let { " ($it)" } ?: "")
             is ChatEvent.AccountInfo -> statusMessage = null
             is ChatEvent.SessionMigrated -> effects += ChatEffect.AdoptSessionId(event.newSessionId)
+            is ChatEvent.TeamDetected -> effects += ChatEffect.TeamDetected(event.teamName)
+            is ChatEvent.TeamInbox -> effects += ChatEffect.TeamMessages(event.messages)
             is ChatEvent.Other -> Unit
         }
     }
@@ -466,10 +475,19 @@ class ChatTranscript {
         else -> null
     }
 
-    private fun stepFinalized(parent: String, use: ChatEvent.ToolUse) {
+    /**
+     * A subagent's event, on its card. A backgrounded agent works on after the turn that started it
+     * ended: its events then go on that turn's card (`routeToFinalizedParent`).
+     */
+    private fun routeChild(parent: String, event: ChatEvent) {
+        if (live?.hasAgent(parent) != true) childFinalized(parent, event)
+        live?.add(event)
+    }
+
+    private fun childFinalized(parent: String, event: ChatEvent) {
         // The live turn drops a question's call; so does a finished one.
-        if (use.name == "AskUserQuestion") return
-        updateFinalizedAgent(parent) { it.withStep(parent, use) ?: it }
+        if (event is ChatEvent.ToolUse && event.name == "AskUserQuestion") return
+        updateFinalizedAgent(parent) { it.withChild(parent, event) ?: it }
     }
 
     /** The newest message whose own Agent/Task card is the call [toolUseId], with that card changed. */

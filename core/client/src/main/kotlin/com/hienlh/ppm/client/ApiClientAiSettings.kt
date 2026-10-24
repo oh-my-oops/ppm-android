@@ -4,7 +4,9 @@ import com.hienlh.ppm.protocol.AiSettings
 import com.hienlh.ppm.protocol.McpServerState
 import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.ProviderProbeStatus
+import com.hienlh.ppm.protocol.TeamActivityFeed
 import com.hienlh.ppm.protocol.TeamInfo
+import com.hienlh.ppm.protocol.TeamMessage
 import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.string
@@ -35,6 +37,14 @@ suspend fun ApiClient.settingsModels(providerId: String): List<ModelOption> =
 
 /** `GET /api/teams`: the agent teams on the server's machine. */
 suspend fun ApiClient.teams(): List<TeamInfo> = call("GET", "/api/teams").array.orEmpty().mapNotNull(TeamInfo::from)
+
+/** `GET /api/teams/:name`: what the team's inboxes hold, oldest first. */
+suspend fun ApiClient.teamMessages(name: String): List<TeamMessage> =
+    call("GET", "/api/teams/${ApiClient.escape(name)}")["messages"].array.orEmpty().mapNotNull(TeamMessage::from)
+
+/** `GET /api/teams/:name/activity`: what each member is doing, read from its transcript, and the replies sent back. */
+suspend fun ApiClient.teamActivity(name: String): TeamActivityFeed =
+    TeamActivityFeed.from(call("GET", "/api/teams/${ApiClient.escape(name)}/activity"))
 
 /** `DELETE /api/teams/:name`: removes a team and everything it kept. */
 suspend fun ApiClient.deleteTeam(name: String) {

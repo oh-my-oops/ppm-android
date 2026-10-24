@@ -26,6 +26,8 @@ data class ToolBlock(
     val approved: Boolean? = null,
     /** A backgrounded Agent/Task's end once it is reported: `completed`, `failed` or `stopped`. */
     val bgStatus: String? = null,
+    /** Agent/Task only: what the card keeps of its subagent's events, for its session window. */
+    val children: AgentChildren? = null,
 ) {
     val steps: Int get() = progress?.total ?: 0
     val lastStep: String? get() = progress?.lastStep
@@ -140,18 +142,24 @@ class TurnBuilder(
         when (event) {
             is ChatEvent.Text -> {
                 allText.append(event.text)
-                if (event.parent == null) append(event.text, thinking = false)
+                val parent = event.parent
+                if (parent == null) append(event.text, thinking = false) else addChild(parent, event)
             }
-            is ChatEvent.Thinking -> if (event.parent == null) append(event.text, thinking = true)
+            is ChatEvent.Thinking -> event.parent.let { parent ->
+                if (parent == null) append(event.text, thinking = true) else addChild(parent, event)
+            }
             is ChatEvent.ToolUse -> addToolUse(event)
             is ChatEvent.ToolResult -> {
                 val id = event.toolUseId
-                if (event.parent != null || id in askCalls) return
+                if (id in askCalls) return
+                event.parent?.let { return addChild(it, event) }
                 // By id; otherwise, or when no card has it, the first card still without a result.
                 val index = id?.let { toolIndex[it] } ?: list.indexOfFirst { it is ChatBlock.Tool && it.tool.result == null }
                 if (index >= 0) setResult(event.outcome, index)
             }
-            is ChatEvent.Error -> list += ChatBlock.Error(event.message)
+            is ChatEvent.Error -> event.parent.let { parent ->
+                if (parent == null) list += ChatBlock.Error(event.message) else addChild(parent, event)
+            }
             is ChatEvent.Approval -> {
                 val request = event.request
                 // A database change already has its `db_execute` card; its approval is only the prompt.
@@ -170,7 +178,7 @@ class TurnBuilder(
             is ChatEvent.AccountRetry -> list += ChatBlock.Retry(event.reason ?: "Auth failed", event.accountLabel ?: "another account")
             is ChatEvent.SubagentStatus -> setBgStatus(event.toolUseId, event.status)
             is ChatEvent.Done, is ChatEvent.SessionMigrated, is ChatEvent.StatusUpdate, is ChatEvent.AccountInfo, is ChatEvent.BashOutput,
-            is ChatEvent.Other -> Unit
+            is ChatEvent.TeamDetected, is ChatEvent.TeamInbox, is ChatEvent.Other -> Unit
         }
     }
 
@@ -198,7 +206,7 @@ class TurnBuilder(
             // As on the web: its approval request already stands for it in the turn, a subagent's
             // question too, and its result is dropped with it.
             live && use.name == "AskUserQuestion" -> if (id != null) askCalls += id
-            parent != null -> addStep(parent, use)
+            parent != null -> addChild(parent, use)
             existing != null -> {
                 // The same call again, with its input complete or its result attached.
                 val block = (list[existing] as? ChatBlock.Tool)?.tool ?: return
@@ -213,7 +221,17 @@ class TurnBuilder(
                     toolIndex[id] = list.size
                     if (progress != null) (listOf(id) + progress.nestedIds).forEach { agentCards[it] = list.size }
                 }
-                list += ChatBlock.Tool(ToolBlock(toolUseId = id, name = use.name, input = use.input, result = use.result, progress = progress, bgStatus = use.bgStatus))
+                list += ChatBlock.Tool(
+                    ToolBlock(
+                        toolUseId = id,
+                        name = use.name,
+                        input = use.input,
+                        result = use.result,
+                        progress = progress,
+                        bgStatus = use.bgStatus,
+                        children = if (isAgent) AgentChildren.ofHistory(use.children, use.transcriptAvailable) else null,
+                    ),
+                )
             }
         }
     }
@@ -252,17 +270,33 @@ class TurnBuilder(
         list[index] = ChatBlock.Tool(block.copy(result = outcome))
     }
 
-    private fun addStep(parent: String, use: ChatEvent.ToolUse) {
+    /** An event the agent [parent] made, on the card of this turn that holds that agent. */
+    private fun addChild(parent: String, event: ChatEvent) {
         val index = agentCards[parent] ?: return
         val block = (list[index] as? ChatBlock.Tool)?.tool ?: return
-        list[index] = ChatBlock.Tool(block.withStep(parent, use) ?: return)
-        val id = use.toolUseId
-        if (id != null && (use.name == "Agent" || use.name == "Task")) agentCards[id] = index
+        list[index] = ChatBlock.Tool(block.withChild(parent, event) ?: return)
+        val id = (event as? ChatEvent.ToolUse)?.takeIf { it.name == "Agent" || it.name == "Task" }?.toolUseId
+        if (id != null) agentCards[id] = index
     }
 }
 
 /** An Agent/Task call rather than an approval request for one. */
 val ToolBlock.isAgent: Boolean get() = (name == "Agent" || name == "Task") && requestId == null
+
+/**
+ * This agent card with [event], made by its agent [parent] or one under it: counted when it is a
+ * call, and kept for the card's session window. Null when neither agent is this card's.
+ */
+fun ToolBlock.withChild(parent: String, event: ChatEvent): ToolBlock? {
+    if (!isAgent) return null
+    val counted = if (event is ChatEvent.ToolUse) withStep(parent, event) ?: return null else this
+    val children = (children ?: AgentChildren()).route(toolUseId, parent, event)
+    return when {
+        children != null -> counted.copy(children = children)
+        event is ChatEvent.ToolUse -> counted
+        else -> null
+    }
+}
 
 /** This agent card with [use], a call its agent [parent] or one under it made, counted; null when it is neither's. */
 fun ToolBlock.withStep(parent: String, use: ChatEvent.ToolUse): ToolBlock? {

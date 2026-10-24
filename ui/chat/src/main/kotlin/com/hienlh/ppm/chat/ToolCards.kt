@@ -72,6 +72,7 @@ import com.hienlh.ppm.state.BashPartial
 import com.hienlh.ppm.state.SHELL_TOOLS
 import com.hienlh.ppm.state.ToolBlock
 import com.hienlh.ppm.state.isAgent
+import com.hienlh.ppm.state.isAsyncAgentLaunchAck
 import com.hienlh.ppm.state.truthy
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -266,9 +267,6 @@ internal fun imageReadPath(tool: ToolBlock): String? {
     if (!ABSOLUTE_PATH.containsMatchIn(path)) return null
     return if (isImageExtension(path)) path else null
 }
-
-/** A backgrounded agent's call answers this the moment the agent starts (`isAsyncAgentLaunchAck`). */
-internal fun isAsyncAgentLaunchAck(output: String): Boolean = output.contains("Async agent launched successfully")
 
 internal fun stepCount(n: Int): String = if (n == 1) "1 step" else "$n steps"
 

@@ -224,6 +224,43 @@ class TranscriptTest {
     }
 
     @Test
+    fun `a subagent's events are kept on its card for the session window, its error too`() {
+        val chat = ChatTranscript()
+        chat.handle(frame("""{"type":"phase_changed","phase":"thinking"}"""))
+        chat.handle(frame("""{"type":"tool_use","tool":"Agent","input":{"description":"Watch"},"toolUseId":"a1","streamSeq":1}"""))
+        chat.handle(frame("""{"type":"text","content":"Reading","parentToolUseId":"a1","streamSeq":2}"""))
+        chat.handle(frame("""{"type":"error","message":"Tool crashed","parentToolUseId":"a1","streamSeq":3}"""))
+        // Not a line of the turn: the card holds it.
+        assertEquals(1, chat.live!!.blocks.size)
+        fun card() = chat.items.last().blocks.filterIsInstance<ChatBlock.Tool>().single().tool
+        chat.handle(frame("""{"type":"tool_result","output":"Async agent launched successfully.","toolUseId":"a1","streamSeq":4}"""))
+        chat.handle(frame("""{"type":"done","streamSeq":5}"""))
+        assertEquals(listOf(ChatEvent.Text("Reading", "a1"), ChatEvent.Error("Tool crashed", "a1")), card().children!!.events)
+        // After its turn, on that turn's card.
+        chat.handle(frame("""{"type":"tool_use","tool":"Edit","input":{"file_path":"/a.ts"},"toolUseId":"e1","parentToolUseId":"a1","streamSeq":6}"""))
+        chat.handle(frame("""{"type":"text","content":"edited","parentToolUseId":"a1","streamSeq":7}"""))
+        assertEquals(listOf("e1"), card().children!!.kept.map { (it.event as ChatEvent.ToolUse).toolUseId })
+        assertEquals(4, card().children!!.events.size)
+        assertEquals(1, chat.items.last().blocks.size)
+    }
+
+    @Test
+    fun `a team found and its inbox are handed to the controller, a replayed one too`() {
+        val chat = ChatTranscript()
+        assertEquals(listOf(ChatEffect.TeamDetected("s1")), chat.handle(frame("""{"type":"team_detected","teamName":"s1","streamSeq":1}""")))
+        val inbox = chat.handle(
+            frame("""{"type":"team_inbox","teamName":"s1","agent":"tester","messages":[{"from":"team-lead","text":"go","timestamp":"2026-10-25T08:00:00Z"}]}"""),
+        ).single() as ChatEffect.TeamMessages
+        assertEquals(listOf("go"), inbox.messages.map { it.text })
+        chat.handle(frame("""{"type":"session_state","phase":"streaming","pendingApproval":null}"""))
+        val replay = chat.handle(frame("""{"type":"turn_events","userMessage":"go","streamSeq":3,"events":[{"type":"team_detected","teamName":"s1","streamSeq":3}]}"""))
+        assertTrue(ChatEffect.TeamDetected("s1") in replay)
+        // Nothing of the turn: the snapshot's own question, and no answer.
+        assertEquals(listOf("go"), chat.items.map { it.text })
+        assertNull(chat.live)
+    }
+
+    @Test
     fun `a gap asks for one resync, not one per frame`() {
         val chat = ChatTranscript()
         chat.handle(frame("""{"type":"phase_changed","phase":"thinking"}"""))

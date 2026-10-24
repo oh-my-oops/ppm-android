@@ -82,11 +82,14 @@ sealed interface ChatEvent {
         val bgStatus: String? = null,
         /** An Agent/Task's own events in history, the subagent's calls among them. */
         val children: List<ChatEvent>? = null,
+        /** History: the transcript hub can stream this Agent/Task's session from disk, so its [children] may be slimmed. */
+        val transcriptAvailable: Boolean = false,
     ) : ChatEvent
 
     data class ToolResult(val outcome: ToolOutcome, val toolUseId: String?, val parent: String? = null) : ChatEvent
     data class Approval(val request: ApprovalRequest) : ChatEvent
-    data class Error(val message: String) : ChatEvent
+    /** [parent]: a subagent's error, which belongs to its card rather than the turn. */
+    data class Error(val message: String, val parent: String? = null) : ChatEvent
     /**
      * The turn ended; [lastMessageUuid] is the SDK's id for its last message, [usage] its token
      * split. A subagent's own end names the call that started it in [parent].
@@ -113,7 +116,13 @@ sealed interface ChatEvent {
 
     data class SessionMigrated(val newSessionId: String) : ChatEvent
 
-    /** Anything else (`team_*`, …): not shown yet. */
+    /** The session has an agent team, whose inboxes the server now watches. */
+    data class TeamDetected(val teamName: String) : ChatEvent
+
+    /** Messages that just landed in the inbox of [agent], a member of [teamName]. Live only. */
+    data class TeamInbox(val teamName: String, val agent: String, val messages: List<TeamMessage>) : ChatEvent
+
+    /** Anything else (`team_updated`, …): nothing the chat shows. */
     data class Other(val type: String) : ChatEvent
 
     companion object {
@@ -130,10 +139,11 @@ sealed interface ChatEvent {
                     result = json["result"]?.takeIf { it is JsonObject }?.let(ToolOutcome::from),
                     bgStatus = json["bgStatus"].string,
                     children = json["children"].array?.map(::from),
+                    transcriptAvailable = json["transcriptAvailable"].bool == true,
                 )
                 "tool_result" -> ToolResult(ToolOutcome.from(json), json["toolUseId"].string, parent)
                 "approval_request" -> ApprovalRequest.from(json)?.let(::Approval) ?: Other(type)
-                "error" -> Error(json["message"].string ?: "Unknown error")
+                "error" -> Error(json["message"].string ?: "Unknown error", parent)
                 "done" -> Done(json["lastMessageUuid"].string, TurnUsage.from(json["usage"]), parent)
                 "account_retry" -> AccountRetry(json["reason"].string, json["accountLabel"].string, json["accountId"].string)
                 "status_update" -> StatusUpdate(json["message"].string ?: "", json["accountLabel"].string)
@@ -147,6 +157,10 @@ sealed interface ChatEvent {
                     ?.let { BashOutput(it, json["content"].string ?: "", json["lineCount"].int ?: 0) }
                     ?: Other(type)
                 "session_migrated" -> json["newSessionId"].string?.let(::SessionMigrated) ?: Other(type)
+                "team_detected" -> json["teamName"].string?.takeIf { it.isNotEmpty() }?.let(::TeamDetected) ?: Other(type)
+                "team_inbox" -> json["messages"].array
+                    ?.let { TeamInbox(json["teamName"].string.orEmpty(), json["agent"].string.orEmpty(), it.mapNotNull(TeamMessage::from)) }
+                    ?: Other(type)
                 else -> Other(type)
             }
         }

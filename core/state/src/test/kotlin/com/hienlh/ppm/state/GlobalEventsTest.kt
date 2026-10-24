@@ -1,6 +1,8 @@
 package com.hienlh.ppm.state
 
 import com.hienlh.ppm.client.ApiClient
+import com.hienlh.ppm.protocol.AgentRunningEntry
+import com.hienlh.ppm.protocol.AgentTranscriptFrame
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionTag
 import com.hienlh.ppm.protocol.SessionUnread
@@ -68,6 +70,30 @@ class GlobalEventsTest {
         assertEquals(emptySet<String>(), e.running.value)
         e.handle(json("""{"type":"file:changed","projectName":"app","path":"a.ts"}"""))
         assertEquals(emptySet<String>(), e.running.value)
+    }
+
+    @Test
+    fun `agent frames reach whoever listens, and nothing is sent before the socket is ready`() {
+        val e = events()
+        val frames = mutableListOf<AgentTranscriptFrame>()
+        var readies = 0
+        val stopFrames = e.onAgentFrame { frames += it }
+        e.onGlobalReady { readies++ }
+        assertEquals(false, e.sendIfOpen("""{"type":"agent-activity:subscribe"}"""))
+        e.handle(json("""{"type":"agent-activity","subId":"aa-1","running":[{"memberName":"tester","lastWriteAt":5}]}"""))
+        e.handle(json("""{"type":"agent-transcript:error","subId":"ats-1","code":"limit"}"""))
+        assertEquals(
+            listOf(
+                AgentTranscriptFrame.Activity("aa-1", listOf(AgentRunningEntry(null, "tester", 5, null))),
+                AgentTranscriptFrame.Error("ats-1", "limit"),
+            ),
+            frames,
+        )
+        stopFrames()
+        e.handle(json("""{"type":"agent-transcript:error","subId":"ats-1","code":"limit"}"""))
+        assertEquals(2, frames.size)
+        e.handle(json("""{"type":"global_ready"}"""))
+        assertEquals(1, readies)
     }
 
     @Test

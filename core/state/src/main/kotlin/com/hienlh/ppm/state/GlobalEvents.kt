@@ -3,6 +3,7 @@ package com.hienlh.ppm.state
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.SocketConnection
 import com.hienlh.ppm.client.markUnread
+import com.hienlh.ppm.protocol.AgentTranscriptFrame
 import com.hienlh.ppm.protocol.SessionUnread
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.bool
@@ -33,7 +34,7 @@ class GlobalEvents(
     private val api: ApiClient,
     parent: CoroutineScope,
     private val clock: () -> Long = System::currentTimeMillis,
-) {
+) : GlobalChannel {
     private val _isConnected = MutableStateFlow(false)
 
     /** Up and told which project to watch (after `global_ready`). */
@@ -84,6 +85,8 @@ class GlobalEvents(
     var onIndexChanged: ((project: String) -> Unit)? = null
 
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
+    private val readyListeners = LinkedHashSet<() -> Unit>()
+    private val agentListeners = LinkedHashSet<(AgentTranscriptFrame) -> Unit>()
     private var socket: SocketConnection? = null
 
     /** Reads the socket, or waits to connect again. */
@@ -155,6 +158,25 @@ class GlobalEvents(
         if (!entry.manual) markRead(sessionId)
     }
 
+    // GlobalChannel
+
+    override fun sendIfOpen(text: String): Boolean {
+        val socket = socket
+        if (!_isConnected.value || socket == null) return false
+        socket.send(text)
+        return true
+    }
+
+    override fun onGlobalReady(listener: () -> Unit): () -> Unit {
+        readyListeners += listener
+        return { readyListeners -= listener }
+    }
+
+    override fun onAgentFrame(listener: (AgentTranscriptFrame) -> Unit): () -> Unit {
+        agentListeners += listener
+        return { agentListeners -= listener }
+    }
+
     // Frames
 
     internal fun handle(frame: JsonElement) {
@@ -166,6 +188,7 @@ class GlobalEvents(
                 syncRunning()
                 loadUnread()
                 onReady?.invoke()
+                readyListeners.toList().forEach { it() }
             }
             "session:unread_changed" -> applyUnread(frame)
             "session:phase_changed" -> {
@@ -177,6 +200,8 @@ class GlobalEvents(
             "git:changed" -> frame["projectName"].string?.let { onGitChanged?.invoke(it) }
             "file:changed" -> frame["projectName"].string?.let { onFileChanged?.invoke(it) }
             "files:index-changed" -> frame["projectName"].string?.let { onIndexChanged?.invoke(it) }
+            "agent-transcript:events", "agent-transcript:error", "agent-activity" ->
+                AgentTranscriptFrame.from(frame)?.let { agent -> agentListeners.toList().forEach { it(agent) } }
         }
     }
 

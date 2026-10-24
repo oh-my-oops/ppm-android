@@ -2,6 +2,8 @@ package com.hienlh.ppm.state
 
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.SocketConnection
+import com.hienlh.ppm.client.teamMessages
+import com.hienlh.ppm.client.teams
 import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ChatEvent
@@ -29,6 +31,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
+import java.time.Instant
 
 /** Everything one chat shows, as one value the UI collects. */
 data class ChatState(
@@ -38,6 +41,8 @@ data class ChatState(
     val items: List<ChatItem> = emptyList(),
     /** The blocks of the assistant message being streamed. */
     val live: List<ChatBlock>? = null,
+    /** When [live] got its first event. */
+    val liveStartedAt: Instant? = null,
     val phase: SessionPhase = SessionPhase.IDLE,
     val pendingApproval: ApprovalRequest? = null,
     val turnStop: TurnStop? = null,
@@ -67,9 +72,17 @@ data class ChatState(
     val promptCache: PromptCacheState? = null,
     /** The account the stream last said a turn runs on (`liveAccount`): an `account_info`, or a retry moved onto another. */
     val liveAccount: PickedAccount? = null,
+    /** The session's agent teams and what their inboxes received. */
+    val team: TeamActivity = TeamActivity(),
 ) {
     val isRunning: Boolean get() = phase.isRunning
     val canSend: Boolean get() = connection == ChatController.Connection.Connected
+
+    /** [items] with the turn being streamed after them as one more message, as the web's list holds it. */
+    fun itemsWithLive(): List<ChatItem> {
+        val blocks = live ?: return items
+        return items + ChatItem("live", ChatItem.Role.ASSISTANT, blocks, liveStartedAt)
+    }
 }
 
 /**
@@ -115,6 +128,7 @@ class ChatController(
     private var tasksAskedFor: Pair<String, Int>? = null
     private var tasksJob: Job? = null
     private var liveAccount: PickedAccount? = null
+    private var team = TeamActivity()
     private var socket: SocketConnection? = null
     private var lastFrameAt = clock()
     private var closeReason: String? = null
@@ -153,7 +167,9 @@ class ChatController(
         scope.launch {
             // History first: a snapshot arriving before it would be merged into nothing.
             loadInitialHistory()
-            if (!stopped) connect()
+            if (stopped) return@launch
+            connect()
+            rehydrateTeam()
         }
     }
 
@@ -213,6 +229,12 @@ class ChatController(
 
     fun takeRejected() {
         transcript.takeRejected()
+        publish()
+    }
+
+    /** `markTeamRead`: the team panel was opened. */
+    fun markTeamRead() {
+        team = team.read()
         publish()
     }
 
@@ -344,7 +366,51 @@ class ChatController(
                 is ChatEffect.Send -> socket?.send(effect.message.json.toString())
                 ChatEffect.ReloadHistory -> reloadHistory()
                 is ChatEffect.AdoptSessionId -> sessionId = effect.id
+                is ChatEffect.TeamDetected -> {
+                    team = team.withTeam(effect.name)
+                    // Every time, a replay's too: inbox pushes are never replayed, so this is what
+                    // brings back the messages a dropped connection missed.
+                    loadTeamMessages(effect.name)
+                }
+                is ChatEffect.TeamMessages -> team = team.received(effect.messages)
             }
+        }
+    }
+
+    // Team
+
+    /**
+     * The team named after this session, read back from disk: `team_detected` is only ever live,
+     * and its replay ends with the turn, so a reopened chat would lose a team still at work.
+     * Only that name: nothing on disk ties any other team to a session.
+     */
+    private suspend fun rehydrateTeam() {
+        val session = sessionId ?: return
+        val found = try {
+            api.teams().any { it.name == session }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return
+        }
+        if (!found || stopped) return
+        team = team.withTeam(session)
+        publish()
+        loadTeamMessages(session)
+    }
+
+    private fun loadTeamMessages(name: String) {
+        scope.launch {
+            val messages = try {
+                api.teamMessages(name)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Deleted, or unreadable mid-write.
+                return@launch
+            }
+            team = team.merged(messages)
+            publish()
         }
     }
 
@@ -438,6 +504,7 @@ class ChatController(
             providerId = providerId,
             items = transcript.shown,
             live = transcript.live?.blocks,
+            liveStartedAt = transcript.live?.let { Instant.ofEpochMilli(transcript.liveStartedAt) },
             phase = transcript.phase,
             pendingApproval = transcript.pendingApproval,
             turnStop = transcript.turnStop,
@@ -460,6 +527,7 @@ class ChatController(
             thinking = settings.thinking,
             promptCache = settings.promptCache,
             liveAccount = liveAccount,
+            team = team,
         )
     }
 
