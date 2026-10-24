@@ -1,5 +1,8 @@
 package com.hienlh.ppm.chat
 
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -29,10 +32,14 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.layout.IntrinsicMeasurable
@@ -43,6 +50,7 @@ import androidx.compose.ui.layout.MeasurePolicy
 import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.AnnotatedString
@@ -51,6 +59,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -249,6 +258,7 @@ private fun InlineText(text: AnnotatedString, style: MarkdownStyle, modifier: Mo
     val boxes = remember(text) { text.getStringAnnotations(CODE_BOX, 0, text.length) }
     val files = remember(text) { text.getStringAnnotations(FILE_CODE, 0, text.length) }
     val color = (style.color ?: tokens.text).color
+    val fonts = LocalFontFamilyResolver.current
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     BasicText(
         text,
@@ -258,7 +268,7 @@ private fun InlineText(text: AnnotatedString, style: MarkdownStyle, modifier: Mo
             modifier.drawBehind {
                 layout?.let {
                     drawCodeBoxes(it, boxes, tokens)
-                    drawDottedUnderlines(it, files, color)
+                    drawDottedUnderlines(it, files, color, fonts)
                 }
             }
         },
@@ -418,15 +428,20 @@ private fun DrawScope.drawCodeBoxes(layout: TextLayoutResult, boxes: List<Annota
 /**
  * `MdCode`'s `text-decoration: underline dotted` under a file's code, as Chrome draws it: a tenth
  * of the code's size thick, in square dots that long with gaps as long from where the code's text
- * starts on each line, through any glyph in the way. It starts under the baseline by half its
- * thickness rounded up to a whole CSS pixel, one, then snapped to a device pixel, and is centred
- * on the whole device pixels below that.
+ * starts on each line. It starts under the baseline by half its thickness rounded up to a whole
+ * CSS pixel, one, then snapped to a device pixel, and is centred on the whole device pixels below
+ * that. Where a glyph's ink crosses it, it is left out (`text-decoration-skip-ink: auto`).
  */
-private fun DrawScope.drawDottedUnderlines(layout: TextLayoutResult, codes: List<AnnotatedString.Range<String>>, color: Color) {
+private fun DrawScope.drawDottedUnderlines(layout: TextLayoutResult, codes: List<AnnotatedString.Range<String>>, color: Color, fonts: FontFamily.Resolver) {
+    if (codes.isEmpty()) return
     val css = INLINE_CODE_SIZE / 10f
     val thickness = css.sp.toPx()
     val dot = thickness.roundToInt().coerceAtLeast(1).toFloat()
     val gap = ceil(css / 2f).sp.toPx()
+    val glyphs = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = fonts.resolve(PpmFonts.mono).value as Typeface
+        textSize = INLINE_CODE_SIZE.sp.toPx()
+    }
     for (code in codes) {
         val first = layout.getLineForOffset(code.start)
         val last = layout.getLineForOffset(code.end - 1)
@@ -435,14 +450,45 @@ private fun DrawScope.drawDottedUnderlines(layout: TextLayoutResult, codes: List
             val end = minOf(code.end, layout.getLineEnd(line, visibleEnd = true))
             if (end <= start) continue
             val right = layout.getBoundingBox(end - 1).right
-            val top = (layout.getLineBaseline(line) + gap).roundToInt() + (dot - thickness) / 2
-            var x = floor(layout.getBoundingBox(start).left)
-            while (x < right) {
-                drawRect(color, Offset(x, top), Size(minOf(dot, right - x), thickness))
-                x += 2 * dot
+            val baseline = layout.getLineBaseline(line)
+            val top = (baseline + gap).roundToInt() + (dot - thickness) / 2
+            // Chrome measures the ink against the line a stroke [dot] wide would cover, which sits
+            // half a pixel up when its width truncates to an odd number, less half a pixel at the
+            // top and at the bottom.
+            val middle = top + thickness / 2 - if (thickness.toInt() % 2 == 1) 0.5f else 0f
+            val skips = inkSkips(layout, start, end, baseline, glyphs, middle - dot / 2 + 0.5f, middle + dot / 2 - 0.5f, thickness)
+            clipPath(skips, ClipOp.Difference) {
+                var x = floor(layout.getBoundingBox(start).left)
+                while (x < right) {
+                    drawRect(color, Offset(x, top), Size(minOf(dot, right - x), thickness))
+                    x += 2 * dot
+                }
             }
         }
     }
+}
+
+/**
+ * What Chrome leaves out of an underline under the characters from [start] to [end], set in
+ * [glyphs] on [baseline] (`ClipDecorationsStripe`): over each glyph's ink between [upper] and
+ * [lower], and [dilation] further either side and a pixel above and below, in whole pixels.
+ */
+private fun inkSkips(layout: TextLayoutResult, start: Int, end: Int, baseline: Float, glyphs: Paint, upper: Float, lower: Float, dilation: Float): Path {
+    val text = layout.layoutInput.text.text
+    val band = android.graphics.Path()
+    band.addRect(layout.getBoundingBox(start).left - glyphs.textSize, upper, layout.getBoundingBox(end - 1).right + glyphs.textSize, lower, android.graphics.Path.Direction.CW)
+    val glyph = android.graphics.Path()
+    val ink = RectF()
+    val skips = Path()
+    for (index in start until end) {
+        glyphs.getTextPath(text, index, index + 1, layout.getBoundingBox(index).left, baseline, glyph)
+        if (!glyph.op(band, android.graphics.Path.Op.INTERSECT) || glyph.isEmpty) continue
+        glyph.computeBounds(ink, true)
+        val left = (ink.left - dilation).roundToInt().toFloat()
+        val right = (ink.right + dilation).roundToInt().toFloat()
+        skips.addRect(Rect(left, (upper - 1).roundToInt().toFloat(), right, (lower + 1).roundToInt().toFloat()))
+    }
+    return skips
 }
 
 @Composable
