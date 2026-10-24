@@ -54,6 +54,25 @@ fun rememberCssExact(): CssExact = remember { CssExact() }
 fun Modifier.cssExact(exact: CssExact): Modifier = this then CssExactElement(exact, reads = false)
 
 /**
+ * Tells a box laid out in a [CssColumn] where in its first pixel it starts ([cssPhase], read as it
+ * measures), and measures it again whenever that changes: what it places inside rounds from its
+ * exact place, as Chrome rounds each box, not from the pixel the box was put on.
+ */
+fun Modifier.cssPhased(exact: CssExact): Modifier = this then CssExactElement(exact, reads = true)
+
+/** Where in its first pixel a [cssPhased] box starts, from -0.5 to 0.5: read as the box measures. */
+fun CssExact.cssPhase(): Float {
+    measuredPhase = phase
+    return phase
+}
+
+/** Tells the [CssColumn] around a [cssPhased] box that it is [height] px tall exactly, though it measured [measured]. */
+fun CssExact.cssReport(height: Float, measured: Int) {
+    this.height = height
+    reported = measured
+}
+
+/**
  * A column laid out as Chrome stacks blocks: each child [gap] under the last and [top] / [bottom]
  * inside its edges, all kept in fractions of a pixel, and each child put on the whole pixel its
  * exact place rounds to. A child that knows its exact height ([cssLines], [cssHeight], another

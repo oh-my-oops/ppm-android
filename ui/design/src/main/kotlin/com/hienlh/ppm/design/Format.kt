@@ -68,6 +68,17 @@ object PpmFormat {
         return DateTimeFormatter.ofPattern(pattern, locale).withZone(ZoneId.systemDefault()).format(date).replace('\u202F', ' ')
     }
 
+    /**
+     * `toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })`: "09:05:07 PM",
+     * the hour in two figures, as V8 asks ICU for it (`UDATPG_MATCH_HOUR_FIELD_LENGTH`).
+     */
+    fun twoDigitTimeOfDay(date: Instant): String {
+        val locale = Locale.getDefault()
+        val pattern = android.icu.text.DateTimePatternGenerator.getInstance(locale)
+            .getBestPattern("jjmmss", android.icu.text.DateTimePatternGenerator.MATCH_HOUR_FIELD_LENGTH)
+        return DateTimeFormatter.ofPattern(pattern, locale).withZone(ZoneId.systemDefault()).format(date).replace(' ', ' ')
+    }
+
     /** `toLocaleDateString()`: the date in figures in the device's locale ("10/24/2026"). */
     fun numericDate(date: Instant): String {
         val locale = Locale.getDefault()
