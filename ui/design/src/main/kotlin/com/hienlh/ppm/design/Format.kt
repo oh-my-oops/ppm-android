@@ -61,6 +61,20 @@ object PpmFormat {
         return DateTimeFormatter.ofPattern(pattern, locale).withZone(ZoneId.systemDefault()).format(date)
     }
 
+    /** `toLocaleTimeString()`: the time to the second in the device's locale ("10:02:00 AM"), with Chrome's plain space before "AM". */
+    fun timeOfDay(date: Instant): String {
+        val locale = Locale.getDefault()
+        val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, "jms")
+        return DateTimeFormatter.ofPattern(pattern, locale).withZone(ZoneId.systemDefault()).format(date).replace('\u202F', ' ')
+    }
+
+    /** `toLocaleDateString()`: the date in figures in the device's locale ("10/24/2026"). */
+    fun numericDate(date: Instant): String {
+        val locale = Locale.getDefault()
+        val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, "yMd")
+        return DateTimeFormatter.ofPattern(pattern, locale).withZone(ZoneId.systemDefault()).format(date)
+    }
+
     /**
      * `getProjectInitials` (src/web/lib/project-avatar.ts): one letter when it is unique among the
      * projects, two when that is, else the project's 1-based position.

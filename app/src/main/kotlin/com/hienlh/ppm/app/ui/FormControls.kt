@@ -120,6 +120,8 @@ import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderInset
 import com.hienlh.ppm.design.cssBorderPx
+import com.hienlh.ppm.design.cssHeight
+import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -135,7 +137,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** Tailwind's `shadow-xs`. */
-private val ShadowXs = ThemeShadow(0.0, 1.0, 2.0, 0.0, Rgba(0.0, 0.0, 0.0, 0.05))
+internal val ShadowXs = ThemeShadow(0.0, 1.0, 2.0, 0.0, Rgba(0.0, 0.0, 0.0, 0.05))
 
 /** Tailwind's `shadow-sm`, by its larger layer. */
 private val ShadowSm = ThemeShadow(0.0, 1.0, 3.0, 0.0, Rgba(0.0, 0.0, 0.0, 0.1))
@@ -157,7 +159,7 @@ fun FieldLabel(text: String, modifier: Modifier = Modifier, target: LabelTarget?
     val tokens = LocalPpmTokens.current
     BasicText(
         text,
-        if (target == null) modifier else modifier.clickable(interactionSource = null, indication = null) { target.activate() },
+        (if (target == null) modifier else modifier.clickable(interactionSource = null, indication = null) { target.activate() }).cssLines(16.5f),
         style = ppmText(11f, FontWeight.Medium, lineHeight = 16.5f).copy(color = tokens.text.color),
     )
 }
@@ -166,7 +168,7 @@ fun FieldLabel(text: String, modifier: Modifier = Modifier, target: LabelTarget?
 @Composable
 fun HelpText(text: String, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
-    BasicText(text, modifier, style = ppmText(9f, lineHeight = 13.5f).copy(color = tokens.text2.color))
+    BasicText(text, modifier.cssLines(13.5f), style = ppmText(9f, lineHeight = 13.5f).copy(color = tokens.text2.color))
 }
 
 /** One choice of a select: what is saved, and what it says. */
@@ -198,11 +200,10 @@ fun SelectField(
     // `dark:bg-input/30 dark:hover:bg-input/50`, not among the colours it transitions.
     val hover = rememberHover(enabled = enabled, instant = true)
     val chosen = options.firstOrNull { it.value == value }
-    Box(modifier.onGloballyPositioned { bounds[0] = it.boundsInWindow() }) {
+    Box(modifier.cssHeight(36.dp).onGloballyPositioned { bounds[0] = it.boundsInWindow() }) {
         Row(
             Modifier
-                .fillMaxWidth()
-                .height(36.dp)
+                .fillMaxSize()
                 .alpha(if (enabled) 1f else 0.5f)
                 .ppmShadow(ShadowXs, shape)
                 .clip(shape)
@@ -538,7 +539,7 @@ fun FormInput(
     Box(
         modifier
             .fillMaxWidth()
-            .height(height)
+            .cssHeight(height)
             .clip(shape)
             .background(tokens.panel.color)
             .cssBorder((if (focused) tokens.accent else tokens.border).color, shape)
@@ -560,7 +561,7 @@ fun FormInput(
                     decorator = { field ->
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (state.text.isEmpty()) {
-                                BasicText(placeholder, style = style.copy(color = tokens.text2.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                BasicText(placeholder, style = style.copy(color = tokens.text2.color), softWrap = false, maxLines = 1, overflow = TextOverflow.Clip)
                             }
                             field()
                         }
@@ -585,6 +586,7 @@ fun FormInput(
                     inputTransformation = if (kind == InputKind.Url) null else NumberCharacters,
                     focusRequester = focus,
                     onFocusChanged = ::focusChanged,
+                    placeholderOverflow = TextOverflow.Clip,
                 )
             }
         }
@@ -628,7 +630,7 @@ fun FormTextArea(
     Box(
         modifier
             .fillMaxWidth()
-            .height(with(density) { height.toDp() })
+            .cssHeight(with(density) { height.toDp() })
             .drawBehind {
                 if (!focused) return@drawBehind
                 val radius = 8.dp.toPx()
@@ -735,7 +737,7 @@ fun NativeSelect(
     Box(
         modifier
             .fillMaxWidth()
-            .height(if (wide) 28.dp else 44.dp)
+            .cssHeight(if (wide) 28.dp else 44.dp)
             .alpha(if (enabled) 1f else 0.5f)
             .drawBehind {
                 if (!focused) return@drawBehind

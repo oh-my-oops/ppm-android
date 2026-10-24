@@ -99,7 +99,7 @@ private fun StringBuilder.writePretty(value: JsonElement, indent: String) {
 }
 
 /** A number as JavaScript prints it: no `.0` on whole numbers, exponents only past 1e21 or under 1e-6. */
-internal fun jsNumber(value: Double?): String {
+fun jsNumber(value: Double?): String {
     if (value == null || !value.isFinite()) return "null"
     if (value == 0.0) return "0"
     val magnitude = abs(value)

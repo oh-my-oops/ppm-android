@@ -176,12 +176,15 @@ private class PressPoint {
     var offset = Offset.Zero
 }
 
-/** `ProviderBadge`: the provider's logo at 16px, or a "?" square for one with none. */
+/**
+ * `ProviderBadge`: the provider's logo at 16px, or a "?" square for one with none. Cursor's is
+ * drawn in [foreground], the text colour around it (`currentColor`).
+ */
 @Composable
-fun ProviderBadge(providerId: String, size: Dp = 16.dp) {
+fun ProviderBadge(providerId: String, size: Dp = 16.dp, foreground: Color = LocalPpmTokens.current.text.color) {
     val tokens = LocalPpmTokens.current
     if (ProviderLogos.has(providerId)) {
-        ProviderLogo(providerId, size, tokens.text.color)
+        ProviderLogo(providerId, size, foreground)
     } else {
         Box(
             Modifier.size(size).clip(RoundedCornerShape(4.dp)).background(tokens.panel2.color),
@@ -271,9 +274,11 @@ fun PpmTextField(
     inputTransformation: InputTransformation? = null,
     focusRequester: FocusRequester? = null,
     onFocusChanged: (Boolean) -> Unit = {},
+    placeholderOverflow: TextOverflow = TextOverflow.Ellipsis,
 ) {
     val tokens = LocalPpmTokens.current
     val style = desktopStyle?.takeUnless { LocalPpmMobile.current } ?: style
+    val multiline = lineLimits is TextFieldLineLimits.MultiLine
     BasicTextField(
         state = state,
         modifier = modifier
@@ -287,9 +292,16 @@ fun PpmTextField(
         lineLimits = lineLimits,
         inputTransformation = inputTransformation,
         decorator = { field ->
-            Box(contentAlignment = Alignment.CenterStart) {
+            // A textarea's text and placeholder start at its top and wrap; an input's sit in its
+            // middle on one line, cut at its edge as Chrome cuts it unless told otherwise.
+            Box(contentAlignment = if (multiline) Alignment.TopStart else Alignment.CenterStart) {
                 if (state.text.isEmpty()) {
-                    BasicText(placeholder, style = style.copy(color = placeholderColor ?: tokens.text3.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val placeholderStyle = style.copy(color = placeholderColor ?: tokens.text3.color)
+                    when {
+                        multiline -> BasicText(placeholder, style = placeholderStyle)
+                        placeholderOverflow == TextOverflow.Clip -> BasicText(placeholder, style = placeholderStyle, softWrap = false, maxLines = 1, overflow = TextOverflow.Clip)
+                        else -> BasicText(placeholder, style = placeholderStyle, maxLines = 1, overflow = placeholderOverflow)
+                    }
                 }
                 field()
             }

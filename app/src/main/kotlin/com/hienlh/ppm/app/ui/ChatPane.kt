@@ -303,8 +303,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                         panel = if (panel == which) null else which
                     }
                     ChatToolbar(
-                        model, tab, chat, state, panel == ToolbarPanel.History, narrow,
-                        toggleHistory = { toggle(ToolbarPanel.History) },
+                        model, tab, chat, state, panel, narrow,
+                        toggle = ::toggle,
                         usageChip = if (isClaude || tab.providerId == "codex") {
                             {
                                 UsageChip(usage?.usage ?: UsageInfo(), pickedLabel, pickedAccountId, panel == ToolbarPanel.Usage, narrow) {
@@ -317,6 +317,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     )
                     val list = tab.historyList
                     if (panel == ToolbarPanel.History && list != null) ChatHistoryDropdown(model, tab, list) { panel = null }
+                    if (panel == ToolbarPanel.Config) AiSettingsPanel(model)
                     if (panel == ToolbarPanel.Usage && (isClaude || tab.providerId == "codex")) {
                         val shown = usage?.usage ?: UsageInfo()
                         val selectAccount: (suspend (String, String?) -> String?)? = if (!tab.providerPending && !tab.firstSendPending) {
@@ -470,15 +471,16 @@ private fun GateButton(label: String, style: TextStyle, onClick: () -> Unit) {
 }
 
 /** The panel the toolbar has open under it; one at a time. */
-private enum class ToolbarPanel { History, Usage }
+private enum class ToolbarPanel { History, Config, Usage }
 
 /** `border-t` or `border-b`. */
 fun Modifier.line(top: Boolean, color: Color): Modifier = cssBorder(color, sides = if (top) CssSides.Top else CssSides.Bottom)
 
 /**
- * The row over the message box (`chat-history-bar.tsx`): History and the usage chip on the left,
- * scrolling sideways when they run out of room; on the right the reload button with the connection
- * dot, then the overflow menu. AI settings are left out until this app has them.
+ * The row over the message box (`chat-history-bar.tsx`): History, AI settings and the usage chip
+ * on the left, scrolling sideways when they run out of room; on the right the reload button with
+ * the connection dot, then the overflow menu. AI settings show the chat's provider once it has a
+ * session, else a gear.
  */
 @Composable
 private fun ChatToolbar(
@@ -486,9 +488,9 @@ private fun ChatToolbar(
     tab: ChatTab,
     chat: ChatController,
     state: ChatState,
-    historyOpen: Boolean,
+    panel: ToolbarPanel?,
     narrow: Boolean,
-    toggleHistory: () -> Unit,
+    toggle: (ToolbarPanel) -> Unit,
     usageChip: (@Composable () -> Unit)?,
 ) {
     Row(
@@ -501,7 +503,15 @@ private fun ChatToolbar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            ToolbarChip(ProductIcon.History, if (narrow) null else "History", active = historyOpen, onClick = toggleHistory)
+            ToolbarChip(ProductIcon.History, if (narrow) null else "History", active = panel == ToolbarPanel.History) { toggle(ToolbarPanel.History) }
+            val provider = tab.providerId
+            if (tab.session != null && provider.isNotEmpty() && provider != "mock") {
+                ToolbarChip(if (narrow) null else capitalized(provider), active = panel == ToolbarPanel.Config, onClick = { toggle(ToolbarPanel.Config) }) { color ->
+                    ProviderBadge(provider, foreground = color)
+                }
+            } else {
+                SettingsGearButton(active = panel == ToolbarPanel.Config) { toggle(ToolbarPanel.Config) }
+            }
             usageChip?.invoke()
         }
         Row(Modifier.padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -512,12 +522,18 @@ private fun ChatToolbar(
     }
 }
 
+@Composable
+private fun ToolbarChip(icon: ProductIcon, title: String?, active: Boolean, onClick: () -> Unit) =
+    ToolbarChip(title, active, onClick) { color ->
+        Box(Modifier.size(12.dp, 16.5.dp), contentAlignment = Alignment.Center) { PpmIcon(icon, 12.dp, color) }
+    }
+
 /**
  * `px-1.5 py-0.5 rounded text-[11px]`, accent-tinted while its panel is open, and otherwise
- * `hover:text-foreground hover:bg-surface-elevated`.
+ * `hover:text-foreground hover:bg-surface-elevated`; [leading] is drawn in the chip's colour.
  */
 @Composable
-private fun ToolbarChip(icon: ProductIcon, title: String?, active: Boolean, onClick: () -> Unit) {
+private fun ToolbarChip(title: String?, active: Boolean, onClick: () -> Unit, leading: @Composable (Color) -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(4.dp)
     val hover = rememberHover(enabled = !active)
@@ -537,8 +553,35 @@ private fun ToolbarChip(icon: ProductIcon, title: String?, active: Boolean, onCl
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Box(Modifier.size(12.dp, 16.5.dp), contentAlignment = Alignment.Center) { PpmIcon(icon, 12.dp, color.color) }
+        leading(color.color)
         if (title != null) BasicText(title, style = ppmText(11f, lineHeight = 16.5f).copy(color = color.color))
+    }
+}
+
+/**
+ * AI settings before a chat has a provider of its own (`p-1 rounded`, a 12 px gear): accent-tinted
+ * while open, else `text-text-subtle hover:text-text-secondary hover:bg-surface-elevated`.
+ */
+@Composable
+private fun SettingsGearButton(active: Boolean, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(4.dp)
+    val hover = rememberHover(enabled = !active)
+    val color = if (active) tokens.accent else tokens.text2.mix(tokens.text3, hover.lit.toDouble())
+    Box(
+        Modifier
+            .clip(shape)
+            .background(if (active) tokens.accent.opacity(0.1).color else Color.Transparent)
+            .ppmClickable(
+                pressedColor = tokens.panel2.color,
+                hoverColor = if (active) Color.Transparent else tokens.panel2.color,
+                shape = shape,
+                source = hover.source,
+                onClick = onClick,
+            )
+            .padding(4.dp),
+    ) {
+        PpmIcon(ProductIcon.Settings2, 12.dp, color.color)
     }
 }
 
