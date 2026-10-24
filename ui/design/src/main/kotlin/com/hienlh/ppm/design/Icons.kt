@@ -42,7 +42,7 @@ private val vectors = ConcurrentHashMap<ProductIcon, ImageVector>()
 val ProductIcon.vector: ImageVector
     get() = vectors.getOrPut(this) {
         ImageVector.Builder(name = name, defaultWidth = 20.dp, defaultHeight = 20.dp, viewportWidth = 20f, viewportHeight = 20f)
-            .apply { for (d in pathData) addPath(addPathNodes(d), fill = SolidColor(Color.Black)) }
+            .apply { for (d in pathData) addPath(addPathNodes(separateArcFlags(d)), fill = SolidColor(Color.Black)) }
             .build()
     }
 
@@ -55,7 +55,7 @@ val LucideIcon.vector: ImageVector
             .apply {
                 for (d in pathData) {
                     addPath(
-                        addPathNodes(d),
+                        addPathNodes(separateArcFlags(d)),
                         stroke = SolidColor(Color.Black),
                         strokeLineWidth = 2f,
                         strokeLineCap = StrokeCap.Round,
@@ -95,6 +95,50 @@ private fun VectorIcon(vector: ImageVector, size: Dp, tint: Color, modifier: Mod
     Box(base.paint(painter, contentScale = ContentScale.Fit, colorFilter = ColorFilter.tint(tint)))
 }
 
+/**
+ * [d] with each arc's two flags set apart from their neighbours. SVG lets a flag run into what
+ * follows it (`0 00.04.155` is flags 0 and 0, then .04 and .155; `0 01-.017` is flags 0 and 1,
+ * then -.017), and Compose's parser reads some of those as numbers, which shifts every argument
+ * after them — the Codex mark grew a stray lobe. Only the spacing changes.
+ */
+internal fun separateArcFlags(d: String): String {
+    val out = StringBuilder(d.length + 32)
+    var command = ' '
+    var arg = 0
+    var i = 0
+    while (i < d.length) {
+        val c = d[i]
+        when {
+            c.isLetter() -> { command = c; arg = 0; out.append(c); i++ }
+            c == ',' || c.isWhitespace() -> i++
+            else -> {
+                val end = if ((command == 'a' || command == 'A') && arg % 7 in 3..4) i + 1 else svgNumberEnd(d, i)
+                out.append(' ').append(d, i, end)
+                arg++
+                i = end
+            }
+        }
+    }
+    return out.toString()
+}
+
+/** Where the number at [start] ends: a sign, digits with at most one point, an exponent. */
+private fun svgNumberEnd(d: String, start: Int): Int {
+    var i = start
+    if (d[i] == '+' || d[i] == '-') i++
+    var point = false
+    while (i < d.length) {
+        val c = d[i]
+        when {
+            c.isDigit() -> i++
+            c == '.' && !point -> { point = true; i++ }
+            c == 'e' || c == 'E' -> { point = true; i++; if (i < d.length && (d[i] == '+' || d[i] == '-')) i++ }
+            else -> break
+        }
+    }
+    return maxOf(i, start + 1)
+}
+
 /** The AI providers' own logos, as the web draws them (src/web/lib/provider-logos.tsx). */
 object ProviderLogos {
     /** Providers with artwork; others get the lettered tile. */
@@ -111,7 +155,7 @@ object ProviderLogos {
             else -> return null
         }
         return paths.getOrPut(providerId) {
-            PathParser().parsePathString(d).toPath().apply {
+            PathParser().parsePathString(separateArcFlags(d)).toPath().apply {
                 if (providerId == "codex" || providerId == "cursor") fillType = PathFillType.EvenOdd
             }
         }

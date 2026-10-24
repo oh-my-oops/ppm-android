@@ -82,6 +82,8 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.layout.FirstBaseline
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -147,6 +149,7 @@ import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.PromptCacheStatus
 import com.hienlh.ppm.state.stepHistory
 import kotlin.math.floor
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
@@ -1037,9 +1040,7 @@ private fun ProviderPopover(current: String, providers: List<ProviderInfo>, stat
                 .background(tokens.panel2.over(tokens.bgSolid).color)
                 .cssBorder(tokens.border.color, shape),
         ) {
-            Row(Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Bottom).padding(horizontal = 12.dp, vertical = 8.dp)) {
-                BasicText("Provider", style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color))
-            }
+            ProviderPopoverHeader()
             Column(Modifier.padding(vertical = 4.dp)) {
                 if (providers.isEmpty()) {
                     BasicText(
@@ -1070,6 +1071,25 @@ private fun ProviderPopover(current: String, providers: List<ProviderInfo>, stat
                 }
             }
         }
+    }
+}
+
+/**
+ * "Provider" (`px-3 py-2 border-b`): a block, so its line is the page's 16 px text on 24 px lines,
+ * the label on that line's baseline as Chrome rounds it in device pixels.
+ */
+@Composable
+private fun ProviderPopoverHeader() {
+    val tokens = LocalPpmTokens.current
+    val density = LocalDensity.current.density
+    val (up, down) = PpmFonts.chromeAscentDescent(16f * density, PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT)
+    val baseline = floor((24f * density - up - down) / 2) + up
+    Layout(
+        { BasicText("Provider", style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color)) },
+        Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Bottom).padding(horizontal = 12.dp, vertical = 8.dp).height(24.dp),
+    ) { measurables, constraints ->
+        val label = measurables.first().measure(constraints.copy(minWidth = 0, minHeight = 0))
+        layout(constraints.maxWidth, constraints.maxHeight) { label.place(0, (baseline - label[FirstBaseline]).roundToInt()) }
     }
 }
 

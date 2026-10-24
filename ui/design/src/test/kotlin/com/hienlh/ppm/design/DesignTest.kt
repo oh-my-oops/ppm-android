@@ -64,6 +64,34 @@ class DesignTest {
     }
 
     @Test
+    fun `arc flags that run into the next number are set apart before Compose reads them`() {
+        // Codex's own arcs: without the flags set apart, Compose reads `00.04` as a number.
+        val nodes = addPathNodes(separateArcFlags("M0 0a.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891l1 1"))
+        assertEquals(PathNode.RelativeArcTo(0.167f, 0.167f, 0f, false, false, 0.04f, 0.155f), nodes[1])
+        assertEquals(PathNode.RelativeArcTo(5.982f, 5.982f, 0f, false, true, 1.578f, 2.891f), nodes[2])
+        assertEquals(PathNode.RelativeLineTo(1f, 1f), nodes[3])
+        assertEquals("M 1 2e-1a 1 1 0 0 1 -.5 .5", separateArcFlags("M1,2e-1a1 1 0 01-.5.5"))
+    }
+
+    @Test
+    fun `every provider logo arc is read as the circle its artwork draws`() {
+        // A flag read as a number shifts every argument after it: radii, rotation and count go wrong.
+        val logos = mapOf("claude" to ProviderLogoPaths.CLAUDE, "codex" to ProviderLogoPaths.CODEX, "cursor" to ProviderLogoPaths.CURSOR, "gemini" to ProviderLogoPaths.GEMINI)
+        val counts = logos.mapValues { (id, d) ->
+            val arcs = addPathNodes(separateArcFlags(d)).mapNotNull {
+                when (it) {
+                    is PathNode.RelativeArcTo -> Triple(it.horizontalEllipseRadius, it.verticalEllipseRadius, it.theta)
+                    is PathNode.ArcTo -> Triple(it.horizontalEllipseRadius, it.verticalEllipseRadius, it.theta)
+                    else -> null
+                }
+            }
+            for ((rx, ry, theta) in arcs) assertTrue("$id: $rx $ry $theta", rx > 0f && rx == ry && theta == 0f)
+            arcs.size
+        }
+        assertEquals(mapOf("claude" to 1, "codex" to 24, "cursor" to 6, "gemini" to 13), counts)
+    }
+
+    @Test
     fun `provider logos are there`() {
         for (id in listOf("claude", "codex", "cursor", "gemini")) {
             assertTrue(id, ProviderLogos.has(id))
