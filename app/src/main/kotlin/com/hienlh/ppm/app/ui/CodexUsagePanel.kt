@@ -12,11 +12,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -472,8 +477,11 @@ private val CssEase = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
 /**
  * The web's `Dialog` around `DialogContent className="sm:max-w-sm"` (shadcn): a 50% black
  * backdrop, a card at most 384 wide and 16 in from each side, `rounded-lg border bg-background
- * p-6 shadow-lg`, the title (`text-sm leading-none font-semibold`, clear of the close cross) 16
- * over [content]. It fades in and grows from 95%; it goes at once, as the web unmounts it.
+ * p-6 shadow-lg`, the title (`text-sm font-semibold`, clear of the close cross) 16 over
+ * [content]. The caller's `text-sm` brings its 20 px line, which tailwind-merge lets replace the
+ * title's own `leading-none`; and a bare `border` is Tailwind 4's `currentColor`, the text's
+ * colour, as the web sets no default border colour. It fades in and grows from 95%; it goes at
+ * once, as the web unmounts it.
  */
 @Composable
 private fun WebDialog(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
@@ -486,44 +494,49 @@ private fun WebDialog(title: String, onDismiss: () -> Unit, content: @Composable
         val backdrop = remember { Animatable(0f) }
         val card = remember { Animatable(0f) }
         LaunchedEffect(Unit) { launch { backdrop.animateTo(1f, tween(150, easing = CssEase)) }; card.animateTo(1f, tween(200, easing = CssEase)) }
-        BoxWithConstraints(
+        Box(
             Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.5f * backdrop.value))
                 .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
-            contentAlignment = Alignment.Center,
         ) {
-            val shape = RoundedCornerShape(12.dp)
-            Box(
-                Modifier
-                    .width(minOf(maxWidth - 32.dp, 384.dp))
-                    .graphicsLayer {
-                        alpha = card.value
-                        scaleX = 0.95f + 0.05f * card.value
-                        scaleY = scaleX
-                    }
-                    .then(ShadowLg.fold(Modifier as Modifier) { m, s -> m.ppmShadow(s, shape) })
-                    .clip(shape)
-                    .background(tokens.bgSolid.color)
-                    // A tap on the card stays on it rather than reaching the backdrop.
-                    .pointerInput(Unit) { detectTapGestures {} }
-                    .cssBorder(tokens.border.color, shape),
+            // Centred where the page is, between the system bars, as the web's is in its viewport.
+            BoxWithConstraints(
+                Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout)),
+                contentAlignment = Alignment.Center,
             ) {
-                Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    BasicText(title, Modifier.padding(end = 32.dp), style = ppmText(14f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tokens.text.color))
-                    content()
-                }
-                // `absolute top-4 right-4 opacity-70 hover:opacity-100`, a 16 px cross.
-                val hover = rememberHover()
+                val shape = RoundedCornerShape(12.dp)
                 Box(
                     Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 16.dp, end = 16.dp)
-                        .alpha(0.7f + 0.3f * hover.lit)
-                        .pointerHoverIcon(WebCursor.Pointer)
-                        .ppmClickable(pressedColor = Color.Transparent, source = hover.source, onClickLabel = "Close", onClick = onDismiss),
+                        .width(minOf(maxWidth - 32.dp, 384.dp))
+                        .graphicsLayer {
+                            alpha = card.value
+                            scaleX = 0.95f + 0.05f * card.value
+                            scaleY = scaleX
+                        }
+                        .then(ShadowLg.fold(Modifier as Modifier) { m, s -> m.ppmShadow(s, shape) })
+                        .clip(shape)
+                        .background(tokens.bgSolid.color)
+                        // A tap on the card stays on it rather than reaching the backdrop.
+                        .pointerInput(Unit) { detectTapGestures {} }
+                        .cssBorder(tokens.text.color, shape),
                 ) {
-                    PpmIcon(ProductIcon.X, 16.dp, tokens.text.color)
+                    Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        BasicText(title, Modifier.padding(end = 32.dp), style = ppmText(14f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color))
+                        content()
+                    }
+                    // `absolute top-4 right-4 opacity-70 hover:opacity-100`, a 16 px cross.
+                    val hover = rememberHover()
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 16.dp, end = 16.dp)
+                            .alpha(0.7f + 0.3f * hover.lit)
+                            .pointerHoverIcon(WebCursor.Pointer)
+                            .ppmClickable(pressedColor = Color.Transparent, source = hover.source, onClickLabel = "Close", onClick = onDismiss),
+                    ) {
+                        PpmIcon(ProductIcon.X, 16.dp, tokens.text.color)
+                    }
                 }
             }
         }
