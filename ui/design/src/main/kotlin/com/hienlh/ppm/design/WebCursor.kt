@@ -27,6 +27,12 @@ object WebCursor {
     /** `cursor-zoom-in`, which Chromium hands Android as its own zoom-in icon. */
     val ZoomIn = PointerIcon(android.view.PointerIcon.TYPE_ZOOM_IN)
 
+    /** `cursor-wait`. */
+    val Wait = PointerIcon(android.view.PointerIcon.TYPE_WAIT)
+
+    /** `cursor-help`. */
+    val Help = PointerIcon(android.view.PointerIcon.TYPE_HELP)
+
     /** `cursor-not-allowed`: Chrome's hand with a no-entry sign. */
     val NotAllowed = PointerIcon(android.view.PointerIcon.TYPE_NO_DROP)
 

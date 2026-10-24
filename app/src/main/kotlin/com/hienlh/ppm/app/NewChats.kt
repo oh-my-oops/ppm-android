@@ -19,6 +19,7 @@ import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.ChatPreparationCache
 import com.hienlh.ppm.state.ChatPreparations
 import com.hienlh.ppm.state.PermissionMode
+import com.hienlh.ppm.state.UsageScope
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -99,6 +100,7 @@ internal class NewChats(private val model: AppModel) {
         // Taken now: what it answers belongs to this server, whichever is open by then.
         val cache = model.newChatCache
         val slash = model.slashItems
+        val usages = model.usageCache
         preparations.start(
             tabId,
             request = { bounded(PREPARE_MILLIS, "The server did not answer in time.") { api.prepareChat(project, openedOn, focused, skipPick) } },
@@ -108,9 +110,19 @@ internal class NewChats(private val model: AppModel) {
             preparationCache.seedProviders(project, result.providers)
             result.slash?.let { slash?.seed(it, project, result.providerId) }
             result.tags?.let { model.seedTags(project, it) }
-            if (current) applyPrepared(tabId, result)
+            if (current) {
+                applyPrepared(tabId, result)
+                // `seedUsage`: the chip's first reading, under the scope of the account just picked.
+                result.usage?.let {
+                    val picked = (result.pickedAccount as? AccountPick.Picked)?.account
+                    usages?.seed(UsageScope(project, result.providerId, null, picked?.id), it, it.lastFetchedAt)
+                }
+            }
         }
     }
+
+    /** The tab's preparation on its way or just answered (`getPrepare`), which its usage reading waits on. */
+    fun preparation(tabId: String): Deferred<PreparedChat>? = preparations[tabId]
 
     /** The draft the tab's preparation read for its box; null with none to join, so the draft is asked for. */
     fun preparedDraft(chat: ChatTab): (suspend () -> ChatDraft?)? {

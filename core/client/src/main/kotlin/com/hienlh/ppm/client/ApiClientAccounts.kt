@@ -24,6 +24,14 @@ suspend fun ApiClient.chatUsage(project: String, providerId: String, sessionId: 
     return UsageInfo.from(call("GET", "${chatPath(project)}/usage", query))
 }
 
+/**
+ * `PUT /chat/sessions/:id/account {accountId}`: binds [sessionId] to another account from its next
+ * message. Refused with the server's reason when that account cannot serve it.
+ */
+suspend fun ApiClient.setSessionAccount(project: String, sessionId: String, accountId: String) {
+    call("PUT", "${chatPath(project)}/sessions/${ApiClient.escape(sessionId)}/account", body = buildJsonObject { put("accountId", accountId) })
+}
+
 /** `GET /api/accounts`: every Claude account PPM holds. */
 suspend fun ApiClient.accounts(): List<AccountInfo> = call("GET", "/api/accounts").array.orEmpty().mapNotNull(AccountInfo::from)
 

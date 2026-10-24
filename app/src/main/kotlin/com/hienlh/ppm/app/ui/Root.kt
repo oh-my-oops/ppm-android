@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,7 +36,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -162,6 +167,10 @@ fun PpmRoot(model: AppModel) {
                         mobile -> PhoneShell(model)
                         else -> TabletShell(model)
                     }
+                    model.screenOverlay?.let { overlay ->
+                        // The viewport `fixed inset-0` covers: the app's own area, inside the system bars.
+                        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) { overlay() }
+                    }
                 }
                 if (model.showSignIn) ConnectScreen(model, signIn = true, onCancel = { model.showSignIn = false })
                 if (model.addingServer) ConnectScreen(model, signIn = false, onCancel = { model.addingServer = false })
@@ -259,6 +268,7 @@ private fun ErrorToast(message: ErrorToastMessage?, mobile: Boolean, narrow: Boo
             // The icons PPM gives sonner (components/ui/sonner.tsx).
             val icon = when (shown?.kind) {
                 ErrorToastMessage.Kind.INFO -> ProductIcon.InfoIcon
+                ErrorToastMessage.Kind.SUCCESS -> ProductIcon.CircleCheckIcon
                 ErrorToastMessage.Kind.PLAIN -> null
                 else -> ProductIcon.OctagonXIcon
             }

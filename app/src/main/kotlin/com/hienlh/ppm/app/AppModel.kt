@@ -6,6 +6,7 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -36,6 +37,7 @@ import com.hienlh.ppm.client.rawFile
 import com.hienlh.ppm.client.uploadedFile
 import com.hienlh.ppm.client.putUiPrefs
 import com.hienlh.ppm.client.renameSession
+import com.hienlh.ppm.client.setSessionAccount
 import com.hienlh.ppm.client.reorderProjects
 import com.hienlh.ppm.client.resetTags
 import com.hienlh.ppm.client.setDefaultTag
@@ -86,6 +88,7 @@ import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.RejectedSend
 import com.hienlh.ppm.state.messageWithAttachments
 import com.hienlh.ppm.state.SlashItemsStore
+import com.hienlh.ppm.state.UsageCache
 import com.hienlh.ppm.state.selectInlineImages
 import com.hienlh.ppm.state.windows.MAX_WINDOWS
 import com.hienlh.ppm.state.windows.WindowKind
@@ -131,6 +134,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
@@ -176,6 +180,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** The open project's file list, which the `@` picker searches (the web's file-store index). */
     var fileIndex by mutableStateOf<FileIndexStore?>(null)
+        private set
+
+    /** The usage readings every chat on the open server shares (use-usage.ts's module cache). */
+    var usageCache by mutableStateOf<UsageCache?>(null)
         private set
     var info by mutableStateOf<ServerInfo?>(null)
         private set
@@ -399,6 +407,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** The image lightbox, while it is open (`useImageOverlay`). */
     var lightbox by mutableStateOf<LightboxRequest?>(null)
 
+    /** Something drawn over the whole app as CSS's `fixed inset-0` draws it: a usage panel gone fullscreen. */
+    var screenOverlay by mutableStateOf<(@Composable () -> Unit)?>(null)
+
     /** What the command palette opened with while it is open; null while it is closed. */
     var paletteQuery by mutableStateOf<String?>(null)
         private set
@@ -502,6 +513,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         api = null
         slashItems = null
         fileIndex = null
+        usageCache = null
         info = null
         projects = emptyList()
         projectsLoad = Load.Idle
@@ -529,6 +541,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         this.api = api
         slashItems = SlashItemsStore(scope)
         fileIndex = FileIndexStore(api, scope)
+        usageCache = UsageCache()
         openWorkspace(api)
         startEvents(api)
         scope.launch { readAddresses(api) }
@@ -1880,6 +1893,39 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         store.updateTab(tabId) { it.withMetadata(*changes) }
     }
 
+    /**
+     * Moves [chat] onto an account picked in its usage panel (`handleSelectAccount`). A session is
+     * bound to it from its next message — said out loud, as the switch costs a full prompt-cache
+     * write — and [reloadUsage] reads the new binding's figures at once; a tab with no session
+     * claims it instead, to be redeemed when its session is made. Answers the server's refusal,
+     * shown beside the cards where the pick was made, or null.
+     */
+    suspend fun selectAccount(chat: ChatTab, accountId: String, label: String?, reloadUsage: suspend () -> Unit): String? {
+        val session = chat.session
+        if (session == null) {
+            patchTabMetadata(
+                chat.tabId,
+                "pickedAccountId" to JsonPrimitive(accountId),
+                "pickedAccountLabel" to (label?.let(::JsonPrimitive) ?: JsonNull),
+                "pickedAccountProvider" to JsonPrimitive(chat.providerId),
+            )
+            return null
+        }
+        val api = api ?: return null
+        try {
+            api.setSessionAccount(chat.project, session.id, accountId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            signInIfRefused(error)
+            return error.message?.takeIf { it.isNotEmpty() } ?: "Could not switch account"
+        }
+        chat.servingAccount = PickedAccount(accountId, label)
+        scope.launch { reloadUsage() }
+        toast = ErrorToastMessage("This chat will use the selected account from the next message.", kind = ErrorToastMessage.Kind.SUCCESS)
+        return null
+    }
+
     /** A session made here goes into the list at once (`upsertSession`). */
     internal fun addSession(project: String, session: SessionInfo) {
         if (selectedProject != project) return
@@ -2068,6 +2114,10 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     val claimedAccountId: String?
         get() = metadata["pickedAccountId"].string?.takeIf { it.isNotEmpty() && metadata["pickedAccountProvider"].string == providerId }
 
+    /** The name that claim gives its account, while the claim is for its provider. */
+    val claimedAccountLabel: String?
+        get() = if (claimedAccountId != null) metadata["pickedAccountLabel"].string else null
+
     /** Its provider is still being resolved (`providerPending`): the gate line shows, the mode and model chips wait. */
     var providerPending by mutableStateOf(false)
         internal set
@@ -2124,6 +2174,16 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
 
     /** What is typed in this tab's message box, kept while another tab is in front. */
     val draft = TextFieldState()
+
+    /**
+     * The account this chat is on as far as the app can tell (`servingAccount`): written by a
+     * switch the server accepted and by the stream naming who served, the later of the two
+     * winning; cleared for another conversation.
+     */
+    var servingAccount by mutableStateOf<PickedAccount?>(null)
+
+    /** The stream's report [servingAccount] last took, so each is taken once however often the chat is drawn. */
+    internal var liveAccountTaken: PickedAccount? = null
 
     /** This chat's History list, with its own search, tag chip and pages. */
     var historyList by mutableStateOf<HistoryList?>(null)
@@ -2448,6 +2508,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     /** The session its first message made: from now on this tab is that chat, its draft kept under it. */
     internal fun adopt(session: SessionInfo) {
         this.session = session
+        servingAccount = null
         providerId = session.providerId
         firstQueued = true
         drafts?.moveTo(session.id)
@@ -2556,7 +2617,7 @@ private const val DRAFT_GATE_MILLIS = 3_000L
 class ErrorToastMessage(val title: String, val description: String? = null, val action: Action? = null, val kind: Kind = Kind.ERROR) {
     class Action(val label: String, val run: () -> Unit)
 
-    enum class Kind { ERROR, INFO, PLAIN }
+    enum class Kind { ERROR, INFO, SUCCESS, PLAIN }
 }
 
 /** The lightbox open on [images] at [index] (`useImageOverlay`'s state). */

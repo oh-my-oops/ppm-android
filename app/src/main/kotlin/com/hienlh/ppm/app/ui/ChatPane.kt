@@ -13,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -45,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -119,10 +121,15 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
+import com.hienlh.ppm.client.chatUsage
 import com.hienlh.ppm.protocol.SessionInfo
+import com.hienlh.ppm.protocol.UsageInfo
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatState
 import com.hienlh.ppm.state.HistoryList
+import com.hienlh.ppm.state.UsageCache
+import com.hienlh.ppm.state.UsageReader
+import com.hienlh.ppm.state.UsageScope
 import com.hienlh.ppm.state.workspace.SourceLine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filter
@@ -139,7 +146,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
     val chat = tab.controller ?: return
     val state by chat.state.collectAsState()
     val tokens = LocalPpmTokens.current
-    var historyOpen by remember(tab.tabId) { mutableStateOf(false) }
+    var panel by remember(tab.tabId) { mutableStateOf<ToolbarPanel?>(null) }
     // The title the server gives a new chat goes into every list and onto its tab, as the web's tab carries it.
     LaunchedEffect(state.title) {
         state.title?.takeIf { it.isNotEmpty() }?.let {
@@ -183,6 +190,38 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         }
         chat.takeRejected()
     }
+    // This chat's usage reading (`useUsage`): the session's binding, or before one the account the
+    // tab claimed — nothing while its provider resolves, which would read a guess.
+    val fallbackCache = remember { UsageCache() }
+    val usageCache = model.usageCache ?: fallbackCache
+    val usageReader = remember(usageCache, tab) {
+        UsageReader(usageCache) { scope, refresh ->
+            model.api?.chatUsage(scope.project, scope.providerId, scope.sessionId, scope.previewAccountId, refresh)
+        }
+    }
+    val usageScope = if (tab.providerPending) null else UsageScope(tab.project, tab.providerId, tab.session?.id, tab.claimedAccountId)
+    LaunchedEffect(usageReader, usageScope) {
+        if (usageScope != null) usageReader.run(usageScope, model.newChats.preparation(tab.tabId))
+    }
+    val usageSnapshot by usageReader.snapshot.collectAsState()
+    val usageLoading by usageReader.loading.collectAsState()
+    val usage = usageReader.shown(usageScope, usageSnapshot)
+    val paneScope = rememberCoroutineScope()
+    // The stream's report of who served is the second writer of the serving account, taken once
+    // each: a later turn's report, even of the same account, outranks a pick made since. Rotation
+    // keeps the session, so the reading's scope stays put: its binding is read again at once.
+    val live = state.liveAccount
+    SideEffect {
+        if (live !== tab.liveAccountTaken) {
+            val moved = live != null && live.id != tab.liveAccountTaken?.id
+            tab.liveAccountTaken = live
+            if (live != null) tab.servingAccount = live
+            if (moved) paneScope.launch { usageReader.read(refresh = false) }
+        }
+    }
+    val pickedLabel = tab.servingAccount?.label ?: tab.claimedAccountLabel
+    val pickedAccountId = tab.servingAccount?.id ?: tab.claimedAccountId
+    val isClaude = tab.providerId.isEmpty() || tab.providerId == "claude"
     val activity = LocalActivity.current
     val context = LocalContext.current
     val fileDrop = remember(tab) {
@@ -260,9 +299,41 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
             // `border-t border-border bg-panel`, around the toolbar and the message box.
             Column(Modifier.fillMaxWidth().background(tokens.panel.color).line(top = true, tokens.border.color)) {
                 Column(Modifier.fillMaxWidth().line(top = false, tokens.border.opacity(0.5).color)) {
-                    ChatToolbar(model, tab, chat, state, historyOpen, narrow) { historyOpen = !historyOpen }
+                    fun toggle(which: ToolbarPanel) {
+                        panel = if (panel == which) null else which
+                    }
+                    ChatToolbar(
+                        model, tab, chat, state, panel == ToolbarPanel.History, narrow,
+                        toggleHistory = { toggle(ToolbarPanel.History) },
+                        usageChip = if (isClaude || tab.providerId == "codex") {
+                            {
+                                UsageChip(usage?.usage ?: UsageInfo(), pickedLabel, pickedAccountId, panel == ToolbarPanel.Usage, narrow) {
+                                    toggle(ToolbarPanel.Usage)
+                                }
+                            }
+                        } else {
+                            null
+                        },
+                    )
                     val list = tab.historyList
-                    if (historyOpen && list != null) ChatHistoryDropdown(model, tab, list) { historyOpen = false }
+                    if (panel == ToolbarPanel.History && list != null) ChatHistoryDropdown(model, tab, list) { panel = null }
+                    if (panel == ToolbarPanel.Usage && isClaude) {
+                        val shown = usage?.usage ?: UsageInfo()
+                        ClaudeUsagePanel(
+                            model,
+                            shown,
+                            usageLoading,
+                            usage?.fetchedAt,
+                            selectedAccountId = pickedAccountId ?: shown.activeAccountId,
+                            onSelectAccount = if (!tab.providerPending && !tab.firstSendPending) {
+                                { id, label -> model.selectAccount(tab, id, label) { usageReader.read(refresh = false) } }
+                            } else {
+                                null
+                            },
+                            onReload = { paneScope.launch { usageReader.read(refresh = true) } },
+                            onClose = { panel = null },
+                        )
+                    }
                 }
                 val pickers = rememberComposerPickers(model, tab)
                 ComposerPickerList(model, tab, pickers)
@@ -386,23 +457,40 @@ private fun GateButton(label: String, style: TextStyle, onClick: () -> Unit) {
     )
 }
 
+/** The panel the toolbar has open under it; one at a time. */
+private enum class ToolbarPanel { History, Usage }
+
 /** `border-t` or `border-b`. */
 fun Modifier.line(top: Boolean, color: Color): Modifier = cssBorder(color, sides = if (top) CssSides.Top else CssSides.Bottom)
 
 /**
- * The row over the message box (`chat-history-bar.tsx`): History on the left; on the right the
- * reload button with the connection dot, then the overflow menu. AI settings and usage are left
- * out until this app has them.
+ * The row over the message box (`chat-history-bar.tsx`): History and the usage chip on the left,
+ * scrolling sideways when they run out of room; on the right the reload button with the connection
+ * dot, then the overflow menu. AI settings are left out until this app has them.
  */
 @Composable
-private fun ChatToolbar(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState, historyOpen: Boolean, narrow: Boolean, toggleHistory: () -> Unit) {
+private fun ChatToolbar(
+    model: AppModel,
+    tab: ChatTab,
+    chat: ChatController,
+    state: ChatState,
+    historyOpen: Boolean,
+    narrow: Boolean,
+    toggleHistory: () -> Unit,
+    usageChip: (@Composable () -> Unit)?,
+) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             ToolbarChip(ProductIcon.History, if (narrow) null else "History", active = historyOpen, onClick = toggleHistory)
+            usageChip?.invoke()
         }
         Row(Modifier.padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             ReloadButton(state.canSend) { chat.reload() }
