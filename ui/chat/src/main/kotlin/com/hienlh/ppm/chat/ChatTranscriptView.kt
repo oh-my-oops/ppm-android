@@ -42,6 +42,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -90,6 +91,7 @@ import com.hienlh.ppm.state.ChatBlock
 import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.ChatState
 import com.hienlh.ppm.state.MessageReply
+import com.hienlh.ppm.state.PromptCacheStatus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -152,11 +154,18 @@ private fun TranscriptList(
     val tokens = LocalPpmTokens.current
     val live = state.live
     // Top down, as the web's: the sentinel while there is more above, the skeleton while it loads,
-    // the messages oldest first, the turn streaming in, and the approval or the thinking line
-    // while there is one.
+    // the messages oldest first, the turn streaming in, the cache gone cold while the chat is
+    // idle, and the approval or the thinking line while there is one.
     val head = (if (state.hasEarlier) 1 else 0) + (if (state.loadingEarlier) 1 else 0)
+    // Read again once a minute, as `useMinuteClock` reads the time.
+    val idleCache by produceState(coldCache(state), state.promptCache, state.isRunning, state.pendingApproval) {
+        while (true) {
+            value = coldCache(state)
+            delay(60_000)
+        }
+    }
     val trailing = state.pendingApproval != null || indicatorLabel(state) != null
-    val count = head + rows.size + (if (!live.isNullOrEmpty()) 1 else 0) + (if (trailing) 1 else 0)
+    val count = head + rows.size + (if (!live.isNullOrEmpty()) 1 else 0) + (if (idleCache != null) 1 else 0) + (if (trailing) 1 else 0)
     // Opened at its end, so the first frame is already the newest, and the sentinel, which loads
     // what is above once it is near the screen, is not passed on the way there.
     val list = rememberLazyListState((count - 1).coerceAtLeast(0), OPEN_AT_END)
@@ -264,6 +273,9 @@ private fun TranscriptList(
                                 AssistantBlocks(live, live = state.isRunning, actions = null, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp))
                             }
                         }
+                    }
+                    idleCache?.let { cold ->
+                        item(key = "idle-cache") { IdleCacheNotice(cold) }
                     }
                     if (trailing) {
                         item(key = "trailing") { Trailing(state, onRespond) }
@@ -532,6 +544,15 @@ private fun Trailing(state: ChatState, onRespond: (ApprovalRequest, Boolean, Jso
             )
         }
     }
+}
+
+/**
+ * The cache gone cold, for [IdleCacheNotice]: only while the chat is idle and nothing waits on an
+ * answer, as once a turn starts the question it informs has been answered.
+ */
+private fun coldCache(state: ChatState): PromptCacheStatus.Cold? {
+    if (state.isRunning || state.pendingApproval != null) return null
+    return PromptCacheStatus.of(state.promptCache, System.currentTimeMillis().toDouble()) as? PromptCacheStatus.Cold
 }
 
 /** Shown while nothing streams — before the first token, while a tool's result is read — and over text while PPM says what it is doing. */
