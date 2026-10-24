@@ -87,6 +87,12 @@ object PpmFonts {
     const val MONO_ADVANCE = 0.62f
 
     /**
+     * What an inline code's edges are set in (`scripts/code-edge-font.py`): an empty U+E000 one em
+     * wide, with no ascent or descent, so it takes room on the line and leaves the line's height be.
+     */
+    val codeEdge = FontFamily(Font(R.font.code_edge))
+
+    /**
      * A font's ascent and descent at [px] as Chrome rounds them for a box (`AscentDescentWithHacks`):
      * each to a whole pixel, and a descent rounded down takes one from the ascent.
      */

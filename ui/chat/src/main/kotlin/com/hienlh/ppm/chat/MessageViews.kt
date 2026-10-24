@@ -192,7 +192,7 @@ fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActi
                 when (block) {
                     is ChatBlock.Text -> Column {
                         CompositionLocalProvider(LocalMarkdownImageScope provides scope?.let { "$it/$index" }) {
-                            WithoutOnCopy(CODE_EDGE) { SelectionContainer { MarkdownView(block.text, streaming = growing) } }
+                            WithoutOnCopy(MARKDOWN_MARKS) { SelectionContainer { MarkdownView(block.text, streaming = growing) } }
                         }
                         if (growing) StreamingMark()
                     }
@@ -202,7 +202,7 @@ fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActi
                     // The web quotes it into the answer as markdown of its own.
                     is ChatBlock.Retry -> Column {
                         val quote = "> ↻ ${block.reason} — retrying with **${block.accountLabel}**..."
-                        WithoutOnCopy(CODE_EDGE) { SelectionContainer { MarkdownView(quote) } }
+                        WithoutOnCopy(MARKDOWN_MARKS) { SelectionContainer { MarkdownView(quote) } }
                         if (growing) StreamingMark()
                     }
                 }
@@ -354,7 +354,7 @@ internal fun ThinkingBlock(text: String, streaming: Boolean) {
                 if (streaming) snapshotFlow { scroll.maxValue }.collect { scroll.scrollTo(it) }
             }
             Column(Modifier.heightIn(max = 240.dp).verticalScroll(scroll).padding(start = 8.dp, end = 8.dp, bottom = 8.dp)) {
-                WithoutOnCopy(CODE_EDGE) {
+                WithoutOnCopy(MARKDOWN_MARKS) {
                     SelectionContainer {
                         MarkdownView(text, style = thinkingStyle.copy(color = tokens.text3.opacity(0.8)), streaming = streaming)
                     }

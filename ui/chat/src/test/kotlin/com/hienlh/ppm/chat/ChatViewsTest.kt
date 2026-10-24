@@ -255,6 +255,31 @@ class ChatViewsTest {
     }
 
     @Test
+    fun `a line ends where Blink ends one, not where Android's line breaker would`() {
+        val b = BREAK
+        val j = JOIN
+        fun marked(text: String) = buildString {
+            for (i in text.indices) {
+                breakMark(text, i)?.let { append(it) }
+                append(text[i])
+            }
+        }
+        // Between ASCII characters Blink breaks only before an opening bracket, after a hyphen and after a question mark.
+        assertEquals("src/${j}server/${j}share-${b}host.ts", marked("src/server/share-host.ts"))
+        assertEquals("a!${j}b a|${j}b a}${j}b a?b a=${b}(b f(x) 5%${j}+1", marked("a!b a|b a}b a?b a=(b f(x) 5%+1"))
+        assertEquals("a?${b}-${b}b", marked("a?-b"))
+        // Between a hyphen and a digit only after a letter or a digit.
+        assertEquals("a-${b}1 1-${b}2 -1 (-1) x-\$y", marked("a-1 1-2 -1 (-1) x-\$y"))
+        // Chrome may end a line after any spaces: before what Android will not start one with, the break goes before them.
+        assertEquals("GET$b /${j}git/${j}repos", marked("GET /git/repos"))
+        assertEquals("($b a$b ) a$b / b", marked("( a ) a / b"))
+        // A word with `@` or `://` stays whole on Android up to its first character past ASCII.
+        assertEquals("user$j@host.dev https:$j//${j}x.dev", marked("user@host.dev https://x.dev"))
+        // Past ASCII Chrome asks ICU, which breaks after an en dash, and after a hyphen that does not start a word.
+        assertEquals("10–${b}20 a‐${b}b ‐b a-${b}ư -ư", marked("10–20 a‐b ‐b a-ư -ư"))
+    }
+
+    @Test
     fun `a tab reaches the next stop of four columns, as tab-size 4 lays it out`() {
         val b = BREAK
         assertEquals("    x", preText("\tx", false).text)

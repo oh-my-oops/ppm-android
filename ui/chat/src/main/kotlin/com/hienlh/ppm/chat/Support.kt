@@ -116,6 +116,91 @@ internal fun breakAnywhere(text: String): String = buildString(text.length * 2) 
     }
 }
 
+/**
+ * U+FEFF: no line ends on either side, and nothing is drawn. U+2060 says the same, but Geist has
+ * no glyph for it, so Android would set it in another font and split the run of text around it.
+ */
+internal const val JOIN = '﻿'
+
+/**
+ * What Android's line breaker lets a line start with after `!`, `?`, `|`, `}` and `/`, which
+ * Blink's table never does, except after `?`.
+ */
+private const val ICU_LINE_START = "#$%&(*+0123456789<=>ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\^_`abcdefghijklmnopqrstuvwxyz{~"
+
+/**
+ * Whether Android's line breaker ends a line between two printable ASCII characters, [x] then
+ * [y]: whatever surrounds them with [always], else around some. Measured on Android 17, where
+ * Minikin asks ICU and never ends a line after a hyphen.
+ */
+private fun androidBreaks(x: Char, y: Char, always: Boolean): Boolean = when (x) {
+    '!', '?', '|' -> y in ICU_LINE_START
+    '}' -> y in ICU_LINE_START && !(always && y in "$%+\\")
+    '/' -> if (always) y in ICU_LINE_START && y !in "$%+\\0123456789" else y in ICU_LINE_START || y == '@'
+    '$', '%', '+', '\\' -> y in (if (always) "$%+\\" else "$%(+[\\{")
+    ')', ',', '.', ':', ';', ']' -> y in (if (always) "([{" else "$%(+[\\{")
+    else -> false
+}
+
+private fun Char.isAsciiLetterOrDigit() = this in '0'..'9' || this in 'a'..'z' || this in 'A'..'Z'
+
+/**
+ * Whether Blink ends a line between two printable ASCII characters, [x] then [y], after [before]:
+ * its own table (`LineBreakData::FillAscii`), which breaks only before an opening bracket, after a
+ * hyphen and after a question mark, and `ShouldBreakFast`, which breaks between a hyphen and a
+ * digit only after a letter or a digit.
+ */
+private fun blinkBreaks(before: Char?, x: Char, y: Char): Boolean = when (x) {
+    '-' -> if (y in '0'..'9') before?.isAsciiLetterOrDigit() == true else y !in "$!),./:;?]}"
+    '?' -> y !in "!\"'),./:;?]}"
+    else -> y in "(<[{" && x !in "$'(/<@[^_`{" && !x.isAsciiLetterOrDigit()
+}
+
+/**
+ * What goes between [text]`[i - 1]` and [text]`[i]` for Android to end lines where Chrome does
+ * under `word-break: normal`: a [JOIN] where only Android's line breaker would end one, a [BREAK]
+ * where only Blink's would, or nothing. [codeEnd] and [codeStart] say a code's box ends or starts
+ * there, its edge reading as a letter to Android; the mark goes outside it.
+ *
+ * Between two printable ASCII characters Blink keeps a table of its own, and ICU breaks after
+ * `/`, `!`, `|` and `}` too. Minikin never breaks after a hyphen or an en dash, and keeps a word
+ * with `@` or `://` whole up to its first character past ASCII, which a [JOIN] there ends. After
+ * spaces Chrome always may, where ICU will not before what [NO_BREAK_AFTER_SPACE] holds or after
+ * an opening bracket: the [BREAK] goes before the spaces, as [breakAnywhere]'s does.
+ */
+internal fun breakMark(text: CharSequence, i: Int, codeEnd: Boolean = false, codeStart: Boolean = false): Char? {
+    if (i <= 0 || i >= text.length) return null
+    val x = text[i - 1]
+    val y = text[i]
+    if (isBlank(x.code)) return null
+    if (isBlank(y.code)) {
+        var next = i
+        while (next < text.length && isBlank(text[next].code)) next++
+        return if (next < text.length && (text[next] in NO_BREAK_AFTER_SPACE || x in "([{")) BREAK else null
+    }
+    val before = text.getOrNull(i - 2)
+    if (x !in '!'..'~' || y !in '!'..'~') {
+        // Past ASCII Chrome asks ICU too, which breaks after a hyphen or an en dash, unless a
+        // hyphen starts the word (UAX #14 LB20a).
+        val hyphen = x == '-' || x == '‐' || x == '–'
+        val starts = x != '–' && (before == null || before.isWhitespace())
+        return if (hyphen && !starts && y.isLetterOrDigit()) BREAK else null
+    }
+    val blink = blinkBreaks(before, x, y)
+    val left = if (codeEnd) 'a' else x
+    val right = if (codeStart) 'a' else y
+    return when {
+        blink -> if (androidBreaks(left, right, always = true)) null else BREAK
+        androidBreaks(left, right, always = false) || y == '@' || (x == ':' && y == '/') -> JOIN
+        else -> null
+    }
+}
+
+/** Whether a code's box needs a [JOIN] between its start edge and [first], or its [last] and its end edge. */
+internal fun joinsCodeStart(first: Char): Boolean = first.code >= 0x80
+
+internal fun joinsCodeEnd(last: Char): Boolean = last.code >= 0x80 || androidBreaks(last, 'a', always = false)
+
 /** Columns from one tab stop to the next: Tailwind's preflight sets `tab-size: 4`. */
 private const val TAB_SIZE = 4
 
@@ -177,22 +262,22 @@ private fun breaksBetween(text: String, i: Int, previous: Int, c: Int): Boolean 
 @Composable
 internal fun WithoutBreaksOnCopy(enabled: Boolean, content: @Composable () -> Unit) {
     if (!enabled) return content()
-    WithoutOnCopy(BREAK, content)
+    WithoutOnCopy("$BREAK", content)
 }
 
-/** [content] copied to the clipboard without [mark], a character there for the layout alone. */
+/** [content] copied to the clipboard without [marks], characters there for the layout alone. */
 @Composable
-internal fun WithoutOnCopy(mark: Char, content: @Composable () -> Unit) {
+internal fun WithoutOnCopy(marks: String, content: @Composable () -> Unit) {
     val clipboard = LocalClipboard.current
-    val clean = remember(clipboard, mark) { CleanClipboard(clipboard, mark) }
+    val clean = remember(clipboard, marks) { CleanClipboard(clipboard, marks) }
     CompositionLocalProvider(LocalClipboard provides clean, content = content)
 }
 
-private class CleanClipboard(private val inner: Clipboard, private val mark: Char) : Clipboard by inner {
+private class CleanClipboard(private val inner: Clipboard, private val marks: String) : Clipboard by inner {
     override suspend fun setClipEntry(clipEntry: ClipEntry?) {
         val data = clipEntry?.clipData
         val text = data?.takeIf { it.itemCount == 1 }?.getItemAt(0)?.text
-        if (text == null || mark !in text) return inner.setClipEntry(clipEntry)
-        inner.setClipEntry(ClipEntry(ClipData.newPlainText(data.description.label, text.toString().replace(mark.toString(), ""))))
+        if (text == null || text.none { it in marks }) return inner.setClipEntry(clipEntry)
+        inner.setClipEntry(ClipEntry(ClipData.newPlainText(data.description.label, text.filterNot { it in marks }.toString())))
     }
 }

@@ -15,8 +15,6 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.InlineTextContent
-import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
@@ -49,8 +47,6 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.Placeholder
-import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextLinkStyles
@@ -60,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -214,7 +211,9 @@ internal fun InlineMarkdownText(source: String, style: MarkdownStyle, modifier: 
     val uriHandler = LocalUriHandler.current
     val tabs = LocalChatTabs.current
     val parsed = remember(source) { InlineMarkdown.parse(source) }
-    val text = remember(parsed, tokens, uriHandler, tabs, style.size) { parsed.annotated(tokens, uriHandler, style.size, tabs) }
+    val density = LocalDensity.current
+    val edge = with(density) { (codeEdgePx() / style.size.sp.toPx()).em }
+    val text = remember(parsed, tokens, uriHandler, tabs, style.size, edge) { parsed.annotated(tokens, uriHandler, style.size, edge, tabs) }
     if (parsed.images.isEmpty()) {
         InlineText(text, style, modifier)
         return
@@ -265,7 +264,6 @@ private fun InlineText(text: AnnotatedString, style: MarkdownStyle, modifier: Mo
         },
         style = ppmText(style.size, style.weight, lineHeight = style.lineHeight, italic = style.italic).copy(color = color),
         onTextLayout = { if (boxes.isNotEmpty()) layout = it },
-        inlineContent = codeEdges(),
     )
 }
 
@@ -275,16 +273,17 @@ internal const val INLINE_CODE_SIZE = 12f
 /**
  * What an inline code's box stands on at either side, so that its padding and border take room on
  * the line as Chrome gives them: a private-use character, which a line breaker takes for a letter,
- * so that a line ends neither between it and the code nor anywhere a letter would not let it.
+ * so that a line ends neither between it and the code nor anywhere a letter would not let it. It is
+ * set in [PpmFonts.codeEdge], as wide as the side, and not an inline placeholder: StaticLayout
+ * swaps a placeholder's character for U+FFFC, which a line may end on either side of.
  */
 internal const val CODE_EDGE = ''
 
-/** The placeholders over the [CODE_EDGE]s before a code and after it. */
-private const val CODE_START_ID = "code-start"
-private const val CODE_END_ID = "code-end"
-
 /** Annotates each inline code's box: the code and the [CODE_EDGE]s around it. */
 internal const val CODE_BOX = "ppm.code-box"
+
+/** What [annotated] puts in the text for the layout alone, which a copy leaves out. */
+internal const val MARKDOWN_MARKS = "$CODE_EDGE$BREAK$JOIN"
 
 /** Annotates the text of an inline code that names a file, which is underlined with dots. */
 internal const val FILE_CODE = "ppm.file-code"
@@ -293,45 +292,44 @@ internal const val FILE_CODE = "ppm.file-code"
 private fun Density.codeEdgePx(): Float = 4.dp.toPx() + cssBorderPx(1.dp)
 
 /**
- * The [CODE_EDGE]s' placeholders. Android makes one a whole number of pixels, rounding up, so the
- * pair share the two sides' width instead: what follows a code starts where Chrome starts it.
+ * The text with its spans, for text of [size] CSS pixels, and lines ending where Chrome ends them
+ * ([breakMark]). Each [CODE_EDGE] is [edge] wide, in em. A link and an inline code that name a file
+ * open it through [tabs] (`MdLink`, `MdCode`); any other link opens what the system can.
  */
-@Composable
-private fun codeEdges(): Map<String, InlineTextContent> {
-    val density = LocalDensity.current
-    return remember(density) {
-        with(density) {
-            val edge = codeEdgePx()
-            val start = floor(edge)
-            fun placeholder(px: Float) = InlineTextContent(Placeholder((px - 0.01f).toSp(), 0.sp, PlaceholderVerticalAlign.AboveBaseline)) {}
-            mapOf(CODE_START_ID to placeholder(start), CODE_END_ID to placeholder(2 * edge - start))
-        }
-    }
-}
-
-/**
- * The text with its spans, for text of [size] CSS pixels. A link and an inline code that name a
- * file open it through [tabs] (`MdLink`, `MdCode`); any other link opens what the system can.
- */
-internal fun InlineMarkdown.Parsed.annotated(tokens: ThemeTokens, uriHandler: UriHandler, size: Float, tabs: ChatTabs? = null): AnnotatedString {
-    val code = spans.filter { it.kind == InlineMarkdown.Kind.CODE }.sortedBy { it.start }
-    // Where an offset of the text lands once every code has an edge before and after it.
-    fun at(offset: Int) = offset + code.sumOf { if (it.end <= offset) 2 else if (it.start < offset) 1 else 0 }
+internal fun InlineMarkdown.Parsed.annotated(tokens: ThemeTokens, uriHandler: UriHandler, size: Float, edge: TextUnit, tabs: ChatTabs? = null): AnnotatedString {
+    val code = spans.filter { it.kind == InlineMarkdown.Kind.CODE }
+    val codeStarts = code.mapTo(HashSet()) { it.start }
+    val codeEnds = code.mapTo(HashSet()) { it.end }
+    // Where each offset of the text lands as a span's start and as its end: a code's box takes in
+    // its edges, and a mark between two characters goes outside them.
+    val starts = IntArray(text.length + 1)
+    val ends = IntArray(text.length + 1)
     return buildAnnotatedString {
-        var last = 0
-        for (span in code) {
-            append(text, last, span.start)
-            val start = length
-            appendInlineContent(CODE_START_ID, CODE_EDGE.toString())
-            append(text, span.start, span.end)
-            appendInlineContent(CODE_END_ID, CODE_EDGE.toString())
-            addStringAnnotation(CODE_BOX, "", start, length)
-            last = span.end
+        for (index in 0..text.length) {
+            val codeEnd = index in codeEnds
+            val codeStart = index in codeStarts
+            if (codeEnd) {
+                if (joinsCodeEnd(text[index - 1])) append(JOIN)
+                append(CODE_EDGE)
+            }
+            ends[index] = length
+            breakMark(text, index, codeEnd, codeStart)?.let { append(it) }
+            starts[index] = length
+            if (codeStart) {
+                append(CODE_EDGE)
+                if (joinsCodeStart(text[index])) append(JOIN)
+            }
+            if (index < text.length) append(text[index])
         }
-        append(text, last, text.length)
+        val edgeStyle = SpanStyle(fontFamily = PpmFonts.codeEdge, fontSize = edge)
+        for (span in code) {
+            addStringAnnotation(CODE_BOX, "", starts[span.start], ends[span.end])
+            addStyle(edgeStyle, starts[span.start], starts[span.start] + 1)
+            addStyle(edgeStyle, ends[span.end] - 1, ends[span.end])
+        }
         for (span in spans) {
-            val start = at(span.start)
-            val end = at(span.end)
+            val start = starts[span.start]
+            val end = ends[span.end]
             when (span.kind) {
                 // `.markdown-content strong` is 600, even inside a 700 heading.
                 InlineMarkdown.Kind.STRONG -> addStyle(SpanStyle(fontWeight = FontWeight.SemiBold), start, end)
@@ -374,7 +372,6 @@ internal fun InlineMarkdown.Parsed.annotated(tokens: ThemeTokens, uriHandler: Ur
  */
 private fun DrawScope.drawCodeBoxes(layout: TextLayoutResult, boxes: List<AnnotatedString.Range<String>>, tokens: ThemeTokens) {
     val border = cssBorderPx(1.dp).toFloat()
-    val edge = codeEdgePx()
     val size = INLINE_CODE_SIZE.sp.toPx()
     val (ascent, descent) = PpmFonts.chromeAscentDescent(size, PpmFonts.MONO_ASCENT, PpmFonts.MONO_DESCENT)
     val above = ascent + 2.dp.toPx() + border
@@ -390,17 +387,13 @@ private fun DrawScope.drawCodeBoxes(layout: TextLayoutResult, boxes: List<Annota
             val end = minOf(box.end, layout.getLineEnd(line))
             val visible = minOf(end, maxOf(start, layout.getLineEnd(line, visibleEnd = true)))
             val baseline = layout.getLineBaseline(line)
-            // A side is its edge's outer end, where Chrome's is: the two edges are as wide as Chrome's
-            // together. Alone on a line the box went on to, the end edge is half a pixel over, so that
-            // side is measured from the code. Spaces where the line breaks hang inside the piece.
-            // Chrome snaps it to whole pixels.
+            // A side is its edge's outer end, where Chrome's is. Spaces where the line breaks hang
+            // inside the piece. Chrome snaps it to whole pixels.
             val left = if (line == first) layout.getBoundingBox(box.start).left else layout.getBoundingBox(start).left
             val right = if (line == last) {
-                if (line == first) layout.getBoundingBox(box.end - 1).right else layout.getBoundingBox(box.end - 2).right + edge
+                layout.getBoundingBox(box.end - 1).right
             } else {
-                // On the first line the code starts where its start edge, a whole pixel, ends: short of Chrome's.
-                val short = if (line == first) edge - layout.getBoundingBox(box.start).width else 0f
-                (if (visible > start) layout.getBoundingBox(visible - 1).right else left) + (end - visible) * PpmFonts.MONO_ADVANCE * size + short
+                (if (visible > start) layout.getBoundingBox(visible - 1).right else left) + (end - visible) * PpmFonts.MONO_ADVANCE * size
             }
             val x0 = left.roundToInt().toFloat()
             val x1 = right.roundToInt().toFloat()
@@ -434,7 +427,6 @@ private fun DrawScope.drawDottedUnderlines(layout: TextLayoutResult, codes: List
     val thickness = css.sp.toPx()
     val dot = thickness.roundToInt().coerceAtLeast(1).toFloat()
     val gap = ceil(css / 2f).sp.toPx()
-    val edge = codeEdgePx()
     for (code in codes) {
         val first = layout.getLineForOffset(code.start)
         val last = layout.getLineForOffset(code.end - 1)
@@ -442,12 +434,9 @@ private fun DrawScope.drawDottedUnderlines(layout: TextLayoutResult, codes: List
             val start = maxOf(code.start, layout.getLineStart(line))
             val end = minOf(code.end, layout.getLineEnd(line, visibleEnd = true))
             if (end <= start) continue
-            // On its first line the text starts past the start edge, a whole pixel here and 12.5 in
-            // Chrome: the dots start where Chrome's text does.
-            val shift = if (line == first) layout.getBoundingBox(code.start - 1).left + edge - layout.getBoundingBox(start).left else 0f
-            val right = layout.getBoundingBox(end - 1).right + shift
+            val right = layout.getBoundingBox(end - 1).right
             val top = (layout.getLineBaseline(line) + gap).roundToInt() + (dot - thickness) / 2
-            var x = floor(layout.getBoundingBox(start).left + shift)
+            var x = floor(layout.getBoundingBox(start).left)
             while (x < right) {
                 drawRect(color, Offset(x, top), Size(minOf(dot, right - x), thickness))
                 x += 2 * dot

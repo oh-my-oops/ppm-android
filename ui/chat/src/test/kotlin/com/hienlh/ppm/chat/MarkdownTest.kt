@@ -200,14 +200,33 @@ class MarkdownTest {
         val handler = object : UriHandler {
             override fun openUri(uri: String) = Unit
         }
-        val text = inline("**`a`** and *b `c` d*").annotated(BuiltInThemes.auroraDark.tokens, handler, 14f)
+        val text = inline("**`a`** and *b `c` d*").annotated(BuiltInThemes.auroraDark.tokens, handler, 14f, 0.5.em)
         assertEquals("${CODE_EDGE}a$CODE_EDGE and b ${CODE_EDGE}c$CODE_EDGE d", text.text)
         val weights = text.spanStyles.filter { it.item.fontWeight != null }.map { it.start to it.end }
         assertEquals(listOf(0 to 3), weights)
         val italics = text.spanStyles.filter { it.item.fontStyle != null }.map { it.start to it.end }
         assertEquals(listOf(8 to 15), italics)
-        val code = text.spanStyles.filter { it.item.fontFamily != null }.map { text.text.substring(it.start, it.end) }
+        val code = text.spanStyles.filter { it.item.fontFamily == PpmFonts.mono }.map { text.text.substring(it.start, it.end) }
         assertEquals(listOf("a", "c"), code)
+        // Each edge is set in a font of its own, as wide as it is given.
+        val edges = text.spanStyles.filter { it.item.fontFamily == PpmFonts.codeEdge }
+        assertEquals(listOf(0, 2, 10, 12), edges.map { it.start })
+        assertTrue(edges.all { it.end == it.start + 1 && it.item.fontSize == 0.5.em })
+    }
+
+    @Test
+    fun `a line break between a code and the text around it goes outside the code's box`() {
+        val handler = object : UriHandler {
+            override fun openUri(uri: String) = Unit
+        }
+        val e = CODE_EDGE
+        val j = JOIN
+        val b = BREAK
+        val text = inline("a/`b` `c/`d `e-`f x-`y` `→`").annotated(BuiltInThemes.auroraDark.tokens, handler, 14f, 1.em)
+        // An edge reads as a letter to Android's line breaker: `/` would end a line before it.
+        assertEquals("a/$j${e}b$e ${e}c/$j${e}d ${e}e-$e${b}f x-$b${e}y$e $e$j→$j$e", text.text)
+        val boxes = text.getStringAnnotations(CODE_BOX, 0, text.length).map { text.text.substring(it.start, it.end) }
+        assertEquals(listOf("${e}b$e", "${e}c/$j$e", "${e}e-$e", "${e}y$e", "$e$j→$j$e"), boxes)
     }
 
     @Test
@@ -225,10 +244,10 @@ class MarkdownTest {
                 opened += uri
             }
         }
-        val text = parsed.annotated(BuiltInThemes.auroraDark.tokens, handler, 14f)
+        val text = parsed.annotated(BuiltInThemes.auroraDark.tokens, handler, 14f, 1.em)
         // The code's box takes room on either side of it, and is drawn rather than set as a background.
         val box = text.getStringAnnotations(CODE_BOX, 0, text.length).single()
-        assertEquals("${CODE_EDGE}https://in.code$CODE_EDGE", text.text.substring(box.start, box.end))
+        assertEquals("${CODE_EDGE}https:$JOIN//${JOIN}in.code$CODE_EDGE", text.text.substring(box.start, box.end))
         val codeStyle = text.spanStyles.single { it.start == box.start + 1 && it.end == box.end - 1 }
         assertEquals(PpmFonts.mono, codeStyle.item.fontFamily)
         assertEquals((12f / 14f).em, codeStyle.item.fontSize)
@@ -261,13 +280,13 @@ class MarkdownTest {
             }
         }
         val source = "`src/a.ts:12` `bun test` [doc](docs/my%20guide.md#setup) [x](javascript:alert(1)) [web](<https://x.dev/a b>)"
-        val text = inline(source).annotated(BuiltInThemes.auroraDark.tokens, handler, 14f, tabs)
+        val text = inline(source).annotated(BuiltInThemes.auroraDark.tokens, handler, 14f, 1.em, tabs)
         // Only the path is underlined, and the tap takes its box in, edges and all.
         val underlined = text.getStringAnnotations(FILE_CODE, 0, text.length).map { text.text.substring(it.start, it.end) }
-        assertEquals(listOf("src/a.ts:12"), underlined)
+        assertEquals(listOf("src/${JOIN}a.ts:12"), underlined)
         val links = text.getLinkAnnotations(0, text.length)
-        assertEquals("${CODE_EDGE}src/a.ts:12$CODE_EDGE", text.text.substring(links[0].start, links[0].end))
-        assertEquals(listOf("src/a.ts:12", "doc", "x", "web"), links.map { text.text.substring(it.start, it.end).trim(CODE_EDGE) })
+        assertEquals("${CODE_EDGE}src/${JOIN}a.ts:12$CODE_EDGE", text.text.substring(links[0].start, links[0].end))
+        assertEquals(listOf("src/${JOIN}a.ts:12", "doc", "x", "web"), links.map { text.text.substring(it.start, it.end).trim(CODE_EDGE) })
         for (link in links) link.item.linkInteractionListener!!.onClick(link.item)
         assertEquals(listOf("src/a.ts" to SourceLine(12), "docs/my guide.md" to null), files)
         assertEquals(listOf("https://x.dev/a%20b"), opened)
