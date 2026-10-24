@@ -62,7 +62,7 @@ class ProtocolTest {
     @Test
     fun `account_retry says why, and which account takes over`() {
         assertEquals(
-            ChatEvent.AccountRetry("Rate limited — switching account", "Work"),
+            ChatEvent.AccountRetry("Rate limited — switching account", "Work", "a2"),
             ChatEvent.from(json("""{"type":"account_retry","reason":"Rate limited — switching account","accountId":"a2","accountLabel":"Work"}""")),
         )
         assertEquals(ChatEvent.AccountRetry(null, null), ChatEvent.from(json("""{"type":"account_retry"}""")))

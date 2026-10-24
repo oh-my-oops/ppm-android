@@ -7,6 +7,7 @@ import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatFrame
 import com.hienlh.ppm.protocol.InlineImage
+import com.hienlh.ppm.protocol.PickedAccount
 import com.hienlh.ppm.protocol.PromptCacheState
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionInfo
@@ -64,6 +65,8 @@ data class ChatState(
     val effort: String? = null,
     val thinking: Boolean = true,
     val promptCache: PromptCacheState? = null,
+    /** The account the stream last said a turn runs on (`liveAccount`): an `account_info`, or a retry moved onto another. */
+    val liveAccount: PickedAccount? = null,
 ) {
     val isRunning: Boolean get() = phase.isRunning
     val canSend: Boolean get() = connection == ChatController.Connection.Connected
@@ -111,6 +114,7 @@ class ChatController(
     /** The session and the count of task-tool calls [tasks] were last asked for. */
     private var tasksAskedFor: Pair<String, Int>? = null
     private var tasksJob: Job? = null
+    private var liveAccount: PickedAccount? = null
     private var socket: SocketConnection? = null
     private var lastFrameAt = clock()
     private var closeReason: String? = null
@@ -301,6 +305,12 @@ class ChatController(
         // The snapshot of a long turn can run to megabytes: decode it off the main thread.
         val frame = withContext(Dispatchers.Default) { WireJson.parseOrNull(text)?.let(ChatFrame::from) } ?: return
         if (frame is ChatFrame.SessionState) settings.apply(frame.state)
+        when (val event = (frame as? ChatFrame.Event)?.event) {
+            is ChatEvent.AccountInfo -> event.accountId?.let { liveAccount = PickedAccount(it, event.accountLabel) }
+            // Only a retry that names where it went: the server was forced off the account shown.
+            is ChatEvent.AccountRetry -> if (event.accountId != null && event.accountLabel != null) liveAccount = PickedAccount(event.accountId!!, event.accountLabel)
+            else -> {}
+        }
         val ended = (frame as? ChatFrame.Event)?.event as? ChatEvent.Done
         val usage = ended?.usage
         if (usage != null && ended.parent == null && transcript.phase.isRunning) settings.turnEnded(usage, clock())
@@ -449,6 +459,7 @@ class ChatController(
             effort = settings.effort,
             thinking = settings.thinking,
             promptCache = settings.promptCache,
+            liveAccount = liveAccount,
         )
     }
 

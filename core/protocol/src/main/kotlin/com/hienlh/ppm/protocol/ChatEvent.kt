@@ -94,13 +94,13 @@ sealed interface ChatEvent {
     data class Done(val lastMessageUuid: String? = null, val usage: TurnUsage? = null, val parent: String? = null) : ChatEvent
 
     /** The provider moved the turn to another account: a rate limit, a usage cap or a failed sign-in. */
-    data class AccountRetry(val reason: String?, val accountLabel: String?) : ChatEvent
+    data class AccountRetry(val reason: String?, val accountLabel: String?, val accountId: String? = null) : ChatEvent
 
     /** What PPM does before the provider answers: picking an account, refreshing its token, retrying. */
     data class StatusUpdate(val message: String, val accountLabel: String?) : ChatEvent
 
     /** The account the turn runs on. */
-    data object AccountInfo : ChatEvent
+    data class AccountInfo(val accountId: String?, val accountLabel: String?) : ChatEvent
 
     /** A backgrounded Agent/Task ended ([status]: `completed`, `failed` or `stopped`), maybe turns after its call. */
     data class SubagentStatus(val toolUseId: String, val status: String) : ChatEvent
@@ -135,9 +135,9 @@ sealed interface ChatEvent {
                 "approval_request" -> ApprovalRequest.from(json)?.let(::Approval) ?: Other(type)
                 "error" -> Error(json["message"].string ?: "Unknown error")
                 "done" -> Done(json["lastMessageUuid"].string, TurnUsage.from(json["usage"]), parent)
-                "account_retry" -> AccountRetry(json["reason"].string, json["accountLabel"].string)
+                "account_retry" -> AccountRetry(json["reason"].string, json["accountLabel"].string, json["accountId"].string)
                 "status_update" -> StatusUpdate(json["message"].string ?: "", json["accountLabel"].string)
-                "account_info" -> AccountInfo
+                "account_info" -> AccountInfo(json["accountId"].string, json["accountLabel"].string)
                 "subagent_status" -> {
                     val id = json["toolUseId"].string
                     val status = json["status"].string
