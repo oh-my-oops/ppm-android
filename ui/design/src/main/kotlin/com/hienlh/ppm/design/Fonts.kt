@@ -97,6 +97,17 @@ object PpmFonts {
     }
 
     /**
+     * How far a line [line] px tall, in a font of [px] px, reaches under its baseline in Chrome: the
+     * descent as [chromeAscentDescent] rounds it and the half-leading below, which keeps the pixel
+     * the floored half above gives up. An inline-block sitting on that line has it under its box.
+     */
+    fun chromeBelowBaseline(px: Float, line: Float, ascent: Float, descent: Float): Float {
+        val (up, down) = chromeAscentDescent(px, ascent, descent)
+        val leading = line - up - down
+        return down + leading - floor(leading / 2)
+    }
+
+    /**
      * The `topRatio` that puts the baseline of a line [line] px tall, in a font of [px] px, where
      * Chrome puts it (LayoutNG `CalculateLeadingSpace`): the half-leading above floored to a whole
      * pixel, over [chromeAscentDescent]. Compose centres the text on the metrics Android rounds,

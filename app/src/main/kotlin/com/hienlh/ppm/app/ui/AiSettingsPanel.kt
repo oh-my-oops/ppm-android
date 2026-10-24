@@ -56,6 +56,7 @@ import com.hienlh.ppm.client.settingsModels
 import com.hienlh.ppm.client.teams
 import com.hienlh.ppm.client.updateAiSettings
 import com.hienlh.ppm.design.CssColumn
+import com.hienlh.ppm.design.CssGridRow
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTheme
@@ -804,9 +805,9 @@ private fun CodexContextForm(config: AiProviderSettings?, saving: Boolean, onSav
     CssColumn(Modifier.fillMaxWidth().cssBorder(tokens.border.color, shape).padding(horizontal = 12.dp), gap = 8.dp, top = 12.dp, bottom = 12.dp) {
         val clearError = { error = null }
         if (wide) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TokenLimitSelect("Context window (tokens)", window, saving, wide, clearError, Modifier.weight(1f))
-                TokenLimitSelect("Auto-compact threshold (tokens)", compact, saving, wide, clearError, Modifier.weight(1f))
+            CssGridRow(Modifier.fillMaxWidth(), gap = 12.dp) {
+                TokenLimitSelect("Context window (tokens)", window, saving, wide, clearError)
+                TokenLimitSelect("Auto-compact threshold (tokens)", compact, saving, wide, clearError)
             }
         } else {
             CssColumn(Modifier.fillMaxWidth(), gap = 12.dp) {

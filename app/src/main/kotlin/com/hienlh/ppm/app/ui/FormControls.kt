@@ -109,10 +109,12 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.hienlh.ppm.app.TextInputFocus
 import com.hienlh.ppm.app.tracksTextFocus
+import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTheme
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
@@ -597,7 +599,9 @@ fun FormInput(
  * The AI panel's `textarea` (`rows={3} rounded-md border-input bg-background px-3 py-2`): three
  * lines tall at 16/24 on a phone, 11/16.5 elsewhere, scrolling inside past that. Focused, it wears
  * `ring-2 ring-offset-2`: a 2 px band of the page colour, then 2 px of the accent. Chrome's
- * resizer sits in its corner, and dragging it changes the height (`resize: vertical`).
+ * resizer sits in its corner, and dragging it changes the height (`resize: vertical`). A textarea
+ * is inline-block, so it sits on the baseline of the panel's 16/24 line, and the part of that
+ * line under the baseline stays under it: 18 px at 2.625x.
  */
 @Composable
 fun FormTextArea(
@@ -627,37 +631,40 @@ fun FormTextArea(
     var resized by remember { mutableStateOf<Float?>(null) }
     val height = resized ?: natural
     val shape = RoundedCornerShape(8.dp)
-    Box(
-        modifier
-            .fillMaxWidth()
-            .cssHeight(with(density) { height.toDp() })
-            .drawBehind {
-                if (!focused) return@drawBehind
-                val radius = 8.dp.toPx()
-                val band = 2.dp.toPx()
-                drawRoundRect(tokens.accent.color, Offset(-2 * band, -2 * band), Size(size.width + 4 * band, size.height + 4 * band), CornerRadius(radius + 2 * band))
-                drawRoundRect(tokens.bgSolid.color, Offset(-band, -band), Size(size.width + 2 * band, size.height + 2 * band), CornerRadius(radius + band))
-            }
-            .clip(shape)
-            .background(tokens.bgSolid.color)
-            .cssBorder(tokens.border.color, shape),
-    ) {
-        PpmTextField(
-            state,
-            placeholder,
-            Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
-            style = ppmText(fontSize, lineHeight = line),
-            placeholderColor = tokens.text2.color,
-            lineLimits = TextFieldLineLimits.MultiLine(),
-            focusRequester = focus,
-            onFocusChanged = {
-                if (it != focused) {
-                    focused = it
-                    onFocusChanged(it)
+    val strut = with(density) { PpmFonts.chromeBelowBaseline(16.sp.toPx(), 24.sp.toPx(), PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT).toDp() }
+    CssColumn(modifier, bottom = strut) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .cssHeight(with(density) { height.toDp() })
+                .drawBehind {
+                    if (!focused) return@drawBehind
+                    val radius = 8.dp.toPx()
+                    val band = 2.dp.toPx()
+                    drawRoundRect(tokens.accent.color, Offset(-2 * band, -2 * band), Size(size.width + 4 * band, size.height + 4 * band), CornerRadius(radius + 2 * band))
+                    drawRoundRect(tokens.bgSolid.color, Offset(-band, -band), Size(size.width + 2 * band, size.height + 2 * band), CornerRadius(radius + band))
                 }
-            },
-        )
-        ResizeGrip { dy -> resized = max(smallest, height + dy) }
+                .clip(shape)
+                .background(tokens.bgSolid.color)
+                .cssBorder(tokens.border.color, shape),
+        ) {
+            PpmTextField(
+                state,
+                placeholder,
+                Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+                style = ppmText(fontSize, lineHeight = line),
+                placeholderColor = tokens.text2.color,
+                lineLimits = TextFieldLineLimits.MultiLine(),
+                focusRequester = focus,
+                onFocusChanged = {
+                    if (it != focused) {
+                        focused = it
+                        onFocusChanged(it)
+                    }
+                },
+            )
+            ResizeGrip { dy -> resized = max(smallest, height + dy) }
+        }
     }
 }
 
@@ -749,18 +756,23 @@ fun NativeSelect(
             .cssBorder(tokens.border.color, shape)
             .drawWithContent {
                 drawContent()
-                // Chrome's menulist chevron, sized by the font: 7.6 x 3.8 px at 16 px, centred 8.9 px in from the right.
-                val font = fontSize.sp.toPx()
-                val w = 0.475f * font
-                val h = w / 2
-                val cx = size.width - 0.554f * font + cssBorderPx(1.dp)
-                val cy = size.height / 2
+                // Chrome's menulist arrow (ThemePainterDefault::SetupMenuListArrow, NativeThemeBase::PaintMenuList),
+                // sized by the zoom and not the font: a chevron 8 px wide and half as tall in whole device
+                // pixels, centred in the 15 px arrow box inside the right border, stroked 2 device px.
+                // This draws inside the border, so its right edge is the one Chrome measures from.
+                val zoom = this.density
+                val box = 15 * zoom
+                val across = 8 * zoom
+                val arrow = across.toInt()
+                val x = (size.width.toInt() - (box + across) / 2).toInt().toFloat()
+                val tall = arrow / 2
+                val y = (size.height.toInt() / 2 - tall / 2).toFloat()
                 val path = Path().apply {
-                    moveTo(cx - w / 2, cy - h / 2)
-                    lineTo(cx, cy + h / 2)
-                    lineTo(cx + w / 2, cy - h / 2)
+                    moveTo(x, y)
+                    lineTo(x + arrow / 2, y + tall)
+                    lineTo(x + arrow, y)
                 }
-                drawPath(path, text, style = Stroke(0.05f * font))
+                drawPath(path, text, style = Stroke(2f))
             }
             .focusRequester(focus)
             .onFocusChanged { focused = it.isFocused }

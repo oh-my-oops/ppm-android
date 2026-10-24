@@ -116,6 +116,33 @@ fun CssColumn(
     }
 }
 
+/**
+ * One row of a CSS grid of equal columns [gap] apart, each child a column: laid out as Chrome lays
+ * out the tracks, at their exact places in fractions of a pixel, and each given the pixels its two
+ * edges round to. Two columns sharing 871 px end the first on 435.5, so Chrome gives that one the
+ * odd pixel where a weighted Row gives it to the last. It fills the width it is given, which must
+ * be bounded; children are as tall as they measure, at the top.
+ */
+@Composable
+fun CssGridRow(modifier: Modifier = Modifier, gap: Dp = 0.dp, content: @Composable () -> Unit) {
+    Layout(content, modifier) { measurables, constraints ->
+        val width = constraints.maxWidth
+        val gapPx = gap.toPx()
+        val track = (width - gapPx * (measurables.size - 1)) / measurables.size
+        val lefts = IntArray(measurables.size)
+        val placeables = measurables.mapIndexed { index, measurable ->
+            val at = index * (track + gapPx)
+            lefts[index] = at.roundToInt()
+            val columnWidth = max(0, (at + track).roundToInt() - lefts[index])
+            measurable.measure(Constraints(columnWidth, columnWidth, 0, constraints.maxHeight))
+        }
+        val height = (placeables.maxOfOrNull { it.height } ?: 0).coerceIn(constraints.minHeight, constraints.maxHeight)
+        layout(width, height) {
+            placeables.forEachIndexed { index, placeable -> placeable.placeRelative(lefts[index], 0) }
+        }
+    }
+}
+
 private data class CssExactElement(val exact: CssExact, val reads: Boolean) : ModifierNodeElement<CssExactNode>() {
     override fun create() = CssExactNode(exact, reads)
 
