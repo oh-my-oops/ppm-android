@@ -707,8 +707,8 @@ private fun NeutralChip(label: String?, narrow: Boolean, labelMax: Dp, onClick: 
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        // An icon alone still takes the line's height, as the text beside it would.
-        Box(Modifier.height(17.25.dp), contentAlignment = Alignment.Center) { leading(color.color) }
+        // An icon alone is the chip's whole height (21.5 px on the web): the hidden label leaves no line.
+        leading(color.color)
         if (label != null) {
             BasicText(
                 label,
