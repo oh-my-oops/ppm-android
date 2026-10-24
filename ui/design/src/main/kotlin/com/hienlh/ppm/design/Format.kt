@@ -4,6 +4,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Locale
 
 /** The web's small display rules, kept identical so the two clients read the same. */
@@ -28,10 +29,27 @@ object PpmFormat {
         if (hours < 24) return "${hours}h ago"
         val days = hours / 24
         if (days < 7) return "${days}d ago"
+        return monthDay(date)
+    }
+
+    /** `toLocaleDateString(undefined, { day: "numeric", month: "short" })`: "Nov 5" in the device's locale. */
+    fun monthDay(date: Instant): String {
         val locale = Locale.getDefault()
         val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, "MMMd")
         return DateTimeFormatter.ofPattern(pattern, locale).withZone(ZoneId.systemDefault()).format(date)
     }
+
+    /**
+     * `toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })`: "Nov 5, 2026, 3:04 PM"
+     * in the device's locale, with the plain space Chrome keeps before "PM" where newer ICU data
+     * writes a narrow no-break one.
+     */
+    fun mediumDateShortTime(date: Instant): String =
+        DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+            .withLocale(Locale.getDefault())
+            .withZone(ZoneId.systemDefault())
+            .format(date)
+            .replace('\u202F', ' ')
 
     /**
      * `new Date(iso).toLocaleString()`, the time's `title` in the action bar: the date and the time

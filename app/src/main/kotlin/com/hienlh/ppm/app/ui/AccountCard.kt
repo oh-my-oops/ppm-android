@@ -5,6 +5,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,10 +13,10 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -51,6 +52,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
@@ -61,7 +64,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import java.text.BreakIterator
+import java.time.Instant
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
@@ -78,6 +83,8 @@ import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.AccountInfo
 import com.hienlh.ppm.protocol.AccountUsageEntry
 import com.hienlh.ppm.protocol.LimitBucket
+import com.hienlh.ppm.protocol.ResetCredits
+import com.hienlh.ppm.state.DailyGuardState
 import com.hienlh.ppm.state.UsageTone
 import com.hienlh.ppm.state.formatExpiry
 import com.hienlh.ppm.state.formatLastUpdated
@@ -103,8 +110,9 @@ private val FlashFade = tween<Color>(500, easing = FastOutSlowInEasing)
 
 /**
  * One account as the chat's usage panel shows it (account-card.tsx, dense): its name and badges,
- * the Use button and the on/off switch beside them, its windows, and a footer of the facts worth
- * acting on — when the figures were read and when the sign-in ends. An expired account, or one
+ * the Use button and the on/off switch beside them, its windows, a weekly-only Codex account's
+ * Daily guard, and a footer of the facts worth acting on — its free resets and [resetCreditAction]
+ * beside them, when the figures were read and when the sign-in ends. An expired account, or one
  * whose sign-in was refused, is dimmed; the expired one also loses its switch.
  *
  * The badges' explanations are the web's tooltips, which a tap never opens there: they wait for
@@ -128,8 +136,11 @@ fun AccountCard(
     planLabel: String? = null,
     reauthHint: String? = null,
     onReauth: ((id: String) -> Unit)? = null,
-    footerLead: @Composable RowScope.() -> Unit = {},
-    below: (@Composable () -> Unit)? = null,
+    dailyGuard: CardDailyGuard? = null,
+    onDailyGuardToggle: (() -> Unit)? = null,
+    dailyGuardToggling: Boolean = false,
+    resetCredits: ResetCredits? = null,
+    resetCreditAction: (@Composable () -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val now = System.currentTimeMillis()
@@ -229,7 +240,7 @@ fun AccountCard(
                 style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
             )
         }
-        below?.let { Box(gap) { it() } }
+        dailyGuard?.let { DailyGuardBox(it, onDailyGuardToggle, dailyGuardToggling, gap) }
         // Always there, even empty: `space-y` still puts its gap above it. `gap-2` both ways, so
         // the facts that wrap in a narrow grid cell sit 8 apart.
         FlowRow(
@@ -237,7 +248,8 @@ fun AccountCard(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
-            footerLead()
+            resetCredits?.let { ResetCreditsChip(it) }
+            resetCreditAction?.invoke()
             val fact = ppmText(10f, lineHeight = 15f)
             usage.lastFetchedAt?.let(::isoMillis)?.let { read ->
                 FooterFact(ProductIcon.RefreshCw, formatLastUpdated(read, now).orEmpty(), tokens.text3, fact)
@@ -246,6 +258,72 @@ fun AccountCard(
                 FooterFact(ProductIcon.KeyRound, "sign-in ${formatExpiry(grantExpiresAtMs, now)}", if (grantEndingSoon) tokens.warning else tokens.text3, fact)
             }
             if (showTokenStatus) BasicText("© ${ts.label}", Modifier.pointerHoverIcon(WebCursor.Help), style = fact.copy(color = tokens.tone(ts.tone).color))
+        }
+    }
+}
+
+/** A weekly-only Codex account's Daily guard (`dailyGuard`): whether it is on, and where the week stands. */
+data class CardDailyGuard(val enabled: Boolean, val state: DailyGuardState)
+
+/**
+ * Daily guard (`flex min-h-12 items-center justify-between gap-3 rounded-md border px-2.5 py-1.5`):
+ * its title and help mark over today's share of the week, and its switch on the right. Red, with
+ * what is used against the cap, once the guard is on and today's share is spent.
+ */
+@Composable
+private fun DailyGuardBox(guard: CardDailyGuard, onToggle: (() -> Unit)?, toggling: Boolean, modifier: Modifier) {
+    val tokens = LocalPpmTokens.current
+    val blocked = guard.enabled && guard.state.blocked
+    val shape = RoundedCornerShape(8.dp)
+    val cap = (guard.state.cap * 100).roundToInt()
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clip(shape)
+            .background((if (blocked) tokens.error.opacity(0.05) else tokens.panel.opacity(0.4)).color)
+            .cssBorder((if (blocked) tokens.error.opacity(0.4) else tokens.border.opacity(0.5)).color, shape)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // `min-w-0`: in a narrow grid cell the title wraps beside its help mark and the line
+        // under it runs past the column a word at a time, as the web's do.
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            ShrinkRow(6.dp, between = false) {
+                BasicText("Daily guard", style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = (if (blocked) tokens.error else tokens.text2).color))
+                // The help mark's tooltip waits for 13a; its `cursor-help` and hover colour do not.
+                val hover = rememberHover(instant = true)
+                Box(Modifier.pointerHoverIcon(WebCursor.Help).hoverable(hover.source)) {
+                    PpmIcon(ProductIcon.CircleHelp, 14.dp, tokens.text.mix(tokens.text3, hover.lit.toDouble()).color)
+                }
+            }
+            CssWrapText(
+                if (blocked) "${(guard.state.used * 100).roundToInt()}% used / $cap% daily cap. New turns paused." else "Weekday ${guard.state.day}/5, $cap% daily cap",
+                ppmText(10f, lineHeight = 15f).copy(color = (if (blocked) tokens.error else tokens.text3).color, fontFeatureSettings = "tnum"),
+            )
+        }
+        if (onToggle != null) PpmSwitch(checked = guard.enabled, enabled = !toggling, onChange = onToggle)
+    }
+}
+
+/**
+ * Codex's free rate-limit resets (`ResetCreditsChip`): "2 free resets" in the accent and when the
+ * next one lapses, or "No free resets" in the footer's colour. Its explanation waits for 13a.
+ */
+@Composable
+private fun ResetCreditsChip(credits: ResetCredits) {
+    val tokens = LocalPpmTokens.current
+    val n = credits.available
+    val color = if (n > 0) tokens.accent else tokens.text3
+    val style = ppmText(10f, lineHeight = 15f)
+    // `inline-flex items-center gap-1`: narrower than the cell, the count and the date each wrap.
+    ShrinkRow(4.dp, between = false, Modifier.pointerHoverIcon(WebCursor.Help)) {
+        PpmIcon(ProductIcon.RotateCcw, 12.dp, color.color)
+        BasicText(if (n == 0) "No free resets" else "$n free reset${if (n == 1) "" else "s"}", style = style.copy(color = color.color))
+        val expires = credits.nextExpiresAt?.let(::isoMillis)
+        if (n > 0 && expires != null) {
+            BasicText("· until ${PpmFormat.monthDay(Instant.ofEpochMilli(expires))}", style = style.copy(color = tokens.text3.color))
         }
     }
 }
@@ -326,7 +404,7 @@ private fun ReauthChip(text: String, onClick: (() -> Unit)?) {
 fun AccountUsageBar(label: String, pct: Int?, reset: String?) {
     val tokens = LocalPpmTokens.current
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        ShrinkBetweenRow {
+        ShrinkRow(0.dp, between = true, Modifier.fillMaxWidth()) {
             BasicText(label, style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
             reset?.let { BasicText("↻ $it", style = ppmText(10f, lineHeight = 15f).copy(color = tokens.text3.color)) }
         }
@@ -440,80 +518,139 @@ private fun CardName(name: String, style: TextStyle) {
 }
 
 /**
- * `flex items-center justify-between` around a window's name and its reset time, both free to
- * shrink: CSS takes what does not fit out of each in proportion to its natural width, never below
- * its longest word, and each wraps in what it keeps — "5-Hour / Session" beside "↻ 2h / 10m" in a
- * narrow grid cell. A Row would give the second its whole width first.
+ * A flex row of items that all shrink (`flex-shrink: 1`, `min-width: auto`), centred across:
+ * what does not fit is taken out of each in proportion to its natural width, never below its
+ * longest word, and each wraps in what it keeps — "5-Hour / Session" beside "↻ 2h / 10m" in a
+ * narrow grid cell. A Row would give each its whole width in turn. [between] puts the last item
+ * at the far end (`justify-between`); otherwise they follow each other [gap] apart, and the row
+ * is as wide as they are. Past even their longest words, they run over its end, as CSS's do.
  */
 @Composable
-private fun ShrinkBetweenRow(content: @Composable () -> Unit) {
-    Layout(content, Modifier.fillMaxWidth(), ShrinkBetween)
+private fun ShrinkRow(gap: Dp, between: Boolean, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val policy = remember(gap, between) { ShrinkPolicy(gap, between) }
+    Layout(content, modifier, policy)
 }
 
-private object ShrinkBetween : MeasurePolicy {
+private class ShrinkPolicy(private val gap: Dp, private val between: Boolean) : MeasurePolicy {
     override fun MeasureScope.measure(measurables: List<Measurable>, constraints: Constraints): MeasureResult {
-        val sizes = widths(measurables, constraints.maxWidth)
-        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else sizes.sum()
-        val placeables = measurables.mapIndexed { i, measurable -> measurable.measure(Constraints.fixedWidth(sizes[i])) }
+        val gapPx = gap.toPx()
+        val sizes = sizes(measurables, constraints.maxWidth, gapPx)
+        // Edges rounded rather than widths, so the items and the gaps between them add up.
+        val edges = sizes.runningFoldIndexed(0.0) { i, x, size -> x + size + if (i > 0) gapPx else 0f }.drop(1)
+        val placeables = measurables.mapIndexed { i, measurable ->
+            val start = if (i == 0) 0.0 else edges[i - 1] + gapPx
+            measurable.measure(Constraints.fixedWidth((edges[i].roundToInt() - start.roundToInt()).coerceAtLeast(0)))
+        }
+        val natural = edges.lastOrNull()?.roundToInt() ?: 0
+        val width = natural.coerceAtMost(constraints.maxWidth).coerceAtLeast(constraints.minWidth)
         val height = placeables.maxOfOrNull { it.height } ?: 0
         return layout(width, height) {
-            var x = 0
             placeables.forEachIndexed { i, placeable ->
+                var x = if (i == 0) 0 else (edges[i - 1] + gapPx).roundToInt()
                 // The last at the far end, unless the ones before it already reach past that.
-                if (i > 0 && i == placeables.lastIndex) x = maxOf(x, width - placeable.width)
+                if (between && i > 0 && i == placeables.lastIndex) x = maxOf(x, width - placeable.width)
                 placeable.placeRelative(x, (height - placeable.height) / 2)
-                x += placeable.width
             }
         }
     }
 
+    private fun IntrinsicMeasureScope.gaps(count: Int) = (gap.toPx() * (count - 1).coerceAtLeast(0)).roundToInt()
+
     override fun IntrinsicMeasureScope.minIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) =
-        measurables.sumOf { it.minIntrinsicWidth(height) }
+        measurables.sumOf { it.minIntrinsicWidth(height) } + gaps(measurables.size)
 
     override fun IntrinsicMeasureScope.maxIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) =
-        measurables.sumOf { it.maxIntrinsicWidth(height) }
+        measurables.sumOf { it.maxIntrinsicWidth(height) } + gaps(measurables.size)
 
     override fun IntrinsicMeasureScope.minIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int) =
         maxIntrinsicHeight(measurables, width)
 
     override fun IntrinsicMeasureScope.maxIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int): Int {
-        val sizes = widths(measurables, width)
-        return measurables.indices.maxOfOrNull { measurables[it].maxIntrinsicHeight(sizes[it]) } ?: 0
+        val sizes = sizes(measurables, width, gap.toPx())
+        return measurables.indices.maxOfOrNull { measurables[it].maxIntrinsicHeight(sizes[it].roundToInt()) } ?: 0
     }
 
     /**
-     * Flex shrinking with `flex-shrink: 1` and `min-width: auto`: the overflow taken from each
-     * item in proportion to its natural width, any item pushed below its longest word frozen
-     * there and the rest shared out again. Edges rounded rather than widths, so they add up.
+     * Flex shrinking: the overflow taken from each item in proportion to its natural width, any
+     * item pushed below its longest word frozen there and the rest shared out again.
      */
-    private fun widths(measurables: List<IntrinsicMeasurable>, room: Int): List<Int> {
-        val basis = measurables.map { it.maxIntrinsicWidth(Constraints.Infinity) }
-        if (basis.sum() <= room) return basis
-        val floor = measurables.map { it.minIntrinsicWidth(Constraints.Infinity) }
-        val sizes = basis.map { it.toDouble() }.toMutableList()
+    private fun sizes(measurables: List<IntrinsicMeasurable>, room: Int, gap: Float): List<Double> {
+        val basis = measurables.map { it.maxIntrinsicWidth(Constraints.Infinity).toDouble() }
+        val gaps = gap.toDouble() * (measurables.size - 1).coerceAtLeast(0)
+        if (room == Constraints.Infinity || basis.sum() + gaps <= room) return basis
+        val floor = measurables.map { it.minIntrinsicWidth(Constraints.Infinity).toDouble() }
+        val sizes = basis.toMutableList()
         val frozen = BooleanArray(basis.size)
         do {
-            val free = room - basis.indices.sumOf { if (frozen[it]) sizes[it] else basis[it].toDouble() }
-            val share = basis.indices.filterNot { frozen[it] }.sumOf { basis[it].toDouble() }
+            val free = room - gaps - basis.indices.sumOf { if (frozen[it]) sizes[it] else basis[it] }
+            val share = basis.indices.filterNot { frozen[it] }.sumOf { basis[it] }
             var violated = false
             for (i in basis.indices) {
-                if (frozen[i]) continue
+                if (frozen[i] || share == 0.0) continue
                 sizes[i] = basis[i] + free * basis[i] / share
                 if (sizes[i] < floor[i]) {
-                    sizes[i] = floor[i].toDouble()
+                    sizes[i] = floor[i]
                     frozen[i] = true
                     violated = true
                 }
             }
         } while (violated)
-        var edge = 0.0
-        var previous = 0
-        return sizes.map { size ->
-            edge += size
-            val at = edge.roundToInt()
-            (at - previous).also { previous = at }
-        }
+        return sizes
     }
+}
+
+/**
+ * Text wrapped as CSS wraps it (`overflow-wrap: normal`): at spaces only, a word longer than the
+ * line alone on its line and running past the box, where Android would break the word. Lines are
+ * filled greedily, as Chrome fills them.
+ */
+@Composable
+private fun CssWrapText(text: String, style: TextStyle, modifier: Modifier = Modifier) {
+    val measurer = rememberTextMeasurer()
+    val laidOut = remember { mutableStateOf<TextLayoutResult?>(null) }
+    val policy = remember(text, style, measurer) { CssWrapPolicy(text, style, measurer) { laidOut.value = it } }
+    Layout(modifier.drawBehind { laidOut.value?.let { drawText(it) } }, policy)
+}
+
+private class CssWrapPolicy(
+    private val text: String,
+    private val style: TextStyle,
+    private val measurer: TextMeasurer,
+    private val onLayout: (TextLayoutResult) -> Unit,
+) : MeasurePolicy {
+    private fun line(s: String) = measurer.measure(s, style, softWrap = false, maxLines = 1)
+
+    /** [text] with a break wherever CSS would put one in [room] pixels, laid out. */
+    private fun wrapped(room: Int): TextLayoutResult {
+        val out = StringBuilder()
+        var current = ""
+        for (word in text.split(' ')) {
+            val longer = if (current.isEmpty()) word else "$current $word"
+            if (current.isNotEmpty() && line(longer).getLineRight(0) > room) {
+                out.append(current).append('\n')
+                current = word
+            } else {
+                current = longer
+            }
+        }
+        out.append(current)
+        return measurer.measure(out.toString(), style, softWrap = false)
+    }
+
+    override fun MeasureScope.measure(measurables: List<Measurable>, constraints: Constraints): MeasureResult {
+        val result = wrapped(constraints.maxWidth)
+        onLayout(result)
+        return layout(result.size.width.coerceIn(constraints.minWidth, constraints.maxWidth), result.size.height.coerceAtLeast(constraints.minHeight)) {}
+    }
+
+    override fun IntrinsicMeasureScope.minIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) =
+        text.split(' ').maxOfOrNull { line(it).size.width } ?: 0
+
+    override fun IntrinsicMeasureScope.maxIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) = line(text).size.width
+
+    override fun IntrinsicMeasureScope.minIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int) = wrapped(width).size.height
+
+    override fun IntrinsicMeasureScope.maxIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int) = wrapped(width).size.height
 }
 
 /** `flex-1 h-2 rounded-full bg-border overflow-hidden`, filled to [pct] (at most all of it). */
@@ -534,12 +671,12 @@ fun AccountBucketRow(label: String, bucket: LimitBucket?, now: Long) {
     AccountUsageBar(label, usagePercent(bucket.utilization), formatResetTime(bucket, now))
 }
 
-/** Tailwind's `shadow-sm` under a switch's track, and the thumb's `shadow-lg`. */
+/** Tailwind's `shadow-sm` under a switch's track, and `shadow-lg` under its thumb (and a dialog). */
 private val TrackShadow = listOf(
     ThemeShadow(0.0, 1.0, 3.0, 0.0, Rgba(0.0, 0.0, 0.0, 0.1)),
     ThemeShadow(0.0, 1.0, 2.0, -1.0, Rgba(0.0, 0.0, 0.0, 0.1)),
 )
-private val ThumbShadow = listOf(
+internal val ShadowLg = listOf(
     ThemeShadow(0.0, 10.0, 15.0, -3.0, Rgba(0.0, 0.0, 0.0, 0.1)),
     ThemeShadow(0.0, 4.0, 6.0, -4.0, Rgba(0.0, 0.0, 0.0, 0.1)),
 )
@@ -568,7 +705,7 @@ fun PpmSwitch(checked: Boolean, enabled: Boolean = true, onChange: () -> Unit) {
         contentAlignment = Alignment.CenterStart,
     ) {
         Box(
-            ThumbShadow.fold(Modifier.offset(x = slide).size(16.dp) as Modifier) { m, s -> m.ppmShadow(s, CircleShape) }
+            ShadowLg.fold(Modifier.offset(x = slide).size(16.dp) as Modifier) { m, s -> m.ppmShadow(s, CircleShape) }
                 .clip(CircleShape)
                 .background(tokens.bgSolid.color),
         )

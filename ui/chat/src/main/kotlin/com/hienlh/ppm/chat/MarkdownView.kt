@@ -507,7 +507,7 @@ private fun OrdinalMarker(text: String, style: MarkdownStyle, color: Color, modi
  * screen. Geist's own bullet glyph is half that size.
  */
 @Composable
-private fun DiscMarker(style: MarkdownStyle, color: Color, modifier: Modifier) {
+fun DiscMarker(style: MarkdownStyle, color: Color, modifier: Modifier) {
     var baseline by remember { mutableFloatStateOf(0f) }
     // A line of the item's text with nothing in it, for the baseline to align to and draw on.
     BasicText(

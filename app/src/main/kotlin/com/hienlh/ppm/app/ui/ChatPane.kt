@@ -317,22 +317,34 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     )
                     val list = tab.historyList
                     if (panel == ToolbarPanel.History && list != null) ChatHistoryDropdown(model, tab, list) { panel = null }
-                    if (panel == ToolbarPanel.Usage && isClaude) {
+                    if (panel == ToolbarPanel.Usage && (isClaude || tab.providerId == "codex")) {
                         val shown = usage?.usage ?: UsageInfo()
-                        ClaudeUsagePanel(
-                            model,
-                            shown,
-                            usageLoading,
-                            usage?.fetchedAt,
-                            selectedAccountId = pickedAccountId ?: shown.activeAccountId,
-                            onSelectAccount = if (!tab.providerPending && !tab.firstSendPending) {
-                                { id, label -> model.selectAccount(tab, id, label) { usageReader.read(refresh = false) } }
-                            } else {
-                                null
-                            },
-                            onReload = { paneScope.launch { usageReader.read(refresh = true) } },
-                            onClose = { panel = null },
-                        )
+                        val selectAccount: (suspend (String, String?) -> String?)? = if (!tab.providerPending && !tab.firstSendPending) {
+                            { id, label -> model.selectAccount(tab, id, label) { usageReader.read(refresh = false) } }
+                        } else {
+                            null
+                        }
+                        if (isClaude) {
+                            ClaudeUsagePanel(
+                                model,
+                                shown,
+                                usageLoading,
+                                usage?.fetchedAt,
+                                selectedAccountId = pickedAccountId ?: shown.activeAccountId,
+                                onSelectAccount = selectAccount,
+                                onReload = { paneScope.launch { usageReader.read(refresh = true) } },
+                                onClose = { panel = null },
+                            )
+                        } else {
+                            CodexUsagePanel(
+                                model,
+                                shown,
+                                selectedAccountId = pickedAccountId ?: shown.activeAccountId,
+                                onSelectAccount = selectAccount,
+                                onReload = { usageReader.read(refresh = true) },
+                                onClose = { panel = null },
+                            )
+                        }
                     }
                 }
                 val pickers = rememberComposerPickers(model, tab)

@@ -302,17 +302,24 @@ fun PpmTextField(
  * bottom edge with a 16px top radius and a drag handle, sliding up in 200 ms; a tap on the
  * backdrop, Back or a swipe down closes it. Drawn in a window of its own, so that it covers the
  * bottom bar and rises with the keyboard. [background] replaces `bg-popover` where a sheet's
- * class does (`bg-background` on the project sheet).
+ * class does (`bg-background` on the project sheet). While not [dismissible] (an `onClose` that
+ * ignores the call), it stays, and a swipe springs back.
  */
 @Composable
-fun BottomSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier, background: Color? = null, content: @Composable ColumnScope.() -> Unit) {
+fun BottomSheet(
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+    background: Color? = null,
+    dismissible: Boolean = true,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     val tokens = LocalPpmTokens.current
     val scope = rememberCoroutineScope()
     var panelHeight by remember { mutableFloatStateOf(0f) }
     val offset = remember { Animatable(Float.MAX_VALUE) }
     var closing by remember { mutableStateOf(false) }
     fun close() {
-        if (closing) return
+        if (closing || !dismissible) return
         closing = true
         scope.launch {
             offset.animateTo(panelHeight, tween(150))
@@ -360,7 +367,7 @@ fun BottomSheet(onDismiss: () -> Unit, modifier: Modifier = Modifier, background
                         rememberDraggableState { delta -> scope.launch { offset.snapTo((offset.value + delta).coerceAtLeast(0f)) } },
                         Orientation.Vertical,
                         onDragStopped = { velocity ->
-                            if (offset.value > panelHeight * 0.25f || velocity > 1_500f) close() else offset.animateTo(0f, tween(150))
+                            if (dismissible && (offset.value > panelHeight * 0.25f || velocity > 1_500f)) close() else offset.animateTo(0f, tween(150))
                         },
                     )
                     .cssBorderInset(top = 1.dp)
