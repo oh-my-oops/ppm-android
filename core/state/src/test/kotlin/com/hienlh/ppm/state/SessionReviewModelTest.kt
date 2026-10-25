@@ -31,17 +31,6 @@ class SessionReviewModelTest {
 
     private fun states(r: FileReview) = r.blocks.map { it.state }
 
-    /** `revertBlocks` (server side on the web): [current] with [blocks] put back to the base's lines. */
-    private fun revertBlocks(base: String, current: String, blocks: List<ReviewBlocks.Block>): String {
-        val old = ReviewBlocks.splitLines(base)
-        val now = ReviewBlocks.splitLines(current).toMutableList()
-        for (b in blocks.sortedByDescending { it.newFrom }) {
-            repeat(b.newTo - b.newFrom) { now.removeAt(b.newFrom) }
-            now.addAll(b.newFrom, old.subList(b.oldFrom, b.oldTo))
-        }
-        return now.joinToString("")
-    }
-
     @Test
     fun `lists every block of every file in file order, a reverted one where it sat`() {
         val a = SessionReviewModel.fileReviews(

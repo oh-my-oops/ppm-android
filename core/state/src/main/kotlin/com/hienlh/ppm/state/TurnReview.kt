@@ -145,6 +145,16 @@ object SessionChangeList {
     /** The files left to review, and those marked reviewed as they are now, which the lists hide. */
     fun splitReviewed(files: List<SessionFileChange>): Pair<List<SessionFileChange>, List<SessionFileChange>> = files.partition { !it.reviewed }
 
+    /**
+     * Changes whenever what a diff of this file would show does: every write moves the version,
+     * the baseline kind moves when a fallback to git HEAD turns into the session's own copy, and a
+     * mark moves what a file changed since it was reviewed is diffed against.
+     */
+    fun changeKey(file: SessionFileChange): String {
+        val review = if (file.reviewed) "reviewed" else if (file.sinceReview) "since" else ""
+        return "${file.path}\u0000${file.status.wire}\u0000${file.baseline}\u0000${file.version}\u0000$review"
+    }
+
     /** [files] with [paths] marked or unmarked reviewed ahead of the server's answer. */
     fun withReviewed(files: List<SessionFileChange>, paths: Set<String>, reviewed: Boolean): List<SessionFileChange> =
         files.map { if (it.path in paths) it.copy(reviewed = reviewed, sinceReview = false) else it }

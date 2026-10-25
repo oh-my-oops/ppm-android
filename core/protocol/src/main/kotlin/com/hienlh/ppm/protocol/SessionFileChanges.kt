@@ -81,6 +81,22 @@ data class SessionBlockSummary(
     }
 }
 
+/** Both sides of one file the session changed (`…/file-changes/diff`): what the Review tab cuts its blocks from. */
+data class SessionFileDiff(
+    val file: SessionFileChange,
+    /** The state it is compared with: before the session, at its mark, or at git HEAD. */
+    val original: String,
+    /** The file now; "" once it is deleted. */
+    val modified: String,
+) {
+    companion object {
+        fun from(json: JsonElement?): SessionFileDiff? {
+            val file = SessionFileChange.from(json) ?: return null
+            return SessionFileDiff(file, json["original"].string.orEmpty(), json["modified"].string.orEmpty())
+        }
+    }
+}
+
 /** What `…/file-changes/reviewed` answers. */
 data class SessionReviewResult(val updated: List<String>, val stale: List<String>) {
     companion object {

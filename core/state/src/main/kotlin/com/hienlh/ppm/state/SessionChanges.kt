@@ -57,9 +57,15 @@ class SessionChanges(
     val backend: SessionChangesBackend,
     private val scope: CoroutineScope,
     private val delayMillis: Long = REFETCH_DELAY_MILLIS,
+    private val now: () -> Long = ::monotonicMillis,
 ) {
     private val _files = MutableStateFlow<List<SessionFileChange>>(emptyList())
     val files: StateFlow<List<SessionFileChange>> = _files.asStateFlow()
+
+    private val _listed = MutableStateFlow<SessionChangesList?>(null)
+
+    /** Each list the server sent, with what it was asked for and when: a Review tab open on the session follows it. */
+    val listed: StateFlow<SessionChangesList?> = _listed.asStateFlow()
 
     /** The paths the transcript names, which every request adds to the server's own list. */
     var paths: List<String> = emptyList()
@@ -87,8 +93,12 @@ class SessionChanges(
             delay(delayMillis)
             // Saving the marks asks again.
             if (marking > 0) return@launch
+            val asked = paths
+            val askedAt = now()
             try {
-                _files.value = backend.list(paths)
+                val files = backend.list(asked)
+                _files.value = files
+                _listed.value = SessionChangesList(files, asked, askedAt)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -132,6 +142,12 @@ class SessionChanges(
         const val REFETCH_DELAY_MILLIS = 400L
     }
 }
+
+/** A list the server sent, the paths it was asked with, and when it was asked ([monotonicMillis]). */
+data class SessionChangesList(val files: List<SessionFileChange>, val paths: List<String>, val askedAt: Long)
+
+/** Milliseconds on a clock that never goes back: what "asked before that answer landed" is measured on. */
+fun monotonicMillis(): Long = System.nanoTime() / 1_000_000
 
 /** What the tray says after an answer: what went wrong, or what to undo. */
 data class TurnReviewNotice(val text: String, val undoId: String? = null)

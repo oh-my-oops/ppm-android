@@ -285,6 +285,11 @@ object SessionReviewModel {
         return PaneModel(items, cut.lines, cut.baseLine, entries.size, stale)
     }
 
+    /** Cuts [original] against [modified] ahead of [paneModel], so a large file is cut off the main thread. */
+    fun prepare(original: String, modified: String) {
+        cutFile(original, modified)
+    }
+
     private class Cut(val diff: ReviewBlocks.Diff, val map: IntArray, val lines: List<String>, val baseLine: IntArray)
 
     // The pane is redrawn on every answer while its file stays the same, and a diff that ran out
