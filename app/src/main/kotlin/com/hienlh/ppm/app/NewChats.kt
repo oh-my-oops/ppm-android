@@ -491,7 +491,7 @@ internal class NewChats(private val model: AppModel) {
             )
             // Bounded: a socket that never says hello would keep the message with nothing on screen.
             val connected = withTimeoutOrNull(PENDING_SEND_MILLIS) {
-                chat.controller?.state?.first { it.sessionId == session.id && it.canSend }
+                chat.controller?.state?.first { it.sessionId == session.id && it.connected }
             }
             if (attempt != chat.firstSendAttempt) return@launch
             if (connected == null) abandon(chat, "The chat did not connect in time.") else chat.flushFirst(mode)

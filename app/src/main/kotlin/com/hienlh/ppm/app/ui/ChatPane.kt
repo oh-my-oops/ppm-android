@@ -110,6 +110,7 @@ import com.hienlh.ppm.chat.AgentSessionOpener
 import com.hienlh.ppm.chat.BackgroundCommandBar
 import com.hienlh.ppm.chat.CONTINUE_AFTER_STOP
 import com.hienlh.ppm.chat.ChatImages
+import com.hienlh.ppm.chat.ChatReconnectBanner
 import com.hienlh.ppm.chat.ChatTabs
 import com.hienlh.ppm.chat.ChatTranscriptView
 import com.hienlh.ppm.chat.FirstSendView
@@ -188,8 +189,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         }
     }
     // Text the tab was opened with is in the box now: once connected, the tab stops offering it.
-    LaunchedEffect(state.canSend, state.sessionId) {
-        if (state.canSend && state.sessionId != null) model.pendingMessageTaken(tab)
+    LaunchedEffect(state.connected, state.sessionId) {
+        if (state.connected && state.sessionId != null) model.pendingMessageTaken(tab)
     }
     // A new chat on screen has the process its first message will run on started while that
     // message is written (`useChatPrewarm`), with what it will carry: asked once the picks hold
@@ -451,6 +452,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                 ChatComposer(model, tab, chat, state, narrow, fileDrop, pickers)
             }
         }
+        // A pill, not an overlay: the chat stays readable and usable while it reconnects.
+        ChatReconnectBanner(state.connection is ChatController.Connection.Reconnecting, model.resumes, onRetry = chat::reloadChat)
         if (fileDrop.showing) DropFilesOverlay()
     }
 }
@@ -619,7 +622,7 @@ private fun ChatToolbar(
                 }
             }
             Row(Modifier.padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                ReloadButton(state.canSend) { chat.reload() }
+                ReloadButton(state.connected) { chat.reloadChat() }
                 // Its actions are a session's.
                 tab.session?.let { OverflowButton(model, it) }
             }

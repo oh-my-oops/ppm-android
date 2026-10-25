@@ -81,7 +81,8 @@ data class ChatState(
     val mcpNeedsAuth: List<String> = emptyList(),
 ) {
     val isRunning: Boolean get() = phase.isRunning
-    val canSend: Boolean get() = connection == ChatController.Connection.Connected
+    /** The socket is open. A message sent while it is not shows at once and goes out once it is. */
+    val connected: Boolean get() = connection == ChatController.Connection.Connected
 
     /** [items] with the turn being streamed after them as one more message, as the web's list holds it. */
     fun itemsWithLive(): List<ChatItem> {
@@ -135,6 +136,10 @@ class ChatController(
     private var liveAccount: PickedAccount? = null
     private var team = TeamActivity()
     private var socket: SocketConnection? = null
+    /** Frames sent while the socket was down, in order: the next connection sends them after `ready` (`ws-client.ts`). */
+    private val unsent = ArrayList<String>()
+    /** The wait before the next attempt after a drop, which [reconnect] cuts short. */
+    private var retry: Job? = null
     private var lastFrameAt = clock()
     private var closeReason: String? = null
     private var failures = 0
@@ -183,12 +188,14 @@ class ChatController(
         scope.cancel()
         socket?.close()
         socket = null
+        unsent.clear()
     }
 
     /**
      * [options] carries the composer's mode and priority; the model, effort and thinking are added
      * here. [replyTo] goes only if it quotes this chat: the server refuses any other. [images] ride
      * in the frame and [imagePaths] name their uploads; a message of pictures alone may have no text.
+     * While the socket is down the message shows at once and goes out once it is back.
      */
     fun send(
         text: String,
@@ -198,10 +205,9 @@ class ChatController(
         imagePaths: List<String> = emptyList(),
     ) {
         val content = text.trim()
-        val socket = socket
-        if ((content.isEmpty() && images.isEmpty()) || socket == null || connection != Connection.Connected) return
+        if ((content.isEmpty() && images.isEmpty()) || sessionId == null || stopped) return
         val reply = replyTo?.takeIf { it.sessionId == sessionId && it.providerId == providerId }
-        socket.send(transcript.send(content, settings.turnOptions(options), clock(), reply, images, imagePaths).json.toString())
+        transmit(transcript.send(content, settings.turnOptions(options), clock(), reply, images, imagePaths))
         publish()
     }
 
@@ -216,12 +222,12 @@ class ChatController(
     val turnPicks: TurnOptions get() = settings.turnOptions(TurnOptions())
 
     private fun pick(frame: ChatClientMessage) {
-        socket?.send(frame.json.toString())
+        transmit(frame)
         publish()
     }
 
     fun cancel() {
-        socket?.send(ChatClientMessage.Cancel.json.toString())
+        transmit(ChatClientMessage.Cancel)
         transcript.cancelled()
         publish()
     }
@@ -229,12 +235,12 @@ class ChatController(
     /** Asks the AI to stop a background command; the next `background_registry` says `stopping`. */
     fun killBackgroundShell(shellId: String) {
         if (shellId.isEmpty()) return
-        socket?.send(ChatClientMessage.KillBackgroundShell(shellId).json.toString())
+        transmit(ChatClientMessage.KillBackgroundShell(shellId))
     }
 
     fun respond(request: ApprovalRequest, approved: Boolean, data: JsonElement? = null) {
-        val socket = socket ?: return
-        socket.send(transcript.respond(request, approved, data).json.toString())
+        if (stopped) return
+        transmit(transcript.respond(request, approved, data))
         publish()
     }
 
@@ -293,8 +299,27 @@ class ChatController(
         }
     }
 
-    /** Reads the history again — the web's reload button above the composer. */
+    /** Reads the history again. */
     fun reload() = reloadHistory()
+
+    /**
+     * The toolbar's reload and the reconnect pill's Retry (`reloadChat`): a socket that is not open
+     * starts over at once, in place of an attempt still under way, and an idle chat reads its
+     * messages again.
+     */
+    fun reloadChat() {
+        if (connection != Connection.Connected) reconnect()
+        if (!transcript.isRunning) reloadHistory()
+    }
+
+    /**
+     * The app came to the front, as the web's socket does on `visibilitychange`: one that is down
+     * tries again now instead of waiting out its backoff, and one gone silent is replaced. Nothing
+     * while one is opening.
+     */
+    fun resumed() {
+        if (socket == null && connection is Connection.Reconnecting) reconnect() else closeIfSilent()
+    }
 
     /** Drops the connection as a network loss would; it comes back by itself. */
     fun simulateConnectionLoss() {
@@ -324,6 +349,9 @@ class ChatController(
                 lastFrameAt = clock()
                 transcript.socketOpened()
                 socket?.send(ChatClientMessage.Ready.json.toString())
+                // What was sent while it was down goes after `ready`, in order.
+                for (text in unsent) socket?.send(text)
+                unsent.clear()
             }
             is SocketConnection.Event.Text -> frame(event.text)
             is SocketConnection.Event.Binary -> frame(event.bytes.utf8())
@@ -358,23 +386,48 @@ class ChatController(
         publish()
         // 0.25 s, 0.5, 1, 2, 4, then every 8 s.
         val wait = minOf(250L shl minOf(failures - 1, 5), 8_000L)
-        scope.launch {
+        retry = scope.launch {
             delay(wait)
+            retry = null
             connect()
         }
     }
 
+    /** On the socket when it is open; otherwise kept for the next connection, as the web's socket keeps it. */
+    private fun transmit(message: ChatClientMessage) {
+        val text = message.json.toString()
+        val socket = socket
+        if (socket != null && connection == Connection.Connected) socket.send(text) else if (!stopped) unsent += text
+    }
+
     private fun closeIfSilent() {
-        val socket = socket ?: return
-        if (connection != Connection.Connected || clock() - lastFrameAt <= SILENCE_LIMIT_MS) return
+        if (socket == null || connection != Connection.Connected || clock() - lastFrameAt <= SILENCE_LIMIT_MS) return
         closeReason = "No answer from the server for ${SILENCE_LIMIT_MS / 1000} seconds."
-        socket.close()
+        reconnect()
+    }
+
+    /**
+     * A new socket now, in place of the one open, opening or waited for (`WsClient.connect`). The
+     * old one is let go first, so nothing sent meanwhile goes out on it: it waits for the new one.
+     */
+    private fun reconnect() {
+        if (stopped || sessionId == null) return
+        retry?.cancel()
+        retry = null
+        failures = 0
+        socket?.let { old ->
+            socket = null
+            old.close()
+        }
+        if (connection == Connection.Connected) connection = Connection.Reconnecting(closeReason)
+        publish()
+        connect()
     }
 
     private fun perform(effects: List<ChatEffect>) {
         for (effect in effects) {
             when (effect) {
-                is ChatEffect.Send -> socket?.send(effect.message.json.toString())
+                is ChatEffect.Send -> transmit(effect.message)
                 ChatEffect.ReloadHistory -> reloadHistory()
                 is ChatEffect.AdoptSessionId -> sessionId = effect.id
                 is ChatEffect.TeamDetected -> {

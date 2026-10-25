@@ -102,7 +102,7 @@ class EndToEndTest {
     private suspend fun open(session: SessionInfo): ChatController {
         val chat = ChatController(api, project, session, scope)
         chat.start()
-        waitFor("the socket") { chat.state.value.canSend }
+        waitFor("the socket") { chat.state.value.connected }
         return chat
     }
 
@@ -194,10 +194,10 @@ class EndToEndTest {
         var session: SessionInfo? = null
         try {
             delay(200)
-            assertFalse(chat.state.value.canSend)
+            assertFalse(chat.state.value.connected)
             session = api.createSession(project, chat.providerId, title = "hello")
             chat.adopt(session)
-            waitFor("the socket") { chat.state.value.canSend }
+            waitFor("the socket") { chat.state.value.connected }
             chat.send("hello")
             chat.turnEnds(2)
             assertEquals(session.id, chat.state.value.sessionId)
@@ -226,7 +226,7 @@ class EndToEndTest {
                 chat.simulateConnectionLoss()
                 waitFor("the turn to end") {
                     val state = chat.state.value
-                    state.canSend && !state.isRunning && state.items.size == before + 2
+                    state.connected && !state.isRunning && state.items.size == before + 2
                 }
             }
             // Give a reload triggered at idle time to land, then compare with what the server kept.

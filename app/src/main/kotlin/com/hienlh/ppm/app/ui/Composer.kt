@@ -297,8 +297,9 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
         tab.pickMode(mode)
         modeOpen = false
     }
-    // A new chat has no socket to wait for: its first message makes the session (Send asks no connection on the web).
-    val canSend = hasContent && (state.canSend || tab.session == null) && !tab.firstSendPending
+    // Send asks no connection, as on the web: a new chat's first message makes the session, and
+    // what is sent while a chat reconnects goes out once it is back.
+    val canSend = hasContent && !tab.firstSendPending
     // `disabled` while the first message goes: the text, the paperclip and the mic at half strength.
     val locked = tab.firstSendPending
 

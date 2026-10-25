@@ -786,11 +786,17 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         events.start()
     }
 
+    /** How many times the app has come to the front: each restarts the reconnect pill's clocks. */
+    var resumes by mutableIntStateOf(0)
+        private set
+
     /**
-     * The app came to the front: replace a socket that died meanwhile, and read the session
-     * list again if it has not been read for a while (the web does both when a page shows).
+     * The app came to the front: replace the sockets that died or went silent meanwhile, and read
+     * the session list again if it has not been read for a while (the web does both when a page shows).
      */
     fun becameActive() {
+        resumes++
+        for (tab in chats.values) tab.controller?.resumed()
         events?.wake()
         refreshWorkspace()
         val readAt = sessionsReadAt ?: return
@@ -2815,7 +2821,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         val agent = agent
         val ready = attachments.filter { it.status == ComposerAttachment.Status.READY }
         val first = session == null
-        if (chat == null || (typed.isEmpty() && ready.isEmpty() && agent == null) || (!first && !chat.state.value.canSend) || firstSendPending) {
+        if (chat == null || (typed.isEmpty() && ready.isEmpty() && agent == null) || firstSendPending) {
             pendingSend = false
             return
         }
