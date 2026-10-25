@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -52,7 +53,8 @@ private val bodyText = ppmText(14f, lineHeight = 20f)
 fun McpSignInPanel(model: AppModel, signIn: McpSignIn) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
-    val dark = model.theme.isDark
+    // `dark:` is the device's dark mode on the web, not PPM's theme.
+    val dark = isSystemInDarkTheme()
     val close = model::closeMcpSignIn
     val title = "Sign in to ${signIn.serverName}"
     val buttons = Buttons(dark, if (mobile) 44.dp else 36.dp)

@@ -1,6 +1,7 @@
 package com.hienlh.ppm.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -265,7 +266,8 @@ private fun CodexResetCreditButton(model: AppModel, account: CodexAccount, usage
     if (!canUseResetCredit(usage)) return
     val credits = usage.resetCredits ?: return
     val mobile = LocalPpmMobile.current
-    val dark = model.theme.isDark
+    // `dark:` is the device's dark mode on the web, not PPM's theme.
+    val dark = isSystemInDarkTheme()
 
     fun spend() {
         busy = true

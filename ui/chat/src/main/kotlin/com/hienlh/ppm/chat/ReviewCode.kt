@@ -4,6 +4,7 @@ import android.content.ClipData
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -1373,7 +1374,8 @@ internal fun ReviewButton(
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
-    val dark = LocalPpmTheme.current.isDark
+    // `dark:` is the device's dark mode on the web, not PPM's theme.
+    val dark = isSystemInDarkTheme()
     val shape = RoundedCornerShape(8.dp)
     val hover = rememberHover(enabled = enabled)
     val pressed by hover.source.collectIsPressedAsState()

@@ -2,6 +2,7 @@ package com.hienlh.ppm.app.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -265,7 +266,7 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
         ) {
             if (!split) {
                 // The `ghost` button: `hover:bg-accent`, `dark:hover:bg-accent/50`, `cursor-pointer`.
-                val ghost = ghostHover(tokens, model.theme.isDark)
+                val ghost = ghostHover(tokens, isSystemInDarkTheme())
                 Box(
                     Modifier
                         .size(36.dp)
@@ -316,7 +317,7 @@ private fun AppearanceSection(model: AppModel) {
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for ((mode, label, icon) in THEME_MODES) {
-                ModeButton(label, icon, model.themeSelection.mode == mode, model.theme.isDark, Modifier.weight(1f)) {
+                ModeButton(label, icon, model.themeSelection.mode == mode, isSystemInDarkTheme(), Modifier.weight(1f)) {
                     model.scope.launch { model.pickThemeMode(mode) }
                 }
             }
@@ -419,6 +420,8 @@ private fun ModeButton(label: String, icon: ProductIcon, on: Boolean, dark: Bool
     }
 }
 
+// Below, `dark` is the device's dark mode: the web's `dark:` is `prefers-color-scheme`, which PPM's theme does not set.
+
 /** The outline button's border: `dark:border-input` (the border colour), else the text colour. */
 internal fun outlineBorder(tokens: ThemeTokens, dark: Boolean): Color = (if (dark) tokens.border else tokens.text).color
 
@@ -471,7 +474,7 @@ private fun ServersSection(model: AppModel) {
         }
         // The web has no such list: a server is lit as a theme card is, the bin as a `ghost`
         // button and Add server as an `outline` one.
-        val ghost = ghostHover(tokens, model.theme.isDark)
+        val ghost = ghostHover(tokens, isSystemInDarkTheme())
         for (server in servers) {
             val current = server.id == selected
             val shape = RoundedCornerShape(12.dp)
@@ -508,9 +511,9 @@ private fun ServersSection(model: AppModel) {
                 .height(36.dp)
                 .ppmShadow(SHADOW_XS, shape)
                 .clip(shape)
-                .background(outlineFill(tokens, model.theme.isDark, hover.lit.toDouble()))
+                .background(outlineFill(tokens, isSystemInDarkTheme(), hover.lit.toDouble()))
                 .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, source = hover.source) { model.addingServer = true }
-                .cssBorder(outlineBorder(tokens, model.theme.isDark), shape),
+                .cssBorder(outlineBorder(tokens, isSystemInDarkTheme()), shape),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         ) {

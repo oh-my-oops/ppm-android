@@ -1,6 +1,7 @@
 package com.hienlh.ppm.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,7 +60,6 @@ import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssGridRow
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmMobile
-import com.hienlh.ppm.design.LocalPpmTheme
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.PpmIcon
@@ -714,7 +714,8 @@ private fun UnavailableBox(provider: String, status: ProviderProbeStatus, probin
 @Composable
 private fun CheckAgainButton(probing: Boolean, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
-    val dark = LocalPpmTheme.current.isDark
+    // `dark:` is the device's dark mode on the web, not PPM's theme.
+    val dark = isSystemInDarkTheme()
     val shape = RoundedCornerShape(8.dp)
     val hover = rememberHover(enabled = !probing)
     val fill = if (dark) tokens.border.opacity(0.3 + 0.2 * hover.lit) else tokens.panel2.mix(tokens.bgSolid, hover.lit.toDouble())

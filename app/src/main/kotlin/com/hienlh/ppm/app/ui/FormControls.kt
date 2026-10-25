@@ -114,7 +114,6 @@ import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
-import com.hienlh.ppm.design.LocalPpmTheme
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.PpmIcon
@@ -196,7 +195,8 @@ fun SelectField(
     label: LabelTarget? = null,
 ) {
     val tokens = LocalPpmTokens.current
-    val dark = LocalPpmTheme.current.isDark
+    // `dark:` is the device's dark mode on the web, not PPM's theme.
+    val dark = isSystemInDarkTheme()
     var open by remember { mutableStateOf(false) }
     val bounds = remember { arrayOf(Rect.Zero) }
     SideEffect { label?.activate = { if (enabled) open = true } }
