@@ -85,12 +85,14 @@ class MarkdownTest {
 
     @Test
     fun `table columns share the line as CSS's auto layout does`() {
-        // Room to spare: by content width.
-        assertArrayEquals(intArrayOf(60, 80), TableWidths.distribute(intArrayOf(10, 20), intArrayOf(30, 40), 140))
+        // Room to spare: by content width, over the table less one border.
+        assertArrayEquals(intArrayOf(0, 60, 142), TableWidths.edges(intArrayOf(10, 20), intArrayOf(30, 40), 142, 2))
         // Between the narrowest and the widest: each wraps by how much it can.
-        assertArrayEquals(intArrayOf(20, 30), TableWidths.distribute(intArrayOf(10, 20), intArrayOf(30, 40), 50))
+        assertArrayEquals(intArrayOf(0, 20, 52), TableWidths.edges(intArrayOf(10, 20), intArrayOf(30, 40), 52, 2))
         // Too narrow even for the longest words: the table scrolls.
-        assertArrayEquals(intArrayOf(10, 20), TableWidths.distribute(intArrayOf(10, 20), intArrayOf(30, 40), 20))
+        assertArrayEquals(intArrayOf(0, 10, 32), TableWidths.edges(intArrayOf(10, 20), intArrayOf(30, 40), 22, 2))
+        // Chrome's phone table, 377.905px at 2.625: columns 279.470px and 97.673px, the border between at 778 - 44.
+        assertArrayEquals(intArrayOf(0, 734, 992), TableWidths.edges(intArrayOf(100, 100), intArrayOf(362, 126), 992, 2))
     }
 
     private fun inline(source: String) = flatInline(source)

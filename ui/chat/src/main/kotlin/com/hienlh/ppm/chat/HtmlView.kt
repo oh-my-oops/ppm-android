@@ -80,6 +80,7 @@ import com.hienlh.ppm.design.cssBorderInset
 import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -413,20 +414,27 @@ private fun checkboxes(side: TextUnit): Map<String, InlineTextContent> {
 
 /**
  * A summary's `::marker` for `disclosure-open`/`-closed` in a font of [fontPx], as Chrome paints
- * it (`ListMarkerPainter`, measured at 100px): a triangle in a square 0.66 em on a side standing
- * on the baseline, in a marker 0.86 em wide. Shorter than the ascent, it leaves the line be.
- * Android rounds a placeholder up to whole pixels, so the marker is given the nearest whole width
- * (24.06 px at 14px and 2x would push the text a pixel right) and the square is drawn at its own size.
+ * it (`ListMarkerPainter`, measured at 100px) and lays it out (`ListMarker`): a triangle in a
+ * square 0.66 em on a side standing on the baseline, then a margin of 0.4 em, each a LayoutUnit
+ * (cut down to 1/64 px). Chrome takes the margin from the font's size before the page is scaled
+ * to the screen, so the marker is narrower on a denser one: 24.06 px at 14px and 2x, 29.84 px at
+ * 2.625. Shorter than the ascent, it leaves the line be. Android rounds a placeholder up to whole
+ * pixels, so the marker is given the nearest whole width (24.06 px would push the text a pixel
+ * right) and the square is drawn at its own size.
  */
 private fun disclosures(fontPx: Float, color: Color, density: Density): Map<String, InlineTextContent> {
     val side = 0.66f * fontPx
-    val width = with(density) { ((0.86f * fontPx).roundToInt() - 0.01f).toSp() }
+    val advance = layoutUnit(side) + layoutUnit(0.4f * fontPx / density.density)
+    val width = with(density) { (advance.roundToInt() - 0.01f).toSp() }
     val placeholder = Placeholder(width, with(density) { side.toSp() }, PlaceholderVerticalAlign.AboveBaseline)
     return mapOf(
         OPEN_TRIANGLE to InlineTextContent(placeholder) { HtmlDisclosure(true, side, color) },
         CLOSED_TRIANGLE to InlineTextContent(placeholder) { HtmlDisclosure(false, side, color) },
     )
 }
+
+/** Blink's `LayoutUnit(float)`: [px] cut down to a 64th of a pixel. */
+private fun layoutUnit(px: Float) = floor(px * 64f) / 64f
 
 /** `GetCanonicalDisclosurePath`: down or right, in a square [side] px on a side whose bottom is the baseline. */
 @Composable
@@ -601,69 +609,76 @@ private class TableGrid(box: TableBox) {
 }
 
 /**
- * [TableGrid]'s cells at the widths [TableWidths] shares out to fill the width the scroller passes
- * on as its minimum, every cell as tall as its row. Its intrinsic sizes are every column at its
- * content's narrowest, or widest, as CSS sizes a table inside a box that sizes itself from it.
+ * [TableGrid]'s cells between the edges [TableWidths] puts its columns at to fill the width the
+ * scroller passes on as its minimum, every cell as tall as its row. Its intrinsic sizes are every
+ * column at its content's narrowest, or widest, as CSS sizes a table inside a box that sizes itself
+ * from it. A cell counts one border, its start one; the table's end border is the table's own.
  */
 private class HtmlTableLayout(private val grid: TableGrid) : MeasurePolicy {
     override fun MeasureScope.measure(measurables: List<Measurable>, constraints: Constraints): MeasureResult {
-        val widths = widths(measurables, constraints.minWidth.takeIf { it > 0 })
-        val heights = heights(measurables, widths)
-        val xs = IntArray(grid.columns + 1).also { for (c in 0 until grid.columns) it[c + 1] = it[c] + widths[c] }
+        val xs = edges(measurables, constraints.minWidth.takeIf { it > 0 })
+        val heights = heights(measurables, xs)
         val ys = IntArray(grid.rows + 1).also { for (r in 0 until grid.rows) it[r + 1] = it[r] + heights[r] }
         val placeables = measurables.mapIndexed { index, cell ->
-            cell.measure(Constraints.fixed(spanWidth(index, widths), heights[grid.row[index]]))
+            cell.measure(Constraints.fixed(spanWidth(index, xs), heights[grid.row[index]]))
         }
         return layout(xs[grid.columns], ys[grid.rows]) {
             placeables.forEachIndexed { index, cell -> cell.place(xs[grid.column[index]], ys[grid.row[index]]) }
         }
     }
 
-    override fun IntrinsicMeasureScope.minIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) =
-        columnWidths(measurables) { it.minIntrinsicWidth(Constraints.Infinity) }.sum()
+    override fun IntrinsicMeasureScope.minIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int): Int {
+        val border = cssBorderPx(1.dp)
+        return columnWidths(measurables, border) { it.minIntrinsicWidth(Constraints.Infinity) }.sum() + border
+    }
 
-    override fun IntrinsicMeasureScope.maxIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) =
-        columnWidths(measurables) { it.maxIntrinsicWidth(Constraints.Infinity) }.sum()
+    override fun IntrinsicMeasureScope.maxIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int): Int {
+        val border = cssBorderPx(1.dp)
+        return columnWidths(measurables, border) { it.maxIntrinsicWidth(Constraints.Infinity) }.sum() + border
+    }
 
     override fun IntrinsicMeasureScope.minIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int) =
-        heights(measurables, widths(measurables, width.takeIf { it != Constraints.Infinity })).sum()
+        heights(measurables, edges(measurables, width.takeIf { it != Constraints.Infinity })).sum()
 
     override fun IntrinsicMeasureScope.maxIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int) =
         minIntrinsicHeight(measurables, width)
 
-    private fun spanWidth(index: Int, widths: IntArray) = (grid.column[index] until grid.column[index] + grid.span[index]).sumOf { widths[it] }
+    private fun spanWidth(index: Int, xs: IntArray) = xs[grid.column[index] + grid.span[index]] - xs[grid.column[index]]
 
-    /** Each column's width, filling [fill]; with nothing to fill, each at its widest. */
-    private fun widths(cells: List<IntrinsicMeasurable>, fill: Int?): IntArray {
-        val min = columnWidths(cells) { it.minIntrinsicWidth(Constraints.Infinity) }
-        val max = columnWidths(cells) { it.maxIntrinsicWidth(Constraints.Infinity) }
-        return TableWidths.distribute(min, max, fill ?: max.sum())
+    /** Where each column's start border begins, then the table's end, filling [fill]; with nothing to fill, each column at its widest. */
+    private fun IntrinsicMeasureScope.edges(cells: List<IntrinsicMeasurable>, fill: Int?): IntArray {
+        val border = cssBorderPx(1.dp)
+        val min = columnWidths(cells, border) { it.minIntrinsicWidth(Constraints.Infinity) }
+        val max = columnWidths(cells, border) { it.maxIntrinsicWidth(Constraints.Infinity) }
+        return TableWidths.edges(min, max, fill ?: (max.sum() + border), border)
     }
 
     /**
-     * The largest [size] of each column's cells: the cells in one column first, then what a cell
-     * spanning several needs past them, shared out evenly.
+     * The largest [size] of each column's cells, less the end [border] a cell closing its row
+     * draws: the cells in one column first, then what a cell spanning several needs past them,
+     * shared out evenly.
      */
-    private inline fun columnWidths(cells: List<IntrinsicMeasurable>, size: (IntrinsicMeasurable) -> Int): IntArray {
+    private inline fun columnWidths(cells: List<IntrinsicMeasurable>, border: Int, size: (IntrinsicMeasurable) -> Int): IntArray {
         val widths = IntArray(grid.columns)
-        cells.forEachIndexed { index, cell ->
-            if (grid.span[index] == 1) widths[grid.column[index]] = max(widths[grid.column[index]], size(cell))
+        val needs = IntArray(cells.size) { size(cells[it]) - if (grid.closesEnd[it]) border else 0 }
+        needs.forEachIndexed { index, need ->
+            if (grid.span[index] == 1) widths[grid.column[index]] = max(widths[grid.column[index]], need)
         }
-        cells.forEachIndexed { index, cell ->
+        needs.forEachIndexed { index, need ->
             val span = grid.span[index]
             if (span == 1) return@forEachIndexed
             val from = grid.column[index]
-            val short = size(cell) - (from until from + span).sumOf { widths[it] }
+            val short = need - (from until from + span).sumOf { widths[it] }
             if (short > 0) for (k in 0 until span) widths[from + k] += short / span + if (k < short % span) 1 else 0
         }
         return widths
     }
 
-    private fun heights(cells: List<IntrinsicMeasurable>, widths: IntArray): IntArray {
+    private fun heights(cells: List<IntrinsicMeasurable>, xs: IntArray): IntArray {
         val heights = IntArray(grid.rows)
         cells.forEachIndexed { index, cell ->
             val row = grid.row[index]
-            heights[row] = max(heights[row], cell.minIntrinsicHeight(spanWidth(index, widths)))
+            heights[row] = max(heights[row], cell.minIntrinsicHeight(spanWidth(index, xs)))
         }
         return heights
     }

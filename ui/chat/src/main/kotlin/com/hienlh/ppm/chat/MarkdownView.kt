@@ -307,28 +307,38 @@ fun DiscMarker(style: MarkdownStyle, color: Color, modifier: Modifier) {
     )
 }
 
-/** CSS's auto table layout, for a table of `width: 100%`. */
+/**
+ * CSS's auto table layout, for a table of `width: 100%` with collapsed borders [border] px wide,
+ * as Chrome runs it. Each column's [min] and [max] count one border, half of it on either side
+ * of its cells. The grid, the table less the outer halves of its outer borders, is [available]
+ * less one border, shared out in fractions of a pixel; a table too narrow for its columns at
+ * their narrowest is as wide as they need. Each border is centred on its column's edge and
+ * snapped to the pixel, so the answer is the pixel each column's start border begins at, then
+ * the table's end.
+ */
 internal object TableWidths {
-    fun distribute(min: IntArray, max: IntArray, available: Int): IntArray {
+    fun edges(min: IntArray, max: IntArray, available: Int, border: Int): IntArray {
+        if (max.isEmpty()) return IntArray(1)
+        val widths = distribute(min, max, available - border)
+        val edges = IntArray(max.size + 1)
+        var x = 0.0
+        for (c in widths.indices) {
+            x += widths[c]
+            edges[c + 1] = x.roundToInt()
+        }
+        edges[max.size] += border
+        return edges
+    }
+
+    private fun distribute(min: IntArray, max: IntArray, grid: Int): DoubleArray {
         val minSum = min.sum()
         val maxSum = max.sum()
         return when {
             // Wider than the content: the extra goes to each column by its content's width.
-            maxSum <= available -> {
-                if (maxSum == 0) return IntArray(max.size) { available / max.size.coerceAtLeast(1) }
-                val widths = IntArray(max.size) { (max[it].toLong() * available / maxSum).toInt() }
-                widths[widths.lastIndex] += available - widths.sum()
-                widths
-            }
+            maxSum <= grid -> if (maxSum == 0) DoubleArray(max.size) { grid.toDouble() / max.size } else DoubleArray(max.size) { max[it].toDouble() * grid / maxSum }
             // Between: each column gives up room by how much it could wrap.
-            minSum < available -> {
-                val room = available - minSum
-                val wrap = maxSum - minSum
-                val widths = IntArray(max.size) { min[it] + ((max[it] - min[it]).toLong() * room / wrap).toInt() }
-                widths[widths.lastIndex] += available - widths.sum()
-                widths
-            }
-            else -> min.copyOf()
+            minSum < grid -> DoubleArray(max.size) { min[it] + (max[it] - min[it]).toDouble() * (grid - minSum) / (maxSum - minSum) }
+            else -> DoubleArray(min.size) { min[it].toDouble() }
         }
     }
 }
