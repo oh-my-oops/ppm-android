@@ -1,0 +1,227 @@
+// Writes what the web's chat markdown becomes when a reply carries raw HTML: react-markdown's
+// remark plugins, remark-rehype with the HTML kept, rehype-raw, rehype-sanitize with
+// `markdownSanitizeSchema` and the fragment-link prefix — every step before react-markdown's own
+// `urlTransform` and rehype-katex — so ui/chat's MarkdownHtmlTest can hold the app to the same tree.
+// Re-run after the pipeline or the inputs change:
+//
+//   PPM_HOME=$(mktemp -d) bun android/scripts/gen-markdown-html-cases.ts
+//
+// `--probe '<markdown>'` prints one input's tree instead.
+import { writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import remarkBreaks from "remark-breaks";
+import remarkRehype from "remark-rehype";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
+import rehypeStringify from "rehype-stringify";
+import { visit } from "unist-util-visit";
+import { markdownSanitizeSchema, rehypePrefixFragmentLinks, sanitizedRemarkRehypeOptions } from "../../src/web/components/shared/markdown-sanitize";
+import { normalizeMathDelimiters } from "../../src/web/lib/markdown-math-delimiters";
+
+const out = resolve(import.meta.dir, "../ui/chat/src/test/resources/markdown-html-cases.json");
+
+const remark = unified()
+  .use(remarkParse)
+  .use(remarkGfm, { singleTilde: false })
+  .use(remarkMath, { singleDollarTextMath: false })
+  .use(remarkBreaks);
+// react-markdown spreads `allowDangerousHtml: true` over the options it is given.
+const rehype = unified()
+  .use(remarkRehype, { ...sanitizedRemarkRehypeOptions, allowDangerousHtml: true })
+  .use(rehypeRaw)
+  .use(rehypeSanitize, markdownSanitizeSchema)
+  .use(rehypePrefixFragmentLinks)
+  .use(rehypeStringify);
+
+function run(md: string) {
+  const mdast = remark.runSync(remark.parse(normalizeMathDelimiters(md)));
+  let raw = false;
+  visit(mdast, "html", () => {
+    raw = true;
+  });
+  const hast = rehype.runSync(mdast as never);
+  return { md, raw, out: rehype.stringify(hast as never) };
+}
+
+const probe = process.argv.indexOf("--probe");
+if (probe >= 0) {
+  for (const md of process.argv.slice(probe + 1)) console.log(JSON.stringify(run(md)));
+  process.exit(0);
+}
+
+const inputs: string[] = [
+  // Markdown alone: how each block and span becomes HTML.
+  "Hello **world**, *this* is `code` and ~~gone~~.",
+  "# One\n## Two\n### Three\n#### Four\n##### Five\n###### Six",
+  "Line one\nline two\nline three",
+  "First paragraph.\n\nSecond paragraph.",
+  "- a\n- b\n- c",
+  "- a\n\n- b",
+  "- a\n\n  more of a\n- b",
+  "1. one\n2. two",
+  "3. three\n4. four",
+  "- [ ] todo\n- [x] done\n- plain",
+  "- [ ] \n- [x] done",
+  "- a\n  - nested\n  - nested two\n- b",
+  "1. a\n   ```js\n   x()\n   ```\n2. b",
+  "> quoted\n> lines\n\n> second quote",
+  "> - in a quote\n> - list",
+  "```ts\nconst a = 1;\n```",
+  "```\nplain\n```",
+  "```js title=x.js\nx\n```",
+  "```\n```",
+  "    indented code\n    block",
+  "| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n| 4 | 5 |",
+  "| x |\n|---|",
+  "Text\n\n---\n\nMore",
+  "[link](https://ppm.dev \"Title\") and [bare](https://ppm.dev)",
+  "![alt *text*](https://ppm.dev/a.png \"pic\")",
+  "<https://x.dev> and <a@b.co>",
+  "see https://ppm.dev/x). and `https://in.code`",
+  "visit www.example.com. or mail a.b@c.io!",
+  "\"www.example.com\" and (https://x.dev/a_(b)) done",
+  "https://x.dev/*b* and http://x.dev![a](b.png)",
+  "[a http://x.com] b",
+  "**bold http://x.dev/path** end",
+  "a\\\nb and c  \nd",
+  "Escapes: \\*not\\* \\<b> &copy; &amp; &#x27; &nbsp;x &foo;",
+  "[local](src/a.ts:12) and [hash](#sec) and [q](?x=1)",
+  "Unicode link [x](https://ví.dụ/đường dẫn) [y](<https://x.dev/a b>)",
+  // HTML blocks.
+  "<details>\n<summary>More</summary>\n\nHidden **text**\n\n</details>",
+  "<div align=\"center\">\n  <img src=\"logo.png\" width=\"120\">\n</div>",
+  "<p align=\"center\"><b>Title</b></p>\n\nAfter.",
+  "<!-- a comment -->\nText after.",
+  "Before\n\n<!--\nmulti\nline\n-->\n\nAfter",
+  "<table>\n<tr><td>a</td><td>b</td></tr>\n</table>",
+  "<pre>\n**not bold**\n</pre>",
+  "<script>alert(1)</script>\n\nSafe",
+  "<style>p{color:red}</style>\n\nSafe",
+  "<iframe src=\"https://evil.test\"></iframe>",
+  "<br>",
+  "<hr>\nafter",
+  "<img src=x onerror=alert(1)>",
+  "<a href=\"javascript:alert(1)\">x</a>",
+  "<a href=\"#sec\">jump</a>\n\n<h2 id=\"sec\">Sec</h2>",
+  "<span>a span block</span>\nstill?",
+  "<custom-tag>\ncontent\n</custom-tag>",
+  "<ul>\n<li>raw item</li>\n</ul>",
+  "<input type=\"checkbox\" checked> raw box",
+  "<dl>\n<dt>Term</dt>\n<dd>Definition</dd>\n</dl>",
+  "<?php echo 1; ?>\n\nafter",
+  "<![CDATA[ x ]]>\n\nafter",
+  "<!DOCTYPE html>\n\nafter",
+  "Paragraph\n<div>interrupts</div>",
+  "Paragraph\n<span>does not interrupt</span>",
+  "<div>\n*not emphasis inside the block*\n</div>",
+  "<div>\n\n*emphasis after a blank line*\n\n</div>",
+  "- item\n\n  <div>html in item</div>\n- next",
+  "> <b>quoted html</b>\n> more",
+  "  <div>indented</div>",
+  // Inline HTML.
+  "Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to copy.",
+  "H<sub>2</sub>O and x<sup>2</sup>",
+  "one<br>two<br/>three",
+  "a <mark>marked</mark> <small>small</small> <u>under</u> <ins>ins</ins> <abbr title=\"Hyper\">H</abbr>",
+  "<b>bold</b> <i>it</i> <em>em</em> <strong>st</strong> <s>s</s> <del>d</del> <strike>k</strike>",
+  "<span title=\"t\">span</span> <font color=red>font</font>",
+  "<b>unclosed bold\n\nnext paragraph",
+  "text <!-- hidden --> more",
+  "<a href=\"https://ppm.dev\" title=\"T\">raw link</a> and <a name=\"x\">anchor</a>",
+  "<img src=\"https://ppm.dev/a.png\" alt=\"a\" width=\"20\" height=\"10\"> inline image",
+  "a <b>c\nd</b> e",
+  "x <span\nclass=\"y\">split tag</span>",
+  "**<i>nested</i> bold** and *<b>x</b>*",
+  "[<b>bold link</b>](https://ppm.dev)",
+  "`<b>code</b>` stays code",
+  "a < b > c and x<y and <3 and <-",
+  "<a href=x/y>slash</a>",
+  "<a href=\"x\"title=\"y\">no space</a>",
+  "<b>a</b><i>b</i>",
+  "tag <x-y data-z=\"1\">custom</x-y>",
+  "<code class=\"language-js\">raw code</code>",
+  "inline <script>alert(1)</script> script",
+  "<details><summary>Inline</summary>body</details>",
+  "Mixed <div>block tag inline</div> text",
+  "<sup>[1](#fn)</sup>",
+  "- [ ] <b>task</b> with html",
+  "| a | <b>b</b> |\n|---|---|\n| <i>1</i> | 2 |",
+  "Ends with <br>\nnext line",
+  "&lt;b&gt; escaped and <b>real</b>",
+  "<p>a &copy</p>",
+  // Where the block structure has to read lines as micromark does.
+  "- [ ] * not a nested list\n- [x] <!X decl> inline\n- [ ] # not a heading",
+  "- [ ]\n  next line\n- [ ]",
+  "- a\n## heading\nnot lazy",
+  "- a\n  ## heading\nnot lazy",
+  "- <div>html</div>\n<custom-tag>\nx\n</custom-tag>",
+  "- a\n* b\n+ c",
+  "1. a\n2) b",
+  "> a\n2. b",
+  "> a\n<b>\nc",
+  "> a\nlazy\n> b",
+  "- a\n  > q\nlazy",
+  "> - a\nlazy",
+  "- a\n| x | y |\n|---|---|",
+  "> a\n| x | y |\n|---|---|",
+  "> a\n| x |\n|---|\n| y |",
+  "- a\n| x |\n|---|\n| y |",
+  "> a\n| x |\n> |---|",
+  "> a\n<b>",
+  "> a\n<b>\n> c",
+  "> - a\n<b>\nc",
+  "- a\n<b>\nd",
+  "a\n> 2. x",
+  "a\n- *",
+  "- a\n- *",
+  "    code\n\n2. x",
+  "    a\n      \nb",
+  "-     code\n\n  b",
+  "> a  \n> b",
+  "> ```\n> x  \n> ```",
+  "> > a\n> >\nb",
+  "-\n  [ ] box",
+  "- \n  [ ] no box",
+  "-\n   [ ] no box",
+  "- ```\n  a\n      \n  b\n  ```",
+  "- ```\n  x\n\n- b",
+  // Loose or tight as mdast's prepareList counts the line endings before a marker or the exit.
+  "-\n\n- b",
+  "1. \n1. q",
+  "- a\n  - b\n\n- c",
+  "> - a\n>   - b\n>\n> - c",
+  "> - a\n>   - b\n>\n>\n> - c",
+  "> - a\n>   - b\n>\n> > x",
+  "> - a\n>   > q\n>\n> - c",
+  "> - a\n>\n>\n> b",
+  "> - a\n>\n> b",
+  "> - a\n>\n>",
+  "> - a\n>\n",
+  "> > - a\n> >\n> - b",
+  "> - C++\n<img src=\"a.png\">\n   > \n  > > x",
+  "- a\n  | x |\n  |---|\n| b |\n|---|\nc",
+  "a\n   </pre>\n|---|\n\nb",
+  "a\n<b>\n|---|",
+  // Tables as micromark ends them.
+  "a\n| x |\n|---|",
+  "a\n|---|",
+  "a\n:-:\nb",
+  "| a |\n|---|\nplain\n> q",
+  "| a |\n|---|\n2. x",
+  "| a |\n|---|\n<b>",
+  "| a |\n|---|\n    | b |",
+  "| a | b |\n- |---|---|",
+  // Emphasis as micromark flanks it.
+  "_]_😀_[_ and *😀*x",
+  "x*~~y~~*z and ~~*a*~~",
+  "<i>open*~~sách~~https://x.dev/*b*!",
+  "***a**b* and **a*b*** and *a **b*** c",
+];
+
+const cases = inputs.map(run);
+writeFileSync(out, JSON.stringify(cases, null, 1) + "\n");
+console.log(`${cases.length} cases (${cases.filter((c) => c.raw).length} with raw HTML) -> ${out}`);

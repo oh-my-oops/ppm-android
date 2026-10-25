@@ -47,6 +47,37 @@ internal fun parseHtmlFragment(html: String): List<HtmlNode> {
     return builder.root.children
 }
 
+/** A node of the tree remark-rehype makes of markdown: elements and text, and the HTML the markdown held. */
+internal sealed interface Hast {
+    class Element(val name: String, val attrs: List<HtmlAttr>, val children: List<Hast>) : Hast
+    class Text(val text: String) : Hast
+    class Raw(val html: String) : Hast
+}
+
+/**
+ * hast-util-raw (rehype-raw): [nodes] as one HTML fragment, each element going in as its start and
+ * end tags and each raw node through the tokenizer, so HTML a reply writes around its markdown —
+ * `<details>` around a list, a `<div>` inside a paragraph — builds the tree a browser would.
+ */
+internal fun parseHast(nodes: List<Hast>): List<HtmlNode> {
+    val builder = HtmlTreeBuilder()
+    fun walk(node: Hast) {
+        when (node) {
+            is Hast.Element -> {
+                builder.treeStartTag(node.name, node.attrs)
+                node.children.forEach(::walk)
+                builder.treeEndTag(node.name)
+            }
+            is Hast.Text -> builder.treeText(node.text)
+            is Hast.Raw -> builder.tokenizer.write(node.html, last = false)
+        }
+    }
+    nodes.forEach(::walk)
+    // No end-of-file: what is still open stays open, and a token the last raw node cut off is dropped.
+    builder.tokenizer.reset()
+    return builder.root.children
+}
+
 /**
  * HTML's tree construction, ported from parse5 7 for the modes a fragment parsed in a `<template>`
  * context can reach: in template, in body, text, the table modes and select. Function names follow
@@ -481,6 +512,30 @@ internal class HtmlTreeBuilder {
             HtmlToken.Doctype -> onDoctype(token)
             HtmlToken.Eof -> onEof(token)
         }
+    }
+
+    // ---- hast-util-raw: a tree's elements and text go in as tokens, between its raw nodes ----
+
+    fun treeStartTag(name: String, attrs: List<HtmlAttr>) {
+        if (tokenizer.state == HtmlTokenizer.State.PLAINTEXT) return
+        tokenizer.reset()
+        processStartTag(HtmlToken.Tag(name, end = false).also { it.attrs.addAll(attrs) })
+        tokenizer.lastStartTagName = name
+    }
+
+    fun treeEndTag(name: String) {
+        if (!tokenizer.inForeignNode && name in VOID_ELEMENTS) return
+        if (tokenizer.state == HtmlTokenizer.State.PLAINTEXT) return
+        tokenizer.reset()
+        onEndTag(HtmlToken.Tag(name, end = true))
+        if (name == tokenizer.lastStartTagName && tokenizer.state in TEXT_STATES) tokenizer.state = HtmlTokenizer.State.DATA
+    }
+
+    /** A text node is one character token, whitespace or not; a tokenizer left inside a tag goes back to data. */
+    fun treeText(text: String) {
+        if (tokenizer.state > HtmlTokenizer.State.PLAINTEXT) tokenizer.state = HtmlTokenizer.State.DATA
+        tokenizer.reset()
+        onCharacter(HtmlToken.Chars(HtmlToken.CHARACTER, text))
     }
 
     /** parse5's `_processToken`: a start tag re-enters without resetting the pending newline skip. */
@@ -1388,6 +1443,11 @@ internal class HtmlTreeBuilder {
         val TABLE_CELLS = setOf("td", "th")
         val TABLE_VOID_ELEMENTS = setOf("caption", "col", "colgroup", "tbody", "td", "tfoot", "th", "thead", "tr")
         val SELECT_IN_TABLE_EXITS = setOf("caption", "table", "tbody", "tfoot", "thead", "tr", "td", "th")
+        val VOID_ELEMENTS = setOf(
+            "area", "base", "basefont", "bgsound", "br", "col", "command", "embed", "frame", "hr", "image", "img", "input",
+            "keygen", "link", "meta", "param", "source", "track", "wbr",
+        )
+        val TEXT_STATES = setOf(HtmlTokenizer.State.RCDATA, HtmlTokenizer.State.RAWTEXT, HtmlTokenizer.State.SCRIPT_DATA)
         val EXITS_FOREIGN_CONTENT = setOf(
             "b", "big", "blockquote", "body", "br", "center", "code", "dd", "div", "dl", "dt", "em", "embed", "h1", "h2",
             "h3", "h4", "h5", "h6", "head", "hr", "i", "img", "li", "listing", "menu", "meta", "nobr", "ol", "p", "pre",

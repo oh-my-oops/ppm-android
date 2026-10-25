@@ -39,6 +39,9 @@ internal class HtmlTokenizer(private val builder: HtmlTreeBuilder) {
     private var html = ""
     private var pos = -1
     private var active = false
+    private var lastChunk = true
+    private var endOfChunkHit = false
+    private var consumedAfterSnapshot = 0
     private var returnState = State.DATA
     private var entityStart = 0
 
@@ -50,24 +53,72 @@ internal class HtmlTokenizer(private val builder: HtmlTreeBuilder) {
     private val attrValue = StringBuilder()
     private var attr: HtmlAttr? = null
 
-    /** Tokenizes the whole of [input], ending with the end-of-file token. */
-    fun write(input: String) {
+    /**
+     * Tokenizes [input]. The [last] chunk ends with the end-of-file token; any other stops where it
+     * runs out, and a token it cuts off waits for the next chunk or for [reset] (parse5's
+     * hibernation), which is how rehype-raw feeds the raw HTML of a markdown tree through one parser.
+     */
+    fun write(input: String, last: Boolean = true) {
         // The input stream: CR LF and lone CR are newlines.
         html = input.replace("\r\n", "\n").replace('\r', '\n')
         pos = -1
+        lastChunk = last
+        endOfChunkHit = false
         active = true
-        while (active) callState(consume())
+        while (active) {
+            consumedAfterSnapshot = 0
+            val cp = consume()
+            if (!ensureHibernation()) callState(cp)
+        }
+    }
+
+    /**
+     * hast-util-raw's `resetTokenizer`, before each node of the tree it feeds in: pending text goes to
+     * the tree builder and a half-read token is dropped. The state is kept; rehype-raw sets it itself.
+     */
+    fun reset() {
+        flushChars()
+        active = false
+        returnState = State.DATA
+        tag = null
+        attr = null
+        attrName.setLength(0)
+        attrValue.setLength(0)
+    }
+
+    /** At the end of a chunk that is not the last: back to where this step started, to wait for more. */
+    private fun ensureHibernation(): Boolean {
+        if (!endOfChunkHit) return false
+        pos -= consumedAfterSnapshot
+        consumedAfterSnapshot = 0
+        active = false
+        return true
     }
 
     private fun consume(): Int {
+        consumedAfterSnapshot++
         pos++
-        return if (pos >= html.length) EOF else html[pos].code
+        if (pos >= html.length) {
+            endOfChunkHit = !lastChunk
+            return EOF
+        }
+        return html[pos].code
     }
 
-    private fun peek(offset: Int): Int = (pos + offset).let { if (it >= html.length) EOF else html[it].code }
+    private fun peek(offset: Int): Int {
+        val at = pos + offset
+        if (at >= html.length) {
+            endOfChunkHit = !lastChunk
+            return EOF
+        }
+        return html[at].code
+    }
 
     private fun startsWith(pattern: String, caseSensitive: Boolean): Boolean {
-        if (pos + pattern.length > html.length) return false
+        if (pos + pattern.length > html.length) {
+            endOfChunkHit = !lastChunk
+            return false
+        }
         if (caseSensitive) return html.startsWith(pattern, pos)
         for (i in pattern.indices) if ((html[pos + i].code or 0x20) != pattern[i].code) return false
         return true
@@ -343,7 +394,7 @@ internal class HtmlTokenizer(private val builder: HtmlTreeBuilder) {
 
     /** An end tag in text only counts when it names the element the text is in. */
     private fun stateTextEndTagName(cp: Int, text: State) {
-        if (handleSpecialEndTag()) {
+        if (handleSpecialEndTag() && !ensureHibernation()) {
             emitChars("</")
             state = text
             callState(cp)
@@ -478,7 +529,7 @@ internal class HtmlTokenizer(private val builder: HtmlTreeBuilder) {
             emitCodePoint(cp)
             repeat(6) { emitCodePoint(consume()) }
             state = State.SCRIPT_DATA_DOUBLE_ESCAPED
-        } else {
+        } else if (!ensureHibernation()) {
             state = State.SCRIPT_DATA_ESCAPED
             stateScriptDataEscaped(cp)
         }
@@ -560,7 +611,7 @@ internal class HtmlTokenizer(private val builder: HtmlTreeBuilder) {
             emitCodePoint(cp)
             repeat(6) { emitCodePoint(consume()) }
             state = State.SCRIPT_DATA_ESCAPED
-        } else {
+        } else if (!ensureHibernation()) {
             state = State.SCRIPT_DATA_DOUBLE_ESCAPED
             stateScriptDataDoubleEscaped(cp)
         }
@@ -710,7 +761,7 @@ internal class HtmlTokenizer(private val builder: HtmlTreeBuilder) {
             consumeSequenceIfMatch("--", true) -> state = State.COMMENT_START
             consumeSequenceIfMatch("doctype", false) -> state = State.DOCTYPE
             consumeSequenceIfMatch("[CDATA[", true) -> state = if (inForeignNode) State.CDATA_SECTION else State.BOGUS_COMMENT
-            else -> {
+            !ensureHibernation() -> {
                 state = State.BOGUS_COMMENT
                 stateBogusComment(cp)
             }
@@ -899,6 +950,15 @@ internal class HtmlTokenizer(private val builder: HtmlTreeBuilder) {
     }
 
     private fun stateCharacterReference() {
+        // A reference the chunk cuts off could go on in the next one: parse5's decoder waits, and
+        // what it took is lost if a reset comes first.
+        if (!lastChunk && characterReferenceRunsOn(html, entityStart + 1)) {
+            pos = html.length - 1
+            consumedAfterSnapshot = 0
+            endOfChunkHit = true
+            active = false
+            return
+        }
         val reference = decodeCharacterReference(html, entityStart + 1, inAttribute())
         if (reference == null) {
             pos = entityStart
@@ -961,6 +1021,23 @@ internal fun decodeCharacterReference(input: String, start: Int, attribute: Bool
         i++
     }
     return if (legacy >= 0 && (!attribute || legacy == i - start)) legacyReference(input, start, legacy) else null
+}
+
+/** Whether the reference starting at [start] reaches the end of [input] still unfinished, the decoder wanting more. */
+internal fun characterReferenceRunsOn(input: String, start: Int): Boolean {
+    if (start >= input.length) return true
+    if (input[start] == '#') {
+        var i = start + 1
+        val hex = i < input.length && (input[i].code or 0x20) == 'x'.code
+        if (hex) i++
+        while (i < input.length && asciiDigit(input[i], if (hex) 16 else 10) != null) i++
+        return i >= input.length
+    }
+    for (i in start until input.length) {
+        val name = input.substring(start, i + 1)
+        if (name !in entityPrefixes || input[i] == ';') return false
+    }
+    return true
 }
 
 /** Every prefix of a name in HTML's table followed by its `;`: how far the decoder walks before it gives up. */

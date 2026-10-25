@@ -106,7 +106,7 @@ internal fun markdownImages(text: String): List<InlineMarkdown.Image> {
                 is MarkdownBlock.ListBlock -> block.items.forEach { walk(it.blocks) }
                 is MarkdownBlock.Quote -> walk(block.blocks)
                 is MarkdownBlock.Table -> (listOf(block.header) + block.rows).forEach { row -> row.forEach(::inline) }
-                is MarkdownBlock.Code, MarkdownBlock.Rule -> Unit
+                is MarkdownBlock.Code, MarkdownBlock.Rule, is MarkdownBlock.Html -> Unit
             }
         }
     }

@@ -41,7 +41,7 @@ class MarkdownTest {
     @Test
     fun lists() {
         assertEquals(listOf(MarkdownBlock.ListBlock(true, 3, listOf(item("x"), item("y")))), Markdown.parse("3. x\n4. y"))
-        assertEquals(listOf(MarkdownBlock.ListBlock(false, 1, listOf(item("a"), item("b")))), Markdown.parse("- a\n\n- b"))
+        assertEquals(listOf(MarkdownBlock.ListBlock(false, 1, listOf(item("a"), item("b")), loose = true)), Markdown.parse("- a\n\n- b"))
         assertEquals(
             listOf(
                 MarkdownBlock.ListBlock(
@@ -73,11 +73,11 @@ class MarkdownTest {
     fun `quotes and tables`() {
         assertEquals(listOf(MarkdownBlock.Quote(listOf(MarkdownBlock.Paragraph("a\nb")))), Markdown.parse("> a\nb"))
         assertEquals(
-            listOf(MarkdownBlock.Table(listOf("a", "b"), listOf(listOf("1", "2")))),
+            listOf(MarkdownBlock.Table(listOf("a", "b"), listOf(listOf("1", "2")), listOf(null, "center"))),
             Markdown.parse("| a | b |\n|---|:-:|\n| 1 | 2 |"),
         )
         assertEquals(
-            listOf(MarkdownBlock.Table(listOf("a | b", "c"), listOf(listOf("1", "")))),
+            listOf(MarkdownBlock.Table(listOf("a | b", "c"), listOf(listOf("1", "")), listOf(null, null))),
             Markdown.parse("| a \\| b | c |\n|---|---|\n| 1 |"),
         )
     }
@@ -175,8 +175,10 @@ class MarkdownTest {
         assertEquals(listOf(InlineMarkdown.Image("/tmp/x.png", "a b"), InlineMarkdown.Image("http://h/y.png", "")), parsed.images)
         // The bold runs on across the picture, as the `strong` holds the `<img>`.
         assertEquals(listOf(Span(16, 28, Kind.STRONG)), parsed.spans)
-        // A bare address ends where a picture starts.
-        assertEquals(listOf(Span(0, 12, Kind.LINK, "http://x.dev")), inline("http://x.dev![a](b.png)").spans)
+        // A bare address runs on to the `]` before a `(`, as micromark's does on the web: no picture follows it.
+        val bare = inline("http://x.dev![a](b.png)")
+        assertEquals("http://x.dev![a](b.png)", bare.text)
+        assertEquals(listOf(Span(0, 15, Kind.LINK, "http://x.dev![a")), bare.spans)
     }
 
     @Test

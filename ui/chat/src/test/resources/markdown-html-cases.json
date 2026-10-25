@@ -1,0 +1,797 @@
+[
+ {
+  "md": "Hello **world**, *this* is `code` and ~~gone~~.",
+  "raw": false,
+  "out": "<p>Hello <strong>world</strong>, <em>this</em> is <code>code</code> and <del>gone</del>.</p>"
+ },
+ {
+  "md": "# One\n## Two\n### Three\n#### Four\n##### Five\n###### Six",
+  "raw": false,
+  "out": "<h1>One</h1>\n<h2>Two</h2>\n<h3>Three</h3>\n<h4>Four</h4>\n<h5>Five</h5>\n<h6>Six</h6>"
+ },
+ {
+  "md": "Line one\nline two\nline three",
+  "raw": false,
+  "out": "<p>Line one<br>\nline two<br>\nline three</p>"
+ },
+ {
+  "md": "First paragraph.\n\nSecond paragraph.",
+  "raw": false,
+  "out": "<p>First paragraph.</p>\n<p>Second paragraph.</p>"
+ },
+ {
+  "md": "- a\n- b\n- c",
+  "raw": false,
+  "out": "<ul>\n<li>a</li>\n<li>b</li>\n<li>c</li>\n</ul>"
+ },
+ {
+  "md": "- a\n\n- b",
+  "raw": false,
+  "out": "<ul>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>b</p>\n</li>\n</ul>"
+ },
+ {
+  "md": "- a\n\n  more of a\n- b",
+  "raw": false,
+  "out": "<ul>\n<li>\n<p>a</p>\n<p>more of a</p>\n</li>\n<li>\n<p>b</p>\n</li>\n</ul>"
+ },
+ {
+  "md": "1. one\n2. two",
+  "raw": false,
+  "out": "<ol>\n<li>one</li>\n<li>two</li>\n</ol>"
+ },
+ {
+  "md": "3. three\n4. four",
+  "raw": false,
+  "out": "<ol start=\"3\">\n<li>three</li>\n<li>four</li>\n</ol>"
+ },
+ {
+  "md": "- [ ] todo\n- [x] done\n- plain",
+  "raw": false,
+  "out": "<ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled> todo</li>\n<li class=\"task-list-item\"><input type=\"checkbox\" checked disabled> done</li>\n<li>plain</li>\n</ul>"
+ },
+ {
+  "md": "- [ ] \n- [x] done",
+  "raw": false,
+  "out": "<ul class=\"contains-task-list\">\n<li>[ ]</li>\n<li class=\"task-list-item\"><input type=\"checkbox\" checked disabled> done</li>\n</ul>"
+ },
+ {
+  "md": "- a\n  - nested\n  - nested two\n- b",
+  "raw": false,
+  "out": "<ul>\n<li>a\n<ul>\n<li>nested</li>\n<li>nested two</li>\n</ul>\n</li>\n<li>b</li>\n</ul>"
+ },
+ {
+  "md": "1. a\n   ```js\n   x()\n   ```\n2. b",
+  "raw": false,
+  "out": "<ol>\n<li>a\n<pre><code class=\"language-js\">x()\n</code></pre>\n</li>\n<li>b</li>\n</ol>"
+ },
+ {
+  "md": "> quoted\n> lines\n\n> second quote",
+  "raw": false,
+  "out": "<blockquote>\n<p>quoted<br>\nlines</p>\n</blockquote>\n<blockquote>\n<p>second quote</p>\n</blockquote>"
+ },
+ {
+  "md": "> - in a quote\n> - list",
+  "raw": false,
+  "out": "<blockquote>\n<ul>\n<li>in a quote</li>\n<li>list</li>\n</ul>\n</blockquote>"
+ },
+ {
+  "md": "```ts\nconst a = 1;\n```",
+  "raw": false,
+  "out": "<pre><code class=\"language-ts\">const a = 1;\n</code></pre>"
+ },
+ {
+  "md": "```\nplain\n```",
+  "raw": false,
+  "out": "<pre><code>plain\n</code></pre>"
+ },
+ {
+  "md": "```js title=x.js\nx\n```",
+  "raw": false,
+  "out": "<pre><code class=\"language-js\">x\n</code></pre>"
+ },
+ {
+  "md": "```\n```",
+  "raw": false,
+  "out": "<pre><code></code></pre>"
+ },
+ {
+  "md": "    indented code\n    block",
+  "raw": false,
+  "out": "<pre><code>indented code\nblock\n</code></pre>"
+ },
+ {
+  "md": "| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n| 4 | 5 |",
+  "raw": false,
+  "out": "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th align=\"left\">a</th><th align=\"center\">b</th><th align=\"right\">c</th></tr></thead><tbody><tr><td align=\"left\">1</td><td align=\"center\">2</td><td align=\"right\">3</td></tr><tr><td align=\"left\">4</td><td align=\"center\">5</td><td align=\"right\"></td></tr></tbody></table>"
+ },
+ {
+  "md": "| x |\n|---|",
+  "raw": false,
+  "out": "\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead></table>"
+ },
+ {
+  "md": "Text\n\n---\n\nMore",
+  "raw": false,
+  "out": "<p>Text</p>\n<hr>\n<p>More</p>"
+ },
+ {
+  "md": "[link](https://ppm.dev \"Title\") and [bare](https://ppm.dev)",
+  "raw": false,
+  "out": "<p><a href=\"https://ppm.dev\" title=\"Title\">link</a> and <a href=\"https://ppm.dev\">bare</a></p>"
+ },
+ {
+  "md": "![alt *text*](https://ppm.dev/a.png \"pic\")",
+  "raw": false,
+  "out": "<p><img src=\"https://ppm.dev/a.png\" alt=\"alt text\" title=\"pic\"></p>"
+ },
+ {
+  "md": "<https://x.dev> and <a@b.co>",
+  "raw": false,
+  "out": "<p><a href=\"https://x.dev\">https://x.dev</a> and <a href=\"mailto:a@b.co\">a@b.co</a></p>"
+ },
+ {
+  "md": "see https://ppm.dev/x). and `https://in.code`",
+  "raw": false,
+  "out": "<p>see <a href=\"https://ppm.dev/x\">https://ppm.dev/x</a>). and <code>https://in.code</code></p>"
+ },
+ {
+  "md": "visit www.example.com. or mail a.b@c.io!",
+  "raw": false,
+  "out": "<p>visit <a href=\"http://www.example.com\">www.example.com</a>. or mail <a href=\"mailto:a.b@c.io\">a.b@c.io</a>!</p>"
+ },
+ {
+  "md": "\"www.example.com\" and (https://x.dev/a_(b)) done",
+  "raw": false,
+  "out": "<p>\"<a href=\"http://www.example.com\">www.example.com</a>\" and (<a href=\"https://x.dev/a_(b)\">https://x.dev/a_(b)</a>) done</p>"
+ },
+ {
+  "md": "https://x.dev/*b* and http://x.dev![a](b.png)",
+  "raw": false,
+  "out": "<p><a href=\"https://x.dev/*b\">https://x.dev/*b</a>* and <a href=\"http://x.dev!%5Ba\">http://x.dev![a</a>](b.png)</p>"
+ },
+ {
+  "md": "[a http://x.com] b",
+  "raw": false,
+  "out": "<p>[a <a href=\"http://x.com\">http://x.com</a>] b</p>"
+ },
+ {
+  "md": "**bold http://x.dev/path** end",
+  "raw": false,
+  "out": "<p><strong>bold <a href=\"http://x.dev/path\">http://x.dev/path</a></strong> end</p>"
+ },
+ {
+  "md": "a\\\nb and c  \nd",
+  "raw": false,
+  "out": "<p>a<br>\nb and c<br>\nd</p>"
+ },
+ {
+  "md": "Escapes: \\*not\\* \\<b> &copy; &amp; &#x27; &nbsp;x &foo;",
+  "raw": false,
+  "out": "<p>Escapes: *not* &#x3C;b> © &#x26; '  x &#x26;foo;</p>"
+ },
+ {
+  "md": "[local](src/a.ts:12) and [hash](#sec) and [q](?x=1)",
+  "raw": false,
+  "out": "<p><a href=\"src/a.ts:12\">local</a> and <a href=\"#user-content-sec\">hash</a> and <a href=\"?x=1\">q</a></p>"
+ },
+ {
+  "md": "Unicode link [x](https://ví.dụ/đường dẫn) [y](<https://x.dev/a b>)",
+  "raw": false,
+  "out": "<p>Unicode link [x](<a href=\"https://v%C3%AD.d%E1%BB%A5/%C4%91%C6%B0%E1%BB%9Dng\">https://ví.dụ/đường</a> dẫn) <a href=\"https://x.dev/a%20b\">y</a></p>"
+ },
+ {
+  "md": "<details>\n<summary>More</summary>\n\nHidden **text**\n\n</details>",
+  "raw": true,
+  "out": "<details>\n<summary>More</summary>\n<p>Hidden <strong>text</strong></p>\n</details>"
+ },
+ {
+  "md": "<div align=\"center\">\n  <img src=\"logo.png\" width=\"120\">\n</div>",
+  "raw": true,
+  "out": "<div align=\"center\">\n  <img src=\"logo.png\" width=\"120\">\n</div>"
+ },
+ {
+  "md": "<p align=\"center\"><b>Title</b></p>\n\nAfter.",
+  "raw": true,
+  "out": "<p align=\"center\"><b>Title</b></p>\n<p>After.</p>"
+ },
+ {
+  "md": "<!-- a comment -->\nText after.",
+  "raw": true,
+  "out": "\n<p>Text after.</p>"
+ },
+ {
+  "md": "Before\n\n<!--\nmulti\nline\n-->\n\nAfter",
+  "raw": true,
+  "out": "<p>Before</p>\n\n<p>After</p>"
+ },
+ {
+  "md": "<table>\n<tr><td>a</td><td>b</td></tr>\n</table>",
+  "raw": true,
+  "out": "<table>\n<tbody><tr><td>a</td><td>b</td></tr>\n</tbody></table>"
+ },
+ {
+  "md": "<pre>\n**not bold**\n</pre>",
+  "raw": true,
+  "out": "<pre>**not bold**\n</pre>"
+ },
+ {
+  "md": "<script>alert(1)</script>\n\nSafe",
+  "raw": true,
+  "out": "\n<p>Safe</p>"
+ },
+ {
+  "md": "<style>p{color:red}</style>\n\nSafe",
+  "raw": true,
+  "out": "\n<p>Safe</p>"
+ },
+ {
+  "md": "<iframe src=\"https://evil.test\"></iframe>",
+  "raw": true,
+  "out": ""
+ },
+ {
+  "md": "<br>",
+  "raw": true,
+  "out": "<br>"
+ },
+ {
+  "md": "<hr>\nafter",
+  "raw": true,
+  "out": "<hr>\nafter"
+ },
+ {
+  "md": "<img src=x onerror=alert(1)>",
+  "raw": true,
+  "out": "<img src=\"x\">"
+ },
+ {
+  "md": "<a href=\"javascript:alert(1)\">x</a>",
+  "raw": true,
+  "out": "<p><a href=\"javascript:alert(1)\">x</a></p>"
+ },
+ {
+  "md": "<a href=\"#sec\">jump</a>\n\n<h2 id=\"sec\">Sec</h2>",
+  "raw": true,
+  "out": "<p><a href=\"#user-content-sec\">jump</a></p>\n<h2 id=\"user-content-sec\">Sec</h2>"
+ },
+ {
+  "md": "<span>a span block</span>\nstill?",
+  "raw": true,
+  "out": "<p><span>a span block</span><br>\nstill?</p>"
+ },
+ {
+  "md": "<custom-tag>\ncontent\n</custom-tag>",
+  "raw": true,
+  "out": "\ncontent\n"
+ },
+ {
+  "md": "<ul>\n<li>raw item</li>\n</ul>",
+  "raw": true,
+  "out": "<ul>\n<li>raw item</li>\n</ul>"
+ },
+ {
+  "md": "<input type=\"checkbox\" checked> raw box",
+  "raw": true,
+  "out": "<p><input type=\"checkbox\" checked disabled> raw box</p>"
+ },
+ {
+  "md": "<dl>\n<dt>Term</dt>\n<dd>Definition</dd>\n</dl>",
+  "raw": true,
+  "out": "<dl>\n<dt>Term</dt>\n<dd>Definition</dd>\n</dl>"
+ },
+ {
+  "md": "<?php echo 1; ?>\n\nafter",
+  "raw": true,
+  "out": "\n<p>after</p>"
+ },
+ {
+  "md": "<![CDATA[ x ]]>\n\nafter",
+  "raw": true,
+  "out": "\n<p>after</p>"
+ },
+ {
+  "md": "<!DOCTYPE html>\n\nafter",
+  "raw": true,
+  "out": "\n<p>after</p>"
+ },
+ {
+  "md": "Paragraph\n<div>interrupts</div>",
+  "raw": true,
+  "out": "<p>Paragraph</p>\n<div>interrupts</div>"
+ },
+ {
+  "md": "Paragraph\n<span>does not interrupt</span>",
+  "raw": true,
+  "out": "<p>Paragraph<br>\n<span>does not interrupt</span></p>"
+ },
+ {
+  "md": "<div>\n*not emphasis inside the block*\n</div>",
+  "raw": true,
+  "out": "<div>\n*not emphasis inside the block*\n</div>"
+ },
+ {
+  "md": "<div>\n\n*emphasis after a blank line*\n\n</div>",
+  "raw": true,
+  "out": "<div>\n<p><em>emphasis after a blank line</em></p>\n</div>"
+ },
+ {
+  "md": "- item\n\n  <div>html in item</div>\n- next",
+  "raw": true,
+  "out": "<ul>\n<li>\n<p>item</p>\n<div>html in item</div>\n</li>\n<li>\n<p>next</p>\n</li>\n</ul>"
+ },
+ {
+  "md": "> <b>quoted html</b>\n> more",
+  "raw": true,
+  "out": "<blockquote>\n<p><b>quoted html</b><br>\nmore</p>\n</blockquote>"
+ },
+ {
+  "md": "  <div>indented</div>",
+  "raw": true,
+  "out": "  <div>indented</div>"
+ },
+ {
+  "md": "Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to copy.",
+  "raw": true,
+  "out": "<p>Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to copy.</p>"
+ },
+ {
+  "md": "H<sub>2</sub>O and x<sup>2</sup>",
+  "raw": true,
+  "out": "<p>H<sub>2</sub>O and x<sup>2</sup></p>"
+ },
+ {
+  "md": "one<br>two<br/>three",
+  "raw": true,
+  "out": "<p>one<br>two<br>three</p>"
+ },
+ {
+  "md": "a <mark>marked</mark> <small>small</small> <u>under</u> <ins>ins</ins> <abbr title=\"Hyper\">H</abbr>",
+  "raw": true,
+  "out": "<p>a <mark>marked</mark> <small>small</small> <u>under</u> <ins>ins</ins> <abbr title=\"Hyper\">H</abbr></p>"
+ },
+ {
+  "md": "<b>bold</b> <i>it</i> <em>em</em> <strong>st</strong> <s>s</s> <del>d</del> <strike>k</strike>",
+  "raw": true,
+  "out": "<p><b>bold</b> <i>it</i> <em>em</em> <strong>st</strong> <s>s</s> <del>d</del> <strike>k</strike></p>"
+ },
+ {
+  "md": "<span title=\"t\">span</span> <font color=red>font</font>",
+  "raw": true,
+  "out": "<p><span title=\"t\">span</span> font</p>"
+ },
+ {
+  "md": "<b>unclosed bold\n\nnext paragraph",
+  "raw": true,
+  "out": "<p><b>unclosed bold</b></p><b>\n<p>next paragraph</p></b>"
+ },
+ {
+  "md": "text <!-- hidden --> more",
+  "raw": true,
+  "out": "<p>text  more</p>"
+ },
+ {
+  "md": "<a href=\"https://ppm.dev\" title=\"T\">raw link</a> and <a name=\"x\">anchor</a>",
+  "raw": true,
+  "out": "<p><a href=\"https://ppm.dev\" title=\"T\">raw link</a> and <a name=\"user-content-x\">anchor</a></p>"
+ },
+ {
+  "md": "<img src=\"https://ppm.dev/a.png\" alt=\"a\" width=\"20\" height=\"10\"> inline image",
+  "raw": true,
+  "out": "<p><img src=\"https://ppm.dev/a.png\" alt=\"a\" width=\"20\" height=\"10\"> inline image</p>"
+ },
+ {
+  "md": "a <b>c\nd</b> e",
+  "raw": true,
+  "out": "<p>a <b>c<br>\nd</b> e</p>"
+ },
+ {
+  "md": "x <span\nclass=\"y\">split tag</span>",
+  "raw": true,
+  "out": "<p>x <span>split tag</span></p>"
+ },
+ {
+  "md": "**<i>nested</i> bold** and *<b>x</b>*",
+  "raw": true,
+  "out": "<p><strong><i>nested</i> bold</strong> and <em><b>x</b></em></p>"
+ },
+ {
+  "md": "[<b>bold link</b>](https://ppm.dev)",
+  "raw": true,
+  "out": "<p><a href=\"https://ppm.dev\"><b>bold link</b></a></p>"
+ },
+ {
+  "md": "`<b>code</b>` stays code",
+  "raw": false,
+  "out": "<p><code>&#x3C;b>code&#x3C;/b></code> stays code</p>"
+ },
+ {
+  "md": "a < b > c and x<y and <3 and <-",
+  "raw": false,
+  "out": "<p>a &#x3C; b > c and x&#x3C;y and &#x3C;3 and &#x3C;-</p>"
+ },
+ {
+  "md": "<a href=x/y>slash</a>",
+  "raw": true,
+  "out": "<p>&#x3C;a href=x/y>slash</p>"
+ },
+ {
+  "md": "<a href=\"x\"title=\"y\">no space</a>",
+  "raw": true,
+  "out": "<p>&#x3C;a href=\"x\"title=\"y\">no space</p>"
+ },
+ {
+  "md": "<b>a</b><i>b</i>",
+  "raw": true,
+  "out": "<p><b>a</b><i>b</i></p>"
+ },
+ {
+  "md": "tag <x-y data-z=\"1\">custom</x-y>",
+  "raw": true,
+  "out": "<p>tag custom</p>"
+ },
+ {
+  "md": "<code class=\"language-js\">raw code</code>",
+  "raw": true,
+  "out": "<p><code class=\"language-js\">raw code</code></p>"
+ },
+ {
+  "md": "inline <script>alert(1)</script> script",
+  "raw": true,
+  "out": "<p>inline  script</p>"
+ },
+ {
+  "md": "<details><summary>Inline</summary>body</details>",
+  "raw": true,
+  "out": "<details><summary>Inline</summary>body</details>"
+ },
+ {
+  "md": "Mixed <div>block tag inline</div> text",
+  "raw": true,
+  "out": "<p>Mixed </p><div>block tag inline</div> text<p></p>"
+ },
+ {
+  "md": "<sup>[1](#fn)</sup>",
+  "raw": true,
+  "out": "<p><sup><a href=\"#user-content-fn\">1</a></sup></p>"
+ },
+ {
+  "md": "- [ ] <b>task</b> with html",
+  "raw": true,
+  "out": "<ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled> <b>task</b> with html</li>\n</ul>"
+ },
+ {
+  "md": "| a | <b>b</b> |\n|---|---|\n| <i>1</i> | 2 |",
+  "raw": true,
+  "out": "\n\n\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>a</th><th><b>b</b></th></tr></thead><tbody><tr><td><i>1</i></td><td>2</td></tr></tbody></table>"
+ },
+ {
+  "md": "Ends with <br>\nnext line",
+  "raw": true,
+  "out": "<p>Ends with <br><br>\nnext line</p>"
+ },
+ {
+  "md": "&lt;b&gt; escaped and <b>real</b>",
+  "raw": true,
+  "out": "<p>&#x3C;b> escaped and <b>real</b></p>"
+ },
+ {
+  "md": "<p>a &copy</p>",
+  "raw": true,
+  "out": "<p>a ©</p>"
+ },
+ {
+  "md": "- [ ] * not a nested list\n- [x] <!X decl> inline\n- [ ] # not a heading",
+  "raw": true,
+  "out": "<ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled> * not a nested list</li>\n<li class=\"task-list-item\"><input type=\"checkbox\" checked disabled>  inline</li>\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled> # not a heading</li>\n</ul>"
+ },
+ {
+  "md": "- [ ]\n  next line\n- [ ]",
+  "raw": false,
+  "out": "<ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled> next line</li>\n<li>[ ]</li>\n</ul>"
+ },
+ {
+  "md": "- a\n## heading\nnot lazy",
+  "raw": false,
+  "out": "<ul>\n<li>a</li>\n</ul>\n<h2>heading</h2>\n<p>not lazy</p>"
+ },
+ {
+  "md": "- a\n  ## heading\nnot lazy",
+  "raw": false,
+  "out": "<ul>\n<li>a\n<h2>heading</h2>\n</li>\n</ul>\n<p>not lazy</p>"
+ },
+ {
+  "md": "- <div>html</div>\n<custom-tag>\nx\n</custom-tag>",
+  "raw": true,
+  "out": "<ul>\n<li>\n<div>html</div>\n</li>\n</ul>\n\nx\n"
+ },
+ {
+  "md": "- a\n* b\n+ c",
+  "raw": false,
+  "out": "<ul>\n<li>a</li>\n</ul>\n<ul>\n<li>b</li>\n</ul>\n<ul>\n<li>c</li>\n</ul>"
+ },
+ {
+  "md": "1. a\n2) b",
+  "raw": false,
+  "out": "<ol>\n<li>a</li>\n</ol>\n<ol start=\"2\">\n<li>b</li>\n</ol>"
+ },
+ {
+  "md": "> a\n2. b",
+  "raw": false,
+  "out": "<blockquote>\n<p>a</p>\n</blockquote>\n<ol start=\"2\">\n<li>b</li>\n</ol>"
+ },
+ {
+  "md": "> a\n<b>\nc",
+  "raw": true,
+  "out": "<blockquote>\n<p>a</p>\n<b>\n</b></blockquote><b>\n<p>c</p></b>"
+ },
+ {
+  "md": "> a\nlazy\n> b",
+  "raw": false,
+  "out": "<blockquote>\n<p>a<br>\nlazy<br>\nb</p>\n</blockquote>"
+ },
+ {
+  "md": "- a\n  > q\nlazy",
+  "raw": false,
+  "out": "<ul>\n<li>a\n<blockquote>\n<p>q<br>\nlazy</p>\n</blockquote>\n</li>\n</ul>"
+ },
+ {
+  "md": "> - a\nlazy",
+  "raw": false,
+  "out": "<blockquote>\n<ul>\n<li>a<br>\nlazy</li>\n</ul>\n</blockquote>"
+ },
+ {
+  "md": "- a\n| x | y |\n|---|---|",
+  "raw": false,
+  "out": "<ul>\n<li>a<br>\n| x | y |<br>\n|---|---|</li>\n</ul>"
+ },
+ {
+  "md": "> a\n| x | y |\n|---|---|",
+  "raw": false,
+  "out": "<blockquote>\n<p>a<br>\n| x | y |<br>\n|---|---|</p>\n</blockquote>"
+ },
+ {
+  "md": "> a\n| x |\n|---|\n| y |",
+  "raw": false,
+  "out": "<blockquote>\n<p>a<br>\n| x |<br>\n|---|<br>\n| y |</p>\n</blockquote>"
+ },
+ {
+  "md": "- a\n| x |\n|---|\n| y |",
+  "raw": false,
+  "out": "<ul>\n<li>a<br>\n| x |<br>\n|---|<br>\n| y |</li>\n</ul>"
+ },
+ {
+  "md": "> a\n| x |\n> |---|",
+  "raw": false,
+  "out": "<blockquote>\n<p>a</p>\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead></table>\n</blockquote>"
+ },
+ {
+  "md": "> a\n<b>",
+  "raw": true,
+  "out": "<blockquote>\n<p>a</p>\n</blockquote>\n<b></b>"
+ },
+ {
+  "md": "> a\n<b>\n> c",
+  "raw": true,
+  "out": "<blockquote>\n<p>a</p>\n<b>\nc\n</b></blockquote>"
+ },
+ {
+  "md": "> - a\n<b>\nc",
+  "raw": true,
+  "out": "<blockquote>\n<ul>\n<li>a\n<b>\n</b></li><b>\n</b></ul><b>\n</b></blockquote><b>\n<p>c</p></b>"
+ },
+ {
+  "md": "- a\n<b>\nd",
+  "raw": true,
+  "out": "<ul>\n<li>a\n<b>\n</b></li><b>\n</b></ul><b>\n<p>d</p></b>"
+ },
+ {
+  "md": "a\n> 2. x",
+  "raw": false,
+  "out": "<p>a</p>\n<blockquote>\n<p>2. x</p>\n</blockquote>"
+ },
+ {
+  "md": "a\n- *",
+  "raw": false,
+  "out": "<p>a</p>\n<ul>\n<li>*</li>\n</ul>"
+ },
+ {
+  "md": "- a\n- *",
+  "raw": false,
+  "out": "<ul>\n<li>a</li>\n<li>\n<ul>\n<li></li>\n</ul>\n</li>\n</ul>"
+ },
+ {
+  "md": "    code\n\n2. x",
+  "raw": false,
+  "out": "<pre><code>code\n</code></pre>\n<p>2. x</p>"
+ },
+ {
+  "md": "    a\n      \nb",
+  "raw": false,
+  "out": "<pre><code>a\n  \n</code></pre>\n<p>b</p>"
+ },
+ {
+  "md": "-     code\n\n  b",
+  "raw": false,
+  "out": "<ul>\n<li>\n<pre><code>code\n</code></pre>\n<p>b</p>\n</li>\n</ul>"
+ },
+ {
+  "md": "> a  \n> b",
+  "raw": false,
+  "out": "<blockquote>\n<p>a<br>\nb</p>\n</blockquote>"
+ },
+ {
+  "md": "> ```\n> x  \n> ```",
+  "raw": false,
+  "out": "<blockquote>\n<pre><code>x  \n</code></pre>\n</blockquote>"
+ },
+ {
+  "md": "> > a\n> >\nb",
+  "raw": false,
+  "out": "<blockquote>\n<blockquote>\n<p>a</p>\n</blockquote>\n</blockquote>\n<p>b</p>"
+ },
+ {
+  "md": "-\n  [ ] box",
+  "raw": false,
+  "out": "<ul class=\"contains-task-list\">\n<li class=\"task-list-item\"><input type=\"checkbox\" disabled> box</li>\n</ul>"
+ },
+ {
+  "md": "- \n  [ ] no box",
+  "raw": false,
+  "out": "<ul>\n<li>[ ] no box</li>\n</ul>"
+ },
+ {
+  "md": "-\n   [ ] no box",
+  "raw": false,
+  "out": "<ul>\n<li>[ ] no box</li>\n</ul>"
+ },
+ {
+  "md": "- ```\n  a\n      \n  b\n  ```",
+  "raw": false,
+  "out": "<ul>\n<li>\n<pre><code>a\n    \nb\n</code></pre>\n</li>\n</ul>"
+ },
+ {
+  "md": "- ```\n  x\n\n- b",
+  "raw": false,
+  "out": "<ul>\n<li>\n<pre><code>x\n\n</code></pre>\n</li>\n<li>b</li>\n</ul>"
+ },
+ {
+  "md": "-\n\n- b",
+  "raw": false,
+  "out": "<ul>\n<li></li>\n<li>\n<p>b</p>\n</li>\n</ul>"
+ },
+ {
+  "md": "1. \n1. q",
+  "raw": false,
+  "out": "<ol>\n<li></li>\n<li>q</li>\n</ol>"
+ },
+ {
+  "md": "- a\n  - b\n\n- c",
+  "raw": false,
+  "out": "<ul>\n<li>\n<p>a</p>\n<ul>\n<li>b</li>\n</ul>\n</li>\n<li>\n<p>c</p>\n</li>\n</ul>"
+ },
+ {
+  "md": "> - a\n>   - b\n>\n> - c",
+  "raw": false,
+  "out": "<blockquote>\n<ul>\n<li>a\n<ul>\n<li>b</li>\n</ul>\n</li>\n<li>c</li>\n</ul>\n</blockquote>"
+ },
+ {
+  "md": "> - a\n>   - b\n>\n>\n> - c",
+  "raw": false,
+  "out": "<blockquote>\n<ul>\n<li>a\n<ul>\n<li>\n<p>b</p>\n</li>\n</ul>\n</li>\n<li>c</li>\n</ul>\n</blockquote>"
+ },
+ {
+  "md": "> - a\n>   - b\n>\n> > x",
+  "raw": false,
+  "out": "<blockquote>\n<ul>\n<li>a\n<ul>\n<li>\n<p>b</p>\n</li>\n</ul>\n</li>\n</ul>\n<blockquote>\n<p>x</p>\n</blockquote>\n</blockquote>"
+ },
+ {
+  "md": "> - a\n>   > q\n>\n> - c",
+  "raw": false,
+  "out": "<blockquote>\n<ul>\n<li>\n<p>a</p>\n<blockquote>\n<p>q</p>\n</blockquote>\n</li>\n<li>\n<p>c</p>\n</li>\n</ul>\n</blockquote>"
+ },
+ {
+  "md": "> - a\n>\n>\n> b",
+  "raw": false,
+  "out": "<blockquote>\n<ul>\n<li>\n<p>a</p>\n</li>\n</ul>\n<p>b</p>\n</blockquote>"
+ },
+ {
+  "md": "> - a\n>\n> b",
+  "raw": false,
+  "out": "<blockquote>\n<ul>\n<li>a</li>\n</ul>\n<p>b</p>\n</blockquote>"
+ },
+ {
+  "md": "> - a\n>\n>",
+  "raw": false,
+  "out": "<blockquote>\n<ul>\n<li>\n<p>a</p>\n</li>\n</ul>\n</blockquote>"
+ },
+ {
+  "md": "> - a\n>\n",
+  "raw": false,
+  "out": "<blockquote>\n<ul>\n<li>a</li>\n</ul>\n</blockquote>"
+ },
+ {
+  "md": "> > - a\n> >\n> - b",
+  "raw": false,
+  "out": "<blockquote>\n<blockquote>\n<ul>\n<li>\n<p>a</p>\n</li>\n</ul>\n</blockquote>\n<ul>\n<li>b</li>\n</ul>\n</blockquote>"
+ },
+ {
+  "md": "> - C++\n<img src=\"a.png\">\n   > \n  > > x",
+  "raw": true,
+  "out": "<blockquote>\n<ul>\n<li>\n<p>C++</p>\n<img src=\"a.png\">\n</li>\n</ul>\n<blockquote>\n<p>x</p>\n</blockquote>\n</blockquote>"
+ },
+ {
+  "md": "- a\n  | x |\n  |---|\n| b |\n|---|\nc",
+  "raw": false,
+  "out": "<ul>\n<li>a\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead></table>\n</li>\n</ul>\n<p>| b |<br>\n|---|<br>\nc</p>"
+ },
+ {
+  "md": "a\n   </pre>\n|---|\n\nb",
+  "raw": true,
+  "out": "<p>a</p>\n   \n|---|\n<p>b</p>"
+ },
+ {
+  "md": "a\n<b>\n|---|",
+  "raw": true,
+  "out": "<p>a</p>\n<b>\n|---|</b>"
+ },
+ {
+  "md": "a\n| x |\n|---|",
+  "raw": false,
+  "out": "<p>a</p>\n\n\n\n\n\n\n<table><thead><tr><th>x</th></tr></thead></table>"
+ },
+ {
+  "md": "a\n|---|",
+  "raw": false,
+  "out": "\n\n\n\n\n\n<table><thead><tr><th>a</th></tr></thead></table>"
+ },
+ {
+  "md": "a\n:-:\nb",
+  "raw": false,
+  "out": "\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th align=\"center\">a</th></tr></thead><tbody><tr><td align=\"center\">b</td></tr></tbody></table>"
+ },
+ {
+  "md": "| a |\n|---|\nplain\n> q",
+  "raw": false,
+  "out": "\n\n\n\n\n\n\n\n\n\n\n<table><thead><tr><th>a</th></tr></thead><tbody><tr><td>plain</td></tr></tbody></table>\n<blockquote>\n<p>q</p>\n</blockquote>"
+ },
+ {
+  "md": "| a |\n|---|\n2. x",
+  "raw": false,
+  "out": "\n\n\n\n\n\n<table><thead><tr><th>a</th></tr></thead></table>\n<ol start=\"2\">\n<li>x</li>\n</ol>"
+ },
+ {
+  "md": "| a |\n|---|\n<b>",
+  "raw": true,
+  "out": "\n\n\n\n\n\n<table><thead><tr><th>a</th></tr></thead></table>\n<b></b>"
+ },
+ {
+  "md": "| a |\n|---|\n    | b |",
+  "raw": false,
+  "out": "\n\n\n\n\n\n<table><thead><tr><th>a</th></tr></thead></table>\n<pre><code>| b |\n</code></pre>"
+ },
+ {
+  "md": "| a | b |\n- |---|---|",
+  "raw": false,
+  "out": "<p>| a | b |</p>\n<ul>\n<li>|---|---|</li>\n</ul>"
+ },
+ {
+  "md": "_]_😀_[_ and *😀*x",
+  "raw": false,
+  "out": "<p><em>]<em>😀</em>[</em> and <em>😀</em>x</p>"
+ },
+ {
+  "md": "x*~~y~~*z and ~~*a*~~",
+  "raw": false,
+  "out": "<p>x<em><del>y</del></em>z and <del><em>a</em></del></p>"
+ },
+ {
+  "md": "<i>open*~~sách~~https://x.dev/*b*!",
+  "raw": true,
+  "out": "<p><i>open<em><del>sách</del><a href=\"https://x.dev/*b\">https://x.dev/*b</a></em>!</i></p>"
+ },
+ {
+  "md": "***a**b* and **a*b*** and *a **b*** c",
+  "raw": false,
+  "out": "<p><em><strong>a</strong>b</em> and <strong>a<em>b</em></strong> and <em>a <strong>b</strong></em> c</p>"
+ }
+]

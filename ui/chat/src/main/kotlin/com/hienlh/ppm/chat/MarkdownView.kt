@@ -174,6 +174,7 @@ internal object MarkdownGaps {
         is MarkdownBlock.Code, MarkdownBlock.Rule -> 8 to 8
         // Its scroller holds the table's own ([TABLE_INSET]) and has none to meet another block's.
         is MarkdownBlock.Table -> 0 to 0
+        is MarkdownBlock.Html -> 0 to 0
     }
 
     /** An `li`'s, `0.125rem` each, with its first and last child's. */
@@ -210,6 +211,7 @@ private fun MarkdownBlockView(block: MarkdownBlock, style: MarkdownStyle, modifi
         }
         is MarkdownBlock.Table -> MarkdownTable(block.header, block.rows, style, modifier)
         MarkdownBlock.Rule -> Box(modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top))
+        is MarkdownBlock.Html -> InlineText(AnnotatedString(block.text), style, modifier)
     }
 }
 
