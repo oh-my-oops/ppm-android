@@ -33,6 +33,7 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
     when (tab.type) {
         "settings" -> SettingsTab(model)
         "chat" -> model.chat(tab.id)?.let { chat -> key(chat) { ChatPane(model, chat) } }
+        "session-review" -> SessionReviewBody(model, tab)
         else -> TabPlaceholder(tabTypeIcon(tab.type), tab.title, "This tab is not in the Android app yet.")
     }
 }

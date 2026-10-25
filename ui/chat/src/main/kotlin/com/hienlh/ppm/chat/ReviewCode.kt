@@ -1336,12 +1336,14 @@ private fun TurnCard(chip: TurnChip, compact: Boolean, onClose: () -> Unit, act:
 
 // Buttons
 
-internal enum class WebVariant { DEFAULT, OUTLINE, GHOST }
+internal enum class WebVariant { DEFAULT, DESTRUCTIVE, OUTLINE, GHOST }
 
 internal enum class WebSize { XS, SM, LG }
 
 /**
  * The web's `Button` (`rounded-md text-sm font-medium transition-all`): `default` in the accent;
+ * `destructive` in the error colour with white text (`hover:bg-destructive/90`, in the dark
+ * `bg-destructive/60`, which the hover's `:hover` still outranks);
  * `outline` (`border bg-background shadow-xs`, in the dark `bg-input/30`; its border the text's
  * colour in the light, Tailwind 4's `currentColor`) or `ghost`, both `hover:bg-accent`; at `xs`
  * (`h-6 gap-1 px-2 text-xs`, a 12 px icon), `sm` (`h-8 gap-1.5 px-3`) or `lg` (`h-10 gap-2
@@ -1370,10 +1372,12 @@ internal fun ReviewButton(
     val lit = if (pressed && enabled) 1.0 else hover.lit.toDouble()
     val ink = when (variant) {
         WebVariant.DEFAULT -> tokens.accentFg
+        WebVariant.DESTRUCTIVE -> Rgba(1.0, 1.0, 1.0, 1.0)
         else -> (hoverContent ?: tokens.text).mix(content ?: tokens.text, lit)
     }
     val fill = when (variant) {
         WebVariant.DEFAULT -> tokens.accent.opacity(1 - 0.1 * lit)
+        WebVariant.DESTRUCTIVE -> tokens.error.opacity(if (dark) 0.6 + 0.3 * lit else 1 - 0.1 * lit)
         WebVariant.OUTLINE -> if (dark) tokens.border.opacity(0.3 + 0.2 * lit) else tokens.panel2.mix(tokens.bgSolid, lit)
         WebVariant.GHOST -> tokens.panel2.opacity(if (dark) 0.5 * lit else lit)
     }
