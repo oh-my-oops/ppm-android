@@ -107,6 +107,7 @@ import com.hienlh.ppm.app.attach
 import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.app.ui.tablet.dashedBorder
 import com.hienlh.ppm.chat.AgentSessionOpener
+import com.hienlh.ppm.chat.AsyncQuestions
 import com.hienlh.ppm.chat.BackgroundCommandBar
 import com.hienlh.ppm.chat.CONTINUE_AFTER_STOP
 import com.hienlh.ppm.chat.ChatImages
@@ -115,6 +116,7 @@ import com.hienlh.ppm.chat.ChatTabs
 import com.hienlh.ppm.chat.ChatTranscriptView
 import com.hienlh.ppm.chat.FirstSendView
 import com.hienlh.ppm.chat.LocalAgentSessionOpener
+import com.hienlh.ppm.chat.LocalAsyncQuestions
 import com.hienlh.ppm.chat.LocalChatImages
 import com.hienlh.ppm.chat.LocalChatTabs
 import com.hienlh.ppm.chat.LocalMarkdownImages
@@ -148,6 +150,7 @@ import com.hienlh.ppm.client.chatUsage
 import com.hienlh.ppm.protocol.AgentSource
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.TeamMemberActivity
+import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.UsageInfo
 import com.hienlh.ppm.protocol.agentTranscriptProvider
 import com.hienlh.ppm.state.AgentActivityWatch
@@ -329,6 +332,11 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                 LocalMarkdownImages provides markdownImages,
                 LocalChatTabs provides tabs,
                 LocalAgentSessionOpener provides agentOpener,
+                // A Codex question's answer goes out as the composer would send it, in its permission mode.
+                LocalAsyncQuestions provides AsyncQuestions(
+                    state.items,
+                    if (state.connected) { content -> chat.send(content, TurnOptions(permissionMode = tab.permissionMode?.value)) } else null,
+                ),
             ) {
                 val preview = tab.firstSendPreview
                 if (preview != null) {

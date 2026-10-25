@@ -44,8 +44,14 @@ data class Question(
     val header: String?,
     val options: List<Option>,
     val multiSelect: Boolean,
+    /** Codex's own id for it; its answer is keyed by this, and by the text when there is none. */
+    val id: String? = null,
 ) {
     data class Option(val label: String, val description: String?)
+
+    /** What its answer is keyed by (`q.id ?? q.question`). */
+    val key: String
+        get() = id ?: question
 
     companion object {
         fun from(json: JsonElement): Question? {
@@ -57,6 +63,7 @@ data class Question(
                     option["label"].string?.let { Option(it, option["description"].string) }
                 },
                 multiSelect = json["multiSelect"].bool ?: false,
+                id = json["id"].string,
             )
         }
     }

@@ -63,3 +63,15 @@ private fun isCaseIgnorable(point: Int): Boolean = when (Character.getType(point
 private val WORD_JOINERS = setOf(
     0x27, 0x2E, 0x3A, 0xB7, 0x387, 0x55F, 0x5F4, 0x2018, 0x2019, 0x2024, 0x2027, 0xFE13, 0xFE52, 0xFE55, 0xFF07, 0xFF0E, 0xFF1A,
 )
+
+/** JavaScript's `encodeURIComponent`: UTF-8, every byte but `A-Z a-z 0-9 - _ . ! ~ * ' ( )` as `%XX`. */
+fun encodeUriComponent(value: String): String = buildString {
+    for (byte in value.encodeToByteArray()) {
+        val c = byte.toInt() and 0xff
+        if (c < 0x80 && (c.toChar().isLetterOrDigit() || c.toChar() in "-_.!~*'()")) {
+            append(c.toChar())
+        } else {
+            append('%').append("0123456789ABCDEF"[c shr 4]).append("0123456789ABCDEF"[c and 15])
+        }
+    }
+}

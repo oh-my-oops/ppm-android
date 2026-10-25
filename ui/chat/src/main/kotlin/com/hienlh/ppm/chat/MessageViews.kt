@@ -72,7 +72,10 @@ import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.webTitle
+import com.hienlh.ppm.protocol.ChatQuestions
+import com.hienlh.ppm.protocol.Question
 import com.hienlh.ppm.protocol.TurnStop
+import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.TurnUsage
 import com.hienlh.ppm.state.ChatBlock
@@ -218,7 +221,16 @@ fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActi
                         if (growing) StreamingMark()
                     }
                     is ChatBlock.Thinking -> ThinkingBlock(block.text, growing)
-                    is ChatBlock.Tool -> ToolCardView(block.tool, completed = !live || readSettled(blocks, index))
+                    is ChatBlock.Tool -> {
+                        val tool = block.tool
+                        val itemId = tool.toolUseId
+                        // Codex asking without stopping: a form in the turn, not a card about a call.
+                        if (tool.name == ChatQuestions.ASYNC_QUESTION_TOOL && itemId != null) {
+                            AsyncQuestionCard(itemId, tool.input["questions"].array.orEmpty().mapNotNull(Question::from))
+                        } else {
+                            ToolCardView(tool, completed = !live || readSettled(blocks, index))
+                        }
+                    }
                     is ChatBlock.Error -> InlineError(block.message)
                     // The web quotes it into the answer as markdown of its own.
                     is ChatBlock.Retry -> Column {

@@ -837,7 +837,8 @@ private fun AnsweredQuestions(input: JsonElement) {
         for (q in questions) {
             val question = q["question"].string ?: ""
             val header = q["header"].string
-            val answer = answers[question].string ?: ""
+            // Keyed by Codex's id when the question has one, by its text otherwise.
+            val answer = answers[q["id"].string ?: question].string ?: answers[question].string ?: ""
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 BasicText(
                     (header?.let { "$it: " } ?: "") + question,

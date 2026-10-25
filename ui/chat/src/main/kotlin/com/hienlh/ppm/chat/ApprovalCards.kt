@@ -84,7 +84,12 @@ import kotlinx.serialization.json.JsonPrimitive
 fun PendingApprovalCard(request: ApprovalRequest, respond: (approved: Boolean, data: JsonElement?) -> Unit, modifier: Modifier = Modifier) {
     val questions = request.questions
     if (request.tool == "AskUserQuestion" && questions.isNotEmpty()) {
-        QuestionCard(questions, onSubmit = { respond(true, it) }, onSkip = { respond(false, null) }, modifier = modifier)
+        QuestionCard(
+            questions,
+            onSubmit = { answers -> respond(true, JsonObject(answers.mapValues { JsonPrimitive(it.value) })) },
+            onSkip = { respond(false, null) },
+            modifier = modifier,
+        )
     } else {
         ToolApprovalCard(request, respond, modifier)
     }
@@ -192,11 +197,18 @@ private fun OutlineButton(
 
 /**
  * The AI's questions (`question-card.tsx`): tabs when there are several, numbered options and
- * an "Other" answer. The answers go back as the web sends them: the typed one if any, else the
- * picked labels joined by ", ".
+ * an "Other" answer. The answers go back as the web sends them, keyed by [Question.key]: the
+ * typed one if any, else the picked labels joined by ", ". [autoFocus] off leaves the keyboard
+ * where it is, as a card that does not hold the turn up must.
  */
 @Composable
-private fun QuestionCard(questions: List<Question>, onSubmit: (JsonElement) -> Unit, onSkip: () -> Unit, modifier: Modifier) {
+internal fun QuestionCard(
+    questions: List<Question>,
+    onSubmit: (Map<String, String>) -> Unit,
+    onSkip: () -> Unit,
+    modifier: Modifier = Modifier,
+    autoFocus: Boolean = true,
+) {
     val tokens = LocalPpmTokens.current
     var active by remember { mutableIntStateOf(0) }
     // Picked labels per question, in the order they were picked.
@@ -223,9 +235,9 @@ private fun QuestionCard(questions: List<Question>, onSubmit: (JsonElement) -> U
         if (!allAnswered) return
         val answers = questions.indices.associate { index ->
             val typed = custom[index].orEmpty().trim()
-            questions[index].question to JsonPrimitive(typed.ifEmpty { picked[index].orEmpty().joinToString(", ") })
+            questions[index].key to typed.ifEmpty { picked[index].orEmpty().joinToString(", ") }
         }
-        onSubmit(JsonObject(answers))
+        onSubmit(answers)
     }
 
     // The keyboard's place among the options, "Other" last, ringed (`useQuestionKeyboard`): the
@@ -239,7 +251,7 @@ private fun QuestionCard(questions: List<Question>, onSubmit: (JsonElement) -> U
     val typing by otherSource.collectIsFocusedAsState()
     LaunchedEffect(typing) { if (typing) focused = other }
     // The web focuses the card as it appears, so its keys work at once.
-    LaunchedEffect(Unit) { runCatching { card.requestFocus() } }
+    LaunchedEffect(Unit) { if (autoFocus) runCatching { card.requestFocus() } }
 
     fun pick(index: Int) {
         if (index < other) select(current.options[index]) else if (index == other) otherField.requestFocus()
