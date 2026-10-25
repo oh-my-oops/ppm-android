@@ -350,6 +350,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                             },
                             onDismiss = chat::dismissMessage,
                             onClearErrors = chat::clearErrors,
+                            jumpRequest = model.chatJump?.takeIf { it.sessionId == state.sessionId },
+                            onJumpTaken = model::chatJumpDone,
                             // Not while the draft, which may carry a reply of its own, is on its way.
                             onReply = if (tab.draftLoading) null else tab::selectReply,
                         )

@@ -94,6 +94,7 @@ import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.state.ChatBlock
+import com.hienlh.ppm.state.ChatJumpRequest
 import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.ChatState
 import com.hienlh.ppm.state.MessageReply
@@ -103,6 +104,7 @@ import com.hienlh.ppm.state.SessionTurns
 import com.hienlh.ppm.state.SessionTurnsMemo
 import com.hienlh.ppm.state.TurnFileChange
 import com.hienlh.ppm.state.TurnFileChanges
+import com.hienlh.ppm.state.monotonicMillis
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -134,6 +136,10 @@ fun ChatTranscriptView(
     onClearErrors: () -> Unit = {},
     /** A message picked to answer; null leaves Reply out. */
     onReply: ((ReplyReference) -> Unit)? = null,
+    /** A place in this chat to show, asked for from outside it (the Review tab's "Show in chat"). */
+    jumpRequest: ChatJumpRequest? = null,
+    /** [jumpRequest] was shown, or given up on. */
+    onJumpTaken: (ChatJumpRequest) -> Unit = {},
 ) {
     Box(modifier.fillMaxSize()) {
         when {
@@ -142,7 +148,7 @@ fun ChatTranscriptView(
                 CenteredNotice("Loading messages...", pulsing = true)
             state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null ->
                 Welcome(welcome)
-            else -> TranscriptList(state, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply)
+            else -> TranscriptList(state, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply, jumpRequest, onJumpTaken)
         }
         state.historyError?.let { error ->
             HistoryErrorBanner(error, onReload, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
@@ -159,6 +165,8 @@ private fun TranscriptList(
     onDismiss: (String) -> Unit,
     onClearErrors: () -> Unit,
     onReply: ((ReplyReference) -> Unit)?,
+    jumpRequest: ChatJumpRequest?,
+    onJumpTaken: (ChatJumpRequest) -> Unit,
 ) {
     val rollups = remember { TurnRollups() }
     val rows = remember(state.items, state.isRunning) { TranscriptRows.of(state.items, state.isRunning, rollups) }
@@ -201,32 +209,36 @@ private fun TranscriptList(
     // The message a reply card jumped to, lit for 1.4 s (`showMessageAt`).
     var flashing by remember { mutableStateOf<String?>(null) }
     var flashJob by remember { mutableStateOf<Job?>(null) }
+    val currentRows by rememberUpdatedState(rows)
+    val currentHead by rememberUpdatedState(head)
+    val showMessage = remember(list, scroll, density) {
+        { id: String, row: Int ->
+            flashJob?.cancel()
+            flashing = id
+            flashJob = scope.launch {
+                delay(1_400)
+                flashing = null
+            }
+            scope.launch {
+                scroll.release()
+                list.reveal(currentHead + row, with(density) { 24.dp.toPx() })
+            }
+            Unit
+        }
+    }
     val replies = remember(rows, state.sessionId, state.providerId, head) {
         val found = HashMap<ReplyReference, ChatItem?>()
         ReplyTargets { reply ->
             val target = if (reply in found) found[reply] else MessageReply.resolve(reply, state.items, state.sessionId, state.providerId).also { found[reply] = it }
             val row = target?.let { rows.indexOfFirst { it.item.id == target.id } } ?: -1
             if (target == null || row < 0) return@ReplyTargets null
-            val jump: () -> Unit = {
-                flashJob?.cancel()
-                flashing = target.id
-                flashJob = scope.launch {
-                    delay(1_400)
-                    flashing = null
-                }
-                scope.launch {
-                    scroll.release()
-                    list.reveal(head + row, with(density) { 24.dp.toPx() })
-                }
-            }
+            val jump: () -> Unit = { showMessage(target.id, row) }
             jump
         }
     }
     // "Show in chat" from a change tray (`jumpToEdit`): the edit inside its card when the card is
     // open, else the card, 60 px under the top of the chat, lit for 1.4 s.
     val anchors = remember { EditAnchors() }
-    val currentRows by rememberUpdatedState(rows)
-    val currentHead by rememberUpdatedState(head)
     val jump = remember(anchors, list, scroll, density) {
         { ref: String ->
             val call = ref.replace(Regex("-\\d+$"), "")
@@ -248,6 +260,29 @@ private fun TranscriptList(
                 }
             }
             Unit
+        }
+    }
+    // "Show in chat" from the Review tab (`useChatJumpStore`): the call's card, or the prompt that
+    // asked for it when the card is not drawn (a sub-agent's call). Waits for the tab to be laid out
+    // and its history to load, since the request is made just before the tab opens.
+    val taken by rememberUpdatedState(onJumpTaken)
+    LaunchedEffect(jumpRequest) {
+        val request = jumpRequest ?: return@LaunchedEffect
+        while (true) {
+            if (list.layoutInfo.viewportSize.height > 0) {
+                val call = request.toolUseId
+                if (call != null && currentRows.any { r -> r.item.blocks.any { (it as? ChatBlock.Tool)?.tool?.toolUseId == call } }) {
+                    jump("$call-0")
+                    return@LaunchedEffect taken(request)
+                }
+                val row = request.messageId?.let { id -> currentRows.indexOfFirst { it.item.id == id } } ?: -1
+                if (row >= 0) {
+                    showMessage(currentRows[row].item.id, row)
+                    return@LaunchedEffect taken(request)
+                }
+            }
+            if (monotonicMillis() - request.at > ChatJumpRequest.GIVE_UP_MILLIS) return@LaunchedEffect taken(request)
+            delay(150)
         }
     }
     // The user's messages as items of that list, oldest first.
