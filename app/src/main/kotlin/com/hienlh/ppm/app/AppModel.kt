@@ -73,6 +73,7 @@ import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.AgentSessionFallbacks
 import com.hienlh.ppm.state.AgentSessionOpening
 import com.hienlh.ppm.state.AgentSessionPayload
+import com.hienlh.ppm.state.BackgroundOutput
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatSearch
 import com.hienlh.ppm.state.ClientCommand
@@ -423,6 +424,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** Something drawn over the whole app as CSS's `fixed inset-0` draws it: a usage panel gone fullscreen. */
     var screenOverlay by mutableStateOf<(@Composable () -> Unit)?>(null)
+
+    /** The background command whose output the panel shows (`panelShellId`), with the chat tab that lists it. */
+    var backgroundOutput by mutableStateOf<BackgroundOutputRequest?>(null)
+        private set
+
+    /** What that panel's box holds: one for the whole window, as the web mounts one panel. */
+    val backgroundOutputShown = BackgroundOutput()
 
     /** What the command palette opened with while it is open; null while it is closed. */
     var paletteQuery by mutableStateOf<String?>(null)
@@ -1088,6 +1096,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     fun openFileOrSearch(project: String, path: String, line: SourceLine?) {
         val api = api ?: return
         if (path.isEmpty()) return
+        // A background command's output file opens its output panel, while a chat still lists it.
+        if (path.endsWith(".output")) {
+            backgroundShellFor(path)?.let {
+                backgroundOutput = it
+                return
+            }
+        }
         val root = projects.firstOrNull { it.name == project }?.path
         scope.launch {
             when (val open = resolveFileNavigation(path, line, project, root, System.currentTimeMillis()) { api.fsStat(it) }) {
@@ -1520,6 +1535,24 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** The chat of a chat tab; none for a tab whose chat has not started. */
     fun chat(tabId: String): ChatTab? = chats[tabId]
+
+    /** `openPanel`: the output of a command [tabId]'s chat lists. */
+    fun openBackgroundOutput(tabId: String, shellId: String) {
+        backgroundOutput = BackgroundOutputRequest(tabId, shellId)
+    }
+
+    fun closeBackgroundOutput() {
+        backgroundOutput = null
+    }
+
+    /** `findByOutput`: the open chat tab and command a `.output` file name belongs to, across every chat. */
+    private fun backgroundShellFor(name: String): BackgroundOutputRequest? {
+        for ((id, chat) in chats) {
+            val shells = chat.controller?.state?.value?.backgroundShells ?: continue
+            BackgroundOutput.findByOutput(name, shells.asSequence())?.let { return BackgroundOutputRequest(id, it.shellId) }
+        }
+        return null
+    }
 
     /** The grid panels in grid order, for the tab switcher's "Panel N" groups. */
     val gridPanelIds: List<String> get() = layout?.gridPanelIds.orEmpty()
@@ -2676,3 +2709,6 @@ class ErrorToastMessage(val title: String, val description: String? = null, val 
 
 /** The lightbox open on [images] at [index] (`useImageOverlay`'s state). */
 class LightboxRequest(val images: List<GalleryImage>, val index: Int)
+
+/** The command the output panel is open on, and the chat tab whose registry keeps its status. */
+data class BackgroundOutputRequest(val tabId: String, val shellId: String)

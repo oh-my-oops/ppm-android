@@ -159,9 +159,11 @@ fun PpmRoot(model: AppModel) {
                 }
                 val context = LocalContext.current
                 val clipboard = LocalClipboard.current
-                // `backdrop-blur-sm` under the connection-lost overlay and the lightbox: CSS's blur(8px) is
-                // a sigma of 8, which Android's blur reaches at a radius of 13 (sigma = 0.577 radius + 0.5).
-                Box(Modifier.fillMaxSize().then(if (model.connectionLost || model.lightbox != null) Modifier.blur(13.dp) else Modifier)) {
+                // `backdrop-blur-sm` under the connection-lost overlay, the lightbox and the background
+                // output panel: CSS's blur(8px) is a sigma of 8, which Android's blur reaches at a radius
+                // of 13 (sigma = 0.577 radius + 0.5).
+                val blurred = model.connectionLost || model.lightbox != null || model.backgroundOutput != null
+                Box(Modifier.fillMaxSize().then(if (blurred) Modifier.blur(13.dp) else Modifier)) {
                     when {
                         !model.hasServer -> ConnectScreen(model, signIn = false)
                         mobile -> PhoneShell(model)
@@ -177,6 +179,7 @@ fun PpmRoot(model: AppModel) {
                 Dialogs(model)
                 model.agentSheet?.let { AgentSessionSheet(model, it) }
                 model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }
+                model.backgroundOutput?.let { BackgroundOutputPanel(model, it) }
                 model.lightbox?.let { request ->
                     ImageLightbox(request, onClose = { model.lightbox = null }, onDownload = download, onCopy = { copyImage(context, clipboard, it) })
                 }

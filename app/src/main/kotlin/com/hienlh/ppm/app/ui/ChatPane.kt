@@ -103,6 +103,7 @@ import com.hienlh.ppm.app.attach
 import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.app.ui.tablet.dashedBorder
 import com.hienlh.ppm.chat.AgentSessionOpener
+import com.hienlh.ppm.chat.BackgroundCommandBar
 import com.hienlh.ppm.chat.CONTINUE_AFTER_STOP
 import com.hienlh.ppm.chat.ChatImages
 import com.hienlh.ppm.chat.ChatTabs
@@ -282,6 +283,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         // `backdrop-blur-sm` under the drop overlay: CSS's blur(8px) is Android's at a radius of 13.
         Column(Modifier.fillMaxSize().then(if (fileDrop.showing) Modifier.blur(13.dp) else Modifier)) {
             if (tab.providerPending) NewChatGateLine(model, tab)
+            BackgroundCommandBar(state.backgroundShells, onViewOutput = { model.openBackgroundOutput(tab.tabId, it.shellId) }, onStop = { chat.killBackgroundShell(it.shellId) })
             val images = remember(tab.project) {
                 object : ChatImages {
                     override suspend fun load(path: String) = model.chatImage(tab.project, path)

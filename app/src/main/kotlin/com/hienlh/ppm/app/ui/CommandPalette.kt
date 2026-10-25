@@ -84,7 +84,7 @@ import com.hienlh.ppm.state.scoreFileSearchFast
 private const val MAX_RESULTS = 100
 
 /** Tailwind's `shadow-2xl`. */
-private val SHADOW_2XL = ThemeShadow(0.0, 25.0, 50.0, -12.0, Rgba(0.0, 0.0, 0.0, 0.25))
+internal val SHADOW_2XL = ThemeShadow(0.0, 25.0, 50.0, -12.0, Rgba(0.0, 0.0, 0.0, 0.25))
 
 /** One entry (`CommandItem`): what it is called, the words that also find it, its shortcut, what it does. */
 private class PaletteCommand(
