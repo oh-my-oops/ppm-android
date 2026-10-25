@@ -19,6 +19,7 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ReviewTab
 import com.hienlh.ppm.app.TextInputFocus
 import com.hienlh.ppm.chat.ReviewDesktop
+import com.hienlh.ppm.chat.ReviewPhone
 import com.hienlh.ppm.chat.ReviewSheet
 import com.hienlh.ppm.chat.ReviewTabContext
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -45,14 +46,19 @@ fun SessionReviewBody(model: AppModel, tab: WorkspaceTab) {
 private fun ReviewPane(model: AppModel, tab: ReviewTab) {
     val review = tab.review ?: return
     val entries by model.sessionTurns.entries.collectAsState()
+    // `max-h-[85%]` of the sheet's frame (`fixed inset-0`), the app's area under the status bar.
     val statusBar = WindowInsets.statusBars.getTop(LocalDensity.current)
-    val sheet: ReviewSheet = remember(statusBar) {
+    val listSheet: ReviewSheet = remember(statusBar) {
         val sheetMax = Modifier.layout { measurable, constraints ->
-            val max = ((constraints.maxHeight - statusBar) * 0.9f).toInt().coerceIn(constraints.minHeight, constraints.maxHeight)
+            val max = ((constraints.maxHeight - statusBar) * 0.85f).toInt().coerceIn(constraints.minHeight, constraints.maxHeight)
             val placeable = measurable.measure(constraints.copy(maxHeight = max))
             layout(placeable.width, placeable.height) { placeable.place(0, 0) }
         }
-        val open: ReviewSheet = { dismiss, content -> BottomSheet(dismiss, sheetMax, radius = 14.dp) { content(LocalSheetContentTop.current) } }
+        val open: ReviewSheet = { dismiss, content -> BottomSheet(dismiss, sheetMax) { content(LocalSheetContentTop.current) } }
+        open
+    }
+    val sheet: ReviewSheet = remember {
+        val open: ReviewSheet = { dismiss, content -> BottomSheet(dismiss) { content(LocalSheetContentTop.current) } }
         open
     }
     val ctx = ReviewTabContext(
@@ -66,6 +72,8 @@ private fun ReviewPane(model: AppModel, tab: ReviewTab) {
         typing = { TextInputFocus.focused },
         ownsKeys = { model.activeTabId == tab.tabId },
         sheet = sheet,
+        listSheet = listSheet,
     )
-    ReviewDesktop(review, ctx)
+    // `useIsMobile`: the phone's layout below the desktop's breakpoint.
+    if (model.wide) ReviewDesktop(review, ctx) else ReviewPhone(review, ctx)
 }

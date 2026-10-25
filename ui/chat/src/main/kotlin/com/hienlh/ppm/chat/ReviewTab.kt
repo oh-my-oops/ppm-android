@@ -12,10 +12,10 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,7 +45,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -148,11 +147,14 @@ class ReviewTabContext(
     val typing: () -> Boolean,
     /** The tab is the one in front, whose Escape a turn card takes. */
     val ownsKeys: () -> Boolean,
+    /** A phone's sheet for a turn card (`BottomSheet` with no class of its own). */
     val sheet: ReviewSheet,
+    /** A phone's sheet for the files and the file's actions, `max-h-[85%]`. */
+    val listSheet: ReviewSheet,
 )
 
 /** The code pane's answers, on the review (`reviewView`'s `codeActions`). */
-private fun reviewActions(review: SessionReview, showInChat: (SessionTurn, String) -> Unit) = ReviewCodeActions(
+internal fun reviewActions(review: SessionReview, showInChat: (SessionTurn, String) -> Unit) = ReviewCodeActions(
     focus = { key -> review.state.value.focused?.let { review.setFocus(ReviewFocus(it.path, key)) } },
     keep = review::keepBlock,
     revert = review::revertBlock,
@@ -277,14 +279,7 @@ fun ReviewDesktop(review: SessionReview, ctx: ReviewTabContext, modifier: Modifi
                 onKeepAll = review::keepAll,
                 onReload = review::reload,
             )
-            state.error?.let { error ->
-                // `bg-destructive/10 px-3 py-1.5 text-xs text-destructive`.
-                BasicText(
-                    error,
-                    Modifier.fillMaxWidth().background(tokens.error.opacity(0.1).color).padding(horizontal = 12.dp, vertical = 6.dp),
-                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.error.color),
-                )
-            }
+            state.error?.let { ReviewErrorStrip(it) }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 Row(Modifier.fillMaxSize()) {
                     if (wide) {
@@ -312,7 +307,7 @@ fun ReviewDesktop(review: SessionReview, ctx: ReviewTabContext, modifier: Modifi
                                     onChange = if (state.canChange) review::changeFocused else null,
                                     modifier = Modifier.fillMaxSize(),
                                 )
-                                state.toast?.let { toast -> ToastSlot(toast, mobile = false) { toast.undoId?.let { review.undo(it, toast.focus) } } }
+                                state.toast?.let { toast -> ReviewToastSlot(toast, mobile = false) { toast.undoId?.let { review.undo(it, toast.focus) } } }
                             }
                             BottomBar(
                                 state = state,
@@ -332,7 +327,7 @@ fun ReviewDesktop(review: SessionReview, ctx: ReviewTabContext, modifier: Modifi
                                     mobile = false,
                                     onChat = ctx.openChat,
                                 )
-                                state.toast?.let { toast -> ToastSlot(toast, mobile = false) { toast.undoId?.let { review.undo(it, toast.focus) } } }
+                                state.toast?.let { toast -> ReviewToastSlot(toast, mobile = false) { toast.undoId?.let { review.undo(it, toast.focus) } } }
                             }
                         }
                     }
@@ -369,6 +364,17 @@ fun ReviewDesktop(review: SessionReview, ctx: ReviewTabContext, modifier: Modifi
             }
         }
     }
+}
+
+/** Why the last call failed (`bg-destructive/10 px-3 py-1.5 text-xs text-destructive`), under the head. */
+@Composable
+internal fun ReviewErrorStrip(error: String) {
+    val tokens = LocalPpmTokens.current
+    BasicText(
+        error,
+        Modifier.fillMaxWidth().background(tokens.error.opacity(0.1).color).padding(horizontal = 12.dp, vertical = 6.dp),
+        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.error.color),
+    )
 }
 
 /**
@@ -1077,7 +1083,7 @@ internal fun ReviewFileList(reviews: List<FileReview>, current: String?, mobile:
 
 /** The toast where the pane's corner puts it: centred near the bottom on a tablet, across it on a phone. */
 @Composable
-private fun androidx.compose.foundation.layout.BoxScope.ToastSlot(toast: ReviewToast, mobile: Boolean, onUndo: () -> Unit) {
+internal fun BoxScope.ReviewToastSlot(toast: ReviewToast, mobile: Boolean, onUndo: () -> Unit) {
     ReviewToastView(
         toast,
         mobile,
