@@ -1,0 +1,1790 @@
+[
+ {
+  "html": "<iframe srcdoc=\"<script>window.__pwned=1</script>\"></iframe>",
+  "out": ""
+ },
+ {
+  "html": "<script>window.__pwned=1</script>",
+  "out": ""
+ },
+ {
+  "html": "<img src=\"x\" onerror=\"window.__pwned=1\">",
+  "out": "<img src=\"x\">"
+ },
+ {
+  "html": "<a href=\"javascript:window.__pwned=1\">a</a>",
+  "out": "<a href=\"javascript:window.__pwned=1\">a</a>"
+ },
+ {
+  "html": "<a href=\"JaVaScRiPt:window.__pwned=1\">a</a>",
+  "out": "<a href=\"JaVaScRiPt:window.__pwned=1\">a</a>"
+ },
+ {
+  "html": "<a href=\"&#106;avascript:window.__pwned=1\">a</a>",
+  "out": "<a href=\"javascript:window.__pwned=1\">a</a>"
+ },
+ {
+  "html": "<a href=\"java\tscript:window.__pwned=1\">a</a>",
+  "out": "<a href=\"java\tscript:window.__pwned=1\">a</a>"
+ },
+ {
+  "html": "<a href=\"vbscript:msgbox(1)\">a</a>",
+  "out": "<a href=\"vbscript:msgbox(1)\">a</a>"
+ },
+ {
+  "html": "<a href=\"data:text/html,<script>window.__pwned=1</script>\">a</a>",
+  "out": "<a href=\"data:text/html,<script>window.__pwned=1</script>\">a</a>"
+ },
+ {
+  "html": "<svg onload=\"window.__pwned=1\"><circle r=\"5\"/></svg>",
+  "out": ""
+ },
+ {
+  "html": "<form action=\"https://evil.test/steal\"><input name=\"q\" type=\"text\"><button>Go</button></form>",
+  "out": "<input name=\"user-content-q\" disabled type=\"checkbox\">Go"
+ },
+ {
+  "html": "<object data=\"data:text/html,<script>window.__pwned=1</script>\"></object>",
+  "out": ""
+ },
+ {
+  "html": "<embed src=\"data:text/html,<script>window.__pwned=1</script>\">",
+  "out": ""
+ },
+ {
+  "html": "<meta http-equiv=\"refresh\" content=\"0;url=https://evil.test\">",
+  "out": ""
+ },
+ {
+  "html": "<base href=\"https://evil.test/\">",
+  "out": ""
+ },
+ {
+  "html": "<style>body{display:none}</style>",
+  "out": ""
+ },
+ {
+  "html": "<link rel=\"stylesheet\" href=\"https://evil.test/x.css\">",
+  "out": ""
+ },
+ {
+  "html": "<div class=\"fixed inset-0 z-50\" style=\"position:fixed;inset:0\">Sign in again</div>",
+  "out": "<div>Sign in again</div>"
+ },
+ {
+  "html": "<details open ontoggle=\"window.__pwned=1\"><summary>s</summary>x</details>",
+  "out": "<details open><summary>s</summary>x</details>"
+ },
+ {
+  "html": "<input type=\"text\" autofocus onfocus=\"window.__pwned=1\">",
+  "out": "<input disabled type=\"checkbox\">"
+ },
+ {
+  "html": "<video><source onerror=\"window.__pwned=1\"></video>",
+  "out": ""
+ },
+ {
+  "html": "<math><mtext><table><mglyph><style><img src=x onerror=\"window.__pwned=1\">",
+  "out": "<table></table>"
+ },
+ {
+  "html": "<template><img src=x onerror=\"window.__pwned=1\"></template>",
+  "out": ""
+ },
+ {
+  "html": "<form><p>inside a form</p></form><style>.x{color:red}</style>",
+  "out": "<p>inside a form</p>"
+ },
+ {
+  "html": "<details><summary>More</summary>\nHidden</details>",
+  "out": "<details><summary>More</summary>\nHidden</details>"
+ },
+ {
+  "html": "Press <kbd>Ctrl</kbd>, H<sub>2</sub>O, x<sup>2</sup>, one<br>two",
+  "out": "Press <kbd>Ctrl</kbd>, H<sub>2</sub>O, x<sup>2</sup>, one<br>two"
+ },
+ {
+  "html": "<img src=\"https://example.com/b.png\" alt=\"b\" width=\"20\">",
+  "out": "<img src=\"https://example.com/b.png\" alt=\"b\" width=\"20\">"
+ },
+ {
+  "html": "<a href=\"https://example.org\" target=\"_blank\" rel=\"x\">raw</a>",
+  "out": "<a href=\"https://example.org\">raw</a>"
+ },
+ {
+  "html": "<a href=\"mailto:a@b.test\">mail</a>",
+  "out": "<a href=\"mailto:a@b.test\">mail</a>"
+ },
+ {
+  "html": "<a href=\"src/a.ts:10\">raw</a>",
+  "out": "<a href=\"src/a.ts:10\">raw</a>"
+ },
+ {
+  "html": "<img src=\"C:/tmp/b.png\" alt=\"b\">",
+  "out": "<img src=\"C:/tmp/b.png\" alt=\"b\">"
+ },
+ {
+  "html": "<a href=\"#sec\">jump</a>",
+  "out": "<a href=\"#sec\">jump</a>"
+ },
+ {
+  "html": "<h2 id=\"sec\">Sec</h2>",
+  "out": "<h2 id=\"user-content-sec\">Sec</h2>"
+ },
+ {
+  "html": "<p align=\"center\">\n  <img src=\"logo.png\" width=\"120\" height=\"40\">\n  <b>Title</b>\n</p>",
+  "out": "<p align=\"center\">\n  <img src=\"logo.png\" width=\"120\" height=\"40\">\n  <b>Title</b>\n</p>"
+ },
+ {
+  "html": "<div align=\"right\"><i>right</i></div>",
+  "out": "<div align=\"right\"><i>right</i></div>"
+ },
+ {
+  "html": "<abbr title=\"HyperText\">HTML</abbr> <mark>m</mark> <small>s</small> <u>u</u> <ins>i</ins> <del cite=\"https://x\">d</del> <s>s</s> <strike>k</strike>",
+  "out": "<abbr title=\"HyperText\">HTML</abbr> <mark>m</mark> <small>s</small> <u>u</u> <ins>i</ins> <del cite=\"https://x\">d</del> <s>s</s> <strike>k</strike>"
+ },
+ {
+  "html": "<q cite=\"https://x.test/q\">quoted</q> <q cite=\"javascript:x\">bad</q> <var>v</var> <samp>out</samp> <tt>tt</tt> <code>c</code>",
+  "out": "<q cite=\"https://x.test/q\">quoted</q> <q>bad</q> <var>v</var> <samp>out</samp> <tt>tt</tt> <code>c</code>"
+ },
+ {
+  "html": "<code class=\"language-ts x\">c</code>",
+  "out": "<code class=\"language-ts\">c</code>"
+ },
+ {
+  "html": "<code class=\"language-math math-inline\">x</code>",
+  "out": "<code class=\"language-math math-inline\">x</code>"
+ },
+ {
+  "html": "<code class=\"math-display other\">y</code>",
+  "out": "<code class=\"math-display\">y</code>"
+ },
+ {
+  "html": "<ruby>漢<rp>(</rp><rt>kan</rt><rp>)</rp></ruby>",
+  "out": "<ruby>漢<rp>(</rp><rt>kan</rt><rp>)</rp></ruby>"
+ },
+ {
+  "html": "<dl><dt>Term<dd>Def<dt>Two<dd>Def two</dl>",
+  "out": "<dl><dt>Term</dt><dd>Def</dd><dt>Two</dt><dd>Def two</dd></dl>"
+ },
+ {
+  "html": "<hr><hr/>",
+  "out": "<hr><hr>"
+ },
+ {
+  "html": "<ol start=\"3\" class=\"contains-task-list x\"><li class=\"task-list-item\">a</li></ol>",
+  "out": "<ol start=\"3\" class=\"contains-task-list\"><li class=\"task-list-item\">a</li></ol>"
+ },
+ {
+  "html": "<ul aria-label=\"l\"><li>a<li>b</ul>",
+  "out": "<ul aria-label=\"l\"><li>a</li><li>b</li></ul>"
+ },
+ {
+  "html": "<input type=\"checkbox\" checked>",
+  "out": "<input type=\"checkbox\" checked disabled>"
+ },
+ {
+  "html": "<input checked>",
+  "out": "<input checked disabled type=\"checkbox\">"
+ },
+ {
+  "html": "<input type=\"checkbox\" disabled=\"no\">",
+  "out": "<input type=\"checkbox\" disabled>"
+ },
+ {
+  "html": "<picture><source srcset=\"a.png\" media=\"(min-width: 1px)\"><img src=\"b.png\"></picture><source srcset=\"c\">",
+  "out": "<picture><source srcset=\"a.png\" media=\"(min-width: 1px)\"><img src=\"b.png\"></picture>"
+ },
+ {
+  "html": "<table border=\"1\" cellpadding=\"2\"><caption>c</caption><thead><tr><th align=\"left\" colspan=\"2\">h</th></tr></thead><tbody><tr><td rowspan=2>1</td><td>2</td></tr></tbody></table>",
+  "out": "<table border=\"1\" cellpadding=\"2\">c<thead><tr><th align=\"left\" colspan=\"2\">h</th></tr></thead><tbody><tr><td rowspan=\"2\">1</td><td>2</td></tr></tbody></table>"
+ },
+ {
+  "html": "<table><tr><td>1</td></tr></table>",
+  "out": "<table><tbody><tr><td>1</td></tr></tbody></table>"
+ },
+ {
+  "html": "<table><td>x</td></table>",
+  "out": "<table><tbody><tr><td>x</td></tr></tbody></table>"
+ },
+ {
+  "html": "<td>x</td>",
+  "out": "x"
+ },
+ {
+  "html": "<tr><td>a</td></tr>",
+  "out": "a"
+ },
+ {
+  "html": "<table>text<tr><td>x</table>",
+  "out": "text<table><tbody><tr><td>x</td></tr></tbody></table>"
+ },
+ {
+  "html": "<table><tr><td>a<td>b<tr><td>c</table>",
+  "out": "<table><tbody><tr><td>a</td><td>b</td></tr><tr><td>c</td></tr></tbody></table>"
+ },
+ {
+  "html": "<table><tbody><tr><td><table><tr><td>in</td></tr></table></td></tr></tbody></table>",
+  "out": "<table><tbody><tr><td><table><tbody><tr><td>in</td></tr></tbody></table></td></tr></tbody></table>"
+ },
+ {
+  "html": "<section class=\"footnotes\" data-footnotes><h2 class=\"sr-only\" id=\"footnote-label\">Footnotes</h2></section>",
+  "out": "<section class=\"footnotes\" data-footnotes=\"\"><h2 class=\"sr-only\" id=\"user-content-footnote-label\">Footnotes</h2></section>"
+ },
+ {
+  "html": "<span title=\"&lt;&amp;&quot;\">x</span>",
+  "out": "<span title=\"<&#x26;&#x22;\">x</span>"
+ },
+ {
+  "html": "<span id=\"a\" name=\"b\" aria-describedby=\"c\" aria-labelledby=\"d\" aria-label=\"e\">x</span>",
+  "out": "<span id=\"user-content-a\" name=\"user-content-b\">x</span>"
+ },
+ {
+  "html": "<div itemscope itemtype=\"https://schema.org/x\">x</div>",
+  "out": "<div itemscope itemtype=\"https://schema.org/x\">x</div>"
+ },
+ {
+  "html": "<img aria-label=\"l\" longdesc=\"https://x\" longdesc=\"javascript:y\" src=\"a\">",
+  "out": "<img aria-label=\"l\" longdesc=\"https://x\" src=\"a\">"
+ },
+ {
+  "html": "<blockquote cite=\"https://x\">q</blockquote>",
+  "out": "<blockquote cite=\"https://x\">q</blockquote>"
+ },
+ {
+  "html": "<blockquote cite=\"javascript:x\">q</blockquote>",
+  "out": "<blockquote>q</blockquote>"
+ },
+ {
+  "html": "<summary aria-label=\"s\">x</summary>",
+  "out": "<summary aria-label=\"s\">x</summary>"
+ },
+ {
+  "html": "<p>a<div>b</div>c</p>",
+  "out": "<p>a</p><div>b</div>c<p></p>"
+ },
+ {
+  "html": "<p>a<p>b",
+  "out": "<p>a</p><p>b</p>"
+ },
+ {
+  "html": "<p>",
+  "out": "<p></p>"
+ },
+ {
+  "html": "</p>",
+  "out": ""
+ },
+ {
+  "html": "a</p>b",
+  "out": "ab"
+ },
+ {
+  "html": "<ul><li>a<li>b</ul>",
+  "out": "<ul><li>a</li><li>b</li></ul>"
+ },
+ {
+  "html": "<ul><li>a<ul><li>b</ul><li>c</ul>",
+  "out": "<ul><li>a<ul><li>b</li></ul></li><li>c</li></ul>"
+ },
+ {
+  "html": "<li>a<li>b",
+  "out": "<li>a</li><li>b</li>"
+ },
+ {
+  "html": "<h1>a<h2>b</h2>",
+  "out": "<h1>a</h1><h2>b</h2>"
+ },
+ {
+  "html": "<h1>a</h2>b",
+  "out": "<h1>a</h1>b"
+ },
+ {
+  "html": "<b>x<i>y</b>z</i>",
+  "out": "<b>x<i>y</i></b><i>z</i>"
+ },
+ {
+  "html": "<p><b>x</p>y",
+  "out": "<p><b>x</b></p><b>y</b>"
+ },
+ {
+  "html": "<b><p>x</b>y</p>",
+  "out": "<b></b><p><b>x</b>y</p>"
+ },
+ {
+  "html": "<i>a<p>b</i>c</p>",
+  "out": "<i>a</i><p><i>b</i>c</p>"
+ },
+ {
+  "html": "<a href=\"1\">a<a href=\"2\">b</a>",
+  "out": "<a href=\"1\">a</a><a href=\"2\">b</a>"
+ },
+ {
+  "html": "<b>1<b>2<b>3<b>4</b></b></b></b>",
+  "out": "<b>1<b>2<b>3<b>4</b></b></b></b>"
+ },
+ {
+  "html": "<sub>a<b>b</sub>c</b>",
+  "out": "<sub>a<b>b</b></sub><b>c</b>"
+ },
+ {
+  "html": "<b>a<sub>b</b>c</sub>",
+  "out": "<b>a<sub>b</sub></b>c"
+ },
+ {
+  "html": "<div>a<span>b</div>c</span>",
+  "out": "<div>a<span>b</span></div>c"
+ },
+ {
+  "html": "<span>a<div>b</span>c</div>",
+  "out": "<span>a<div>bc</div></span>"
+ },
+ {
+  "html": "<em>a<strong>b</em>c</strong>",
+  "out": "<em>a<strong>b</strong></em><strong>c</strong>"
+ },
+ {
+  "html": "<u>a<div>b</u>c</div>",
+  "out": "<u>a</u><div><u>b</u>c</div>"
+ },
+ {
+  "html": "<button>a<button>b</button>",
+  "out": "ab"
+ },
+ {
+  "html": "<select><option>a<option>b</select>",
+  "out": "ab"
+ },
+ {
+  "html": "<details><summary>a</details>b</summary>",
+  "out": "<details><summary>a</summary></details>b"
+ },
+ {
+  "html": "<div><p>a</div>b",
+  "out": "<div><p>a</p></div>b"
+ },
+ {
+  "html": "<pre>\na</pre>",
+  "out": "<pre>a</pre>"
+ },
+ {
+  "html": "<pre>\n\na</pre>",
+  "out": "<pre>\na</pre>"
+ },
+ {
+  "html": "<textarea>\n<b>x</b></textarea>",
+  "out": "&#x3C;b>x&#x3C;/b>"
+ },
+ {
+  "html": "<title>t <b>x</b></title>",
+  "out": "t &#x3C;b>x&#x3C;/b>"
+ },
+ {
+  "html": "<xmp><b></xmp>",
+  "out": "&#x3C;b>"
+ },
+ {
+  "html": "<iframe><b>x</b></iframe>y",
+  "out": "&#x3C;b>x&#x3C;/b>y"
+ },
+ {
+  "html": "<noscript><b>x</b></noscript>",
+  "out": "<b>x</b>"
+ },
+ {
+  "html": "<noembed><b>x</b></noembed>",
+  "out": "&#x3C;b>x&#x3C;/b>"
+ },
+ {
+  "html": "<noframes><b>x</b></noframes>",
+  "out": "&#x3C;b>x&#x3C;/b>"
+ },
+ {
+  "html": "<plaintext><b>x</b></plaintext>",
+  "out": "&#x3C;b>x&#x3C;/b>&#x3C;/plaintext>"
+ },
+ {
+  "html": "<script>a</script >b",
+  "out": "b"
+ },
+ {
+  "html": "<style>a</styl></style>b",
+  "out": "b"
+ },
+ {
+  "html": "<svg><a href=\"x\">y</a></svg>",
+  "out": "<a href=\"x\">y</a>"
+ },
+ {
+  "html": "<math><mi>x</mi></math>",
+  "out": "x"
+ },
+ {
+  "html": "<br/>a</br>",
+  "out": "<br>a<br>"
+ },
+ {
+  "html": "<img/><wbr>x<wbr/>",
+  "out": "<img>x"
+ },
+ {
+  "html": "<image src=\"a\">",
+  "out": "<img src=\"a\">"
+ },
+ {
+  "html": "<p/>x",
+  "out": "<p>x</p>"
+ },
+ {
+  "html": "<div/>x</div>",
+  "out": "<div>x</div>"
+ },
+ {
+  "html": "<span/>x",
+  "out": "<span>x</span>"
+ },
+ {
+  "html": "<b><i><u><s><em><strong><p>x</b>y",
+  "out": "<b><i><u><s><em><strong></strong></em></s></u></i></b><s><em><strong><p><b>x</b>y</p></strong></em></s>"
+ },
+ {
+  "html": "<a href=\"1\"><b><i><u><s><div>x</a>y",
+  "out": "<a href=\"1\"><b><i><u><s></s></u></i></b></a><i><u><s><div><a href=\"1\">x</a>y</div></s></u></i>"
+ },
+ {
+  "html": "<b><i><u><s><em><strong><small><code><div>x</b>y</div>",
+  "out": "<b><i><u><s><em><strong><small><code></code></small></strong></em></s></u></i></b><strong><small><code><div><b>x</b>y</div></code></small></strong>"
+ },
+ {
+  "html": "<b><i><u><s><em><div>1</b>2</i>3</u>4</s>5</em>6",
+  "out": "<b><i><u><s><em></em></s></u></i></b><u><s><em></em></s></u><s><em></em></s><em></em><div><em><s><u><b>1</b>23</u>4</s>5</em>6</div>"
+ },
+ {
+  "html": "<b class=\"1\"><b class=\"1\"><b class=\"1\"><b class=\"1\">x</b></b>y",
+  "out": "<b><b><b><b>x</b></b>y</b></b>"
+ },
+ {
+  "html": "<DIV CLASS=\"x\" ALIGN=Center>Up</DIV>",
+  "out": "<div align=\"Center\">Up</div>"
+ },
+ {
+  "html": "<div align=left align=right>dup</div>",
+  "out": "<div align=\"left\">dup</div>"
+ },
+ {
+  "html": "<div align = \"x\" title='y' dir=rtl>s</div>",
+  "out": "<div align=\"x\" title=\"y\" dir=\"rtl\">s</div>"
+ },
+ {
+  "html": "<div title=a&amp;b&lt;c>t</div>",
+  "out": "<div title=\"a&#x26;b<c\">t</div>"
+ },
+ {
+  "html": "<div title=\"&notit; &not &copy &copyx\">t</div>",
+  "out": "<div title=\"&#x26;notit; ¬ © &#x26;copyx\">t</div>"
+ },
+ {
+  "html": "<a href=\"?a=1&b=2&copy=3\">t</a>",
+  "out": "<a href=\"?a=1&#x26;b=2&#x26;copy=3\">t</a>"
+ },
+ {
+  "html": "x &nbsp; &copy; &unknown; &#169; &#x1F600; &#0; &#x110000; &#128; &#xD800;",
+  "out": "x   © &#x26;unknown; © 😀 � � € �"
+ },
+ {
+  "html": "&amp &lt &gt &quot &AMP; &LT; &notin; &not; &noti",
+  "out": "&#x26; &#x3C; > \" &#x26; &#x3C; ∉ ¬ ¬i"
+ },
+ {
+  "html": "a < b > c & d",
+  "out": "a &#x3C; b > c &#x26; d"
+ },
+ {
+  "html": "a <3 b",
+  "out": "a &#x3C;3 b"
+ },
+ {
+  "html": "a </ b",
+  "out": "a "
+ },
+ {
+  "html": "a </3 b",
+  "out": "a "
+ },
+ {
+  "html": "a <> b",
+  "out": "a &#x3C;> b"
+ },
+ {
+  "html": "a </> b",
+  "out": "a  b"
+ },
+ {
+  "html": "<!-- c --><p>t</p>",
+  "out": "<p>t</p>"
+ },
+ {
+  "html": "<!--> a",
+  "out": " a"
+ },
+ {
+  "html": "<!---> b",
+  "out": " b"
+ },
+ {
+  "html": "<!-- a -- b -->c",
+  "out": "c"
+ },
+ {
+  "html": "<!DOCTYPE html>x",
+  "out": "x"
+ },
+ {
+  "html": "<?php echo 1 ?>x",
+  "out": "x"
+ },
+ {
+  "html": "<![CDATA[ a ]]>x",
+  "out": "x"
+ },
+ {
+  "html": "<!x>y",
+  "out": "y"
+ },
+ {
+  "html": "<!-- unclosed",
+  "out": ""
+ },
+ {
+  "html": "<div",
+  "out": ""
+ },
+ {
+  "html": "<div title=\"x",
+  "out": ""
+ },
+ {
+  "html": "x\r\ny\rz",
+  "out": "x\ny\nz"
+ },
+ {
+  "html": "a\u0000b",
+  "out": "ab"
+ },
+ {
+  "html": "<div>\n  a  \n  b\n</div>",
+  "out": "<div>\n  a  \n  b\n</div>"
+ },
+ {
+  "html": " lead",
+  "out": " lead"
+ },
+ {
+  "html": "trail ",
+  "out": "trail "
+ },
+ {
+  "html": "<span>a</span>\n<span>b</span>",
+  "out": "<span>a</span>\n<span>b</span>"
+ },
+ {
+  "html": "\n <div>",
+  "out": "\n <div></div>"
+ },
+ {
+  "html": "<em> <small><sub><div><em>\n<br> 1<2",
+  "out": "<em> <small><sub><div><em>\n<br> 1&#x3C;2</em></div></sub></small></em>"
+ },
+ {
+  "html": "</a> </small><small>y z",
+  "out": " <small>y z</small>"
+ },
+ {
+  "html": "<kbd><em>y z</strong>y z<small><mark><a href=\"h\">x<div>1<2",
+  "out": "<kbd><em>y zy z<small><mark><a href=\"h\">x<div>1&#x3C;2</div></a></mark></small></em></kbd>"
+ },
+ {
+  "html": "<u>&amp;<em><sup><small></br>x1<2</div></small></sub>",
+  "out": "<u>&#x26;<em><sup><small><br>x1&#x3C;2</small></sup></em></u>"
+ },
+ {
+  "html": "<sub> </a></s>é<i>1<2<i><em></strong>",
+  "out": "<sub> é<i>1&#x3C;2<i><em></em></i></i></sub>"
+ },
+ {
+  "html": "</span><details><s></br><small></span><a href=\"h\"><kbd></small></kbd>",
+  "out": "<details><s><br><small><a href=\"h\"><kbd></kbd></a></small></s></details>"
+ },
+ {
+  "html": "\nx</strong><span></b>x</small>\n</kbd>y z",
+  "out": "\nx<span>x\ny z</span>"
+ },
+ {
+  "html": "</br><u><span></s><i><div> ",
+  "out": "<u><span><i><div> </div></i></span></u>"
+ },
+ {
+  "html": "<a href=\"h\"><a href=\"h\"><kbd><b>x<span><mark>y z<mark>",
+  "out": "<a href=\"h\"></a><a href=\"h\"><kbd><b>x<span><mark>y z<mark></mark></mark></span></b></kbd></a>"
+ },
+ {
+  "html": "<small><i>y z<details><small><span><summary></b>",
+  "out": "<small><i>y z<details><small><span><summary></summary></span></small></details></i></small>"
+ },
+ {
+  "html": "<em><em><summary><small></details>\n</em>",
+  "out": "<em><em></em><summary><em><small>\n</small></em></summary></em>"
+ },
+ {
+  "html": "</em>&amp;",
+  "out": "&#x26;"
+ },
+ {
+  "html": "<sub><p><small></b><code></details></strong>",
+  "out": "<sub><p><small><code></code></small></p></sub>"
+ },
+ {
+  "html": "</summary><kbd><i>",
+  "out": "<kbd><i></i></kbd>"
+ },
+ {
+  "html": "<div><span>",
+  "out": "<div><span></span></div>"
+ },
+ {
+  "html": "</sub>é",
+  "out": "é"
+ },
+ {
+  "html": "x<code></div></i><details>y z<small><code></details></strong><sup>",
+  "out": "x<code><details>y z<small><code></code></small></details><small><code><sup></sup></code></small></code>"
+ },
+ {
+  "html": "<summary>1<2",
+  "out": "<summary>1&#x3C;2</summary>"
+ },
+ {
+  "html": "y z </em>&amp;</span>x1<2</span><br>y z</div>",
+  "out": "y z &#x26;x1&#x3C;2<br>y z"
+ },
+ {
+  "html": "é1<2<summary><strong></kbd><strong><em>\n",
+  "out": "é1&#x3C;2<summary><strong><strong><em>\n</em></strong></strong></summary>"
+ },
+ {
+  "html": "<br></br><span><summary>\n\n",
+  "out": "<br><br><span><summary>\n\n</summary></span>"
+ },
+ {
+  "html": "1<2</div></i><em> ",
+  "out": "1&#x3C;2<em> </em>"
+ },
+ {
+  "html": "</summary><strong><mark>",
+  "out": "<strong><mark></mark></strong>"
+ },
+ {
+  "html": "<i>x</sub>x<mark></mark> </p></s>",
+  "out": "<i>xx<mark></mark> <p></p></i>"
+ },
+ {
+  "html": "</details><summary></sup> y z<sub></small><s><b></div>",
+  "out": "<summary> y z<sub><s><b></b></s></sub></summary>"
+ },
+ {
+  "html": "<strong><s> x</b>x</summary>",
+  "out": "<strong><s> xx</s></strong>"
+ },
+ {
+  "html": "<i><small><span><sup></kbd><s><code>é1<2",
+  "out": "<i><small><span><sup><s><code>é1&#x3C;2</code></s></sup></span></small></i>"
+ },
+ {
+  "html": "1<2<sub><s><em><div><sub></div><p>",
+  "out": "1&#x3C;2<sub><s><em><div><sub></sub></div><p></p></em></s></sub>"
+ },
+ {
+  "html": "&amp;</strong><sup><a href=\"h\"><small></strong>",
+  "out": "&#x26;<sup><a href=\"h\"><small></small></a></sup>"
+ },
+ {
+  "html": "<mark><i>",
+  "out": "<mark><i></i></mark>"
+ },
+ {
+  "html": "</code>1<2",
+  "out": "1&#x3C;2"
+ },
+ {
+  "html": "<s></code><s>1<2<code><a href=\"h\"></strong><strong> ",
+  "out": "<s><s>1&#x3C;2<code><a href=\"h\"><strong> </strong></a></code></s></s>"
+ },
+ {
+  "html": "<s><s></summary>",
+  "out": "<s><s></s></s>"
+ },
+ {
+  "html": "</i><details></summary><sup><s>x&amp;</br></sup><kbd>",
+  "out": "<details><sup><s>x&#x26;<br></s></sup><s><kbd></kbd></s></details>"
+ },
+ {
+  "html": "x<i><strong>\n</s></br></em></sup></code>x",
+  "out": "x<i><strong>\n<br>x</strong></i>"
+ },
+ {
+  "html": "</sub>&amp;<em><span>",
+  "out": "&#x26;<em><span></span></em>"
+ },
+ {
+  "html": "x</i>&amp;\nx</details>x</em></br>",
+  "out": "x&#x26;\nxx"
+ },
+ {
+  "html": "1<2<em></details></b>",
+  "out": "1&#x3C;2<em></em>"
+ },
+ {
+  "html": "</br></kbd><details></em> ",
+  "out": "<details> </details>"
+ },
+ {
+  "html": "<i><div> </br></details>y z",
+  "out": "<i><div> <br>y z</div></i>"
+ },
+ {
+  "html": "<u></br></strong>é",
+  "out": "<u><br>é</u>"
+ },
+ {
+  "html": "<p><sup>1<2<br></kbd><mark></summary><sup><div>",
+  "out": "<p><sup>1&#x3C;2<br><mark><sup></sup></mark></sup></p><div></div>"
+ },
+ {
+  "html": "y z</i><mark><br>",
+  "out": "y z<mark><br></mark>"
+ },
+ {
+  "html": "\n1<2<mark>\n y z</sup>é</kbd><p>",
+  "out": "\n1&#x3C;2<mark>\n y zé<p></p></mark>"
+ },
+ {
+  "html": "</mark></div></details>y z<kbd><div>\n</s>",
+  "out": "y z<kbd><div>\n</div></kbd>"
+ },
+ {
+  "html": "</a></sup><i></i></u></strong>",
+  "out": "<i></i>"
+ },
+ {
+  "html": "&amp;</kbd></u><kbd></strong><a href=\"h\">&amp;",
+  "out": "&#x26;<kbd><a href=\"h\">&#x26;</a></kbd>"
+ },
+ {
+  "html": "<u><kbd></small><details>x</sup><sup><i><mark> é",
+  "out": "<u><kbd><details>x<sup><i><mark> é</mark></i></sup></details></kbd></u>"
+ },
+ {
+  "html": "<strong><s>1<2</em>1<2\né<kbd>",
+  "out": "<strong><s>1&#x3C;21&#x3C;2\né<kbd></kbd></s></strong>"
+ },
+ {
+  "html": "\n</a>",
+  "out": "\n"
+ },
+ {
+  "html": "</small><em>xx<u>",
+  "out": "<em>xx<u></u></em>"
+ },
+ {
+  "html": "<span><u></p><u> ",
+  "out": "<span><u><p></p><u> </u></u></span>"
+ },
+ {
+  "html": "</kbd><div></s>\n</u> <sup><summary></code>",
+  "out": "<div>\n <sup><summary></summary></sup></div>"
+ },
+ {
+  "html": "<strong> <br><code><strong></br>&amp;<small>\n<b>",
+  "out": "<strong> <br><code><strong><br>&#x26;<small>\n<b></b></small></strong></code></strong>"
+ },
+ {
+  "html": "<small> <sup><u><span></i>",
+  "out": "<small> <sup><u><span></span></u></sup></small>"
+ },
+ {
+  "html": "<i>x1<2é<div><b><b>1<2\n</div> ",
+  "out": "<i>x1&#x3C;2é<div><b><b>1&#x3C;2\n</b></b></div><b><b> </b></b></i>"
+ },
+ {
+  "html": "<br><sub></kbd>x<small></a>&amp; <small>",
+  "out": "<br><sub>x<small>&#x26; <small></small></small></sub>"
+ },
+ {
+  "html": "x</em>é<summary>x</kbd><u></mark>",
+  "out": "xé<summary>x<u></u></summary>"
+ },
+ {
+  "html": "<span><u><div></sup>\n</div></small>",
+  "out": "<span><u><div>\n</div></u></span>"
+ },
+ {
+  "html": "y z ",
+  "out": "y z "
+ },
+ {
+  "html": "<em></u>y z\ny z\n<b><br>&amp;",
+  "out": "<em>y z\ny z\n<b><br>&#x26;</b></em>"
+ },
+ {
+  "html": "</s>x<small></p><kbd></sup> </code>1<2",
+  "out": "x<small><p></p><kbd> 1&#x3C;2</kbd></small>"
+ },
+ {
+  "html": " <details></b></s>y z<b><a href=\"h\">é",
+  "out": " <details>y z<b><a href=\"h\">é</a></b></details>"
+ },
+ {
+  "html": "</u></sup>&amp; </details><br><kbd></u></i>&amp; ",
+  "out": "&#x26; <br><kbd>&#x26; </kbd>"
+ },
+ {
+  "html": "<span>y z",
+  "out": "<span>y z</span>"
+ },
+ {
+  "html": "<details>é",
+  "out": "<details>é</details>"
+ },
+ {
+  "html": "<span>\n ",
+  "out": "<span>\n </span>"
+ },
+ {
+  "html": "y z</p>é\n\n&amp;&amp;<u>",
+  "out": "y zé\n\n&#x26;&#x26;<u></u>"
+ },
+ {
+  "html": "\n<p>&amp;&amp;</mark>",
+  "out": "\n<p>&#x26;&#x26;</p>"
+ },
+ {
+  "html": "1<2<b>é<strong><i>\n<sub><s><p></sup>",
+  "out": "1&#x3C;2<b>é<strong><i>\n<sub><s><p></p></s></sub></i></strong></b>"
+ },
+ {
+  "html": "<span></mark>1<2<code>y z<p>é</strong></b>",
+  "out": "<span>1&#x3C;2<code>y z<p>é</p></code></span>"
+ },
+ {
+  "html": "</b>\ny z\n",
+  "out": "\ny z\n"
+ },
+ {
+  "html": "<details></span><small><s><em>",
+  "out": "<details><small><s><em></em></s></small></details>"
+ },
+ {
+  "html": "<br><mark><strong></small>\n<s><small></b>",
+  "out": "<br><mark><strong>\n<s><small></small></s></strong></mark>"
+ },
+ {
+  "html": "</strong></b>1<2<mark><b><span>&amp;",
+  "out": "1&#x3C;2<mark><b><span>&#x26;</span></b></mark>"
+ },
+ {
+  "html": "<mark></a><br></i>",
+  "out": "<mark><br></mark>"
+ },
+ {
+  "html": "1<2</br><s></kbd><em><details>",
+  "out": "1&#x3C;2<s><em><details></details></em></s>"
+ },
+ {
+  "html": "\n<small><kbd>\n<mark>",
+  "out": "\n<small><kbd>\n<mark></mark></kbd></small>"
+ },
+ {
+  "html": "<code><small>",
+  "out": "<code><small></small></code>"
+ },
+ {
+  "html": "</sub><a href=\"h\"><details> <br><mark><summary></small><span><kbd>",
+  "out": "<a href=\"h\"><details> <br><mark><summary><span><kbd></kbd></span></summary></mark></details></a>"
+ },
+ {
+  "html": "x </sup> y z<div><a href=\"h\"></b></sub>",
+  "out": "x  y z<div><a href=\"h\"></a></div>"
+ },
+ {
+  "html": "<kbd>&amp; </em>",
+  "out": "<kbd>&#x26; </kbd>"
+ },
+ {
+  "html": "<sub><strong>x<div></small></kbd></kbd><mark></strong></small>é",
+  "out": "<sub><strong>x</strong><div><strong><mark></mark></strong>é</div></sub>"
+ },
+ {
+  "html": "</span></b></b></strong>&amp;<p><i>\n",
+  "out": "&#x26;<p><i>\n</i></p>"
+ },
+ {
+  "html": "<a href=\"h\">&amp;</u>&amp;</sub></em><b>",
+  "out": "<a href=\"h\">&#x26;&#x26;<b></b></a>"
+ },
+ {
+  "html": "</p>1<2<strong>é</sup></a>&amp; <details>",
+  "out": "1&#x3C;2<strong>é&#x26; <details></details></strong>"
+ },
+ {
+  "html": "x<b></a><u>",
+  "out": "x<b><u></u></b>"
+ },
+ {
+  "html": "<summary><b>&amp;é</p><u>",
+  "out": "<summary><b>&#x26;é<p></p><u></u></b></summary>"
+ },
+ {
+  "html": "</s>x<i></code>x</br><mark></br>",
+  "out": "x<i>x<br><mark><br></mark></i>"
+ },
+ {
+  "html": "<p></sup>é</small>",
+  "out": "<p>é</p>"
+ },
+ {
+  "html": "<kbd><small><u>\ny z<sub><span></s><p><details></details>",
+  "out": "<kbd><small><u>\ny z<sub><span><p></p><details></details></span></sub></u></small></kbd>"
+ },
+ {
+  "html": "</u>y z",
+  "out": "y z"
+ },
+ {
+  "html": "&amp;<em>",
+  "out": "&#x26;<em></em>"
+ },
+ {
+  "html": "x<p><em></sup><details>1<2é<i>\n",
+  "out": "x<p><em></em></p><details><em>1&#x3C;2é<i>\n</i></em></details>"
+ },
+ {
+  "html": "<code>xx<strong><span><a href=\"h\">",
+  "out": "<code>xx<strong><span><a href=\"h\"></a></span></strong></code>"
+ },
+ {
+  "html": "</sup>y z<strong>",
+  "out": "y z<strong></strong>"
+ },
+ {
+  "html": "</u></span>1<2<mark></i><kbd>",
+  "out": "1&#x3C;2<mark><kbd></kbd></mark>"
+ },
+ {
+  "html": "<sub><br></div><kbd><u>",
+  "out": "<sub><br><kbd><u></u></kbd></sub>"
+ },
+ {
+  "html": "</sup></small>&amp;",
+  "out": "&#x26;"
+ },
+ {
+  "html": "<p><b><u><sub>1<21<2<kbd>y z",
+  "out": "<p><b><u><sub>1&#x3C;21&#x3C;2<kbd>y z</kbd></sub></u></b></p>"
+ },
+ {
+  "html": "<div><kbd>1<2<s>x<kbd>\n",
+  "out": "<div><kbd>1&#x3C;2<s>x<kbd>\n</kbd></s></kbd></div>"
+ },
+ {
+  "html": "<div><small></s>x",
+  "out": "<div><small>x</small></div>"
+ },
+ {
+  "html": "</strong><div>é</summary>\n<p><div>",
+  "out": "<div>é\n<p></p><div></div></div>"
+ },
+ {
+  "html": "y z</summary></sub>é</br>",
+  "out": "y zé"
+ },
+ {
+  "html": "<details> <code></summary><u><b><small></strong>1<2</summary></sub>",
+  "out": "<details> <code><u><b><small>1&#x3C;2</small></b></u></code></details>"
+ },
+ {
+  "html": " <sup><span><b> <mark></b><b><small>",
+  "out": " <sup><span><b> <mark></mark></b><b><small></small></b></span></sup>"
+ },
+ {
+  "html": "<i><i><b><details>é\n</code>&amp;</p>\n",
+  "out": "<i><i><b><details>é\n&#x26;<p></p>\n</details></b></i></i>"
+ },
+ {
+  "html": "</summary></sup>x</sub><b><em>",
+  "out": "x<b><em></em></b>"
+ },
+ {
+  "html": "</code>y z",
+  "out": "y z"
+ },
+ {
+  "html": "<em><s>&amp;<summary>",
+  "out": "<em><s>&#x26;<summary></summary></s></em>"
+ },
+ {
+  "html": "<a href=\"h\"></a><kbd></p></span></details></p>",
+  "out": "<a href=\"h\"></a><kbd><p></p><p></p></kbd>"
+ },
+ {
+  "html": "<summary>é</b></mark></span></div>",
+  "out": "<summary>é</summary>"
+ },
+ {
+  "html": "<i><mark>",
+  "out": "<i><mark></mark></i>"
+ },
+ {
+  "html": "x</strong>é",
+  "out": "xé"
+ },
+ {
+  "html": "&amp;</br></a>é</p>x<sup></div>",
+  "out": "&#x26;éx<sup></sup>"
+ },
+ {
+  "html": "1<2</sup>\n1<2</details></i><small></sup></em>é1<2",
+  "out": "1&#x3C;2\n1&#x3C;2<small>é1&#x3C;2</small>"
+ },
+ {
+  "html": "1<2<br><small></br><u><s> </u></summary>",
+  "out": "1&#x3C;2<br><small><br><u><s> </s></u></small>"
+ },
+ {
+  "html": "1<2&amp;",
+  "out": "1&#x3C;2&#x26;"
+ },
+ {
+  "html": "\ny z<u></code>1<2</details></small><details><details>&amp;<small>",
+  "out": "\ny z<u>1&#x3C;2<details><details>&#x26;<small></small></details></details></u>"
+ },
+ {
+  "html": "<div><kbd></sub><em>",
+  "out": "<div><kbd><em></em></kbd></div>"
+ },
+ {
+  "html": "<details>\n<mark>é\n<small><em>é<kbd>",
+  "out": "<details>\n<mark>é\n<small><em>é<kbd></kbd></em></small></mark></details>"
+ },
+ {
+  "html": "\ny z<a href=\"h\"><b></span>x<details></code><div><code>",
+  "out": "\ny z<a href=\"h\"><b>x<details><div><code></code></div></details></b></a>"
+ },
+ {
+  "html": "<summary><mark><details></u></mark>&amp;<p></sub><strong><div></i>",
+  "out": "<summary><mark><details>&#x26;<p><strong></strong></p><div></div></details></mark></summary>"
+ },
+ {
+  "html": "</small></s></br></summary>x\n</mark>y z</code>",
+  "out": "x\ny z"
+ },
+ {
+  "html": "</kbd></kbd><u><a href=\"h\">&amp;</a>",
+  "out": "<u><a href=\"h\">&#x26;</a></u>"
+ },
+ {
+  "html": "</br><b></br><a href=\"h\">",
+  "out": "<b><br><a href=\"h\"></a></b>"
+ },
+ {
+  "html": "1<21<2</strong>y z</br><span><kbd><div>x",
+  "out": "1&#x3C;21&#x3C;2y z<span><kbd><div>x</div></kbd></span>"
+ },
+ {
+  "html": "<sub><br>1<2</a></div>éy z</summary><em></br></summary>",
+  "out": "<sub><br>1&#x3C;2éy z<em><br></em></sub>"
+ },
+ {
+  "html": "</sup>1<2y z",
+  "out": "1&#x3C;2y z"
+ },
+ {
+  "html": " &amp;y z</u><sup><sup><em><b>y z</a><kbd>",
+  "out": " &#x26;y z<sup><sup><em><b>y z<kbd></kbd></b></em></sup></sup>"
+ },
+ {
+  "html": "1<2x",
+  "out": "1&#x3C;2x"
+ },
+ {
+  "html": "</summary>\n<s></code></s>",
+  "out": "\n<s></s>"
+ },
+ {
+  "html": "<small></div><mark></b><div><div></div><kbd></mark></kbd><div>",
+  "out": "<small><mark><div><div></div><kbd></kbd><div></div></div></mark></small>"
+ },
+ {
+  "html": "&amp; </i></i>\n</sup></b>\n<i>1<2</strong>",
+  "out": "&#x26; \n\n<i>1&#x3C;2</i>"
+ },
+ {
+  "html": "<details></em>\n",
+  "out": "<details>\n</details>"
+ },
+ {
+  "html": " <u>y z<summary></small></sup><span>",
+  "out": " <u>y z<summary><span></span></summary></u>"
+ },
+ {
+  "html": "<br><i>é</small><b></i></mark><strong></p>",
+  "out": "<br><i>é<b></b></i><b><strong><p></p></strong></b>"
+ },
+ {
+  "html": "</sup><small>\n<small><span></p>",
+  "out": "<small>\n<small><span><p></p></span></small></small>"
+ },
+ {
+  "html": "<strong>é\n<p><kbd>y z <p>",
+  "out": "<strong>é\n<p><kbd>y z </kbd></p><p></p></strong>"
+ },
+ {
+  "html": "</kbd><em></summary></a><a href=\"h\"></code>",
+  "out": "<em><a href=\"h\"></a></em>"
+ },
+ {
+  "html": "&amp;\n</strong> </code></kbd><br>é</code>",
+  "out": "&#x26;\n <br>é"
+ },
+ {
+  "html": "y z</em></i>",
+  "out": "y z"
+ },
+ {
+  "html": "</strong><kbd><kbd><strong>x<kbd><details></mark> <span>",
+  "out": "<kbd><kbd><strong>x<kbd><details> <span></span></details></kbd></strong></kbd></kbd>"
+ },
+ {
+  "html": "<mark></details></strong>\n",
+  "out": "<mark>\n</mark>"
+ },
+ {
+  "html": "<em><mark>é<summary>",
+  "out": "<em><mark>é<summary></summary></mark></em>"
+ },
+ {
+  "html": " </b><sub></kbd>é<details> </span>",
+  "out": " <sub>é<details> </details></sub>"
+ },
+ {
+  "html": "<span></code>x<span></em>",
+  "out": "<span>x<span></span></span>"
+ },
+ {
+  "html": "é</em><b><sub><s>&amp;<kbd>y z<mark>",
+  "out": "é<b><sub><s>&#x26;<kbd>y z<mark></mark></kbd></s></sub></b>"
+ },
+ {
+  "html": "</b><sup><i> </code><b>1<2<span>&amp;",
+  "out": "<sup><i> <b>1&#x3C;2<span>&#x26;</span></b></i></sup>"
+ },
+ {
+  "html": "</br>1<2x</b> <b><small><sup><em>",
+  "out": "1&#x3C;2x <b><small><sup><em></em></sup></small></b>"
+ },
+ {
+  "html": "</code><summary>&amp;x1<2<p><p><div><details><sub>",
+  "out": "<summary>&#x26;x1&#x3C;2<p></p><p></p><div><details><sub></sub></details></div></summary>"
+ },
+ {
+  "html": "</sub>x1<2&amp;</span></sup>&amp;</strong>1<2<details>",
+  "out": "x1&#x3C;2&#x26;&#x26;1&#x3C;2<details></details>"
+ },
+ {
+  "html": "</sub>\n<b><s> <details></br>",
+  "out": "\n<b><s> <details><br></details></s></b>"
+ },
+ {
+  "html": "</details><code></span></summary><small><br> </br><code>&amp;",
+  "out": "<code><small><br> <br><code>&#x26;</code></small></code>"
+ },
+ {
+  "html": "</code></summary></sup></a>",
+  "out": ""
+ },
+ {
+  "html": "<em></a>y z<span><s>",
+  "out": "<em>y z<span><s></s></span></em>"
+ },
+ {
+  "html": "</small></s>y z<kbd></i>",
+  "out": "y z<kbd></kbd>"
+ },
+ {
+  "html": "<br> </sup><details></summary><a href=\"h\"><p>",
+  "out": "<br> <details><a href=\"h\"><p></p></a></details>"
+ },
+ {
+  "html": "</span><summary></strong>",
+  "out": "<summary></summary>"
+ },
+ {
+  "html": "</mark><i><u><sup></u></kbd>",
+  "out": "<i><u><sup></sup></u></i>"
+ },
+ {
+  "html": "<u><b></code> 1<2</kbd></em> <kbd></strong>",
+  "out": "<u><b> 1&#x3C;2 <kbd></kbd></b></u>"
+ },
+ {
+  "html": "y z <mark>x<a href=\"h\">y z</p></u><summary><u><sup>",
+  "out": "y z <mark>x<a href=\"h\">y z<p></p><summary><u><sup></sup></u></summary></a></mark>"
+ },
+ {
+  "html": "<details><strong><em>&amp;<strong>y z",
+  "out": "<details><strong><em>&#x26;<strong>y z</strong></em></strong></details>"
+ },
+ {
+  "html": "<span><br> <details><summary><sub>x",
+  "out": "<span><br> <details><summary><sub>x</sub></summary></details></span>"
+ },
+ {
+  "html": "<kbd><summary><div><div></br><p></i><s></u>",
+  "out": "<kbd><summary><div><div><br><p><s></s></p></div></div></summary></kbd>"
+ },
+ {
+  "html": "<sub><kbd>é1<2<summary><br> </br>1<2<details><s>",
+  "out": "<sub><kbd>é1&#x3C;2<summary><br> <br>1&#x3C;2<details><s></s></details></summary></kbd></sub>"
+ },
+ {
+  "html": "x</small><em><i><p>",
+  "out": "x<em><i><p></p></i></em>"
+ },
+ {
+  "html": "</kbd></u><strong><code>y z<a href=\"h\"><kbd>\n",
+  "out": "<strong><code>y z<a href=\"h\"><kbd>\n</kbd></a></code></strong>"
+ },
+ {
+  "html": "<small></br></a></i>1<2<s><s>&amp;<a href=\"h\">1<2",
+  "out": "<small><br>1&#x3C;2<s><s>&#x26;<a href=\"h\">1&#x3C;2</a></s></s></small>"
+ },
+ {
+  "html": "<span>x<code><span><b>",
+  "out": "<span>x<code><span><b></b></span></code></span>"
+ },
+ {
+  "html": "<mark></div>",
+  "out": "<mark></mark>"
+ },
+ {
+  "html": "</a><div><small><strong></span><sub>y z </small>",
+  "out": "<div><small><strong><sub>y z </sub></strong></small></div>"
+ },
+ {
+  "html": "<strong>&amp;",
+  "out": "<strong>&#x26;</strong>"
+ },
+ {
+  "html": "</code> <br>",
+  "out": " <br>"
+ },
+ {
+  "html": "</small>&amp;",
+  "out": "&#x26;"
+ },
+ {
+  "html": "<code></details><details></kbd><sup></sub></kbd></details><i><strong>",
+  "out": "<code><details><sup></sup></details><i><strong></strong></i></code>"
+ },
+ {
+  "html": "</details>&amp;<b></strong></br><details>",
+  "out": "&#x26;<b><br><details></details></b>"
+ },
+ {
+  "html": " \né<strong>&amp;<div><code></kbd>",
+  "out": " \né<strong>&#x26;<div><code></code></div></strong>"
+ },
+ {
+  "html": "<u><kbd>1<2<br>",
+  "out": "<u><kbd>1&#x3C;2<br></kbd></u>"
+ },
+ {
+  "html": "<sub>x<strong><a href=\"h\"></div>",
+  "out": "<sub>x<strong><a href=\"h\"></a></strong></sub>"
+ },
+ {
+  "html": "</i></summary>é<i>&amp;x<a href=\"h\"><small>",
+  "out": "é<i>&#x26;x<a href=\"h\"><small></small></a></i>"
+ },
+ {
+  "html": "</b></i><code>y z<sub>1<2",
+  "out": "<code>y z<sub>1&#x3C;2</sub></code>"
+ },
+ {
+  "html": "y z<div><div> &amp;</summary></p></kbd>",
+  "out": "y z<div><div> &#x26;<p></p></div></div>"
+ },
+ {
+  "html": "<div>\n<p><strong></br><i><b><mark>",
+  "out": "<div>\n<p><strong><br><i><b><mark></mark></b></i></strong></p></div>"
+ },
+ {
+  "html": "\n<div></summary><small></b>",
+  "out": "\n<div><small></small></div>"
+ },
+ {
+  "html": "<mark></div></u><i>&amp;<sub>é<u><mark></i>",
+  "out": "<mark><i>&#x26;<sub>é<u><mark></mark></u></sub></i></mark>"
+ },
+ {
+  "html": "1<2</small><sub></s></s><kbd><s><div>",
+  "out": "1&#x3C;2<sub><kbd><s><div></div></s></kbd></sub>"
+ },
+ {
+  "html": "<em></a>",
+  "out": "<em></em>"
+ },
+ {
+  "html": "x </p><em>\n\n</p>",
+  "out": "x <em>\n\n<p></p></em>"
+ },
+ {
+  "html": "</b><summary>1<2x</mark><details>\n",
+  "out": "<summary>1&#x3C;2x<details>\n</details></summary>"
+ },
+ {
+  "html": "<kbd><u><em><details><sup>x",
+  "out": "<kbd><u><em><details><sup>x</sup></details></em></u></kbd>"
+ },
+ {
+  "html": "<div></a><br>",
+  "out": "<div><br></div>"
+ },
+ {
+  "html": "<em><summary><u><div><br></u></sup></p><details>",
+  "out": "<em><summary><u></u><div><u><br></u><p></p><details></details></div></summary></em>"
+ },
+ {
+  "html": "1<21<2</sup></b><em>1<2 </em><code>",
+  "out": "1&#x3C;21&#x3C;2<em>1&#x3C;2 </em><code></code>"
+ },
+ {
+  "html": "</p></sup> <p><code>",
+  "out": " <p><code></code></p>"
+ },
+ {
+  "html": "</a>1<2y z</code></a><mark><strong><br>",
+  "out": "1&#x3C;2y z<mark><strong><br></strong></mark>"
+ },
+ {
+  "html": "</code><br><u></br></sub>1<2<br>\n</em></sup>&amp;",
+  "out": "<br><u><br>1&#x3C;2<br>\n&#x26;</u>"
+ },
+ {
+  "html": "é<summary> ",
+  "out": "é<summary> </summary>"
+ },
+ {
+  "html": "<kbd>&amp;y z</s></kbd></s><div><summary>&amp;</u>",
+  "out": "<kbd>&#x26;y z</kbd><div><summary>&#x26;</summary></div>"
+ },
+ {
+  "html": "<a href=\"h\"> y z<div>&amp;</summary><i>",
+  "out": "<a href=\"h\"> y z<div>&#x26;<i></i></div></a>"
+ },
+ {
+  "html": "<mark><s></strong><i></details>",
+  "out": "<mark><s><i></i></s></mark>"
+ },
+ {
+  "html": "<strong><div></mark><em></b></sub>é</p><strong><em>",
+  "out": "<strong><div><em>é<p></p><strong><em></em></strong></em></div></strong>"
+ },
+ {
+  "html": "<i></strong><details>",
+  "out": "<i><details></details></i>"
+ },
+ {
+  "html": "y z&amp;</details></summary>y z\ny z</p><code>",
+  "out": "y z&#x26;y z\ny z<code></code>"
+ },
+ {
+  "html": "1<2</details>",
+  "out": "1&#x3C;2"
+ },
+ {
+  "html": "</small><p><em>1<2</br>1<2 <summary></s>",
+  "out": "<p><em>1&#x3C;2<br>1&#x3C;2 </em></p><summary></summary>"
+ },
+ {
+  "html": "</p></s></mark></details>\n<a href=\"h\"><s><b>\né",
+  "out": "\n<a href=\"h\"><s><b>\né</b></s></a>"
+ },
+ {
+  "html": "&amp;</sup>é\n<s>\n</p>",
+  "out": "&#x26;é\n<s>\n<p></p></s>"
+ },
+ {
+  "html": "</u><sub>\n</mark><kbd> </em><details>\n<u>&amp;",
+  "out": "<sub>\n<kbd> <details>\n<u>&#x26;</u></details></kbd></sub>"
+ },
+ {
+  "html": "<b><sub><kbd>",
+  "out": "<b><sub><kbd></kbd></sub></b>"
+ },
+ {
+  "html": "y z1<2",
+  "out": "y z1&#x3C;2"
+ },
+ {
+  "html": "1<2<summary> <s>",
+  "out": "1&#x3C;2<summary> <s></s></summary>"
+ },
+ {
+  "html": "<s> x<s><u><b>y z</small><b>",
+  "out": "<s> x<s><u><b>y z<b></b></b></u></s></s>"
+ },
+ {
+  "html": "é1<2<i>1<2<em><div><br></code>",
+  "out": "é1&#x3C;2<i>1&#x3C;2<em><div><br></div></em></i>"
+ },
+ {
+  "html": "<sub></small></mark><small>é</br>",
+  "out": "<sub><small>é<br></small></sub>"
+ },
+ {
+  "html": "</small></span> <span>",
+  "out": " <span></span>"
+ },
+ {
+  "html": "</a><code><i>\né&amp;<details></span>x",
+  "out": "<code><i>\né&#x26;<details>x</details></i></code>"
+ },
+ {
+  "html": "<span></br><span>",
+  "out": "<span><br><span></span></span>"
+ },
+ {
+  "html": " 1<2<code>",
+  "out": " 1&#x3C;2<code></code>"
+ },
+ {
+  "html": "</sup>éx</em>&amp;1<2</mark></s>x",
+  "out": "éx&#x26;1&#x3C;2x"
+ },
+ {
+  "html": "x</br>x <small>",
+  "out": "xx <small></small>"
+ },
+ {
+  "html": "</kbd>1<2&amp;<em> <summary><code><small>",
+  "out": "1&#x3C;2&#x26;<em> <summary><code><small></small></code></summary></em>"
+ },
+ {
+  "html": "</sup><sub> </u>&amp;</summary><br>",
+  "out": "<sub> &#x26;<br></sub>"
+ },
+ {
+  "html": "</sup><u>",
+  "out": "<u></u>"
+ },
+ {
+  "html": "</i><div> <em>y z",
+  "out": "<div> <em>y z</em></div>"
+ },
+ {
+  "html": "</sub> <br> </summary></sub></small><s>é</strong>",
+  "out": " <br> <s>é</s>"
+ },
+ {
+  "html": "<br>1<21<2 1<2<i><em><strong></kbd>",
+  "out": "<br>1&#x3C;21&#x3C;2 1&#x3C;2<i><em><strong></strong></em></i>"
+ },
+ {
+  "html": "y z<b><mark> </sub></sub></mark> é\n ",
+  "out": "y z<b><mark> </mark> é\n </b>"
+ },
+ {
+  "html": "</sup></mark><sup><code><i></kbd>y z<p></code></em><b>",
+  "out": "<sup><code><i>y z</i></code><i><p><code></code><b></b></p></i></sup>"
+ },
+ {
+  "html": " <span><details>&amp;é éé</br>",
+  "out": " <span><details>&#x26;é éé<br></details></span>"
+ },
+ {
+  "html": "<p><p>&amp;1<2",
+  "out": "<p></p><p>&#x26;1&#x3C;2</p>"
+ },
+ {
+  "html": "<summary></b>\n<br></details><p><u><span></b></b>",
+  "out": "<summary>\n<br><p><u><span></span></u></p></summary>"
+ },
+ {
+  "html": "</s><sup>1<2<summary>",
+  "out": "<sup>1&#x3C;2<summary></summary></sup>"
+ },
+ {
+  "html": "</small></br><em></code></div><br>\n",
+  "out": "<em><br>\n</em>"
+ },
+ {
+  "html": "<details></kbd>&amp;<details></b></kbd><strong>&amp;</code>",
+  "out": "<details>&#x26;<details><strong>&#x26;</strong></details></details>"
+ },
+ {
+  "html": "&amp;1<2</kbd>1<2<sub>y z",
+  "out": "&#x26;1&#x3C;21&#x3C;2<sub>y z</sub>"
+ },
+ {
+  "html": "<summary>\n\n<sup></sub><summary></code><strong><div>",
+  "out": "<summary>\n\n<sup><summary><strong><div></div></strong></summary></sup></summary>"
+ },
+ {
+  "html": "</em><u>",
+  "out": "<u></u>"
+ },
+ {
+  "html": "<summary><details></kbd> ",
+  "out": "<summary><details> </details></summary>"
+ },
+ {
+  "html": "<div><mark><a href=\"h\"></small><sup></details>",
+  "out": "<div><mark><a href=\"h\"><sup></sup></a></mark></div>"
+ },
+ {
+  "html": "</br><mark><details>éé",
+  "out": "<mark><details>éé</details></mark>"
+ },
+ {
+  "html": "y z</i><i></strong><b> </mark></span>x</small>",
+  "out": "y z<i><b> x</b></i>"
+ },
+ {
+  "html": "</sup>&amp;</a>1<2",
+  "out": "&#x26;1&#x3C;2"
+ },
+ {
+  "html": "y z</b>é</a>1<2",
+  "out": "y zé1&#x3C;2"
+ },
+ {
+  "html": "</code>1<2",
+  "out": "1&#x3C;2"
+ },
+ {
+  "html": "<br></em><code>\n<mark></div><b>",
+  "out": "<br><code>\n<mark><b></b></mark></code>"
+ },
+ {
+  "html": "<br></b><strong><p>",
+  "out": "<br><strong><p></p></strong>"
+ },
+ {
+  "html": "x<div><div>",
+  "out": "x<div><div></div></div>"
+ },
+ {
+  "html": "<summary>&amp;\ny z<mark><strong> ",
+  "out": "<summary>&#x26;\ny z<mark><strong> </strong></mark></summary>"
+ },
+ {
+  "html": " <i> <sub><details>",
+  "out": " <i> <sub><details></details></sub></i>"
+ },
+ {
+  "html": "  <div>y z </code>",
+  "out": "  <div>y z </div>"
+ },
+ {
+  "html": "<summary><mark>&amp;</div> <small><sup>1<21<2<summary><strong>",
+  "out": "<summary><mark>&#x26; <small><sup>1&#x3C;21&#x3C;2<summary><strong></strong></summary></sup></small></mark></summary>"
+ },
+ {
+  "html": "</strong><summary><s><span>\n<small><mark></sup>\n",
+  "out": "<summary><s><span>\n<small><mark>\n</mark></small></span></s></summary>"
+ },
+ {
+  "html": "&amp;y z<small><small>&amp;</a>\n",
+  "out": "&#x26;y z<small><small>&#x26;\n</small></small>"
+ },
+ {
+  "html": "</b><u><b><b><br>y z<em><br>",
+  "out": "<u><b><b><br>y z<em><br></em></b></b></u>"
+ },
+ {
+  "html": "<details><br><em><sup><small></details>",
+  "out": "<details><br><em><sup><small></small></sup></em></details>"
+ },
+ {
+  "html": "</s>1<2x</s> </a><u>x</details></u>",
+  "out": "1&#x3C;2x <u>x</u>"
+ },
+ {
+  "html": "</u><details></u>y z&amp;é",
+  "out": "<details>y z&#x26;é</details>"
+ },
+ {
+  "html": "<b>1<2</kbd><u>x</b><strong><u></br>\n",
+  "out": "<b>1&#x3C;2<u>x</u></b><u><strong><u><br>\n</u></strong></u>"
+ },
+ {
+  "html": "</details></b>y z<strong> 1<2<b>",
+  "out": "y z<strong> 1&#x3C;2<b></b></strong>"
+ },
+ {
+  "html": "<a href=\"h\"></sup></small>",
+  "out": "<a href=\"h\"></a>"
+ },
+ {
+  "html": "</sup><p></b>y z</span></details>",
+  "out": "<p>y z</p>"
+ },
+ {
+  "html": "xxé</code>é<span></sup>1<2",
+  "out": "xxéé<span>1&#x3C;2</span>"
+ },
+ {
+  "html": "&amp;</br> <span><b> <sup><s><sub><sup>",
+  "out": "&#x26; <span><b> <sup><s><sub><sup></sup></sub></s></sup></b></span>"
+ },
+ {
+  "html": "</kbd><summary></b></s><div>x</code></strong>",
+  "out": "<summary><div>x</div></summary>"
+ },
+ {
+  "html": "é</br></div></u><sub><details><p>y z<sub></strong>",
+  "out": "é<sub><details><p>y z<sub></sub></p></details></sub>"
+ },
+ {
+  "html": "<span>\n<sub><s>1<2<div></span>y z</b>y z",
+  "out": "<span>\n<sub><s>1&#x3C;2<div>y zy z</div></s></sub></span>"
+ },
+ {
+  "html": "<i><em>",
+  "out": "<i><em></em></i>"
+ },
+ {
+  "html": "<div>é</u>é</summary></small>",
+  "out": "<div>éé</div>"
+ },
+ {
+  "html": "</p><code>&amp;</strong></a><summary></p><summary>",
+  "out": "<code>&#x26;<summary><p></p><summary></summary></summary></code>"
+ },
+ {
+  "html": "&amp;x",
+  "out": "&#x26;x"
+ },
+ {
+  "html": "<kbd> <kbd><s><b></i>1<2",
+  "out": "<kbd> <kbd><s><b>1&#x3C;2</b></s></kbd></kbd>"
+ },
+ {
+  "html": "</b></code>",
+  "out": ""
+ },
+ {
+  "html": "<u><p><p> 1<2</div><sup> y z<a href=\"h\">é",
+  "out": "<u><p></p><p> 1&#x3C;2<sup> y z<a href=\"h\">é</a></sup></p></u>"
+ },
+ {
+  "html": "<code></span>1<2</summary></code>1<2<details>",
+  "out": "<code>1&#x3C;2</code>1&#x3C;2<details></details>"
+ },
+ {
+  "html": "\n<a href=\"h\"><div>é",
+  "out": "\n<a href=\"h\"><div>é</div></a>"
+ },
+ {
+  "html": "é<small></span></sup></u><code><sup>",
+  "out": "é<small><code><sup></sup></code></small>"
+ },
+ {
+  "html": "</a><em>1<2",
+  "out": "<em>1&#x3C;2</em>"
+ },
+ {
+  "html": "</s><br></summary><div><i>y z<span><br></u>&amp;",
+  "out": "<br><div><i>y z<span><br>&#x26;</span></i></div>"
+ },
+ {
+  "html": "</kbd></small>y z<code>y z</span>",
+  "out": "y z<code>y z</code>"
+ },
+ {
+  "html": "<mark><code>\n1<2<p> <u></sup>",
+  "out": "<mark><code>\n1&#x3C;2<p> <u></u></p></code></mark>"
+ },
+ {
+  "html": "<a href=\"h\"><em></s></strong><em></strong></details>é<s>",
+  "out": "<a href=\"h\"><em><em>é<s></s></em></em></a>"
+ },
+ {
+  "html": "y z1<2</sup>y z</kbd></a>",
+  "out": "y z1&#x3C;2y z"
+ },
+ {
+  "html": "<i></b></s></a><br></span>y z<details>",
+  "out": "<i><br>y z<details></details></i>"
+ },
+ {
+  "html": "</details></u>y z</br><span> é</em>",
+  "out": "y z<span> é</span>"
+ },
+ {
+  "html": "y z1<2&amp;</span>1<2<b></s>",
+  "out": "y z1&#x3C;2&#x26;1&#x3C;2<b></b>"
+ },
+ {
+  "html": "</details></s>x<u></i>",
+  "out": "x<u></u>"
+ },
+ {
+  "html": "\n</sup></kbd><kbd></br>1<2</p></b><sub><br>",
+  "out": "\n<kbd><br>1&#x3C;2<p></p><sub><br></sub></kbd>"
+ },
+ {
+  "html": "</br><summary>&amp;<details>",
+  "out": "<summary>&#x26;<details></details></summary>"
+ },
+ {
+  "html": "<p>&amp; <a href=\"h\"><kbd></strong>&amp;y z<a href=\"h\"></sub>",
+  "out": "<p>&#x26; <a href=\"h\"><kbd>&#x26;y z</kbd></a><a href=\"h\"></a></p>"
+ },
+ {
+  "html": "</sup></code><s>\n<small><sup>1<2",
+  "out": "<s>\n<small><sup>1&#x3C;2</sup></small></s>"
+ },
+ {
+  "html": "&amp;y z<em></div>",
+  "out": "&#x26;y z<em></em>"
+ },
+ {
+  "html": "<mark> </details></small></code><i></summary>1<2</code>1<2",
+  "out": "<mark> <i>1&#x3C;21&#x3C;2</i></mark>"
+ },
+ {
+  "html": "<details></sup>",
+  "out": "<details></details>"
+ },
+ {
+  "html": "é<sub><mark> é<br><br>",
+  "out": "é<sub><mark> é<br><br></mark></sub>"
+ },
+ {
+  "html": "\n</mark><a href=\"h\"><u>",
+  "out": "\n<a href=\"h\"><u></u></a>"
+ },
+ {
+  "html": "</strong>\n<b></summary></sub>\n</sup>",
+  "out": "\n<b>\n</b>"
+ },
+ {
+  "html": "1<2<strong>y z</strong>x1<2</u></details><strong>",
+  "out": "1&#x3C;2<strong>y z</strong>x1&#x3C;2<strong></strong>"
+ },
+ {
+  "html": " x",
+  "out": " x"
+ }
+]
