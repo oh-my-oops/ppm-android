@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.AlignmentLine
 import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.IntrinsicMeasurable
@@ -152,7 +153,9 @@ internal fun HtmlFlow(box: FlowBox, drawing: HtmlDrawing, modifier: Modifier = M
 
 @Composable
 private fun HtmlChildren(box: FlowBox, drawing: HtmlDrawing) {
-    for (child in box.children) HtmlBoxView(child, drawing, Modifier.padding(top = child.gap.dp))
+    // The reply's own blocks draw in layers of their own, so the block a streamed reply grows draws again alone.
+    val layer = if (box.tag == null) Modifier.graphicsLayer() else Modifier
+    for (child in box.children) HtmlBoxView(child, drawing, Modifier.padding(top = child.gap.dp).then(layer))
 }
 
 @Composable

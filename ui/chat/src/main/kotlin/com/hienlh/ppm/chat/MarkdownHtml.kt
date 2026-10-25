@@ -30,6 +30,52 @@ internal object MarkdownHtml {
         return if (rawHtml) clean(hast) else sanitizeHtml(parseHast(hast.map(::asText)))
     }
 
+    /**
+     * [render] for one reply as it grows. A top-level block that reads as it did on the call before
+     * gets back the very nodes it had, so a streamed reply parses only the blocks that changed and
+     * what is drawn of the rest can be kept as it is. With raw HTML in it the reply is parsed whole:
+     * rehype-raw parses it as one fragment, where HTML in one block can reach into the next.
+     */
+    class Blocks {
+        private var kept = HashMap<MarkdownBlock, List<SafeHtml>>()
+        private var keptRawHtml = false
+
+        fun render(markdown: String, rawHtml: Boolean): List<SafeHtml> {
+            if (rawHtml != keptRawHtml) kept = HashMap()
+            keptRawHtml = rawHtml
+            val next = HashMap<MarkdownBlock, List<SafeHtml>>()
+            val out = ArrayList<SafeHtml>()
+            Markdown.parse(markdown).forEachIndexed { index, block ->
+                val html = next[block] ?: kept[block] ?: html(block, rawHtml) ?: run {
+                    kept = HashMap()
+                    return MarkdownHtml.render(markdown, rawHtml)
+                }
+                next[block] = html
+                // `wrap`'s line break between blocks; the parser joins texts that meet.
+                if (index > 0) out.appendJoined(SafeHtml.Text("\n"))
+                html.forEach { out.appendJoined(it) }
+            }
+            kept = next
+            return out
+        }
+
+        /** [block] as [render] makes it, or null when rehype-raw would parse its raw HTML in among the rest. */
+        private fun html(block: MarkdownBlock, rawHtml: Boolean): List<SafeHtml>? {
+            val converter = Converter()
+            val hast = listOf(converter.block(block))
+            return when {
+                !rawHtml -> sanitizeHtml(parseHast(hast.map(::asText)))
+                converter.raw -> null
+                else -> clean(hast)
+            }
+        }
+
+        private fun MutableList<SafeHtml>.appendJoined(node: SafeHtml) {
+            val last = lastOrNull()
+            if (node is SafeHtml.Text && last is SafeHtml.Text) set(lastIndex, SafeHtml.Text(last.text + node.text)) else add(node)
+        }
+    }
+
     private fun asText(node: Hast): Hast = when (node) {
         is Hast.Raw -> Hast.Text(node.html)
         is Hast.Element -> Hast.Element(node.name, node.attrs, node.children.map(::asText))
@@ -56,7 +102,7 @@ internal object MarkdownHtml {
 
         fun root(blocks: List<MarkdownBlock>): List<Hast> = wrap(blocks.map(::block), loose = false)
 
-        private fun block(block: MarkdownBlock): Hast = when (block) {
+        fun block(block: MarkdownBlock): Hast = when (block) {
             is MarkdownBlock.Paragraph -> element("p", inline(block.text))
             is MarkdownBlock.Heading -> element("h${block.level}", inline(block.text))
             is MarkdownBlock.Code -> {

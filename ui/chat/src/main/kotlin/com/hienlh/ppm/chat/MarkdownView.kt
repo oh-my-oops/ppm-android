@@ -72,7 +72,8 @@ data class MarkdownStyle(
  * the web's allow-list when [rawHtml] and shown as text when not, drawn as `.markdown-content`
  * draws it; [streaming] while it still grows. The web holds it in a flex item or a scroller, which
  * stops the margins collapsing out of its first and last block, so they show. A `details` opened
- * or closed stays so while the text grows, as the DOM keeps it.
+ * or closed stays so while the text grows, as the DOM keeps it. While it grows, the blocks it had
+ * are kept as they were and only the ones that changed are parsed, built and drawn again.
  */
 @Composable
 fun MarkdownView(
@@ -82,9 +83,11 @@ fun MarkdownView(
     streaming: Boolean = false,
     rawHtml: Boolean = true,
 ) {
-    val nodes = remember(text, rawHtml) { MarkdownHtml.render(text, rawHtml) }
+    val blocks = remember { MarkdownHtml.Blocks() }
+    val kept = remember { KeptBoxes() }
+    val nodes = remember(text, rawHtml) { blocks.render(text, rawHtml) }
     var opened by remember { mutableStateOf(emptyMap<Int, Boolean>()) }
-    val root = remember(nodes, style, opened) { HtmlBoxes.build(nodes, style, opened) }
+    val root = remember(nodes, style, opened) { HtmlBoxes.build(nodes, style, opened, kept = kept) }
     val drawing = remember(style) { HtmlDrawing(style) { id, open -> opened = opened + (id to open) } }
     CompositionLocalProvider(LocalMarkdownStreaming provides streaming) {
         HtmlFlow(root, drawing, modifier)

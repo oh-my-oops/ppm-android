@@ -162,12 +162,34 @@ internal object HtmlBoxes {
         base: MarkdownStyle,
         open: Map<Int, Boolean> = emptyMap(),
         trace: MutableMap<String, HtmlStyle>? = null,
+        kept: KeptBoxes? = null,
     ): FlowBox {
         val style = HtmlStyle(size = base.size, weight = base.weight.weight, italic = base.italic)
-        val builder = Builder(open, trace)
+        val reuse = kept?.takeIf { trace == null }?.also { it.keepFor(style, open) }
+        val builder = Builder(open, trace, reuse)
         val root = FlowBox(null, "", style, builder.blocks(nodes, style, ""), contained = true)
         Margins.collapse(root)
         return root
+    }
+}
+
+/**
+ * What [HtmlBoxes.build] made of one reply's top-level elements, handed back on the next build of
+ * it while an element is the same node in the same place: a streamed reply rebuilds only the blocks
+ * that changed, and Compose skips the boxes it is handed back.
+ */
+internal class KeptBoxes {
+    class Entry(val node: SafeHtml.Element, val first: Boolean, val last: Boolean, val detailsBefore: Int, val box: HtmlBox, val detailsAfter: Int)
+
+    var entries: List<Entry?> = emptyList()
+    private var style: HtmlStyle? = null
+    private var open: Map<Int, Boolean>? = null
+
+    /** Nothing built in another style, or with other details open, is handed back. */
+    fun keepFor(style: HtmlStyle, open: Map<Int, Boolean>) {
+        if (style != this.style || open != this.open) entries = emptyList()
+        this.style = style
+        this.open = open
     }
 }
 
@@ -221,7 +243,7 @@ private val MERMAID = Regex(
         "gitGraph|mindmap|timeline|sankey|xychart|block-beta|packet-beta|architecture-beta|kanban)\\b",
 )
 
-private class Builder(private val open: Map<Int, Boolean>, private val trace: MutableMap<String, HtmlStyle>?) {
+private class Builder(private val open: Map<Int, Boolean>, private val trace: MutableMap<String, HtmlStyle>?, private val kept: KeptBoxes?) {
     private var detailsSeen = 0
 
     /** The block boxes of [nodes], the children of the element at [path], a block container set in [style]. */
@@ -235,6 +257,8 @@ private class Builder(private val open: Map<Int, Boolean>, private val trace: Mu
 
     private fun children(nodes: List<SafeHtml>, style: HtmlStyle, path: String, run: InlineRun, out: MutableList<HtmlBox>, skip: SafeHtml? = null) {
         val count = nodes.count { it is SafeHtml.Element }
+        // The reply's own blocks are what a build hands back.
+        val keep = if (path.isEmpty() && kept != null) arrayOfNulls<KeptBoxes.Entry>(count) else null
         var index = -1
         for (node in nodes) {
             when (node) {
@@ -247,13 +271,38 @@ private class Builder(private val open: Map<Int, Boolean>, private val trace: Mu
                         Display.NONE -> Unit
                         Display.BLOCK -> {
                             run.finish()?.let(out::add)
-                            out += block(node, style, at, first = index == 0, last = index == count - 1)
+                            val first = index == 0
+                            val last = index == count - 1
+                            out += if (keep == null) block(node, style, at, first, last) else keptBlock(node, style, at, index, first, last, keep)
                         }
                         Display.INLINE -> inline(node, style, at, run, out)
                     }
                 }
             }
         }
+        if (keep != null) kept?.entries = keep.asList()
+    }
+
+    /** [block], or the box the build before made of the same [node] in the same place. */
+    private fun keptBlock(
+        node: SafeHtml.Element,
+        style: HtmlStyle,
+        path: String,
+        index: Int,
+        first: Boolean,
+        last: Boolean,
+        keep: Array<KeptBoxes.Entry?>,
+    ): HtmlBox {
+        val entry = kept?.entries?.getOrNull(index)
+        if (entry != null && entry.node === node && entry.first == first && entry.last == last && entry.detailsBefore == detailsSeen) {
+            detailsSeen = entry.detailsAfter
+            keep[index] = entry
+            return entry.box
+        }
+        val before = detailsSeen
+        val box = block(node, style, path, first, last)
+        keep[index] = KeptBoxes.Entry(node, first, last, before, box, detailsSeen)
+        return box
     }
 
     private fun inline(node: SafeHtml.Element, parent: HtmlStyle, path: String, run: InlineRun, out: MutableList<HtmlBox>) {
