@@ -134,6 +134,8 @@ internal class RichText(
     val marks: List<IntRange>,
     /** Each checkbox's place in [text], an [HTML_OBJECT], and whether it is ticked. */
     val boxes: List<Pair<Int, Boolean>>,
+    /** Set when [text] starts with a summary's disclosure triangle, an [HTML_OBJECT]: whether it points down, its `details` open. */
+    val disclosure: Boolean? = null,
 )
 
 internal class RichRun(val start: Int, val end: Int, val style: HtmlStyle)
@@ -143,7 +145,7 @@ internal class RichCode(val start: Int, val end: Int, val file: String?)
 
 internal class RichLink(val start: Int, val end: Int, val href: String)
 
-/** Stands in the text for an inline box, a checkbox. */
+/** Stands in the text for an inline box: a checkbox, or a summary's disclosure triangle. */
 internal const val HTML_OBJECT = '￼'
 
 /** What a `details` with no `summary` shows, Chrome's own. */
@@ -420,14 +422,15 @@ private class Builder(private val open: Map<Int, Boolean>, private val trace: Mu
         is SafeHtml.Element -> (if (node.name == "details") 1 else 0) + node.children.sumOf(::countDetails)
     }
 
-    /** The disclosure triangle, `list-style-position: inside`: the first thing on the summary's first line. */
+    /**
+     * The disclosure triangle, `list-style-position: inside`: the first thing on the summary's first
+     * line, or a line of its own before a block. Chrome paints it as a shape, not a glyph.
+     */
     private fun withDisclosure(children: List<HtmlBox>, style: HtmlStyle, opened: Boolean): List<HtmlBox> {
-        val mark = if (opened) "▾ " else "▸ "
         val first = children.firstOrNull()
-        if (first is LinesBox) return listOf(first.prefixed(mark, style)) + children.drop(1)
-        val run = InlineRun(style)
-        run.generated(mark, style)
-        return listOfNotNull(run.finish()) + children
+        if (first is LinesBox) return listOf(first.withTriangle(opened, style)) + children.drop(1)
+        val triangle = RichText(HTML_OBJECT.toString(), listOf(RichRun(0, 1, style)), emptyList(), emptyList(), emptyList(), emptyList(), disclosure = opened)
+        return listOf(LinesBox(triangle, style)) + children
     }
 
     private fun pre(node: SafeHtml.Element, path: String): CodeBox {
@@ -507,17 +510,17 @@ private class Builder(private val open: Map<Int, Boolean>, private val trace: Mu
     }
 }
 
-private fun LinesBox.prefixed(prefix: String, style: HtmlStyle): LinesBox {
-    val n = prefix.length
-    val runs = listOf(RichRun(0, n, style)) + text.runs.map { RichRun(it.start + n, it.end + n, it.style) }
+private fun LinesBox.withTriangle(opened: Boolean, style: HtmlStyle): LinesBox {
+    val runs = listOf(RichRun(0, 1, style)) + text.runs.map { RichRun(it.start + 1, it.end + 1, it.style) }
     return LinesBox(
         RichText(
-            prefix + text.text,
+            HTML_OBJECT + text.text,
             runs,
-            text.codes.map { RichCode(it.start + n, it.end + n, it.file) },
-            text.links.map { RichLink(it.start + n, it.end + n, it.href) },
-            text.marks.map { (it.first + n)..(it.last + n) },
-            text.boxes.map { (it.first + n) to it.second },
+            text.codes.map { RichCode(it.start + 1, it.end + 1, it.file) },
+            text.links.map { RichLink(it.start + 1, it.end + 1, it.href) },
+            text.marks.map { (it.first + 1)..(it.last + 1) },
+            text.boxes.map { (it.first + 1) to it.second },
+            disclosure = opened,
         ),
         this.style,
     )

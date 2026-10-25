@@ -8,10 +8,15 @@ class HtmlBoxesTest {
     private fun build(markdown: String, open: Map<Int, Boolean> = emptyMap()) =
         HtmlBoxes.build(MarkdownHtml.render(markdown, rawHtml = true), MarkdownStyle.chat, open)
 
-    /** Every line box's text, in order. */
+    /** Every line box's text, in order; a disclosure triangle as the glyph it looks like. */
     private fun texts(box: HtmlBox): List<String> = when (box) {
         is FlowBox -> box.children.flatMap(::texts)
-        is LinesBox -> listOf(box.text.text)
+        is LinesBox -> listOf(
+            when (box.text.disclosure) {
+                null -> box.text.text
+                else -> (if (box.text.disclosure == true) "▾ " else "▸ ") + box.text.text.removePrefix(HTML_OBJECT.toString())
+            },
+        )
         is TableBox -> box.rows.flatten().flatMap { texts(it.box) }
         else -> emptyList()
     }

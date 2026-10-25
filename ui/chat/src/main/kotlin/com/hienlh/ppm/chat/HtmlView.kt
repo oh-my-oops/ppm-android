@@ -63,6 +63,7 @@ import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -202,15 +203,17 @@ private const val DOTTED = "ppm.dotted"
 /** Annotates the text of a `mark`, with its size. */
 private const val MARK = "ppm.mark"
 
-/** The inline content a checkbox is, ticked or not. */
+/** The inline content a checkbox is, ticked or not, and a summary's disclosure triangle, down or not. */
 private const val CHECKED_BOX = "ppm.checkbox.checked"
 private const val UNCHECKED_BOX = "ppm.checkbox"
+private const val OPEN_TRIANGLE = "ppm.disclosure.open"
+private const val CLOSED_TRIANGLE = "ppm.disclosure"
 
 /**
  * [this] for Android to set as Chrome sets it in a block of [block]'s text: each run's styles over
  * its characters, an inline code's box on [CODE_EDGE]s [edge] em wide, lines ending where Chrome
- * ends them ([breakMark]), a checkbox an inline box. A link opens what it names, a file through
- * [tabs]; a code that names a file opens it (`MdLink`, `MdCode`).
+ * ends them ([breakMark]), a checkbox or disclosure triangle an inline box. A link opens what it
+ * names, a file through [tabs]; a code that names a file opens it (`MdLink`, `MdCode`).
  */
 internal fun RichText.annotated(
     block: HtmlStyle,
@@ -245,9 +248,11 @@ internal fun RichText.annotated(
             }
             at[index] = length
             if (index == text.length) break
-            when (val checked = checkboxes[index]) {
-                null -> append(text[index])
-                else -> appendInlineContent(if (checked) CHECKED_BOX else UNCHECKED_BOX, HTML_OBJECT.toString())
+            val checked = checkboxes[index]
+            when {
+                index == 0 && disclosure != null -> appendInlineContent(if (disclosure) OPEN_TRIANGLE else CLOSED_TRIANGLE, HTML_OBJECT.toString())
+                checked != null -> appendInlineContent(if (checked) CHECKED_BOX else UNCHECKED_BOX, HTML_OBJECT.toString())
+                else -> append(text[index])
             }
         }
         // A code's edges take no run's styles: their size is the block's, whatever is around them.
@@ -339,14 +344,19 @@ private fun HtmlLines(box: LinesBox, drawing: HtmlDrawing, modifier: Modifier) {
     val color = block.color.rgba(base, tokens).color
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val side = with(density) { CHECKBOX.dp.toSp() }
-    val inline = if (box.text.boxes.isEmpty()) emptyMap() else remember(side) { checkboxes(side) }
+    val checkboxes = if (box.text.boxes.isEmpty()) emptyMap() else remember(side) { checkboxes(side) }
+    val inline = if (box.text.disclosure == null) {
+        checkboxes
+    } else {
+        remember(checkboxes, block.size, color, density) { checkboxes + disclosures(with(density) { block.size.dp.toPx() }, color, density) }
+    }
     val style = textStyle(block, base, tokens)
     val measurer = rememberTextMeasurer()
     BasicText(
         text,
         modifier
             .fillMaxWidth()
-            .then(if (inline.isEmpty()) Modifier else Modifier.plainDepthUnderLastLine(measurer, style))
+            .then(if (checkboxes.isEmpty()) Modifier else Modifier.plainDepthUnderLastLine(measurer, style))
             .then(
                 if (!drawn) {
                     Modifier
@@ -396,6 +406,44 @@ private fun checkboxes(side: TextUnit): Map<String, InlineTextContent> {
         CHECKED_BOX to InlineTextContent(placeholder) { HtmlCheckbox(true) },
         UNCHECKED_BOX to InlineTextContent(placeholder) { HtmlCheckbox(false) },
     )
+}
+
+/**
+ * A summary's `::marker` for `disclosure-open`/`-closed` in a font of [fontPx], as Chrome paints
+ * it (`ListMarkerPainter`, measured at 100px): a triangle in a square 0.66 em on a side standing
+ * on the baseline, in a marker 0.86 em wide. Shorter than the ascent, it leaves the line be.
+ * Android rounds a placeholder up to whole pixels, so the marker is given the nearest whole width
+ * (24.06 px at 14px and 2x would push the text a pixel right) and the square is drawn at its own size.
+ */
+private fun disclosures(fontPx: Float, color: Color, density: Density): Map<String, InlineTextContent> {
+    val side = 0.66f * fontPx
+    val width = with(density) { ((0.86f * fontPx).roundToInt() - 0.01f).toSp() }
+    val placeholder = Placeholder(width, with(density) { side.toSp() }, PlaceholderVerticalAlign.AboveBaseline)
+    return mapOf(
+        OPEN_TRIANGLE to InlineTextContent(placeholder) { HtmlDisclosure(true, side, color) },
+        CLOSED_TRIANGLE to InlineTextContent(placeholder) { HtmlDisclosure(false, side, color) },
+    )
+}
+
+/** `GetCanonicalDisclosurePath`: down or right, in a square [side] px on a side whose bottom is the baseline. */
+@Composable
+private fun HtmlDisclosure(open: Boolean, side: Float, color: Color) {
+    Canvas(Modifier.fillMaxSize()) {
+        val top = size.height - side
+        val path = Path().apply {
+            if (open) {
+                moveTo(0f, top + 0.07f * side)
+                lineTo(0.5f * side, top + 0.93f * side)
+                lineTo(side, top + 0.07f * side)
+            } else {
+                moveTo(0f, top)
+                lineTo(0.86f * side, top + 0.5f * side)
+                lineTo(0f, top + side)
+            }
+            close()
+        }
+        drawPath(path, color)
+    }
 }
 
 /**
