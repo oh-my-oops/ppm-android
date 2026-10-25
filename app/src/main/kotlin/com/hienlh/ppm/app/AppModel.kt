@@ -79,6 +79,7 @@ import com.hienlh.ppm.state.AgentSessionOpening
 import com.hienlh.ppm.state.AgentSessionPayload
 import com.hienlh.ppm.state.BackgroundOutput
 import com.hienlh.ppm.state.ChatController
+import com.hienlh.ppm.state.ChatJumpRequest
 import com.hienlh.ppm.state.ChatSearch
 import com.hienlh.ppm.state.ClientCommand
 import com.hienlh.ppm.state.DraftLocalStore
@@ -101,8 +102,12 @@ import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.RejectedSend
 import com.hienlh.ppm.state.SessionChanges
 import com.hienlh.ppm.state.SessionChangesBackend
+import com.hienlh.ppm.state.SessionChangesList
+import com.hienlh.ppm.state.SessionTurnsMemo
+import com.hienlh.ppm.state.SessionTurnsStore
 import com.hienlh.ppm.state.SessionWrites
 import com.hienlh.ppm.state.messageWithAttachments
+import com.hienlh.ppm.state.monotonicMillis
 import com.hienlh.ppm.state.SlashItemsStore
 import com.hienlh.ppm.state.UsageCache
 import com.hienlh.ppm.state.selectInlineImages
@@ -144,6 +149,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -332,6 +338,16 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** The chat behind each chat tab in memory, by tab id; a tab whose chat has not started has none. */
     private val chats = mutableStateMapOf<String, ChatTab>()
+
+    /** The review behind each session-review tab in memory, by tab id. */
+    private val reviews = mutableStateMapOf<String, ReviewTab>()
+
+    /** Each session's turns: an open chat publishes its own, a Review tab reads them (`useSessionTurnsStore`). */
+    val sessionTurns = SessionTurnsStore()
+
+    /** "Show in chat" on its way to the chat showing its session (`useChatJumpStore`). */
+    var chatJump by mutableStateOf<ChatJumpRequest?>(null)
+        private set
 
     /** The chat tabs with no session yet: their preparation, provider, account and first message. */
     internal val newChats = NewChats(this)
@@ -1448,6 +1464,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             }
             store.state.collect { state ->
                 syncChats(state)
+                syncReviews(state)
                 layout = state
                 recordNavigation(state)
                 reconcileWindowPanels()
@@ -1578,24 +1595,20 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                 chat.firstSend = { message -> newChats.sendFirst(chat, message) }
                 chat.prewarmTouch = { newChats.touchPrewarm(chat) }
                 chat.modePicked = { mode -> patchTabMetadata(id, "permissionMode" to JsonPrimitive(mode.value), "permissionModeSource" to JsonPrimitive("user")) }
+                chat.changesListed = { sessionId, list ->
+                    for (review in reviews.values) if (review.sessionId == sessionId && review.project == project) review.takeLive(list)
+                }
                 newChats.follow(chat, tab)
             }
         }
         val active = state.activeGridTab
         val api = api
         if (api != null) {
-            // A phone shows the focused panel's tab; the desktop layout shows each grid panel's,
-            // and each floating window's (one in the dock too: its tab stays live, as on the web).
-            val shown = if (wide) {
-                (state.gridPanelIds + state.panels.keys.filter(::isWindowPanelId)).mapNotNull { state.panels[it]?.activeTab }
-            } else {
-                listOfNotNull(active)
-            }
-            for (tab in shown) {
+            for (tab in shownTabs(state)) {
                 val chat = chats[tab.id]?.takeUnless { it.started } ?: continue
                 // Prepared first, so its draft and its gate join that one request.
                 newChats.prepare(chat)
-                chat.start(api, scope, DraftLocalStore(draftPrefs, serverKey), newChats.preparedDraft(chat))
+                chat.start(api, scope, DraftLocalStore(draftPrefs, serverKey), newChats.preparedDraft(chat), sessionTurns)
                 newChats.started(chat)
             }
         }
@@ -1606,6 +1619,84 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             shownSession = sessionId
             if (sessionId != null && windowVisible) events?.seen(sessionId)
         }
+    }
+
+    /**
+     * The tabs on screen: a phone shows the focused panel's; the desktop layout shows each grid
+     * panel's, and each floating window's (one in the dock too: its tab stays live, as on the web).
+     */
+    private fun shownTabs(state: WorkspaceState): List<WorkspaceTab> = if (wide) {
+        (state.gridPanelIds + state.panels.keys.filter(::isWindowPanelId)).mapNotNull { state.panels[it]?.activeTab }
+    } else {
+        listOfNotNull(state.activeGridTab)
+    }
+
+    /**
+     * Gives each session-review tab in memory its review and ends those of tabs that went; a
+     * review starts once its tab is first shown, then follows the tab's metadata until it closes.
+     */
+    private fun syncReviews(state: WorkspaceState) {
+        val live = HashMap<String, WorkspaceTab>()
+        for (panel in state.panels.values) for (tab in panel.tabs) if (tab.type == "session-review") live[tab.id] = tab
+        for ((id, review) in reviews.toList()) {
+            val tab = live[id]
+            if (tab == null || tab.metaString("projectName") != review.project || tab.metaString("sessionId") != review.sessionId) {
+                review.stop()
+                reviews.remove(id)
+            }
+        }
+        for ((id, tab) in live) {
+            reviews[id]?.let { it.follow(tab); continue }
+            // A tab that names no session shows "No chat session." and holds nothing.
+            val project = tab.metaString("projectName")?.takeIf { it.isNotEmpty() } ?: continue
+            val sessionId = tab.metaString("sessionId")?.takeIf { it.isNotEmpty() } ?: continue
+            reviews[id] = ReviewTab(id, project, sessionId).also { it.follow(tab) }
+        }
+        val api = api ?: return
+        for (tab in shownTabs(state)) {
+            val review = reviews[tab.id]?.takeUnless { it.started } ?: continue
+            review.start(api, scope, sessionTurns) { reviewAnswered(review.project, review.sessionId) }
+        }
+    }
+
+    /** The Review tab of a session-review tab; none for a tab that names no session. */
+    fun review(tabId: String): ReviewTab? = reviews[tabId]
+
+    /** An answer landed: the session's changes bars ask again, those that ever asked (`announceReviewMarks`). */
+    private fun reviewAnswered(project: String, sessionId: String) {
+        for (chat in chats.values) {
+            if (chat.project != project || chat.session?.id != sessionId) continue
+            chat.sessionChanges?.takeIf { it.listed.value != null }?.refresh()
+        }
+    }
+
+    /** The Review tab's link back to its chat (`openChat`): the session's tab brought forward, or opened. */
+    fun openReviewChat(review: ReviewTab) {
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = "chat",
+                    title = review.chatTitle ?: "Chat",
+                    projectId = review.project,
+                    metadata = buildJsonObject {
+                        put("projectName", review.project)
+                        put("sessionId", review.sessionId)
+                        review.providerId?.let { put("providerId", it) }
+                    },
+                ),
+            )
+        }
+    }
+
+    /** A turn chip's "Show in chat": its call's card, or the turn's prompt, once the chat shows it. */
+    fun showInChat(review: ReviewTab, messageId: String, call: String) {
+        chatJump = ChatJumpRequest(review.sessionId, call, messageId, monotonicMillis())
+        openReviewChat(review)
+    }
+
+    /** The chat took [request] up, or gave up on it; a newer request stays. */
+    fun chatJumpDone(request: ChatJumpRequest) {
+        if (chatJump === request) chatJump = null
     }
 
     /** The tab bar's tabs, the phone's merged one: every grid panel's, this project's, with the panel each is in. */
@@ -2461,6 +2552,9 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     private var changesScope: CoroutineScope? = null
     private var changesJob: Job? = null
 
+    /** Each list its changes bar gets, for a Review tab on the same session (`announceSessionChanges`); set by the model. */
+    var changesListed: ((sessionId: String, list: SessionChangesList) -> Unit)? = null
+
     /** A list for the session it is on now: one asked for under another is never shown under this. */
     private fun watchChanges() {
         changesJob?.cancel()
@@ -2472,7 +2566,31 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
             return
         }
         val job = SupervisorJob(scope.coroutineContext[Job]).also { changesJob = it }
-        sessionChanges = SessionChanges(SessionChangesBackend.api(api, project, id), scope + job)
+        val changes = SessionChanges(SessionChangesBackend.api(api, project, id), scope + job)
+        sessionChanges = changes
+        scope.launch(job) { changes.listed.collect { list -> if (list != null) changesListed?.invoke(id, list) } }
+    }
+
+    /** Publishes its turns from [start] to [stop], so a Review tab on its session names the turn behind each block. */
+    private var turnsJob: Job? = null
+
+    /** What the transcript shows, the turn being streamed included, as turns (`useSessionTurnsStore().publish`). */
+    private fun publishTurns(controller: ChatController, store: SessionTurnsStore, scope: CoroutineScope): Job = scope.launch {
+        val memo = SessionTurnsMemo()
+        var published: String? = null
+        try {
+            controller.state
+                .distinctUntilChanged { a, b -> a.sessionId == b.sessionId && a.items === b.items && a.live === b.live }
+                .collect { state ->
+                    val id = state.sessionId
+                    val before = published
+                    if (before != null && before != id) store.release(before)
+                    published = id
+                    if (id != null) store.publish(id, memo.of(state.itemsWithLive()), live = true)
+                }
+        } finally {
+            published?.let(store::release)
+        }
     }
 
     /** The box's unsent message, kept on this device and on the server (`useDraft`); from [start] on. */
@@ -2816,11 +2934,19 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
      * Its chat connected (once it has a session), and its draft loaded from [draftStore], from
      * what its preparation read ([preparedDraft]) or from the server.
      */
-    fun start(api: ApiClient, scope: CoroutineScope, draftStore: DraftLocalStore, preparedDraft: (suspend () -> ChatDraft?)? = null) {
+    fun start(
+        api: ApiClient,
+        scope: CoroutineScope,
+        draftStore: DraftLocalStore,
+        preparedDraft: (suspend () -> ChatDraft?)? = null,
+        turns: SessionTurnsStore? = null,
+    ) {
         if (controller != null) return
         historyList = HistoryList(api, project, scope)
         welcomeList = HistoryList(api, project, scope)
-        controller = ChatController(api, project, session, scope, providerId = providerId).also { it.start() }
+        val controller = ChatController(api, project, session, scope, providerId = providerId).also { it.start() }
+        this.controller = controller
+        turnsJob = turns?.let { publishTurns(controller, it, scope) }
         changesApi = api
         changesScope = scope
         watchChanges()
@@ -2847,6 +2973,8 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         drafts?.flush()
         controller?.stop()
         controller = null
+        turnsJob?.cancel()
+        turnsJob = null
         changesJob?.cancel()
         sessionChanges = null
     }
