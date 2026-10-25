@@ -554,16 +554,16 @@ private fun TaskNotificationBadge(tag: ParsedUserMessage.SystemTag) {
     }
 }
 
-/** The result as markdown, `text-[11px] leading-relaxed text-text-subtle/80 max-h-60`, scrolling past that. */
+/**
+ * The result as markdown, `text-[11px] leading-relaxed text-text-subtle/80 max-h-60`, scrolling
+ * past that, its HTML shown as text (`rawHtml={false}`): it is what an agent wrote, not the AI's answer.
+ */
 @Composable
 private fun TaskResult(markdown: String) {
     val tokens = LocalPpmTokens.current
-    val blocks = remember(markdown) { Markdown.parse(markdown) }
     val style = MarkdownStyle(size = 11f, lineHeightRatio = 1.625f, color = tokens.text3.opacity(0.8))
-    // It scrolls, so the margins collapsing out of the first and last block stay inside it.
-    val (top, bottom) = remember(blocks) { MarkdownGaps.ends(blocks) }
-    Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()).padding(top = top.dp, bottom = bottom.dp)) {
-        MarkdownBlocks(blocks, style)
+    Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
+        MarkdownContent(markdown, style = style, rawHtml = false)
     }
 }
 

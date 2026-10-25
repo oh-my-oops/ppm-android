@@ -36,11 +36,11 @@ import androidx.compose.ui.layout.IntrinsicMeasureScope
 import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.node.LayoutModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.invalidateMeasurement
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
@@ -49,7 +49,6 @@ import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.LocalImageViewer
 import com.hienlh.ppm.design.LocalPpmTokens
-import com.hienlh.ppm.design.ThemeTokens
 import com.hienlh.ppm.design.ViewerImage
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.cssBorder
@@ -133,7 +132,7 @@ private fun markdownCacheKey(src: String) = "md\u0000$src"
  * path itself until the blob comes, which no browser can load.
  */
 @Composable
-internal fun MarkdownImage(image: InlineMarkdown.Image, style: MarkdownStyle) {
+internal fun MarkdownImage(image: InlineMarkdown.Image, style: MarkdownStyle, size: ImageSize? = null) {
     val images = LocalMarkdownImages.current
     val src = image.url
     val name = image.alt.ifEmpty { basename(src) }
@@ -145,19 +144,19 @@ internal fun MarkdownImage(image: InlineMarkdown.Image, style: MarkdownStyle) {
         if (state.value == null) state.value = images?.read(src) ?: ToolImage.Failed(null)
     }
     when (val shown = state.value) {
-        is ToolImage.Loaded -> LoadedImage(shown, src, name)
-        is ToolImage.Failed -> BrokenImage(name, style)
+        is ToolImage.Loaded -> LoadedImage(shown, src, name, size)
+        is ToolImage.Failed -> BrokenImage(name, style, Modifier.attributeBox(size))
         null -> if (source == MarkdownImageSource.LOCAL) {
-            BrokenImage(name, style, Modifier.alpha(0.3f).heightIn(min = 48.dp))
+            BrokenImage(name, style, Modifier.attributeBox(size).alpha(0.3f).heightIn(min = 48.dp))
         } else {
             // An address the browser is still fetching: a box with no size yet, its border only.
-            Box(Modifier.fillMaxWidth().cssBorder(LocalPpmTokens.current.border.color, RoundedCornerShape(8.dp)))
+            Box(Modifier.attributeBox(size).fillMaxWidth().cssBorder(LocalPpmTokens.current.border.color, RoundedCornerShape(8.dp)))
         }
     }
 }
 
 @Composable
-private fun LoadedImage(image: ToolImage.Loaded, src: String, name: String) {
+private fun LoadedImage(image: ToolImage.Loaded, src: String, name: String, size: ImageSize?) {
     val tokens = LocalPpmTokens.current
     val gallery = LocalChatGallery.current
     val viewer = LocalImageViewer.current
@@ -165,7 +164,7 @@ private fun LoadedImage(image: ToolImage.Loaded, src: String, name: String) {
     val shape = RoundedCornerShape(8.dp)
     Box(
         Modifier
-            .then(ImageBoxElement(image.natural))
+            .then(ImageBoxElement(image.natural, size))
             .pointerHoverIcon(WebCursor.Pointer)
             .ppmClickable(pressedColor = Color.Transparent, onClickLabel = "Open $name") {
                 val self = GalleryImage(markdownImageKey(scope, src), name) { ViewerImage(name, image.bytes, image.type) }
@@ -177,17 +176,6 @@ private fun LoadedImage(image: ToolImage.Loaded, src: String, name: String) {
         Image(image.preview, name, Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
     }
 }
-
-/** The alt text is set as the text around the picture is, inside its `strong`, `em` or link. */
-internal fun MarkdownStyle.around(spans: List<InlineMarkdown.Span>, offset: Int, tokens: ThemeTokens): MarkdownStyle =
-    spans.filter { it.start <= offset && offset < it.end }.fold(this) { style, span ->
-        when (span.kind) {
-            InlineMarkdown.Kind.STRONG -> style.copy(weight = FontWeight.SemiBold)
-            InlineMarkdown.Kind.EMPHASIS -> style.copy(italic = true)
-            InlineMarkdown.Kind.LINK -> style.copy(color = tokens.accent)
-            else -> style
-        }
-    }
 
 /** Chrome's broken image: the icon floats at the start of the alt text, which wraps under it past its first line. */
 @Composable
@@ -254,11 +242,47 @@ private fun BrokenImageIcon(modifier: Modifier) {
 /** `max-h-[400px]`. */
 private const val MAX_HEIGHT = 400
 
-private data class ImageBoxElement(val natural: IntSize) : ModifierNodeElement<ImageBoxNode>() {
-    override fun create() = ImageBoxNode(natural)
+/**
+ * An `<img>`'s `width` and `height` attributes, CSS px; the width a percentage of the line when
+ * [percent]. Tailwind's preflight sets `height: auto` over the height, which then only gives the
+ * box its shape until the picture comes (`aspect-ratio: auto w / h`).
+ */
+internal data class ImageSize(val width: Float?, val percent: Boolean, val height: Float?)
+
+/** The border box the `width` attribute gives against a line [maxWidth] wide, which caps it (`max-w-full`); null when it gives none. */
+private fun Density.attributeWidth(size: ImageSize?, maxWidth: Int): Int? {
+    val width = size?.width ?: return null
+    val px = if (size.percent) {
+        if (maxWidth == Constraints.Infinity) return null
+        maxWidth * width / 100f
+    } else {
+        width.dp.toPx()
+    }
+    return minOf(px.roundToInt(), maxWidth).coerceAtLeast(2 * cssBorderPx(1.dp))
+}
+
+/**
+ * A picture not shown, or not yet, in the box its attributes give it: the `width` attribute's,
+ * and as tall as their ratio makes its content box when both are set; else as tall as what it holds.
+ */
+private fun Modifier.attributeBox(size: ImageSize?): Modifier = if (size?.width == null) this else layout { measurable, constraints ->
+    val width = attributeWidth(size, constraints.maxWidth)
+    if (width == null) {
+        val placeable = measurable.measure(constraints)
+        return@layout layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
+    val border = 2 * cssBorderPx(1.dp)
+    val height = size.height?.takeIf { !size.percent && size.width > 0f }?.let { ((width - border) * it / size.width).roundToInt() + border }
+    val placeable = measurable.measure(if (height != null) Constraints.fixed(width, height) else Constraints.fixedWidth(width))
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+}
+
+private data class ImageBoxElement(val natural: IntSize, val size: ImageSize?) : ModifierNodeElement<ImageBoxNode>() {
+    override fun create() = ImageBoxNode(natural, size)
 
     override fun update(node: ImageBoxNode) {
         node.natural = natural
+        node.size = size
         node.invalidateMeasurement()
     }
 }
@@ -266,14 +290,20 @@ private data class ImageBoxElement(val natural: IntSize) : ModifierNodeElement<I
 /**
  * The `<img>`'s box under `max-w-full max-h-[400px]` and `box-sizing: border-box`: the picture at
  * its own size, a pixel of it a CSS pixel, scaled down until it fits the line and 400 px with its
- * border. A table column may squeeze it to nothing, as CSS lets it squeeze a replaced element with
- * a percentage `max-width`.
+ * border. A `width` attribute sets the width, the line capping it, and the picture's ratio the
+ * height, which 400 px caps alone, squeezing the picture (`object-fit: fill`). A table column may
+ * squeeze it to nothing, as CSS lets it squeeze a replaced element with a percentage `max-width`.
  */
-private class ImageBoxNode(var natural: IntSize) : Modifier.Node(), LayoutModifierNode {
+private class ImageBoxNode(var natural: IntSize, var size: ImageSize?) : Modifier.Node(), LayoutModifierNode {
     private fun Density.box(maxWidth: Int): IntSize {
         val border = 2 * cssBorderPx(1.dp)
         val width = natural.width.dp.toPx()
         val height = natural.height.dp.toPx()
+        val set = attributeWidth(size, maxWidth)
+        if (set != null) {
+            val content = if (width > 0f) (set - border) * height / width else 0f
+            return IntSize(set, minOf(content.roundToInt() + border, MAX_HEIGHT.dp.roundToPx()))
+        }
         val scale = minOf(1f, (maxWidth - border) / width, (MAX_HEIGHT.dp.toPx() - border) / height).coerceAtLeast(0f)
         return IntSize((width * scale).roundToInt() + border, (height * scale).roundToInt() + border)
     }

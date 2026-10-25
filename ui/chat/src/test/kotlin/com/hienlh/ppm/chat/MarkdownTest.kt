@@ -2,10 +2,11 @@ package com.hienlh.ppm.chat
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.UriHandler
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.em
 import com.hienlh.ppm.chat.InlineMarkdown.Kind
-import com.hienlh.ppm.chat.InlineMarkdown.Span
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.state.workspace.SourceLine
@@ -83,28 +84,6 @@ class MarkdownTest {
     }
 
     @Test
-    fun `blocks collapse their margins as Chrome does`() {
-        // Measured in Chrome: the gaps between the blocks, then what collapses out of the message.
-        val first = Markdown.parse(
-            "Intro.\n\n```ts\nconst a = 1;\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n> One.\n>\n> Two.\n\n---\n\n" +
-                "1. First\n2. Second\n   - nested one\n   - nested two\n3. Third\n\n- loose one\n\n- loose two\n\nLast.",
-        )
-        assertEquals(listOf(0, 8, 8, 4, 8, 8, 4, 4), MarkdownGaps.tops(first))
-        assertEquals(0 to 0, MarkdownGaps.ends(first))
-        val ordered = first[5] as MarkdownBlock.ListBlock
-        // An item holding a list ends with that list's margin.
-        assertEquals(listOf(0, 2, 4), MarkdownGaps.itemTops(ordered.items))
-        assertEquals(listOf(0, 4), MarkdownGaps.tops(ordered.items[1].blocks))
-        // The quote's paragraphs drop their outer margins and keep the one between them.
-        assertEquals(listOf(0, 4), MarkdownGaps.tops((first[3] as MarkdownBlock.Quote).blocks))
-        // A table keeps its margins inside its scroller: nothing collapses out, 8 more inside.
-        assertEquals(0 to 8, MarkdownGaps.ends(Markdown.parse("| a |\n|---|\n| 1 |\n\n```\ncode\n```")))
-        assertEquals(4 to 8, MarkdownGaps.ends(Markdown.parse("> A quote first.\n\n### Three\n\nText.\n\n---")))
-        assertEquals(8 to 4, MarkdownGaps.ends(Markdown.parse("```\ncode\n```\n\n- item\n\n## Two\n\n- last")))
-        assertEquals(12 to 4, MarkdownGaps.ends(Markdown.parse("# One\n\n- last")))
-    }
-
-    @Test
     fun `table columns share the line as CSS's auto layout does`() {
         // Room to spare: by content width.
         assertArrayEquals(intArrayOf(60, 80), TableWidths.distribute(intArrayOf(10, 20), intArrayOf(30, 40), 140))
@@ -114,7 +93,22 @@ class MarkdownTest {
         assertArrayEquals(intArrayOf(10, 20), TableWidths.distribute(intArrayOf(10, 20), intArrayOf(30, 40), 20))
     }
 
-    private fun inline(source: String) = InlineMarkdown.parse(source)
+    private fun inline(source: String) = flatInline(source)
+
+    private val ignore = object : UriHandler {
+        override fun openUri(uri: String) = Unit
+    }
+
+    /** The first lines [source] makes, set as a reply sets them. */
+    private fun annotated(source: String, edge: TextUnit, uriHandler: UriHandler = ignore, tabs: ChatTabs? = null): AnnotatedString {
+        fun first(box: HtmlBox): LinesBox? = when (box) {
+            is LinesBox -> box
+            is FlowBox -> box.children.firstNotNullOfOrNull(::first)
+            else -> null
+        }
+        val lines = first(HtmlBoxes.build(MarkdownHtml.render(source, rawHtml = true), MarkdownStyle.chat))!!
+        return lines.text.annotated(lines.style, MarkdownStyle.chat, BuiltInThemes.auroraDark.tokens, uriHandler, edge, tabs)
+    }
 
     private fun assertInline(source: String, text: String, vararg spans: Span) {
         val parsed = inline(source)
@@ -185,6 +179,9 @@ class MarkdownTest {
     fun `an answer's pictures are found in every block, in the page's order`() {
         val text = "![a](a.png)\n\n- item ![b](b.png)\n\n> ![c](c.png)\n\n| h |\n|---|\n| ![d](d.png) |\n\n```\n![e](e.png)\n```"
         assertEquals(listOf("a.png", "b.png", "c.png", "d.png"), markdownImages(text).map { it.url })
+        // Raw HTML's too, and one in a closed `details`: the page holds it.
+        val html = "<details>\n<summary>More</summary>\n\n![f](f.png)\n\n</details>\n\n<img src=\"g.png\" alt=\"G\">"
+        assertEquals(listOf("f.png" to "f", "g.png" to "G"), markdownImages(html).map { it.url to it.alt })
     }
 
     @Test
@@ -198,16 +195,14 @@ class MarkdownTest {
     }
 
     @Test
-    fun `the spans around and after a code box take in its edges`() {
-        val handler = object : UriHandler {
-            override fun openUri(uri: String) = Unit
-        }
-        val text = inline("**`a`** and *b `c` d*").annotated(BuiltInThemes.auroraDark.tokens, handler, 14f, 0.5.em)
+    fun `a code's edges keep out of the styles around it`() {
+        val text = annotated("**`a`** and *b `c` d*", 0.5.em)
         assertEquals("${CODE_EDGE}a$CODE_EDGE and b ${CODE_EDGE}c$CODE_EDGE d", text.text)
+        // Each run's style is set over its own characters; an edge is as wide whatever is around it.
         val weights = text.spanStyles.filter { it.item.fontWeight != null }.map { it.start to it.end }
-        assertEquals(listOf(0 to 3), weights)
+        assertEquals(listOf(1 to 2), weights)
         val italics = text.spanStyles.filter { it.item.fontStyle != null }.map { it.start to it.end }
-        assertEquals(listOf(8 to 15), italics)
+        assertEquals(listOf(8 to 10, 11 to 12, 13 to 15), italics)
         val code = text.spanStyles.filter { it.item.fontFamily == PpmFonts.mono }.map { text.text.substring(it.start, it.end) }
         assertEquals(listOf("a", "c"), code)
         // Each edge is set in a font of its own, as wide as it is given.
@@ -218,13 +213,10 @@ class MarkdownTest {
 
     @Test
     fun `a line break between a code and the text around it goes outside the code's box`() {
-        val handler = object : UriHandler {
-            override fun openUri(uri: String) = Unit
-        }
         val e = CODE_EDGE
         val j = JOIN
         val b = BREAK
-        val text = inline("a/`b` `c/`d `e-`f x-`y` `→`").annotated(BuiltInThemes.auroraDark.tokens, handler, 14f, 1.em)
+        val text = annotated("a/`b` `c/`d `e-`f x-`y` `→`", 1.em)
         // An edge reads as a letter to Android's line breaker: `/` would end a line before it.
         assertEquals("a/$j${e}b$e ${e}c/$j${e}d ${e}e-$e${b}f x-$b${e}y$e $e$j→$j$e", text.text)
         val boxes = text.getStringAnnotations(CODE_BOX, 0, text.length).map { text.text.substring(it.start, it.end) }
@@ -233,7 +225,8 @@ class MarkdownTest {
 
     @Test
     fun `bare URLs become links, minus the sentence's punctuation`() {
-        val parsed = inline("see https://ppm.dev/x). and `https://in.code`")
+        val source = "see https://ppm.dev/x). and `https://in.code`"
+        val parsed = inline(source)
         val links = parsed.spans.filter { it.kind == Kind.LINK }
         assertEquals(listOf("https://ppm.dev/x"), links.map { parsed.text.substring(it.start, it.end) })
         assertEquals(listOf("https://ppm.dev/x"), links.map { it.url })
@@ -246,7 +239,7 @@ class MarkdownTest {
                 opened += uri
             }
         }
-        val text = parsed.annotated(BuiltInThemes.auroraDark.tokens, handler, 14f, 1.em)
+        val text = annotated(source, 1.em, handler)
         // The code's box takes room on either side of it, and is drawn rather than set as a background.
         val box = text.getStringAnnotations(CODE_BOX, 0, text.length).single()
         assertEquals("${CODE_EDGE}https:$JOIN//${JOIN}in.code$CODE_EDGE", text.text.substring(box.start, box.end))
@@ -282,7 +275,7 @@ class MarkdownTest {
             }
         }
         val source = "`src/a.ts:12` `bun test` [doc](docs/my%20guide.md#setup) [x](javascript:alert(1)) [web](<https://x.dev/a b>)"
-        val text = inline(source).annotated(BuiltInThemes.auroraDark.tokens, handler, 14f, 1.em, tabs)
+        val text = annotated(source, 1.em, handler, tabs)
         // Only the path is underlined, and the tap takes its box in, edges and all.
         val underlined = text.getStringAnnotations(FILE_CODE, 0, text.length).map { text.text.substring(it.start, it.end) }
         assertEquals(listOf("src/${JOIN}a.ts:12"), underlined)

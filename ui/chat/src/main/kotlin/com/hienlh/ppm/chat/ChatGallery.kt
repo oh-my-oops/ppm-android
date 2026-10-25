@@ -91,26 +91,22 @@ internal fun galleryRefs(items: List<ChatItem>, live: List<ChatBlock>?, isOpen: 
 /** The scope of the turn still streaming in. */
 internal const val LIVE_SCOPE = "live"
 
-/** The pictures [text] shows, in the order the page draws them. */
+/**
+ * The pictures [text] shows, in the order the page holds them (`collectGalleryImages` reads the
+ * DOM): every `img` of the reply, raw HTML's too, one in a closed `details` included.
+ */
 internal fun markdownImages(text: String): List<InlineMarkdown.Image> {
-    if (!text.contains("![")) return emptyList()
+    if (!text.contains("![") && !text.contains("<img", ignoreCase = true)) return emptyList()
     val images = mutableListOf<InlineMarkdown.Image>()
-    fun inline(source: String) {
-        images += InlineMarkdown.parse(source).images
-    }
-    fun walk(blocks: List<MarkdownBlock>) {
-        for (block in blocks) {
-            when (block) {
-                is MarkdownBlock.Paragraph -> inline(block.text)
-                is MarkdownBlock.Heading -> inline(block.text)
-                is MarkdownBlock.ListBlock -> block.items.forEach { walk(it.blocks) }
-                is MarkdownBlock.Quote -> walk(block.blocks)
-                is MarkdownBlock.Table -> (listOf(block.header) + block.rows).forEach { row -> row.forEach(::inline) }
-                is MarkdownBlock.Code, MarkdownBlock.Rule, is MarkdownBlock.Html -> Unit
-            }
+    fun walk(nodes: List<SafeHtml>) {
+        for (node in nodes) {
+            if (node !is SafeHtml.Element) continue
+            val src = node.properties["src"]?.let(::jsString).orEmpty()
+            if (node.name == "img" && src.isNotEmpty()) images += InlineMarkdown.Image(src, node.properties["alt"]?.let(::jsString).orEmpty())
+            walk(node.children)
         }
     }
-    walk(Markdown.parse(text))
+    walk(MarkdownHtml.render(markdownContent(text), rawHtml = true))
     return images
 }
 

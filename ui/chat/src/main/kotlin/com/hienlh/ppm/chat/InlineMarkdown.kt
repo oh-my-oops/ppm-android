@@ -3,13 +3,12 @@ package com.hienlh.ppm.chat
 import com.hienlh.ppm.protocol.isJsSpace
 
 /**
- * One paragraph's inline markdown: its text, and the ranges that are emphasis, code, links or
- * struck through. The web parses chat text with remark (CommonMark, GFM with `singleTilde:
+ * One paragraph's inline markdown as mdast's phrasing content: emphasis, code, links, struck-through
+ * text, pictures and raw HTML. The web parses chat text with remark (CommonMark, GFM with `singleTilde:
  * false`, remark-breaks); this follows CommonMark's inline algorithm — delimiter runs and their
  * flanking, the rule of three, a link closing on the nearest bracket — for what chat text uses.
- * Raw HTML is read as micromark reads it and drawn as its text here; [tree] hands it to the HTML
- * path. An image is an [IMAGE_SLOT] in the text with its source and alt text in [Parsed.images],
- * for the paragraph to draw as a block. Bare addresses become links as remark-gfm makes them:
+ * Raw HTML is read as micromark reads it and kept as written, for the HTML path to parse. Bare
+ * addresses become links as remark-gfm makes them:
  * micromark's literal autolinks while scanning, then its transform over the text that is left.
  * Android has no system markdown parser, so this stands in for the Apple app's
  * `AttributedString(markdown:)`.
@@ -17,14 +16,8 @@ import com.hienlh.ppm.protocol.isJsSpace
 object InlineMarkdown {
     enum class Kind { STRONG, EMPHASIS, CODE, STRIKE, LINK }
 
-    /** [url] is set for a link only. */
-    data class Span(val start: Int, val end: Int, val kind: Kind, val url: String? = null)
-
     /** `![alt](url)`: [alt] is the plain text of what the brackets hold, as remark gives `alt`. */
     data class Image(val url: String, val alt: String)
-
-    /** [images] in the order of their [IMAGE_SLOT]s in [text]. */
-    data class Parsed(val text: String, val spans: List<Span>, val images: List<Image> = emptyList())
 
     /** mdast's phrasing content, once remark-gfm has made bare addresses links. */
     sealed interface Inline {
@@ -42,46 +35,11 @@ object InlineMarkdown {
         data class Image(val url: String, val alt: String, val title: String?) : Inline
     }
 
-    fun parse(source: String): Parsed {
-        val out = StringBuilder()
-        val spans = mutableListOf<Span>()
-        val images = mutableListOf<Image>()
-        render(tree(source), out, spans, images)
-        return Parsed(out.toString(), spans.sortedWith(compareBy<Span> { it.start }.thenByDescending { it.end }.thenBy { it.kind }), images)
-    }
-
     fun tree(source: String): List<Inline> {
         var nodes = inlines(Scanner(source).scan())
         // remark-gfm's transform: addresses micromark left as text, every web address first.
         nodes = replaceTexts(nodes) { findAll(it, WEB_ADDRESS, ::webAddress) }
         return replaceTexts(nodes) { findAll(it, EMAIL_ADDRESS, ::emailAddress) }
-    }
-
-    private fun render(nodes: List<Inline>, out: StringBuilder, spans: MutableList<Span>, images: MutableList<Image>) {
-        for (node in nodes) {
-            when (node) {
-                is Inline.Text -> out.append(node.text)
-                is Inline.Html -> out.append(node.html)
-                is Inline.Code -> {
-                    val start = out.length
-                    out.append(node.text)
-                    if (out.length > start) spans += Span(start, out.length, Kind.CODE)
-                }
-                // The web's `<img>` is `display: block`: one slot here, where the paragraph is cut.
-                is Inline.Image -> {
-                    out.append(IMAGE_SLOT)
-                    images += Image(node.url, node.alt)
-                }
-                is Inline.Styled -> spanOver(node.children, node.kind, null, out, spans, images)
-                is Inline.Link -> spanOver(node.children, Kind.LINK, node.url, out, spans, images)
-            }
-        }
-    }
-
-    private fun spanOver(children: List<Inline>, kind: Kind, url: String?, out: StringBuilder, spans: MutableList<Span>, images: MutableList<Image>) {
-        val start = out.length
-        render(children, out, spans, images)
-        if (out.length > start) spans += Span(start, out.length, kind, url)
     }
 
     /** The scanner's nodes as mdast's: what is left of delimiters and brackets joins the text around it. */
@@ -629,9 +587,6 @@ object InlineMarkdown {
     }
 
 }
-
-/** Where an image stands in a paragraph's parsed text: a private-use character, cut out before it is drawn. */
-internal const val IMAGE_SLOT = ''
 
 // micromark's tokenizers, over UTF-16 units as it reads them. `-1` past the end.
 

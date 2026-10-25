@@ -3,20 +3,8 @@ package com.hienlh.ppm.chat
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -42,42 +30,16 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.layout.IntrinsicMeasurable
-import androidx.compose.ui.layout.IntrinsicMeasureScope
-import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.layout.Measurable
-import androidx.compose.ui.layout.MeasurePolicy
-import androidx.compose.ui.layout.MeasureResult
-import androidx.compose.ui.layout.MeasureScope
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalFontFamilyResolver
-import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.TextLinkStyles
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.hienlh.ppm.design.CssSides
-import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFonts
-import com.hienlh.ppm.design.PpmIcon
-import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeTokens
-import com.hienlh.ppm.design.cssBorder
-import com.hienlh.ppm.design.cssBorderInset
 import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.ppmText
 import kotlin.math.ceil
@@ -99,15 +61,6 @@ data class MarkdownStyle(
 ) {
     val lineHeight: Float get() = size * lineHeightRatio
 
-    fun heading(level: Int): MarkdownStyle = when (level) {
-        // `1rem` and `0.875rem`, whatever size the text around them is.
-        1 -> copy(size = 16f, weight = FontWeight.Bold)
-        2 -> copy(size = 14f, weight = FontWeight.Bold)
-        3 -> copy(size = 14f, weight = FontWeight.SemiBold)
-        // Tailwind's reset leaves h4–h6 as plain text; the web's markdown styles skip them.
-        else -> this
-    }
-
     companion object {
         /** `text-sm`: an assistant message. */
         val chat = MarkdownStyle(size = 14f, lineHeightRatio = 20f / 14f)
@@ -115,168 +68,44 @@ data class MarkdownStyle(
 }
 
 /**
- * A message's markdown, drawn as the web's `.markdown-content` draws it; [streaming] while it still
- * grows. The web holds it in a flex item or a scroller, which stops the margins collapsing out of
- * its first and last block, so they show.
+ * `MarkdownRenderer`: [text] as the web's react-markdown pipeline makes it, its raw HTML through
+ * the web's allow-list when [rawHtml] and shown as text when not, drawn as `.markdown-content`
+ * draws it; [streaming] while it still grows. The web holds it in a flex item or a scroller, which
+ * stops the margins collapsing out of its first and last block, so they show. A `details` opened
+ * or closed stays so while the text grows, as the DOM keeps it.
  */
 @Composable
-fun MarkdownView(text: String, modifier: Modifier = Modifier, style: MarkdownStyle = MarkdownStyle.chat, streaming: Boolean = false) {
-    val blocks = remember(text) { Markdown.parse(text) }
-    val (top, bottom) = remember(blocks) { MarkdownGaps.ends(blocks) }
+fun MarkdownView(
+    text: String,
+    modifier: Modifier = Modifier,
+    style: MarkdownStyle = MarkdownStyle.chat,
+    streaming: Boolean = false,
+    rawHtml: Boolean = true,
+) {
+    val nodes = remember(text, rawHtml) { MarkdownHtml.render(text, rawHtml) }
+    var opened by remember { mutableStateOf(emptyMap<Int, Boolean>()) }
+    val root = remember(nodes, style, opened) { HtmlBoxes.build(nodes, style, opened) }
+    val drawing = remember(style) { HtmlDrawing(style) { id, open -> opened = opened + (id to open) } }
     CompositionLocalProvider(LocalMarkdownStreaming provides streaming) {
-        MarkdownBlocks(blocks, style, modifier.padding(top = top.dp, bottom = bottom.dp))
+        HtmlFlow(root, drawing, modifier)
     }
 }
-
-/** MdPre's test for a diagram: the web draws it with Mermaid, and as plain code until it can. */
-private val MERMAID_KEYWORDS = Regex(
-    "^(sequenceDiagram|flowchart|graph\\s|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|quadrantChart|requirementDiagram|" +
-        "gitGraph|mindmap|timeline|sankey|xychart|block-beta|packet-beta|architecture-beta|kanban)\\b",
-)
-
-private fun MarkdownBlock.Code.isDiagram(): Boolean =
-    language == "mermaid" || (language == null && MERMAID_KEYWORDS.containsMatchIn(text.trim()))
 
 /**
- * `.markdown-content`'s vertical margins, in CSS pixels, collapsing as CSS collapses them: where two
- * meet the larger wins, and a first or last child's passes out through a list, an item or a quote,
- * which have no padding or border above or below to stop it. Only a paragraph drops its own at
- * either end of what holds it (`p:first-child`, `p:last-child`).
+ * The web's `MarkdownContent`: [text] without teammate messages and with runs of blank lines
+ * closed up ([markdownContent]), and nothing at all when that leaves nothing.
  */
-internal object MarkdownGaps {
-    /** `margin: 0.5rem 0` on a table, kept inside the `overflow-x-auto` that wraps it. */
-    const val TABLE_INSET = 8
-
-    /** The space above each of [blocks]; the first one's margin collapses out of them. */
-    fun tops(blocks: List<MarkdownBlock>): List<Int> =
-        blocks.indices.map { if (it == 0) 0 else maxOf(margins(blocks, it - 1).second, margins(blocks, it).first) }
-
-    /** The margins that collapse out of the top and the bottom of [blocks]. */
-    fun ends(blocks: List<MarkdownBlock>): Pair<Int, Int> =
-        if (blocks.isEmpty()) 0 to 0 else margins(blocks, 0).first to margins(blocks, blocks.lastIndex).second
-
-    /** The space above each of a list's [items]. */
-    fun itemTops(items: List<MarkdownListItem>): List<Int> =
-        items.indices.map { if (it == 0) 0 else maxOf(item(items[it - 1]).second, item(items[it]).first) }
-
-    /** The top and bottom margins of the [index]th of [blocks], with what collapses out of its children. */
-    fun margins(blocks: List<MarkdownBlock>, index: Int): Pair<Int, Int> = when (val block = blocks[index]) {
-        is MarkdownBlock.Paragraph -> (if (index == 0) 0 else 4) to (if (index == blocks.lastIndex) 0 else 4)
-        is MarkdownBlock.Heading -> when (block.level) {
-            1 -> 12 to 4
-            2 -> 8 to 4
-            3 -> 8 to 2
-            else -> 0 to 0
-        }
-        is MarkdownBlock.ListBlock ->
-            maxOf(4, block.items.firstOrNull()?.let { item(it).first } ?: 0) to maxOf(4, block.items.lastOrNull()?.let { item(it).second } ?: 0)
-        is MarkdownBlock.Quote -> ends(block.blocks).let { (top, bottom) -> maxOf(4, top) to maxOf(4, bottom) }
-        is MarkdownBlock.Code, MarkdownBlock.Rule -> 8 to 8
-        // Its scroller holds the table's own ([TABLE_INSET]) and has none to meet another block's.
-        is MarkdownBlock.Table -> 0 to 0
-        is MarkdownBlock.Html -> 0 to 0
-    }
-
-    /** An `li`'s, `0.125rem` each, with its first and last child's. */
-    private fun item(item: MarkdownListItem): Pair<Int, Int> = ends(item.blocks).let { (top, bottom) -> maxOf(2, top) to maxOf(2, bottom) }
-}
-
 @Composable
-internal fun MarkdownBlocks(blocks: List<MarkdownBlock>, style: MarkdownStyle, modifier: Modifier = Modifier) {
-    val tops = remember(blocks) { MarkdownGaps.tops(blocks) }
-    Column(modifier.fillMaxWidth()) {
-        blocks.forEachIndexed { index, block ->
-            MarkdownBlockView(block, style, Modifier.padding(top = tops[index].dp))
-        }
-    }
-}
-
-@Composable
-private fun MarkdownBlockView(block: MarkdownBlock, style: MarkdownStyle, modifier: Modifier) {
-    val tokens = LocalPpmTokens.current
-    when (block) {
-        is MarkdownBlock.Paragraph -> InlineMarkdownText(block.text, style, modifier)
-        is MarkdownBlock.Heading -> InlineMarkdownText(block.text, style.heading(block.level), modifier)
-        is MarkdownBlock.Code -> CodeBlockView(block.text, block.language, modifier, highlight = !block.isDiagram())
-        is MarkdownBlock.ListBlock -> MarkdownList(block, style, modifier)
-        is MarkdownBlock.Quote -> {
-            val border = tokens.border.color
-            MarkdownBlocks(
-                block.blocks,
-                style.copy(italic = true, color = tokens.text2),
-                modifier
-                    .cssBorder(border, width = 2.dp, sides = CssSides.Start)
-                    .padding(start = 12.dp),
-            )
-        }
-        is MarkdownBlock.Table -> MarkdownTable(block.header, block.rows, style, modifier)
-        MarkdownBlock.Rule -> Box(modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top))
-        is MarkdownBlock.Html -> InlineText(AnnotatedString(block.text), style, modifier)
-    }
-}
-
-/** One paragraph of inline markdown: bold, italic, `code`, links, strikethrough, and pictures between its lines. */
-@Composable
-internal fun InlineMarkdownText(source: String, style: MarkdownStyle, modifier: Modifier = Modifier) {
-    val tokens = LocalPpmTokens.current
-    val uriHandler = LocalUriHandler.current
-    val tabs = LocalChatTabs.current
-    val parsed = remember(source) { InlineMarkdown.parse(source) }
-    val density = LocalDensity.current
-    val edge = with(density) { (codeEdgePx() / style.size.sp.toPx()).em }
-    val text = remember(parsed, tokens, uriHandler, tabs, style.size, edge) { parsed.annotated(tokens, uriHandler, style.size, edge, tabs) }
-    if (parsed.images.isEmpty()) {
-        InlineText(text, style, modifier)
-        return
-    }
-    // Each `<img>` is a block, which cuts the paragraph's lines: the text either side of one keeps
-    // lines of its own, a break included, and whitespace alone none.
-    val pieces = remember(text) { text.cutAt(IMAGE_SLOT) }
-    val slots = remember(parsed) { parsed.text.indices.filter { parsed.text[it] == IMAGE_SLOT } }
-    Column(modifier) {
-        pieces.forEachIndexed { index, piece ->
-            if (piece.isNotBlank() || '\n' in piece) InlineText(piece, style)
-            parsed.images.getOrNull(index)?.let { MarkdownImage(it, style.around(parsed.spans, slots[index], tokens)) }
-        }
-    }
-}
-
-/** [this] cut at every [at], each piece keeping its styles. */
-private fun AnnotatedString.cutAt(at: Char): List<AnnotatedString> {
-    val pieces = mutableListOf<AnnotatedString>()
-    var start = 0
-    for (index in indices) {
-        if (this[index] != at) continue
-        pieces += subSequence(start, index)
-        start = index + 1
-    }
-    pieces += subSequence(start, length)
-    return pieces
-}
-
-@Composable
-private fun InlineText(text: AnnotatedString, style: MarkdownStyle, modifier: Modifier = Modifier) {
-    val tokens = LocalPpmTokens.current
-    val boxes = remember(text) { text.getStringAnnotations(CODE_BOX, 0, text.length) }
-    val files = remember(text) { text.getStringAnnotations(FILE_CODE, 0, text.length) }
-    val color = (style.color ?: tokens.text).color
-    val fonts = LocalFontFamilyResolver.current
-    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
-    BasicText(
-        text,
-        if (boxes.isEmpty()) {
-            modifier
-        } else {
-            modifier.drawBehind {
-                layout?.let {
-                    drawCodeBoxes(it, boxes, tokens)
-                    drawDottedUnderlines(it, files, color, fonts)
-                }
-            }
-        },
-        style = ppmText(style.size, style.weight, lineHeight = style.lineHeight, italic = style.italic).copy(color = color),
-        onTextLayout = { if (boxes.isNotEmpty()) layout = it },
-    )
+fun MarkdownContent(
+    text: String,
+    modifier: Modifier = Modifier,
+    style: MarkdownStyle = MarkdownStyle.chat,
+    streaming: Boolean = false,
+    rawHtml: Boolean = true,
+) {
+    val content = remember(text) { markdownContent(text) }
+    if (content.isEmpty()) return
+    MarkdownView(content, modifier, style, streaming, rawHtml)
 }
 
 /** `.markdown-content code` is 0.75rem whatever the text around it. */
@@ -294,87 +123,14 @@ internal const val CODE_EDGE = ''
 /** Annotates each inline code's box: the code and the [CODE_EDGE]s around it. */
 internal const val CODE_BOX = "ppm.code-box"
 
-/** What [annotated] puts in the text for the layout alone, which a copy leaves out. */
+/** What [RichText.annotated] puts in the text for the layout alone, which a copy leaves out. */
 internal const val MARKDOWN_MARKS = "$CODE_EDGE$BREAK$JOIN"
 
 /** Annotates the text of an inline code that names a file, which is underlined with dots. */
 internal const val FILE_CODE = "ppm.file-code"
 
 /** One side of a code's box: `padding-inline: 0.25rem` and the 1px border, 12.5 px at 2.625. */
-private fun Density.codeEdgePx(): Float = 4.dp.toPx() + cssBorderPx(1.dp)
-
-/**
- * The text with its spans, for text of [size] CSS pixels, and lines ending where Chrome ends them
- * ([breakMark]). Each [CODE_EDGE] is [edge] wide, in em. A link and an inline code that name a file
- * open it through [tabs] (`MdLink`, `MdCode`); any other link opens what the system can.
- */
-internal fun InlineMarkdown.Parsed.annotated(tokens: ThemeTokens, uriHandler: UriHandler, size: Float, edge: TextUnit, tabs: ChatTabs? = null): AnnotatedString {
-    val code = spans.filter { it.kind == InlineMarkdown.Kind.CODE }
-    val codeStarts = code.mapTo(HashSet()) { it.start }
-    val codeEnds = code.mapTo(HashSet()) { it.end }
-    // Where each offset of the text lands as a span's start and as its end: a code's box takes in
-    // its edges, and a mark between two characters goes outside them.
-    val starts = IntArray(text.length + 1)
-    val ends = IntArray(text.length + 1)
-    return buildAnnotatedString {
-        for (index in 0..text.length) {
-            val codeEnd = index in codeEnds
-            val codeStart = index in codeStarts
-            if (codeEnd) {
-                if (joinsCodeEnd(text[index - 1])) append(JOIN)
-                append(CODE_EDGE)
-            }
-            ends[index] = length
-            breakMark(text, index, codeEnd, codeStart)?.let { append(it) }
-            starts[index] = length
-            if (codeStart) {
-                append(CODE_EDGE)
-                if (joinsCodeStart(text[index])) append(JOIN)
-            }
-            if (index < text.length) append(text[index])
-        }
-        val edgeStyle = SpanStyle(fontFamily = PpmFonts.codeEdge, fontSize = edge)
-        for (span in code) {
-            addStringAnnotation(CODE_BOX, "", starts[span.start], ends[span.end])
-            addStyle(edgeStyle, starts[span.start], starts[span.start] + 1)
-            addStyle(edgeStyle, ends[span.end] - 1, ends[span.end])
-        }
-        for (span in spans) {
-            val start = starts[span.start]
-            val end = ends[span.end]
-            when (span.kind) {
-                // `.markdown-content strong` is 600, even inside a 700 heading.
-                InlineMarkdown.Kind.STRONG -> addStyle(SpanStyle(fontWeight = FontWeight.SemiBold), start, end)
-                InlineMarkdown.Kind.EMPHASIS -> addStyle(SpanStyle(fontStyle = FontStyle.Italic), start, end)
-                InlineMarkdown.Kind.STRIKE -> addStyle(SpanStyle(textDecoration = TextDecoration.LineThrough), start, end)
-                // In em: a span's size in sp is rounded to a whole pixel, 31.5 to 32 at 2.625, and every character set wider.
-                InlineMarkdown.Kind.CODE -> {
-                    addStyle(SpanStyle(fontFamily = PpmFonts.mono, fontSize = (INLINE_CODE_SIZE / size).em), start + 1, end - 1)
-                    // The whole `<code>` is what a tap lands on, its padding included.
-                    val file = FileTargets.inlineCode(text.substring(span.start, span.end)) ?: continue
-                    addLink(LinkAnnotation.Clickable(FILE_CODE) { tabs?.openFileOrSearch(file.path, file.line) }, start, end)
-                    addStringAnnotation(FILE_CODE, "", start + 1, end - 1)
-                }
-                InlineMarkdown.Kind.LINK -> {
-                    val url = span.url ?: continue
-                    val file = FileTargets.link(url)
-                    val open = FileTargets.url(url)
-                    addLink(
-                        LinkAnnotation.Url(open ?: url, TextLinkStyles(SpanStyle(color = tokens.accent.color))) {
-                            when {
-                                file != null -> tabs?.openFileOrSearch(file.path, file.line)
-                                // No app may take the scheme; that is no crash.
-                                open != null -> runCatching { uriHandler.openUri(open) }
-                            }
-                        },
-                        start,
-                        end,
-                    )
-                }
-            }
-        }
-    }
-}
+internal fun Density.codeEdgePx(): Float = 4.dp.toPx() + cssBorderPx(1.dp)
 
 /**
  * `:not(pre) > code`'s box: the page's background, a 1px border rounded 4px, `padding: 0.125rem
@@ -382,7 +138,7 @@ internal fun InlineMarkdown.Parsed.annotated(tokens: ThemeTokens, uriHandler: Ur
  * slice`), with no border or rounding where it goes on, and above and below it reaches past the
  * code's own ascent and descent by its padding and border, as any inline box does.
  */
-private fun DrawScope.drawCodeBoxes(layout: TextLayoutResult, boxes: List<AnnotatedString.Range<String>>, tokens: ThemeTokens) {
+internal fun DrawScope.drawCodeBoxes(layout: TextLayoutResult, boxes: List<AnnotatedString.Range<String>>, tokens: ThemeTokens) {
     val border = cssBorderPx(1.dp).toFloat()
     val size = INLINE_CODE_SIZE.sp.toPx()
     val (ascent, descent) = PpmFonts.chromeAscentDescent(size, PpmFonts.MONO_ASCENT, PpmFonts.MONO_DESCENT)
@@ -428,21 +184,29 @@ private fun DrawScope.drawCodeBoxes(layout: TextLayoutResult, boxes: List<Annota
 }
 
 /**
- * `MdCode`'s `text-decoration: underline dotted` under a file's code, as Chrome draws it: a tenth
- * of the code's size thick, in square dots that long with gaps as long from where the code's text
- * starts on each line. It starts under the baseline by half its thickness rounded up to a whole
- * CSS pixel, one, then snapped to a device pixel, and is centred on the whole device pixels below
- * that. Where a glyph's ink crosses it, it is left out (`text-decoration-skip-ink: auto`).
+ * `text-decoration: underline dotted` under text of [size] CSS px in [family] (`MdCode`'s under a
+ * file's code, `abbr[title]`'s), as Chrome draws it: a tenth of the size thick, a pixel at least,
+ * in square dots that long with gaps as long from where the text starts on each line. It starts
+ * under the baseline by half its thickness rounded up to a whole CSS pixel, then snapped to a
+ * device pixel, and is centred on the whole device pixels below that. Where a glyph's ink crosses
+ * it, it is left out (`text-decoration-skip-ink: auto`).
  */
-private fun DrawScope.drawDottedUnderlines(layout: TextLayoutResult, codes: List<AnnotatedString.Range<String>>, color: Color, fonts: FontFamily.Resolver) {
+internal fun DrawScope.drawDottedUnderlines(
+    layout: TextLayoutResult,
+    codes: List<AnnotatedString.Range<String>>,
+    color: Color,
+    fonts: FontFamily.Resolver,
+    size: Float = INLINE_CODE_SIZE,
+    family: FontFamily = PpmFonts.mono,
+) {
     if (codes.isEmpty()) return
-    val css = INLINE_CODE_SIZE / 10f
+    val css = maxOf(1f, size / 10f)
     val thickness = css.sp.toPx()
     val dot = thickness.roundToInt().coerceAtLeast(1).toFloat()
     val gap = ceil(css / 2f).sp.toPx()
     val glyphs = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = fonts.resolve(PpmFonts.mono).value as Typeface
-        textSize = INLINE_CODE_SIZE.sp.toPx()
+        typeface = fonts.resolve(family).value as Typeface
+        textSize = size.sp.toPx()
     }
     for (code in codes) {
         val first = layout.getLineForOffset(code.start)
@@ -493,36 +257,12 @@ private fun inkSkips(layout: TextLayoutResult, start: Int, end: Int, baseline: F
     return skips
 }
 
-@Composable
-private fun MarkdownList(list: MarkdownBlock.ListBlock, style: MarkdownStyle, modifier: Modifier) {
-    val tokens = LocalPpmTokens.current
-    val color = (style.color ?: tokens.text).color
-    val tops = remember(list) { MarkdownGaps.itemTops(list.items) }
-    Column(modifier) {
-        list.items.forEachIndexed { index, item ->
-            Row(Modifier.padding(top = tops[index].dp)) {
-                // An outside marker in the list's 1rem padding, ending at the text; a long number hangs
-                // further out. Chrome's `::marker` is "1. ", space and all, in `tabular-nums`.
-                if (list.ordered) {
-                    OrdinalMarker("${list.start + index}. ", style, color, Modifier.alignByBaseline())
-                } else {
-                    DiscMarker(style, color, Modifier.alignByBaseline())
-                }
-                if (item.checked != null) {
-                    TaskBox(item.checked, Modifier.alignBy { it.measuredHeight - 1 }.padding(end = 5.dp))
-                }
-                MarkdownBlocks(item.blocks, style, Modifier.alignByBaseline().weight(1f))
-            }
-        }
-    }
-}
-
 /**
  * An ordered item's marker, ending on the item's text to the fraction of a pixel as Chrome's does:
  * Compose gives a text a whole number of pixels, rounding up, so the end alone would leave it short.
  */
 @Composable
-private fun OrdinalMarker(text: String, style: MarkdownStyle, color: Color, modifier: Modifier) {
+internal fun OrdinalMarker(text: String, style: MarkdownStyle, color: Color, modifier: Modifier) {
     var short by remember { mutableFloatStateOf(0f) }
     BasicText(
         text,
@@ -564,115 +304,6 @@ fun DiscMarker(style: MarkdownStyle, color: Color, modifier: Modifier) {
     )
 }
 
-/** A GFM task item's (disabled) checkbox. */
-@Composable
-private fun TaskBox(checked: Boolean, modifier: Modifier) {
-    val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(3.dp)
-    val box = if (checked) {
-        Modifier.background(tokens.accent.color, shape)
-    } else {
-        Modifier.border(1.dp, tokens.text3.color, shape)
-    }
-    Box(modifier) {
-        Box(box.size(13.dp), contentAlignment = Alignment.Center) {
-            if (checked) PpmIcon(ProductIcon.Check, 10.dp, tokens.accentFg.color)
-        }
-    }
-}
-
-/**
- * A GFM table as the web's auto table layout sets it: columns as wide as their content, the
- * table filling the line, scrolling sideways (`overflow-x-auto`) only when even the narrowest
- * columns do not fit.
- */
-@Composable
-private fun MarkdownTable(header: List<String>, rows: List<List<String>>, style: MarkdownStyle, modifier: Modifier) {
-    val tokens = LocalPpmTokens.current
-    val cellStyle = style.copy(size = 12f)
-    val cells = listOf(header) + rows
-    val policy = remember(header.size) { TableLayout(header.size) }
-    Layout(
-        content = {
-            cells.forEachIndexed { row, values ->
-                values.forEachIndexed { column, value ->
-                    TableCell(
-                        value,
-                        style = if (row == 0) cellStyle.copy(weight = FontWeight.Medium) else cellStyle,
-                        background = if (row == 0) tokens.bgSolid.color else Color.Transparent,
-                        border = tokens.border.color,
-                        lastColumn = column == header.lastIndex,
-                        lastRow = row == cells.lastIndex,
-                    )
-                }
-            }
-        },
-        // The scroller passes the line's width on as its minimum, its maximum being endless.
-        modifier.padding(vertical = MarkdownGaps.TABLE_INSET.dp).fillMaxWidth().horizontalScroll(rememberScrollState()),
-        policy,
-    )
-}
-
-/**
- * Rows of [columns] cells, the columns sized by [TableWidths] to fill the width the scroller
- * passes on as its minimum. It answers intrinsic sizes too, as CSS does for a table whose width
- * is a percentage of a box that sizes itself from it (a badge that shrinks to fit): every column
- * at its content's narrowest, or widest.
- */
-private class TableLayout(private val columns: Int) : MeasurePolicy {
-    override fun MeasureScope.measure(measurables: List<Measurable>, constraints: Constraints): MeasureResult {
-        val widths = widths(measurables, constraints.minWidth.takeIf { it > 0 })
-        val heights = heights(measurables, widths)
-        val placeables = measurables.mapIndexed { index, cell ->
-            cell.measure(Constraints.fixed(widths[index % columns], heights[index / columns]))
-        }
-        return layout(widths.sum(), heights.sum()) {
-            var y = 0
-            for (row in heights.indices) {
-                var x = 0
-                for (column in 0 until columns) {
-                    placeables[row * columns + column].place(x, y)
-                    x += widths[column]
-                }
-                y += heights[row]
-            }
-        }
-    }
-
-    override fun IntrinsicMeasureScope.minIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) =
-        IntArray(columns).also { fold(measurables, it) { cell -> cell.minIntrinsicWidth(Constraints.Infinity) } }.sum()
-
-    override fun IntrinsicMeasureScope.maxIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) =
-        IntArray(columns).also { fold(measurables, it) { cell -> cell.maxIntrinsicWidth(Constraints.Infinity) } }.sum()
-
-    override fun IntrinsicMeasureScope.minIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int) =
-        heights(measurables, widths(measurables, width.takeIf { it != Constraints.Infinity })).sum()
-
-    override fun IntrinsicMeasureScope.maxIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int) =
-        minIntrinsicHeight(measurables, width)
-
-    /** Each column's width, filling [fill]; with nothing to fill, each at its widest. */
-    private fun widths(cells: List<IntrinsicMeasurable>, fill: Int?): IntArray {
-        val min = IntArray(columns).also { fold(cells, it) { cell -> cell.minIntrinsicWidth(Constraints.Infinity) } }
-        val max = IntArray(columns).also { fold(cells, it) { cell -> cell.maxIntrinsicWidth(Constraints.Infinity) } }
-        return TableWidths.distribute(min, max, fill ?: max.sum())
-    }
-
-    private fun heights(cells: List<IntrinsicMeasurable>, widths: IntArray): IntArray {
-        val heights = IntArray((cells.size + columns - 1) / columns)
-        cells.forEachIndexed { index, cell ->
-            val row = index / columns
-            heights[row] = maxOf(heights[row], cell.minIntrinsicHeight(widths[index % columns]))
-        }
-        return heights
-    }
-
-    /** The largest of [size] over each column's cells, into [into]. */
-    private inline fun fold(cells: List<IntrinsicMeasurable>, into: IntArray, size: (IntrinsicMeasurable) -> Int) {
-        cells.forEachIndexed { index, cell -> into[index % columns] = maxOf(into[index % columns], size(cell)) }
-    }
-}
-
 /** CSS's auto table layout, for a table of `width: 100%`. */
 internal object TableWidths {
     fun distribute(min: IntArray, max: IntArray, available: Int): IntArray {
@@ -696,35 +327,5 @@ internal object TableWidths {
             }
             else -> min.copyOf()
         }
-    }
-}
-
-@Composable
-private fun TableCell(
-    text: String,
-    style: MarkdownStyle,
-    background: Color,
-    border: Color,
-    lastColumn: Boolean,
-    lastRow: Boolean,
-) {
-    Box(
-        Modifier
-            .background(background)
-            // Collapsed borders: each cell draws its top and left edges; the last row and column
-            // close the table.
-            .drawBehind {
-                val line = cssBorderPx(1.dp).toFloat()
-                drawRect(border, size = Size(size.width, line))
-                drawRect(border, size = Size(line, size.height))
-                if (lastColumn) drawRect(border, Offset(size.width - line, 0f), Size(line, size.height))
-                if (lastRow) drawRect(border, Offset(0f, size.height - line), Size(size.width, line))
-            }
-            .cssBorderInset(start = 1.dp, top = 1.dp, end = if (lastColumn) 1.dp else 0.dp, bottom = if (lastRow) 1.dp else 0.dp)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        // `td` is `vertical-align: middle`, with `text-align: left`.
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        InlineMarkdownText(text, style)
     }
 }

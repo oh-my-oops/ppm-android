@@ -206,7 +206,7 @@ class MarkdownDomTest {
                     children(box, x?.plus(box.borderStart + box.paddingStart), y + box.insetTop)
                 }
                 is CodeBox -> placed[box.path] = Placed(x, y, measure(box))
-                is ImageBox -> placed[box.path] = Placed(x.takeIf { box.align == HtmlAlign.START }, y, measure(box))
+                is ImageBox -> placed[box.path] = Placed(x.takeIf { box.style.align != HtmlAlign.WEBKIT_CENTER && box.style.align != HtmlAlign.WEBKIT_RIGHT }, y, measure(box))
                 is RuleBox -> placed[box.path] = Placed(x, y, 1.0)
                 is TableBox -> {
                     placed[box.path] = Placed(x, y, measure(box))

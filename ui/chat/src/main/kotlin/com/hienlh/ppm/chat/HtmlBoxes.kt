@@ -114,8 +114,8 @@ internal class ImageBox(
     val width: Float?,
     val widthPercent: Boolean,
     val height: Float?,
-    /** Where a `-webkit-` alignment around it puts it: start, centre, end. */
-    val align: HtmlAlign,
+    /** The text around it, which its alt text is set in, and whose `-webkit-` alignment moves it. */
+    val style: HtmlStyle,
 ) : HtmlBox()
 
 internal class RuleBox(val path: String) : HtmlBox()
@@ -450,12 +450,7 @@ private class Builder(private val open: Map<Int, Boolean>, private val trace: Mu
             }
             else -> null to false
         }
-        val align = when (parent.align) {
-            HtmlAlign.WEBKIT_CENTER -> HtmlAlign.CENTER
-            HtmlAlign.WEBKIT_RIGHT -> HtmlAlign.RIGHT
-            else -> HtmlAlign.START
-        }
-        return ImageBox(path, src, alt, width, percent, node.number("height")?.toFloat(), align)
+        return ImageBox(path, src, alt, width, percent, node.number("height")?.toFloat(), parent)
     }
 
     private fun table(node: SafeHtml.Element, style: HtmlStyle, path: String): TableBox {
