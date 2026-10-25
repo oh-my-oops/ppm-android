@@ -32,9 +32,9 @@ import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTheme
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
-import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.SyntaxHighlighter
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.lucideOutline
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -117,6 +117,13 @@ internal fun CopyIconButton(text: String, modifier: Modifier = Modifier) {
             .semantics { contentDescription = "Copy" },
         contentAlignment = Alignment.Center,
     ) {
-        PpmIcon(if (copied) ProductIcon.Check else ProductIcon.Copy, 12.dp, tokens.text.mix(tokens.text2, lit).color)
+        PpmIcon(if (copied) COPIED_ICON else COPY_ICON, 12.dp, tokens.text.mix(tokens.text2, lit).color)
     }
 }
+
+/** `CopyIcon` and `CheckIcon` (markdown-code-block.tsx): lucide's outlines, which the web writes out rather than imports. */
+private val COPY_ICON = lucideOutline(
+    "CodeCopy",
+    listOf("M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z", "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"),
+)
+private val COPIED_ICON = lucideOutline("CodeCopied", listOf("M20 6L9 17L4 12"))

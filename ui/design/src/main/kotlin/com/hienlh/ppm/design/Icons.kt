@@ -50,21 +50,23 @@ private val lucideVectors = ConcurrentHashMap<LucideIcon, ImageVector>()
 
 /** The glyph in its 24×24 box, stroked black to be tinted: lucide's 2 wide, round caps and joins. */
 val LucideIcon.vector: ImageVector
-    get() = lucideVectors.getOrPut(this) {
-        ImageVector.Builder(name = name, defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
-            .apply {
-                for (d in pathData) {
-                    addPath(
-                        addPathNodes(separateArcFlags(d)),
-                        stroke = SolidColor(Color.Black),
-                        strokeLineWidth = 2f,
-                        strokeLineCap = StrokeCap.Round,
-                        strokeLineJoin = StrokeJoin.Round,
-                    )
-                }
+    get() = lucideVectors.getOrPut(this) { lucideOutline(name, pathData) }
+
+/** [pathData] in a 24×24 box drawn as [LucideIcon]s are: for an icon the web writes out as its own `<svg>` in lucide's style. */
+fun lucideOutline(name: String, pathData: List<String>): ImageVector =
+    ImageVector.Builder(name = name, defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
+        .apply {
+            for (d in pathData) {
+                addPath(
+                    addPathNodes(separateArcFlags(d)),
+                    stroke = SolidColor(Color.Black),
+                    strokeLineWidth = 2f,
+                    strokeLineCap = StrokeCap.Round,
+                    strokeLineJoin = StrokeJoin.Round,
+                )
             }
-            .build()
-    }
+        }
+        .build()
 
 /**
  * `<Icon className="size-4" />` — one of the web's product icons at [size], in [tint]. [spinning]
