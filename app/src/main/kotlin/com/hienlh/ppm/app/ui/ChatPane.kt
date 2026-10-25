@@ -115,6 +115,7 @@ import com.hienlh.ppm.chat.LocalChatTabs
 import com.hienlh.ppm.chat.LocalMarkdownImages
 import com.hienlh.ppm.chat.LocalToolImages
 import com.hienlh.ppm.chat.MarkdownImages
+import com.hienlh.ppm.chat.McpSignInBar
 import com.hienlh.ppm.chat.RelativeTime
 import com.hienlh.ppm.chat.RunningAgentsBar
 import com.hienlh.ppm.chat.TeamActivityPanel
@@ -352,6 +353,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
             )
             val stop = state.turnStop
             if (stop != null && !state.isRunning) TurnStopBar(stop, onContinue = { chat.send(CONTINUE_AFTER_STOP) })
+            // MCP servers this session cannot use until someone signs in.
+            McpSignInBar(state.mcpNeedsAuth, model.mcpSignInDismissed, onSignIn = { model.openMcpSignIn(tab.project.ifEmpty { null }, it) }, onHide = model::dismissMcpSignIn)
             // `border-t border-border bg-panel`, around the toolbar and the message box.
             Column(Modifier.fillMaxWidth().background(tokens.panel.color).line(top = true, tokens.border.color)) {
                 Column(Modifier.fillMaxWidth().line(top = false, tokens.border.opacity(0.5).color)) {

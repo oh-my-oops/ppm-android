@@ -43,6 +43,7 @@ import androidx.compose.foundation.text.BasicSecureTextField
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.KeyboardActionHandler
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
@@ -508,7 +509,7 @@ private val NumberCharacters = InputTransformation {
  * The web's `Input` (`rounded-lg border bg-surface px-3`, the border the accent while focused) at
  * [height]: 16/24 on a phone (globals.css), and `md:text-sm`, 14/20, from there; the API key's
  * `font-mono` with its text hidden as a password field hides it. Selected text sits on the accent
- * (`selection:bg-primary`).
+ * (`selection:bg-primary`). [onSubmit] is a form's: the keyboard's Go and Enter run it.
  */
 @Composable
 fun FormInput(
@@ -519,6 +520,7 @@ fun FormInput(
     height: Dp = 28.dp,
     label: LabelTarget? = null,
     onFocusChanged: (Boolean) -> Unit = {},
+    onSubmit: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -584,8 +586,9 @@ fun FormInput(
                             else -> KeyboardType.Uri
                         },
                         autoCorrectEnabled = false,
-                        imeAction = ImeAction.Next,
+                        imeAction = if (onSubmit != null) ImeAction.Go else ImeAction.Next,
                     ),
+                    onKeyboardAction = onSubmit?.let { submit -> KeyboardActionHandler { submit() } },
                     inputTransformation = if (kind == InputKind.Url) null else NumberCharacters,
                     focusRequester = focus,
                     onFocusChanged = ::focusChanged,

@@ -1,27 +1,12 @@
 package com.hienlh.ppm.app.ui
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.displayCutout
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -37,11 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerHoverIcon
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -49,9 +30,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.chat.DiscMarker
 import com.hienlh.ppm.chat.MarkdownStyle
@@ -323,7 +301,15 @@ private fun CodexResetCreditButton(model: AppModel, account: CodexAccount, usage
             }
         }
     } else {
-        WebDialog("Use a free reset", onDismiss = { if (!busy) confirming = false }, content = body)
+        // `sm:max-w-sm`, and the class's `text-sm` brings its 20 px line, which tailwind-merge lets
+        // replace the title's own `leading-none`.
+        WebDialog(
+            "Use a free reset",
+            onDismiss = { if (!busy) confirming = false },
+            widest = 384.dp,
+            titleStyle = ppmText(14f, FontWeight.SemiBold, lineHeight = 20f),
+            content = body,
+        )
     }
 }
 
@@ -424,121 +410,5 @@ private fun ResetFact(text: String) {
     Row {
         DiscMarker(item, tokens.text2.color, Modifier.alignByBaseline())
         BasicText(text, Modifier.alignByBaseline().weight(1f), style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color))
-    }
-}
-
-/**
- * The web's `Button` at its default size with `min-h-11`: 44 tall, `rounded-md text-sm
- * font-medium`, either `default` (the accent, `px-3` around its icon, `gap-1.5`) or `outline`
- * (`px-4`), half-faded while a reset is out.
- */
-@Composable
-private fun DialogButton(
-    label: String,
-    primary: Boolean,
-    dark: Boolean,
-    enabled: Boolean,
-    modifier: Modifier,
-    icon: ProductIcon? = null,
-    spinning: Boolean = false,
-    onClick: () -> Unit,
-) {
-    val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(8.dp)
-    val hover = rememberHover(enabled = enabled)
-    val content = if (primary) tokens.accentFg.color else tokens.text.color
-    Row(
-        modifier
-            .height(44.dp)
-            .alpha(if (enabled) 1f else 0.5f)
-            .then(if (primary) Modifier else Modifier.ppmShadow(SHADOW_XS, shape))
-            .clip(shape)
-            .background(if (primary) tokens.accent.opacity(1 - 0.1 * hover.lit).color else outlineFill(tokens, dark, hover.lit.toDouble()))
-            .ppmClickable(
-                enabled = enabled,
-                pressedColor = if (primary) Color.Black.copy(alpha = 0.1f) else tokens.panel2.color,
-                shape = shape,
-                source = hover.source,
-                onClick = onClick,
-            )
-            .then(if (primary) Modifier else Modifier.cssBorder(outlineBorder(tokens, dark), shape))
-            .padding(horizontal = if (icon != null) 12.dp else 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
-    ) {
-        if (icon != null) PpmIcon(icon, 16.dp, content, spinning = spinning)
-        BasicText(label, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = content), maxLines = 1, softWrap = false)
-    }
-}
-
-/** CSS's `ease`, what tw-animate-css enters with. */
-internal val CssEase = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
-
-/**
- * The web's `Dialog` around `DialogContent className="sm:max-w-sm"` (shadcn): a 50% black
- * backdrop, a card at most 384 wide and 16 in from each side, `rounded-lg border bg-background
- * p-6 shadow-lg`, the title (`text-sm font-semibold`, clear of the close cross) 16 over
- * [content]. The caller's `text-sm` brings its 20 px line, which tailwind-merge lets replace the
- * title's own `leading-none`; and a bare `border` is Tailwind 4's `currentColor`, the text's
- * colour, as the web sets no default border colour. It fades in and grows from 95%; it goes at
- * once, as the web unmounts it.
- */
-@Composable
-private fun WebDialog(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
-    val tokens = LocalPpmTokens.current
-    if (closedByConnectionLost(onDismiss)) return
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        // The platform's own dim would fade on its own clock; the backdrop is drawn here.
-        val window = (LocalView.current.parent as? DialogWindowProvider)?.window
-        LaunchedEffect(window) { window?.setDimAmount(0f) }
-        val backdrop = remember { Animatable(0f) }
-        val card = remember { Animatable(0f) }
-        LaunchedEffect(Unit) { launch { backdrop.animateTo(1f, tween(150, easing = CssEase)) }; card.animateTo(1f, tween(200, easing = CssEase)) }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.5f * backdrop.value))
-                .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
-        ) {
-            // Centred where the page is, between the system bars, as the web's is in its viewport.
-            BoxWithConstraints(
-                Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout)),
-                contentAlignment = Alignment.Center,
-            ) {
-                val shape = RoundedCornerShape(12.dp)
-                Box(
-                    Modifier
-                        .width(minOf(maxWidth - 32.dp, 384.dp))
-                        .graphicsLayer {
-                            alpha = card.value
-                            scaleX = 0.95f + 0.05f * card.value
-                            scaleY = scaleX
-                        }
-                        .then(ShadowLg.fold(Modifier as Modifier) { m, s -> m.ppmShadow(s, shape) })
-                        .clip(shape)
-                        .background(tokens.bgSolid.color)
-                        // A tap on the card stays on it rather than reaching the backdrop.
-                        .pointerInput(Unit) { detectTapGestures {} }
-                        .cssBorder(tokens.text.color, shape),
-                ) {
-                    Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        BasicText(title, Modifier.padding(end = 32.dp), style = ppmText(14f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color))
-                        content()
-                    }
-                    // `absolute top-4 right-4 opacity-70 hover:opacity-100`, a 16 px cross.
-                    val hover = rememberHover()
-                    Box(
-                        Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 16.dp, end = 16.dp)
-                            .alpha(0.7f + 0.3f * hover.lit)
-                            .pointerHoverIcon(WebCursor.Pointer)
-                            .ppmClickable(pressedColor = Color.Transparent, source = hover.source, onClickLabel = "Close", onClick = onDismiss),
-                    ) {
-                        PpmIcon(ProductIcon.X, 16.dp, tokens.text.color)
-                    }
-                }
-            }
-        }
     }
 }

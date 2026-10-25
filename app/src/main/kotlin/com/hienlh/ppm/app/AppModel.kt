@@ -54,6 +54,8 @@ import com.hienlh.ppm.protocol.ChatReply
 import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.DraftAttachment
 import com.hienlh.ppm.protocol.FileMention
+import com.hienlh.ppm.protocol.McpServerName
+import com.hienlh.ppm.protocol.McpSignInDismissals
 import com.hienlh.ppm.protocol.PickedAccount
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.ProjectTags
@@ -85,6 +87,8 @@ import com.hienlh.ppm.state.HealthCheck
 import com.hienlh.ppm.state.HealthWatch
 import com.hienlh.ppm.state.HistoryList
 import com.hienlh.ppm.state.KeyBindings
+import com.hienlh.ppm.state.McpSignInBackend
+import com.hienlh.ppm.state.McpSignInFlow
 import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.NewChatCache
@@ -140,6 +144,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -280,6 +285,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** A panel's tabs wrap onto more rows rather than scroll (`tabWrap`), shared like [sidebarCollapsed]. */
     var tabWrap by mutableStateOf(false)
+        private set
+
+    /** The MCP servers whose sign-in bar was hidden (`mcpSignInDismissed`), shared like [sidebarCollapsed]. */
+    var mcpSignInDismissed by mutableStateOf<List<String>>(emptyList())
         private set
 
     /** The open server's OS (`/api/system/host`), kept per server so the first frame already knows it. */
@@ -431,6 +440,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** What that panel's box holds: one for the whole window, as the web mounts one panel. */
     val backgroundOutputShown = BackgroundOutput()
+
+    /** The MCP sign-in open over the app (`McpSignInDialog`), and the flow it drives. */
+    var mcpSignIn by mutableStateOf<McpSignIn?>(null)
+        private set
 
     /** What the command palette opened with while it is open; null while it is closed. */
     var paletteQuery by mutableStateOf<String?>(null)
@@ -671,6 +684,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                     prefs.keepScreenAwake?.let { keepScreenAwake = it }
                     prefs.explorerSkin?.let { explorerSkin = it }
                     prefs.tabWrap?.let { tabWrap = it }
+                    prefs.mcpSignInDismissed?.let { mcpSignInDismissed = it }
                     saveUiPrefs()
                 }
                 projects
@@ -712,10 +726,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         keepScreenAwake = saved.keepScreenAwake ?: true
         explorerSkin = saved.explorerSkin
         tabWrap = saved.tabWrap ?: false
+        mcpSignInDismissed = saved.mcpSignInDismissed ?: emptyList()
     }
 
     private fun saveUiPrefs() {
-        prefs.put("uiPrefs.$serverKey", UiPrefs(projectSortMode, projectOpenedAt, sidebarCollapsed, sidebarWidth, keepScreenAwake, explorerSkin, tabWrap).toJson().toString())
+        prefs.put("uiPrefs.$serverKey", UiPrefs(projectSortMode, projectOpenedAt, sidebarCollapsed, sidebarWidth, keepScreenAwake, explorerSkin, tabWrap, mcpSignInDismissed).toJson().toString())
     }
 
     private fun startEvents(api: ApiClient) {
@@ -1543,6 +1558,47 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     fun closeBackgroundOutput() {
         backgroundOutput = null
+    }
+
+    /**
+     * Signs in to [serverName] as a chat in [project] sees it: started at once and cancelled if the
+     * dialog closes first. A claude.ai connector is connected on claude.ai instead, with no flow.
+     */
+    fun openMcpSignIn(project: String?, serverName: String) {
+        val api = api ?: return
+        mcpSignIn?.flow?.close()
+        val flow = if (McpServerName.isClaudeAiConnector(serverName)) {
+            null
+        } else {
+            McpSignInFlow(serverName, McpSignInBackend.api(api, project), scope, onSignedIn = ::undismissMcpSignIn).also { it.start() }
+        }
+        mcpSignIn = McpSignIn(serverName, flow)
+    }
+
+    fun closeMcpSignIn() {
+        mcpSignIn?.flow?.close()
+        mcpSignIn = null
+    }
+
+    /** The sign-in bar's ×: [names] hidden in every chat until one of them is signed in to. */
+    fun dismissMcpSignIn(names: List<String>) {
+        storeMcpSignInDismissed(McpSignInDismissals.dismissing(names, mcpSignInDismissed))
+        toast = ErrorToastMessage(
+            "Sign-in bar hidden",
+            "You can still sign in to these MCP servers from AI Resources → MCP. The bar comes back only for a server that is not on this list.",
+            kind = ErrorToastMessage.Kind.INFO,
+        )
+    }
+
+    /** Signed in, so no longer a server the user chose to ignore: should it need a sign-in again, the bar says so. */
+    private fun undismissMcpSignIn(name: String) {
+        McpSignInDismissals.undismissing(name, mcpSignInDismissed)?.let(::storeMcpSignInDismissed)
+    }
+
+    private fun storeMcpSignInDismissed(names: List<String>) {
+        mcpSignInDismissed = names
+        saveUiPrefs()
+        putUiPref { put("mcpSignInDismissed", JsonArray(names.map(::JsonPrimitive))) }
     }
 
     /** `findByOutput`: the open chat tab and command a `.output` file name belongs to, across every chat. */
@@ -2712,3 +2768,6 @@ class LightboxRequest(val images: List<GalleryImage>, val index: Int)
 
 /** The command the output panel is open on, and the chat tab whose registry keeps its status. */
 data class BackgroundOutputRequest(val tabId: String, val shellId: String)
+
+/** The MCP server a sign-in is open on, and the flow that signs in to it — none for a claude.ai connector. */
+class McpSignIn(val serverName: String, val flow: McpSignInFlow?)

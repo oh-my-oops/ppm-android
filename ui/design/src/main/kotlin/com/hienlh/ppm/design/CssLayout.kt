@@ -3,6 +3,9 @@ package com.hienlh.ppm.design
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.AlignmentLine
+import androidx.compose.ui.layout.FirstBaseline
+import androidx.compose.ui.layout.LastBaseline
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.MeasureResult
@@ -200,22 +203,24 @@ private class CssExactNode(var exact: CssExact, var reads: Boolean) : Modifier.N
 /**
  * Text whose lines are [lineHeight] CSS pixels apart: a [CssColumn] counts it as its lines times
  * that, as Chrome does, rather than the whole pixels it measures. Held to [max] (`max-h-*`), it
- * counts as that once it reaches it.
+ * counts as that once it reaches it; a row whose other box is [min] tall, taller than one line,
+ * counts as that while it measures no taller.
  */
-fun Modifier.cssLines(lineHeight: Float, max: Dp = Dp.Unspecified): Modifier = this then CssLinesElement(lineHeight, max)
+fun Modifier.cssLines(lineHeight: Float, max: Dp = Dp.Unspecified, min: Dp = Dp.Unspecified): Modifier = this then CssLinesElement(lineHeight, max, min)
 
-private data class CssLinesElement(val lineHeight: Float, val max: Dp) : ModifierNodeElement<CssLinesNode>() {
-    override fun create() = CssLinesNode(lineHeight, max)
+private data class CssLinesElement(val lineHeight: Float, val max: Dp, val min: Dp) : ModifierNodeElement<CssLinesNode>() {
+    override fun create() = CssLinesNode(lineHeight, max, min)
 
     override fun update(node: CssLinesNode) {
-        if (node.lineHeight == lineHeight && node.max == max) return
+        if (node.lineHeight == lineHeight && node.max == max && node.min == min) return
         node.lineHeight = lineHeight
         node.max = max
+        node.min = min
         node.invalidateMeasurement()
     }
 }
 
-private class CssLinesNode(var lineHeight: Float, var max: Dp) : Modifier.Node(), LayoutModifierNode, ParentDataModifierNode {
+private class CssLinesNode(var lineHeight: Float, var max: Dp, var min: Dp) : Modifier.Node(), LayoutModifierNode, ParentDataModifierNode {
     private val exact = CssExact()
 
     override fun Density.modifyParentData(parentData: Any?): Any = exact
@@ -223,9 +228,61 @@ private class CssLinesNode(var lineHeight: Float, var max: Dp) : Modifier.Node()
     override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
         val placeable = measurable.measure(constraints)
         val line = lineHeight.sp.toPx()
-        exact.height = if (max.isSpecified && placeable.height >= max.roundToPx()) max.toPx() else max(1, (placeable.height / line).roundToInt()) * line
+        exact.height = when {
+            max.isSpecified && placeable.height >= max.roundToPx() -> max.toPx()
+            min.isSpecified && placeable.height <= min.roundToPx() -> min.toPx()
+            else -> max(1, (placeable.height / line).roundToInt()) * line
+        }
         exact.reported = placeable.height
         return layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
+}
+
+/**
+ * Text set [lineHeight] CSS pixels a line in a [fontSize] px font, laid out as Chrome lays it out
+ * even where the line is shorter than the font (`leading-none`): Compose closes such lines up but
+ * pads the text so no glyph is cut, which leaves the box the font's height — an 18 px title 23.5
+ * px tall, and everything under it 5.5 px low. This box is its lines' height, its first baseline
+ * where Chrome puts it ([PpmFonts.chromeBelowBaseline]), the glyphs reaching out of it as there;
+ * a [CssColumn] counts it at that height exactly.
+ */
+fun Modifier.cssTightLines(fontSize: Float, lineHeight: Float, kind: FontKind = FontKind.SANS): Modifier =
+    this then CssTightLinesElement(fontSize, lineHeight, kind)
+
+private data class CssTightLinesElement(val fontSize: Float, val lineHeight: Float, val kind: FontKind) : ModifierNodeElement<CssTightLinesNode>() {
+    override fun create() = CssTightLinesNode(fontSize, lineHeight, kind)
+
+    override fun update(node: CssTightLinesNode) {
+        if (node.fontSize == fontSize && node.lineHeight == lineHeight && node.kind == kind) return
+        node.fontSize = fontSize
+        node.lineHeight = lineHeight
+        node.kind = kind
+        node.invalidateMeasurement()
+    }
+}
+
+private class CssTightLinesNode(var fontSize: Float, var lineHeight: Float, var kind: FontKind) : Modifier.Node(), LayoutModifierNode, ParentDataModifierNode {
+    private val exact = CssExact()
+
+    override fun Density.modifyParentData(parentData: Any?): Any = exact
+
+    override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
+        val placeable = measurable.measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+        val line = lineHeight.sp.toPx()
+        val first = placeable[FirstBaseline]
+        val known = first != AlignmentLine.Unspecified
+        val lines = if (known) ((placeable[LastBaseline] - first) / line).roundToInt() + 1 else 1
+        val sans = kind == FontKind.SANS
+        val below = PpmFonts.chromeBelowBaseline(
+            fontSize.sp.toPx(),
+            line,
+            if (sans) PpmFonts.SANS_ASCENT else PpmFonts.MONO_ASCENT,
+            if (sans) PpmFonts.SANS_DESCENT else PpmFonts.MONO_DESCENT,
+        )
+        exact.height = lines * line
+        val height = exact.height.roundToInt().coerceIn(constraints.minHeight, constraints.maxHeight)
+        exact.reported = height
+        return layout(placeable.width, height) { placeable.place(0, if (known) (line - below - first).roundToInt() else 0) }
     }
 }
 

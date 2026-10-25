@@ -51,6 +51,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -180,6 +181,8 @@ fun PpmRoot(model: AppModel) {
                 model.agentSheet?.let { AgentSessionSheet(model, it) }
                 model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }
                 model.backgroundOutput?.let { BackgroundOutputPanel(model, it) }
+                // A new sheet for each sign-in, as the web mounts a new body per server.
+                model.mcpSignIn?.let { key(it) { McpSignInPanel(model, it) } }
                 model.lightbox?.let { request ->
                     ImageLightbox(request, onClose = { model.lightbox = null }, onDownload = download, onCopy = { copyImage(context, clipboard, it) })
                 }
