@@ -18,6 +18,7 @@ import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.TurnSnapshot
 import com.hienlh.ppm.protocol.TurnStop
 import com.hienlh.ppm.protocol.TurnUsage
+import com.hienlh.ppm.protocol.VersionGroup
 import kotlinx.serialization.json.JsonElement
 import java.time.Instant
 
@@ -100,6 +101,18 @@ class ChatTranscript {
     var historyStart = 0
         private set
     var hasLoadedHistory = false
+        private set
+
+    /** The user messages above [historyStart] (`userOrdinalOffset`), so that a window numbers its own as the whole transcript would. */
+    var userOrdinalOffset = 0
+        private set
+
+    /** What a fork or edit of the first loaded message continues from, when that is not loaded (`historyPredecessorId`). */
+    var historyPredecessorId: String? = null
+        private set
+
+    /** The edited versions in this session's tree, by user-message ordinal (`versionMap`). */
+    var versionMap: Map<Int, VersionGroup> = emptyMap()
         private set
 
     // Live frames must arrive contiguous. A gap, or a ping counting past what arrived, asks the
@@ -264,7 +277,9 @@ class ChatTranscript {
     fun applyHistory(page: HistoryPage, requestedAt: Int, now: Long = System.currentTimeMillis()): Boolean {
         if (requestedAt != activity) return false
         items = page.messages.mapNotNull(ChatItem::fromHistory)
-        historyStart = page.start
+        // Kept when the server sends none, as the web keeps it.
+        page.versionMap?.let { versionMap = it }
+        applyWindow(page)
         historyLoadedAt = now
         hasLoadedHistory = true
         if (!phase.isRunning) live = null
@@ -276,7 +291,14 @@ class ChatTranscript {
         if (before != historyStart) return
         val have = items.mapTo(HashSet()) { it.id }
         items = page.messages.mapNotNull(ChatItem::fromHistory).filterNot { it.id in have } + items
+        applyWindow(page)
+    }
+
+    /** `applyHistoryWindow`: where [page] starts, and what goes with that. */
+    private fun applyWindow(page: HistoryPage) {
         historyStart = page.start
+        userOrdinalOffset = page.userOrdinalOffset
+        historyPredecessorId = if (page.start > 0) page.predecessorId else null
     }
 
     // Before compactions

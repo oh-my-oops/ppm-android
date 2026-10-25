@@ -18,6 +18,7 @@ import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.protocol.TaskItem
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.TurnStop
+import com.hienlh.ppm.protocol.VersionGroup
 import com.hienlh.ppm.protocol.WireJson
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -57,6 +58,12 @@ data class ChatState(
     val rejected: RejectedSend? = null,
     val historyStart: Int = 0,
     val hasLoadedHistory: Boolean = false,
+    /** What [ChatTranscript.userOrdinalOffset] holds. */
+    val userOrdinalOffset: Int = 0,
+    /** What [ChatTranscript.historyPredecessorId] holds. */
+    val historyPredecessorId: String? = null,
+    /** The edited versions in this session's tree, by user-message ordinal. */
+    val versionMap: Map<Int, VersionGroup> = emptyMap(),
     val connection: ChatController.Connection = ChatController.Connection.Connecting,
     val historyError: String? = null,
     /** Something above what is shown can still be loaded: an older page, or the conversation before a compaction. */
@@ -580,6 +587,9 @@ class ChatController(
             rejected = transcript.rejected,
             historyStart = transcript.historyStart,
             hasLoadedHistory = transcript.hasLoadedHistory,
+            userOrdinalOffset = transcript.userOrdinalOffset,
+            historyPredecessorId = transcript.historyPredecessorId,
+            versionMap = transcript.versionMap,
             connection = connection,
             historyError = historyError,
             hasEarlier = transcript.historyStart > 0 || transcript.unexpandedCompact != null,

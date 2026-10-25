@@ -353,6 +353,12 @@ data class HistoryPage(
     val total: Int,
     /** Set when the transcript belongs to another id now: read and continue under that one. */
     val canonicalSessionId: String?,
+    /** The user messages shown before [start], so that a window numbers its own as the whole transcript would. */
+    val userOrdinalOffset: Int = 0,
+    /** What a fork or edit of the first message continues from: the nearest earlier message shown, which is not in the page. */
+    val predecessorId: String? = null,
+    /** The edited versions in this session's tree, by user-message ordinal; null when the server sent none. */
+    val versionMap: Map<Int, VersionGroup>? = null,
 ) {
     companion object {
         fun from(json: JsonElement): HistoryPage? {
@@ -363,7 +369,22 @@ data class HistoryPage(
                 start = json["start"].int ?: 0,
                 total = json["total"].int ?: messages.size,
                 canonicalSessionId = json["canonicalSessionId"].string,
+                userOrdinalOffset = json["userOrdinalOffset"].int ?: 0,
+                predecessorId = json["predecessorId"].string,
+                versionMap = json["versionMap"].obj?.let { map ->
+                    buildMap { for ((key, value) in map) VersionGroup.from(value)?.let { group -> key.toIntOrNull()?.let { put(it, group) } } }
+                },
             )
+        }
+    }
+}
+
+/** The versions of one user message (`VersionGroup`): the sessions that hold one each, the original first, and which is shown. */
+data class VersionGroup(val ids: List<String>, val currentIndex: Int) {
+    companion object {
+        fun from(json: JsonElement): VersionGroup? {
+            val ids = json["ids"].array?.mapNotNull { it.string } ?: return null
+            return VersionGroup(ids, json["currentIndex"].int ?: 0)
         }
     }
 }

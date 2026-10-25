@@ -122,6 +122,19 @@ class ApiClient(val baseUrl: HttpUrl, val token: String) {
         return SessionInfo.from(json) ?: throw PpmError.BadResponse("Unexpected session.")
     }
 
+    /**
+     * `POST …/sessions/:id/fork`: a new session holding [sessionId]'s messages up to and including
+     * [messageId], or an empty one without it. With [edit] it is another version of the same
+     * conversation, kept under the original's title; otherwise a thread of its own.
+     */
+    suspend fun forkSession(project: String, sessionId: String, providerId: String, messageId: String?, edit: Boolean): SessionInfo {
+        val query = mutableListOf("providerId" to providerId)
+        if (edit) query += "mode" to "edit"
+        val body = buildJsonObject { if (messageId != null) put("messageId", messageId) }
+        val json = call("POST", "${chatPath(project)}/sessions/${escape(sessionId)}/fork", query, body)
+        return SessionInfo.from(json) ?: throw PpmError.BadResponse("Unexpected session.")
+    }
+
     /** The newest [limit] messages (aligned to a turn start), the ones [before] an index, or everything [from] an index on. */
     suspend fun history(
         project: String,

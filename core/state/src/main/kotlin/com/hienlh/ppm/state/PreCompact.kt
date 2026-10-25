@@ -26,4 +26,7 @@ internal object PreCompact {
 
     /** The id the server knows a shown message by: without the prefix its segment's ids carry. */
     fun rawId(id: String): String = id.replaceFirst(PREFIX, "")
+
+    /** Whether a shown message was loaded from before a compaction, by the prefix its id carries. */
+    fun isExpanded(id: String): Boolean = PREFIX.containsMatchIn(id)
 }
