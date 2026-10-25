@@ -375,7 +375,7 @@ private fun SquareIconButton(icon: ProductIcon, iconSize: Dp, size: Dp, radius: 
  * clockwise, three widths on and about two off, the gap stretched so a whole number of dashes
  * goes round (`StrokeData::SelectBestDashGap`). The pattern runs on through the corners.
  */
-private fun Modifier.editCardBorder(color: Color, radius: Dp, dashed: Boolean): Modifier =
+internal fun Modifier.editCardBorder(color: Color, radius: Dp, dashed: Boolean): Modifier =
     // The dashes are drawn over the whole box, then the border's room is taken inside it.
     if (!dashed) cssBorder(color, RoundedCornerShape(radius)) else drawWithCache {
         val w = cssBorderPx(1.dp).toFloat()
