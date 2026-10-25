@@ -81,6 +81,7 @@ import com.hienlh.ppm.app.LightboxRequest
 import com.hienlh.ppm.app.leavesTextOnTap
 import com.hienlh.ppm.app.ui.tablet.TabletShell
 import com.hienlh.ppm.design.ImageViewer
+import com.hienlh.ppm.design.LocalIconFramework
 import com.hienlh.ppm.design.LocalImageViewer
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
@@ -152,7 +153,7 @@ fun PpmRoot(model: AppModel) {
         // The layout follows the window, not the device: a rotation or a split screen can cross it.
         SideEffect { model.setWindowWide(!mobile) }
         val viewer = remember(model) { ImageViewer { images, index -> model.lightbox = LightboxRequest(images, index) } }
-        CompositionLocalProvider(LocalConnectionLost provides model.connectionLost, LocalImageViewer provides viewer) {
+        CompositionLocalProvider(LocalConnectionLost provides model.connectionLost, LocalImageViewer provides viewer, LocalIconFramework provides model.iconFramework) {
             PpmThemeProvider(theme, mobile) {
                 // Chrome's own word on a download, which the web leaves to the browser.
                 val download = rememberImageDownload { saved ->

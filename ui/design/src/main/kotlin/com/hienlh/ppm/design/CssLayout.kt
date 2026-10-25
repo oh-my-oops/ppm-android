@@ -146,18 +146,25 @@ fun CssColumn(
  * edges round to. Two columns sharing 871 px end the first on 435.5, so Chrome gives that one the
  * odd pixel where a weighted Row gives it to the last. It fills the width it is given, which must
  * be bounded; children are as tall as they measure, at the top.
+ *
+ * With [bases] the children are `flex-1` items instead, each starting from its base — the borders
+ * and paddings a `border-box` item keeps at `flex-basis: 0%` — and given an equal share of what is
+ * left: a bordered button beside a borderless one is its borders wider.
  */
 @Composable
-fun CssGridRow(modifier: Modifier = Modifier, gap: Dp = 0.dp, content: @Composable () -> Unit) {
+fun CssGridRow(modifier: Modifier = Modifier, gap: Dp = 0.dp, bases: List<Dp> = emptyList(), content: @Composable () -> Unit) {
     Layout(content, modifier) { measurables, constraints ->
         val width = constraints.maxWidth
         val gapPx = gap.toPx()
-        val track = (width - gapPx * (measurables.size - 1)) / measurables.size
+        val base = FloatArray(measurables.size) { bases.getOrNull(it)?.toPx() ?: 0f }
+        val track = (width - gapPx * (measurables.size - 1) - base.sum()) / measurables.size
         val lefts = IntArray(measurables.size)
+        var at = 0f
         val placeables = measurables.mapIndexed { index, measurable ->
-            val at = index * (track + gapPx)
+            val end = at + base[index] + track
             lefts[index] = at.roundToInt()
-            val columnWidth = max(0, (at + track).roundToInt() - lefts[index])
+            val columnWidth = max(0, end.roundToInt() - lefts[index])
+            at = end + gapPx
             measurable.measure(Constraints(columnWidth, columnWidth, 0, constraints.maxHeight))
         }
         val height = (placeables.maxOfOrNull { it.height } ?: 0).coerceIn(constraints.minHeight, constraints.maxHeight)

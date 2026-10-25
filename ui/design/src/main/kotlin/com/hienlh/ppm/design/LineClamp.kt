@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
@@ -131,6 +132,37 @@ fun TruncatedText(
     )
 }
 
+/**
+ * `StartEllipsis` (`<span dir="rtl" class="truncate text-left"><bdi>…</bdi></span>`): one line
+ * that, when it does not fit, loses its start behind the "…" rather than its end, so the end of a
+ * path — the part that differs — stays in view. As Chrome draws it: a right-to-left line that
+ * overflows starts at its right edge, so what is kept sits flush right with the "…" just before
+ * it; a line that fits sits on the left. Give it the width to fill.
+ */
+@Composable
+fun StartTruncatedText(text: String, style: TextStyle, modifier: Modifier = Modifier) {
+    val measurer = rememberTextMeasurer()
+    val ellipsis = remember(measurer, style) { measurer.measure("…", style, maxLines = 1) }
+    var cut by remember { mutableStateOf<LineClamp.StartCut?>(null) }
+    BasicText(
+        text,
+        modifier.drawWithContent {
+            val at = cut
+            if (at == null) {
+                drawContent()
+            } else {
+                clipRect(left = at.x) { translate(left = -at.shift) { this@drawWithContent.drawContent() } }
+                drawText(ellipsis, topLeft = Offset(at.x - ellipsis.getLineRight(0), at.baseline - ellipsis.firstBaseline))
+            }
+        },
+        style,
+        onTextLayout = { layout -> cut = LineClamp.truncateStart(layout, ellipsis.getLineRight(0)) },
+        overflow = TextOverflow.Visible,
+        softWrap = false,
+        maxLines = 1,
+    )
+}
+
 internal object LineClamp {
     /** The "…" goes at [x] on the last line shown, whose top is [top]; the text after [x] is hidden. */
     data class Cut(val x: Float, val top: Float, val baseline: Float)
@@ -164,6 +196,30 @@ internal object LineClamp {
         val right = { k: Int -> layout.getBoundingBox(k - 1).right }
         val kept = keep(0, end, width, ellipsis, right, characters::preceding, characters::following)
         return Cut(x = if (kept > 0) right(kept) else layout.getLineLeft(0), top = layout.getLineTop(0), baseline = layout.getLineBaseline(0))
+    }
+
+    /** A start-truncated line: drawn [shift] to the left, the text before [x] hidden behind the "…". */
+    data class StartCut(val shift: Float, val x: Float, val baseline: Float)
+
+    /**
+     * Where a start-truncated line is cut for an [ellipsis] that wide; null when it fits. The fewest
+     * characters go from its start that leave the rest room after the "…", one character kept at least.
+     */
+    fun truncateStart(layout: TextLayoutResult, ellipsis: Float): StartCut? {
+        val width = layout.layoutInput.constraints.maxWidth.toFloat()
+        val end = layout.getLineEnd(0, visibleEnd = true)
+        if (end == 0) return null
+        val total = layout.getBoundingBox(end - 1).right
+        if (total <= width) return null
+        val characters = BreakIterator.getCharacterInstance().apply { setText(layout.layoutInput.text.text) }
+        var k = 0
+        while (total - layout.getBoundingBox(k).left + ellipsis > width) {
+            val next = characters.following(k)
+            if (next == BreakIterator.DONE || next >= end) break
+            k = next
+        }
+        val shift = total - width
+        return StartCut(shift, layout.getBoundingBox(k).left - shift, layout.getLineBaseline(0))
     }
 
     /**

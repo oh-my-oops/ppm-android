@@ -93,3 +93,7 @@ suspend fun ApiClient.fsStat(path: String): FsStat {
 
 /** `GET /api/fs/read`: a text file anywhere on the host, as the background output panel reads a command's `.output`. */
 suspend fun ApiClient.fsRead(path: String): String = call("GET", "/api/fs/read", listOf("path" to path))["content"].string.orEmpty()
+
+/** `GET /api/project/:name/files/read`: a text file inside [project], as the web reads `package.json` for its icons. */
+suspend fun ApiClient.readProjectFile(project: String, path: String): String =
+    call("GET", "/api/project/${ApiClient.escape(project)}/files/read", listOf("path" to path))["content"].string.orEmpty()

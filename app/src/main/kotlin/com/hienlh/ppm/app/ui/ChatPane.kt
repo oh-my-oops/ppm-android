@@ -24,12 +24,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -76,6 +78,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -118,6 +121,7 @@ import com.hienlh.ppm.chat.MarkdownImages
 import com.hienlh.ppm.chat.McpSignInBar
 import com.hienlh.ppm.chat.RelativeTime
 import com.hienlh.ppm.chat.RunningAgentsBar
+import com.hienlh.ppm.chat.SessionChangesBar
 import com.hienlh.ppm.chat.TeamActivityPanel
 import com.hienlh.ppm.chat.ToolImages
 import com.hienlh.ppm.chat.TurnStopBar
@@ -146,7 +150,9 @@ import com.hienlh.ppm.state.AgentActivityWatch
 import com.hienlh.ppm.state.AgentSessionIdentity
 import com.hienlh.ppm.state.AgentSessionPayload
 import com.hienlh.ppm.state.ChatController
+import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.ChatState
+import com.hienlh.ppm.state.SessionChanges
 import com.hienlh.ppm.state.HistoryList
 import com.hienlh.ppm.state.UsageCache
 import com.hienlh.ppm.state.UsageReader
@@ -344,17 +350,20 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     )
                 }
             }
+            val itemsWithLive = remember(state.items, state.live, state.liveStartedAt) { state.itemsWithLive() }
             // Agents still working: the last thing under the conversation.
             RunningAgentsBar(
                 runningAgents,
                 teamMembers,
-                remember(state.items, state.live, state.liveStartedAt) { state.itemsWithLive() },
+                itemsWithLive,
                 onOpen = { model.openAgentSession(it.payload(agentIdentity, primaryTeam.orEmpty()), null) },
             )
             val stop = state.turnStop
             if (stop != null && !state.isRunning) TurnStopBar(stop, onContinue = { chat.send(CONTINUE_AFTER_STOP) })
             // MCP servers this session cannot use until someone signs in.
             McpSignInBar(state.mcpNeedsAuth, model.mcpSignInDismissed, onSignIn = { model.openMcpSignIn(tab.project.ifEmpty { null }, it) }, onHide = model::dismissMcpSignIn)
+            // Every file this session has changed, across all its turns.
+            tab.sessionChanges?.let { changes -> SessionChangesSection(model, tab, state, changes, itemsWithLive, narrow) }
             // `border-t border-border bg-panel`, around the toolbar and the message box.
             Column(Modifier.fillMaxWidth().background(tokens.panel.color).line(top = true, tokens.border.color)) {
                 Column(Modifier.fillMaxWidth().line(top = false, tokens.border.opacity(0.5).color)) {
@@ -1074,4 +1083,41 @@ fun InlineRename(model: AppModel, session: SessionInfo, field: RenameField, modi
         RowIcon(ProductIcon.Check, tokens.success, tokens.success.opacity(0.8)) { finish(save = true) }
         RowIcon(ProductIcon.X, tokens.text3, tokens.text2) { finish(save = false) }
     }
+}
+
+/**
+ * The changes bar wired to [tab]'s session (`useSessionFileChanges` + `SessionChangesBar`): the
+ * list asked for again whenever the transcript says a file may have moved, its rows opening the
+ * session's Review tab, and on a phone its sheet up to 85% of the page.
+ */
+@Composable
+private fun SessionChangesSection(model: AppModel, tab: ChatTab, state: ChatState, changes: SessionChanges, items: List<ChatItem>, narrow: Boolean) {
+    val running = state.isRunning
+    LaunchedEffect(changes, items, running) {
+        val (paths, settled) = tab.sessionWrites.of(items)
+        changes.update(paths, settled, running)
+    }
+    val files by changes.files.collectAsState()
+    // `max-h-[85%]` of the sheet's frame (`fixed inset-0`), which is the app's area: the sheet's
+    // window under the status bar.
+    val statusBar = WindowInsets.statusBars.getTop(LocalDensity.current)
+    val sheetMax = Modifier.layout { measurable, constraints ->
+        val max = ((constraints.maxHeight - statusBar) * 0.85f).toInt().coerceIn(constraints.minHeight, constraints.maxHeight)
+        val placeable = measurable.measure(constraints.copy(maxHeight = max))
+        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
+    SessionChangesBar(
+        files,
+        projectPath = model.projects.firstOrNull { it.name == tab.project }?.path,
+        providerId = tab.providerId,
+        narrow = narrow,
+        onReview = { path ->
+            tab.session?.let { model.openSessionReview(tab.project, it.id, state.title, tab.providerId, changes.paths, path) }
+        },
+        onOpen = changes::refresh,
+        onSetReviewed = changes::setReviewed,
+        sheet = { dismiss, content ->
+            BottomSheet(dismiss, sheetMax) { content(LocalSheetContentTop.current) }
+        },
+    )
 }

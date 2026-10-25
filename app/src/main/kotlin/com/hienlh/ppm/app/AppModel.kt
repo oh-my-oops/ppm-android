@@ -34,6 +34,7 @@ import com.hienlh.ppm.client.keybindings
 import com.hienlh.ppm.client.projectImage
 import com.hienlh.ppm.client.fsStat
 import com.hienlh.ppm.client.rawFile
+import com.hienlh.ppm.client.readProjectFile
 import com.hienlh.ppm.client.uploadedFile
 import com.hienlh.ppm.client.putUiPrefs
 import com.hienlh.ppm.client.renameSession
@@ -46,6 +47,7 @@ import com.hienlh.ppm.client.uiPrefs
 import com.hienlh.ppm.client.updateTag
 import com.hienlh.ppm.client.webFile
 import com.hienlh.ppm.design.GalleryImage
+import com.hienlh.ppm.design.IconFramework
 import com.hienlh.ppm.design.PpmTheme
 import com.hienlh.ppm.design.ViewerImage
 import com.hienlh.ppm.protocol.ChatDraft
@@ -97,6 +99,9 @@ import com.hienlh.ppm.state.agentSessionOpening
 import com.hienlh.ppm.state.workspace.NewChatDefaults
 import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.RejectedSend
+import com.hienlh.ppm.state.SessionChanges
+import com.hienlh.ppm.state.SessionChangesBackend
+import com.hienlh.ppm.state.SessionWrites
 import com.hienlh.ppm.state.messageWithAttachments
 import com.hienlh.ppm.state.SlashItemsStore
 import com.hienlh.ppm.state.UsageCache
@@ -142,6 +147,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.plus
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -205,6 +211,12 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         private set
     var selectedProject by mutableStateOf<String?>(null)
         private set
+
+    /** The open project's file-naming framework, which file icons resolve `*.module.ts` by (`project-framework-store.ts`). */
+    var iconFramework by mutableStateOf<IconFramework?>(null)
+        private set
+    private val iconFrameworks = HashMap<String, IconFramework?>()
+    private var iconFrameworkFor: String? = null
 
     var sessions by mutableStateOf(emptyList<SessionInfo>())
         private set
@@ -553,6 +565,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         projects = emptyList()
         projectsLoad = Load.Idle
         selectedProject = null
+        iconFrameworkFor = null
+        iconFramework = null
         gitBranches.clear()
         keyBindings = KeyBindings()
         health = HealthWatch()
@@ -1146,6 +1160,36 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         }
     }
 
+    /**
+     * `openSessionReview`: the session's Review tab, on [selectPath] when one was picked. Asked
+     * again, the tab already open takes the newer [paths] and selects that file once more.
+     */
+    fun openSessionReview(project: String, sessionId: String, title: String?, providerId: String?, paths: List<String>, selectPath: String?) {
+        val patch = arrayOf<Pair<String, JsonElement?>>(
+            "paths" to JsonArray(paths.map(::JsonPrimitive)),
+            // The header links back to the chat by its name, which can change after the tab opened.
+            *(if (!title.isNullOrEmpty()) arrayOf<Pair<String, JsonElement?>>("chatTitle" to JsonPrimitive(title)) else emptyArray()),
+            // A new object each time: asking for the same file again must still select it.
+            "select" to selectPath?.let { buildJsonObject { put("path", it); put("at", System.currentTimeMillis()) } },
+        )
+        withWorkspace { store ->
+            val id = store.openTab(
+                NewTab(
+                    type = "session-review",
+                    title = if (!title.isNullOrEmpty()) "Changes: $title" else "Session changes",
+                    projectId = project,
+                    metadata = buildJsonObject {
+                        put("projectName", project)
+                        put("sessionId", sessionId)
+                        providerId?.let { put("providerId", it) }
+                        for ((key, value) in patch) if (value != null) put(key, value)
+                    },
+                ),
+            )
+            if (id.isNotEmpty()) patchTabMetadata(id, *patch)
+        }
+    }
+
     /** An edit's change in a diff tab of its own (`openEditDiff`). */
     fun openDiffTab(project: String, path: String, original: String, modified: String) {
         withWorkspace { store ->
@@ -1203,6 +1247,31 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         }
     }
 
+    /**
+     * Reads [project]'s `package.json` once per server for the icons' framework; neither overlay
+     * until the answer lands, rather than the previous project's.
+     */
+    private fun detectIconFramework(api: ApiClient, project: String) {
+        val key = "$serverKey\u0000$project"
+        iconFrameworkFor = key
+        if (key in iconFrameworks) {
+            iconFramework = iconFrameworks[key]
+            return
+        }
+        iconFramework = null
+        scope.launch {
+            val framework = try {
+                IconFramework.of(api.readProjectFile(project, "package.json"))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+            iconFrameworks[key] = framework
+            if (iconFrameworkFor == key) iconFramework = framework
+        }
+    }
+
     /** Opens [name]; [then] runs on its tabs once they are shown, or at once when it is already open. */
     suspend fun openProject(name: String, then: ((WorkspaceStore) -> Unit)? = null) {
         val api = api ?: return
@@ -1211,6 +1280,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             return
         }
         selectedProject = name
+        detectIconFramework(api, name)
         waitingForWorkspace.clear()
         then?.let { waitingForWorkspace += it }
         events?.project = name
@@ -2378,6 +2448,33 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     val hasContent: Boolean
         get() = draft.text.isNotBlank() || attachments.any { it.status != ComposerAttachment.Status.ERROR } || agent != null
 
+    /**
+     * Every file its session has changed (`useSessionFileChanges`), which the changes bar and each
+     * turn's tray share; null while it has no session.
+     */
+    var sessionChanges by mutableStateOf<SessionChanges?>(null)
+        private set
+
+    /** What its transcript's tools wrote, worked out again only for the messages that changed. */
+    val sessionWrites = SessionWrites()
+    private var changesApi: ApiClient? = null
+    private var changesScope: CoroutineScope? = null
+    private var changesJob: Job? = null
+
+    /** A list for the session it is on now: one asked for under another is never shown under this. */
+    private fun watchChanges() {
+        changesJob?.cancel()
+        val api = changesApi
+        val scope = changesScope
+        val id = session?.id
+        if (api == null || scope == null || id == null || project.isEmpty()) {
+            sessionChanges = null
+            return
+        }
+        val job = SupervisorJob(scope.coroutineContext[Job]).also { changesJob = it }
+        sessionChanges = SessionChanges(SessionChangesBackend.api(api, project, id), scope + job)
+    }
+
     /** The box's unsent message, kept on this device and on the server (`useDraft`); from [start] on. */
     private var drafts: DraftSync? = null
     private var draftLoad: Job? = null
@@ -2656,6 +2753,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         firstQueued = true
         drafts?.moveTo(session.id)
         controller?.adopt(session)
+        watchChanges()
     }
 
     /** Before its session the tab may change provider (`setProviderId`), and the chat follows. */
@@ -2723,6 +2821,9 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         historyList = HistoryList(api, project, scope)
         welcomeList = HistoryList(api, project, scope)
         controller = ChatController(api, project, session, scope, providerId = providerId).also { it.start() }
+        changesApi = api
+        changesScope = scope
+        watchChanges()
         val drafts = DraftSync(api, project, tabId, session?.id ?: DraftSync.NEW_CHAT, draftStore, scope).also { drafts = it }
         draftLoad = scope.launch {
             // Past the gate a draft still goes in when it comes, into a box left empty.
@@ -2746,6 +2847,8 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         drafts?.flush()
         controller?.stop()
         controller = null
+        changesJob?.cancel()
+        sessionChanges = null
     }
 }
 
