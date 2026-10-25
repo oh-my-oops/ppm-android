@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.vector.ImageVector
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.runningSessions
 import com.hienlh.ppm.app.ui.tabTitle
@@ -60,6 +61,7 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeTokens
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.vector
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.windows.WindowKind
@@ -241,7 +243,7 @@ internal enum class TileSize(val box: Dp, val radius: Dp, val glyph: Dp) {
  */
 @Composable
 internal fun WindowTile(
-    icon: ProductIcon,
+    icon: ImageVector,
     tone: Rgba,
     size: TileSize,
     modifier: Modifier = Modifier,
@@ -388,7 +390,7 @@ internal fun WindowTitleText(title: String, subtitle: String?, busy: Boolean, fo
 internal class WindowMeta(
     /** The hosted tab's live title, when there is one; [windowTitle] otherwise. */
     val title: String?,
-    val icon: ProductIcon,
+    val icon: ImageVector,
     val tone: Rgba,
     val subtitle: String?,
     /** The kind in words, for the dock's window list. */
@@ -424,7 +426,7 @@ private val TAB_LABELS = mapOf(
 @Composable
 internal fun windowMeta(model: AppModel, win: WindowRuntimeState): WindowMeta {
     val tokens = LocalPpmTokens.current
-    fun kind(icon: ProductIcon, tone: Rgba, label: String) = WindowMeta(null, icon, tone, null, label, busy = false)
+    fun kind(icon: ProductIcon, tone: Rgba, label: String) = WindowMeta(null, icon.vector, tone, null, label, busy = false)
     return when (win.kind) {
         WindowKind.Explorer -> kind(ProductIcon.FolderOpen, tokens.info, "Explorer")
         WindowKind.AgentSession -> kind(ProductIcon.Users, tokens.accent2, "Agent")
@@ -433,7 +435,7 @@ internal fun windowMeta(model: AppModel, win: WindowRuntimeState): WindowMeta {
         WindowKind.Settings -> kind(ProductIcon.Settings, tokens.text3, "Settings")
         WindowKind.Logs -> kind(ProductIcon.ScrollText, tokens.text2, "Logs")
         WindowKind.TabHost -> {
-            val tab = hostedTab(model, win.id) ?: return kind(tabTypeIcon("editor"), tokens.accent, "Tab")
+            val tab = hostedTab(model, win.id) ?: return WindowMeta(null, tabTypeIcon("editor"), tokens.accent, null, "Tab", busy = false)
             val label = TAB_LABELS[tab.type] ?: "Tab"
             val design = tab.type == "design"
             val sessionId = tabSessionId(tab)

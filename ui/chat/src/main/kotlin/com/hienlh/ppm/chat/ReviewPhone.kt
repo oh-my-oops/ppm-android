@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,6 +40,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -45,6 +48,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FileIcon
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -53,6 +58,10 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.TruncatedText
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssBorderPx
+import com.hienlh.ppm.design.cssFlex
+import com.hienlh.ppm.design.cssHeight
+import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.SessionFileChange
@@ -88,14 +97,14 @@ fun ReviewPhone(review: SessionReview, ctx: ReviewTabContext, modifier: Modifier
     val code = rememberReviewCodeState((state.pane as? ReviewPane.Blocks)?.review?.path.orEmpty())
     val undoToast = { state.toast?.let { toast -> toast.undoId?.let { review.undo(it, toast.focus) } }; Unit }
 
-    // `flex h-full flex-col overflow-hidden bg-bg`.
-    Column(modifier.fillMaxSize().background(tokens.bgSolid.color).clipToBounds()) {
+    // `flex h-full flex-col overflow-hidden bg-bg`, its rows stacked at their fractional heights.
+    CssColumn(modifier.fillMaxSize().background(tokens.bgSolid.color).clipToBounds()) {
         PhoneHeader(decided, progress.total) { sheet = PhoneSheet.FILES }
         ProgressLine(decided, progress.total)
         state.error?.let { ReviewErrorStrip(it) }
         if (focused != null) {
             PhoneFileHeader(state, focused, ctx) { sheet = PhoneSheet.ACTIONS }
-            Box(Modifier.weight(1f).fillMaxWidth()) {
+            Box(Modifier.cssFlex().fillMaxWidth().fillMaxHeight()) {
                 ReviewPaneBody(
                     state = state,
                     compact = true,
@@ -112,7 +121,7 @@ fun ReviewPhone(review: SessionReview, ctx: ReviewTabContext, modifier: Modifier
             }
             PhoneBottomBar(state, review) { sheet = PhoneSheet.CONFIRM }
         } else {
-            Box(Modifier.weight(1f).fillMaxWidth()) {
+            Box(Modifier.cssFlex().fillMaxWidth().fillMaxHeight()) {
                 ReviewEmpty(
                     loading = state.files == null || (progress.open > 0 && state.focus == null),
                     files = state.reviews.size,
@@ -168,8 +177,8 @@ private fun PhoneHeader(decided: Int, total: Int, onFiles: () -> Unit) {
     val tokens = LocalPpmTokens.current
     Row(
         Modifier
+            .cssHeight(48.dp)
             .fillMaxWidth()
-            .height(48.dp)
             .background(tokens.panel.color)
             .cssBorder(tokens.borderSoft.color, sides = CssSides.Bottom)
             .padding(start = 14.dp, end = 4.dp),
@@ -203,8 +212,8 @@ private fun ProgressLine(decided: Int, total: Int) {
     val accent = tokens.accent.color
     Box(
         Modifier
+            .cssHeight(3.dp)
             .fillMaxWidth()
-            .height(3.dp)
             .background(tokens.text.opacity(0.1).color)
             .drawBehind { drawRect(accent, size = Size((size.width * fraction).roundToInt().toFloat(), size.height)) },
     )
@@ -227,13 +236,19 @@ private fun PhoneFileHeader(state: SessionReviewState, r: FileReview, ctx: Revie
         else -> ""
     }
     val sub = listOf(where, dir).filter { it.isNotEmpty() }.joinToString(" · ")
+    // The 44 px button or the two lines, whichever is taller, `py-1` and the border: never under
+    // `min-h-[52px]`, which counts the border, and 52.76 px where Rows would round it to 53.33.
+    val height = with(LocalDensity.current) {
+        val lines = 20.sp.toDp() + if (sub.isNotEmpty()) 17.25.sp.toDp() else 0.dp
+        maxOf(44.dp, lines) + 8.dp + cssBorderPx(1.dp).toDp()
+    }
     Row(
         Modifier
+            .cssHeight(height)
             .fillMaxWidth()
-            .heightIn(min = 52.dp)
             .background(tokens.panel.color)
             .cssBorder(tokens.borderSoft.color, sides = CssSides.Bottom)
-            .padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            .padding(start = 14.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -258,12 +273,14 @@ private fun PhoneFileHeader(state: SessionReviewState, r: FileReview, ctx: Revie
 @Composable
 private fun PhoneBottomBar(state: SessionReviewState, review: SessionReview, onConfirm: () -> Unit) {
     val tokens = LocalPpmTokens.current
+    val height = with(LocalDensity.current) { 44.dp + 16.dp + cssBorderPx(1.dp).toDp() }
     Row(
         Modifier
+            .cssHeight(height)
             .fillMaxWidth()
             .background(tokens.panel.color)
             .cssBorder(tokens.borderSoft.color, sides = CssSides.Top)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -424,13 +441,16 @@ private fun ConfirmRevert(r: FileReview, ctx: ReviewTabContext, review: SessionR
     val tokens = LocalPpmTokens.current
     val (base, _) = reviewNameAndDir(r.path, ctx.projectPath)
     SheetHead("Revert $base?", icon = { PpmIcon(ProductIcon.RotateCcw, 20.dp, tokens.error.color) }, onClose = onDone)
-    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 4.dp)) {
+    // `px-4 pb-1`, stacked as Chrome stacks it: a 21 px line at 2.625x is 55.125 px, which Compose
+    // rounds up, and the 11 px counts in their mono face fit inside the line without raising it.
+    CssColumn(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp), bottom = 4.dp) {
         BasicText(
             revertFileText(r.file, base, r.blocks.size, tokens),
-            Modifier.padding(bottom = 14.dp),
+            Modifier.fillMaxWidth().cssLines(21f),
             style = ppmText(14f, lineHeight = 21f).copy(color = tokens.text2.color),
         )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Spacer(Modifier.cssHeight(14.dp))
+        Row(Modifier.cssHeight(44.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             BarButton("Cancel", null, BarTone.PLAIN, Modifier.weight(1f), onClick = onDone)
             BarButton("Revert file", ProductIcon.RotateCcw, BarTone.DANGER, Modifier.weight(1f)) {
                 onDone()

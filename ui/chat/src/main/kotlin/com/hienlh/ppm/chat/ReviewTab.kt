@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -87,6 +88,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FileIcon
 import com.hienlh.ppm.design.FontKind
@@ -102,6 +104,8 @@ import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderPx
+import com.hienlh.ppm.design.cssHeight
+import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -644,17 +648,21 @@ private fun FileAside(reviews: List<FileReview>, current: String?, ctx: ReviewTa
 private fun AsideHint(providerId: String?) {
     val tokens = LocalPpmTokens.current
     val style = pageText(11.5f).copy(color = tokens.text3.color)
-    Column(
+    CssColumn(
         Modifier
             .fillMaxWidth()
             .cssBorder(tokens.borderSoft.color, sides = CssSides.Top)
-            .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 12.dp),
+            .padding(start = 12.dp, end = 12.dp),
+        gap = 6.dp,
+        top = 10.dp,
+        bottom = 12.dp,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Its lines count at Chrome's 17.25px, not the 17.5 Compose rounds each to.
+        Row(Modifier.cssLines(pageLine(11.5f)), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             PpmIcon(ProductIcon.Terminal, 12.dp, tokens.text3.color, Modifier.padding(top = 2.dp))
             BasicText("A binary or very large file has no blocks: it is kept or reverted whole. ${shellChangesHint(providerId)}", style = style)
         }
-        CssWrapRow(gapX = 12.dp, gapY = 4.dp, modifier = Modifier.padding(top = 6.dp)) {
+        CssWrapRow(gapX = 12.dp, gapY = 4.dp) {
             for ((keys, label) in listOf(listOf("J", "K") to "move", listOf("Y") to "keep", listOf("N") to "revert")) {
                 Row(Modifier.layoutId(WrapItem(height = pageLine(11.5f))), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     for (key in keys) ReviewKbd(key)
@@ -791,7 +799,16 @@ private fun BottomBar(
             ) { onConfirm(!confirm) }
         }
         if (r.open > 0 && !r.gone) {
-            ReviewButton("Keep file", WebVariant.OUTLINE, WebSize.SM, icon = ProductIcon.Check, modifier = Modifier.layoutId(WrapItem(height = 32f)), onClick = review::keepFile)
+            // No colour of its own: it takes the bar's `text-text-2`, and its border with it.
+            ReviewButton(
+                "Keep file",
+                WebVariant.OUTLINE,
+                WebSize.SM,
+                icon = ProductIcon.Check,
+                content = tokens.text2,
+                modifier = Modifier.layoutId(WrapItem(height = 32f)),
+                onClick = review::keepFile,
+            )
         }
         if (next != null) {
             ReviewButton(
@@ -817,12 +834,18 @@ private fun RevertConfirm(r: FileReview, ctx: ReviewTabContext, overlay: ReviewO
     val anchor = overlay.revert ?: return
     val (base, _) = reviewNameAndDir(r.path, ctx.projectPath)
     val shape = RoundedCornerShape(12.dp)
-    Column(
+    // Stacked as Chrome stacks it: three lines of 18.75 px are 112.5 px at 2x, which Compose
+    // rounds line by line to 114.
+    CssColumn(
         Modifier
             .layout { measurable, constraints ->
-                val placeable = measurable.measure(Constraints(maxWidth = constraints.maxWidth, maxHeight = constraints.maxHeight))
+                // `max-w-[calc(100vw-24px)]`, held to the tab that clips it: the web's, `right-0`
+                // under a button near the left of a narrow panel, runs past the panel's edge and
+                // loses its Cancel button and the start of every line.
+                val margin = 12.dp.roundToPx()
+                val placeable = measurable.measure(Constraints(maxWidth = max(0, constraints.maxWidth - 2 * margin), maxHeight = constraints.maxHeight))
                 layout(0, 0) {
-                    val x = (anchor.right - placeable.width).roundToInt()
+                    val x = max(margin, (anchor.right - placeable.width).roundToInt())
                     val y = (anchor.top - 8.dp.toPx() - placeable.height).roundToInt()
                     overlay.popover = Rect(x.toFloat(), y.toFloat(), (x + placeable.width).toFloat(), (y + placeable.height).toFloat())
                     placeable.place(x, y)
@@ -833,14 +856,18 @@ private fun RevertConfirm(r: FileReview, ctx: ReviewTabContext, overlay: ReviewO
             .clip(shape)
             .background(tokens.panel2.color)
             .cssBorder(tokens.border.color, shape)
-            .padding(14.dp),
+            .padding(horizontal = 14.dp),
+        top = 14.dp,
+        bottom = 14.dp,
     ) {
-        Row(Modifier.padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.cssHeight(pageLine(13f).dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PpmIcon(ProductIcon.RotateCcw, 14.dp, tokens.text.color)
             BasicText("Revert $base?", style = pageText(13f, FontWeight.SemiBold).copy(color = tokens.text.color))
         }
-        BasicText(revertFileText(r.file, base, r.blocks.size, tokens), Modifier.padding(bottom = 12.dp), style = pageText(12.5f).copy(color = tokens.text2.color))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End)) {
+        Spacer(Modifier.cssHeight(6.dp))
+        BasicText(revertFileText(r.file, base, r.blocks.size, tokens), Modifier.cssLines(pageLine(12.5f)), style = pageText(12.5f).copy(color = tokens.text2.color))
+        Spacer(Modifier.cssHeight(12.dp))
+        Row(Modifier.cssHeight(32.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End)) {
             ReviewButton("Cancel", WebVariant.GHOST, WebSize.SM, onClick = onCancel)
             ReviewButton("Revert file", WebVariant.DESTRUCTIVE, WebSize.SM, icon = ProductIcon.RotateCcw, onClick = onRevert)
         }

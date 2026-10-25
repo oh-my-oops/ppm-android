@@ -82,6 +82,37 @@ class SessionTurnsStoreTest {
     }
 
     @Test
+    fun `a fetch called off before it landed does not hold the next one back`() = runTest {
+        // A Review tab restored on its own asks before the session's changes arrive, and their
+        // calls arriving call that first fetch off: the one they ask for goes out at once.
+        val store = SessionTurnsStore { testScheduler.currentTime }
+        var loads = 0
+        val gate = CompletableDeferred<Unit>()
+        val first = launch { store.follow("s", emptyList()) { loads++; gate.await(); listOf(turn(1, "a")) } }
+        runCurrent()
+        first.cancel()
+        val second = launch { store.follow("s", listOf("a")) { loads++; listOf(turn(1, "a")) } }
+        runCurrent()
+        assertEquals(2, loads)
+        assertEquals(0L, testScheduler.currentTime)
+        assertEquals(1, store.entries.value.getValue("s").byCall.getValue("a").n)
+        second.join()
+    }
+
+    @Test
+    fun `a fetch that failed holds the next one back`() = runTest {
+        val store = SessionTurnsStore { testScheduler.currentTime }
+        var loads = 0
+        store.follow("s", listOf("a")) { loads++; error("offline") }
+        val job = launch { store.follow("s", listOf("a")) { loads++; listOf(turn(1, "a")) } }
+        advanceTimeBy(7_999)
+        assertEquals(1, loads)
+        advanceTimeBy(2)
+        assertEquals(2, loads)
+        job.join()
+    }
+
+    @Test
     fun `the same turns published again change nothing`() = runTest {
         val store = SessionTurnsStore()
         store.publish("s", listOf(turn(1, "a")), live = true)

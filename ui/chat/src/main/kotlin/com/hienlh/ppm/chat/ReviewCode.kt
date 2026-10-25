@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -875,10 +874,18 @@ internal fun ReviewKbd(label: String, onAccent: Boolean = false, modifier: Modif
     val thin = with(density) { cssBorderPx(1.dp) }
     val thick = with(density) { cssBorderPx(2.dp) }
     val (thinDp, thickDp) = with(density) { thin.toDp() to thick.toDp() }
+    val style = ppmText(10f, FontWeight.Medium, FontKind.MONO, lineHeight = 10f).copy(color = text)
+    // As wide as Chrome's box, to the nearest pixel. Compose sizes text to whole pixels, its
+    // intrinsic width too, which rounded the 6.2px advance up and made every key 0.6px wider: the
+    // Revert button 2px off where the web has it, and "revert" 4px along the tab's key hints. The
+    // caret after the label is the advance as it is.
+    val measurer = rememberTextMeasurer()
+    val glyphs = remember(measurer, label, style) { measurer.measure(label, style, softWrap = false, maxLines = 1).getHorizontalPosition(label.length, usePrimaryDirection = true) }
+    val width = with(density) { max(16.dp.toPx(), 2 * thin + 8.dp.toPx() + glyphs).roundToInt().toDp() }
     Box(
         modifier
             .height(16.dp)
-            .widthIn(min = 16.dp)
+            .width(width)
             .drawWithCache {
                 val r = 4.dp.toPx()
                 val outside = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(r))) }
@@ -893,10 +900,10 @@ internal fun ReviewKbd(label: String, onAccent: Boolean = false, modifier: Modif
                     drawPath(ring, edge)
                 }
             }
-            .padding(start = thinDp + 4.dp, end = thinDp + 4.dp, top = thinDp, bottom = thickDp),
+            .padding(top = thinDp, bottom = thickDp),
         contentAlignment = Alignment.Center,
     ) {
-        BasicText(label, style = ppmText(10f, FontWeight.Medium, FontKind.MONO, lineHeight = 10f).copy(color = text), maxLines = 1, softWrap = false)
+        BasicText(label, style = style, maxLines = 1, softWrap = false)
     }
 }
 
@@ -1284,10 +1291,11 @@ private fun TurnCard(chip: TurnChip, compact: Boolean, onClose: () -> Unit, act:
             )
         }
         // `mb-2.5 overflow-y-auto whitespace-pre-wrap rounded-r-md border-l-2 border-primary bg-[text 5%]
-        // px-2.5 py-2 leading-[1.45]`, `max-h-48 text-[13px]` (`max-h-[40vh] text-sm`).
+        // px-2.5 py-2 leading-[1.45]`, `max-h-48 text-[13px]` (`max-h-[40vh] text-sm`) — less the
+        // `leading-[1.45]`, which `cn` drops for the font size after it: the lines keep the card's ratio.
         val quote = RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp)
         val maxHeight = if (compact) (LocalConfiguration.current.screenHeightDp * 0.4f).dp else 192.dp
-        val style = ppmText(prompt, lineHeight = prompt * 1.45f)
+        val style = ppmText(prompt, lineHeight = prompt * ratio)
         Box(
             Modifier
                 .padding(bottom = 10.dp)
@@ -1501,7 +1509,7 @@ private fun WholeFile(review: FileReview, compact: Boolean, onRevertFile: () -> 
                         }
                         if (onChange != null) ReviewButton("Change", WebVariant.GHOST, WebSize.XS, icon = ProductIcon.Undo2, content = tokens.text2, onClick = onChange)
                     } else {
-                        ReviewButton("Revert file…", WebVariant.OUTLINE, WebSize.SM, icon = ProductIcon.RotateCcw, hoverContent = tokens.error, onClick = onRevertFile)
+                        ReviewButton("Revert file…", WebVariant.OUTLINE, WebSize.SM, icon = ProductIcon.RotateCcw, content = tokens.text2, hoverContent = tokens.error, onClick = onRevertFile)
                         ReviewButton("Keep file", WebVariant.DEFAULT, WebSize.SM, icon = ProductIcon.Check, onClick = onKeepFile)
                     }
                 }

@@ -79,6 +79,11 @@ fun PpmIcon(icon: ProductIcon, size: Dp, tint: Color, modifier: Modifier = Modif
 fun PpmIcon(icon: LucideIcon, size: Dp, tint: Color, modifier: Modifier = Modifier, spinning: Boolean = false) =
     VectorIcon(icon.vector, size, tint, modifier, spinning)
 
+/** Either kind of icon by its [vector][ProductIcon.vector], for a map that holds both (`TAB_TYPE_ICONS`). */
+@Composable
+fun PpmIcon(vector: ImageVector, size: Dp, tint: Color, modifier: Modifier = Modifier, spinning: Boolean = false) =
+    VectorIcon(vector, size, tint, modifier, spinning)
+
 @Composable
 private fun VectorIcon(vector: ImageVector, size: Dp, tint: Color, modifier: Modifier, spinning: Boolean) {
     val painter = rememberVectorPainter(vector)

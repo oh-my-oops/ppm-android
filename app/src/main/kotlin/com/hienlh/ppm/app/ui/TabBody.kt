@@ -10,17 +10,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.LucideIcon
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.ProviderLogo
 import com.hienlh.ppm.design.ProviderLogos
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.vector
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 
 /**
@@ -39,7 +42,7 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
 }
 
 @Composable
-private fun TabPlaceholder(icon: ProductIcon, title: String, detail: String) {
+private fun TabPlaceholder(icon: ImageVector, title: String, detail: String) {
     val tokens = LocalPpmTokens.current
     Column(
         Modifier.fillMaxSize().padding(24.dp),
@@ -79,29 +82,29 @@ fun TabIcon(tab: WorkspaceTab, tint: Rgba) {
 }
 
 /**
- * `TAB_TYPE_ICONS`. A file tab is drawn with its file's icon on the web; until this app has those,
- * with the type's. `FileDiff` and `GitCommitHorizontal` are not among this app's icons yet.
+ * `TAB_TYPE_ICONS`, product icons and the two the web keeps on lucide. A file tab is drawn with
+ * its file's icon on the web; until this app has those, with the type's.
  */
-fun tabTypeIcon(type: String): ProductIcon = when (type) {
-    "terminal" -> ProductIcon.Terminal
-    "chat" -> ProductIcon.MessageSquare
-    "editor" -> ProductIcon.FileCode
-    "database" -> ProductIcon.Table
-    "db-structure" -> ProductIcon.FolderTree
-    "db-sql" -> ProductIcon.Code
-    "db-query" -> ProductIcon.SquareTerminal
-    "db-impexp" -> ProductIcon.ArrowLeftRight
-    "db-connection" -> ProductIcon.Plug
-    "sqlite" -> ProductIcon.Database
-    "git-diff", "branch-review", "session-review", "git-review", "conflict-editor" -> ProductIcon.File
-    "settings", "system-monitor" -> ProductIcon.Settings
-    "git-log" -> ProductIcon.GitBranch
-    "ai-resource" -> ProductIcon.Sparkles
-    "group" -> ProductIcon.Users
-    "problems" -> ProductIcon.CircleX
-    "design" -> ProductIcon.Palette
-    "android" -> ProductIcon.Smartphone
-    "web-preview" -> ProductIcon.Globe
-    "logs" -> ProductIcon.ScrollText
-    else -> ProductIcon.Puzzle
+fun tabTypeIcon(type: String): ImageVector = when (type) {
+    "terminal" -> ProductIcon.Terminal.vector
+    "chat" -> ProductIcon.MessageSquare.vector
+    "editor" -> ProductIcon.FileCode.vector
+    "database" -> ProductIcon.Table.vector
+    "db-structure" -> ProductIcon.FolderTree.vector
+    "db-sql" -> ProductIcon.Code.vector
+    "db-query" -> ProductIcon.SquareTerminal.vector
+    "db-impexp" -> ProductIcon.ArrowLeftRight.vector
+    "db-connection" -> ProductIcon.Plug.vector
+    "sqlite" -> ProductIcon.Database.vector
+    "git-diff", "branch-review", "session-review", "git-review", "conflict-editor" -> LucideIcon.FileDiff.vector
+    "settings", "system-monitor" -> ProductIcon.Settings.vector
+    "git-log" -> LucideIcon.GitCommitHorizontal.vector
+    "ai-resource" -> ProductIcon.Sparkles.vector
+    "group" -> ProductIcon.Users.vector
+    "problems" -> ProductIcon.CircleX.vector
+    "design" -> ProductIcon.Palette.vector
+    "android" -> ProductIcon.Smartphone.vector
+    "web-preview" -> ProductIcon.Globe.vector
+    "logs" -> ProductIcon.ScrollText.vector
+    else -> ProductIcon.Puzzle.vector
 }

@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.graphics.vector.ImageVector
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
@@ -59,6 +60,7 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.vector
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionTag
 import kotlinx.coroutines.delay
@@ -157,7 +159,11 @@ fun MenuItem(
 
 /** `size-3.5` in `text-muted-foreground`, the colour a Radix item gives an icon of none. */
 @Composable
-fun MenuIcon(icon: ProductIcon, tint: Rgba? = null) {
+fun MenuIcon(icon: ProductIcon, tint: Rgba? = null) = MenuIcon(icon.vector, tint)
+
+/** [MenuIcon] for a glyph of either kind, as `TAB_TYPE_ICONS` holds them. */
+@Composable
+fun MenuIcon(icon: ImageVector, tint: Rgba? = null) {
     val tokens = LocalPpmTokens.current
     PpmIcon(icon, 14.dp, (tint ?: tokens.text2).color)
 }

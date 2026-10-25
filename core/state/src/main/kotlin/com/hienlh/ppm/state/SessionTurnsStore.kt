@@ -61,12 +61,16 @@ class SessionTurnsStore(private val now: () -> Long = ::monotonicMillis) {
         // A fetch already found nothing for these: only a new call is worth asking again for.
         if (entry != null && last?.second == unplaced) return
         if (last != null) delay(maxOf(0L, last.first + REFETCH_MILLIS - now()))
-        fetched[sessionId] = now() to last?.second
+        val askedAt = now()
         val turns = try {
             load()
         } catch (e: CancellationException) {
+            // Called off before it landed — the session's changes arriving do that to the fetch a
+            // restored tab sends first — it holds nothing back: the web's would hold the next one
+            // eight seconds, and the turn chips with it.
             throw e
         } catch (_: Exception) {
+            fetched[sessionId] = askedAt to last?.second
             return
         }
         val placed = SessionTurns.byCall(turns)
