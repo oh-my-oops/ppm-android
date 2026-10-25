@@ -2,7 +2,8 @@ package com.hienlh.ppm.state
 
 /**
  * jsdiff 9's `diffLines` (and the `Diff.diff` under every diff of it), as the web runs it: the
- * Edit preview diffs lines and words with it, and the change tray counts each edit's lines.
+ * Edit preview diffs lines and words with it, the change tray counts each edit's lines, and the
+ * Review tab cuts its blocks from it.
  */
 object JsDiff {
     /** `diffLines`' tokens: each line with the line break that ends it, and none for an empty text. */
@@ -31,7 +32,21 @@ object JsDiff {
      * head and tail is one replacement instead: jsdiff would go on, and the web with it, for as
      * long as it takes.
      */
-    fun <T> diff(a: List<T>, b: List<T>): Pair<BooleanArray, BooleanArray> = jsdiff(a, b) ?: replaced(a, b)
+    fun <T> diff(a: List<T>, b: List<T>): Pair<BooleanArray, BooleanArray> =
+        jsdiff(a, b, WORK)?.let { marks(it, a.size, b.size) } ?: replaced(a, b)
+
+    /** One of jsdiff's change objects: [count] items kept, added or removed. */
+    data class Run(val count: Int, val added: Boolean, val removed: Boolean)
+
+    /**
+     * jsdiff's change objects in order, or null past [work] steps — where the web's own diff, given
+     * a time limit, would have given up too.
+     */
+    fun <T> runs(a: List<T>, b: List<T>, work: Int = WORK): List<Run>? {
+        if (a.isEmpty() && b.isEmpty()) return emptyList()
+        val last = jsdiff(a, b, work) ?: return null
+        return generateSequence(last) { it.previous }.map { Run(it.count, it.added, it.removed) }.toList().asReversed()
+    }
 
     private const val WORK = 4_000_000
 
@@ -40,8 +55,12 @@ object JsDiff {
 
     private class Path(var oldPos: Int, var last: Component?)
 
-    /** `Diff.diffWithOptionsObj` with no options, line for line: its Myers variant, pruned diagonals and ties included. */
-    private fun <T> jsdiff(a: List<T>, b: List<T>): Pair<BooleanArray, BooleanArray>? {
+    /**
+     * `Diff.diffWithOptionsObj` with no options, line for line: its Myers variant, pruned diagonals
+     * and ties included. Answers the last change object, or null past [budget] steps; a sentinel
+     * with no count when both sides are empty.
+     */
+    private fun <T> jsdiff(a: List<T>, b: List<T>, budget: Int): Component? {
         val oldLen = a.size
         val newLen = b.size
         val maxEditLength = oldLen + newLen
@@ -77,14 +96,14 @@ object JsDiff {
         val first = Path(-1, null)
         bestPath[offset] = first
         var newPos = extractCommon(first, 0)
-        if (first.oldPos + 1 >= oldLen && newPos + 1 >= newLen) return marks(first.last, oldLen, newLen)
+        if (first.oldPos + 1 >= oldLen && newPos + 1 >= newLen) return first.last ?: Component(0, added = false, removed = false, previous = null)
         var minDiagonal = Int.MIN_VALUE
         var maxDiagonal = Int.MAX_VALUE
         for (editLength in 1..maxEditLength) {
             var diagonal = maxOf(minDiagonal, -editLength)
             // jsdiff reads its bound again on every step: a path reaching the right edge narrows it.
             while (diagonal <= minOf(maxDiagonal, editLength)) {
-                if (++work > WORK) return null
+                if (++work > budget) return null
                 val removePath = bestPath[offset + diagonal - 1]
                 val addPath = bestPath[offset + diagonal + 1]
                 if (removePath != null) bestPath[offset + diagonal - 1] = null
@@ -101,7 +120,7 @@ object JsDiff {
                     addToPath(removePath!!, added = false, removed = true, oldPosInc = 1)
                 }
                 newPos = extractCommon(base, diagonal)
-                if (base.oldPos + 1 >= oldLen && newPos + 1 >= newLen) return marks(base.last, oldLen, newLen)
+                if (base.oldPos + 1 >= oldLen && newPos + 1 >= newLen) return base.last
                 bestPath[offset + diagonal] = base
                 if (base.oldPos + 1 >= oldLen) maxDiagonal = minOf(maxDiagonal, diagonal - 1)
                 if (newPos + 1 >= newLen) minDiagonal = maxOf(minDiagonal, diagonal + 1)
@@ -112,7 +131,7 @@ object JsDiff {
     }
 
     /** `buildValues`, as marks: the change objects from the first, each run of items it covers. */
-    private fun marks(last: Component?, oldLen: Int, newLen: Int): Pair<BooleanArray, BooleanArray> {
+    private fun marks(last: Component, oldLen: Int, newLen: Int): Pair<BooleanArray, BooleanArray> {
         val removed = BooleanArray(oldLen)
         val inserted = BooleanArray(newLen)
         var oldPos = 0
