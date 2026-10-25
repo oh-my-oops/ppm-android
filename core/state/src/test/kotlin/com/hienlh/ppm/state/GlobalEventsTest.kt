@@ -3,6 +3,8 @@ package com.hienlh.ppm.state
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.protocol.AgentRunningEntry
 import com.hienlh.ppm.protocol.AgentTranscriptFrame
+import com.hienlh.ppm.protocol.SessionFileChange
+import com.hienlh.ppm.protocol.SessionFileChangesPush
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionTag
 import com.hienlh.ppm.protocol.SessionUnread
@@ -94,6 +96,20 @@ class GlobalEventsTest {
         assertEquals(2, frames.size)
         e.handle(json("""{"type":"global_ready"}"""))
         assertEquals(1, readies)
+    }
+
+    @Test
+    fun `a session's pushed rows reach whoever listens, read like a list's`() {
+        val e = events()
+        val pushes = mutableListOf<SessionFileChangesPush>()
+        e.onSessionFileChanges = { pushes += it }
+        e.handle(json("""{"type":"session:file-changes","projectName":"app","sessionId":"s1","files":[{"path":"/p/a.ts","status":"added","additions":2,"version":"v3"},{"status":"modified"}],"gone":["/p/b.ts",3]}"""))
+        // A frame naming no session is nobody's.
+        e.handle(json("""{"type":"session:file-changes","projectName":"app","files":[],"gone":[]}"""))
+        assertEquals(
+            listOf(SessionFileChangesPush("app", "s1", listOf(SessionFileChange("/p/a.ts", SessionFileChange.Status.ADDED, 2, version = "v3")), listOf("/p/b.ts"))),
+            pushes,
+        )
     }
 
     @Test

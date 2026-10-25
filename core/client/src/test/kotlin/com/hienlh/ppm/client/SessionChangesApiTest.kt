@@ -109,4 +109,11 @@ class SessionChangesApiTest {
         }
         assertEquals(true, undo.stale)
     }
+
+    @Test
+    fun `the count is a GET, and an answer with no number counts nothing`() = withServer(ok("""{"count":7}"""), ok("""{}""")) { server, api ->
+        assertEquals(7, api.sessionChangeCount("my app", "s/1"))
+        server.takeRequest().let { assertEquals("GET $base/count", "${it.method} ${it.target}") }
+        assertEquals(0, api.sessionChangeCount("my app", "s/1"))
+    }
 }

@@ -4,6 +4,7 @@ import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.SocketConnection
 import com.hienlh.ppm.client.markUnread
 import com.hienlh.ppm.protocol.AgentTranscriptFrame
+import com.hienlh.ppm.protocol.SessionFileChangesPush
 import com.hienlh.ppm.protocol.SessionUnread
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.bool
@@ -83,6 +84,9 @@ class GlobalEvents(
 
     /** The server rebuilt this project's file list and it names other paths (`files:index-changed`). */
     var onIndexChanged: ((project: String) -> Unit)? = null
+
+    /** The agent changed files of a session whose list someone asked for (`session:file-changes`): just those rows. */
+    var onSessionFileChanges: ((SessionFileChangesPush) -> Unit)? = null
 
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
     private val readyListeners = LinkedHashSet<() -> Unit>()
@@ -200,6 +204,7 @@ class GlobalEvents(
             "git:changed" -> frame["projectName"].string?.let { onGitChanged?.invoke(it) }
             "file:changed" -> frame["projectName"].string?.let { onFileChanged?.invoke(it) }
             "files:index-changed" -> frame["projectName"].string?.let { onIndexChanged?.invoke(it) }
+            "session:file-changes" -> SessionFileChangesPush.from(frame)?.let { onSessionFileChanges?.invoke(it) }
             "agent-transcript:events", "agent-transcript:error", "agent-activity" ->
                 AgentTranscriptFrame.from(frame)?.let { agent -> agentListeners.toList().forEach { it(agent) } }
         }

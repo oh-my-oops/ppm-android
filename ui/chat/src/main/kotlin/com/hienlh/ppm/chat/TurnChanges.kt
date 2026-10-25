@@ -213,14 +213,22 @@ internal fun TurnChangeRollup(actions: MessageActions, modifier: Modifier = Modi
     var open by rememberSaveable { mutableStateOf(false) }
     val review = rememberTurnReview(host, actions)
     val (added, removed) = remember(changes) { TurnReview.totals(changes) }
-    MessageActionBar(actions.timestamp, actions.copyText, modifier, actions.onReply) {
-        TurnChangePill(changes.size, added, removed, TurnReview.label(review.summary), open, mobile) { open = !open }
-    }
-    if (!open) return
     val close = {
         review.model?.cancelRevert()
         open = false
     }
+    MessageActionBar(actions.timestamp, actions.copyText, modifier, actions.onReply) {
+        TurnChangePill(changes.size, added, removed, TurnReview.label(review.summary), open, mobile) {
+            if (open) {
+                close()
+            } else {
+                // The session's list is worked out only when someone looks; opening a turn's changes is that.
+                host.changes?.refresh()
+                open = true
+            }
+        }
+    }
+    if (!open) return
     val jump: (String) -> Unit = { ref ->
         close()
         actions.onJump?.invoke(ref)

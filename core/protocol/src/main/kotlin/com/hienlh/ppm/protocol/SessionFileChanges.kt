@@ -97,6 +97,32 @@ data class SessionFileDiff(
     }
 }
 
+/**
+ * `session:file-changes` on `/ws/global` (`SessionFileChangesPushEvent`): the rows of the files the
+ * agent has just changed in a session whose list someone asked for, and the files that are no
+ * longer changes.
+ */
+data class SessionFileChangesPush(
+    val projectName: String,
+    val sessionId: String,
+    val files: List<SessionFileChange>,
+    /** Absolute paths. */
+    val gone: List<String>,
+) {
+    companion object {
+        fun from(json: JsonElement?): SessionFileChangesPush? {
+            val project = json["projectName"].string?.ifEmpty { null } ?: return null
+            val sessionId = json["sessionId"].string?.ifEmpty { null } ?: return null
+            return SessionFileChangesPush(
+                project,
+                sessionId,
+                json["files"].array?.mapNotNull(SessionFileChange::from).orEmpty(),
+                json["gone"].array?.mapNotNull { it.string }.orEmpty(),
+            )
+        }
+    }
+}
+
 /** What `…/file-changes/reviewed` answers. */
 data class SessionReviewResult(val updated: List<String>, val stale: List<String>) {
     companion object {

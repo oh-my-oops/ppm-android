@@ -1121,18 +1121,21 @@ private fun rememberTurnChangesHost(model: AppModel, tab: ChatTab, state: ChatSt
 }
 
 /**
- * The changes bar wired to [tab]'s session (`useSessionFileChanges` + `SessionChangesBar`): the
- * list asked for again whenever the transcript says a file may have moved, its rows opening the
+ * The changes bar wired to [tab]'s session (`useSessionFileChanges` + `SessionChangesBar`): a
+ * count from the transcript and the server until the list is opened, its rows opening the
  * session's Review tab, and on a phone its sheet up to 85% of the page.
  */
 @Composable
 private fun SessionChangesSection(model: AppModel, tab: ChatTab, state: ChatState, changes: SessionChanges, items: List<ChatItem>, narrow: Boolean) {
     val running = state.isRunning
     LaunchedEffect(changes, items, running) {
-        val (paths, settled) = tab.sessionWrites.of(items)
-        changes.update(paths, settled, running)
+        val (paths) = tab.sessionWrites.of(items)
+        changes.update(paths, running)
     }
     val files by changes.files.collectAsState()
+    val loaded by changes.loaded.collectAsState()
+    val loading by changes.loading.collectAsState()
+    val unloadedCount by changes.unloadedCount.collectAsState()
     // `max-h-[85%]` of the sheet's frame (`fixed inset-0`), which is the app's area: the sheet's
     // window under the status bar.
     val statusBar = WindowInsets.statusBars.getTop(LocalDensity.current)
@@ -1143,6 +1146,9 @@ private fun SessionChangesSection(model: AppModel, tab: ChatTab, state: ChatStat
     }
     SessionChangesBar(
         files,
+        loaded,
+        loading,
+        unloadedCount,
         projectPath = model.projects.firstOrNull { it.name == tab.project }?.path,
         providerId = tab.providerId,
         narrow = narrow,
@@ -1150,6 +1156,7 @@ private fun SessionChangesSection(model: AppModel, tab: ChatTab, state: ChatStat
             tab.session?.let { model.openSessionReview(tab.project, it.id, state.title, tab.providerId, changes.paths, path) }
         },
         onOpen = changes::refresh,
+        onRefresh = changes::refresh,
         onSetReviewed = changes::setReviewed,
         sheet = { dismiss, content ->
             BottomSheet(dismiss, sheetMax) { content(LocalSheetContentTop.current) }

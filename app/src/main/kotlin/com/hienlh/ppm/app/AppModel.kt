@@ -767,12 +767,21 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         val events = GlobalEvents(api, scope)
         // Whatever changed while the socket was down — another device renamed, pinned or
         // started a chat — was never delivered.
-        events.onReady = { scope.launch { refreshSessions(quiet = true) } }
+        events.onReady = {
+            scope.launch { refreshSessions(quiet = true) }
+            // Pushes missed while the socket was down, or a server that restarted and keeps no list.
+            for (chat in chats.values) chat.sessionChanges?.reconnected()
+        }
         events.isShown = { id -> windowVisible && activeSessionId == id }
         events.onGitChanged = { gitChanged.tryEmit(it) }
         // A change only marks the list stale; it is read again when a picker shows it.
         events.onFileChanged = { fileIndex?.markStale(it) }
         events.onIndexChanged = { fileIndex?.rebuilt(it) }
+        events.onSessionFileChanges = { push ->
+            for (chat in chats.values) {
+                if (chat.project == push.projectName && chat.session?.id == push.sessionId) chat.sessionChanges?.push(push.files, push.gone)
+            }
+        }
         this.events = events
         events.start()
     }
@@ -1666,7 +1675,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     private fun reviewAnswered(project: String, sessionId: String) {
         for (chat in chats.values) {
             if (chat.project != project || chat.session?.id != sessionId) continue
-            chat.sessionChanges?.takeIf { it.listed.value != null }?.refresh()
+            chat.sessionChanges?.takeIf { it.loaded.value }?.refresh()
         }
     }
 

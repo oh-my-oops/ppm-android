@@ -158,4 +158,17 @@ object SessionChangeList {
     /** [files] with [paths] marked or unmarked reviewed ahead of the server's answer. */
     fun withReviewed(files: List<SessionFileChange>, paths: Set<String>, reviewed: Boolean): List<SessionFileChange> =
         files.map { if (it.path in paths) it.copy(reviewed = reviewed, sinceReview = false) else it }
+
+    /**
+     * [files] with the rows the server pushed after the agent changed them: each replaces its
+     * file's row, a file not listed yet goes last (it is the newest), and the [gone] ones drop out.
+     */
+    fun withPushedChanges(files: List<SessionFileChange>, pushed: List<SessionFileChange>, gone: List<String>): List<SessionFileChange> {
+        val byPath = pushed.associateBy { it.path }
+        val drop = gone.toHashSet()
+        val out = files.filter { it.path !in drop }.mapTo(ArrayList()) { byPath[it.path] ?: it }
+        val listed = files.mapTo(HashSet()) { it.path }
+        for (f in pushed) if (f.path !in listed) out += f
+        return out
+    }
 }

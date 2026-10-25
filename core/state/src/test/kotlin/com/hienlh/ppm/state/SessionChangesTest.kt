@@ -28,14 +28,25 @@ private class FakeChanges(var files: List<SessionFileChange>) : SessionChangesBa
     val reverts = mutableListOf<Pair<List<String>, List<Pair<String, String>>?>>()
     val undone = mutableListOf<String>()
     var holdMark: CompletableDeferred<Unit>? = null
+    var holdList: CompletableDeferred<Unit>? = null
     var answerResult: SessionAnswerResult = SessionAnswerResult(emptyList())
     var revertResults = ArrayDeque<TurnRevertResult>()
     var undoResult = SessionAnswerResult(emptyList())
     var fail: Exception? = null
+    var count = 0
+    var counted = 0
 
     override suspend fun list(paths: List<String>): List<SessionFileChange> {
         asked += paths
-        return files
+        // The answer as it stood when asked, however long it takes to arrive.
+        val answer = files
+        holdList?.await()
+        return answer
+    }
+
+    override suspend fun count(): Int {
+        counted++
+        return count
     }
 
     override suspend fun setReviewed(files: List<SessionFileChange>, reviewed: Boolean) {
@@ -81,26 +92,106 @@ class SessionChangesTest {
     private val k1 = TurnReview.editKey("/p/app.ts", edit("t1"))
     private val k2 = TurnReview.editKey("/p/app.ts", edit("t2"))
 
-    private fun TestScope.changes(server: FakeChanges) = SessionChanges(server, backgroundScope, delayMillis = 400)
+    private fun TestScope.changes(server: FakeChanges) = SessionChanges(server, backgroundScope)
 
     @Test
-    fun `a burst of updates is one request, 400 ms after the last`() = runTest {
+    fun `the list is asked for only once opened, and until then the bar counts the transcript's files or the server's`() = runTest {
+        val server = FakeChanges(listOf(app)).apply { count = 1 }
+        val changes = changes(server)
+        changes.update(listOf("/p/app.ts"), streaming = false)
+        settle()
+        assertEquals(1, server.counted)
+        assertEquals(1, changes.unloadedCount.value)
+        // A turn names a second file; the count is asked again only once it ends.
+        changes.update(listOf("/p/app.ts", "/p/README.md"), streaming = true)
+        settle()
+        assertEquals(2, changes.unloadedCount.value)
+        assertEquals(1, server.counted)
+        // A row pushed before anyone asked: the list it would go into is not there yet.
+        changes.push(listOf(readme), emptyList())
+        assertEquals(emptyList<SessionFileChange>(), changes.files.value)
+        // Shell commands wrote files no tool call names.
+        server.count = 5
+        changes.update(listOf("/p/app.ts", "/p/README.md"), streaming = false)
+        settle()
+        assertEquals(2, server.counted)
+        assertEquals(5, changes.unloadedCount.value)
+        assertEquals(0, server.asked.size)
+        assertEquals(false, changes.loaded.value)
+
+        changes.refresh()
+        assertEquals(true, changes.loading.value)
+        settle()
+        assertEquals(listOf(listOf("/p/app.ts", "/p/README.md")), server.asked)
+        assertEquals(listOf(app), changes.files.value)
+        assertEquals(true to false, changes.loaded.value to changes.loading.value)
+        // Asked for once: the next turn ends without asking again.
+        changes.update(listOf("/p/app.ts", "/p/README.md"), streaming = true)
+        changes.update(listOf("/p/app.ts", "/p/README.md"), streaming = false)
+        settle()
+        assertEquals(1, server.asked.size)
+    }
+
+    @Test
+    fun `pushed rows are put in place without asking, a new file last, and gone files dropped`() = runTest {
         val server = FakeChanges(listOf(app))
         val changes = changes(server)
-        changes.update(listOf("/p/a"), 0, true)
-        advanceTimeBy(300)
-        changes.update(listOf("/p/a"), 1, true)
-        advanceTimeBy(300)
-        assertEquals(0, server.asked.size)
-        // The same again asks nothing.
-        changes.update(listOf("/p/a"), 1, true)
-        advanceTimeBy(101)
+        changes.refresh()
+        settle()
+        val moved = app.copy(additions = 9, version = "v2")
+        changes.push(listOf(moved, readme), emptyList())
+        assertEquals(listOf(moved, readme), changes.files.value)
+        assertEquals("an open Review tab follows the push", listOf(moved, readme), changes.listed.value?.files)
+        changes.push(emptyList(), listOf("/p/app.ts"))
+        assertEquals(listOf(readme), changes.files.value)
+        assertEquals(1, server.asked.size)
+    }
+
+    @Test
+    fun `a row pushed while the list is on its way is set aside, and the list asked for again once it is in`() = runTest {
+        val server = FakeChanges(listOf(app)).apply { holdList = CompletableDeferred() }
+        val changes = changes(server)
+        changes.refresh()
         runCurrent()
-        assertEquals(listOf(listOf("/p/a")), server.asked)
-        assertEquals(listOf(app), changes.files.value)
-        changes.update(listOf("/p/a"), 1, false)
+        // The list being answered may already be older than this row.
+        changes.push(listOf(readme), emptyList())
+        server.files = listOf(app, readme)
+        server.holdList!!.complete(Unit)
         settle()
         assertEquals(2, server.asked.size)
+        assertEquals(listOf(app, readme), changes.files.value)
+    }
+
+    @Test
+    fun `a newer ask replaces the one on its way`() = runTest {
+        val server = FakeChanges(listOf(app)).apply { holdList = CompletableDeferred() }
+        val changes = changes(server)
+        changes.refresh()
+        runCurrent()
+        server.holdList = null
+        server.files = listOf(app, readme)
+        changes.refresh()
+        settle()
+        assertEquals(2, server.asked.size)
+        assertEquals(listOf(app, readme), changes.files.value)
+        assertEquals(false, changes.loading.value)
+    }
+
+    @Test
+    fun `the list is asked for again when the socket connects, once it was asked for`() = runTest {
+        val server = FakeChanges(listOf(app))
+        val changes = changes(server)
+        changes.reconnected()
+        settle()
+        assertEquals(0, server.asked.size)
+        changes.refresh()
+        settle()
+        // The server restarted mid-turn: what the agent changed meanwhile was never pushed.
+        server.files = listOf(app, readme)
+        changes.reconnected()
+        settle()
+        assertEquals(2, server.asked.size)
+        assertEquals(listOf(app, readme), changes.files.value)
     }
 
     @Test
@@ -112,12 +203,13 @@ class SessionChangesTest {
                 return listOf(app)
             }
         }
-        val changes = SessionChanges(server, backgroundScope, 400)
+        val changes = SessionChanges(server, backgroundScope)
         changes.refresh()
         settle()
         changes.refresh()
         settle()
         assertEquals(listOf(app), changes.files.value)
+        assertEquals(false, changes.loading.value)
     }
 
     @Test
@@ -129,9 +221,11 @@ class SessionChangesTest {
         server.holdMark = CompletableDeferred()
         changes.setReviewed(listOf(readme), true)
         assertEquals(listOf(false, true), changes.files.value.map { it.reviewed })
-        changes.update(listOf("/p/x"), 3, false)
+        changes.refresh()
+        changes.push(listOf(readme), emptyList())
         advanceTimeBy(1_000)
         assertEquals("no list while the marks are saved", 1, server.asked.size)
+        assertEquals("a row pushed meanwhile waits for the list", listOf(false, true), changes.files.value.map { it.reviewed })
         server.files = listOf(app, readme.copy(reviewed = true))
         server.holdMark!!.complete(Unit)
         settle()

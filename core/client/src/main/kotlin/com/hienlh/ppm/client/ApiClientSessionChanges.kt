@@ -7,6 +7,8 @@ import com.hienlh.ppm.protocol.SessionFileChange
 import com.hienlh.ppm.protocol.SessionFileDiff
 import com.hienlh.ppm.protocol.SessionReviewResult
 import com.hienlh.ppm.protocol.TurnRevertResult
+import com.hienlh.ppm.protocol.get
+import com.hienlh.ppm.protocol.int
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -23,6 +25,13 @@ private fun ApiClient.changesPath(project: String, sessionId: String) =
 /** Every file the session changed; [paths] adds the ones its transcript names. */
 suspend fun ApiClient.sessionFileChanges(project: String, sessionId: String, paths: List<String>): List<SessionFileChange> =
     SessionFileChange.listFrom(call("POST", changesPath(project, sessionId), body = buildJsonObject { put("paths", JsonArray(paths.map(::JsonPrimitive))) }))
+
+/**
+ * How many files the session (and those it was branched from) kept a "before" for, read off
+ * directory listings: what the changes bar counts until the list itself is asked for.
+ */
+suspend fun ApiClient.sessionChangeCount(project: String, sessionId: String): Int =
+    call("GET", "${changesPath(project, sessionId)}/count")["count"].int ?: 0
 
 /** Both sides of one file the session changed: what the Review tab cuts its blocks from. */
 suspend fun ApiClient.sessionFileDiff(project: String, sessionId: String, path: String): SessionFileDiff =

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -27,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
@@ -257,21 +259,31 @@ fun ReviewedToggle(count: Int, shown: Boolean, dense: Boolean, onToggle: () -> U
 @Composable
 fun SessionChangesBar(
     files: List<SessionFileChange>,
+    /**
+     * Whether [files] is the server's answer. The list is worked out only when opened, so until
+     * then the bar counts the [unloadedCount] files the transcript names, with no line totals.
+     */
+    loaded: Boolean,
+    loading: Boolean,
+    unloadedCount: Int,
     projectPath: String?,
     providerId: String?,
     narrow: Boolean,
     onReview: (String?) -> Unit,
+    /** The list was opened: worth asking the server again, the disk may have moved. */
     onOpen: () -> Unit,
+    /** Ask the server again on demand: the list never refreshes on its own. */
+    onRefresh: (() -> Unit)?,
     onSetReviewed: ((List<SessionFileChange>, Boolean) -> Unit)?,
     sheet: @Composable (onDismiss: () -> Unit, content: @Composable ColumnScope.(top: Dp) -> Unit) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     var showReviewed by remember { mutableStateOf(false) }
-    if (files.isEmpty()) return
+    if (if (loaded) files.isEmpty() && !(loading && open) else unloadedCount == 0) return
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     val (pending, reviewed) = SessionChangeList.splitReviewed(files)
-    val allReviewed = pending.isEmpty()
+    val allReviewed = loaded && files.isNotEmpty() && pending.isEmpty()
     // Nothing else to show once every file is reviewed.
     val reviewedShown = showReviewed || allReviewed
     val (added, removed) = SessionChangeList.totals(pending)
@@ -281,6 +293,8 @@ fun SessionChangesBar(
     }
     val review = { path: String? ->
         open = false
+        // The Review tab follows the agent through this list, so opening it is opening the list.
+        if (!loaded) onOpen()
         onReview(path)
     }
     val markAll: () -> Unit = {
@@ -288,7 +302,7 @@ fun SessionChangesBar(
         onSetReviewed?.invoke(pending, true)
     }
     val rows = @Composable { dense: Boolean ->
-        ChangeRows(pending, reviewed, reviewedShown, showToggle = reviewed.isNotEmpty() && !allReviewed, showReviewed, dense, projectPath, review, onSetReviewed) {
+        ChangeRows(loading, pending, reviewed, reviewedShown, showToggle = reviewed.isNotEmpty() && !allReviewed, showReviewed, dense, projectPath, review, onSetReviewed) {
             showReviewed = !showReviewed
         }
     }
@@ -299,7 +313,11 @@ fun SessionChangesBar(
     ) {
         // `flex items-center gap-1 px-1.5`.
         Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            val label = if (allReviewed) "All ${SessionChangeList.fileCount(reviewed.size)} reviewed" else "${SessionChangeList.fileCount(pending.size)} changed"
+            val label = when {
+                !loaded -> "${SessionChangeList.fileCount(unloadedCount)} changed"
+                allReviewed -> "All ${SessionChangeList.fileCount(reviewed.size)} reviewed"
+                else -> "${SessionChangeList.fileCount(pending.size)} changed"
+            }
             // `flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded px-1 text-xs md:min-h-8`.
             Row(
                 Modifier
@@ -319,14 +337,13 @@ fun SessionChangesBar(
                     ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = if (allReviewed) tokens.text2.color else tokens.text.color),
                     Modifier.weight(1f, fill = false),
                 )
-                if (!allReviewed) {
-                    ChangeCounts(added, removed, ppmText(11f, kind = FontKind.MONO, lineHeight = XS_11_LINE))
-                    if (reviewed.isNotEmpty() && !narrow) {
-                        BasicText("· ${reviewed.size} reviewed", style = ppmText(11f, lineHeight = XS_11_LINE).copy(color = tokens.text3.color), maxLines = 1, softWrap = false)
-                    }
+                if (loaded && !allReviewed) ChangeCounts(added, removed, ppmText(11f, kind = FontKind.MONO, lineHeight = XS_11_LINE))
+                if (!allReviewed && reviewed.isNotEmpty() && !narrow) {
+                    BasicText("· ${reviewed.size} reviewed", style = ppmText(11f, lineHeight = XS_11_LINE).copy(color = tokens.text3.color), maxLines = 1, softWrap = false)
                 }
             }
-            if (!mobile && !allReviewed && onSetReviewed != null) MarkAllButton(narrow, markAll)
+            if (onRefresh != null) RefreshButton(mobile, loading, onRefresh)
+            if (!mobile && loaded && !allReviewed && onSetReviewed != null) MarkAllButton(narrow, markAll)
             if (!allReviewed) ReviewButton(mobile) { review(null) }
         }
 
@@ -361,9 +378,9 @@ fun SessionChangesBar(
     if (mobile && open) {
         sheet({ open = false }) { top ->
             ChangesSheetContent(
-                top, allReviewed, added, removed, pending.size, providerId,
+                top, loaded, allReviewed, added, removed, if (loaded) pending.size else unloadedCount, providerId,
                 onClose = { open = false },
-                onMarkAll = if (onSetReviewed != null) markAll else null,
+                onMarkAll = if (loaded && onSetReviewed != null) markAll else null,
                 onReviewAll = { review(null) },
                 rows = { rows(false) },
             )
@@ -374,6 +391,7 @@ fun SessionChangesBar(
 /** The files still to review, then the row that shows or hides the reviewed ones, and those while shown. */
 @Composable
 private fun ChangeRows(
+    loading: Boolean,
     pending: List<SessionFileChange>,
     reviewed: List<SessionFileChange>,
     reviewedShown: Boolean,
@@ -392,6 +410,13 @@ private fun ChangeRows(
             onClick = { onReview(file.path) },
             onToggleReviewed = onSetReviewed?.let { set -> { set(listOf(file), !file.reviewed) } },
         )
+    }
+    if (loading && pending.isEmpty() && reviewed.isEmpty()) {
+        val tokens = LocalPpmTokens.current
+        // `text-text-subtle`, `px-2.5 py-1.5 text-[11px]` in the list, `px-4 py-3 text-xs` in the sheet.
+        CssColumn(Modifier.fillMaxWidth().padding(horizontal = if (dense) 10.dp else 16.dp), top = if (dense) 6.dp else 12.dp, bottom = if (dense) 6.dp else 12.dp) {
+            BasicText("Working out what changed…", Modifier.cssLines(if (dense) 16.5f else 16f), (if (dense) pageSmallText else xsText).copy(color = tokens.text3.color))
+        }
     }
     pending.forEach { row(it) }
     if (showToggle) ReviewedToggle(reviewed.size, showReviewed, dense, onToggleShown)
@@ -421,6 +446,32 @@ private fun MarkAllButton(narrow: Boolean, onClick: () -> Unit) {
     }
 }
 
+/**
+ * Refresh changes (`inline-flex min-h-11 min-w-11 rounded text-text-secondary hover:bg-surface
+ * hover:text-text-primary disabled:opacity-60 md:min-h-8 md:min-w-8`): spinning, and off, while a
+ * list is on its way.
+ */
+@Composable
+private fun RefreshButton(mobile: Boolean, loading: Boolean, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val hover = rememberHover()
+    val side = if (mobile) 44.dp else 32.dp
+    Box(
+        Modifier
+            .alpha(if (loading) 0.6f else 1f)
+            .heightIn(min = side)
+            .widthIn(min = side)
+            .webTitle("Refresh changes")
+            .ppmClickable(
+                enabled = !loading, pressedColor = tokens.panel.color, hoverColor = tokens.panel.color, shape = RoundedCornerShape(4.dp),
+                onClickLabel = "Refresh changes", source = hover.source, hoverWhileDisabled = true, onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        PpmIcon(ProductIcon.RefreshCw, 14.dp, tokens.text.mix(tokens.text2, hover.lit.toDouble()).color, spinning = loading)
+    }
+}
+
 /** Review (`inline-flex min-h-11 gap-1.5 rounded px-3 text-xs font-medium text-primary md:min-h-8 md:px-2`). */
 @Composable
 private fun ReviewButton(mobile: Boolean, onClick: () -> Unit) {
@@ -446,10 +497,12 @@ private fun ReviewButton(mobile: Boolean, onClick: () -> Unit) {
 @Composable
 private fun ColumnScope.ChangesSheetContent(
     top: Dp,
+    loaded: Boolean,
     allReviewed: Boolean,
     added: Int,
     removed: Int,
-    pendingCount: Int,
+    /** What "Review all" counts: the files left to review, or before the list is in, every file changed. */
+    reviewCount: Int,
     providerId: String?,
     onClose: () -> Unit,
     onMarkAll: (() -> Unit)?,
@@ -469,7 +522,7 @@ private fun ColumnScope.ChangesSheetContent(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             TruncatedText(AnnotatedString("Changed in this chat"), ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color), Modifier.weight(1f))
-            if (!allReviewed) ChangeCounts(added, removed, ppmText(12f, kind = FontKind.MONO, lineHeight = 16f))
+            if (loaded && !allReviewed) ChangeCounts(added, removed, ppmText(12f, kind = FontKind.MONO, lineHeight = 16f))
             // `inline-flex size-11 rounded-lg text-text-subtle hover:bg-surface hover:text-text-primary`.
             val hover = rememberHover()
             Box(
@@ -495,7 +548,7 @@ private fun ColumnScope.ChangesSheetContent(
                 if (onMarkAll != null) {
                     SheetButton(ProductIcon.ListChecks, null, "Mark all reviewed", primary = false, onClick = onMarkAll)
                 }
-                SheetButton(null, LucideIcon.FileDiff, "Review all ${SessionChangeList.fileCount(pendingCount)}", primary = true, onClick = onReviewAll)
+                SheetButton(null, LucideIcon.FileDiff, "Review all ${SessionChangeList.fileCount(reviewCount)}", primary = true, onClick = onReviewAll)
             }
         }
     }
