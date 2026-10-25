@@ -1,0 +1,822 @@
+{
+ "messages": [
+  {
+   "id": "u0",
+   "role": "user",
+   "content": "Before the compaction",
+   "timestamp": "2026-10-25T08:00:00.000Z"
+  },
+  {
+   "id": "a0",
+   "role": "assistant",
+   "content": "",
+   "events": [
+    {
+     "type": "tool_use",
+     "tool": "Edit",
+     "toolUseId": "t0",
+     "input": {
+      "file_path": "/p/old.ts",
+      "old_string": "a",
+      "new_string": "b"
+     }
+    },
+    {
+     "type": "tool_result",
+     "toolUseId": "t0",
+     "output": "ok"
+    }
+   ],
+   "timestamp": "2026-10-25T08:01:00.000Z"
+  },
+  {
+   "id": "c1",
+   "role": "user",
+   "content": "This session is being continued from a previous conversation.",
+   "timestamp": "2026-10-25T08:02:00.000Z",
+   "compaction": {
+    "trigger": "auto",
+    "preTokens": 1000,
+    "postTokens": 100,
+    "savedTokens": 900
+   }
+  },
+  {
+   "id": "u1",
+   "role": "user",
+   "content": "Make the change",
+   "timestamp": "2026-10-25T08:03:00.000Z"
+  },
+  {
+   "id": "a1",
+   "role": "assistant",
+   "content": "",
+   "events": [
+    {
+     "type": "text",
+     "content": "On it."
+    },
+    {
+     "type": "tool_use",
+     "tool": "Write",
+     "toolUseId": "t1",
+     "input": {
+      "file_path": "/p/src/new.ts",
+      "content": "export const a = 1;\nexport const b = 2;\n"
+     }
+    },
+    {
+     "type": "tool_result",
+     "toolUseId": "t1",
+     "output": "File created successfully at: /p/src/new.ts"
+    },
+    {
+     "type": "tool_use",
+     "tool": "Edit",
+     "toolUseId": "t2",
+     "input": {
+      "file_path": "/p/src/app.ts",
+      "old_string": "foo",
+      "new_string": "foo\nbar"
+     }
+    },
+    {
+     "type": "tool_result",
+     "toolUseId": "t2",
+     "output": "The file /p/src/app.ts has been updated."
+    }
+   ],
+   "timestamp": "2026-10-25T08:04:00.000Z"
+  },
+  {
+   "id": "a2",
+   "role": "assistant",
+   "content": "",
+   "events": [
+    {
+     "type": "tool_use",
+     "tool": "MultiEdit",
+     "toolUseId": "t3",
+     "input": {
+      "file_path": "/p/src/app.ts",
+      "edits": [
+       {
+        "old_string": "one\ntwo\nthree\n",
+        "new_string": "zero\none\nthree\nfour\n"
+       },
+       {
+        "old_string": "x\ny\n",
+        "new_string": "x\ny"
+       },
+       "junk"
+      ]
+     }
+    },
+    {
+     "type": "tool_result",
+     "toolUseId": "t3",
+     "output": "ok"
+    },
+    {
+     "type": "tool_use",
+     "tool": "Bash",
+     "toolUseId": "t4",
+     "input": {
+      "command": "npm test"
+     }
+    },
+    {
+     "type": "tool_result",
+     "toolUseId": "t4",
+     "output": "passed"
+    },
+    {
+     "type": "tool_use",
+     "tool": "Agent",
+     "toolUseId": "t5",
+     "input": {
+      "description": "fix lint",
+      "prompt": "Fix the lint"
+     },
+     "children": [
+      {
+       "type": "tool_use",
+       "tool": "Read",
+       "toolUseId": "s1",
+       "input": {
+        "file_path": "/p/src/lint.ts"
+       }
+      },
+      {
+       "type": "tool_result",
+       "toolUseId": "s1",
+       "output": "…"
+      },
+      {
+       "type": "tool_use",
+       "tool": "Edit",
+       "toolUseId": "s2",
+       "input": {
+        "file_path": "/p/src/lint.ts",
+        "old_string": "var x",
+        "new_string": "let x"
+       }
+      },
+      {
+       "type": "tool_result",
+       "toolUseId": "s2",
+       "output": "ok"
+      },
+      {
+       "type": "tool_use",
+       "tool": "Agent",
+       "toolUseId": "s3",
+       "input": {
+        "description": "deeper",
+        "prompt": "Go deeper"
+       },
+       "children": [
+        {
+         "type": "tool_use",
+         "tool": "Write",
+         "toolUseId": "s4",
+         "input": {
+          "file_path": "/p/src/app.ts",
+          "content": "rewritten\n"
+         }
+        },
+        {
+         "type": "tool_result",
+         "toolUseId": "s4",
+         "output": "ok"
+        }
+       ]
+      },
+      {
+       "type": "tool_result",
+       "toolUseId": "s3",
+       "output": "done"
+      }
+     ]
+    },
+    {
+     "type": "tool_result",
+     "toolUseId": "t5",
+     "output": "Agent finished"
+    },
+    {
+     "type": "tool_use",
+     "tool": "NotebookEdit",
+     "toolUseId": "t6",
+     "input": {
+      "notebook_path": "/p/nb.ipynb",
+      "new_source": "print(1)"
+     }
+    },
+    {
+     "type": "text",
+     "content": "Done."
+    }
+   ],
+   "timestamp": "2026-10-25T08:05:00.000Z"
+  },
+  {
+   "id": "u2",
+   "role": "user",
+   "content": "[Attached file: /p/notes.md]\n\n",
+   "timestamp": "2026-10-25T08:06:00.000Z"
+  },
+  {
+   "id": "a3",
+   "role": "assistant",
+   "content": "",
+   "events": [
+    {
+     "type": "tool_use",
+     "tool": "Edit",
+     "toolUseId": "t7",
+     "input": {
+      "file_path": "/p/src/a.ts",
+      "old_string": "a",
+      "new_string": "A",
+      "files": [
+       {
+        "file_path": "/p/src/a.ts",
+        "op": "update",
+        "old_string": "a",
+        "new_string": "A"
+       },
+       {
+        "file_path": "/p/src/b.ts",
+        "op": "add",
+        "old_string": "",
+        "new_string": "b\nb\n"
+       },
+       {
+        "op": "update"
+       }
+      ]
+     }
+    },
+    {
+     "type": "tool_use",
+     "tool": "PowerShell",
+     "toolUseId": "t8",
+     "input": {
+      "command": "dir"
+     }
+    },
+    {
+     "type": "tool_use",
+     "tool": "Edit",
+     "toolUseId": "t9",
+     "input": {
+      "file_path": "",
+      "old_string": "a",
+      "new_string": "b"
+     }
+    },
+    {
+     "type": "tool_use",
+     "tool": "Write",
+     "toolUseId": "t10",
+     "input": {
+      "file_path": "/p/src/c.ts",
+      "content": "c"
+     }
+    },
+    {
+     "type": "tool_result",
+     "toolUseId": "t10",
+     "output": "Overwrote"
+    }
+   ],
+   "timestamp": "2026-10-25T08:07:00.000Z"
+  },
+  {
+   "id": "u3",
+   "role": "user",
+   "content": "<command-name>/review</command-name>\n<command-args>now</command-args>\n\nplease",
+   "timestamp": "2026-10-25T08:08:00.000Z"
+  },
+  {
+   "id": "a4",
+   "role": "assistant",
+   "content": "",
+   "events": [
+    {
+     "type": "text",
+     "content": "Nothing to change."
+    }
+   ],
+   "timestamp": "2026-10-25T08:09:00.000Z"
+  }
+ ],
+ "turns": [
+  {
+   "last": 1,
+   "changes": [
+    {
+     "filePath": "/p/old.ts",
+     "op": "edit",
+     "editCount": 1,
+     "linesAdded": 1,
+     "linesRemoved": 1,
+     "edits": [
+      {
+       "oldStr": "a",
+       "newStr": "b",
+       "toolUseId": "t0",
+       "editIndex": 0,
+       "editRef": "t0-0",
+       "viaSubagent": false
+      }
+     ],
+     "viaSubagent": false
+    }
+   ],
+   "reviews": [
+    {
+     "key": "/p/old.ts\u0000t0\u00000",
+     "state": null,
+     "path": null,
+     "keys": [],
+     "undoId": null
+    }
+   ],
+   "summary": {
+    "open": 0,
+    "kept": 0,
+    "reverted": 0,
+    "known": 0
+   },
+   "keepOpen": [],
+   "all": []
+  },
+  {
+   "last": 5,
+   "changes": [
+    {
+     "filePath": "/p/src/new.ts",
+     "op": "create",
+     "editCount": 1,
+     "linesAdded": 2,
+     "linesRemoved": 0,
+     "edits": [
+      {
+       "oldStr": "",
+       "newStr": "export const a = 1;\nexport const b = 2;\n",
+       "toolUseId": "t1",
+       "editIndex": 0,
+       "editRef": "t1-0",
+       "viaSubagent": false
+      }
+     ],
+     "viaSubagent": false
+    },
+    {
+     "filePath": "/p/src/app.ts",
+     "op": "write",
+     "editCount": 4,
+     "linesAdded": 6,
+     "linesRemoved": 3,
+     "edits": [
+      {
+       "oldStr": "foo",
+       "newStr": "foo\nbar",
+       "toolUseId": "t2",
+       "editIndex": 0,
+       "editRef": "t2-0",
+       "viaSubagent": false
+      },
+      {
+       "oldStr": "one\ntwo\nthree\n",
+       "newStr": "zero\none\nthree\nfour\n",
+       "toolUseId": "t3",
+       "editIndex": 0,
+       "editRef": "t3-0",
+       "viaSubagent": false
+      },
+      {
+       "oldStr": "x\ny\n",
+       "newStr": "x\ny",
+       "toolUseId": "t3",
+       "editIndex": 1,
+       "editRef": "t3-1",
+       "viaSubagent": false
+      },
+      {
+       "oldStr": "",
+       "newStr": "rewritten\n",
+       "toolUseId": "s4",
+       "editIndex": 0,
+       "editRef": "s4-0",
+       "viaSubagent": true
+      }
+     ],
+     "viaSubagent": true
+    },
+    {
+     "filePath": "/p/src/lint.ts",
+     "op": "edit",
+     "editCount": 1,
+     "linesAdded": 1,
+     "linesRemoved": 1,
+     "edits": [
+      {
+       "oldStr": "var x",
+       "newStr": "let x",
+       "toolUseId": "s2",
+       "editIndex": 0,
+       "editRef": "s2-0",
+       "viaSubagent": true
+      }
+     ],
+     "viaSubagent": true
+    },
+    {
+     "filePath": "/p/nb.ipynb",
+     "op": "notebook",
+     "editCount": 1,
+     "linesAdded": 1,
+     "linesRemoved": 0,
+     "edits": [
+      {
+       "oldStr": "",
+       "newStr": "print(1)",
+       "toolUseId": "t6",
+       "editIndex": 0,
+       "editRef": "t6-0",
+       "viaSubagent": false
+      }
+     ],
+     "viaSubagent": false
+    }
+   ],
+   "reviews": [
+    {
+     "key": "/p/src/new.ts\u0000t1\u00000",
+     "state": "open",
+     "path": "/p/src/new.ts",
+     "keys": [
+      "k1"
+     ],
+     "undoId": null
+    },
+    {
+     "key": "/p/src/app.ts\u0000t2\u00000",
+     "state": "kept",
+     "path": "/p/src/app.ts",
+     "keys": [
+      "k2"
+     ],
+     "undoId": null
+    },
+    {
+     "key": "/p/src/app.ts\u0000t3\u00000",
+     "state": "open",
+     "path": "/p/src/app.ts",
+     "keys": [
+      "k3",
+      "k4"
+     ],
+     "undoId": null
+    },
+    {
+     "key": "/p/src/app.ts\u0000t3\u00001",
+     "state": "open",
+     "path": "/p/src/app.ts",
+     "keys": [
+      "k3",
+      "k4"
+     ],
+     "undoId": null
+    },
+    {
+     "key": "/p/src/app.ts\u0000s4\u00000",
+     "state": "open",
+     "path": "/p/src/app.ts",
+     "keys": [
+      "k3"
+     ],
+     "undoId": null
+    },
+    {
+     "key": "/p/src/lint.ts\u0000s2\u00000",
+     "state": "kept",
+     "path": "/p/src/lint.ts",
+     "keys": [],
+     "undoId": null
+    },
+    {
+     "key": "/p/nb.ipynb\u0000t6\u00000",
+     "state": null,
+     "path": "/p/nb.ipynb",
+     "keys": [],
+     "undoId": null
+    }
+   ],
+   "summary": {
+    "open": 4,
+    "kept": 2,
+    "reverted": 0,
+    "known": 6
+   },
+   "keepOpen": [
+    {
+     "path": "/p/src/new.ts",
+     "version": "v1",
+     "keys": [
+      "k1"
+     ]
+    },
+    {
+     "path": "/p/src/app.ts",
+     "version": "v2",
+     "keys": [
+      "k3"
+     ]
+    }
+   ],
+   "all": [
+    {
+     "path": "/p/src/new.ts",
+     "version": "v1",
+     "keys": [
+      "k1"
+     ]
+    },
+    {
+     "path": "/p/src/app.ts",
+     "version": "v2",
+     "keys": [
+      "k2",
+      "k3",
+      "k4"
+     ]
+    }
+   ]
+  },
+  {
+   "last": 7,
+   "changes": [
+    {
+     "filePath": "/p/src/a.ts",
+     "op": "edit",
+     "editCount": 1,
+     "linesAdded": 1,
+     "linesRemoved": 1,
+     "edits": [
+      {
+       "oldStr": "a",
+       "newStr": "A",
+       "toolUseId": "t7",
+       "editIndex": 0,
+       "editRef": "t7-0",
+       "viaSubagent": false
+      }
+     ],
+     "viaSubagent": false
+    },
+    {
+     "filePath": "/p/src/b.ts",
+     "op": "create",
+     "editCount": 1,
+     "linesAdded": 2,
+     "linesRemoved": 0,
+     "edits": [
+      {
+       "oldStr": "",
+       "newStr": "b\nb\n",
+       "toolUseId": "t7",
+       "editIndex": 0,
+       "editRef": "t7-0",
+       "viaSubagent": false
+      }
+     ],
+     "viaSubagent": false
+    },
+    {
+     "filePath": "/p/src/c.ts",
+     "op": "write",
+     "editCount": 1,
+     "linesAdded": 1,
+     "linesRemoved": 0,
+     "edits": [
+      {
+       "oldStr": "",
+       "newStr": "c",
+       "toolUseId": "t10",
+       "editIndex": 0,
+       "editRef": "t10-0",
+       "viaSubagent": false
+      }
+     ],
+     "viaSubagent": false
+    }
+   ],
+   "reviews": [
+    {
+     "key": "/p/src/a.ts\u0000t7\u00000",
+     "state": "reverted",
+     "path": "/p/src/a.ts",
+     "keys": [],
+     "undoId": null
+    },
+    {
+     "key": "/p/src/b.ts\u0000t7\u00000",
+     "state": null,
+     "path": null,
+     "keys": [],
+     "undoId": null
+    },
+    {
+     "key": "/p/src/c.ts\u0000t10\u00000",
+     "state": "reverted",
+     "path": null,
+     "keys": [],
+     "undoId": "undo-1"
+    }
+   ],
+   "summary": {
+    "open": 0,
+    "kept": 0,
+    "reverted": 2,
+    "known": 2
+   },
+   "keepOpen": [],
+   "all": []
+  },
+  {
+   "last": 9,
+   "changes": [],
+   "reviews": [],
+   "summary": {
+    "open": 0,
+    "kept": 0,
+    "reverted": 0,
+    "known": 0
+   },
+   "keepOpen": [],
+   "all": []
+  }
+ ],
+ "writes": {
+  "paths": [
+   "/p/old.ts",
+   "/p/src/new.ts",
+   "/p/src/app.ts",
+   "/p/src/lint.ts",
+   "/p/nb.ipynb",
+   "/p/src/a.ts",
+   "/p/src/b.ts",
+   "/p/src/c.ts"
+  ],
+  "settled": 8
+ },
+ "sessionTurns": [
+  {
+   "n": 0,
+   "messageId": "u0",
+   "at": "2026-10-25T08:00:00.000Z",
+   "prompt": "Before the compaction",
+   "calls": [
+    "t0"
+   ]
+  },
+  {
+   "n": 1,
+   "messageId": "u1",
+   "at": "2026-10-25T08:03:00.000Z",
+   "prompt": "Make the change",
+   "calls": [
+    "t1",
+    "t2",
+    "t3",
+    "t4",
+    "t5",
+    "s1",
+    "s2",
+    "s3",
+    "s4",
+    "t6"
+   ]
+  },
+  {
+   "n": 2,
+   "messageId": "u2",
+   "at": "2026-10-25T08:06:00.000Z",
+   "prompt": "1 attached file",
+   "calls": [
+    "t7",
+    "t8",
+    "t9",
+    "t10"
+   ]
+  },
+  {
+   "n": 3,
+   "messageId": "u3",
+   "at": "2026-10-25T08:08:00.000Z",
+   "prompt": "/review now\n\nplease",
+   "calls": []
+  }
+ ],
+ "files": [
+  {
+   "path": "/p/src/new.ts",
+   "status": "added",
+   "additions": 2,
+   "deletions": 0,
+   "baseline": "session",
+   "version": "v1",
+   "blocks": [
+    {
+     "key": "k1",
+     "added": 2,
+     "removed": 0,
+     "calls": [
+      "t1"
+     ]
+    }
+   ]
+  },
+  {
+   "path": "/p/src/app.ts",
+   "status": "modified",
+   "additions": 3,
+   "deletions": 2,
+   "baseline": "session",
+   "version": "v2",
+   "blocks": [
+    {
+     "key": "k2",
+     "added": 1,
+     "removed": 0,
+     "kept": true,
+     "calls": [
+      "t2"
+     ]
+    },
+    {
+     "key": "k3",
+     "added": 2,
+     "removed": 1,
+     "calls": [
+      "t3",
+      "s4"
+     ]
+    },
+    {
+     "key": "k4",
+     "added": 0,
+     "removed": 1,
+     "kept": true,
+     "calls": [
+      "t3"
+     ]
+    }
+   ]
+  },
+  {
+   "path": "/p/src/lint.ts",
+   "status": "modified",
+   "additions": 1,
+   "deletions": 1,
+   "baseline": "head",
+   "version": "v3",
+   "sinceReview": true
+  },
+  {
+   "path": "/p/nb.ipynb",
+   "status": "modified",
+   "baseline": "session",
+   "version": "v4",
+   "binary": true
+  },
+  {
+   "path": "/p/src/a.ts",
+   "status": "modified",
+   "additions": 1,
+   "deletions": 1,
+   "baseline": "session",
+   "version": "v5",
+   "blocks": [
+    {
+     "key": "k5",
+     "added": 1,
+     "removed": 1,
+     "calls": [
+      "other"
+     ]
+    }
+   ]
+  }
+ ],
+ "reverted": [
+  [
+   "/p/src/c.ts\u0000t10\u00000",
+   "undo-1"
+  ]
+ ]
+}
