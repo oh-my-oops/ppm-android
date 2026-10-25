@@ -1,7 +1,6 @@
 package com.hienlh.ppm.chat
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -15,14 +14,29 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Measurable
+import androidx.compose.ui.layout.MeasureResult
+import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.hienlh.ppm.design.CssExact
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.cssExact
+import com.hienlh.ppm.design.cssPhase
+import com.hienlh.ppm.design.cssPhased
+import com.hienlh.ppm.design.cssReport
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberCssExact
 import com.hienlh.ppm.state.JsDiff
+import kotlin.math.ceil
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * The compact Edit/MultiEdit preview (`edit-diff-compute.ts`): removed lines before the added
@@ -118,48 +132,88 @@ internal object EditDiff {
     fun <T> diff(a: List<T>, b: List<T>): Pair<BooleanArray, BooleanArray> = JsDiff.diff(a, b)
 }
 
-/** An edit as removed and added lines, the changed words marked (`edit-diff-preview.tsx`). */
+/** An edit as removed and added lines, the changed words marked (`edit-diff-preview.tsx`), each [lineHeight] tall. */
 @Composable
-internal fun EditDiffView(old: String, new: String) {
+internal fun EditDiffView(old: String, new: String, lineHeight: Float = 11f * 16f / 12f) {
     val tokens = LocalPpmTokens.current
     val diff = remember(old, new) { EditDiff.rows(old, new) }
-    // `font-mono text-[11px]` inside the card's `text-xs`, whose line height is a ratio.
-    val style = ppmText(11f, kind = FontKind.MONO, lineHeight = 11f * 16f / 12f)
+    // `font-mono text-[11px]`, its line height the box's: a card's `text-xs` is a ratio of 4/3.
+    val style = ppmText(11f, kind = FontKind.MONO, lineHeight = lineHeight)
     // `break-all`, as `Mono` does it: not in a diff holding a U+200B of its own, so a copy keeps it.
     val breaking = diff.rows.none { BREAK in it.text }
+    val exact = rememberCssExact()
     WithoutBreaksOnCopy(breaking) {
-        SelectionContainer {
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).padding(vertical = 4.dp)) {
-                for (row in diff.rows) {
-                    // An empty context line has nothing to stand on: its gutter is a space that collapses.
-                    if (row.kind == EditDiff.Kind.EQUAL && row.text.isEmpty()) continue
-                    val (tint, gutter, prefix) = when (row.kind) {
-                        EditDiff.Kind.DEL -> Triple(tokens.error.opacity(0.16).color, tokens.error.color, "-")
-                        EditDiff.Kind.INS -> Triple(tokens.success.opacity(0.16).color, tokens.success.color, "+")
-                        EditDiff.Kind.EQUAL -> Triple(Color.Transparent, tokens.text3.color, " ")
-                    }
-                    val word = SpanStyle(background = (if (row.kind == EditDiff.Kind.DEL) tokens.error else tokens.success).opacity(0.4).color)
-                    Row(Modifier.fillMaxWidth().background(tint)) {
-                        // `select-none`: a copy is the code alone.
-                        DisableSelection {
-                            BasicText(prefix, Modifier.padding(start = 6.dp).width(6.dp), style.copy(color = gutter), overflow = TextOverflow.Visible, softWrap = false)
+        SelectionContainer(Modifier.cssExact(exact)) {
+            Layout(
+                content = {
+                    for (row in diff.rows) {
+                        // An empty context line has nothing to stand on: its gutter is a space that collapses.
+                        if (row.kind == EditDiff.Kind.EQUAL && row.text.isEmpty()) continue
+                        val (tint, gutter, prefix) = when (row.kind) {
+                            EditDiff.Kind.DEL -> Triple(tokens.error.opacity(0.16).color, tokens.error.color, "-")
+                            EditDiff.Kind.INS -> Triple(tokens.success.opacity(0.16).color, tokens.success.color, "+")
+                            EditDiff.Kind.EQUAL -> Triple(Color.Transparent, tokens.text3.color, " ")
                         }
-                        val text = remember(row, word, breaking) { codeLine(row, word, breaking) }
-                        BasicText(text, Modifier.padding(end = 6.dp), style.copy(color = tokens.text.color))
+                        val word = SpanStyle(background = (if (row.kind == EditDiff.Kind.DEL) tokens.error else tokens.success).opacity(0.4).color)
+                        Row(Modifier.fillMaxWidth().background(tint)) {
+                            // `select-none`: a copy is the code alone.
+                            DisableSelection {
+                                BasicText(prefix, Modifier.padding(start = 6.dp).width(6.dp), style.copy(color = gutter), overflow = TextOverflow.Visible, softWrap = false)
+                            }
+                            val text = remember(row, word, breaking) { codeLine(row, word, breaking) }
+                            BasicText(text, Modifier.padding(end = 6.dp), style.copy(color = tokens.text.color))
+                        }
                     }
-                }
-                if (diff.extra > 0) {
-                    DisableSelection {
-                        BasicText(
-                            "… +${diff.extra} more line${if (diff.extra == 1) "" else "s"}",
-                            Modifier.padding(start = 6.dp),
-                            style.copy(color = tokens.text3.color),
-                        )
+                    if (diff.extra > 0) {
+                        DisableSelection {
+                            BasicText(
+                                "… +${diff.extra} more line${if (diff.extra == 1) "" else "s"}",
+                                Modifier.padding(start = 6.dp),
+                                style.copy(color = tokens.text3.color),
+                            )
+                        }
                     }
-                }
-            }
+                },
+                modifier = Modifier.cssPhased(exact).fillMaxWidth().clip(RoundedCornerShape(4.dp)),
+                measurePolicy = { measurables, constraints -> stackRows(measurables, constraints, exact, lineHeight) },
+            )
         }
     }
+}
+
+/**
+ * The rows `py-1` inside the box and [lineHeight] CSS px a line, at their exact places as Chrome
+ * stacks them, each given the pixels from its rounded top to the next one's: rounded a row at a
+ * time, 43.3 px lines put the sixth row 4 px low at 2.625x, and rounded rows' tints would overlap.
+ * Compose sets each line of a row a whole pixel apart, so a row that wraps measures taller than
+ * its lines; it may lose at most a pixel of the room under its last line, and pushes the rows
+ * after it down by the rest.
+ */
+private fun MeasureScope.stackRows(measurables: List<Measurable>, constraints: Constraints, exact: CssExact, lineHeight: Float): MeasureResult {
+    val phase = exact.cssPhase()
+    val width = constraints.maxWidth
+    val line = lineHeight.sp.toPx()
+    val pitch = ceil(line)
+    val natural = IntArray(measurables.size) { measurables[it].minIntrinsicHeight(width) }
+    val tops = IntArray(measurables.size + 1)
+    var at = phase + 4.dp.toPx()
+    var floor = Int.MIN_VALUE
+    for (index in measurables.indices) {
+        if (at.roundToInt() < floor) at = floor.toFloat()
+        tops[index] = at.roundToInt()
+        at += max(1, (natural[index] / pitch).roundToInt()) * line
+        floor = tops[index] + natural[index] - 1
+    }
+    if (at.roundToInt() < floor) at = floor.toFloat()
+    tops[measurables.size] = at.roundToInt()
+    at += 4.dp.toPx()
+    val height = at.roundToInt().coerceIn(constraints.minHeight, constraints.maxHeight)
+    exact.cssReport(at - phase, height)
+    val placeables = measurables.mapIndexed { index, measurable ->
+        val rowHeight = tops[index + 1] - tops[index]
+        measurable.measure(Constraints(0, width, rowHeight, rowHeight))
+    }
+    return layout(width, height) { placeables.forEachIndexed { index, placeable -> placeable.place(0, tops[index]) } }
 }
 
 /**

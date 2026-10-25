@@ -117,6 +117,17 @@ class SessionChanges(
         }
     }
 
+    private val reviews = HashMap<String, Triple<List<TurnFileChange>, SessionTurn?, TurnReviewModel>>()
+
+    /**
+     * The review of the turn whose answers end with message [key], the same one while the turn
+     * stays as it is: a tray scrolled away and back finds its reverts and its notice as it left them.
+     */
+    fun turnReview(key: String, changes: List<TurnFileChange>, turn: SessionTurn?): TurnReviewModel {
+        reviews[key]?.let { (seen, seenTurn, model) -> if (seen == changes && seenTurn == turn) return model }
+        return TurnReviewModel(changes, turn, this, scope).also { reviews[key] = Triple(changes, turn, it) }
+    }
+
     companion object {
         const val REFETCH_DELAY_MILLIS = 400L
     }

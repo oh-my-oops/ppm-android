@@ -330,12 +330,14 @@ val LocalSheetContentTop = staticCompositionLocalOf { 0.dp }
  * `pb-[max(0.5rem,env(safe-area-inset-bottom))]`, or the keyboard's height while it is up — a
  * sheet whose class drops the padding (`p-0`) keeps only the navigation bar's, which Chrome's
  * page never reaches under. [overlay] is drawn over the sheet and its backdrop, where the page's
- * fixed corners stay above a sheet given a lower `zIndex`.
+ * fixed corners stay above a sheet given a lower `zIndex`. [radius] is the panel's top corners'
+ * (`rounded-t-2xl`, or a class's own).
  */
 @Composable
 fun BottomSheet(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    radius: Dp = 16.dp,
     background: Color? = null,
     dismissible: Boolean = true,
     bottomPadding: WindowInsets = WindowInsets.ime.union(WindowInsets.navigationBars).union(WindowInsets(bottom = 8.dp)),
@@ -378,7 +380,7 @@ fun BottomSheet(
                     .background(Color.Black.copy(alpha = 0.4f * shown))
                     .clickable(remember { MutableInteractionSource() }, indication = null, onClick = ::close),
             )
-            val shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+            val shape = RoundedCornerShape(topStart = radius, topEnd = radius)
             val border = tokens.border.color
             Column(
                 modifier
@@ -389,7 +391,7 @@ fun BottomSheet(
                     .clip(shape)
                     .background(background ?: tokens.panel2.color)
                     .drawWithCache {
-                        val line = topBorder(size, 16.dp.toPx(), cssBorderPx(1.dp).toFloat())
+                        val line = topBorder(size, radius.toPx(), cssBorderPx(1.dp).toFloat())
                         onDrawBehind { drawPath(line, border) }
                     }
                     .draggable(

@@ -28,7 +28,9 @@ object SessionTurns {
      * after it: a turn from before it is "earlier", not given a number that would move each time
      * an older segment is loaded back in.
      */
-    fun of(items: List<ChatItem>): List<SessionTurn> {
+    fun of(items: List<ChatItem>): List<SessionTurn> = of(items, ::promptOf, ::callsOf)
+
+    internal fun of(items: List<ChatItem>, promptOf: (ChatItem) -> String?, callsOf: (ChatItem) -> List<String>): List<SessionTurn> {
         val boundary = items.indexOfLast { it.compaction != null }
         val turns = mutableListOf<SessionTurn>()
         var n = 0
@@ -53,7 +55,7 @@ object SessionTurns {
     fun byCall(turns: List<SessionTurn>): Map<String, SessionTurn> = buildMap { for (turn in turns) for (call in turn.calls) put(call, turn) }
 
     /** What the user typed, or null for a user message that is not a prompt. */
-    private fun promptOf(item: ChatItem): String? {
+    internal fun promptOf(item: ChatItem): String? {
         if (item.role != ChatItem.Role.USER || item.compaction != null || item.text.jsTrim().isEmpty()) return null
         val parsed = ParsedUserMessage.parse(item.text)
         if (parsed.text.isEmpty() && parsed.command == null && parsed.files.isEmpty() && parsed.terminalBlocks.isEmpty()) return null
@@ -66,7 +68,7 @@ object SessionTurns {
      * Every call in an answer. A sub-agent's card keeps only some of its steps' events, but every
      * step's id in its progress, so both are read.
      */
-    private fun callsOf(item: ChatItem): List<String> {
+    internal fun callsOf(item: ChatItem): List<String> {
         val out = LinkedHashSet<String>()
         fun steps(progress: AgentProgress?) {
             progress ?: return
@@ -95,4 +97,33 @@ object SessionTurns {
 
     /** "Turn 3", or "Earlier turn" for one from before the last compaction. */
     fun label(turn: SessionTurn): String = if (turn.n > 0) "Turn ${turn.n}" else "Earlier turn"
+}
+
+/**
+ * [SessionTurns.of] for a chat that asks again whenever a message arrives: each message's prompt
+ * and calls are read once while it stays the same object, as `session-turns.ts` caches them.
+ */
+class SessionTurnsMemo {
+    private val prompts = HashMap<String, Pair<ChatItem, String?>>()
+    private val calls = HashMap<String, Pair<ChatItem, List<String>>>()
+
+    fun of(items: List<ChatItem>): List<SessionTurn> {
+        if (prompts.size + calls.size > 4 * items.size + 64) {
+            val ids = items.mapTo(HashSet()) { it.id }
+            prompts.keys.retainAll(ids)
+            calls.keys.retainAll(ids)
+        }
+        // A message that is no prompt is remembered as such: null is an answer too.
+        return SessionTurns.of(
+            items,
+            promptOf = { item ->
+                val seen = prompts[item.id]
+                if (seen != null && seen.first === item) seen.second else SessionTurns.promptOf(item).also { prompts[item.id] = item to it }
+            },
+            callsOf = { item ->
+                val seen = calls[item.id]
+                if (seen != null && seen.first === item) seen.second else SessionTurns.callsOf(item).also { calls[item.id] = item to it }
+            },
+        )
+    }
 }

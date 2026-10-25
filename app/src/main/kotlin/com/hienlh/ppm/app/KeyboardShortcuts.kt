@@ -4,6 +4,7 @@ import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.KeyboardShortcutGroup
 import android.view.KeyboardShortcutInfo
+import com.hienlh.ppm.chat.TurnTrayEscape
 import com.hienlh.ppm.state.DOCK_BACKTICK
 import com.hienlh.ppm.state.DoubleShift
 import com.hienlh.ppm.state.KEY_ACTIONS
@@ -83,6 +84,8 @@ class KeyboardShortcuts(private val model: AppModel) {
     /** In the web's order, so that a key set for two actions runs the same one. */
     private fun anywhere(press: KeyPress): Boolean {
         when {
+            // The change tray's own window listener: the one opened last, in the tab in front.
+            press == KeyPress("Escape") && TurnTrayEscape.dispatch() -> Unit
             // The web's stops the browser's save dialog; there is none here, but no later action takes the key.
             matches(press, "save-prevent") -> Unit
             matches(press, "command-palette") -> model.openPalette()

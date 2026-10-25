@@ -475,7 +475,7 @@ private fun ColumnScope.ChangesSheetContent(
             Box(
                 Modifier
                     .size(44.dp)
-                    .ppmClickable(pressedColor = tokens.panel.color, hoverColor = tokens.panel.color, shape = RoundedCornerShape(8.dp), onClickLabel = "Close", source = hover.source, onClick = onClose),
+                    .ppmClickable(pressedColor = tokens.panel.color, hoverColor = tokens.panel.color, shape = RoundedCornerShape(12.dp), onClickLabel = "Close", source = hover.source, onClick = onClose),
                 contentAlignment = Alignment.Center,
             ) {
                 PpmIcon(ProductIcon.X, 16.dp, tokens.text.mix(tokens.text3, hover.lit.toDouble()).color)
@@ -508,7 +508,7 @@ private fun ColumnScope.ChangesSheetContent(
 @Composable
 private fun SheetButton(icon: ProductIcon?, lucide: LucideIcon?, label: String, primary: Boolean, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(12.dp)
     val hover = rememberHover()
     // The `hover:` look, which a finger on it shows too.
     val pressed by hover.source.collectIsPressedAsState()

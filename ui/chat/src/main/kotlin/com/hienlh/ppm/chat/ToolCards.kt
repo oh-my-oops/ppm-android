@@ -1,17 +1,24 @@
 package com.hienlh.ppm.chat
 
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
+import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.protocol.bool
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -154,12 +161,29 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
     val partial = if (result == null && tool.name in SHELL_TOOLS) tool.toolUseId?.let { LocalBashOutput.current[it] } else null
     val interactive = tool.name in setOf("AskUserQuestion", "ExitPlanMode") || tool.isAgent
     val shape = RoundedCornerShape(11.dp)
+    // Named for "Show in chat" (`data-tool-ref`), and lit once it is jumped to (`[data-flash="card"]`):
+    // the border the accent at 55%, a 1 px ring and a glow around it, in and out over 200 ms.
+    val anchors = LocalEditAnchors.current
+    val callId = tool.toolUseId
+    if (anchors != null && callId != null) DisposableEffect(anchors, callId) { onDispose { anchors.cards.remove(callId) } }
+    val lit by animateFloatAsState(if (anchors != null && callId != null && anchors.flash == callId) 1f else 0f, tween(200, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)), label = "flash")
+    val border = tokens.accent.opacity(0.55).mix(if (interactive) tokens.accentWashBorder else tokens.border, lit.toDouble())
     Column(
         modifier
             .fillMaxWidth()
+            .then(if (anchors != null && callId != null) Modifier.onGloballyPositioned { anchors.cards[callId] = it } else Modifier)
+            .then(
+                if (lit > 0f) {
+                    Modifier
+                        .ppmShadow(ThemeShadow(0.0, 0.0, 22.0, -6.0, tokens.accent.opacity(0.5 * lit)), shape)
+                        .ppmShadow(ThemeShadow(0.0, 0.0, 0.0, 1.0, tokens.accent.opacity(0.35 * lit)), shape)
+                } else {
+                    Modifier
+                },
+            )
             .clip(shape)
             .background(tokens.panel.color)
-            .cssBorder((if (interactive) tokens.accentWashBorder else tokens.border).color, shape),
+            .cssBorder(border.color, shape),
     ) {
         Row(
             Modifier
@@ -188,7 +212,7 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
                 Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                ToolDetails(tool.name, tool.input)
+                ToolDetails(tool.name, tool.input, tool.toolUseId)
                 if (partial != null) StreamingBashOutput(partial)
                 if (!nested.isNullOrEmpty()) SubagentChildren(nested, window = false)
                 if (imagePath != null) ToolImagePreview(imagePath, tool.toolUseId)
@@ -546,7 +570,7 @@ private fun inlineIconDrop(): Dp = with(LocalDensity.current) {
 
 /** What an expanded card shows about the call itself. */
 @Composable
-private fun ToolDetails(name: String, input: JsonElement) {
+private fun ToolDetails(name: String, input: JsonElement, toolUseId: String? = null) {
     val tokens = LocalPpmTokens.current
     fun s(key: String) = jsString(input[key])
     val dbCall = remember(name, input) { dbToolCall(name, input) }
@@ -560,7 +584,7 @@ private fun ToolDetails(name: String, input: JsonElement) {
             }
             Mono(s("command"), tokens.text2, breakAll = true)
         }
-        "Read", "Write", "Edit", "MultiEdit", "NotebookEdit" -> FileDetails(name, input)
+        "Read", "Write", "Edit", "MultiEdit", "NotebookEdit" -> FileDetails(name, input, toolUseId)
         "Glob" -> Mono(s("pattern") + if (s("path").isEmpty()) "" else " in ${s("path")}", tokens.text2)
         "Grep" -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Mono("/${s("pattern")}/", tokens.text2)
@@ -696,7 +720,7 @@ private fun DeviceToolDetails(call: DeviceToolCall) {
 }
 
 @Composable
-private fun FileDetails(name: String, input: JsonElement) {
+private fun FileDetails(name: String, input: JsonElement, toolUseId: String?) {
     val tokens = LocalPpmTokens.current
     fun s(key: String) = input[key].string ?: ""
     val path = s("notebook_path").ifEmpty { s("file_path") }
@@ -710,12 +734,13 @@ private fun FileDetails(name: String, input: JsonElement) {
                 FileLink("View Diff", ProductIcon.Columns2, tokens.text3, cardText, breakAll = false) { tabs?.openDiff(path, s("old_string"), s("new_string")) }
             }
         }
-        if (hasEditDiff) EditDiffView(s("old_string"), s("new_string"))
+        // Each edit named `<call>-<index>` for "Show in chat" (`data-edit-ref`).
+        if (hasEditDiff) Box(Modifier.editAnchor(toolUseId?.let { "$it-0" })) { EditDiffView(s("old_string"), s("new_string")) }
         if (name == "MultiEdit") {
             val edits = input["edits"].array.orEmpty()
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 edits.forEachIndexed { index, edit ->
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Column(Modifier.editAnchor(toolUseId?.let { "$it-$index" }), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         BasicText("Edit ${index + 1}", style = tinyText.copy(color = tokens.text3.color))
                         EditDiffView(edit["old_string"].string ?: "", edit["new_string"].string ?: "")
                     }
@@ -723,7 +748,7 @@ private fun FileDetails(name: String, input: JsonElement) {
             }
         }
         if (name == "Write" && s("content").isNotEmpty()) {
-            Box(Modifier.heightIn(max = 128.dp).verticalScroll(rememberScrollState())) {
+            Box(Modifier.editAnchor(toolUseId?.let { "$it-0" }).heightIn(max = 128.dp).verticalScroll(rememberScrollState())) {
                 Mono(truncate(s("content"), 300), tokens.text3)
             }
         }

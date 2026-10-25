@@ -239,6 +239,17 @@ class DesignTest {
     }
 
     @Test
+    fun `a line holding Monaspace in Geist is as tall as Chrome makes it`() {
+        val sans = PpmFonts.SANS_ASCENT to PpmFonts.SANS_DESCENT
+        val mono = PpmFonts.MONO_ASCENT to PpmFonts.MONO_DESCENT
+        // 14 px on 21 at 2.625x, measured by CDP: the revert summary's sentence with `font-mono`
+        // counts in its second line is 42.76 px tall, its first line 21.
+        assertEquals(55.125f, PpmFonts.chromeLineBox(36.75f, 55.125f, listOf(sans)), 0.001f)
+        assertEquals(57.125f, PpmFonts.chromeLineBox(36.75f, 55.125f, listOf(sans, mono)), 0.001f)
+        assertEquals(42.76f * 2.625f, PpmFonts.chromeLineBox(36.75f, 55.125f, listOf(sans)) + PpmFonts.chromeLineBox(36.75f, 55.125f, listOf(sans, mono)), 0.02f)
+    }
+
+    @Test
     fun `line-clamp keeps the last line whole when the ellipsis fits after it`() {
         // Ten characters 10 px wide from x 0; "…" 15 px.
         val right = { k: Int -> 10f * k }

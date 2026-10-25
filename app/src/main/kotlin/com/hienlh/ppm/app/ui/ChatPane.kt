@@ -54,6 +54,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -117,6 +118,7 @@ import com.hienlh.ppm.chat.LocalChatImages
 import com.hienlh.ppm.chat.LocalChatTabs
 import com.hienlh.ppm.chat.LocalMarkdownImages
 import com.hienlh.ppm.chat.LocalToolImages
+import com.hienlh.ppm.chat.LocalTurnChanges
 import com.hienlh.ppm.chat.MarkdownImages
 import com.hienlh.ppm.chat.McpSignInBar
 import com.hienlh.ppm.chat.RelativeTime
@@ -124,6 +126,7 @@ import com.hienlh.ppm.chat.RunningAgentsBar
 import com.hienlh.ppm.chat.SessionChangesBar
 import com.hienlh.ppm.chat.TeamActivityPanel
 import com.hienlh.ppm.chat.ToolImages
+import com.hienlh.ppm.chat.TurnChangesHost
 import com.hienlh.ppm.chat.TurnStopBar
 import com.hienlh.ppm.client.teamActivity
 import com.hienlh.ppm.design.CssColumn
@@ -330,24 +333,27 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                 if (preview != null) {
                     FirstSendView(preview.content, preview.timestamp, Modifier.weight(1f))
                 } else {
-                    ChatTranscriptView(
-                        state,
-                        onRespond = { request, approved, data -> chat.respond(request, approved, data) },
-                        onLoadEarlier = chat::loadEarlier,
-                        onReload = { chat.reload() },
-                        modifier = Modifier.weight(1f),
-                        jumps = remember(tab.tabId) { model.chatJumps.filter { it.first == tab.tabId }.map { it.second } },
-                        welcome = {
-                            // `w-full px-4`; picking a chat shows it in this tab.
-                            tab.welcomeList?.let { list ->
-                                SessionListPanel(model, list, onOpen = { model.replaceTab(tab.tabId, it) }, Modifier.padding(horizontal = 16.dp))
-                            }
-                        },
-                        onDismiss = chat::dismissMessage,
-                        onClearErrors = chat::clearErrors,
-                        // Not while the draft, which may carry a reply of its own, is on its way.
-                        onReply = if (tab.draftLoading) null else tab::selectReply,
-                    )
+                    val turnChanges = rememberTurnChangesHost(model, tab, state)
+                    CompositionLocalProvider(LocalTurnChanges provides turnChanges) {
+                        ChatTranscriptView(
+                            state,
+                            onRespond = { request, approved, data -> chat.respond(request, approved, data) },
+                            onLoadEarlier = chat::loadEarlier,
+                            onReload = { chat.reload() },
+                            modifier = Modifier.weight(1f),
+                            jumps = remember(tab.tabId) { model.chatJumps.filter { it.first == tab.tabId }.map { it.second } },
+                            welcome = {
+                                // `w-full px-4`; picking a chat shows it in this tab.
+                                tab.welcomeList?.let { list ->
+                                    SessionListPanel(model, list, onOpen = { model.replaceTab(tab.tabId, it) }, Modifier.padding(horizontal = 16.dp))
+                                }
+                            },
+                            onDismiss = chat::dismissMessage,
+                            onClearErrors = chat::clearErrors,
+                            // Not while the draft, which may carry a reply of its own, is on its way.
+                            onReply = if (tab.draftLoading) null else tab::selectReply,
+                        )
+                    }
                 }
             }
             val itemsWithLive = remember(state.items, state.live, state.liveStartedAt) { state.itemsWithLive() }
@@ -1082,6 +1088,33 @@ fun InlineRename(model: AppModel, session: SessionInfo, field: RenameField, modi
         )
         RowIcon(ProductIcon.Check, tokens.success, tokens.success.opacity(0.8)) { finish(save = true) }
         RowIcon(ProductIcon.X, tokens.text3, tokens.text2) { finish(save = false) }
+    }
+}
+
+/**
+ * What each turn's change pill answers against (`SessionChangesContext`): [tab]'s session list,
+ * its Review tab, and on a phone a sheet up to 90% of the page with `rounded-t-[14px]`.
+ */
+@Composable
+private fun rememberTurnChangesHost(model: AppModel, tab: ChatTab, state: ChatState): TurnChangesHost {
+    val changes = tab.sessionChanges
+    val title by rememberUpdatedState(state.title)
+    val statusBar = WindowInsets.statusBars.getTop(LocalDensity.current)
+    return remember(changes, tab, statusBar) {
+        val sheetMax = Modifier.layout { measurable, constraints ->
+            val max = ((constraints.maxHeight - statusBar) * 0.9f).toInt().coerceIn(constraints.minHeight, constraints.maxHeight)
+            val placeable = measurable.measure(constraints.copy(maxHeight = max))
+            layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+        }
+        TurnChangesHost(
+            changes,
+            openReview = { path ->
+                val session = tab.session
+                if (session != null && changes != null) model.openSessionReview(tab.project, session.id, title, tab.providerId, changes.paths, path)
+            },
+            sheet = { dismiss, content -> BottomSheet(dismiss, sheetMax, radius = 14.dp) { content(LocalSheetContentTop.current) } },
+            ownsKeys = { model.activeTabId == tab.tabId },
+        )
     }
 }
 

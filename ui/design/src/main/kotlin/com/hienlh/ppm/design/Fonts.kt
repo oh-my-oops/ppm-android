@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import kotlin.concurrent.thread
 import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.max
 
 /**
  * The web's two typefaces: Geist for the interface, Monaspace Argon for code and metadata. Both
@@ -111,6 +112,25 @@ object PpmFonts {
         val (up, down) = chromeAscentDescent(px, ascent, descent)
         val leading = line - up - down
         return down + leading - floor(leading / 2)
+    }
+
+    /**
+     * How tall Chrome makes a line [line] px tall holding text in several fonts of [px] px, each
+     * given as its ascent and descent (LayoutNG `NGLineHeightMetrics`): each font's box is [line]
+     * tall around the shared baseline, its half-leading above floored, and the line takes them all.
+     * Monaspace numbers in a line of Geist reach 2 px further down than the Geist around them at
+     * 14 px on 21 at 2.625x, so that line is 57.125 px where a line of Geist alone is 55.125.
+     */
+    fun chromeLineBox(px: Float, line: Float, fonts: List<Pair<Float, Float>>): Float {
+        var above = 0f
+        var below = 0f
+        for ((ascent, descent) in fonts) {
+            val (up, down) = chromeAscentDescent(px, ascent, descent)
+            val top = up + floor((line - up - down) / 2)
+            above = max(above, top)
+            below = max(below, line - top)
+        }
+        return above + below
     }
 
     /**

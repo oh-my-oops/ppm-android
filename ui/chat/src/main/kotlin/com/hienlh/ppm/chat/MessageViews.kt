@@ -16,6 +16,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
@@ -76,13 +77,27 @@ import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.TurnUsage
 import com.hienlh.ppm.state.ChatBlock
 import com.hienlh.ppm.state.ChatItem
+import com.hienlh.ppm.state.SessionTurn
+import com.hienlh.ppm.state.TurnFileChange
 import com.hienlh.ppm.state.truthy
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
 
-/** The time, the Copy text and Reply under the last message of a finished turn. */
-data class MessageActions(val timestamp: Instant?, val copyText: String, val onReply: (() -> Unit)? = null)
+/**
+ * The time, the Copy text and Reply under the last message of a finished turn, and the files the
+ * turn changed for its pill: the turn it closes (what "Revert turn" puts back), [key] the message
+ * that ends it, and [onJump] scrolls the chat to the tool card that made an edit.
+ */
+data class MessageActions(
+    val timestamp: Instant?,
+    val copyText: String,
+    val onReply: (() -> Unit)? = null,
+    val changes: List<TurnFileChange> = emptyList(),
+    val turn: SessionTurn? = null,
+    val key: String = "",
+    val onJump: ((String) -> Unit)? = null,
+)
 
 /** One message of the transcript (`MessageBubble` in message-list.tsx). */
 @Composable
@@ -107,14 +122,19 @@ fun ChatMessageView(
 // Action bar
 
 /**
- * Time, Copy and Reply under a message (`MessageActionBar`). Reply is a 44 px target on a phone,
- * which makes the row that tall. Edit and Fork are not in this app yet. The time's `title` is the
- * full date.
+ * Time, Copy and Reply under a message (`MessageActionBar`), then [extra]: `flex-wrap gap-0.5`, so
+ * what does not fit goes to a line of its own. Reply is a 44 px target on a phone, which makes its
+ * line that tall. Edit and Fork are not in this app yet. The time's `title` is the full date.
  */
 @Composable
-internal fun MessageActionBar(timestamp: Instant?, copyText: String, modifier: Modifier = Modifier, onReply: (() -> Unit)? = null) {
+internal fun MessageActionBar(timestamp: Instant?, copyText: String, modifier: Modifier = Modifier, onReply: (() -> Unit)? = null, extra: @Composable () -> Unit = {}) {
     val tokens = LocalPpmTokens.current
-    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+    FlowRow(
+        modifier,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        itemVerticalAlignment = Alignment.CenterVertically,
+    ) {
         if (timestamp != null) {
             RelativeTime(
                 timestamp,
@@ -124,6 +144,7 @@ internal fun MessageActionBar(timestamp: Instant?, copyText: String, modifier: M
         }
         CopyActionButton(copyText)
         if (onReply != null) ActionButton(ProductIcon.RotateCcw, "Reply", "Reply to this message", touchTarget = true, onClick = onReply)
+        extra()
     }
 }
 
@@ -210,7 +231,7 @@ fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActi
         }
         if (actions != null && usage != null) TurnCostWarning(usage, Modifier.padding(top = 8.dp))
         // `-mt-1.5` against the column's `gap-2`: 2 px under the answer.
-        if (actions != null) MessageActionBar(actions.timestamp, actions.copyText, Modifier.padding(top = 2.dp), actions.onReply)
+        if (actions != null) TurnChangeRollup(actions, Modifier.padding(top = 2.dp))
     }
 }
 

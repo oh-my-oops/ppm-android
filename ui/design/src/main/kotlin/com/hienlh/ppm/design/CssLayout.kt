@@ -1,5 +1,6 @@
 package com.hienlh.ppm.design
 
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -16,6 +17,9 @@ import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.ParentDataModifierNode
 import androidx.compose.ui.node.invalidateMeasurement
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
@@ -45,6 +49,9 @@ class CssExact internal constructor(internal val fixed: Float = Float.NaN) {
     /** The column laid out from [phase], measured again whenever it changes, and the phase it last used. */
     internal var reader: LayoutModifierNode? = null
     internal var measuredPhase = Float.NaN
+
+    /** The child that gives way ([cssFlex]). */
+    internal var flex = false
 }
 
 @Composable
@@ -85,6 +92,10 @@ fun CssExact.cssReport(height: Float, measured: Int) {
  * A column inside one is told where in its first pixel it starts, and measured again when that
  * changes: its rows round from there, so content above it that moves by a fraction can move
  * them by a pixel with nothing else about them changed.
+ *
+ * In a column of bounded height one child can give way ([cssFlex]), as a `min-h-0 flex-1` box
+ * does in a flex column: it is held to what the rest leaves it, so the column never grows past
+ * its bound, and is no taller than it asks to be.
  */
 @Composable
 fun CssColumn(
@@ -100,6 +111,11 @@ fun CssColumn(
         exact.measuredPhase = phase
         val gapPx = gap.toPx()
         val loose = Constraints(maxWidth = constraints.maxWidth, maxHeight = Constraints.Infinity)
+        val exacts = measurables.map { it.parentData as? CssExact }
+        val flex = if (constraints.hasBoundedHeight) exacts.indexOfFirst { it?.flex == true } else -1
+        // Where the child that gives way has to end: above the gaps and set heights under it.
+        var limit = constraints.maxHeight - bottom.toPx()
+        if (flex >= 0) for (index in flex + 1 until measurables.size) limit -= gapPx + (exacts[index]?.fixed?.takeUnless { it.isNaN() } ?: 0f)
         val placeables = ArrayList<Placeable>(measurables.size)
         val tops = IntArray(measurables.size)
         var at = phase + top.toPx()
@@ -107,7 +123,7 @@ fun CssColumn(
         measurables.forEachIndexed { index, measurable ->
             if (index > 0) at += gapPx
             val y = at.roundToInt()
-            val data = measurable.parentData as? CssExact
+            val data = exacts[index]
             if (data != null) {
                 data.phase = at - y
                 val reader = data.reader
@@ -117,6 +133,8 @@ fun CssColumn(
                 // A box of a set height takes the pixels between its two rounded edges.
                 val height = (at + data.fixed).roundToInt() - y
                 measurable.measure(loose.copy(minHeight = height, maxHeight = height))
+            } else if (index == flex) {
+                measurable.measure(loose.copy(maxHeight = max(0, limit.roundToInt() - y)))
             } else {
                 measurable.measure(loose)
             }
@@ -243,6 +261,94 @@ private class CssLinesNode(var lineHeight: Float, var max: Dp, var min: Dp) : Mo
         exact.reported = placeable.height
         return layout(placeable.width, placeable.height) { placeable.place(0, 0) }
     }
+}
+
+/**
+ * Text with runs in another face (`font-mono` numbers in a sentence), drawn as Compose lays it out
+ * with its lines [lineHeight] CSS px apart, and counted by a [CssColumn] at the height Chrome gives
+ * it: a line holding a run in another face is as tall as both faces' boxes together
+ * ([PpmFonts.chromeLineBox]), 2 px taller for Monaspace in Geist at 14 px on 21 at 2.625x. Lines
+ * after such a line are not moved down by it, so it suits text whose mixed line is its last.
+ */
+@Composable
+fun CssMixedText(text: AnnotatedString, style: TextStyle, lineHeight: Float, modifier: Modifier = Modifier) {
+    val exact = rememberCssExact()
+    val laid = remember { arrayOfNulls<TextLayoutResult>(1) }
+    Layout({ BasicText(text, style = style, onTextLayout = { laid[0] = it }) }, modifier.cssExact(exact)) { measurables, constraints ->
+        val placeable = measurables.first().measure(constraints)
+        val result = laid[0]
+        val px = style.fontSize.toPx()
+        val line = lineHeight.sp.toPx()
+        val mono = PpmFonts.MONO_ASCENT to PpmFonts.MONO_DESCENT
+        val own = if (style.fontFamily == PpmFonts.mono) mono else PpmFonts.SANS_ASCENT to PpmFonts.SANS_DESCENT
+        var height = 0f
+        if (result == null) height = placeable.height.toFloat()
+        else for (index in 0 until result.lineCount) {
+            val start = result.getLineStart(index)
+            val end = result.getLineEnd(index)
+            val mixed = own !== mono && text.spanStyles.any { it.item.fontFamily == PpmFonts.mono && it.start < end && it.end > start }
+            height += PpmFonts.chromeLineBox(px, line, if (mixed) listOf(own, mono) else listOf(own))
+        }
+        exact.cssReport(height, placeable.height)
+        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
+}
+
+/**
+ * A box at least [min] tall in CSS pixels (`min-h-*`) whose content can wrap: a [CssColumn] counts
+ * it at [min] exactly while it measures no taller than [min] rounds to, and once its content makes
+ * it taller at what it measures — or, when the tallest child of a row lends its exact height
+ * ([lend], the [CssExact] of a [CssColumn] in it), at that.
+ */
+fun Modifier.cssMinHeight(min: Dp, lend: CssExact? = null): Modifier = this then CssMinHeightElement(min, lend)
+
+private data class CssMinHeightElement(val min: Dp, val lend: CssExact?) : ModifierNodeElement<CssMinHeightNode>() {
+    override fun create() = CssMinHeightNode(min, lend)
+
+    override fun update(node: CssMinHeightNode) {
+        if (node.min == min && node.lend === lend) return
+        node.min = min
+        node.lend = lend
+        node.invalidateMeasurement()
+    }
+}
+
+private class CssMinHeightNode(var min: Dp, var lend: CssExact?) : Modifier.Node(), LayoutModifierNode, ParentDataModifierNode {
+    private val exact = CssExact()
+
+    override fun Density.modifyParentData(parentData: Any?): Any = exact
+
+    override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
+        val floor = min.roundToPx().coerceIn(constraints.minHeight, constraints.maxHeight)
+        val placeable = measurable.measure(constraints.copy(minHeight = floor))
+        val lent = lend?.takeIf { it.reported >= 0 && !it.height.isNaN() }
+        exact.height = when {
+            placeable.height <= floor -> min.toPx()
+            lent != null -> lent.height + (placeable.height - lent.reported)
+            else -> placeable.height.toFloat()
+        }
+        exact.reported = placeable.height
+        return layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
+}
+
+/**
+ * The child of a [CssColumn] that gives way (`min-h-0 flex-1`): held to the height the others
+ * leave it, a scrolling body under a sheet's head. Children under it must be of a set height
+ * ([cssHeight]), which the column counts before it measures them.
+ */
+fun Modifier.cssFlex(): Modifier = this then CssFlexElement
+
+private data object CssFlexElement : ModifierNodeElement<CssFlexNode>() {
+    override fun create() = CssFlexNode()
+
+    override fun update(node: CssFlexNode) = Unit
+}
+
+private class CssFlexNode : Modifier.Node(), ParentDataModifierNode {
+    private val own = CssExact()
+
+    override fun Density.modifyParentData(parentData: Any?): Any = (parentData as? CssExact ?: own).also { it.flex = true }
 }
 
 /**

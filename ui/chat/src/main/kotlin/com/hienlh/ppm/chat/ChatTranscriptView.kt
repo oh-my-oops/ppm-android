@@ -1,5 +1,6 @@
 package com.hienlh.ppm.chat
 
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -31,6 +32,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
@@ -49,6 +51,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -61,6 +65,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -92,6 +98,12 @@ import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.ChatState
 import com.hienlh.ppm.state.MessageReply
 import com.hienlh.ppm.state.PromptCacheStatus
+import com.hienlh.ppm.state.SessionTurn
+import com.hienlh.ppm.state.SessionTurns
+import com.hienlh.ppm.state.SessionTurnsMemo
+import com.hienlh.ppm.state.TurnFileChange
+import com.hienlh.ppm.state.TurnFileChanges
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -148,7 +160,8 @@ private fun TranscriptList(
     onClearErrors: () -> Unit,
     onReply: ((ReplyReference) -> Unit)?,
 ) {
-    val rows = remember(state.items, state.isRunning) { TranscriptRows.of(state.items, state.isRunning) }
+    val rollups = remember { TurnRollups() }
+    val rows = remember(state.items, state.isRunning) { TranscriptRows.of(state.items, state.isRunning, rollups) }
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val tokens = LocalPpmTokens.current
@@ -209,6 +222,34 @@ private fun TranscriptList(
             jump
         }
     }
+    // "Show in chat" from a change tray (`jumpToEdit`): the edit inside its card when the card is
+    // open, else the card, 60 px under the top of the chat, lit for 1.4 s.
+    val anchors = remember { EditAnchors() }
+    val currentRows by rememberUpdatedState(rows)
+    val currentHead by rememberUpdatedState(head)
+    val jump = remember(anchors, list, scroll, density) {
+        { ref: String ->
+            val call = ref.replace(Regex("-\\d+$"), "")
+            val row = currentRows.indexOfFirst { r -> r.item.blocks.any { (it as? ChatBlock.Tool)?.tool?.toolUseId == call } }
+            if (row >= 0) {
+                scope.launch {
+                    scroll.release()
+                    val index = currentHead + row
+                    if (list.layoutInfo.visibleItemsInfo.none { it.index == index }) list.scrollToItem(index)
+                    withFrameNanos {}
+                    val edit = anchors.edits[ref]?.takeIf { it.isAttached }
+                    val target = edit ?: anchors.cards[call]?.takeIf { it.isAttached }
+                    val viewport = anchors.list?.takeIf { it.isAttached }
+                    if (target != null && viewport != null) {
+                        val top = viewport.localPositionOf(target, Offset.Zero).y
+                        anchors.light(if (edit != null) ref else call, scope)
+                        list.animateScrollBy(top - with(density) { 60.dp.toPx() })
+                    }
+                }
+            }
+            Unit
+        }
+    }
     // The user's messages as items of that list, oldest first.
     val userItems = remember(rows, head) { rows.indices.filter { rows[it].item.role == ChatItem.Role.USER }.map { head + it } }
     val nav by remember(userItems, density) { derivedStateOf { list.messageNav(userItems, density) } }
@@ -235,11 +276,17 @@ private fun TranscriptList(
     LaunchedEffect(state.bashOutput.keys) {
         for (id in state.bashOutput.keys) if (streamed.add(id)) openCards[id] = true
     }
-    CompositionLocalProvider(LocalOpenCards provides openCards, LocalChatGallery provides gallery, LocalBashOutput provides state.bashOutput) {
+    CompositionLocalProvider(
+        LocalOpenCards provides openCards,
+        LocalChatGallery provides gallery,
+        LocalBashOutput provides state.bashOutput,
+        LocalEditAnchors provides anchors,
+        LocalTurnsByCall provides rollups.byCall,
+    ) {
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
                 TaskTracker(state.tasks)
-                LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scroll.connection), state = list) {
+                LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scroll.connection).onGloballyPositioned { anchors.list = it }, state = list) {
                     if (state.hasEarlier) item(key = SENTINEL) { Spacer(Modifier.fillMaxWidth().height(1.dp)) }
                     if (state.loadingEarlier) item(key = SKELETON) { PreCompactSkeleton() }
                     for (row in rows) {
@@ -250,7 +297,7 @@ private fun TranscriptList(
                             val message: @Composable (Modifier) -> Unit = { modifier ->
                                 ChatMessageView(
                                     row.item,
-                                    row.actions?.copy(onReply = reply),
+                                    row.actions?.copy(onReply = reply, onJump = jump),
                                     modifier,
                                     replies,
                                     onReply = reply.takeIf { row.item.role == ChatItem.Role.USER },
@@ -579,14 +626,21 @@ internal fun indicatorLabel(state: ChatState): String? {
 internal object TranscriptRows {
     data class Row(val item: ChatItem, val actions: MessageActions?, val replyTarget: ChatItem? = null)
 
-    fun of(items: List<ChatItem>, running: Boolean): List<Row> {
+    /** With [rollups], a turn's last answer also carries the files the turn changed and the turn it closes. */
+    fun of(items: List<ChatItem>, running: Boolean, rollups: TurnRollups? = null): List<Row> {
+        rollups?.start(items)
         val rows = ArrayList<Row>(items.size)
         val turnTexts = mutableListOf<String>()
         var turnReply: ChatItem? = null
+        var turnStart = 0
+        // The prompt the answers since answer: the nearest user message before them that is one.
+        var prompt: SessionTurn? = null
         items.forEachIndexed { index, item ->
             if (item.role != ChatItem.Role.ASSISTANT) {
                 turnTexts.clear()
                 turnReply = null
+                turnStart = index + 1
+                if (item.role == ChatItem.Role.USER) rollups?.turn(item.id)?.let { prompt = it }
             } else if (item.text.isNotEmpty()) {
                 turnTexts += item.text
                 turnReply = item
@@ -596,12 +650,85 @@ internal object TranscriptRows {
             val endsTurn = item.role == ChatItem.Role.ASSISTANT && next?.role != ChatItem.Role.ASSISTANT && !(running && next == null)
             rows += when {
                 item.role == ChatItem.Role.USER -> Row(item, null, item)
-                endsTurn -> Row(item, MessageActions(item.timestamp, turnTexts.joinToString("\n\n")), turnReply)
+                endsTurn -> {
+                    val changes = rollups?.changes(items.subList(turnStart, index + 1)).orEmpty()
+                    val actions = MessageActions(item.timestamp, turnTexts.joinToString("\n\n"), changes = changes, turn = prompt.takeIf { changes.isNotEmpty() }, key = item.id)
+                    Row(item, actions, turnReply)
+                }
                 else -> Row(item, null)
             }
         }
         return rows
     }
+}
+
+/**
+ * Each turn's changes and the turn they close, for its change pill (`turnChanges`, `rollupTurns`):
+ * worked out again only for a turn whose messages changed, as the rows are built again whenever a
+ * message arrives. Also each call's turn, for naming the turn that changed a line since.
+ */
+internal class TurnRollups {
+    private val memo = SessionTurnsMemo()
+    private val changes = HashMap<String, Pair<List<ChatItem>, List<TurnFileChange>>>()
+    private var turns: Map<String, SessionTurn> = emptyMap()
+    var byCall: Map<String, SessionTurn> = emptyMap()
+        private set
+
+    fun start(items: List<ChatItem>) {
+        val found = memo.of(items)
+        turns = found.associateBy { it.messageId }
+        byCall = SessionTurns.byCall(found)
+        if (changes.size > items.size + 64) changes.keys.retainAll(items.mapTo(HashSet()) { it.id })
+    }
+
+    /** The turn [messageId] asked for; null for a user message that is not a prompt. */
+    fun turn(messageId: String): SessionTurn? = turns[messageId]
+
+    fun changes(turn: List<ChatItem>): List<TurnFileChange> {
+        val key = turn.last().id
+        changes[key]?.let { (seen, found) -> if (seen.size == turn.size && seen.indices.all { seen[it] === turn[it] }) return found }
+        return TurnFileChanges.of(turn).also { changes[key] = turn.toList() to it }
+    }
+}
+
+/**
+ * Where each tool card and each edit inside one is, for "Show in chat" (`data-tool-ref`,
+ * `data-edit-ref`), and the one lit (`data-flash`): a card's call id, or an edit's ref.
+ */
+@Stable
+internal class EditAnchors {
+    val cards = HashMap<String, LayoutCoordinates>()
+    val edits = HashMap<String, LayoutCoordinates>()
+    var list: LayoutCoordinates? = null
+    var flash by mutableStateOf<String?>(null)
+        private set
+    private var clear: Job? = null
+
+    /** [ref] lit for 1.4 s; a second jump ends the first one's light at once. */
+    fun light(ref: String, scope: CoroutineScope) {
+        clear?.cancel()
+        flash = ref
+        clear = scope.launch {
+            delay(1_400)
+            flash = null
+        }
+    }
+}
+
+internal val LocalEditAnchors = staticCompositionLocalOf<EditAnchors?> { null }
+
+/**
+ * Names this box for "Show in chat" as the edit [ref] (`data-edit-ref`), and lights it
+ * (`[data-flash="edit"]`: the accent at 13%, in and out over 200 ms).
+ */
+@Composable
+internal fun Modifier.editAnchor(ref: String?): Modifier {
+    val anchors = LocalEditAnchors.current
+    if (anchors == null || ref == null) return this
+    DisposableEffect(anchors, ref) { onDispose { anchors.edits.remove(ref) } }
+    val lit by animateFloatAsState(if (anchors.flash == ref) 1f else 0f, tween(200, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)), label = "flash")
+    val accent = LocalPpmTokens.current.accent
+    return onGloballyPositioned { anchors.edits[ref] = it }.drawBehind { if (lit > 0f) drawRect(accent.opacity(0.13 * lit).color) }
 }
 
 /**
