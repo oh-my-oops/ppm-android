@@ -286,6 +286,15 @@ class ChatTranscript {
         return true
     }
 
+    /**
+     * What the chat this one took over from showed (`staleSwap`), kept on screen until this
+     * session's history is in: versions of a conversation share their start, so only the end
+     * visibly changes, where a loading screen would flash over all of it.
+     */
+    fun showStale(stale: List<ChatItem>) {
+        if (!hasLoadedHistory && items.isEmpty()) items = stale
+    }
+
     /** Adds the page of older messages fetched with `before`, less any already shown. */
     fun prependHistory(page: HistoryPage, before: Int) {
         if (before != historyStart) return

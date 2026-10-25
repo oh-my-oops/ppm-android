@@ -540,10 +540,10 @@ private const val PREPARE_MILLIS = 30_000L
 private const val PICK_MILLIS = 30_000L
 
 /** `SESSION_CREATE_TIMEOUT_MS`: a codex app-server's cold start alone takes about 30 s. */
-private const val SESSION_CREATE_MILLIS = 30_000L
+internal const val SESSION_CREATE_MILLIS = 30_000L
 
 /** `PENDING_SEND_TIMEOUT_MS`. */
-private const val PENDING_SEND_MILLIS = 45_000L
+internal const val PENDING_SEND_MILLIS = 45_000L
 
 /** `SETTLE_MS`: how long the picks hold still before a prewarm is asked, so a tab passed through asks nothing. */
 internal const val PREWARM_SETTLE_MILLIS = 300L

@@ -79,6 +79,7 @@ import com.hienlh.ppm.state.AgentSessionOpening
 import com.hienlh.ppm.state.AgentSessionPayload
 import com.hienlh.ppm.state.BackgroundOutput
 import com.hienlh.ppm.state.ChatController
+import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.ChatJumpRequest
 import com.hienlh.ppm.state.ChatSearch
 import com.hienlh.ppm.state.ClientCommand
@@ -351,6 +352,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** The chat tabs with no session yet: their preparation, provider, account and first message. */
     internal val newChats = NewChats(this)
+
+    /** Fork, Edit and the version switcher on the chats' messages. */
+    internal val edits = MessageEdits(this)
 
     /** This device's copy of what a new chat is resolved from, for the open server. */
     internal val newChatCache: NewChatCache get() = NewChatCache(prefs, serverKey)
@@ -1608,6 +1612,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                 chat.clientCommand = { text -> runClientCommand(chat, text) }
                 chat.closeMic = { voice.closeFor(chat) }
                 chat.firstSend = { message -> newChats.sendFirst(chat, message) }
+                chat.editSend = { message -> edits.send(chat, message) }
                 chat.prewarmTouch = { newChats.touchPrewarm(chat) }
                 chat.modePicked = { mode -> patchTabMetadata(id, "permissionMode" to JsonPrimitive(mode.value), "permissionModeSource" to JsonPrimitive("user")) }
                 chat.changesListed = { sessionId, list ->
@@ -2182,8 +2187,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             activate(open.first.id)
             return
         }
-        // A first message still on its way must not land in the chat picked here.
-        chats[tabId]?.let { newChats.abandon(it, "You switched to another chat before it connected.") }
+        // A first message or an edit still on its way must not land in the chat picked here.
+        chats[tabId]?.let {
+            newChats.abandon(it, "You switched to another chat before it connected.")
+            edits.abandon(it, "You switched to another chat before it connected.")
+        }
         // A tab with a session is no new chat: nothing of one stays to be resolved, claimed or typed.
         store.updateTab(tabId) { tab ->
             tab.copy(title = session.title.ifEmpty { "Chat" }).withMetadata(
@@ -2310,6 +2318,28 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                     },
                 ),
                 panelId,
+            )
+        }
+    }
+
+    /**
+     * A fork of a chat in a tab of its own (`handleFork`'s `openTab`), titled [title]: the message
+     * it was forked at waits in its box ([pendingMessage]) to be sent as it is or changed first.
+     */
+    internal fun openFork(project: String, session: SessionInfo, title: String, pendingMessage: String) {
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = "chat",
+                    title = title,
+                    projectId = project,
+                    metadata = buildJsonObject {
+                        put("projectName", project)
+                        put("sessionId", session.id)
+                        put("providerId", session.providerId)
+                        put("pendingMessage", pendingMessage)
+                    },
+                ),
             )
         }
     }
@@ -2482,6 +2512,21 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
 
     /** Puts a mode picked in the composer on the tab too (set by the model). */
     var modePicked: ((PermissionMode) -> Unit)? = null
+
+    /** The message the next send replaces (`editFork`); null while a send is a new message. */
+    var editFork by mutableStateOf<EditFork?>(null)
+        private set
+
+    /** An edit was sent and its version is being made and connected (`editForking`): the chat is covered meanwhile. */
+    var editForking by mutableStateOf(false)
+        internal set
+
+    /** Sends an edited message, which goes on in a new version of this chat (set by the model). */
+    var editSend: ((EditMessage) -> Unit)? = null
+
+    /** The edited message waiting for its version's socket (`pendingSendRef`), and the work that waits. */
+    internal var pendingEdit: PendingEdit? = null
+    internal var editJob: Job? = null
 
     /** It took its tab's `pendingMessage` into the box; the model drops it from the tab once the chat is connected. */
     var tookPendingMessage = false
@@ -2843,6 +2888,18 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
             }
             null -> {}
         }
+        val edit = editFork
+        if (edit != null && session != null) {
+            // Kept on this device before the box empties, as a first message is. The edit goes
+            // through a fork, which takes only text: every file is named by its marker.
+            saveDraft()
+            drafts?.cancelPendingSave()
+            val message = EditMessage(messageWithAttachments(text, ready, emptyList()), edit.anchor, replyTo, permissionMode?.value)
+            editFork = null
+            emptyBox()
+            editSend?.invoke(message)
+            return
+        }
         val images = selectInlineImages(ready.map { it.imageData })
         val content = messageWithAttachments(text, ready, images)
         val imagePaths = ready.filter { it.isImage }.mapNotNull { it.serverPath }
@@ -2946,6 +3003,95 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     }
 
     /**
+     * Edit on one of its messages (`handleEdit`): the message's text in the box in place of what
+     * was there, what it answered picked again — in this conversation, which the edit goes on —
+     * and the next send replacing it, from [anchor] on.
+     */
+    fun armEdit(item: ChatItem, anchor: String?) {
+        val decoded = ChatReply.decode(item.text)
+        val quoted = decoded.replyTo
+        val session = session
+        replyTo = if (quoted != null && session != null) quoted.copy(sessionId = session.id) else quoted
+        editFork = EditFork(anchor, item.id)
+        draft.setTextAndPlaceCursorAtEnd(decoded.content)
+        edited()
+        requestFocus()
+    }
+
+    /** Cancel on the editing line (`handleCancelEdit`): the next send is a new message again, and the box and its draft are emptied. */
+    fun cancelEdit() {
+        editFork = null
+        editForking = false
+        replyTo = null
+        drafts?.clear()
+        clearBox()
+    }
+
+    /** The box emptied for the chat (`clearSignal`): its text, files and agent, the draft left as it is. */
+    private fun clearBox() {
+        for (attachment in attachments) attachment.file?.parentFile?.deleteRecursively()
+        draft.clearText()
+        attachments.clear()
+        agent = null
+    }
+
+    /**
+     * The tab goes on in another session of its conversation (`setSessionId` after an edit, or from
+     * the version switcher), as the web's tab does without a new one: its chat starts over on
+     * [next], showing what this one showed until that history is in (`staleSwap`). An edit's draft
+     * follows it ([moveDraft]); a switch empties the box and reads the draft [next] has.
+     */
+    internal fun swapSession(next: SessionInfo, moveDraft: Boolean) {
+        val from = startedWith
+        val old = controller
+        val stale = old?.transcript?.items.orEmpty()
+        old?.stop()
+        turnsJob?.cancel()
+        turnsJob = null
+        session = next
+        providerId = next.providerId
+        servingAccount = null
+        closePickers()
+        if (!moveDraft) {
+            editFork = null
+            replyTo = null
+            clearBox()
+        }
+        if (from == null) {
+            controller = null
+            return
+        }
+        val controller = ChatController(from.api, project, next, from.scope, providerId = providerId, stale = stale).also { it.start() }
+        this.controller = controller
+        turnsJob = from.turns?.let { publishTurns(controller, it, from.scope) }
+        watchChanges()
+        if (moveDraft) {
+            drafts?.moveTo(next.id)
+        } else {
+            // A save still waiting goes under the session it was typed for, as the web's timer still fires.
+            drafts?.flush()
+            loadDraft(DraftSync(from.api, project, tabId, next.id, from.draftStore, from.scope), null, from.scope)
+        }
+    }
+
+    /** The edited message waiting for its version's socket, taken: it goes no other way now. */
+    internal fun takePendingEdit(): PendingEdit? = pendingEdit.also { pendingEdit = null }
+
+    /** Its version's socket is up: the edited message goes on it, and the draft it was written under goes. */
+    internal fun flushEdit() {
+        val pending = takePendingEdit() ?: return
+        controller?.send(pending.content, TurnOptions(permissionMode = pending.permissionMode), pending.replyTo)
+        drafts?.clear(pending.draftId)
+    }
+
+    /** An edited message that never reached its version's socket: the draft it was written under goes, and it is back in the box. */
+    internal fun abandonEdit(pending: PendingEdit, reason: String) {
+        editForking = false
+        drafts?.clear(pending.draftId)
+        restore(RejectedSend(pending.content, pending.replyTo, reason))
+    }
+
+    /**
      * Its chat connected (once it has a session), and its draft loaded from [draftStore], from
      * what its preparation read ([preparedDraft]) or from the server.
      */
@@ -2957,6 +3103,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         turns: SessionTurnsStore? = null,
     ) {
         if (controller != null) return
+        startedWith = Started(api, scope, draftStore, turns)
         historyList = HistoryList(api, project, scope)
         welcomeList = HistoryList(api, project, scope)
         val controller = ChatController(api, project, session, scope, providerId = providerId).also { it.start() }
@@ -2965,7 +3112,19 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         changesApi = api
         changesScope = scope
         watchChanges()
-        val drafts = DraftSync(api, project, tabId, session?.id ?: DraftSync.NEW_CHAT, draftStore, scope).also { drafts = it }
+        loadDraft(DraftSync(api, project, tabId, session?.id ?: DraftSync.NEW_CHAT, draftStore, scope), preparedDraft, scope)
+    }
+
+    /** What [start] was given, which a chat on another session of the conversation starts with too. */
+    private class Started(val api: ApiClient, val scope: CoroutineScope, val draftStore: DraftLocalStore, val turns: SessionTurnsStore?)
+
+    private var startedWith: Started? = null
+
+    /** [drafts] the box's from now on, and its draft into the box once it loads. */
+    private fun loadDraft(drafts: DraftSync, preparedDraft: (suspend () -> ChatDraft?)?, scope: CoroutineScope) {
+        this.drafts = drafts
+        draftLoad?.cancel()
+        draftLoading = true
         draftLoad = scope.launch {
             // Past the gate a draft still goes in when it comes, into a box left empty.
             val gate = launch {
@@ -2983,6 +3142,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     fun stop() {
         firstSendAttempt++
         firstSendJob?.cancel()
+        editJob?.cancel()
         closeMic?.invoke()
         draftLoad?.cancel()
         drafts?.flush()

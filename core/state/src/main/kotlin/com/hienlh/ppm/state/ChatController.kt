@@ -114,6 +114,8 @@ class ChatController(
     parent: CoroutineScope,
     private val clock: () -> Long = System::currentTimeMillis,
     providerId: String = session?.providerId ?: "claude",
+    /** What the chat it takes over from showed, shown until [session]'s history is in ([ChatTranscript.showStale]). */
+    stale: List<ChatItem> = emptyList(),
 ) {
     sealed interface Connection {
         data object Connecting : Connection
@@ -121,14 +123,14 @@ class ChatController(
         data class Reconnecting(val reason: String?) : Connection
     }
 
-    val transcript = ChatTranscript()
+    val transcript = ChatTranscript().also { it.showStale(stale) }
     val settings = ChatSettings()
     var providerId: String = providerId
         private set
     var sessionId: String? = session?.id
         private set
 
-    private val _state = MutableStateFlow(ChatState(sessionId = sessionId, providerId = providerId))
+    private val _state = MutableStateFlow(ChatState(sessionId = sessionId, providerId = providerId, items = transcript.shown))
     val state: StateFlow<ChatState> = _state.asStateFlow()
 
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))

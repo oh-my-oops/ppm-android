@@ -63,6 +63,19 @@ class MessageVersionsTest {
     }
 
     @Test
+    fun `a chat taking over from another version shows what that one showed until its own history is in`() {
+        val stale = listOf(user("u1", "first"), answer("a1", ChatBlock.Text("reply")))
+        val chat = ChatTranscript()
+        chat.showStale(stale)
+        assertEquals(stale, chat.shown)
+        chat.applyHistory(page("""{"messages":[{"id":"n1","role":"user","content":"first","timestamp":"2026-10-19T08:00:00Z"}],"start":0,"total":1}"""), chat.activity)
+        assertEquals(listOf("n1"), chat.shown.map { it.id })
+        // Once a history is in, nothing older is put back over it.
+        chat.showStale(stale)
+        assertEquals(listOf("n1"), chat.shown.map { it.id })
+    }
+
+    @Test
     fun `history carries the window's numbering, its anchor and the version groups`() {
         val chat = ChatTranscript()
         chat.applyHistory(
