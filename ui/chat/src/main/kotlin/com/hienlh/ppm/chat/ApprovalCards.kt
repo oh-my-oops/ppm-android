@@ -8,12 +8,10 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -54,11 +52,13 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -69,8 +69,12 @@ import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderInset
 import com.hienlh.ppm.design.cssBorderPx
+import com.hienlh.ppm.design.cssExact
+import com.hienlh.ppm.design.cssHeight
+import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberCssExact
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.Question
@@ -296,7 +300,10 @@ internal fun QuestionCard(
     }
 
     val shape = RoundedCornerShape(12.dp)
-    Column(
+    val line = with(LocalDensity.current) { cssBorderPx(1.dp).toDp() }
+    // `p-3 space-y-3`, stacked as Chrome stacks it: at 2.625x a 12 px gap is 31.5 px, and the
+    // card's gaps, paddings and lines rounded one by one made it 7 px taller than the web's.
+    CssColumn(
         modifier
             .fillMaxWidth()
             .focusRequester(card)
@@ -304,10 +311,12 @@ internal fun QuestionCard(
             .focusable()
             .background(tokens.accent.opacity(0.05).color, shape)
             .cssBorder(tokens.accent.opacity(0.3).color, shape, width = 2.dp)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 12.dp),
+        gap = 12.dp,
+        top = 12.dp,
+        bottom = 12.dp,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.cssLines(20f), verticalAlignment = Alignment.CenterVertically) {
             BasicText(
                 if (multiple) "AI has ${questions.size} questions" else "AI has a question",
                 Modifier.weight(1f),
@@ -320,65 +329,70 @@ internal fun QuestionCard(
         }
         if (multiple) {
             val tabsShape = RoundedCornerShape(8.dp)
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(tokens.bgSolid.color, tabsShape)
-                    .cssBorder(tokens.border.color, tabsShape)
-                    .padding(4.dp)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                questions.forEachIndexed { index, question ->
-                    val isActive = index == active
-                    val done = hasAnswer(index)
-                    val foreground = if (isActive) tokens.accentFg else if (done) tokens.accent else tokens.text2
+            // `p-1` inside the border, kept at 4 px (10.5 at 2.625x) by a column of the strip's own,
+            // around a track as tall as a tab, `py-1.5` and a 16 px line; each tab fills it.
+            val strip = rememberCssExact()
+            Box(Modifier.cssExact(strip).fillMaxWidth().background(tokens.bgSolid.color, tabsShape).cssBorder(tokens.border.color, tabsShape)) {
+                CssColumn(Modifier.padding(horizontal = 4.dp), top = 4.dp, bottom = 4.dp, exact = strip) {
                     Row(
-                        Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(if (isActive) tokens.accent.color else Color.Transparent)
-                            // Only a tab neither open nor answered has `hover:bg-surface-elevated`.
-                            .ppmClickable(
-                                pressedColor = tokens.surfaceHover.color,
-                                hoverColor = if (isActive || done) Color.Transparent else tokens.panel2.color,
-                            ) { active = index }
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        Modifier.cssHeight(28.dp).fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        val badge = when {
-                            isActive -> Color.White.copy(alpha = 0.2f)
-                            done -> tokens.accent.opacity(0.2).color
-                            else -> tokens.panel2.color
+                        questions.forEachIndexed { index, question ->
+                            val isActive = index == active
+                            val done = hasAnswer(index)
+                            val foreground = if (isActive) tokens.accentFg else if (done) tokens.accent else tokens.text2
+                            Row(
+                                Modifier
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (isActive) tokens.accent.color else Color.Transparent)
+                                    // Only a tab neither open nor answered has `hover:bg-surface-elevated`.
+                                    .ppmClickable(
+                                        pressedColor = tokens.surfaceHover.color,
+                                        hoverColor = if (isActive || done) Color.Transparent else tokens.panel2.color,
+                                    ) { active = index }
+                                    .padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                val badge = when {
+                                    isActive -> Color.White.copy(alpha = 0.2f)
+                                    done -> tokens.accent.opacity(0.2).color
+                                    else -> tokens.panel2.color
+                                }
+                                Box(Modifier.size(16.dp).background(badge, CircleShape), contentAlignment = Alignment.Center) {
+                                    BasicText(if (done) "✓" else "${index + 1}", style = ppmText(10f, FontWeight.SemiBold).copy(color = foreground.color))
+                                }
+                                BasicText(
+                                    question.header ?: "Q${index + 1}",
+                                    Modifier.widthIn(max = 100.dp),
+                                    xs.copy(color = foreground.color),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    softWrap = false,
+                                )
+                            }
                         }
-                        Box(Modifier.size(16.dp).background(badge, CircleShape), contentAlignment = Alignment.Center) {
-                            BasicText(if (done) "✓" else "${index + 1}", style = ppmText(10f, FontWeight.SemiBold).copy(color = foreground.color))
-                        }
-                        BasicText(
-                            question.header ?: "Q${index + 1}",
-                            Modifier.widthIn(max = 100.dp),
-                            xs.copy(color = foreground.color),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            softWrap = false,
-                        )
                     }
                 }
             }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // `space-y-2`. Its 11 px lines are 1.5 apart, the line the card inherits (16 px on 24).
+        CssColumn(gap = 8.dp) {
             val header = current.header
             if (!multiple && header != null) {
                 BasicText(
                     header.uppercase(),
-                    style = ppmText(11f, FontWeight.SemiBold).copy(color = tokens.text2.color, letterSpacing = 0.275.sp),
+                    Modifier.cssLines(16.5f),
+                    ppmText(11f, FontWeight.SemiBold, lineHeight = 16.5f).copy(color = tokens.text2.color, letterSpacing = 0.275.sp),
                 )
             }
-            SelectionContainer {
+            SelectionContainer(Modifier.cssLines(20f)) {
                 BasicText(current.question, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color))
             }
-            if (current.multiSelect) BasicText("Select multiple", style = ppmText(11f).copy(color = tokens.text2.color))
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (current.multiSelect) BasicText("Select multiple", Modifier.cssLines(16.5f), ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text2.color))
+            CssColumn(gap = 6.dp) {
                 current.options.forEachIndexed { index, option ->
                     val selected = option.label in picked[active].orEmpty()
                     val optionShape = RoundedCornerShape(4.dp)
@@ -387,8 +401,11 @@ internal fun QuestionCard(
                     val lit = hover.lit.toDouble()
                     val fill = if (selected) tokens.accent.opacity(0.1) else tokens.accent.opacity(0.05).mix(tokens.bgSolid, lit)
                     val edge = if (selected) tokens.accent else tokens.accent.opacity(0.4).mix(tokens.border, lit)
+                    // The row is as tall as its text, which its column counts exactly.
+                    val text = rememberCssExact()
                     Row(
                         Modifier
+                            .cssExact(text)
                             .fillMaxWidth()
                             .focusRing(focused == index)
                             .clip(optionShape)
@@ -404,9 +421,12 @@ internal fun QuestionCard(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         NumberSquare("${index + 1}", selected)
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            BasicText(option.label, style = xsMedium.copy(color = tokens.text.color))
-                            option.description?.let { BasicText(it, style = ppmText(11f).copy(color = tokens.text2.color)) }
+                        // `flex flex-col gap-0.5`, the description's 11 px on the row's `text-xs` ratio.
+                        CssColumn(Modifier.weight(1f), gap = 2.dp, exact = text) {
+                            BasicText(option.label, Modifier.cssLines(16f), xsMedium.copy(color = tokens.text.color))
+                            option.description?.let {
+                                BasicText(it, Modifier.cssLines(44f / 3), ppmText(11f, lineHeight = 44f / 3).copy(color = tokens.text2.color))
+                            }
                         }
                     }
                 }
@@ -423,23 +443,26 @@ internal fun QuestionCard(
                 )
             }
         }
-        // A flex row, which stretches its buttons: Submit, with no border, as tall as Skip.
-        Row(Modifier.fillMaxWidth().padding(top = 4.dp).height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val stretch = Modifier.fillMaxHeight()
-            Spacer(Modifier.weight(1f))
-            if (multiple) {
-                OutlineButton("← Prev", tokens.text, stretch, enabled = active > 0, onClick = ::previous)
-                OutlineButton("Next →", tokens.text, stretch, enabled = active < questions.lastIndex, onClick = ::next)
+        // `pt-1` over a flex row, which stretches its buttons: Submit, with no border, as tall as
+        // Skip, `py-1.5` around a 16 px line inside a 1 px border.
+        CssColumn(Modifier.fillMaxWidth(), top = 4.dp) {
+            Row(Modifier.cssHeight(28.dp + line * 2).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val stretch = Modifier.fillMaxHeight()
+                Spacer(Modifier.weight(1f))
+                if (multiple) {
+                    OutlineButton("← Prev", tokens.text, stretch, enabled = active > 0, onClick = ::previous)
+                    OutlineButton("Next →", tokens.text, stretch, enabled = active < questions.lastIndex, onClick = ::next)
+                }
+                OutlineButton("Skip", tokens.text2, stretch, horizontalPadding = 16, onClick = onSkip)
+                SolidButton(
+                    if (allAnswered) "Submit ✓" else "Submit ($answered/${questions.size})",
+                    tokens.accent,
+                    stretch,
+                    foreground = tokens.accentFg.color,
+                    enabled = allAnswered,
+                    onClick = ::submit,
+                )
             }
-            OutlineButton("Skip", tokens.text2, stretch, horizontalPadding = 16, onClick = onSkip)
-            SolidButton(
-                if (allAnswered) "Submit ✓" else "Submit ($answered/${questions.size})",
-                tokens.accent,
-                stretch,
-                foreground = tokens.accentFg.color,
-                enabled = allAnswered,
-                onClick = ::submit,
-            )
         }
     }
 }
@@ -504,7 +527,7 @@ private fun OtherRow(
                 .focusRequester(focusRequester)
                 .background(tokens.panel.color, fieldShape)
                 .cssBorder((if (focused) tokens.accent else tokens.border).color, fieldShape)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+                .padding(horizontal = 8.dp),
             textStyle = text.copy(color = tokens.text.color),
             cursorBrush = SolidColor(tokens.accent.color),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -512,9 +535,12 @@ private fun OtherRow(
             singleLine = true,
             interactionSource = source,
             decorationBox = { field ->
-                Box {
-                    if (value.isEmpty()) BasicText("Other (press O to type)...", style = text.copy(color = tokens.text3.color))
-                    field()
+                // `py-1`: 10.5 px at 2.625x above and below, which padding would round to 11 each.
+                CssColumn(top = 4.dp, bottom = 4.dp) {
+                    Box(Modifier.fillMaxWidth()) {
+                        if (value.isEmpty()) BasicText("Other (press O to type)...", style = text.copy(color = tokens.text3.color))
+                        field()
+                    }
                 }
             },
         )
