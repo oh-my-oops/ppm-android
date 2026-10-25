@@ -21,6 +21,21 @@ internal object MarkdownHtml {
     /** What [of] gives, for markdown with or without raw HTML. */
     fun html(markdown: String): List<SafeHtml> = clean(Converter().root(Markdown.parse(markdown)))
 
+    /**
+     * The tree MarkdownRenderer draws. Without [rawHtml] nothing is parsed or sanitised: react-markdown
+     * shows each piece of raw HTML as the text it is.
+     */
+    fun render(markdown: String, rawHtml: Boolean): List<SafeHtml> {
+        val hast = Converter().root(Markdown.parse(markdown))
+        return if (rawHtml) clean(hast) else sanitizeHtml(parseHast(hast.map(::asText)))
+    }
+
+    private fun asText(node: Hast): Hast = when (node) {
+        is Hast.Raw -> Hast.Text(node.html)
+        is Hast.Element -> Hast.Element(node.name, node.attrs, node.children.map(::asText))
+        is Hast.Text -> node
+    }
+
     private fun clean(hast: List<Hast>): List<SafeHtml> = prefixFragments(sanitizeHtml(parseHast(hast)))
 
     /** `rehypePrefixFragmentLinks`: a link to `#x` points at the id the sanitiser gave `x`. */
@@ -174,3 +189,9 @@ internal object MarkdownHtml {
         }
     }
 }
+
+private val TEAMMATE_MESSAGE = Regex("<teammate-message[^>]*>[\\s\\S]*?</teammate-message>")
+private val BLANK_LINES = Regex("\n{3,}")
+
+/** MarkdownContent's cleaning: teammate messages out, blank lines down to one, the ends trimmed. Empty: nothing is drawn. */
+internal fun markdownContent(text: String): String = text.replace(TEAMMATE_MESSAGE, "").replace(BLANK_LINES, "\n\n").jsTrim()
