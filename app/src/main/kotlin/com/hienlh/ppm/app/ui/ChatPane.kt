@@ -72,7 +72,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -144,10 +143,12 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.WebCursor
+import com.hienlh.ppm.design.chromeCaret
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberChromeCaret
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.client.chatUsage
 import com.hienlh.ppm.design.webTitle
@@ -1170,6 +1171,8 @@ fun InlineRename(model: AppModel, session: SessionInfo, field: RenameField, modi
     }
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         val shape = RoundedCornerShape(4.dp)
+        val textStyle = ppmText(size, lineHeight = size * field.lineRatio).copy(color = tokens.text.color)
+        val caret = rememberChromeCaret(state, textStyle)
         BasicTextField(
             state,
             Modifier
@@ -1188,11 +1191,15 @@ fun InlineRename(model: AppModel, session: SessionInfo, field: RenameField, modi
                 .background(tokens.panel2.color)
                 .cssBorder((if (focused) tokens.accent.opacity(field.focusAlpha) else tokens.border).color, shape)
                 .padding(horizontal = field.padding, vertical = 2.dp),
-            textStyle = ppmText(size, lineHeight = size * field.lineRatio).copy(color = tokens.text.color),
-            cursorBrush = SolidColor(tokens.accent.color),
+            textStyle = textStyle,
+            cursorBrush = caret.brush,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             onKeyboardAction = { finish(save = true) },
             lineLimits = TextFieldLineLimits.SingleLine,
+            onTextLayout = caret.onTextLayout,
+            interactionSource = caret.interactions,
+            decorator = { inner -> Box(Modifier.chromeCaret(caret)) { inner() } },
+            scrollState = caret.scroll,
         )
         RowIcon(ProductIcon.Check, tokens.success, tokens.success.opacity(0.8)) { finish(save = true) }
         RowIcon(ProductIcon.X, tokens.text3, tokens.text2) { finish(save = false) }

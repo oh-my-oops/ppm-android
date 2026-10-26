@@ -40,7 +40,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -56,10 +55,12 @@ import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.chromeCaret
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberChromeCaret
 import com.hienlh.ppm.design.themeBackground
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -169,6 +170,8 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
                                 PpmIcon(if (showPassword) ProductIcon.EyeOff else ProductIcon.Eye, 18.dp, tokens.text3.color)
                             }
                         }) {
+                            val passwordStyle = fieldStyle.copy(color = tokens.text.color)
+                            val caret = rememberChromeCaret(password, passwordStyle)
                             Box(contentAlignment = Alignment.CenterStart) {
                                 if (password.text.isEmpty()) {
                                     BasicText("Password", style = fieldStyle.copy(color = tokens.text2.color))
@@ -180,13 +183,17 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
                                         .focusRequester(passwordFocus)
                                         .tracksTextFocus(password)
                                         .onFocusChanged { if (it.isFocused) focused = "password" },
-                                    textStyle = fieldStyle.copy(color = tokens.text.color),
-                                    cursorBrush = SolidColor(tokens.accent.color),
+                                    textStyle = passwordStyle,
+                                    cursorBrush = caret.brush,
                                     textObfuscationMode = if (showPassword) TextObfuscationMode.Visible else TextObfuscationMode.RevealLastTyped,
                                     // The secure field's own options, which any passed in replace: without them the
                                     // keyboard is told it is plain text, learns the password and suggests it.
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false, imeAction = ImeAction.Go),
                                     onKeyboardAction = { connect() },
+                                    onTextLayout = caret.onTextLayout,
+                                    interactionSource = caret.interactions,
+                                    decorator = { field -> Box(Modifier.chromeCaret(caret)) { field() } },
+                                    scrollState = caret.scroll,
                                 )
                             }
                         }

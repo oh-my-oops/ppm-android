@@ -65,7 +65,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -128,12 +127,14 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.brightness
+import com.hienlh.ppm.design.chromeCaret
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberChromeCaret
 import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.ParsedUserMessage
 import com.hienlh.ppm.protocol.PromptCacheState
@@ -435,6 +436,7 @@ private fun ComposerField(
 ) {
     val tokens = LocalPpmTokens.current
     val inputStyle = style.copy(color = tokens.text.color)
+    val caret = rememberChromeCaret(tab.draft, inputStyle, multiline = true)
     val context = LocalContext.current
     var focused by remember { mutableStateOf(false) }
     // From the composition that gave the field the options [quietFocus] sets, and on the value it
@@ -496,7 +498,7 @@ private fun ComposerField(
         },
         enabled = enabled,
         textStyle = inputStyle,
-        cursorBrush = SolidColor(tokens.accent.color),
+        cursorBrush = caret.brush,
         keyboardOptions = KeyboardOptions(
             capitalization = KeyboardCapitalization.Sentences,
             imeAction = ImeAction.Send,
@@ -504,13 +506,16 @@ private fun ComposerField(
         ),
         onKeyboardAction = { send() },
         lineLimits = TextFieldLineLimits.MultiLine(),
+        onTextLayout = caret.onTextLayout,
+        interactionSource = caret.interactions,
+        scrollState = caret.scroll,
         decorator = { field ->
             // Inside the field, so the drop lands here rather than in the field's own target.
             Box(Modifier.dragAndDropTarget(shouldStartDragAndDrop = { true }, target = fileDrop).padding(vertical = padding)) {
                 if (tab.draft.text.isEmpty()) {
                     BasicText(placeholder, style = inputStyle.copy(color = tokens.text3.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                field()
+                Box(Modifier.chromeCaret(caret)) { field() }
             }
         },
     )

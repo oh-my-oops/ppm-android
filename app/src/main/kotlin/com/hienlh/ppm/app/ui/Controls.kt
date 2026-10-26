@@ -72,7 +72,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -97,6 +96,7 @@ import androidx.compose.ui.window.DialogWindowProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.leavesTextOnTap
 import com.hienlh.ppm.app.tracksTextFocus
+import com.hienlh.ppm.design.ChromeCaret
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
@@ -104,6 +104,7 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.ProviderLogo
 import com.hienlh.ppm.design.ProviderLogos
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.chromeCaret
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderInset
@@ -112,6 +113,7 @@ import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberChromeCaret
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.themeBackground
 import com.hienlh.ppm.protocol.SessionUnread
@@ -300,7 +302,7 @@ fun SecondaryButton(title: String, modifier: Modifier = Modifier, onClick: () ->
 
 /**
  * A text field drawn as the web's inputs are: [placeholder] in the subtle colour while empty (or
- * the field's own [placeholderColor]), the accent caret. Inputs are 16px on a phone (`globals.css`),
+ * the field's own [placeholderColor]), Chrome's caret ([ChromeCaret]). Inputs are 16px on a phone (`globals.css`),
  * so that is the default size; outside the phone layout a field takes its class's own size,
  * [desktopStyle], where one is given.
  */
@@ -323,18 +325,23 @@ fun PpmTextField(
     val tokens = LocalPpmTokens.current
     val style = desktopStyle?.takeUnless { LocalPpmMobile.current } ?: style
     val multiline = lineLimits is TextFieldLineLimits.MultiLine
+    val textStyle = style.copy(color = tokens.text.color)
+    val caret = rememberChromeCaret(state, textStyle, multiline)
     BasicTextField(
         state = state,
         modifier = modifier
             .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
             .onFocusChanged { onFocusChanged(it.isFocused) }
             .tracksTextFocus(state),
-        textStyle = style.copy(color = tokens.text.color),
-        cursorBrush = SolidColor(tokens.accent.color),
+        textStyle = textStyle,
+        cursorBrush = caret.brush,
         keyboardOptions = keyboardOptions,
         onKeyboardAction = onKeyboardAction,
         lineLimits = lineLimits,
         inputTransformation = inputTransformation,
+        onTextLayout = caret.onTextLayout,
+        interactionSource = caret.interactions,
+        scrollState = caret.scroll,
         decorator = { field ->
             // A textarea's text and placeholder start at its top and wrap; an input's sit in its
             // middle on one line, cut at its edge as Chrome cuts it unless told otherwise.
@@ -347,7 +354,7 @@ fun PpmTextField(
                         else -> BasicText(placeholder, style = placeholderStyle, maxLines = 1, overflow = placeholderOverflow)
                     }
                 }
-                field()
+                Box(Modifier.chromeCaret(caret)) { field() }
             }
         },
     )

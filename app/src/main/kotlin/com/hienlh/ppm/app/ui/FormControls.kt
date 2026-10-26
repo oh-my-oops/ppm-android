@@ -78,7 +78,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -120,6 +119,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
+import com.hienlh.ppm.design.chromeCaret
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderInset
 import com.hienlh.ppm.design.cssBorderPx
@@ -128,6 +128,7 @@ import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberChromeCaret
 import com.hienlh.ppm.design.rememberHover
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -553,6 +554,8 @@ fun FormInput(
     ) {
         CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(selection.handleColor, tokens.accent.color)) {
             if (kind == InputKind.Password) {
+                val textStyle = style.copy(color = tokens.text.color)
+                val caret = rememberChromeCaret(state, textStyle)
                 BasicSecureTextField(
                     state = state,
                     modifier = Modifier
@@ -560,17 +563,20 @@ fun FormInput(
                         .focusRequester(focus)
                         .onFocusChanged { focusChanged(it.isFocused) }
                         .tracksTextFocus(state),
-                    textStyle = style.copy(color = tokens.text.color),
-                    cursorBrush = SolidColor(tokens.accent.color),
+                    textStyle = textStyle,
+                    cursorBrush = caret.brush,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false, imeAction = ImeAction.Next),
+                    onTextLayout = caret.onTextLayout,
+                    interactionSource = caret.interactions,
                     decorator = { field ->
                         Box(contentAlignment = Alignment.CenterStart) {
                             if (state.text.isEmpty()) {
                                 BasicText(placeholder, style = style.copy(color = tokens.text2.color), softWrap = false, maxLines = 1, overflow = TextOverflow.Clip)
                             }
-                            field()
+                            Box(Modifier.chromeCaret(caret)) { field() }
                         }
                     },
+                    scrollState = caret.scroll,
                 )
             } else {
                 PpmTextField(
