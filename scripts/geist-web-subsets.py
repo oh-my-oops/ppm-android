@@ -8,7 +8,8 @@
 # The app chains the same files, in the same order, so that Android splits the text the same way.
 # `woff2_decompress` (google/woff2) unpacks them. The Latin files get the empty U+200B the static
 # fonts carry (see add-zero-width-space.py), so the breaks the app writes into a URL stay in the
-# Latin run; with no variation of its own, it stays empty at every weight.
+# Latin run; with no variation of its own, it stays empty at every weight. Then run
+# geist-android-ascent.py on the same directory, which lowers the ascent Android reads.
 import os
 import shutil
 import subprocess

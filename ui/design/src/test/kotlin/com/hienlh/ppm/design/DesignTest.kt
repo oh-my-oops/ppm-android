@@ -217,22 +217,30 @@ class DesignTest {
             Line(false, 14f, 21f, 2.625f, 40),
             Line(false, 16f, 24f, 2.625f, 45),
             Line(false, 20f, 28f, 2.625f, 54),
+            Line(false, 11f, 44f / 3, 2.625f, 29),
+            Line(false, 9f, 12f, 2.625f, 24),
             Line(true, 10f, 15f, 2.625f, 27),
             Line(true, 11f, 16.5f, 2.625f, 29),
             Line(true, 12f, 16f, 2.625f, 30),
             Line(true, 14f, 20f, 2.625f, 36),
+            // A pixel above where Geist's own ascent of 1005 let Compose put them.
+            Line(false, 12f, 16f, 2f, 23),
+            Line(false, 11f, 44f / 3, 2f, 21),
+            Line(false, 9f, 12f, 2f, 17),
+            Line(false, 12f, 16f, 2.625f, 31),
         )
         for (line in chrome) {
             val ascent = if (line.mono) PpmFonts.MONO_ASCENT else PpmFonts.SANS_ASCENT
             val descent = if (line.mono) PpmFonts.MONO_DESCENT else PpmFonts.SANS_DESCENT
+            val android = if (line.mono) PpmFonts.MONO_ASCENT else PpmFonts.SANS_ANDROID_ASCENT
             val px = line.size * line.density
-            val ratio = PpmFonts.chromeTopRatio(px, line.height * line.density, ascent, descent)!!
+            val ratio = PpmFonts.chromeTopRatio(px, line.height * line.density, ascent, descent, android)!!
             // Where Compose's LineHeightStyleSpan then puts it, on the metrics Android rounds.
             val height = ceil(line.height * line.density).toInt()
-            val below = height - Math.round(px * ascent) - Math.round(px * descent)
+            val below = height - Math.round(px * android) - Math.round(px * descent)
             assertEquals("$line", line.baseline, height - Math.round(px * descent) - ceil(below * (1 - ratio)).toInt())
         }
-        // 12 px in 16: Chrome's text is one pixel above where Android's ascent lets the span lift it.
+        // 12 px in 16: Chrome's text is one pixel above where Geist's own ascent let the span lift it.
         assertEquals(0f, PpmFonts.chromeTopRatio(24f, 32f, PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT))
         // A line no taller than the font is left to the span.
         assertNull(PpmFonts.chromeTopRatio(24f, 24f, PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT))

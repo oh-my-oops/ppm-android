@@ -326,7 +326,8 @@ internal fun QuestionCard(
             )
             BasicText(
                 "${if (multiple) "←→ tabs · " else ""}↑↓ options · 1-${minOf(current.options.size, 9)} select · Enter submit",
-                style = ppmText(10f).copy(color = tokens.text2.color),
+                // `text-[10px]` keeps the header's 20 px line.
+                style = ppmText(10f, lineHeight = 20f).copy(color = tokens.text2.color),
             )
         }
         if (multiple) {
@@ -366,7 +367,8 @@ internal fun QuestionCard(
                                     else -> tokens.panel2.color
                                 }
                                 Box(Modifier.size(16.dp).background(badge, CircleShape), contentAlignment = Alignment.Center) {
-                                    BasicText(if (done) "✓" else "${index + 1}", style = ppmText(10f, FontWeight.SemiBold).copy(color = foreground.color))
+                                    // On the tab's `text-xs` line, which fills the 16 px badge.
+                                    BasicText(if (done) "✓" else "${index + 1}", style = ppmText(10f, FontWeight.SemiBold, lineHeight = 16f).copy(color = foreground.color))
                                 }
                                 BasicText(
                                     question.header ?: "Q${index + 1}",
@@ -482,7 +484,8 @@ private fun NumberSquare(text: String, selected: Boolean) {
             .background((if (selected) tokens.accent.opacity(0.2) else tokens.panel2).color, RoundedCornerShape(4.dp)),
         contentAlignment = Alignment.Center,
     ) {
-        BasicText(text, style = ppmText(10f, FontWeight.SemiBold).copy(color = (if (selected) tokens.accent else tokens.text2).color))
+        // On the option's `text-xs` line, 16 px, centred in the square as its flex box centres it.
+        BasicText(text, style = ppmText(10f, FontWeight.SemiBold, lineHeight = 16f).copy(color = (if (selected) tokens.accent else tokens.text2).color))
     }
 }
 

@@ -54,6 +54,12 @@ object PpmFonts {
     /** Geist's ascender, 1005 of its 1000 units: what Chrome sizes a list's disc from. */
     const val SANS_ASCENT = 1.005f
 
+    /**
+     * The ascender Android reads from the app's Geist files, 970 units (`scripts/geist-android-ascent.py`):
+     * low enough that Compose's line-height span can put every baseline where Chrome's metrics do.
+     */
+    const val SANS_ANDROID_ASCENT = 0.97f
+
     /** Geist's descender, 295 of its 1000 units. */
     const val SANS_DESCENT = 0.295f
 
@@ -139,13 +145,13 @@ object PpmFonts {
      * pixel, over [chromeAscentDescent]. Compose centres the text on the metrics Android rounds,
      * each to the nearest pixel, and set most sizes 1–2 px lower than the web (14 px in 20 at 2x:
      * 30, Chrome 29). Its span puts ⌈extra × (1 − ratio)⌉ of the room under the text, and cannot
-     * lift it above the font's own ascent (12 px in 16: one short). Null for a line no taller than
-     * the font, which the span leaves alone.
+     * lift it above the ascent Android reads from the file, [androidAscent] (Geist's 1005 left 12 px
+     * in 16 one short). Null for a line no taller than the font, which the span leaves alone.
      */
-    fun chromeTopRatio(px: Float, line: Float, ascent: Float, descent: Float): Float? {
+    fun chromeTopRatio(px: Float, line: Float, ascent: Float, descent: Float, androidAscent: Float = ascent): Float? {
         val androidDescent = Math.round(px * descent)
         val height = ceil(line).toInt()
-        val extra = height - Math.round(px * ascent) - androidDescent
+        val extra = height - Math.round(px * androidAscent) - androidDescent
         if (extra <= 0) return null
         val (up, down) = chromeAscentDescent(px, ascent, descent)
         val below = height - androidDescent - (floor((line - up - down) / 2) + up).toInt()
@@ -268,7 +274,7 @@ private fun chromeAlignment(kind: FontKind, size: Float, lineHeight: Float): Lin
     val px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, size, metrics)
     val line = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, lineHeight, metrics)
     val ratio = if (kind == FontKind.SANS) {
-        PpmFonts.chromeTopRatio(px, line, PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT)
+        PpmFonts.chromeTopRatio(px, line, PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT, PpmFonts.SANS_ANDROID_ASCENT)
     } else {
         PpmFonts.chromeTopRatio(px, line, PpmFonts.MONO_ASCENT, PpmFonts.MONO_DESCENT)
     }

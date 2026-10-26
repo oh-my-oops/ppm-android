@@ -349,7 +349,7 @@ private fun HtmlStyle.spanOver(block: HtmlStyle, base: MarkdownStyle, tokens: Th
         fontFamily = if (font != block.font) font.family() else null,
         textDecoration = if (underline != block.underline || lineThrough != block.lineThrough) decoration() else null,
         // `sub` and `sup` move their text and leave the line; Android shifts by a fraction of the ascent, up.
-        baselineShift = if (shift != block.shift) BaselineShift((block.shift - shift) / (size * PpmFonts.SANS_ASCENT)) else null,
+        baselineShift = if (shift != block.shift) BaselineShift((block.shift - shift) / (size * PpmFonts.SANS_ANDROID_ASCENT)) else null,
     )
 }
 
