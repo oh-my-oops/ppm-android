@@ -46,6 +46,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -54,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
+import com.hienlh.ppm.app.leavesTextOnTap
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -167,6 +169,7 @@ internal fun WebDialog(
         // The platform's own dim would fade on its own clock; the backdrop is drawn here.
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         LaunchedEffect(window) { window?.setDimAmount(0f) }
+        val focusManager = LocalFocusManager.current
         val backdrop = remember { Animatable(0f) }
         val card = remember { Animatable(0f) }
         var ringed by remember { mutableStateOf(closeFocused) }
@@ -197,6 +200,8 @@ internal fun WebDialog(
                         .background(tokens.bgSolid.color)
                         // A tap on the card stays on it rather than reaching the backdrop.
                         .pointerInput(Unit) { detectTapGestures {} }
+                        // A tap off the focused field takes the focus from it, as on the page.
+                        .leavesTextOnTap(focusManager)
                         // Any press inside takes the focus from the cross: to a button, or the card.
                         .pointerInput(Unit) {
                             awaitPointerEventScope {

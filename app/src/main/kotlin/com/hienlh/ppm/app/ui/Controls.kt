@@ -83,6 +83,7 @@ import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
@@ -94,6 +95,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.leavesTextOnTap
 import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -374,6 +376,7 @@ fun BottomSheet(
         // The platform's own dim would fade in on its own clock; the backdrop is drawn here.
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         LaunchedEffect(window) { window?.setDimAmount(0f) }
+        val focusManager = LocalFocusManager.current
         val shown = if (panelHeight > 0 && offset.value != Float.MAX_VALUE) 1f - (offset.value / panelHeight).coerceIn(0f, 1f) else 0f
         Box(Modifier.fillMaxSize()) {
             Box(
@@ -403,6 +406,8 @@ fun BottomSheet(
                             if (dismissible && (offset.value > panelHeight * 0.25f || velocity > 1_500f)) close() else offset.animateTo(0f, tween(150))
                         },
                     )
+                    // A tap off the focused field takes the focus from it, as on the page.
+                    .leavesTextOnTap(focusManager)
                     .cssBorderInset(top = 1.dp)
                     .padding(start = inset, top = inset, end = inset)
                     .windowInsetsPadding(bottomPadding),
