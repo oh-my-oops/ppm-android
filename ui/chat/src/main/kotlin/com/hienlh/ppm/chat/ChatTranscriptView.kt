@@ -68,6 +68,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -343,7 +344,8 @@ private fun TranscriptList(
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
                 TaskTracker(state.tasks)
-                LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scroll.connection).onGloballyPositioned { anchors.list = it }, state = list) {
+                // The tag is how the Baseline Profile's journeys find the transcript (baselineprofile/).
+                LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scroll.connection).onGloballyPositioned { anchors.list = it }.testTag("chat-transcript"), state = list) {
                     if (state.hasEarlier) item(key = SENTINEL) { Spacer(Modifier.fillMaxWidth().height(1.dp)) }
                     if (state.loadingEarlier) item(key = SKELETON) { PreCompactSkeleton() }
                     rows.forEachIndexed { index, row ->

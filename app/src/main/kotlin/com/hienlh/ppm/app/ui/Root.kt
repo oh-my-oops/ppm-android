@@ -68,6 +68,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -147,7 +149,9 @@ fun PpmRoot(model: AppModel) {
             .fillMaxSize()
             // A tap outside the text field leaves it, as a press outside an input does in a browser:
             // the keyboard goes, shortcuts work.
-            .leavesTextOnTap(focusManager),
+            .leavesTextOnTap(focusManager)
+            // Test tags as resource ids, which UI Automator can find (baselineprofile/).
+            .semantics { testTagsAsResourceId = true },
     ) {
         val mobile = maxWidth < 768.dp
         // The layout follows the window, not the device: a rotation or a split screen can cross it.

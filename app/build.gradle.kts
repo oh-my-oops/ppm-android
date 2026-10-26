@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.androidx.baselineprofile)
 }
 
 // The release key is never in the repository: its keystore and passwords are Gradle properties
@@ -66,6 +67,16 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidsvg)
     implementation(libs.androidx.compose.ui.tooling.preview)
+    // Hands the Baseline Profile to Android on an install that is not from Play, where nothing else
+    // would: the system compiles it when the device is next idle.
+    implementation(libs.androidx.profileinstaller)
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
+    baselineProfile(project(":baselineprofile"))
+}
+
+// `:app:generateBaselineProfile` writes src/release/generated/baselineProfiles (see
+// baselineprofile/build.gradle.kts); the startup part also orders the dex, startup code first.
+baselineProfile {
+    dexLayoutOptimization = true
 }

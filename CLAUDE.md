@@ -54,6 +54,19 @@ scripts/scratch-server.sh stop
 
 Sessions are created with `providerId: "mock"`, so no AI is paid for. The mock streams a code block (and an approval request) on a session's first turn and keeps its answer without them, so a first turn's text never matches its history.
 
+The Baseline Profile in `app/src/release/generated/baselineProfiles/` is generated and committed: it lists the methods Android compiles ahead of time instead of interpreting them, and its startup half orders the dex. Regenerate it before a release when startup or the chat changed. `:baselineprofile`'s journeys (`PpmJourneys.kt`) sign in and open a mock session with a long transcript, both named in a file on the device, never in instrumentation arguments, which Gradle prints. A run replaces the directory with what its devices reached, a phone never reaches the desktop layout nor a tablet the mobile one, and one emulator runs at a time here, so generate on each and merge:
+
+```bash
+adb -s emulator-5580 push target.properties /data/local/tmp/ppm-baseline-profile.properties  # server= password= project= session=
+ANDROID_SERIAL=emulator-5580 systemd-run --user --scope --quiet ./gradlew :app:generateBaselineProfile \
+  -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true
+cp -r app/src/release/generated/baselineProfiles /tmp/phone-profiles
+# the same on emulator-5582, then
+python3 -I scripts/merge-baseline-profiles.py /tmp/phone-profiles
+```
+
+Without `leaveApksInstalledAfterRun` Gradle uninstalls the app after the run, saved servers and all. `StartupBenchmarks` times a cold start with and without the profile, `ScrollBenchmarks` the frames of opening the chat and scrolling it: `./gradlew :baselineprofile:connectedBenchmarkReleaseAndroidTest -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.enabledRules=Macrobenchmark`, one test with `-Pandroid.testInstrumentationRunnerArguments.class=com.hienlh.ppm.baselineprofile.ScrollBenchmarks#scrollWithProfile`; the numbers land in `baselineprofile/build/outputs/connected_android_test_additional_output/benchmarkRelease/connected/*/*-benchmarkData.json`. On the tablet emulator the start does not depend on the code at all: it draws 2560×1600 in software, and even a fully compiled app (`cmd package compile -m speed -f`) started no faster. The phone emulator does show the profile (10-26: start 502 → 467 ms median, frame CPU P50 31.8 → 25.5 ms), and the tablet's frames do (P95 171 → 115 ms, P99 530 → 201 ms). An install from adb or the self-update compiles nothing at install (`dumpsys package dexopt` reads `verify`): ProfileInstaller writes the profile on the first start and the idle maintenance job compiles it (`speed-profile`), which `adb shell cmd package compile -r bg-dexopt com.hienlh.ppm` runs at once.
+
 ## Devices
 
 - Emulators: the AVD `PPM_Phone` on port 5580 (`emulator-5580`) and `PPM_Tablet` on 5582 (`emulator-5582`, a Pixel Tablet at 2560×1600 and 320 dpi: 1280×800 dp, the web viewport to set beside it, less the 24 dp status bar). Always pass `adb -s <serial>`.
