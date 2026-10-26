@@ -169,7 +169,8 @@ private fun HtmlPreviewToolbar(
 /**
  * `actionClass`: `gap-1.5 rounded px-2 min-h-11 min-w-11 md:min-h-7 md:min-w-7 text-xs
  * text-muted-foreground hover:text-foreground hover:bg-muted`, and `bg-muted text-foreground`
- * for the view that is on.
+ * for the view that is on. Those are joined without `cn`, so both colours are on the button and
+ * the stylesheet's order picks `text-muted-foreground`: the view that is on is only filled.
  */
 @Composable
 private fun HtmlAction(
@@ -184,7 +185,7 @@ private fun HtmlAction(
     val tokens = LocalPpmTokens.current
     val hover = rememberHover(instant = true)
     val side = if (mobile) 44.dp else 28.dp
-    val color = if (active) tokens.text else tokens.text2.mix(tokens.text, hover.lit.toDouble())
+    val color = tokens.text.mix(tokens.text2, hover.lit.toDouble())
     Row(
         Modifier
             .sizeIn(minWidth = side, minHeight = side)
@@ -215,6 +216,10 @@ private fun Breadcrumb(model: AppModel, filePath: String, projectName: String) {
     if (root.isNotEmpty() && path.startsWith("$root/")) {
         prefix = root.split('/')
         segments = path.removePrefix("$root/").split('/').filter { it.isNotEmpty() }
+    } else if (ABSOLUTE_PATH.containsMatchIn(filePath)) {
+        // `EditorBreadcrumbExternal`: a file outside the project, named from its drive's root.
+        prefix = emptyList()
+        segments = filePath.split('/', '\\').filter { it.isNotEmpty() }
     } else {
         prefix = emptyList()
         segments = path.split('/').filter { it.isNotEmpty() }
@@ -249,6 +254,9 @@ private fun Breadcrumb(model: AppModel, filePath: String, projectName: String) {
         }
     }
 }
+
+/** A POSIX path, or a Windows one from its drive. */
+private val ABSOLUTE_PATH = Regex("""^(/|[A-Za-z]:[/\\])""")
 
 /** `ChevronRight size-3 text-muted-foreground shrink-0 mx-0.5`. */
 @Composable

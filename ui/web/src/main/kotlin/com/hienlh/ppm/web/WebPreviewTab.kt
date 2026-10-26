@@ -229,7 +229,7 @@ private fun ToolbarAction(icon: ProductIcon, label: String, mobile: Boolean, tin
             .clip(RoundedCornerShape(4.dp))
             .ppmClickable(pressedColor = tokens.panel.color, hoverColor = tokens.panel.color, fade = false, onClickLabel = label, source = hover.source, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { PpmIcon(icon, 16.dp, tint ?: tokens.text2.mix(tokens.text, hover.lit.toDouble()).color) }
+    ) { PpmIcon(icon, 16.dp, tint ?: tokens.text.mix(tokens.text2, hover.lit.toDouble()).color) }
 }
 
 /** The page itself, in a WebView of its own. */
