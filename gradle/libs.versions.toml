@@ -10,6 +10,7 @@ lifecycle = "2.11.0"
 coreKtx = "1.19.1"
 window = "1.5.1"
 javascriptengine = "1.1.1"
+webkit = "1.14.0"
 androidsvg = "1.4"
 junit = "4.13.2"
 
@@ -28,6 +29,7 @@ androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-window = { module = "androidx.window:window", version.ref = "window" }
 androidx-javascriptengine = { module = "androidx.javascriptengine:javascriptengine", version.ref = "javascriptengine" }
+androidx-webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }
 androidsvg = { module = "com.caverock:androidsvg-aar", version.ref = "androidsvg" }
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 androidx-compose-foundation = { module = "androidx.compose.foundation:foundation" }
