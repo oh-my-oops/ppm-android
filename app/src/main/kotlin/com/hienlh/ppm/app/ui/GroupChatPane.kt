@@ -143,14 +143,14 @@ private fun GroupHeader(state: GroupChat.State, onStop: () -> Unit, onResume: ()
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val dot = when (state.status) {
+            val dot = when (state.shownStatus) {
                 GroupStatus.ACTIVE -> tokens.accent.opacity(pulse().toDouble())
                 GroupStatus.PAUSED -> AMBER_500
                 GroupStatus.IDLE -> tokens.text3
             }
             Box(Modifier.size(8.dp).background(dot.color, CircleShape))
             // `capitalize`.
-            BasicText(state.status.wire.replaceFirstChar { it.uppercase() }, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color))
+            BasicText(state.shownStatus.wire.replaceFirstChar { it.uppercase() }, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color))
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val dark = isSystemInDarkTheme()

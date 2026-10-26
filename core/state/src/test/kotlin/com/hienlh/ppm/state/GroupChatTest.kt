@@ -93,6 +93,23 @@ class GroupChatTest {
         chat.close()
     }
 
+    @Test
+    fun `a running burst reads active, and one the user stopped leaves the group paused, for Resume`() = runTest {
+        // A send runs a burst the server tells no socket about: still active, wherever it stood.
+        assertEquals(GroupStatus.ACTIVE, GroupChat.State(status = GroupStatus.IDLE, running = true).shownStatus)
+        assertEquals(GroupStatus.ACTIVE, GroupChat.State(status = GroupStatus.PAUSED, running = true).shownStatus)
+        assertEquals(GroupStatus.PAUSED, GroupChat.State(status = GroupStatus.PAUSED).shownStatus)
+
+        val chat = GroupChat(ApiClient("http://127.0.0.1:9".toHttpUrl(), ""), "p", "g", this)
+        chat.handle(json(state))
+        chat.handle(json("""{"type":"typing","member":"Ann"}"""))
+        chat.handle(json("""{"type":"group_done","reason":"stopped","turns":0,"costUsd":0}"""))
+        assertEquals(GroupStatus.PAUSED, chat.state.value.shownStatus)
+        assertFalse(chat.state.value.running)
+        assertEquals(emptyList<String>(), chat.state.value.typing)
+        chat.close()
+    }
+
     /** A group server: REST from [rest], every socket it accepts and what each was sent. */
     private class Server(val rest: (RecordedRequest) -> MockResponse) : Dispatcher() {
         val sockets = LinkedBlockingQueue<WebSocket>()

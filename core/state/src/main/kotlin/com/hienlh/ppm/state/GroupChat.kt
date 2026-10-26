@@ -70,7 +70,14 @@ class GroupChat(
         val replyCap: Int? = null,
         val rosterBusy: Boolean = false,
         val rosterError: String? = null,
-    )
+    ) {
+        /**
+         * What the header says: active while a burst runs. The server marks the group active when a
+         * burst starts but tells no socket until the next `group_state`, so the web reads "Idle"
+         * beside its own Stop button.
+         */
+        val shownStatus: GroupStatus get() = if (running) GroupStatus.ACTIVE else status
+    }
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
@@ -239,7 +246,11 @@ class GroupChat(
             "group_done" -> {
                 typingTimers.values.forEach { it.cancel() }
                 typingTimers.clear()
-                _state.update { it.copy(running = false, status = GroupStatus.IDLE, typing = emptyList()) }
+                // A stop the user asked for leaves the group paused for Resume, as the server stores
+                // it (`group-chat.service.ts`). The web sets idle on every end, so its Resume is gone
+                // until a reload reads the group back.
+                val status = if (frame["reason"].string == "stopped") GroupStatus.PAUSED else GroupStatus.IDLE
+                _state.update { it.copy(running = false, status = status, typing = emptyList()) }
             }
             "error" -> _state.update { it.copy(error = frame["message"].string, running = false) }
         }
