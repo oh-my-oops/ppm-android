@@ -116,6 +116,7 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
                         style = ppmText(16f, lineHeight = 64f / 3),
                         desktopStyle = ppmText(12f, lineHeight = 16f),
                         onFocusChanged = { focused = it },
+                        cssStart = 28.dp,
                     )
                 }
                 PpmIcon(ProductIcon.Search, 14.dp, tokens.text3.color, Modifier.padding(start = 8.dp))

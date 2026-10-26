@@ -304,7 +304,7 @@ fun SecondaryButton(title: String, modifier: Modifier = Modifier, onClick: () ->
  * A text field drawn as the web's inputs are: [placeholder] in the subtle colour while empty (or
  * the field's own [placeholderColor]), Chrome's caret ([ChromeCaret]). Inputs are 16px on a phone (`globals.css`),
  * so that is the default size; outside the phone layout a field takes its class's own size,
- * [desktopStyle], where one is given.
+ * [desktopStyle], where one is given. [cssStart] is the CSS length before the text, for the caret.
  */
 @Composable
 fun PpmTextField(
@@ -321,12 +321,13 @@ fun PpmTextField(
     focusRequester: FocusRequester? = null,
     onFocusChanged: (Boolean) -> Unit = {},
     placeholderOverflow: TextOverflow = TextOverflow.Ellipsis,
+    cssStart: Dp = 0.dp,
 ) {
     val tokens = LocalPpmTokens.current
     val style = desktopStyle?.takeUnless { LocalPpmMobile.current } ?: style
     val multiline = lineLimits is TextFieldLineLimits.MultiLine
     val textStyle = style.copy(color = tokens.text.color)
-    val caret = rememberChromeCaret(state, textStyle, multiline)
+    val caret = rememberChromeCaret(state, textStyle, multiline, cssStart)
     BasicTextField(
         state = state,
         modifier = modifier

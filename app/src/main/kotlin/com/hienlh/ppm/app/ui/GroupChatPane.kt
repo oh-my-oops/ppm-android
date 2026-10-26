@@ -395,6 +395,7 @@ private fun GroupMessageBox(group: GroupTab, mobile: Boolean) {
                 lineLimits = TextFieldLineLimits.MultiLine(),
                 inputTransformation = returnSends,
                 onFocusChanged = { focused = it },
+                cssStart = 12.dp,
             )
         }
         SendButton(enabled = draft.text.isNotBlank(), onClick = ::send)

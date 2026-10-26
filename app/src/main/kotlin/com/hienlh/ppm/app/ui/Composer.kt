@@ -353,6 +353,8 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                     tab, focus, quietFocus, focusQuietly, onKey, ::keyboardSend, pasteImage, fileDrop,
                     style = ppmText(16f, lineHeight = INPUT_LINE),
                     padding = 6.dp,
+                    // `px-2`, the 32 px attach button and `gap-1`.
+                    cssStart = 44.dp,
                     maxHeight = 80.dp,
                     placeholder = if (running) "Follow-up..." else "Ask anything...",
                     enabled = !locked,
@@ -388,6 +390,8 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                     tab, focus, quietFocus, focusQuietly, onKey, ::keyboardSend, pasteImage, fileDrop,
                     style = ppmText(14f, lineHeight = 14f * 1.625f),
                     padding = 8.dp,
+                    // `px-2.5`, the 34 px attach button and `gap-2`.
+                    cssStart = 52.dp,
                     maxHeight = 90.dp,
                     placeholder = if (running) "Follow-up or Stop..." else "Ask anything...",
                     enabled = !locked,
@@ -412,7 +416,8 @@ private const val INPUT_LINE = 16f * 1.25f / 0.875f
 
 /**
  * The textarea: `rows={1}` growing with its text (`field-sizing: content`) up to [maxHeight], its
- * [padding] above and below inside that; [send] from the keyboard's action key, [pasteImage] for
+ * [padding] above and below inside that, [cssStart] the CSS length before it in its row (for the
+ * caret); [send] from the keyboard's action key, [pasteImage] for
  * a picture pasted from the text menu. While [quietFocus] holds, gaining focus starts no input
  * session, so no keyboard: set by a touch landing on the unfocused box, dropped as it loses focus.
  * [focusQuietly] focuses it that way.
@@ -429,6 +434,7 @@ private fun ComposerField(
     fileDrop: ChatFileDrop,
     style: TextStyle,
     padding: Dp,
+    cssStart: Dp,
     maxHeight: Dp,
     placeholder: String,
     enabled: Boolean,
@@ -436,7 +442,7 @@ private fun ComposerField(
 ) {
     val tokens = LocalPpmTokens.current
     val inputStyle = style.copy(color = tokens.text.color)
-    val caret = rememberChromeCaret(tab.draft, inputStyle, multiline = true)
+    val caret = rememberChromeCaret(tab.draft, inputStyle, multiline = true, cssStart = cssStart)
     val context = LocalContext.current
     var focused by remember { mutableStateOf(false) }
     // From the composition that gave the field the options [quietFocus] sets, and on the value it

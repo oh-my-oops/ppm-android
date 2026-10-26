@@ -555,7 +555,7 @@ fun FormInput(
         CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(selection.handleColor, tokens.accent.color)) {
             if (kind == InputKind.Password) {
                 val textStyle = style.copy(color = tokens.text.color)
-                val caret = rememberChromeCaret(state, textStyle)
+                val caret = rememberChromeCaret(state, textStyle, cssStart = 12.dp)
                 BasicSecureTextField(
                     state = state,
                     modifier = Modifier
@@ -599,6 +599,7 @@ fun FormInput(
                     focusRequester = focus,
                     onFocusChanged = ::focusChanged,
                     placeholderOverflow = TextOverflow.Clip,
+                    cssStart = 12.dp,
                 )
             }
         }
@@ -672,6 +673,7 @@ fun FormTextArea(
                         onFocusChanged(it)
                     }
                 },
+                cssStart = 12.dp,
             )
             ResizeGrip { dy -> resized = max(smallest, height + dy) }
         }

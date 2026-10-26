@@ -794,6 +794,7 @@ private fun RenameSheet(model: AppModel, session: SessionInfo, onDismiss: () -> 
                     onKeyboardAction = { save() },
                     focusRequester = focus,
                     onFocusChanged = { focused = it },
+                    cssStart = 12.dp,
                 )
             }
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

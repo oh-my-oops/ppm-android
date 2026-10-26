@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.isSpecified
 import kotlinx.coroutines.delay
@@ -44,6 +45,12 @@ import kotlin.math.min
  * brush it is handed: the web's dark 2 px caret, 36 px tall in a 14px input at 2x, was a 4 px blue
  * bar 40 px tall.
  *
+ * Chrome paints it on whole pixels, both edges rounded from where its text really starts, so at
+ * 2.625x its 2.625 px are 2 or 3 wide by that start's fraction of a pixel: 2 in a `px-3` textarea
+ * whose text starts at 56.5 px, 3 with the padding made 10px (51.25), measured. Compose puts the
+ * field on a whole pixel, so a field gives [rememberChromeCaret] the CSS length before its text,
+ * whose fraction is the one Chrome keeps.
+ *
  * A field hands its BasicTextField [brush] (transparent, so Compose still scrolls its own caret into
  * view and this one moves with it), [onTextLayout], [scroll] and [interactions], and wraps the inner
  * field its decorator is given in [Modifier.chromeCaret].
@@ -57,6 +64,7 @@ class ChromeCaret internal constructor(private val state: TextFieldState, privat
 
     private var layout by mutableStateOf<(() -> TextLayoutResult?)?>(null)
     internal var style by mutableStateOf(TextStyle.Default)
+    internal var cssStart by mutableStateOf(0.dp)
     internal var shown by mutableStateOf(false)
     internal var lit by mutableStateOf(true)
 
@@ -71,6 +79,10 @@ class ChromeCaret internal constructor(private val state: TextFieldState, privat
         left = max(left, min(0f, result.getLineLeft(line)))
         left = min(left, max(size.width + if (multiline) 0f else scrolled, result.getLineRight(line)) - width)
         left = floor(left + 0.5f)
+        // Where Chrome's text starts, against this field's whole pixel.
+        val start = cssStart.toPx() - cssStart.roundToPx()
+        val right = floor(start + left + width + 0.5f)
+        left = floor(start + left + 0.5f)
         val px = style.fontSize.toPx()
         val (up, down) = if (style.fontFamily == PpmFonts.mono) {
             PpmFonts.chromeAscentDescent(px, PpmFonts.MONO_ASCENT, PpmFonts.MONO_DESCENT)
@@ -80,17 +92,24 @@ class ChromeCaret internal constructor(private val state: TextFieldState, privat
         val lineHeight = if (style.lineHeight.isSpecified) style.lineHeight.toPx() else up + down
         val top = result.getLineTop(line) + floor((lineHeight - up - down) / 2)
         val origin = if (multiline) Offset(left, top - scrolled) else Offset(left - scrolled, top)
-        clipRect { drawRect(style.color, origin, Size(width, up + down)) }
+        clipRect { drawRect(style.color, origin, Size(right - left, up + down)) }
     }
 }
 
-/** The caret of the field editing [state] in [style] (its colour the text's), [multiline] for a textarea. */
+/**
+ * The caret of the field editing [state] in [style] (its colour the text's), [multiline] for a
+ * textarea. [cssStart] is the CSS length from a whole pixel to where the text starts (the field's
+ * padding, or a row's padding, icon and gap before it); only its fraction of a pixel counts.
+ */
 @Composable
-fun rememberChromeCaret(state: TextFieldState, style: TextStyle, multiline: Boolean = false): ChromeCaret {
+fun rememberChromeCaret(state: TextFieldState, style: TextStyle, multiline: Boolean = false, cssStart: Dp = 0.dp): ChromeCaret {
     val caret = remember(state, multiline) { ChromeCaret(state, multiline) }
     val focused by caret.interactions.collectIsFocusedAsState()
     val window = LocalWindowInfo.current
-    SideEffect { caret.style = style }
+    SideEffect {
+        caret.style = style
+        caret.cssStart = cssStart
+    }
     LaunchedEffect(caret) {
         snapshotFlow { Triple(focused && window.isWindowFocused, state.selection, state.text.toString()) }.collectLatest { (shown) ->
             caret.shown = shown

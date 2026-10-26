@@ -159,6 +159,7 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
                                     onKeyboardAction = { passwordFocus.requestFocus() },
                                     focusRequester = addressFocus,
                                     onFocusChanged = { if (it) focused = "address" },
+                                    cssStart = 12.dp,
                                 )
                             }
                         }
@@ -171,7 +172,7 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
                             }
                         }) {
                             val passwordStyle = fieldStyle.copy(color = tokens.text.color)
-                            val caret = rememberChromeCaret(password, passwordStyle)
+                            val caret = rememberChromeCaret(password, passwordStyle, cssStart = 12.dp)
                             Box(contentAlignment = Alignment.CenterStart) {
                                 if (password.text.isEmpty()) {
                                     BasicText("Password", style = fieldStyle.copy(color = tokens.text2.color))
