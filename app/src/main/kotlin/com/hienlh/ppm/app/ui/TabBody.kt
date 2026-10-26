@@ -48,6 +48,7 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
         "chat" -> model.chat(tab.id)?.let { chat -> key(chat) { ChatPane(model, chat) } }
         "session-review" -> SessionReviewBody(model, tab)
         "web-preview" -> WebPreviewBody(model, tab)
+        "group" -> GroupChatBody(model, tab)
         else -> if (isHtmlEditorTab(tab)) {
             HtmlEditorBody(model, tab)
         } else {

@@ -373,7 +373,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     private val reviews = mutableStateMapOf<String, ReviewTab>()
 
     /** The group chat behind each group tab in memory, by tab id. */
-    private val groupChats = mutableStateMapOf<String, GroupChat>()
+    private val groupChats = mutableStateMapOf<String, GroupTab>()
 
     /** Each session's turns: an open chat publishes its own, a Review tab reads them (`useSessionTurnsStore`). */
     val sessionTurns = SessionTurnsStore()
@@ -852,7 +852,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     fun becameActive() {
         resumes++
         for (tab in chats.values) tab.controller?.resumed()
-        for (group in groupChats.values) group.wake()
+        for (group in groupChats.values) group.chat.wake()
         events?.wake()
         refreshWorkspace()
         val readAt = sessionsReadAt ?: return
@@ -1657,7 +1657,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         agentFallbacks = AgentSessionFallbacks()
         chats.values.forEach { it.stop() }
         chats.clear()
-        groupChats.values.forEach { it.close() }
+        groupChats.values.forEach { it.chat.close() }
         groupChats.clear()
         shownSession = null
         waitingForWorkspace.clear()
@@ -1844,10 +1844,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     private fun syncGroups(state: WorkspaceState) {
         val live = HashMap<String, WorkspaceTab>()
         for (panel in state.panels.values) for (tab in panel.tabs) if (tab.type == "group") live[tab.id] = tab
-        for ((id, chat) in groupChats.toList()) {
+        for ((id, group) in groupChats.toList()) {
             val tab = live[id]
-            if (tab == null || tab.metaString("groupId") != chat.groupId || groupProject(tab) != chat.project) {
-                chat.close()
+            if (tab == null || tab.metaString("groupId") != group.chat.groupId || groupProject(tab) != group.chat.project) {
+                group.chat.close()
                 groupChats.remove(id)
             }
         }
@@ -1855,7 +1855,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         for (tab in shownTabs(state)) {
             if (tab.type != "group" || tab.id in groupChats) continue
             val groupId = tab.metaString("groupId")?.takeIf { it.isNotEmpty() } ?: continue
-            groupChats[tab.id] = GroupChat(api, groupProject(tab), groupId, scope).also { it.start() }
+            groupChats[tab.id] = GroupTab(GroupChat(api, groupProject(tab), groupId, scope).also { it.start() })
         }
     }
 
@@ -1863,7 +1863,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     private fun groupProject(tab: WorkspaceTab): String = tab.metaString("projectName") ?: selectedProject.orEmpty()
 
     /** The group chat of a group tab; none for a tab that names no group, or one not shown yet. */
-    fun group(tabId: String): GroupChat? = groupChats[tabId]
+    fun group(tabId: String): GroupTab? = groupChats[tabId]
 
     /** A group's tab (group-list.tsx), named after it; a group already open comes to the front. */
     fun openGroup(project: String, group: Group) {

@@ -197,7 +197,7 @@ fun rememberComposerPickers(model: AppModel, tab: ChatTab): ComposerPickers {
 }
 
 /** Tailwind's `emerald-500`, as Chrome draws its `oklch()` in sRGB. */
-private val EMERALD_500 = Rgba(0.0, 188.39 / 255, 124.77 / 255, 1.0)
+internal val EMERALD_500 = Rgba(0.0, 188.39 / 255, 124.77 / 255, 1.0)
 
 /** The headers' `text-[10px] font-medium uppercase tracking-wider`. */
 private fun headerText(color: Color) = ppmText(10f, FontWeight.Medium, lineHeight = 15f).copy(color = color, letterSpacing = 0.05.em)

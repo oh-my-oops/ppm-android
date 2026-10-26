@@ -73,7 +73,8 @@ import kotlinx.coroutines.launch
  * (the accent) or `outline`, half-faded while it cannot be used. It is `px-4`, and `px-3` around
  * an icon (`has-[>svg]:px-3`) unless the icon spins: the web wraps a spinner in a span, which the
  * rule does not see ([padding] where it does). [height] is the caller's (`min-h-11`, `h-11 md:h-9`),
- * [gap] the icon's distance from the label (the button's own `gap-2`, or a class's).
+ * [gap] the icon's distance from the label (the button's own `gap-2`, or a class's), [iconSize]
+ * the icon's own `size-*` where it has one.
  */
 @Composable
 internal fun DialogButton(
@@ -87,6 +88,7 @@ internal fun DialogButton(
     height: Dp = 44.dp,
     gap: Dp = 6.dp,
     padding: Dp = if (icon != null && !spinning) 12.dp else 16.dp,
+    iconSize: Dp = 16.dp,
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
@@ -112,7 +114,7 @@ internal fun DialogButton(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
     ) {
-        if (icon != null) PpmIcon(icon, 16.dp, content, spinning = spinning)
+        if (icon != null) PpmIcon(icon, iconSize, content, spinning = spinning)
         if (label.isNotEmpty()) BasicText(label, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = content), maxLines = 1, softWrap = false)
     }
 }

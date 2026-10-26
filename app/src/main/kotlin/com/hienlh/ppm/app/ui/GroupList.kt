@@ -179,7 +179,7 @@ private fun GroupRow(group: Group, mobile: Boolean, onDelete: () -> Unit, onClic
     Box {
         GroupRowContent(group, shape, hover, onMenu = { menuAt = it }, onClick = onClick)
         menuAt?.let { at ->
-            GroupMenu(mobile, at, onDismiss = { menuAt = null }) {
+            OneItemMenu(mobile, at, "Delete group", ProductIcon.Trash2, destructive = true, onDismiss = { menuAt = null }) {
                 menuAt = null
                 onDelete()
             }
@@ -211,23 +211,25 @@ private fun GroupRowContent(group: Group, shape: RoundedCornerShape, hover: Hove
 }
 
 /**
- * "Delete group", the one thing a group's menu holds (`variant="destructive"`, a 16 px bin): at the
- * press on a tablet, lit in `destructive/10` (`/20` in the device's dark mode); on a phone in a
- * sheet (`p-2`, the row `rounded-lg px-3 py-3`, `active:bg-accent`) that is at most 60 vh.
+ * A context menu holding one item (adaptive-context-menu.tsx): at the press on a tablet, on a phone
+ * in a sheet (`p-2`, the row `rounded-lg px-3 py-3`, `active:bg-accent`) that is at most 60 vh. A
+ * [destructive] item is red (`variant="destructive"`), lit in `destructive/10` (`/20` in the device's
+ * dark mode) on a tablet; another's 16 px icon is muted there (`text-muted-foreground`), and in the
+ * sheet takes the text's colour.
  */
 @Composable
-private fun GroupMenu(mobile: Boolean, at: Offset, onDismiss: () -> Unit, onDelete: () -> Unit) {
+internal fun OneItemMenu(mobile: Boolean, at: Offset, label: String, icon: ProductIcon, destructive: Boolean, onDismiss: () -> Unit, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     if (!mobile) {
         val dark = isSystemInDarkTheme()
         ContextMenuPopup(at, onDismiss) {
             MenuItem(
-                "Delete group",
-                onClick = onDelete,
-                icon = { PpmIcon(ProductIcon.Trash2, 16.dp, tokens.error.color) },
-                color = tokens.error,
+                label,
+                onClick = onClick,
+                icon = { PpmIcon(icon, 16.dp, (if (destructive) tokens.error else tokens.text2).color) },
+                color = if (destructive) tokens.error else null,
                 iconEnd = 0.dp,
-                highlight = tokens.error.opacity(if (dark) 0.2 else 0.1),
+                highlight = if (destructive) tokens.error.opacity(if (dark) 0.2 else 0.1) else null,
             )
         }
         return
@@ -235,6 +237,7 @@ private fun GroupMenu(mobile: Boolean, at: Offset, onDismiss: () -> Unit, onDele
     // A `vh` is Chrome's large viewport: everything under the status bar.
     val density = LocalDensity.current
     val vh = with(density) { (LocalWindowInfo.current.containerSize.height - WindowInsets.statusBars.getTop(density)).toDp() }
+    val color = (if (destructive) tokens.error else tokens.text).color
     BottomSheet(onDismiss, inset = 8.dp, bottomPadding = WindowInsets.navigationBars.add(WindowInsets(bottom = 8.dp))) {
         Column(Modifier.heightIn(max = vh * 0.6f).verticalScroll(rememberScrollState())) {
             val shape = RoundedCornerShape(12.dp)
@@ -242,13 +245,13 @@ private fun GroupMenu(mobile: Boolean, at: Offset, onDismiss: () -> Unit, onDele
                 Modifier
                     .fillMaxWidth()
                     .clip(shape)
-                    .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, onClick = onDelete)
+                    .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, onClick = onClick)
                     .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                PpmIcon(ProductIcon.Trash2, 16.dp, tokens.error.color)
-                BasicText("Delete group", style = ppmText(14f, lineHeight = 20f).copy(color = tokens.error.color))
+                PpmIcon(icon, 16.dp, color)
+                BasicText(label, style = ppmText(14f, lineHeight = 20f).copy(color = color))
             }
         }
     }

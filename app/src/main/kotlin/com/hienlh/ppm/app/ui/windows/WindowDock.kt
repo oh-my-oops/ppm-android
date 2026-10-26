@@ -57,9 +57,6 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerType
-import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
-import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -80,6 +77,7 @@ import androidx.compose.ui.unit.em
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.PlacedPopup
 import com.hienlh.ppm.app.ui.PpmTextField
+import com.hienlh.ppm.app.ui.contextMenuGesture
 import com.hienlh.ppm.app.ui.tablet.Edge
 import com.hienlh.ppm.app.ui.tablet.edge
 import com.hienlh.ppm.design.FontKind
@@ -168,7 +166,7 @@ internal fun WindowDock(model: AppModel, modifier: Modifier = Modifier) {
         modifier
             .fillMaxHeight()
             .edge(Edge.Left, tokens.borderSoft.color)
-            .contextMenuGesture { listOpen = true },
+            .contextMenuGesture { _ -> listOpen = true },
     ) {
         val layout = planDock(
             // Inside the border and past `pl-2.5`.
@@ -258,39 +256,6 @@ private fun Modifier.trackPress(toggle: MoreToggle): Modifier = pointerInput(tog
 private fun TextMeasurer.width(text: String, style: TextStyle): Double {
     val layout = measure(text, style, maxLines = 1, softWrap = false)
     return with(layout.layoutInput.density) { (layout.getLineRight(0) - layout.getLineLeft(0)).toDp().value.toDouble() }
-}
-
-/**
- * The dock's `onContextMenu`: a right click, or a finger held still for the long-press time as
- * Chrome turns one into `contextmenu`. A held finger's release is kept from the chip under it,
- * which would otherwise take it as a tap.
- */
-private fun Modifier.contextMenuGesture(open: () -> Unit): Modifier = pointerInput(Unit) {
-    awaitPointerEventScope {
-        while (true) {
-            val press = awaitPointerEvent(PointerEventPass.Initial)
-            val down = press.changes.firstOrNull { it.changedToDownIgnoreConsumed() } ?: continue
-            if (down.type == PointerType.Mouse) {
-                if (press.buttons.isSecondaryPressed) {
-                    down.consume()
-                    open()
-                }
-                continue
-            }
-            val ended = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
-                while (true) {
-                    val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
-                    if (!change.pressed || (change.position - down.position).getDistance() > viewConfiguration.touchSlop) break
-                }
-            }
-            if (ended != null) continue
-            open()
-            do {
-                val event = awaitPointerEvent(PointerEventPass.Initial)
-                event.changes.forEach { it.consume() }
-            } while (event.changes.any { it.pressed })
-        }
-    }
 }
 
 @Composable

@@ -84,12 +84,17 @@ object PpmFormat {
      * "2-digit", minute: "2-digit" })` after `toLocaleDateString([], { month: "short", day: "numeric" })`.
      */
     fun turnTime(date: Instant, now: Instant = Instant.now()): String {
-        val locale = Locale.getDefault()
         val zone = ZoneId.systemDefault()
+        val time = hourMinute(date)
+        return if (date.atZone(zone).toLocalDate() == now.atZone(zone).toLocalDate()) time else "${monthDay(date)}, $time"
+    }
+
+    /** `toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })`: "02:05 PM", or "14:05" where the locale counts 24 hours. */
+    fun hourMinute(date: Instant): String {
+        val locale = Locale.getDefault()
         val pattern = android.icu.text.DateTimePatternGenerator.getInstance(locale)
             .getBestPattern("jjmm", android.icu.text.DateTimePatternGenerator.MATCH_HOUR_FIELD_LENGTH)
-        val time = DateTimeFormatter.ofPattern(pattern, locale).withZone(zone).format(date).replace('\u202F', ' ')
-        return if (date.atZone(zone).toLocalDate() == now.atZone(zone).toLocalDate()) time else "${monthDay(date)}, $time"
+        return DateTimeFormatter.ofPattern(pattern, locale).withZone(ZoneId.systemDefault()).format(date).replace('\u202F', ' ')
     }
 
     /** `toLocaleDateString()`: the date in figures in the device's locale ("10/24/2026"). */

@@ -163,13 +163,13 @@ internal fun GroupCreateDialog(model: AppModel, projectName: String, projectPath
 }
 
 /** What the reply cap is when the field reads [typed]: `Math.max(1, Math.min(50, Number(typed) || 1))`. */
-private fun capValue(typed: CharSequence): Int = (typed.toString().toDoubleOrNull()?.takeIf { it != 0.0 } ?: 1.0).coerceIn(1.0, 50.0).toInt()
+internal fun capValue(typed: CharSequence): Int = (typed.toString().toDoubleOrNull()?.takeIf { it != 0.0 } ?: 1.0).coerceIn(1.0, 50.0).toInt()
 
 /**
  * The reply cap's field: digits only, and whatever they come to is written back as the cap the web
  * would keep — an emptied field reads 1, 80 reads 50 — unless the field already reads that number.
  */
-private val CapDigits = InputTransformation {
+internal val CapDigits = InputTransformation {
     if (!asCharSequence().all(Char::isDigit)) {
         revertAllChanges()
     } else {
@@ -284,7 +284,7 @@ private fun RosterCard(content: @Composable () -> Unit) {
  * edge, as Chrome cuts it.
  */
 @Composable
-private fun GroupInput(state: TextFieldState, placeholder: String, mobile: Boolean, focus: FocusRequester? = null, number: Boolean = false) {
+internal fun GroupInput(state: TextFieldState, placeholder: String, mobile: Boolean, focus: FocusRequester? = null, number: Boolean = false) {
     val tokens = LocalPpmTokens.current
     val font = if (mobile) 16f else 14f
     val line = font * (1.25f / 0.875f)
@@ -331,7 +331,7 @@ private const val CHIP_BASELINE = 20.625f
  * Nothing at all, gap included, while the provider offers one model or none.
  */
 @Composable
-private fun FormModelSelector(model: AppModel, value: String?, viewport: Rect?, onChange: (String) -> Unit) {
+internal fun FormModelSelector(model: AppModel, value: String?, viewport: Rect?, onChange: (String) -> Unit) {
     val catalog = model.models ?: return
     val entries by catalog.entries.collectAsState()
     if ((entries[PROVIDER]?.models?.size ?: 0) <= 1) {

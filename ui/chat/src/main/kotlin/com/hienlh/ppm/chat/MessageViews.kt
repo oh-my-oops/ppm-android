@@ -266,7 +266,7 @@ private fun readSettled(blocks: List<ChatBlock>, index: Int): Boolean {
 
 /** Tailwind's `animate-pulse`: 2 s, down to half opacity and back. */
 @Composable
-internal fun pulse(): Float {
+fun pulse(): Float {
     val alpha by rememberInfiniteTransition(label = "pulse").animateFloat(
         initialValue = 1f,
         targetValue = 0.5f,

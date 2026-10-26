@@ -183,6 +183,44 @@ private class PressPoint {
 }
 
 /**
+ * Where the web listens for `contextmenu` on something that is no button: a right click, or a
+ * finger held still for the long-press time, as Chrome turns one into `contextmenu`; [open] is told
+ * where, in the element. A held finger's release is kept from what is under it, which would
+ * otherwise take it as a tap.
+ */
+@Composable
+fun Modifier.contextMenuGesture(open: (Offset) -> Unit): Modifier {
+    val current by rememberUpdatedState(open)
+    return pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val press = awaitPointerEvent(PointerEventPass.Initial)
+                val down = press.changes.firstOrNull { it.changedToDownIgnoreConsumed() } ?: continue
+                if (down.type == PointerType.Mouse) {
+                    if (press.buttons.isSecondaryPressed) {
+                        down.consume()
+                        current(down.position)
+                    }
+                    continue
+                }
+                val ended = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                    while (true) {
+                        val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed || (change.position - down.position).getDistance() > viewConfiguration.touchSlop) break
+                    }
+                }
+                if (ended != null) continue
+                current(down.position)
+                do {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    event.changes.forEach { it.consume() }
+                } while (event.changes.any { it.pressed })
+            }
+        }
+    }
+}
+
+/**
  * `ProviderBadge`: the provider's logo at 16px, or a "?" square for one with none. Cursor's is
  * drawn in [foreground], the text colour around it (`currentColor`).
  */

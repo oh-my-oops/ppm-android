@@ -104,7 +104,7 @@ private const val NO_BREAK_AFTER_SPACE = "!),./:;?]}"
  * Android line breaker offers, and before a run of spaces that only Chrome breaks after. Put
  * before the spaces, it lets them hang at the end of the line as Chrome's do.
  */
-internal fun breakAnywhere(text: String): String = buildString(text.length * 2) {
+fun breakAnywhere(text: String): String = buildString(text.length * 2) {
     var previous = -1
     var i = 0
     while (i < text.length) {
@@ -202,6 +202,22 @@ internal fun chromeBreaks(text: String): String = buildString(text.length + 8) {
         breakMark(text, i)?.let { append(it) }
         append(text[i])
     }
+}
+
+/** The same for styled text, each style kept on what it styled: a mark at a style's edge goes outside it. */
+fun chromeBreaks(text: AnnotatedString): AnnotatedString {
+    val plain = text.text
+    // Where each character of [plain] lands among the marks.
+    val at = IntArray(plain.length)
+    val marked = buildString(plain.length + 8) {
+        for (i in plain.indices) {
+            breakMark(plain, i)?.let { append(it) }
+            at[i] = length
+            append(plain[i])
+        }
+    }
+    fun end(end: Int) = if (end == 0) 0 else at[end - 1] + 1
+    return AnnotatedString(marked, text.spanStyles.map { AnnotatedString.Range(it.item, if (it.start < plain.length) at[it.start] else marked.length, end(it.end)) })
 }
 
 /** Whether a code's box needs a [JOIN] between its start edge and [first], or its [last] and its end edge. */
