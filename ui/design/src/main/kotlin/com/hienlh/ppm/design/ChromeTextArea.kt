@@ -1,5 +1,6 @@
 package com.hienlh.ppm.design
 
+import android.os.SystemClock
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.gestures.BringIntoViewSpec
@@ -35,6 +36,9 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEvent
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.MeasureResult
@@ -42,6 +46,7 @@ import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.node.LayoutModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.ParentDataModifierNode
+import androidx.compose.ui.node.PointerInputModifierNode
 import androidx.compose.ui.node.invalidateMeasurement
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextLayoutResult
@@ -53,6 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlin.math.floor
 import kotlin.math.max
@@ -96,9 +102,19 @@ class ChromeTextArea internal constructor(internal val state: TextFieldState, in
 
     internal val result: TextLayoutResult? get() = caret.layout?.invoke()
 
+    /** Whether a pointer is down on the field, and when the last one came up (uptime ms). */
+    internal var pointerDown = false
+    internal var pointerUp = Long.MIN_VALUE / 2
+
+    /** Whether a focus the field gains [now] is a pointer's on it, which places the caret itself. */
+    internal fun pointerFocus(now: Long) = pointerDown || now - pointerUp < POINTER_FOCUS_MS
+
     /** What the field draws its selection in: nothing, as this draws it; the handles as [colors] has them. */
     fun selectionColors(colors: TextSelectionColors) = TextSelectionColors(colors.handleColor, Color.Transparent)
 }
+
+/** How long after a pointer lifts from the field a focus it gains is still that pointer's. */
+private const val POINTER_FOCUS_MS = 500L
 
 /** A textarea's lines as Chrome stacks them, device px down its content: [padding] over the first, [pitch] apart. */
 internal class ChromeAreaLines(
@@ -145,7 +161,9 @@ internal fun chromeRevealScroll(top: Float, bottom: Float, scroll: Int, view: In
  * The textarea of the field editing [state] in [style] (its colour the text's), [padding] above and
  * below its lines; [cssStart] is the CSS length from a whole pixel to where its text starts, for
  * the caret ([rememberChromeCaret]). While the field has focus, a caret moved or text typed scrolls
- * it as Chrome scrolls it; the text it opens with is shown from its top, as the web shows a draft.
+ * it as Chrome scrolls it, and so does a focus given by anything but a pointer on the field: Chrome's
+ * `focus()` reveals the selection it restores, so text handed to the box to edit shows its end. The
+ * text it opens with is shown from its top, as the web shows a draft.
  */
 @Composable
 fun rememberChromeTextArea(state: TextFieldState, style: TextStyle, padding: Dp, cssStart: Dp = 0.dp): ChromeTextArea {
@@ -160,25 +178,31 @@ fun rememberChromeTextArea(state: TextFieldState, style: TextStyle, padding: Dp,
     }
     LaunchedEffect(area, density) {
         var seen: Pair<TextRange, String>? = null
+        var wasFocused = false
         snapshotFlow {
             val result = area.result
             val text = state.text.toString()
             // Once the text is laid out: the caret's line is in the layout of the text it is in.
-            if (result == null || result.layoutInput.text.text != text) null else Triple(state.selection, text, result)
+            if (result == null || result.layoutInput.text.text != text) null else LaidOut(state.selection, text, result, focusedNow)
         }.collect { laid ->
             if (laid == null) return@collect
-            val (selection, text, result) = laid
             val before = seen
-            seen = selection to text
-            if (before == null || before == seen || !focusedNow) return@collect
+            seen = laid.selection to laid.text
+            val gained = laid.focused && !wasFocused
+            wasFocused = laid.focused
+            if (!laid.focused) return@collect
+            val moved = before != null && before != seen
+            if (!moved && !(gained && !area.pointerFocus(SystemClock.uptimeMillis()))) return@collect
             val lines = with(density) { chromeAreaLines(area.style, area.padding) }
-            val top = lines.top(result.getLineForOffset(selection.end.coerceIn(0, text.length))) + lines.caretTop
+            val top = lines.top(laid.result.getLineForOffset(laid.selection.end.coerceIn(0, laid.text.length))) + lines.caretTop
             val scroll = area.scroll
             scroll.scrollTo(chromeRevealScroll(top, top + lines.caretHeight, scroll.value, scroll.viewportSize, scroll.maxValue))
         }
     }
     return area
 }
+
+private data class LaidOut(val selection: TextRange, val text: String, val result: TextLayoutResult, val focused: Boolean)
 
 /**
  * The field's box as a [CssRow] or [CssColumn] counts it, outermost on the BasicTextField: the
@@ -199,8 +223,25 @@ private data class ChromeTextAreaElement(val area: ChromeTextArea, val max: Dp) 
     }
 }
 
-private class ChromeTextAreaNode(var area: ChromeTextArea, var max: Dp) : Modifier.Node(), LayoutModifierNode, ParentDataModifierNode {
+private class ChromeTextAreaNode(var area: ChromeTextArea, var max: Dp) :
+    Modifier.Node(), LayoutModifierNode, ParentDataModifierNode, PointerInputModifierNode {
     override fun Density.modifyParentData(parentData: Any?): Any = area.exact
+
+    // Watched, not taken: the field's own gestures still get every event.
+    override fun onPointerEvent(pointerEvent: PointerEvent, pass: PointerEventPass, bounds: IntSize) {
+        if (pass != PointerEventPass.Initial) return
+        when (pointerEvent.type) {
+            PointerEventType.Press -> area.pointerDown = true
+            PointerEventType.Release -> if (pointerEvent.changes.none { it.pressed }) {
+                area.pointerDown = false
+                area.pointerUp = pointerEvent.changes.maxOf { it.uptimeMillis }
+            }
+        }
+    }
+
+    override fun onCancelPointerInput() {
+        area.pointerDown = false
+    }
 
     override fun onAttach() = claim()
 
