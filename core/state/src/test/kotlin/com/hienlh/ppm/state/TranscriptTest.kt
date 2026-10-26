@@ -8,6 +8,7 @@ import com.hienlh.ppm.protocol.HistoryMessage
 import com.hienlh.ppm.protocol.HistoryPage
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionPhase
+import com.hienlh.ppm.protocol.TabOpenRequest
 import com.hienlh.ppm.protocol.ToolOutcome
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.get
@@ -466,13 +467,11 @@ class TranscriptTest {
     }
 
     @Test
-    fun `tab_open is answered at once`() {
+    fun `tab_open goes to the controller to open, and changes nothing on screen`() {
         val chat = ChatTranscript()
         val effects = chat.handle(frame("""{"type":"tab_open","requestId":"q1","tool":"open_file","filePath":"a.ts","projectName":"p"}"""))
-        assertEquals(
-            listOf(ChatEffect.Send(ChatClientMessage.TabOpenResult("q1", opened = false, error = ChatTranscript.TAB_OPEN_UNSUPPORTED))),
-            effects,
-        )
+        assertEquals(listOf(ChatEffect.OpenTab(TabOpenRequest.File("q1", "open_file", "a.ts", "p"))), effects)
+        assertEquals(emptyList<ChatItem>(), chat.items)
     }
 
     @Test

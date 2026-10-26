@@ -1,11 +1,13 @@
 package com.hienlh.ppm.state.workspace
 
 import com.hienlh.ppm.client.FsStat
+import com.hienlh.ppm.protocol.TabOpenRequest
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.string
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -137,8 +139,9 @@ class AiTabsTest {
 
     private var ids = 0
     private var mobile = false
+    private var now = 5_000L
 
-    private fun store() = WorkspaceStore(MemoryStorage(), isMobile = { mobile }, now = { 5_000L }, randomId = { "r${++ids}" }).apply {
+    private fun store() = WorkspaceStore(MemoryStorage(), isMobile = { mobile }, now = { now }, randomId = { "r${++ids}" }).apply {
         switchProject("app")
         openTab(NewTab("chat", "Chat", "app", meta("""{"providerId":"claude","sessionId":"s-1"}""")))
     }
@@ -245,5 +248,86 @@ class AiTabsTest {
         assertEquals("src/a.ts", relativeProjectPath("C:\\p", "C:\\p\\src\\a.ts"))
         assertEquals("", relativeProjectPath("/a/b/", "/a/b"))
         assertNull(relativeProjectPath("/a/b", "/a/bc/d"))
+    }
+
+    // `open_url` (open-ai-tab.ts `openAiUrlTab`, web-preview-url.test.ts)
+
+    private fun url(requestId: String = "q1", url: String = "https://devbox.ts.net:5173/", via: String = "tailscale") =
+        TabOpenRequest.Url(requestId, url, 5173, via)
+
+    @Test
+    fun `a web server opens in a web-preview tab beside the chat, named as the host knows it`() {
+        val store = store()
+        val id = store.openAiUrlTab(url(), session, serverHost = "10.0.2.2")
+        val s = store.state.value
+        assertEquals(2, s.gridPanelIds.size)
+        val tab = s.panels.getValue(s.gridPanelIds[1]).tab(id)!!
+        assertEquals("web-preview" to "localhost:5173", tab.type to tab.title)
+        assertNull(tab.projectId)
+        assertEquals(meta("""{"url":"https://devbox.ts.net:5173/","port":5173,"via":"tailscale","aiOpenAt":5000}"""), tab.metadata.withoutStamp())
+        assertEquals("chat", s.panels.getValue(s.gridPanelIds[0]).activeTab?.type)
+    }
+
+    @Test
+    fun `the same address again reuses its tab, and new metadata reloads it from the start`() {
+        val store = store()
+        val first = store.openAiUrlTab(url(), session, serverHost = "10.0.2.2")
+        store.updateTab(first) { it.copy(metadata = it.metadata.merged(mapOf("currentUrl" to JsonPrimitive("https://devbox.ts.net:5173/admin")))) }
+        now = 6_000L
+        assertEquals(first, store.openAiUrlTab(url(requestId = "q2"), session, serverHost = "10.0.2.2"))
+        val s = store.state.value
+        assertEquals(2, s.gridPanelIds.size)
+        // What the page had navigated to is dropped with the rest.
+        assertEquals(
+            meta("""{"url":"https://devbox.ts.net:5173/","port":5173,"via":"tailscale","aiOpenAt":6000}"""),
+            s.panelOf(first)!!.tab(first)!!.metadata.withoutStamp(),
+        )
+        // Another address is another tab.
+        assertTrue(store.openAiUrlTab(url(url = "https://devbox.ts.net:3000/"), session, serverHost = "10.0.2.2") != first)
+    }
+
+    @Test
+    fun `the host's own localhost opens only on the host`() {
+        val local = url(url = "http://localhost:5173/", via = "local")
+        try {
+            store().openAiUrlTab(local, session, serverHost = "10.0.2.2")
+            fail()
+        } catch (e: IllegalStateException) {
+            assertEquals("this device is not the machine PPM runs on, so it cannot reach localhost:5173", e.message)
+        }
+        val onHost = store()
+        val id = onHost.openAiUrlTab(local, session, serverHost = "127.0.0.1")
+        assertEquals("web-preview", onHost.state.value.panelOf(id)!!.activeTab?.type)
+        for (host in listOf("localhost", "127.0.0.1", "127.1.2.3", "::1", "[::1]")) assertTrue(host, browserOnHost(host))
+        for (host in listOf("10.0.2.2", "192.168.1.20", "127.0.0", "localhost.example", "ppm.ts.net")) assertFalse(host, browserOnHost(host))
+    }
+
+    /** The store stamps every tab it shows. */
+    private fun JsonObject.withoutStamp() = JsonObject(filterKeys { it != "lastActiveAt" })
+
+    private val app = "https://ppm.tail1234.ts.net".toHttpUrl()
+
+    @Test
+    fun `a preview loads a forward's http(s) address, never PPM's own origin or another scheme`() {
+        assertEquals("https://devbox.tail1234.ts.net:5173/", safePreviewUrl("https://devbox.tail1234.ts.net:5173/", app))
+        assertEquals("https://able-river.trycloudflare.com/", safePreviewUrl("https://able-river.trycloudflare.com", app))
+        assertEquals("http://192.168.1.20:5173/", safePreviewUrl("http://192.168.1.20:5173/", app))
+        assertNull(safePreviewUrl("javascript:alert(document.domain)", app))
+        assertNull(safePreviewUrl("https://ppm.tail1234.ts.net/", app))
+        assertNull(safePreviewUrl("https://ppm.tail1234.ts.net/api/settings", app))
+        assertNull(safePreviewUrl("data:text/html,<script>1</script>", app))
+        assertNull(safePreviewUrl("not a url", app))
+        assertNull(safePreviewUrl(null, app))
+        // Another port on PPM's host is another origin.
+        assertEquals("https://ppm.tail1234.ts.net:5173/", safePreviewUrl("https://ppm.tail1234.ts.net:5173/", app))
+    }
+
+    @Test
+    fun `a preview is titled as the host knows the server`() {
+        assertEquals("localhost:5173", previewTitle(5173, "https://devbox.tail1234.ts.net:5173/"))
+        assertEquals("able-river.trycloudflare.com", previewTitle(null, "https://able-river.trycloudflare.com/"))
+        assertEquals("devbox:8443", previewTitle(0, "https://devbox:8443/x"))
+        assertEquals("[::1]:3000", previewTitle(null, "http://[::1]:3000/"))
+        assertEquals("not a url", previewTitle(null, "not a url"))
     }
 }

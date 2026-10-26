@@ -15,6 +15,8 @@ import com.hienlh.ppm.protocol.PromptCacheState
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionPhase
+import com.hienlh.ppm.protocol.TabOpenAnswer
+import com.hienlh.ppm.protocol.TabOpenRequest
 import com.hienlh.ppm.protocol.TaskItem
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.TurnStop
@@ -125,6 +127,13 @@ class ChatController(
 
     val transcript = ChatTranscript().also { it.showStale(stale) }
     val settings = ChatSettings()
+
+    /**
+     * Opens what the AI's tab tools ask this device for (`tab_open`) and says how it went; the app
+     * sets it. Without one every request is refused at once: the AI's tool waits for an answer
+     * either way, so none is ever left unanswered.
+     */
+    var tabOpener: (suspend (TabOpenRequest) -> TabOpenAnswer)? = null
     var providerId: String = providerId
         private set
     var sessionId: String? = session?.id
@@ -446,7 +455,28 @@ class ChatController(
                     loadTeamMessages(effect.name)
                 }
                 is ChatEffect.TeamMessages -> team = team.received(effect.messages)
+                is ChatEffect.OpenTab -> openTab(effect.request)
             }
+        }
+    }
+
+    /**
+     * Opens the tab and answers on this socket once it is open, or checked (`answerTabOpen`). Off the
+     * frame loop: a page check takes seconds, and the frames behind it must not wait.
+     */
+    private fun openTab(request: TabOpenRequest) {
+        fun answer(result: TabOpenAnswer) =
+            transmit(ChatClientMessage.TabOpenResult(request.requestId, result.opened, result.error, result.report))
+        val opener = tabOpener ?: return answer(TabOpenAnswer(opened = false, error = TAB_OPEN_UNSUPPORTED))
+        scope.launch {
+            val result = try {
+                opener(request)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                TabOpenAnswer(opened = false, error = describe(e))
+            }
+            answer(result)
         }
     }
 
@@ -615,6 +645,9 @@ class ChatController(
          * if the OS has not noticed (as on the web).
          */
         const val SILENCE_LIMIT_MS = 45_000L
+
+        const val TAB_OPEN_UNSUPPORTED =
+            "The PPM app on this device cannot open tabs yet. Open this chat in the PPM web app to see it."
 
         internal fun describe(error: Exception): String = error.message ?: error.toString()
     }

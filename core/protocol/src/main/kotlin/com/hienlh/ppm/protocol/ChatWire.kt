@@ -129,8 +129,8 @@ sealed interface ChatFrame {
     data class ApprovalResolved(val requestId: String?, val answers: JsonElement?) : ChatFrame
     data class CompactStatus(val compacting: Boolean) : ChatFrame
 
-    /** The AI asked this device to open a tab (`open_file`, `open_preview`); it waits for an answer. */
-    data class TabOpen(val requestId: String) : ChatFrame
+    /** The AI asked this device to open a tab ([TabOpenRequest]); its tool waits for the answer. */
+    data class TabOpen(val request: TabOpenRequest) : ChatFrame
 
     /**
      * Every background command the session has, whole (`background_registry`): sent when one
@@ -191,7 +191,7 @@ sealed interface ChatFrame {
                     ApprovalResolved(json["requestId"].string, answers?.takeIf { it !is JsonNull })
                 }
                 "compact_status" -> CompactStatus(json["status"].string == "compacting")
-                "tab_open" -> json["requestId"].string?.let(::TabOpen) ?: Event(ChatEvent.from(json), seq)
+                "tab_open" -> TabOpenRequest.from(json)?.let(::TabOpen) ?: Event(ChatEvent.from(json), seq)
                 "background_registry" -> BackgroundRegistry(json["shells"].array.orEmpty().mapNotNull(BackgroundShell::from))
                 "mcp_status" -> McpStatus(names(json["needsAuth"]))
                 else -> Event(ChatEvent.from(json), seq)
@@ -316,13 +316,19 @@ sealed interface ChatClientMessage {
             }
     }
 
-    data class TabOpenResult(val requestId: String, val opened: Boolean, val error: String?) : ChatClientMessage {
+    data class TabOpenResult(
+        val requestId: String,
+        val opened: Boolean,
+        val error: String?,
+        val report: CanvasCheckReport? = null,
+    ) : ChatClientMessage {
         override val json
             get() = buildJsonObject {
                 put("type", "tab_open_result")
                 put("requestId", requestId)
                 put("opened", opened)
                 if (error != null) put("error", error)
+                if (report != null) put("report", report.json)
             }
     }
 }

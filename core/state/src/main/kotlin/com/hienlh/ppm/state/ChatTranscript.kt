@@ -13,6 +13,7 @@ import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.Reported
 import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.protocol.SessionStateFrame
+import com.hienlh.ppm.protocol.TabOpenRequest
 import com.hienlh.ppm.protocol.TeamMessage
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.TurnSnapshot
@@ -33,6 +34,9 @@ sealed interface ChatEffect {
 
     /** Messages a team's inbox just received (`team_inbox`). */
     data class TeamMessages(val messages: List<TeamMessage>) : ChatEffect
+
+    /** The AI's tab tool asked this device for a tab; it waits for the answer, which must always come. */
+    data class OpenTab(val request: TabOpenRequest) : ChatEffect
 }
 
 /** A message the server refused: what was typed, what it quoted, and why ([message]). */
@@ -197,10 +201,7 @@ class ChatTranscript {
                 if (id != null && answers != null) live?.addAnswers(answers, id)
             }
             is ChatFrame.CompactStatus -> compacting = frame.compacting
-            // The AI's tool waits for an answer from this device; never leave it hanging.
-            is ChatFrame.TabOpen -> effects += ChatEffect.Send(
-                ChatClientMessage.TabOpenResult(frame.requestId, opened = false, error = TAB_OPEN_UNSUPPORTED),
-            )
+            is ChatFrame.TabOpen -> effects += ChatEffect.OpenTab(frame.request)
             is ChatFrame.BackgroundRegistry -> backgroundShells = frame.shells
             is ChatFrame.McpStatus -> mcpNeedsAuth = frame.needsAuth
         }
@@ -573,9 +574,4 @@ class ChatTranscript {
     }
 
     private class Unanswered(val content: String, val replyTo: ReplyReference?, val sentAt: Long)
-
-    companion object {
-        const val TAB_OPEN_UNSUPPORTED =
-            "The PPM app on this device cannot open tabs yet. Open this chat in the PPM web app to see it."
-    }
 }

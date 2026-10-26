@@ -160,18 +160,27 @@ fun WorkspaceStore.openAiTab(target: AiTabTarget, sessionId: String): String {
         }
         is AiTabPlacement.Focus -> {
             updateTab(placement.tabId) { it.copy(metadata = it.metadata.merged(view)) }
-            setActiveTab(placement.tabId, placement.panelId)
+            showExistingTab(placement)
             return placement.tabId
         }
         is AiTabPlacement.Move -> {
             updateTab(placement.tabId) { it.copy(metadata = it.metadata.merged(view)) }
-            if (placement.toPanelId != null) {
-                moveTab(placement.tabId, placement.fromPanelId, placement.toPanelId)
-            } else if (!splitPanel(SplitDirection.Right, placement.tabId, placement.fromPanelId)) {
-                setActiveTab(placement.tabId, placement.fromPanelId)
-            }
+            showExistingTab(placement)
             return placement.tabId
         }
+    }
+}
+
+/** Brings a tab that is already open to where the placement wants it: in front, moved or split out. */
+internal fun WorkspaceStore.showExistingTab(placement: AiTabPlacement) {
+    when (placement) {
+        is AiTabPlacement.Focus -> setActiveTab(placement.tabId, placement.panelId)
+        is AiTabPlacement.Move -> if (placement.toPanelId != null) {
+            moveTab(placement.tabId, placement.fromPanelId, placement.toPanelId)
+        } else if (!splitPanel(SplitDirection.Right, placement.tabId, placement.fromPanelId)) {
+            setActiveTab(placement.tabId, placement.fromPanelId)
+        }
+        is AiTabPlacement.Open -> {}
     }
 }
 
