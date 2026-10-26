@@ -1,5 +1,7 @@
 package com.hienlh.ppm.chat
 
+import androidx.compose.ui.platform.UriHandler
+import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.protocol.Compaction
 import com.hienlh.ppm.protocol.SessionPhase
@@ -277,6 +279,26 @@ class ChatViewsTest {
         assertEquals("user$j@host.dev https:$j//${j}x.dev", marked("user@host.dev https://x.dev"))
         // Past ASCII Chrome asks ICU, which breaks after an en dash, and after a hyphen that does not start a word.
         assertEquals("10–${b}20 a‐${b}b ‐b a-${b}ư -ư", marked("10–20 a‐b ‐b a-ư -ư"))
+    }
+
+    @Test
+    fun `a user's text ends its lines where Chrome's do, unless it holds a mark of its own`() {
+        val b = BREAK
+        val j = JOIN
+        val ignore = object : UriHandler {
+            override fun openUri(uri: String) = Unit
+        }
+        fun linked(text: String) = linkedUserText(text, BuiltInThemes.auroraDark.tokens, ignore).text
+        // Chrome may start a line with the slash after a space, which Android will not unless told.
+        assertEquals("Look at$b /${j}home/${j}demo/${j}main.ts", linked("Look at /home/demo/main.ts"))
+        // A URL breaks anywhere, the text around it as Blink breaks it.
+        assertEquals("a/${j}b h${b}t${b}t${b}p${b}s://${b}d${b}o c/${j}d", linked("a/b https://do c/d"))
+        assertEquals("$b$j", userTextMarks("a/b https://do c/d"))
+        // A copy could not tell the user's own marks from the app's: a JOIN leaves only the URL's breaks, a BREAK none.
+        assertEquals("a/b$j h${b}t${b}t${b}p${b}s://${b}d${b}o", linked("a/b$j https://do"))
+        assertEquals("$b", userTextMarks("a/b$j"))
+        assertEquals("a/b$b https://do", linked("a/b$b https://do"))
+        assertEquals("", userTextMarks("a/b$b"))
     }
 
     @Test

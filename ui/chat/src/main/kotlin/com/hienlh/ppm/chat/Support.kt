@@ -57,29 +57,44 @@ internal fun Modifier.maxWidthFraction(fraction: Float): Modifier = layout { mea
 private val userUrl = Regex("https?://[^\\s<>()]+[^\\s<>().,;:!?'\"]")
 
 /**
- * The text with each URL a link, `text-primary underline hover:text-primary/80 break-all`. The
- * URL breaks where Chrome breaks it only when the text holds no [BREAK] of its own, so that
- * [WithoutBreaksOnCopy] can take every one back out of a copy.
+ * The text with each URL a link, `text-primary underline hover:text-primary/80 break-all`, and
+ * the rest ending its lines where Chrome's do ([breakMark]). The marks go only into text that
+ * holds none of its own, so that a copy can take every one back out ([userTextMarks]).
  */
 internal fun linkedUserText(text: String, tokens: ThemeTokens, uriHandler: UriHandler): AnnotatedString {
-    if (!text.contains("://")) return AnnotatedString(text)
     val breakAll = BREAK !in text
+    val marked = breakAll && JOIN !in text
+    if (!text.contains("://")) return AnnotatedString(if (marked) chromeBreaks(text) else text)
     return buildAnnotatedString {
         val styles = TextLinkStyles(
             SpanStyle(color = tokens.accent.color, textDecoration = TextDecoration.Underline),
             hoveredStyle = SpanStyle(color = tokens.accent.opacity(0.8).color),
         )
+        fun plain(from: Int, to: Int) {
+            for (i in from until to) {
+                if (marked) breakMark(text, i)?.let { append(it) }
+                append(text[i])
+            }
+        }
         var last = 0
         for (match in userUrl.findAll(text)) {
-            append(text, last, match.range.first)
+            plain(last, match.range.first)
+            if (marked) breakMark(text, match.range.first)?.let { append(it) }
             val url = match.value
             val start = length
             append(if (breakAll) breakAnywhere(url) else url)
             addLink(LinkAnnotation.Url(url, styles) { runCatching { uriHandler.openUri(url) } }, start, length)
             last = match.range.last + 1
         }
-        append(text, last, text.length)
+        plain(last, text.length)
     }
+}
+
+/** The marks [linkedUserText] puts into [text], for a copy to take out. */
+internal fun userTextMarks(text: String): String = when {
+    BREAK in text -> ""
+    JOIN in text -> "$BREAK"
+    else -> "$BREAK$JOIN"
 }
 
 /** U+200B: a line may end here, and nothing is drawn. */

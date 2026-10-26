@@ -321,8 +321,7 @@ private fun BubbleText(text: String, system: Boolean) {
     } else {
         remember(text, tokens, uriHandler) { linkedUserText(text, tokens, uriHandler) } to emptyMap<String, InlineTextContent>()
     }
-    // `linkedUserText` breaks its URLs only in text with no break of its own.
-    WithoutBreaksOnCopy(enabled = !system && BREAK !in text) {
+    WithoutOnCopy(if (system) "" else userTextMarks(text)) {
         SelectionContainer {
             if (expanded) {
                 BasicText(annotated, Modifier.heightIn(max = expandedLimit).cssScrollY(), style, inlineContent = inline)
@@ -729,11 +728,16 @@ fun ReplyCard(
             }
         }
         val quoteStyle = small.copy(color = tokens.text2.color)
-        SelectionContainer {
-            if (expanded) {
-                BasicText(reply.quote, Modifier.heightIn(max = 240.dp).cssScrollY(), quoteStyle)
-            } else {
-                ClampedText(AnnotatedString(reply.quote), quoteStyle, maxLines = 2, preWrap = true)
+        // Lines end where Chrome's do, in a quote with no mark of its own for a copy to keep.
+        val marked = BREAK !in reply.quote && JOIN !in reply.quote
+        val quote = remember(reply.quote) { if (marked) chromeBreaks(reply.quote) else reply.quote }
+        WithoutOnCopy(if (marked) "$BREAK$JOIN" else "") {
+            SelectionContainer {
+                if (expanded) {
+                    BasicText(quote, Modifier.heightIn(max = 240.dp).cssScrollY(), quoteStyle)
+                } else {
+                    ClampedText(AnnotatedString(quote), quoteStyle, maxLines = 2, preWrap = true)
+                }
             }
         }
         val note = small.copy(color = tokens.text3.color)
