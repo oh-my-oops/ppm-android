@@ -17,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import com.hienlh.ppm.app.update.AppUpdater
 import com.hienlh.ppm.chat.ToolImage
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.GitBranchStatus
@@ -474,6 +475,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** The error toast on screen, if any. */
     var toast by mutableStateOf<ErrorToastMessage?>(null)
 
+    /** Offers this app's newer releases, and installs one the user takes. */
+    private val updater = AppUpdater(context, this)
+
     /** An error toast that is only its title. */
     var actionError: String?
         get() = toast?.title
@@ -846,8 +850,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         private set
 
     /**
-     * The app came to the front: replace the sockets that died or went silent meanwhile, and read
-     * the session list again if it has not been read for a while (the web does both when a page shows).
+     * The app came to the front: replace the sockets that died or went silent meanwhile, read the
+     * session list again if it has not been read for a while (the web does both when a page shows),
+     * and look for a newer release of the app once a day.
      */
     fun becameActive() {
         resumes++
@@ -855,6 +860,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         for (group in groupChats.values) group.chat.wake()
         events?.wake()
         refreshWorkspace()
+        updater.becameActive()
         val readAt = sessionsReadAt ?: return
         if (System.currentTimeMillis() - readAt > 15_000) scope.launch { refreshSessions(quiet = true) }
     }
