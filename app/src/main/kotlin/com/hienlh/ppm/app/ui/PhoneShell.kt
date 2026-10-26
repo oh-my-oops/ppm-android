@@ -639,7 +639,8 @@ private fun TabRow(
                     PpmIcon(ProductIcon.MessageCircle, 16.dp, tokens.warning.color)
                     TypingDots(tokens.warning, Modifier.align(Alignment.Center))
                 } else {
-                    TabIcon(tab, if (active) tokens.accent else tokens.text2)
+                    // The sheet's text is the page's own, 16 px on 24.
+                    TabIcon(tab, if (active) tokens.accent else tokens.text2, line = IconLine(16f, 24f))
                     if (unreadType != null && (!active || unreadManual)) {
                         Box(Modifier.align(Alignment.TopEnd).offset(4.dp, (-4).dp).size(8.dp).clip(CircleShape).background(tokens.notification(unreadType).color))
                     }

@@ -37,8 +37,8 @@ import com.hienlh.ppm.app.ui.DropdownBelowStart
 import com.hienlh.ppm.app.ui.MenuIcon
 import com.hienlh.ppm.app.ui.MenuItem
 import com.hienlh.ppm.app.ui.TabBody
+import com.hienlh.ppm.app.ui.TabIcon
 import com.hienlh.ppm.app.ui.tabTitle
-import com.hienlh.ppm.app.ui.tabTypeIcon
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
@@ -138,7 +138,7 @@ private fun DockHeader(
                                 MenuItem(tabTitle(model, tab), onClick = {
                                     open = false
                                     model.activate(id, DOCK_PANEL_ID)
-                                }, icon = { MenuIcon(tabTypeIcon(tab.type)) }, iconEnd = 0.dp)
+                                }, icon = { TabIcon(tab, tokens.text2, 14.dp) }, iconEnd = 0.dp)
                             }
                         }
                     }
@@ -175,7 +175,7 @@ private fun DockPill(model: AppModel, tab: com.hienlh.ppm.state.workspace.Worksp
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        PpmIcon(tabTypeIcon(tab.type), 12.dp, color.color)
+        TabIcon(tab, color, 12.dp)
         if (showLabel) {
             BasicText(
                 tabTitle(model, tab),

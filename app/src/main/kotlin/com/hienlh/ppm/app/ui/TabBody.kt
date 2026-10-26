@@ -11,13 +11,17 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.design.FileIcon
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.LucideIcon
+import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.ProviderLogo
@@ -29,6 +33,8 @@ import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.state.workspace.safePreviewUrl
 import com.hienlh.ppm.web.WebPreviewTab
 import kotlinx.serialization.json.JsonPrimitive
+import kotlin.math.floor
+import kotlin.math.max
 
 /**
  * What a tab shows. The layout is the web's, so it can hold every kind of tab the web opens;
@@ -94,21 +100,51 @@ fun tabTitle(model: AppModel, tab: WorkspaceTab): String {
     return model.title(chat, chat.controller?.state?.value?.title)
 }
 
-/** `getTabIcon`: a chat by its provider's logo (Claude when it has none yet), anything else by its kind. */
+/** The tab types whose title names a file rather than a kind of panel (`FILE_TAB_TYPES`). */
+private val FILE_TAB_TYPES = setOf("editor", "git-diff", "conflict-editor")
+
+/** The text of the block the web wraps a tab's icon in: [font] px on lines [line] px tall. */
+data class IconLine(val font: Float, val line: Float)
+
+/**
+ * `getTabIcon`: a tab holding a file by that file's icon, a chat by its provider's logo (Claude
+ * when it has none yet), anything else by its kind.
+ *
+ * A file's icon is an inline-block, so where the web wraps the icon in a block of its own (the
+ * tab bar's and the tab switcher's `span.relative`) it sits on the baseline of a line of that
+ * block's text, [line], and the wrapper reaches as far under it as that text does: in the tab
+ * bar's 12/16 at 2x, 2.25 px above where a glyph, which is a block there, is centred.
+ */
 @Composable
-fun TabIcon(tab: WorkspaceTab, tint: Rgba) {
+fun TabIcon(tab: WorkspaceTab, tint: Rgba, size: Dp = 16.dp, line: IconLine? = null) {
+    if (tab.type in FILE_TAB_TYPES) {
+        val path = tab.metaString("filePath")?.takeIf { it.isNotEmpty() } ?: tab.title
+        if (path.isNotEmpty()) {
+            FileIcon(path, if (line == null) Modifier else Modifier.onLine(line, size), size = size)
+            return
+        }
+    }
     val provider = tab.metaString("providerId") ?: "claude"
     if (tab.type == "chat" && ProviderLogos.has(provider)) {
-        ProviderLogo(provider, 16.dp, tint.color)
+        ProviderLogo(provider, size, tint.color)
     } else {
-        PpmIcon(tabTypeIcon(tab.type), 16.dp, tint.color)
+        PpmIcon(tabTypeIcon(tab.type), size, tint.color)
     }
 }
 
-/**
- * `TAB_TYPE_ICONS`, product icons and the two the web keeps on lucide. A file tab is drawn with
- * its file's icon on the web; until this app has those, with the type's.
- */
+/** Room above and below an inline-block [size] tall on the baseline of a line of [line]'s text. */
+@Composable
+private fun Modifier.onLine(line: IconLine, size: Dp): Modifier {
+    val density = LocalDensity.current.density
+    val font = line.font * density
+    val height = line.line * density
+    val (up, down) = PpmFonts.chromeAscentDescent(font, PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT)
+    val strutAbove = (up + floor((height - up - down) / 2)) / density
+    val below = PpmFonts.chromeBelowBaseline(font, height, PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT) / density
+    return padding(top = (max(strutAbove, size.value) - size.value).dp, bottom = below.dp)
+}
+
+/** `TAB_TYPE_ICONS`, product icons and the two the web keeps on lucide. */
 fun tabTypeIcon(type: String): ImageVector = when (type) {
     "terminal" -> ProductIcon.Terminal.vector
     "chat" -> ProductIcon.MessageSquare.vector

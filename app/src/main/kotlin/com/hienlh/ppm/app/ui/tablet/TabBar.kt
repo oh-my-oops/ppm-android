@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.ContextMenuPopup
+import com.hienlh.ppm.app.ui.IconLine
 import com.hienlh.ppm.app.ui.MenuIcon
 import com.hienlh.ppm.app.ui.MenuItem
 import com.hienlh.ppm.app.ui.MenuSeparator
@@ -404,7 +405,7 @@ private fun TabChip(
                         PpmIcon(ProductIcon.MessageCircle, 16.dp, tokens.warning.color)
                         TypingDots(tokens.warning, Modifier.align(Alignment.Center))
                     } else {
-                        TabIcon(tab, color)
+                        TabIcon(tab, color, line = IconLine(12f, 16f))
                         if (unread != null && (!active || unread.manual)) {
                             Box(Modifier.align(Alignment.TopEnd).offset(4.dp, (-4).dp).size(8.dp).clip(CircleShape).background(tokens.notification(unread.type).color))
                         }
