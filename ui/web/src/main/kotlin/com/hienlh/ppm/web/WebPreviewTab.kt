@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.view.ViewGroup
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -240,6 +241,8 @@ private fun PreviewFrame(src: String, onNavigate: (String) -> Unit, onCrash: () 
     AndroidView(
         factory = { context ->
             WebView(context).apply {
+                // A wrap-content WebView lays its page out in a viewport 0 px high, so `height: 100%` is nothing.
+                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 setBackgroundColor(android.graphics.Color.WHITE)
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true

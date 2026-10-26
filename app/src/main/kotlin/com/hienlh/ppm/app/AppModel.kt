@@ -69,6 +69,8 @@ import com.hienlh.ppm.protocol.SessionTag
 import com.hienlh.ppm.protocol.SessionUnread
 import com.hienlh.ppm.protocol.SlashItem
 import com.hienlh.ppm.protocol.SlashTrigger
+import com.hienlh.ppm.protocol.TabOpenAnswer
+import com.hienlh.ppm.protocol.TabOpenRequest
 import com.hienlh.ppm.protocol.ThemeSelection
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.double
@@ -116,6 +118,9 @@ import com.hienlh.ppm.state.windows.MAX_WINDOWS
 import com.hienlh.ppm.state.windows.WindowKind
 import com.hienlh.ppm.state.windows.WindowStore
 import com.hienlh.ppm.state.windows.WindowsState
+import com.hienlh.ppm.state.preview.PreviewLoads
+import com.hienlh.ppm.state.preview.PreviewTicket
+import com.hienlh.ppm.state.preview.answerTabOpen
 import com.hienlh.ppm.state.workspace.DOCK_PANEL_ID
 import com.hienlh.ppm.state.workspace.FileNavigation
 import com.hienlh.ppm.state.workspace.NavEntry
@@ -129,6 +134,7 @@ import com.hienlh.ppm.state.workspace.WorkspaceState
 import com.hienlh.ppm.state.workspace.WorkspaceStore
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.state.workspace.openAiTab
+import com.hienlh.ppm.state.workspace.openAiUrlTab
 import com.hienlh.ppm.state.workspace.resolveFileNavigation
 import com.hienlh.ppm.state.workspace.resolveToolCallTarget
 import com.hienlh.ppm.state.workspace.buildMetadataFromUrl
@@ -140,6 +146,7 @@ import com.hienlh.ppm.state.workspace.tabIdFromUrl
 import com.hienlh.ppm.state.workspace.tabSessionId
 import com.hienlh.ppm.state.workspace.workspaceRemote
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -156,6 +163,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -448,6 +456,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         set(value) {
             toast = value?.let(::ErrorToastMessage)
         }
+
+    /** The HTML previews on screen, which the AI's `open_preview` asks how its page rendered. */
+    val previews = PreviewLoads()
 
     /** The session whose Delete was chosen, until the user confirms. */
     var confirmDeleteSession by mutableStateOf<SessionInfo?>(null)
@@ -1153,6 +1164,54 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     }
 
     /**
+     * The server's `tab_open` on [chat]'s socket (`answerTabOpen`): the tab the AI asked for,
+     * opened beside the chat in the chat's project, and for a page it made, how that page rendered.
+     */
+    private suspend fun answerAiTabOpen(chat: ChatTab, request: TabOpenRequest): TabOpenAnswer {
+        val api = api ?: return TabOpenAnswer(opened = false, error = "the PPM app is not connected")
+        val sessionId = chat.controller?.sessionId ?: chat.session?.id
+            ?: return TabOpenAnswer(opened = false, error = "the chat has no session")
+        return answerTabOpen(
+            request,
+            previews,
+            openFile = { target ->
+                inChatProject(chat.project) { store ->
+                    val tabId = store.openAiTab(target, sessionId)
+                    val tab = store.state.value.panelOf(tabId)?.tab(tabId)
+                    // The key the tab's preview loads under, as its metadata names the file.
+                    val key = if (tab == null) {
+                        PreviewLoads.key(target.projectName, target.filePath)
+                    } else {
+                        PreviewLoads.key(tab.metaString("projectName"), tab.metaString("filePath") ?: target.filePath)
+                    }
+                    PreviewTicket(key, previews.latest(key))
+                }
+            },
+            openUrl = { url -> inChatProject(chat.project) { store -> store.openAiUrlTab(url, sessionId, api.baseUrl.host) } },
+            frame = { if (wide) "Desktop" else "Phone" },
+        )
+    }
+
+    /**
+     * Runs [open] on [project]'s tabs once they are shown, bringing that project up first, as a
+     * tab the AI opens lands in its chat's workspace (`showChatWorkspace`). Throws what [open]
+     * throws, or when the project never comes up — another one was chosen meanwhile.
+     */
+    private suspend fun <T> inChatProject(project: String, open: (WorkspaceStore) -> T): T {
+        val outcome = CompletableDeferred<Result<T>>()
+        scope.launch { openProject(project) { store -> outcome.complete(runCatching { open(store) }) } }
+        val result = withTimeoutOrNull(CHAT_PROJECT_WAIT_MS) { outcome.await() }
+            ?: throw IllegalStateException("PPM could not show the chat's project")
+        return result.getOrThrow()
+    }
+
+    /** A web-preview tab's page moved to [url] on its own origin: the tab reopens there (`currentUrl`). */
+    internal fun keepPreviewUrl(tabId: String, url: String) {
+        if (tabOf(tabId)?.metaString("currentUrl") == url) return
+        patchTabMetadata(tabId, "currentUrl" to JsonPrimitive(url))
+    }
+
+    /**
      * A file a chat message names in [project], by a link or an inline `path:line`
      * (`useMarkdownFileNavigation`): an editor tab at the lines named, a folder in an explorer, and
      * anything the host cannot open searched for in the palette.
@@ -1614,6 +1673,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                 chat.firstSend = { message -> newChats.sendFirst(chat, message) }
                 chat.editSend = { message -> edits.send(chat, message) }
                 chat.prewarmTouch = { newChats.touchPrewarm(chat) }
+                chat.tabOpener = { request -> answerAiTabOpen(chat, request) }
                 chat.modePicked = { mode -> patchTabMetadata(id, "permissionMode" to JsonPrimitive(mode.value), "permissionModeSource" to JsonPrimitive("user")) }
                 chat.changesListed = { sessionId, list ->
                     for (review in reviews.values) if (review.sessionId == sessionId && review.project == project) review.takeLive(list)
@@ -2524,6 +2584,9 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     /** Sends an edited message, which goes on in a new version of this chat (set by the model). */
     var editSend: ((EditMessage) -> Unit)? = null
 
+    /** Opens the tabs the AI asks for on this chat's socket (`tab_open`), and says how that went. */
+    var tabOpener: (suspend (TabOpenRequest) -> TabOpenAnswer)? = null
+
     /** The edited message waiting for its version's socket (`pendingSendRef`), and the work that waits. */
     internal var pendingEdit: PendingEdit? = null
     internal var editJob: Job? = null
@@ -3061,7 +3124,10 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
             controller = null
             return
         }
-        val controller = ChatController(from.api, project, next, from.scope, providerId = providerId, stale = stale).also { it.start() }
+        val controller = ChatController(from.api, project, next, from.scope, providerId = providerId, stale = stale).also {
+            it.tabOpener = tabOpener
+            it.start()
+        }
         this.controller = controller
         turnsJob = from.turns?.let { publishTurns(controller, it, from.scope) }
         watchChanges()
@@ -3106,7 +3172,10 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         startedWith = Started(api, scope, draftStore, turns)
         historyList = HistoryList(api, project, scope)
         welcomeList = HistoryList(api, project, scope)
-        val controller = ChatController(api, project, session, scope, providerId = providerId).also { it.start() }
+        val controller = ChatController(api, project, session, scope, providerId = providerId).also {
+            it.tabOpener = tabOpener
+            it.start()
+        }
         this.controller = controller
         turnsJob = turns?.let { publishTurns(controller, it, scope) }
         changesApi = api
@@ -3157,6 +3226,9 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
 
 /** How long Reply may wait for a tab's draft (`GATE_RELEASE_MS`). */
 private const val DRAFT_GATE_MILLIS = 3_000L
+
+/** How long a `tab_open` waits for its chat's project to come up before it says it could not. */
+private const val CHAT_PROJECT_WAIT_MS = 15_000L
 
 /**
  * What `toast.error(title, { description, action })` shows: a title, a line under it, and one

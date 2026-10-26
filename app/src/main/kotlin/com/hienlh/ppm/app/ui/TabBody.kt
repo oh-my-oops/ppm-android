@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.LucideIcon
 import com.hienlh.ppm.design.PpmIcon
@@ -25,6 +26,9 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.vector
 import com.hienlh.ppm.state.workspace.WorkspaceTab
+import com.hienlh.ppm.state.workspace.safePreviewUrl
+import com.hienlh.ppm.web.WebPreviewTab
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * What a tab shows. The layout is the web's, so it can hold every kind of tab the web opens;
@@ -37,12 +41,32 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
         "settings" -> SettingsTab(model)
         "chat" -> model.chat(tab.id)?.let { chat -> key(chat) { ChatPane(model, chat) } }
         "session-review" -> SessionReviewBody(model, tab)
-        else -> TabPlaceholder(tabTypeIcon(tab.type), tab.title, "This tab is not in the Android app yet.")
+        "web-preview" -> WebPreviewBody(model, tab)
+        else -> if (isHtmlEditorTab(tab)) {
+            HtmlEditorBody(model, tab)
+        } else {
+            TabPlaceholder(tabTypeIcon(tab.type), tab.title, "This tab is not in the Android app yet.")
+        }
     }
 }
 
+/** A web server on the host in a tab (`WebPreviewTab`), the address it moves to kept in the tab as `currentUrl`. */
 @Composable
-private fun TabPlaceholder(icon: ImageVector, title: String, detail: String) {
+private fun WebPreviewBody(model: AppModel, tab: WorkspaceTab) {
+    val app = model.api?.baseUrl
+    WebPreviewTab(
+        requestedUrl = safePreviewUrl(tab.metaString("url"), app),
+        savedUrl = safePreviewUrl(tab.metaString("currentUrl"), app),
+        via = tab.metaString("via"),
+        aiOpenAt = (tab.metadata["aiOpenAt"] as? JsonPrimitive)?.content.orEmpty(),
+        appUrl = app,
+        onNavigate = { url -> model.keepPreviewUrl(tab.id, url) },
+        onCopyFailed = { model.toast = ErrorToastMessage("Failed to copy URL") },
+    )
+}
+
+@Composable
+internal fun TabPlaceholder(icon: ImageVector, title: String, detail: String) {
     val tokens = LocalPpmTokens.current
     Column(
         Modifier.fillMaxSize().padding(24.dp),

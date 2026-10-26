@@ -2,6 +2,7 @@ package com.hienlh.ppm.web
 
 import android.annotation.SuppressLint
 import android.graphics.Color
+import android.view.ViewGroup
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -65,6 +66,8 @@ fun HtmlSurface(
     AndroidView(
         factory = { context ->
             WebView(context).apply {
+                // A wrap-content WebView lays its page out in a viewport 0 px high, so `height: 100%` is nothing.
+                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 setBackgroundColor(Color.WHITE)
                 settings.javaScriptEnabled = true
                 // The sandboxed page has an opaque origin, where storage throws as it does in Chrome.
