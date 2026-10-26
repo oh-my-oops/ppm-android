@@ -111,10 +111,12 @@ fun ChatMessageView(
     replies: ReplyTargets = ReplyTargets.None,
     /** Reply on a user's message; an answer's is in [actions]. */
     onReply: (() -> Unit)? = null,
+    /** Edit, Fork and the versions on a user's message. */
+    edits: UserMessageEdits? = null,
     onDismiss: () -> Unit = {},
 ) {
     when (item.role) {
-        ChatItem.Role.USER -> UserBubble(item.text, item.timestamp, replies, modifier, onReply)
+        ChatItem.Role.USER -> UserBubble(item.text, item.timestamp, replies, modifier, onReply, edits)
         ChatItem.Role.ASSISTANT -> CompositionLocalProvider(LocalMarkdownImageScope provides item.id) {
             AssistantBlocks(item.blocks, live = false, actions = actions, modifier = modifier, usage = item.usage)
         }
@@ -125,9 +127,10 @@ fun ChatMessageView(
 // Action bar
 
 /**
- * Time, Copy and Reply under a message (`MessageActionBar`), then [extra]: `flex-wrap gap-0.5`, so
- * what does not fit goes to a line of its own. Reply is a 44 px target on a phone, which makes its
- * line that tall. Edit and Fork are not in this app yet. The time's `title` is the full date.
+ * Time, Copy and Reply under a message (`MessageActionBar`), then [extra] (a user message's Edit
+ * and Fork, an answer's change pill): `flex-wrap gap-0.5`, so what does not fit goes to a line of
+ * its own. Reply is a 44 px target on a phone, which makes its line that tall. The time's `title`
+ * is the full date.
  */
 @Composable
 internal fun MessageActionBar(timestamp: Instant?, copyText: String, modifier: Modifier = Modifier, onReply: (() -> Unit)? = null, extra: @Composable () -> Unit = {}) {

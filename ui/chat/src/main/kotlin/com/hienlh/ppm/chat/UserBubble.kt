@@ -41,11 +41,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.ContentScale
@@ -62,6 +67,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.ClampedText
 import com.hienlh.ppm.design.FontKind
@@ -86,6 +92,7 @@ import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ChatReply
 import com.hienlh.ppm.protocol.ParsedUserMessage
 import com.hienlh.ppm.protocol.ReplyReference
+import com.hienlh.ppm.protocol.VersionGroup
 import java.time.Instant
 
 /**
@@ -141,18 +148,42 @@ internal fun isImagePath(path: String): Boolean {
 private fun fileName(path: String): String = path.split('/', '\\').last()
 
 /**
+ * Edit, Fork and the versions on a user's message (`onEdit`, `onFork`, `isEditing`,
+ * `versionGroup`, `onNavigateVersion`, `versionNavDisabled`). Edit and Fork are null while a turn
+ * runs, which leaves them out, as the web does; [onSwitchVersion] is null where the chat has no
+ * versions to go to.
+ */
+class UserMessageEdits(
+    val onEdit: (() -> Unit)?,
+    val onFork: (() -> Unit)?,
+    /** This is the message the next send replaces. */
+    val editing: Boolean,
+    /** The versions of this message, when it has any. */
+    val versions: VersionGroup?,
+    val onSwitchVersion: ((String) -> Unit)?,
+    val versionsDisabled: Boolean,
+)
+
+/**
  * The user's message (`message-user-bubble.tsx`): what the composer and the runtime wrapped
  * around it taken apart into a reply card, badges and chips, then the text, two lines until
- * "Show more". What the runtime put there on its own (a task's result, a command's caveat) is
- * drawn faint and full width, with no action bar.
+ * "Show more", and its versions when it was edited. What the runtime put there on its own (a
+ * task's result, a command's caveat) is drawn faint and full width, with no action bar.
  */
 @Composable
-internal fun UserBubble(content: String, timestamp: Instant?, replies: ReplyTargets, modifier: Modifier = Modifier, onReply: (() -> Unit)? = null) {
+internal fun UserBubble(
+    content: String,
+    timestamp: Instant?,
+    replies: ReplyTargets,
+    modifier: Modifier = Modifier,
+    onReply: (() -> Unit)? = null,
+    edits: UserMessageEdits? = null,
+) {
     val tokens = LocalPpmTokens.current
     val parsed = remember(content) { ParsedUserMessage.parse(content) }
     val system = parsed.isSystemContext
     val rad = tokens.rad.dp
-    val shape = if (system) RoundedCornerShape(12.dp) else RoundedCornerShape(topStart = rad, topEnd = rad, bottomEnd = 4.dp, bottomStart = rad)
+    val shape = bubbleShape(system, rad)
     Column(
         modifier.fillMaxWidth(),
         horizontalAlignment = if (system) Alignment.Start else Alignment.End,
@@ -161,8 +192,12 @@ internal fun UserBubble(content: String, timestamp: Instant?, replies: ReplyTarg
         // As wide as what it holds, as a box in a flex column is, up to 80%.
         var bubble = if (system) Modifier.fillMaxWidth() else Modifier.maxWidthFraction(0.8f).width(IntrinsicSize.Max)
         for (shadow in shadowSm) bubble = bubble.ppmShadow(shadow, shape)
+        // `ring-2 ring-primary/60 border-primary/40` on the message an edit replaces, faded in and
+        // out as `transition-all` fades them: the ring grows from nothing, over the shadow.
+        val editing = colorsFade(edits?.editing == true)
+        if (editing > 0f) bubble = bubble.ring(2.dp * editing, tokens.accent.opacity(0.6 * editing).color, shape) { bubbleShape(system, rad, it) }
         val fill = if (system) tokens.panel.opacity(0.4) else tokens.accentWash
-        val stroke = if (system) tokens.border.opacity(0.4) else tokens.accentWashBorder
+        val stroke = (if (system) tokens.border.opacity(0.4) else tokens.accentWashBorder).let { tokens.accent.opacity(0.4).mix(it, editing.toDouble()) }
         Column(bubble.background(fill.color, shape).cssBorder(stroke.color, shape).padding(horizontal = 12.dp, vertical = 8.dp)) {
             parsed.replyTo?.let { ReplyCard(it, replies.jump(it), Modifier.padding(bottom = 8.dp)) }
             if (parsed.tags.isNotEmpty()) {
@@ -197,8 +232,75 @@ internal fun UserBubble(content: String, timestamp: Instant?, replies: ReplyTarg
                 }
             }
             if (parsed.text.isNotEmpty()) BubbleText(parsed.text, system)
+            val versions = edits?.versions
+            val switch = edits?.onSwitchVersion
+            if (!system && versions != null && switch != null) VersionSwitcher(versions, edits.versionsDisabled, switch)
         }
-        if (!system) MessageActionBar(timestamp, remember(content) { ChatReply.decode(content).content }, onReply = onReply)
+        if (!system) {
+            MessageActionBar(timestamp, remember(content) { ChatReply.decode(content).content }, onReply = onReply) {
+                edits?.onEdit?.let { ActionButton(ProductIcon.Pencil, "Edit", "Edit this message (continue in the same tab)", onClick = it) }
+                edits?.onFork?.let { ActionButton(ProductIcon.RotateCcw, "Fork", "Retry from this message (fork into a new tab)", onClick = it) }
+            }
+        }
+    }
+}
+
+/** The bubble's corners, or a context message's, each [grow] wider: a spread shadow's, as CSS rounds one. */
+private fun bubbleShape(system: Boolean, rad: Dp, grow: Dp = 0.dp): Shape =
+    if (system) RoundedCornerShape(12.dp + grow) else RoundedCornerShape(topStart = rad + grow, topEnd = rad + grow, bottomEnd = 4.dp + grow, bottomStart = rad + grow)
+
+/**
+ * Tailwind's `ring-[width]`: a band [width] wide around the border edge (a spread shadow with no
+ * blur), drawn over the shadows before it and only outside the box, its corners [grown] by the
+ * band as CSS grows a spread shadow's radii.
+ */
+private fun Modifier.ring(width: Dp, color: Color, shape: Shape, grown: (Dp) -> Shape): Modifier = drawBehind {
+    val spread = width.toPx()
+    val outer = Path().apply {
+        addOutline(grown(width).createOutline(Size(size.width + 2 * spread, size.height + 2 * spread), layoutDirection, this@drawBehind))
+        translate(Offset(-spread, -spread))
+    }
+    val inner = Path().apply { addOutline(shape.createOutline(size, layoutDirection, this@drawBehind)) }
+    clipPath(inner, ClipOp.Difference) { drawPath(outer, color) }
+}
+
+/**
+ * `‹ n/m ›` under a message that has edited versions (`VersionSwitcher`): `mt-1 gap-1 text-xs
+ * text-text-subtle tabular-nums`, each chevron a `p-0.5` button. One with no version that way, or
+ * any while a turn runs, is at 30%. Nothing for a message with one version.
+ */
+@Composable
+private fun VersionSwitcher(group: VersionGroup, disabled: Boolean, onSwitch: (String) -> Unit) {
+    if (group.ids.size < 2) return
+    val tokens = LocalPpmTokens.current
+    val index = group.currentIndex
+    Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        VersionStep(ProductIcon.ChevronLeft, "Previous version", enabled = !disabled && index > 0) { group.ids.getOrNull(index - 1)?.let(onSwitch) }
+        BasicText("${index + 1}/${group.ids.size}", style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color, fontFeatureSettings = "tnum"))
+        VersionStep(ProductIcon.ChevronRight, "Next version", enabled = !disabled && index < group.ids.lastIndex) { group.ids.getOrNull(index + 1)?.let(onSwitch) }
+    }
+}
+
+/**
+ * One of the switcher's chevrons: `rounded p-0.5 hover:text-text-primary disabled:opacity-30`,
+ * lit at once (no `transition-colors`), while pressed too, and under a mouse even when disabled,
+ * as CSS's `:hover` still matches it. Tailwind 4 gives a button the arrow, enabled or not.
+ */
+@Composable
+private fun VersionStep(icon: ProductIcon, label: String, enabled: Boolean, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val hover = rememberHover(instant = true)
+    val pressed by hover.source.collectIsPressedAsState()
+    val color = (if (hover.lit > 0f || (pressed && enabled)) tokens.text else tokens.text3).color
+    Box(
+        Modifier
+            .alpha(if (enabled) 1f else 0.3f)
+            .clip(RoundedCornerShape(4.dp))
+            .semantics { contentDescription = label }
+            .ppmClickable(enabled = enabled, pressedColor = Color.Transparent, source = hover.source, hoverWhileDisabled = true, onClick = onClick)
+            .padding(2.dp),
+    ) {
+        PpmIcon(icon, 14.dp, color)
     }
 }
 

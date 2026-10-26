@@ -16,6 +16,7 @@ import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -78,6 +79,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.layoutId
@@ -110,6 +112,7 @@ import com.hienlh.ppm.chat.AgentSessionOpener
 import com.hienlh.ppm.chat.AsyncQuestions
 import com.hienlh.ppm.chat.BackgroundCommandBar
 import com.hienlh.ppm.chat.CONTINUE_AFTER_STOP
+import com.hienlh.ppm.chat.ChatEdits
 import com.hienlh.ppm.chat.ChatImages
 import com.hienlh.ppm.chat.ChatReconnectBanner
 import com.hienlh.ppm.chat.ChatTabs
@@ -147,6 +150,7 @@ import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.client.chatUsage
+import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.AgentSource
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.TeamMemberActivity
@@ -294,8 +298,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
     BoxWithConstraints(modifier.fillMaxSize().dragAndDropTarget(shouldStartDragAndDrop = { true }, target = fileDrop)) {
         // The chat's own `@container`: under 420 px the chips drop their words.
         val narrow = maxWidth <= 420.dp
-        // `backdrop-blur-sm` under the drop overlay: CSS's blur(8px) is Android's at a radius of 13.
-        Column(Modifier.fillMaxSize().then(if (fileDrop.showing) Modifier.blur(13.dp) else Modifier)) {
+        // `backdrop-blur-sm` under the drop overlay and the edit's: CSS's blur(8px) is Android's at a radius of 13.
+        Column(Modifier.fillMaxSize().then(if (fileDrop.showing || tab.editForking) Modifier.blur(13.dp) else Modifier)) {
             if (tab.providerPending) NewChatGateLine(model, tab)
             BackgroundCommandBar(state.backgroundShells, onViewOutput = { model.openBackgroundOutput(tab.tabId, it.shellId) }, onStop = { chat.killBackgroundShell(it.shellId) })
             val images = remember(tab.project) {
@@ -343,6 +347,18 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     FirstSendView(preview.content, preview.timestamp, Modifier.weight(1f))
                 } else {
                     val turnChanges = rememberTurnChangesHost(model, tab, state)
+                    // Fork and Edit are left out while a turn runs, and the switchers greyed out.
+                    val running = state.isRunning
+                    val editingId = tab.editFork?.messageId
+                    val edits = remember(tab, running, editingId) {
+                        ChatEdits(
+                            onFork = if (running) null else { item, anchor -> model.edits.fork(tab, item, anchor) },
+                            onEdit = if (running) null else tab::armEdit,
+                            editingId = editingId,
+                            onSwitchVersion = { model.edits.switchVersion(tab, it) },
+                            versionsDisabled = running,
+                        )
+                    }
                     CompositionLocalProvider(LocalTurnChanges provides turnChanges) {
                         ChatTranscriptView(
                             state,
@@ -361,8 +377,10 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                             onClearErrors = chat::clearErrors,
                             jumpRequest = model.chatJump?.takeIf { it.sessionId == state.sessionId },
                             onJumpTaken = model::chatJumpDone,
-                            // Not while the draft, which may carry a reply of its own, is on its way.
-                            onReply = if (tab.draftLoading) null else tab::selectReply,
+                            // Not while the draft, which may carry a reply of its own, is on its way, nor
+                            // while an edit's version is made.
+                            onReply = if (tab.draftLoading || tab.editForking) null else tab::selectReply,
+                            edits = edits,
                         )
                     }
                 }
@@ -457,12 +475,14 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                 }
                 val pickers = rememberComposerPickers(model, tab)
                 ComposerPickerList(model, tab, pickers)
+                if (tab.editFork != null) EditingLine(onCancel = tab::cancelEdit)
                 ChatComposer(model, tab, chat, state, narrow, fileDrop, pickers)
             }
         }
         // A pill, not an overlay: the chat stays readable and usable while it reconnects.
         ChatReconnectBanner(state.connection is ChatController.Connection.Reconnecting, model.resumes, onRetry = chat::reloadChat)
         if (fileDrop.showing) DropFilesOverlay()
+        if (tab.editForking) EditForkingOverlay()
     }
 }
 
@@ -532,6 +552,64 @@ private fun BoxScope.DropFilesOverlay() {
     ) {
         PpmIcon(ProductIcon.Upload, 32.dp, tokens.accent.color)
         BasicText("Drop files to attach", style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.accent.color))
+    }
+}
+
+/**
+ * Over the whole chat while an edit's version is made and connects (`editForking`): `absolute
+ * inset-0 z-50 bg-background/70 backdrop-blur-sm`, "Creating edited version…" at its centre, and
+ * every touch on the chat stopped there. Over the reconnect pill, which is `z-40`.
+ */
+@Composable
+private fun BoxScope.EditForkingOverlay() {
+    val tokens = LocalPpmTokens.current
+    val color = tokens.text2.color
+    Row(
+        Modifier
+            .matchParentSize()
+            .background(tokens.bgSolid.opacity(0.7).color)
+            .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } } },
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PpmIcon(ProductIcon.Loader2, 16.dp, color, spinning = true)
+        BasicText("Creating edited version…", style = ppmText(14f, lineHeight = 20f).copy(color = color))
+    }
+}
+
+/**
+ * Over the message box while an edit is armed (`editFork`): `flex items-center justify-between
+ * gap-2 px-3 py-1.5 text-xs text-muted-foreground border-t border-border bg-muted/40`, and Cancel,
+ * after which the next send is a new message — `rounded px-2 py-1 min-h-[28px] hover:bg-accent
+ * hover:text-accent-foreground transition-colors`, lit while pressed too.
+ */
+@Composable
+private fun EditingLine(onCancel: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val style = ppmText(12f, lineHeight = 16f)
+    Row(
+        Modifier.fillMaxWidth().background(tokens.panel.opacity(0.4).color).line(top = true, tokens.border.color).padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        BasicText("Editing message — your next send replaces it", Modifier.weight(1f), style = style.copy(color = tokens.text2.color))
+        val hover = rememberHover()
+        val pressed by hover.source.collectIsPressedAsState()
+        val lit = if (pressed) 1.0 else hover.lit.toDouble()
+        val color = tokens.text.mix(tokens.text2, lit).color
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .webTitle("Cancel edit (send as a new message instead)")
+                .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, source = hover.source, onClick = onCancel)
+                .heightIn(min = 28.dp)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            PpmIcon(ProductIcon.X, 14.dp, color)
+            BasicText("Cancel", style = style.copy(color = color))
+        }
     }
 }
 

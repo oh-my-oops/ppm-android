@@ -93,11 +93,13 @@ import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionPhase
+import com.hienlh.ppm.protocol.VersionGroup
 import com.hienlh.ppm.state.ChatBlock
 import com.hienlh.ppm.state.ChatJumpRequest
 import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.ChatState
 import com.hienlh.ppm.state.MessageReply
+import com.hienlh.ppm.state.MessageVersions
 import com.hienlh.ppm.state.PromptCacheStatus
 import com.hienlh.ppm.state.SessionTurn
 import com.hienlh.ppm.state.SessionTurns
@@ -112,6 +114,21 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
+
+/**
+ * Fork, Edit and the versions on a chat's user messages (`onFork`, `onEdit`, `editingMsgId`,
+ * `onNavigateVersion`, `versionNavDisabled`). Fork and Edit are handed the message and the one it
+ * continues from, and are null where they are left out.
+ */
+class ChatEdits(
+    val onFork: ((ChatItem, String?) -> Unit)?,
+    val onEdit: ((ChatItem, String?) -> Unit)?,
+    /** The message the next send replaces, ringed. */
+    val editingId: String?,
+    val onSwitchVersion: (String) -> Unit,
+    /** Every switcher greyed out, as while a turn runs. */
+    val versionsDisabled: Boolean,
+)
 
 /**
  * A chat's messages, the turn streaming in, and what it waits on (`MessageList` in
@@ -136,6 +153,8 @@ fun ChatTranscriptView(
     onClearErrors: () -> Unit = {},
     /** A message picked to answer; null leaves Reply out. */
     onReply: ((ReplyReference) -> Unit)? = null,
+    /** Fork, Edit and the versions on the user's messages; null leaves them all out. */
+    edits: ChatEdits? = null,
     /** A place in this chat to show, asked for from outside it (the Review tab's "Show in chat"). */
     jumpRequest: ChatJumpRequest? = null,
     /** [jumpRequest] was shown, or given up on. */
@@ -148,7 +167,7 @@ fun ChatTranscriptView(
                 CenteredNotice("Loading messages...", pulsing = true)
             state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null ->
                 Welcome(welcome)
-            else -> TranscriptList(state, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply, jumpRequest, onJumpTaken)
+            else -> TranscriptList(state, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply, edits, jumpRequest, onJumpTaken)
         }
         state.historyError?.let { error ->
             HistoryErrorBanner(error, onReload, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
@@ -165,11 +184,14 @@ private fun TranscriptList(
     onDismiss: (String) -> Unit,
     onClearErrors: () -> Unit,
     onReply: ((ReplyReference) -> Unit)?,
+    edits: ChatEdits?,
     jumpRequest: ChatJumpRequest?,
     onJumpTaken: (ChatJumpRequest) -> Unit,
 ) {
     val rollups = remember { TurnRollups() }
     val rows = remember(state.items, state.isRunning) { TranscriptRows.of(state.items, state.isRunning, rollups) }
+    // Each user message's number in the session, which names its versions; a row per item.
+    val ordinals = remember(state.items, state.userOrdinalOffset) { MessageVersions.ordinals(state.items, state.userOrdinalOffset) }
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val tokens = LocalPpmTokens.current
@@ -324,9 +346,17 @@ private fun TranscriptList(
                 LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scroll.connection).onGloballyPositioned { anchors.list = it }, state = list) {
                     if (state.hasEarlier) item(key = SENTINEL) { Spacer(Modifier.fillMaxWidth().height(1.dp)) }
                     if (state.loadingEarlier) item(key = SKELETON) { PreCompactSkeleton() }
-                    for (row in rows) {
+                    rows.forEachIndexed { index, row ->
                         item(key = row.item.id, contentType = row.item.role) {
                             val reply = remember(row, state.sessionId, state.providerId, onReply) { replyAction(row, state, onReply) }
+                            val userEdits = if (edits != null && row.item.role == ChatItem.Role.USER) {
+                                val versions = ordinals.getOrNull(index)?.takeIf { it > 0 }?.let { state.versionMap[it] }
+                                val items = state.items
+                                val predecessor = state.historyPredecessorId
+                                remember(row.item, index, edits, versions, items, predecessor) { userMessageEdits(row.item, index, edits, versions, items, predecessor) }
+                            } else {
+                                null
+                            }
                             val place = Modifier.replyFlash(flashing == row.item.id, tokens.accent).padding(start = 16.dp, end = 16.dp, top = 16.dp)
                             val compaction = row.item.compaction
                             val message: @Composable (Modifier) -> Unit = { modifier ->
@@ -336,6 +366,7 @@ private fun TranscriptList(
                                     modifier,
                                     replies,
                                     onReply = reply.takeIf { row.item.role == ChatItem.Role.USER },
+                                    edits = userEdits,
                                 ) { onDismiss(row.item.id) }
                             }
                             // Above the summary: the rule marks where the conversation was cut.
@@ -764,6 +795,22 @@ internal fun Modifier.editAnchor(ref: String?): Modifier {
     val lit by animateFloatAsState(if (anchors.flash == ref) 1f else 0f, tween(200, easing = CubicBezierEasing(0f, 0f, 0.58f, 1f)), label = "flash")
     val accent = LocalPpmTokens.current.accent
     return onGloballyPositioned { anchors.edits[ref] = it }.drawBehind { if (lit > 0f) drawRect(accent.opacity(0.13 * lit).color) }
+}
+
+/**
+ * Edit, Fork and the versions on the user's message at [index] of [items]: both go on from the
+ * message shown above it (`prevMsgId`), or from what is above the loaded window.
+ */
+private fun userMessageEdits(item: ChatItem, index: Int, edits: ChatEdits, versions: VersionGroup?, items: List<ChatItem>, predecessor: String?): UserMessageEdits {
+    fun anchor() = MessageVersions.anchor(items, index, predecessor)
+    return UserMessageEdits(
+        onEdit = edits.onEdit?.let { edit -> { edit(item, anchor()) } },
+        onFork = edits.onFork?.let { fork -> { fork(item, anchor()) } },
+        editing = item.id == edits.editingId,
+        versions = versions,
+        onSwitchVersion = edits.onSwitchVersion,
+        versionsDisabled = edits.versionsDisabled,
+    )
 }
 
 /**
