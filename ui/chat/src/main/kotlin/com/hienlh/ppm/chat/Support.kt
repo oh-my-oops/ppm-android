@@ -1,7 +1,6 @@
 package com.hienlh.ppm.chat
 
 import android.content.ClipData
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -21,11 +20,16 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
+import com.hienlh.ppm.design.CssText
 import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.ThemeTokens
 import kotlinx.coroutines.delay
 import java.time.Instant
+import kotlin.math.roundToInt
 
 /** `formatRelativeDate`, kept current: "just now" becomes "1m ago" without a redraw from outside. */
 @Composable
@@ -37,7 +41,7 @@ fun RelativeTime(date: Instant, style: TextStyle, modifier: Modifier = Modifier)
             delay(30_000)
         }
     }
-    BasicText(PpmFormat.relative(date, now), modifier, style)
+    CssText(PpmFormat.relative(date, now), style, modifier)
 }
 
 /** `basename()` of a path as the web writes it. */
@@ -46,11 +50,45 @@ internal fun basename(path: String): String = path.split('/', '\\').last()
 /** The web's `truncate(str, max)`: a prefix and an ellipsis. */
 internal fun truncate(text: String, max: Int): String = if (text.length > max) text.take(max) + "…" else text
 
-/** `max-w-[80%]`: the content is offered at most [fraction] of the width this is offered. */
-internal fun Modifier.maxWidthFraction(fraction: Float): Modifier = layout { measurable, constraints ->
-    val limit = if (constraints.hasBoundedWidth) (constraints.maxWidth * fraction).toInt() else constraints.maxWidth
-    val placeable = measurable.measure(constraints.copy(minWidth = minOf(constraints.minWidth, limit), maxWidth = limit))
-    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+/**
+ * `max-w-[80%]` on a box that an `items-end` column puts flush with its end: as wide as what it
+ * holds, up to [fraction] of the width it is offered, and starting where Chrome rounds its start.
+ * Chrome keeps the fraction of both widths and snaps the box's left edge; whole pixels floored a
+ * wrapped bubble and took a short one's text to its next pixel, each a pixel off the web's.
+ * [exact] is how wide what it holds is exactly, told the width that measures, or NaN for that.
+ */
+internal fun Modifier.fitWidthAtEnd(fraction: Float, exact: Density.(measured: Int) -> Float): Modifier = layout { measurable, constraints ->
+    val available = constraints.maxWidth
+    val measured = measurable.maxIntrinsicWidth(Constraints.Infinity)
+    val wanted = exact(measured).takeUnless { it.isNaN() } ?: measured.toFloat()
+    // The start rounds half up, so from the end the width rounds half down.
+    val width = (-(-minOf(wanted, available * fraction)).roundToInt()).coerceIn(constraints.minWidth, available)
+    val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+    layout(width, placeable.height) { placeable.place(0, 0) }
+}
+
+/**
+ * How wide [text]'s widest line is in [style], in fractions of a pixel: its lines' own widths,
+ * since Compose rounds intrinsic widths up to whole pixels.
+ */
+@Composable
+internal fun rememberExactTextWidth(text: AnnotatedString, style: TextStyle): Float {
+    val measurer = rememberTextMeasurer()
+    return remember(text, style, measurer) {
+        val laid = measurer.measure(text, style)
+        (0 until laid.lineCount).maxOfOrNull { laid.getLineRight(it) - laid.getLineLeft(it) } ?: 0f
+    }
+}
+
+/**
+ * Text that may lay out a pixel wider than it is offered, for a box sized to the text's exact
+ * width ([fitWidthAtEnd]): Compose wraps a line that needs 420.3 px in 420, where Chrome's box is
+ * the 420.3 the line needs.
+ */
+internal fun Modifier.exactTextSlack(): Modifier = layout { measurable, constraints ->
+    val wider = if (constraints.hasBoundedWidth) constraints.copy(maxWidth = constraints.maxWidth + 1) else constraints
+    val placeable = measurable.measure(wider)
+    layout(minOf(placeable.width, constraints.maxWidth), placeable.height) { placeable.place(0, 0) }
 }
 
 /** `TextWithLinks` in message-user-bubble.tsx: a URL in what the user typed, underlined. */

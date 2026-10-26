@@ -16,7 +16,6 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
@@ -45,7 +44,6 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
@@ -56,7 +54,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.ClampedText
+import com.hienlh.ppm.design.CssRow
 import com.hienlh.ppm.design.CssSides
+import com.hienlh.ppm.design.CssText
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFormat
@@ -67,6 +67,7 @@ import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssScrollY
+import com.hienlh.ppm.design.cssWidth
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -130,27 +131,25 @@ fun ChatMessageView(
  * Time, Copy and Reply under a message (`MessageActionBar`), then [extra] (a user message's Edit
  * and Fork, an answer's change pill): `flex-wrap gap-0.5`, so what does not fit goes to a line of
  * its own. Reply is a 44 px target on a phone, which makes its line that tall. The time's `title`
- * is the full date.
+ * is the full date. A user's bar is flush with the end of the column ([alignEnd]); each item is
+ * where its exact place in the row puts it, as the labels' widths are not whole pixels.
  */
 @Composable
-internal fun MessageActionBar(timestamp: Instant?, copyText: String, modifier: Modifier = Modifier, onReply: (() -> Unit)? = null, extra: @Composable () -> Unit = {}) {
+internal fun MessageActionBar(
+    timestamp: Instant?,
+    copyText: String,
+    modifier: Modifier = Modifier,
+    onReply: (() -> Unit)? = null,
+    alignEnd: Boolean = false,
+    extra: @Composable () -> Unit = {},
+) {
     val tokens = LocalPpmTokens.current
-    // FlowRow sizes itself with each gap rounded up but places with it rounded (5.25 px: 6 and 5 on
-    // a phone), which left a user's bar 1 px short of the bubble's edge per gap. A hair under the
-    // rounded gap is that same whole pixel both ways.
-    val gap = with(LocalDensity.current) { ((2.dp.roundToPx() - 0.01f) / density).dp }
-    FlowRow(
-        modifier,
-        horizontalArrangement = Arrangement.spacedBy(gap),
-        verticalArrangement = Arrangement.spacedBy(gap),
-        itemVerticalAlignment = Alignment.CenterVertically,
-    ) {
+    CssRow(modifier, gap = 2.dp, wrap = true, alignEnd = alignEnd) {
         if (timestamp != null) {
-            RelativeTime(
-                timestamp,
-                ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color, fontFeatureSettings = "tnum"),
-                Modifier.webTitle(remember(timestamp) { PpmFormat.fullDate(timestamp) }).padding(end = 4.dp),
-            )
+            // `pr-1` kept exact: 4 px is 10.5 at 2.625x, which padding would make 11.
+            CssRow(Modifier.webTitle(remember(timestamp) { PpmFormat.fullDate(timestamp) }), end = 4.dp) {
+                RelativeTime(timestamp, ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color, fontFeatureSettings = "tnum"))
+            }
         }
         CopyActionButton(copyText)
         if (onReply != null) ActionButton(ProductIcon.RotateCcw, "Reply", "Reply to this message", touchTarget = true, onClick = onReply)
@@ -189,7 +188,7 @@ internal fun ActionButton(icon: ProductIcon, label: String, title: String, touch
     val color = tokens.text.mix(tokens.text3, lit).color
     val shape = RoundedCornerShape(8.dp)
     val target = if (touchTarget && LocalPpmMobile.current) 44.dp else 0.dp
-    Row(
+    CssRow(
         Modifier
             .clip(shape)
             .background(tokens.panel.opacity(lit).color)
@@ -197,12 +196,14 @@ internal fun ActionButton(icon: ProductIcon, label: String, title: String, touch
             .webTitle(title)
             .clickable(source, indication = null, role = Role.Button, onClick = onClick)
             .defaultMinSize(target, target)
-            .padding(horizontal = 6.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+            .padding(vertical = 4.dp),
+        gap = 4.dp,
+        start = 6.dp,
+        end = 6.dp,
+        centre = true,
     ) {
-        PpmIcon(icon, 14.dp, color)
-        BasicText(label, style = ppmText(12f, lineHeight = 16f).copy(color = color))
+        PpmIcon(icon, 14.dp, color, Modifier.cssWidth(14.dp))
+        CssText(label, ppmText(12f, lineHeight = 16f).copy(color = color))
     }
 }
 

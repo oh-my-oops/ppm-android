@@ -274,4 +274,49 @@ class DesignTest {
         val pairs = { k: Int -> k - 2 }
         assertEquals(6, LineClamp.keep(0, 10, 85f, 15f, right, pairs, { k: Int -> k + 2 }))
     }
+
+    @Test
+    fun `a CSS row puts each child on the pixel Chrome snaps it to`() {
+        // A user message's action bar on the tablet (2x), measured by CDP: time, Copy, Reply, Edit and
+        // Fork 2 CSS px apart, at widths Chrome keeps in 64ths of a device pixel.
+        val bar = floatArrayOf(104.703125f, 116.765625f, 121.953125f, 102.109375f, 109.5f)
+        val user = cssRowPlan(bar, 4f, 0f, 0f, 1000f, 0, 1000, wrap = true, centre = false, alignEnd = true)
+        assertEquals(571.03125f, user.exactWidth)
+        // Flush right, the bar starts 0.03 px before the pixel Chrome rounds its edge to: Fork's 461.5 is 462.
+        assertEquals(571, user.width)
+        assertEquals(listOf(0, 109, 229, 355, 462), user.x.toList())
+        // An assistant's starts on a whole pixel, so nothing moves.
+        val assistant = cssRowPlan(bar.copyOf(3), 4f, 0f, 0f, 1000f, 0, 1000, wrap = true, centre = false, alignEnd = false)
+        assertEquals(351, assistant.width)
+        assertEquals(listOf(0, 109, 229), assistant.x.toList())
+        // At the whole pixels Compose measures its labels to, everything from Reply on was a pixel right.
+        val ceiled = cssRowPlan(FloatArray(5) { ceil(bar[it]) }, 4f, 0f, 0f, 1000f, 0, 1000, wrap = true, centre = false, alignEnd = false)
+        assertEquals(listOf(0, 109, 230, 356, 463), ceiled.x.toList())
+    }
+
+    @Test
+    fun `a wrapping CSS row starts each line at its start and is as wide as it was offered`() {
+        val bar = floatArrayOf(104.703125f, 116.765625f, 121.953125f, 102.109375f, 109.5f)
+        val plan = cssRowPlan(bar, 4f, 0f, 0f, 300f, 0, 300, wrap = true, centre = false, alignEnd = true)
+        assertEquals(3, plan.lines)
+        assertEquals(listOf(0, 0, 1, 1, 2), plan.lineOf.toList())
+        assertEquals(listOf(0, 109, 0, 126, 0), plan.x.toList())
+        assertEquals(300, plan.width)
+        // Without wrap it stays one line, however narrow.
+        assertEquals(1, cssRowPlan(bar, 4f, 0f, 0f, 300f, 0, 300, wrap = false, centre = false, alignEnd = false).lines)
+    }
+
+    @Test
+    fun `a CSS row's padding stays exact and a centred child sits in the middle of a wider minimum`() {
+        // The Copy button: px-1.5 gap-1 around a 14 px icon and its label, at 2x.
+        val copy = cssRowPlan(floatArrayOf(28f, 56.765625f), 8f, 12f, 12f, 976f, 0, 1000, wrap = false, centre = true, alignEnd = false)
+        assertEquals(116.765625f, copy.exactWidth)
+        assertEquals(117, copy.width)
+        assertEquals(listOf(12, 48), copy.x.toList())
+        // An icon alone in a 44 px touch target.
+        val icon = cssRowPlan(floatArrayOf(28f), 8f, 12f, 12f, 976f, 88, 1000, wrap = false, centre = true, alignEnd = false)
+        assertEquals(88, icon.width)
+        assertEquals(listOf(30), icon.x.toList())
+        assertEquals(listOf(12), cssRowPlan(floatArrayOf(28f), 8f, 12f, 12f, 976f, 88, 1000, wrap = false, centre = false, alignEnd = false).x.toList())
+    }
 }

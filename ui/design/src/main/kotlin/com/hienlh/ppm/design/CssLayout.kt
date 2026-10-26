@@ -3,6 +3,7 @@ package com.hienlh.ppm.design
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.AlignmentLine
 import androidx.compose.ui.layout.FirstBaseline
@@ -52,7 +53,17 @@ class CssExact internal constructor(internal val fixed: Float = Float.NaN) {
 
     /** The child that gives way ([cssFlex]). */
     internal var flex = false
+
+    /** The exact width, set as the child is measured ([CssText], a [CssRow]); NaN where it is not known. */
+    internal var width = Float.NaN
+
+    /** The width the child's own layout reported, so whole pixels added around it still count. */
+    internal var reportedWidth = -1
 }
+
+/** How wide a child carrying [data] that measured [placeable] is exactly: what it reports, the whole pixels added around it included. */
+private fun exactWidth(data: CssExact?, placeable: Placeable): Float =
+    if (data == null || data.width.isNaN() || data.reportedWidth < 0) placeable.width.toFloat() else data.width + (placeable.width - data.reportedWidth)
 
 @Composable
 fun rememberCssExact(): CssExact = remember { CssExact() }
@@ -218,6 +229,132 @@ fun CssGridRow(modifier: Modifier = Modifier, gap: Dp = 0.dp, bases: List<Dp> = 
         layout(width, height) {
             placeables.forEachIndexed { index, placeable -> placeable.placeRelative(lefts[index], 0) }
         }
+    }
+}
+
+/**
+ * A row laid out as Chrome lays out a flex row of content-sized items: each child [gap] after the
+ * last and [start] / [end] inside the row's edges, all kept in fractions of a pixel, and each put
+ * on the pixel its exact left edge rounds to. A child that knows its exact width ([CssText],
+ * another CssRow) counts at that, any other at the width it measures. Compose measures a label to
+ * the next whole pixel, so a row of them moved each one after the first up to a pixel further
+ * right than the one before: Copy 2 px and Reply 3 px right of the web's.
+ *
+ * Children are centred across their line. With [wrap] (`flex-wrap`) a child that does not fit
+ * starts a new line, [gap] under the last. A row given a minimum width wider than its children
+ * puts them at its start, or in its middle with [centre] (`justify-center`).
+ *
+ * [alignEnd]: the row sits flush with the end of the box that holds it, which ends on a whole
+ * pixel — an `items-end` column's child. Chrome rounds the row's start there, so this row is as
+ * wide as from that pixel to the end and places its children from where its exact start falls.
+ */
+@Composable
+fun CssRow(
+    modifier: Modifier = Modifier,
+    gap: Dp = 0.dp,
+    start: Dp = 0.dp,
+    end: Dp = 0.dp,
+    wrap: Boolean = false,
+    centre: Boolean = false,
+    alignEnd: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val exact = rememberCssExact()
+    Layout(content, modifier.then(CssExactElement(exact, reads = true))) { measurables, constraints ->
+        // No vertical phase is used here: read so that a column around does not measure this again for it.
+        exact.measuredPhase = exact.phase
+        val gapPx = gap.toPx()
+        val startPx = start.toPx()
+        val endPx = end.toPx()
+        val bounded = constraints.hasBoundedWidth
+        val room = if (bounded) max(0f, constraints.maxWidth - startPx - endPx) else Float.POSITIVE_INFINITY
+        val loose = Constraints(maxWidth = if (bounded) room.toInt() else Constraints.Infinity, maxHeight = constraints.maxHeight)
+        val placeables = measurables.map { it.measure(loose) }
+        val widths = FloatArray(placeables.size) { exactWidth(measurables[it].parentData as? CssExact, placeables[it]) }
+        val plan = cssRowPlan(widths, gapPx, startPx, endPx, room, constraints.minWidth, constraints.maxWidth, wrap, centre, alignEnd)
+        exact.width = plan.exactWidth
+        exact.reportedWidth = plan.width
+        val lines = plan.lines
+        val lineOf = plan.lineOf
+        val lineHeights = IntArray(lines)
+        placeables.forEachIndexed { index, placeable -> lineHeights[lineOf[index]] = max(lineHeights[lineOf[index]], placeable.height) }
+        val lineTops = IntArray(lines)
+        var top = 0f
+        for (line in 0 until lines) {
+            lineTops[line] = top.roundToInt()
+            top += lineHeights[line] + gapPx
+        }
+        val height = max(constraints.minHeight, (top - gapPx).roundToInt()).coerceAtMost(constraints.maxHeight)
+        // One line is as tall as the row, as a single-line flex container stretches it.
+        if (lines == 1) lineHeights[0] = height
+        layout(plan.width, height) {
+            placeables.forEachIndexed { index, placeable ->
+                val line = lineOf[index]
+                placeable.place(plan.x[index], lineTops[line] + Alignment.CenterVertically.align(placeable.height, lineHeights[line]))
+            }
+        }
+    }
+}
+
+/** Where a [CssRow] puts children of these exact widths: each one's line and left pixel, and the row's width in pixels and exactly. */
+internal class CssRowPlan(val lineOf: IntArray, val x: IntArray, val lines: Int, val width: Int, val exactWidth: Float)
+
+/** [CssRow]'s horizontal layout, in device px: [room] is what its children have between [start] and [end]. */
+internal fun cssRowPlan(
+    widths: FloatArray,
+    gap: Float,
+    start: Float,
+    end: Float,
+    room: Float,
+    minWidth: Int,
+    maxWidth: Int,
+    wrap: Boolean,
+    centre: Boolean,
+    alignEnd: Boolean,
+): CssRowPlan {
+    // Each child's line and its exact left edge in that line.
+    val lineOf = IntArray(widths.size)
+    val lefts = FloatArray(widths.size)
+    var lines = 1
+    var at = 0f
+    var widest = 0f
+    widths.indices.forEach { index ->
+        if (index > 0 && wrap && at + gap + widths[index] > room) {
+            widest = max(widest, at)
+            lines++
+            at = 0f
+        } else if (index > 0) {
+            at += gap
+        }
+        lineOf[index] = lines - 1
+        lefts[index] = at
+        at += widths[index]
+    }
+    widest = max(widest, at)
+    // A row that wrapped is as wide as it was offered, as a flex container's fit-content width is.
+    val content = if (lines > 1) room else widest
+    val exactWidth = max(start + content + end, minWidth.toFloat())
+    // Seen from the end, a start Chrome rounds half up is a width rounded half down.
+    val width = (if (alignEnd) -(-exactWidth).roundToInt() else exactWidth.roundToInt()).coerceIn(minWidth, maxWidth)
+    val phase = if (alignEnd) width - exactWidth else 0f
+    val shift = if (centre && lines == 1) (exactWidth - start - content - end) / 2 else 0f
+    return CssRowPlan(lineOf, IntArray(widths.size) { (phase + start + shift + lefts[it]).roundToInt() }, lines, width, exactWidth)
+}
+
+/**
+ * One line of text that a [CssRow] counts at its exact width, the advances of its glyphs added
+ * up as Chrome adds them, where Compose measures it to the next whole pixel.
+ */
+@Composable
+fun CssText(text: String, style: TextStyle, modifier: Modifier = Modifier) {
+    val exact = rememberCssExact()
+    val laid = remember { arrayOfNulls<TextLayoutResult>(1) }
+    Layout({ BasicText(text, style = style, onTextLayout = { laid[0] = it }, softWrap = false, maxLines = 1) }, modifier.cssExact(exact)) { measurables, constraints ->
+        val placeable = measurables.first().measure(constraints)
+        // The line's own width: Compose's intrinsic widths are rounded up to whole pixels too.
+        exact.width = laid[0]?.let { it.getLineRight(0) - it.getLineLeft(0) }?.coerceAtMost(constraints.maxWidth.toFloat()) ?: Float.NaN
+        exact.reportedWidth = placeable.width
+        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
     }
 }
 
@@ -512,5 +649,35 @@ private class CssHeightNode(var height: Dp) : Modifier.Node(), LayoutModifierNod
         val px = if (constraints.hasFixedHeight) constraints.maxHeight else height.roundToPx().coerceIn(constraints.minHeight, constraints.maxHeight)
         val placeable = measurable.measure(constraints.copy(minHeight = px, maxHeight = px))
         return layout(placeable.width, px) { placeable.place(0, 0) }
+    }
+}
+
+/**
+ * A box [width] wide in CSS pixels, which a [CssRow] counts at exactly that — a 14 px icon is
+ * 36.75 px at 2.625x, where Compose sizes it 37 and a row of four buttons came out a pixel wider
+ * than the web's. It measures [width] rounded, and must be the box's outermost width.
+ */
+fun Modifier.cssWidth(width: Dp): Modifier = this then CssWidthElement(width)
+
+private data class CssWidthElement(val width: Dp) : ModifierNodeElement<CssWidthNode>() {
+    override fun create() = CssWidthNode(width)
+
+    override fun update(node: CssWidthNode) {
+        if (node.width == width) return
+        node.width = width
+        node.invalidateMeasurement()
+    }
+}
+
+private class CssWidthNode(var width: Dp) : Modifier.Node(), LayoutModifierNode, ParentDataModifierNode {
+    override fun Density.modifyParentData(parentData: Any?): Any = CssExact().also {
+        it.width = width.toPx()
+        it.reportedWidth = width.roundToPx()
+    }
+
+    override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
+        val px = width.roundToPx().coerceIn(constraints.minWidth, constraints.maxWidth)
+        val placeable = measurable.measure(constraints.copy(minWidth = px, maxWidth = px))
+        return layout(px, placeable.height) { placeable.place(0, 0) }
     }
 }

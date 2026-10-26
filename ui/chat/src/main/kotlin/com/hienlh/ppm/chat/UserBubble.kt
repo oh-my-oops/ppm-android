@@ -96,6 +96,7 @@ import com.hienlh.ppm.protocol.ParsedUserMessage
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.VersionGroup
 import java.time.Instant
+import kotlin.math.ceil
 
 /**
  * Where a reply card's message is (`replyAvailable` / `onJumpToReply`): a jump that shows it, or
@@ -186,13 +187,26 @@ internal fun UserBubble(
     val system = parsed.isSystemContext
     val rad = tokens.rad.dp
     val shape = bubbleShape(system, rad)
+    val uriHandler = LocalUriHandler.current
+    val linked = if (system || parsed.text.isEmpty()) null else remember(parsed.text, tokens, uriHandler) { linkedUserText(parsed.text, tokens, uriHandler) }
+    // How wide the text is exactly: the bubble around it is that and its padding, as Chrome sizes it.
+    val textWidth = if (linked == null) Float.NaN else rememberExactTextWidth(linked, BUBBLE_TEXT)
     Column(
         modifier.fillMaxWidth(),
         horizontalAlignment = if (system) Alignment.Start else Alignment.End,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // As wide as what it holds, as a box in a flex column is, up to 80%.
-        var bubble = if (system) Modifier.fillMaxWidth() else Modifier.maxWidthFraction(0.8f).width(IntrinsicSize.Max)
+        // As wide as what it holds, as a box in a flex column is, up to 80%: the text's exact width
+        // while it is the widest thing in it (measured, it is laid out to its next pixel).
+        var bubble = if (system) {
+            Modifier.fillMaxWidth()
+        } else {
+            Modifier.fitWidthAtEnd(0.8f) { measured ->
+                val border = cssBorderPx(1.dp)
+                if (textWidth.isNaN() || measured > ceil(textWidth).toInt() + 2 * (border + 12.dp.roundToPx())) Float.NaN
+                else textWidth + 2 * (border + 12.dp.toPx())
+            }
+        }
         for (shadow in shadowSm) bubble = bubble.ppmShadow(shadow, shape)
         // `ring-2 ring-primary/60 border-primary/40` on the message an edit replaces, faded in and
         // out as `transition-all` fades them: the ring grows from nothing, over the shadow.
@@ -233,13 +247,13 @@ internal fun UserBubble(
                     for (block in parsed.terminalBlocks) TerminalBlockPreview(block)
                 }
             }
-            if (parsed.text.isNotEmpty()) BubbleText(parsed.text, system)
+            if (parsed.text.isNotEmpty()) BubbleText(parsed.text, system, linked)
             val versions = edits?.versions
             val switch = edits?.onSwitchVersion
             if (!system && versions != null && switch != null) VersionSwitcher(versions, edits.versionsDisabled, switch)
         }
         if (!system) {
-            MessageActionBar(timestamp, remember(content) { ChatReply.decode(content).content }, onReply = onReply) {
+            MessageActionBar(timestamp, remember(content) { ChatReply.decode(content).content }, onReply = onReply, alignEnd = true) {
                 edits?.onEdit?.let { ActionButton(ProductIcon.Pencil, "Edit", "Edit this message (continue in the same tab)", onClick = it) }
                 edits?.onFork?.let { ActionButton(ProductIcon.RotateCcw, "Fork", "Retry from this message (fork into a new tab)", onClick = it) }
             }
@@ -306,27 +320,30 @@ private fun VersionStep(icon: ProductIcon, label: String, enabled: Boolean, onCl
     }
 }
 
-/** The text, two lines until "Show more"; then up to half the window, scrolling. */
+/** The bubble's `text-sm` (14 px on 20) text. */
+private val BUBBLE_TEXT = ppmText(14f, lineHeight = 20f)
+
+/**
+ * The text, two lines until "Show more"; then up to half the window, scrolling. A user's text
+ * comes [linked] ([linkedUserText]), as the bubble measured it.
+ */
 @Composable
-private fun BubbleText(text: String, system: Boolean) {
+private fun BubbleText(text: String, system: Boolean, linked: AnnotatedString?) {
     val tokens = LocalPpmTokens.current
-    val uriHandler = LocalUriHandler.current
     var expanded by remember(text) { mutableStateOf(false) }
     var clamped by remember(text) { mutableStateOf(false) }
     // `max-h-[50vh]` once expanded.
     val expandedLimit = with(LocalDensity.current) { (LocalWindowInfo.current.containerSize.height / 2).toDp() }
-    val style = ppmText(14f, lineHeight = 20f).copy(color = (if (system) tokens.text2 else tokens.text).color)
-    val (annotated, inline) = if (system) {
-        pathChips(text)
-    } else {
-        remember(text, tokens, uriHandler) { linkedUserText(text, tokens, uriHandler) } to emptyMap<String, InlineTextContent>()
-    }
+    val style = BUBBLE_TEXT.copy(color = (if (system) tokens.text2 else tokens.text).color)
+    val (annotated, inline) = if (system || linked == null) pathChips(text) else linked to emptyMap<String, InlineTextContent>()
+    // The bubble is as wide as a user's text exactly, a fraction under the pixels it lays out in.
+    val slack = if (system) Modifier else Modifier.exactTextSlack()
     WithoutOnCopy(if (system) "" else userTextMarks(text)) {
         SelectionContainer {
             if (expanded) {
-                BasicText(annotated, Modifier.heightIn(max = expandedLimit).cssScrollY(), style, inlineContent = inline)
+                BasicText(annotated, slack.heightIn(max = expandedLimit).cssScrollY(), style, inlineContent = inline)
             } else {
-                ClampedText(annotated, style, maxLines = 2, preWrap = true, inlineContent = inline, onClamped = { clamped = it })
+                ClampedText(annotated, style, maxLines = 2, slack, preWrap = true, inlineContent = inline, onClamped = { clamped = it })
             }
         }
     }
