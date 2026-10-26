@@ -135,10 +135,14 @@ fun ChatMessageView(
 @Composable
 internal fun MessageActionBar(timestamp: Instant?, copyText: String, modifier: Modifier = Modifier, onReply: (() -> Unit)? = null, extra: @Composable () -> Unit = {}) {
     val tokens = LocalPpmTokens.current
+    // FlowRow sizes itself with each gap rounded up but places with it rounded (5.25 px: 6 and 5 on
+    // a phone), which left a user's bar 1 px short of the bubble's edge per gap. A hair under the
+    // rounded gap is that same whole pixel both ways.
+    val gap = with(LocalDensity.current) { ((2.dp.roundToPx() - 0.01f) / density).dp }
     FlowRow(
         modifier,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(gap),
+        verticalArrangement = Arrangement.spacedBy(gap),
         itemVerticalAlignment = Alignment.CenterVertically,
     ) {
         if (timestamp != null) {
