@@ -4,12 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -31,9 +28,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.chat.chromeBreaks
+import com.hienlh.ppm.design.CssColumn
+import com.hienlh.ppm.design.CssExact
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.GroupMember
@@ -69,9 +69,10 @@ private const val BODY_LINE = 22.75f
  * the mentioned member's colour. [onMenu], for a message with a member's session behind it, is
  * where a long press or a right click asks for its menu: the web's hover icon needs a fine
  * pointer, which a touch tablet never reports, so that menu is the way to the transcript.
+ * [exact] is the row's height as Chrome adds it up, for the feed to stack the rows by.
  */
 @Composable
-internal fun GroupMessageRow(message: GroupMessage, speakers: GroupSpeakers, onMenu: ((Offset) -> Unit)?) {
+internal fun GroupMessageRow(message: GroupMessage, speakers: GroupSpeakers, exact: CssExact, onMenu: ((Offset) -> Unit)?) {
     val tokens = LocalPpmTokens.current
     val user = message.isUser
     val name = if (user) "You" else message.fromMember
@@ -90,13 +91,14 @@ internal fun GroupMessageRow(message: GroupMessage, speakers: GroupSpeakers, onM
             .background(lerp(base, tokens.panel2.opacity(0.5).color, hover.lit))
             // `inset 3px 0 0 0 <accent>`: over the fill, under the content.
             .drawBehind { drawRect(accent.color, size = Size(3.dp.toPx(), size.height)) }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        // `mt-0.5 size-8 rounded-full text-[11px] font-semibold text-white ring-2 ring-background`.
+        // `mt-0.5 size-8 rounded-full text-[11px] font-semibold text-white ring-2 ring-background`,
+        // under the row's `py-2`.
         Box(
             Modifier
-                .padding(top = 2.dp)
+                .padding(top = 10.dp)
                 .size(32.dp)
                 .drawBehind { drawCircle(ring, radius = size.minDimension / 2 + 2.dp.toPx()) }
                 .background(accent.color, CircleShape),
@@ -104,9 +106,11 @@ internal fun GroupMessageRow(message: GroupMessage, speakers: GroupSpeakers, onM
         ) {
             BasicText(initials(name), style = ppmText(11f, FontWeight.SemiBold, lineHeight = 16.5f).copy(color = Color.White), maxLines = 1, softWrap = false)
         }
-        Column(Modifier.weight(1f)) {
-            // `flex flex-wrap items-center gap-x-2 gap-y-0.5`.
+        // The row's `py-2` and the text's `mt-0.5`, stacked in fractions of a pixel.
+        CssColumn(Modifier.weight(1f), gap = 2.dp, top = 8.dp, bottom = 8.dp, exact = exact) {
+            // `flex flex-wrap items-center gap-x-2 gap-y-0.5`, its rows the name's 20 px.
             FlowRow(
+                Modifier.cssLines(20f, gap = 2f),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 itemVerticalAlignment = Alignment.CenterVertically,
@@ -128,10 +132,10 @@ internal fun GroupMessageRow(message: GroupMessage, speakers: GroupSpeakers, onM
             // empty one has no line at all, and a final line break starts none.
             val summary = message.summary.orEmpty()
             if (summary.isEmpty()) {
-                Spacer(Modifier.height(2.dp))
+                Box(Modifier)
             } else {
                 val body = remember(summary, speakers, tokens.accent) { chromeBreaks(withMentions(summary.removeSuffix("\n"), speakers, tokens.accent)) }
-                BasicText(body, Modifier.padding(top = 2.dp), style = ppmText(14f, lineHeight = BODY_LINE).copy(color = tokens.text2.color))
+                BasicText(body, Modifier.cssLines(BODY_LINE), style = ppmText(14f, lineHeight = BODY_LINE).copy(color = tokens.text2.color))
             }
         }
     }

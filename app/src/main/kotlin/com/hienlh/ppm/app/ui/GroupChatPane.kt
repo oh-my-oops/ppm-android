@@ -16,7 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.GroupTab
 import com.hienlh.ppm.chat.pulse
+import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -66,9 +67,15 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssBorderPx
+import com.hienlh.ppm.design.cssExact
 import com.hienlh.ppm.design.cssHeight
+import com.hienlh.ppm.design.cssLazyItem
+import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberCssExact
+import com.hienlh.ppm.design.rememberCssLazyStack
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.GroupMessage
 import com.hienlh.ppm.protocol.GroupStatus
@@ -203,13 +210,17 @@ private fun GroupFeed(group: GroupTab, state: GroupChat.State, speakers: GroupSp
 private fun FeedList(group: GroupTab, state: GroupChat.State, speakers: GroupSpeakers, mobile: Boolean, onViewFull: (GroupMessage) -> Unit) {
     val list = group.feed
     val typing = state.typing
+    // The rows stacked in fractions of a pixel, as Chrome stacks them: rounded a row at a time,
+    // 83.5 px rows at 2.625x put each one a pixel lower than the last.
+    val stack = rememberCssLazyStack(0.dp)
     LazyColumn(Modifier.fillMaxSize(), state = list) {
-        item(key = FEED_START) { Spacer(Modifier.height(8.dp)) }
-        items(state.messages, key = { it.id }) { message ->
+        item(key = FEED_START) { Spacer(Modifier.cssLazyItem(stack, 0, last = false).cssHeight(8.dp)) }
+        itemsIndexed(state.messages, key = { _, message -> message.id }) { index, message ->
             // Where the press that asked for the message's menu was, in its row.
             var menuAt by remember { mutableStateOf<Offset?>(null) }
-            Box {
-                GroupMessageRow(message, speakers, onMenu = if (message.fullSessionRef.isNullOrEmpty()) null else ({ menuAt = it }))
+            val exact = rememberCssExact()
+            Box(Modifier.cssLazyItem(stack, index + 1, last = false).cssExact(exact)) {
+                GroupMessageRow(message, speakers, exact, onMenu = if (message.fullSessionRef.isNullOrEmpty()) null else ({ menuAt = it }))
                 menuAt?.let { at ->
                     OneItemMenu(mobile, at, "View full transcript", ProductIcon.ScrollText, destructive = false, onDismiss = { menuAt = null }) {
                         menuAt = null
@@ -218,8 +229,10 @@ private fun FeedList(group: GroupTab, state: GroupChat.State, speakers: GroupSpe
                 }
             }
         }
-        if (typing.isNotEmpty()) item(key = FEED_TYPING) { TypingLine(typing) }
-        item(key = FEED_END) { Spacer(Modifier.height(8.dp)) }
+        val after = state.messages.size + 1
+        if (typing.isNotEmpty()) item(key = FEED_TYPING) { TypingLine(typing, Modifier.cssLazyItem(stack, after, last = false)) }
+        val end = after + if (typing.isEmpty()) 0 else 1
+        item(key = FEED_END) { Spacer(Modifier.cssLazyItem(stack, end, last = true).cssHeight(8.dp)) }
     }
     val pad = with(LocalDensity.current) { 8.dp.toPx() }
     val count = state.messages.size + if (typing.isEmpty()) 2 else 3
@@ -235,13 +248,15 @@ private fun FeedList(group: GroupTab, state: GroupChat.State, speakers: GroupSpe
 
 /** `px-3 py-1.5 text-xs italic text-text-subtle`: "Ann is typing…", "Ann, Bo are typing…". */
 @Composable
-private fun TypingLine(names: List<String>) {
+private fun TypingLine(names: List<String>, modifier: Modifier) {
     val tokens = LocalPpmTokens.current
-    BasicText(
-        "${names.joinToString(", ")} ${if (names.size == 1) "is" else "are"} typing…",
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color, fontStyle = FontStyle.Italic),
-    )
+    CssColumn(modifier.fillMaxWidth().padding(horizontal = 12.dp), top = 6.dp, bottom = 6.dp) {
+        BasicText(
+            "${names.joinToString(", ")} ${if (names.size == 1) "is" else "are"} typing…",
+            Modifier.cssLines(16f),
+            style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color, fontStyle = FontStyle.Italic),
+        )
+    }
 }
 
 /** `shrink-0 border-t bg-destructive/10 px-3 py-2 text-xs text-destructive`. */
@@ -304,6 +319,10 @@ private fun GroupMessageBox(group: GroupTab, mobile: Boolean) {
     // 16 px on a phone (`globals.css`), on `text-sm`'s lines either way.
     val font = if (mobile) 16f else 14f
     val line = font * (1.25f / 0.875f)
+    // `rows={1}`, `py-2.5` and the borders, which Chrome snaps to whole pixels before it adds them
+    // up: 116.5 px at 2.625x, painted 116, where 1 px borders counted whole would make 117.75.
+    // `min-h-[44px]` holds it on a tablet.
+    val height = with(LocalDensity.current) { max(44.dp.toPx(), (line + 20f).dp.toPx() + 2 * cssBorderPx(1.dp)).toInt().toDp() }
     val shape = RoundedCornerShape(8.dp)
     val ring = tokens.accent.color
     Row(
@@ -317,7 +336,7 @@ private fun GroupMessageBox(group: GroupTab, mobile: Boolean) {
         Box(
             Modifier
                 .weight(1f)
-                .cssHeight(max(44f, line + 22f).dp)
+                .height(height)
                 // `focus:ring-1 focus:ring-primary`: 1 px outside the border.
                 .drawBehind {
                     if (!focused) return@drawBehind

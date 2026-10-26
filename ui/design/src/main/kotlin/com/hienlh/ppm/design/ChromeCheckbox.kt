@@ -47,7 +47,7 @@ fun ChromeCheckbox(checked: Boolean, modifier: Modifier = Modifier, enabled: Boo
                 fill.luminance() < LUMINANCE_MIDPOINT -> Color.White
                 else -> GREY_900
             }
-            drawPath(tick, ink, style = Stroke(h * 0.6f * 0.16f, cap = StrokeCap.Butt, join = StrokeJoin.Miter))
+            drawPath(tick, ink, style = Stroke(h * 0.16f, cap = StrokeCap.Butt, join = StrokeJoin.Miter))
         } else {
             val border = when {
                 !enabled -> DISABLED_GREY

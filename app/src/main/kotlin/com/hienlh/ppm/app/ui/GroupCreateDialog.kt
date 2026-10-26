@@ -59,6 +59,7 @@ import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.cssFlex
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssLines
@@ -268,10 +269,10 @@ private fun RosterCard(content: @Composable () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(12.dp)
     CssColumn(
-        Modifier.fillMaxWidth().clip(shape).cssBorder(tokens.border.color, shape).padding(horizontal = 13.dp),
+        Modifier.fillMaxWidth().clip(shape).cssBorder(tokens.border.color, shape).padding(horizontal = 12.dp),
         gap = 8.dp,
-        top = 13.dp,
-        bottom = 13.dp,
+        top = 12.dp,
+        bottom = 12.dp,
         content = content,
     )
 }
@@ -288,13 +289,16 @@ internal fun GroupInput(state: TextFieldState, placeholder: String, mobile: Bool
     val tokens = LocalPpmTokens.current
     val font = if (mobile) 16f else 14f
     val line = font * (1.25f / 0.875f)
+    // `min-h-[40px]` over one line and its `py-2`, inside borders Chrome snaps to whole pixels
+    // before it adds them up: 106 px at 2.625x, where borders counted whole would make 107.25.
+    val height = with(LocalDensity.current) { max(40.dp.toPx(), (line + 16f).dp.toPx() + 2 * cssBorderPx(1.dp)).toDp() }
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(8.dp)
     val ring = tokens.accent.color
     Box(
         Modifier
             .fillMaxWidth()
-            .cssHeight(max(40f, line + 18f).dp)
+            .cssHeight(height)
             .drawBehind {
                 if (!focused) return@drawBehind
                 val px = 1.dp.toPx()

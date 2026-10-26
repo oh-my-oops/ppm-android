@@ -229,23 +229,26 @@ private class CssExactNode(var exact: CssExact, var reads: Boolean) : Modifier.N
  * Text whose lines are [lineHeight] CSS pixels apart: a [CssColumn] counts it as its lines times
  * that, as Chrome does, rather than the whole pixels it measures. Held to [max] (`max-h-*`), it
  * counts as that once it reaches it; a row whose other box is [min] tall, taller than one line,
- * counts as that while it measures no taller.
+ * counts as that while it measures no taller. Lines [gap] CSS px apart are the rows of a wrapping
+ * flex row (`flex-wrap gap-y-*`), as many as fit what it measures.
  */
-fun Modifier.cssLines(lineHeight: Float, max: Dp = Dp.Unspecified, min: Dp = Dp.Unspecified): Modifier = this then CssLinesElement(lineHeight, max, min)
+fun Modifier.cssLines(lineHeight: Float, max: Dp = Dp.Unspecified, min: Dp = Dp.Unspecified, gap: Float = 0f): Modifier =
+    this then CssLinesElement(lineHeight, max, min, gap)
 
-private data class CssLinesElement(val lineHeight: Float, val max: Dp, val min: Dp) : ModifierNodeElement<CssLinesNode>() {
-    override fun create() = CssLinesNode(lineHeight, max, min)
+private data class CssLinesElement(val lineHeight: Float, val max: Dp, val min: Dp, val gap: Float) : ModifierNodeElement<CssLinesNode>() {
+    override fun create() = CssLinesNode(lineHeight, max, min, gap)
 
     override fun update(node: CssLinesNode) {
-        if (node.lineHeight == lineHeight && node.max == max && node.min == min) return
+        if (node.lineHeight == lineHeight && node.max == max && node.min == min && node.gap == gap) return
         node.lineHeight = lineHeight
         node.max = max
         node.min = min
+        node.gap = gap
         node.invalidateMeasurement()
     }
 }
 
-private class CssLinesNode(var lineHeight: Float, var max: Dp, var min: Dp) : Modifier.Node(), LayoutModifierNode, ParentDataModifierNode {
+private class CssLinesNode(var lineHeight: Float, var max: Dp, var min: Dp, var gap: Float) : Modifier.Node(), LayoutModifierNode, ParentDataModifierNode {
     private val exact = CssExact()
 
     override fun Density.modifyParentData(parentData: Any?): Any = exact
@@ -253,10 +256,11 @@ private class CssLinesNode(var lineHeight: Float, var max: Dp, var min: Dp) : Mo
     override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
         val placeable = measurable.measure(constraints)
         val line = lineHeight.sp.toPx()
+        val gapPx = gap.sp.toPx()
         exact.height = when {
             max.isSpecified && placeable.height >= max.roundToPx() -> max.toPx()
             min.isSpecified && placeable.height <= min.roundToPx() -> min.toPx()
-            else -> max(1, (placeable.height / line).roundToInt()) * line
+            else -> max(1, ((placeable.height + gapPx) / (line + gapPx)).roundToInt()).let { it * line + (it - 1) * gapPx }
         }
         exact.reported = placeable.height
         return layout(placeable.width, placeable.height) { placeable.place(0, 0) }

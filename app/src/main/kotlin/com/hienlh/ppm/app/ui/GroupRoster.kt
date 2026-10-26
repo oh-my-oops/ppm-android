@@ -59,6 +59,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.cssFlex
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssLines
@@ -169,11 +170,13 @@ private fun CapRow(chat: GroupChat, cap: Int, mobile: Boolean) {
     val font = if (mobile) 16f else 12f
     val line = font * (4f / 3)
     val label = ppmText(12f, lineHeight = 16f)
+    // `py-1` over one line, inside borders Chrome snaps to whole pixels before it adds them up.
+    val input = with(LocalDensity.current) { ((line + 8f).dp.toPx() + 2 * cssBorderPx(1.dp)).toDp() }
     val shape = RoundedCornerShape(4.dp)
     Row(
         Modifier
             .fillMaxWidth()
-            .cssHeight((line + 26f).dp)
+            .cssHeight(input + 16.dp)
             .padding(horizontal = if (mobile) 16.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -182,7 +185,7 @@ private fun CapRow(chat: GroupChat, cap: Int, mobile: Boolean) {
         Box(
             Modifier
                 .width(56.dp)
-                .cssHeight((line + 10f).dp)
+                .cssHeight(input)
                 .clip(shape)
                 .background(tokens.bgSolid.color)
                 .cssBorder(tokens.border.color, shape)

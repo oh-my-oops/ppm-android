@@ -6,7 +6,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -15,7 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -48,6 +47,7 @@ import com.hienlh.ppm.chat.ToolCardView
 import com.hienlh.ppm.chat.breakAnywhere
 import com.hienlh.ppm.client.groupTranscript
 import com.hienlh.ppm.design.CssColumn
+import com.hienlh.ppm.design.CssLazyStack
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
@@ -57,9 +57,12 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssFlex
+import com.hienlh.ppm.design.cssHeight
+import com.hienlh.ppm.design.cssLazyItem
 import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberCssLazyStack
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.GroupMessage
@@ -70,6 +73,7 @@ import com.hienlh.ppm.state.AgentChildren
 import com.hienlh.ppm.state.AgentProgress
 import com.hienlh.ppm.state.ToolBlock
 import kotlinx.coroutines.CancellationException
+import kotlin.math.roundToInt
 
 /** The transcript's text: nothing between it and the page sets a size, so the page's 16 px on lines 1.5 of it. */
 private val TRANSCRIPT_TEXT = MarkdownStyle(size = 16f, lineHeightRatio = 1.5f)
@@ -156,48 +160,73 @@ private fun TranscriptBody(loaded: Result<GroupTranscript>?, summary: String?, m
 @Composable
 private fun TranscriptUnavailable(error: String, summary: String?) {
     val tokens = LocalPpmTokens.current
-    Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 16.dp)) {
+    CssColumn(Modifier.fillMaxWidth().padding(horizontal = 4.dp), top = 16.dp, bottom = 16.dp) {
         BasicText(
             "Full transcript unavailable",
-            Modifier.padding(bottom = 8.dp),
+            Modifier.padding(bottom = 8.dp).cssLines(20f),
             style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color),
         )
-        BasicText(error, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color))
+        BasicText(error, Modifier.cssLines(16f), style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color))
         if (!summary.isNullOrEmpty()) {
-            BasicText(
-                summary.removeSuffix("\n"),
+            CssColumn(
                 Modifier
                     .padding(top = 16.dp)
                     .fillMaxWidth()
                     .background(tokens.panel2.color, RoundedCornerShape(8.dp))
-                    .padding(12.dp),
-                style = ppmText(12f, kind = FontKind.MONO, lineHeight = 19.5f).copy(color = tokens.text2.color),
-            )
+                    .padding(horizontal = 12.dp),
+                top = 12.dp,
+                bottom = 12.dp,
+            ) {
+                BasicText(
+                    summary.removeSuffix("\n"),
+                    Modifier.cssLines(19.5f),
+                    style = ppmText(12f, kind = FontKind.MONO, lineHeight = 19.5f).copy(color = tokens.text2.color),
+                )
+            }
         }
     }
 }
 
 /**
  * The transcript (`px-1 py-1`, its rows `flex flex-col gap-3`): the session's input config, then
- * each message under its role; "Transcript is empty." when it has none.
+ * each message under its role; "Transcript is empty." when it has none. Its rows are stacked in
+ * fractions of a pixel, as Chrome stacks them.
  */
 @Composable
 private fun TranscriptMessages(transcript: GroupTranscript, modifier: Modifier) {
     val tokens = LocalPpmTokens.current
     val config = transcript.config?.rows().orEmpty()
-    LazyColumn(modifier.fillMaxWidth(), contentPadding = PaddingValues(4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (config.isNotEmpty()) item { ConfigBlock(config) }
-        items(transcript.messages) { TranscriptMessage(it) }
+    val first = if (config.isEmpty()) 0 else 1
+    val last = first + maxOf(transcript.messages.size, 1) - 1
+    val stack = rememberCssLazyStack(12.dp)
+    LazyColumn(modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 4.dp)) {
+        if (config.isNotEmpty()) item { TranscriptRow(stack, 0, last) { ConfigBlock(config) } }
+        itemsIndexed(transcript.messages) { index, message -> TranscriptRow(stack, first + index, last) { TranscriptMessage(message) } }
         if (transcript.messages.isEmpty()) {
             item {
-                BasicText(
-                    "Transcript is empty.",
-                    Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                    style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
-                )
+                TranscriptRow(stack, first, last) {
+                    CssColumn(Modifier.fillMaxWidth(), top = 24.dp, bottom = 24.dp) {
+                        BasicText(
+                            "Transcript is empty.",
+                            Modifier.fillMaxWidth().cssLines(20f),
+                            style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
+                        )
+                    }
+                }
             }
         }
     }
+}
+
+/** The [index]th row of the transcript, the list's `py-1` above the first and under the [last]. */
+@Composable
+private fun TranscriptRow(stack: CssLazyStack, index: Int, last: Int, content: @Composable () -> Unit) {
+    CssColumn(
+        Modifier.fillMaxWidth().cssLazyItem(stack, index, last = index == last),
+        top = if (index == 0) 4.dp else 0.dp,
+        bottom = if (index == last) 4.dp else 0.dp,
+        content = content,
+    )
 }
 
 /** A message (`flex flex-col gap-1.5`): its role (`text-[10px] font-semibold uppercase tracking-wide text-text-subtle`), then what it says. */
@@ -209,8 +238,12 @@ private fun TranscriptMessage(message: HistoryMessage) {
         HistoryMessage.Role.ASSISTANT -> "Assistant"
         HistoryMessage.Role.SYSTEM -> message.role.wire
     }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        BasicText(role.uppercase(), style = ppmText(10f, FontWeight.SemiBold, lineHeight = 15f).copy(color = tokens.text3.color, letterSpacing = 0.025.em))
+    CssColumn(Modifier.fillMaxWidth(), gap = 6.dp) {
+        BasicText(
+            role.uppercase(),
+            Modifier.cssLines(15f),
+            style = ppmText(10f, FontWeight.SemiBold, lineHeight = 15f).copy(color = tokens.text3.color, letterSpacing = 0.025.em),
+        )
         MessageEvents(message)
     }
 }
@@ -230,7 +263,7 @@ private fun MessageEvents(message: HistoryMessage) {
     val results = remember(events) {
         events.filterIsInstance<ChatEvent.ToolResult>().filter { it.toolUseId != null }.associateBy { it.toolUseId }
     }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    CssColumn(Modifier.fillMaxWidth(), gap = 8.dp) {
         for (event in events) {
             when (event) {
                 is ChatEvent.Text -> if (event.text.isNotBlank()) MarkdownView(event.text, style = TRANSCRIPT_TEXT)
@@ -297,19 +330,21 @@ private fun ConfigRows(rows: List<Pair<String, String>>) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
     ) { measurables, constraints ->
         val gapX = 12.dp.roundToPx()
-        val gapY = 4.dp.roundToPx()
+        // `gap-y-1` is 10.5 px at 2.625x: rows land where Chrome puts them, not 0.5 px lower each.
+        val gapY = 4.dp.toPx()
         val loose = constraints.copy(minWidth = 0, minHeight = 0)
         val names = measurables.filterIndexed { index, _ -> index % 2 == 0 }.map { it.measure(loose) }
         val column = names.maxOfOrNull { it.width } ?: 0
         val valueWidth = (constraints.maxWidth - column - gapX).coerceAtLeast(0)
         val values = measurables.filterIndexed { index, _ -> index % 2 == 1 }.map { it.measure(loose.copy(maxWidth = valueWidth)) }
         val tops = IntArray(names.size)
-        var height = 0
+        var y = 0f
         names.indices.forEach { index ->
-            if (index > 0) height += gapY
-            tops[index] = height
-            height += maxOf(names[index].height, values[index].height)
+            if (index > 0) y += gapY
+            tops[index] = y.roundToInt()
+            y += maxOf(names[index].height, values[index].height)
         }
+        val height = y.roundToInt()
         layout(constraints.maxWidth, height) {
             names.forEachIndexed { index, name ->
                 name.place(0, tops[index])
@@ -332,7 +367,7 @@ private fun Disclosure(label: String, icon: ProductIcon, color: Rgba, hoverColor
     val turn by animateFloatAsState(if (open) 90f else 0f, tween(150, easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)), label = "chevron")
     val hover = rememberHover(instant = true)
     val shape = RoundedCornerShape(8.dp)
-    Column(
+    CssColumn(
         Modifier
             .fillMaxWidth()
             .clip(shape)
@@ -340,11 +375,13 @@ private fun Disclosure(label: String, icon: ProductIcon, color: Rgba, hoverColor
             .cssBorder(tokens.border.color, shape),
     ) {
         val ink = hoverColor.mix(color, hover.lit.toDouble()).color
+        // `py-1.5` around a 16px line: 28px exactly, which a padded row rounds to 74 px at 2.625x for 73.5.
         Row(
             Modifier
                 .fillMaxWidth()
+                .cssHeight(28.dp)
                 .ppmClickable(pressedColor = Color.Transparent, source = hover.source) { open = !open }
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
