@@ -96,6 +96,9 @@ fun CssExact.cssReport(height: Float, measured: Int) {
  * In a column of bounded height one child can give way ([cssFlex]), as a `min-h-0 flex-1` box
  * does in a flex column: it is held to what the rest leaves it, so the column never grows past
  * its bound, and is no taller than it asks to be.
+ *
+ * With [gaps] each child has its own space above it, the first one's included, in place of [gap]:
+ * the margins CSS leaves between blocks once it has collapsed them.
  */
 @Composable
 fun CssColumn(
@@ -104,24 +107,26 @@ fun CssColumn(
     top: Dp = 0.dp,
     bottom: Dp = 0.dp,
     exact: CssExact = rememberCssExact(),
+    gaps: List<Dp>? = null,
     content: @Composable () -> Unit,
 ) {
     Layout(content, modifier.then(CssExactElement(exact, reads = true))) { measurables, constraints ->
         val phase = exact.phase
         exact.measuredPhase = phase
         val gapPx = gap.toPx()
+        fun above(index: Int) = gaps?.getOrNull(index)?.toPx() ?: if (index > 0 && gaps == null) gapPx else 0f
         val loose = Constraints(maxWidth = constraints.maxWidth, maxHeight = Constraints.Infinity)
         val exacts = measurables.map { it.parentData as? CssExact }
         val flex = if (constraints.hasBoundedHeight) exacts.indexOfFirst { it?.flex == true } else -1
         // Where the child that gives way has to end: above the gaps and set heights under it.
         var limit = constraints.maxHeight - bottom.toPx()
-        if (flex >= 0) for (index in flex + 1 until measurables.size) limit -= gapPx + (exacts[index]?.fixed?.takeUnless { it.isNaN() } ?: 0f)
+        if (flex >= 0) for (index in flex + 1 until measurables.size) limit -= above(index) + (exacts[index]?.fixed?.takeUnless { it.isNaN() } ?: 0f)
         val placeables = ArrayList<Placeable>(measurables.size)
         val tops = IntArray(measurables.size)
         var at = phase + top.toPx()
         var width = constraints.minWidth
         measurables.forEachIndexed { index, measurable ->
-            if (index > 0) at += gapPx
+            at += above(index)
             val y = at.roundToInt()
             val data = exacts[index]
             if (data != null) {

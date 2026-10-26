@@ -9,15 +9,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -31,13 +27,11 @@ import androidx.compose.ui.layout.AlignmentLine
 import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.IntrinsicMeasurable
 import androidx.compose.ui.layout.IntrinsicMeasureScope
-import androidx.compose.ui.layout.LastBaseline
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.MeasurePolicy
 import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.LocalUriHandler
@@ -48,11 +42,9 @@ import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -66,18 +58,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.design.ChromeCheckbox
+import com.hienlh.ppm.design.ChromeFace
+import com.hienlh.ppm.design.ChromeStrut
+import com.hienlh.ppm.design.ChromeText
+import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeTokens
+import com.hienlh.ppm.design.addChromeAtomic
+import com.hienlh.ppm.design.addChromeInline
 import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderInset
 import com.hienlh.ppm.design.cssBorderPx
+import com.hienlh.ppm.design.cssExact
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberCssExact
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -118,6 +118,12 @@ private fun HtmlFont.family(): FontFamily = when (this) {
     HtmlFont.SYSTEM_MONO -> FontFamily.Monospace
 }
 
+private fun HtmlFont.face(): ChromeFace = when (this) {
+    HtmlFont.SANS -> ChromeFace.Sans
+    HtmlFont.MONO -> ChromeFace.Mono
+    HtmlFont.SYSTEM_MONO -> ChromeFace.SystemMono
+}
+
 private fun HtmlStyle.decoration(): TextDecoration =
     TextDecoration.combine(listOfNotNull(TextDecoration.Underline.takeIf { underline }, TextDecoration.LineThrough.takeIf { lineThrough }))
 
@@ -128,7 +134,11 @@ private fun HtmlAlign.textAlign(): TextAlign = when {
     else -> TextAlign.Start
 }
 
-/** A block box, each child [HtmlBox.gap] below the one before; a summary opens and closes its details. */
+/**
+ * A block box, each child [HtmlBox.gap] below the one before; a summary opens and closes its details.
+ * Stacked as Chrome stacks blocks, in fractions of a pixel: at 2.625x a paragraph of three lines
+ * is 157.5 px and the 4 px under it 10.5, where whole pixels would put the next block one lower.
+ */
 @Composable
 internal fun HtmlFlow(box: FlowBox, drawing: HtmlDrawing, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
@@ -139,13 +149,16 @@ internal fun HtmlFlow(box: FlowBox, drawing: HtmlDrawing, modifier: Modifier = M
         outer = outer.ppmClickable(pressedColor = Color.Transparent, onClickLabel = if (opened) "Close" else "Open") { drawing.toggle(toggles, !opened) }
     }
     if (box.borderStart > 0f) outer = outer.cssBorder(tokens.border.color, width = box.borderStart.dp, sides = CssSides.Start)
-    val inner = Modifier.padding(start = box.paddingStart.dp, top = box.insetTop.dp, bottom = box.insetBottom.dp)
+    val inner = Modifier.padding(start = box.paddingStart.dp)
+    val gaps = remember(box) { box.children.map { it.gap.dp } }
+    val exact = rememberCssExact()
     val marker = box.marker
     if (marker == null) {
-        Column(outer.then(inner)) { HtmlChildren(box, drawing) }
+        CssColumn(outer.then(inner), top = box.insetTop.dp, bottom = box.insetBottom.dp, exact = exact, gaps = gaps) { HtmlChildren(box, drawing) }
     } else {
-        HtmlItem(marker, box.style, drawing, outer) {
-            Column(inner.fillMaxWidth()) { HtmlChildren(box, drawing) }
+        // The item's own box is as tall as its body, which the column around counts exactly.
+        HtmlItem(marker, box.style, drawing, outer.cssExact(exact)) {
+            CssColumn(inner.fillMaxWidth(), top = box.insetTop.dp, bottom = box.insetBottom.dp, exact = exact, gaps = gaps) { HtmlChildren(box, drawing) }
         }
     }
 }
@@ -154,7 +167,7 @@ internal fun HtmlFlow(box: FlowBox, drawing: HtmlDrawing, modifier: Modifier = M
 private fun HtmlChildren(box: FlowBox, drawing: HtmlDrawing) {
     // The reply's own blocks draw in layers of their own, so the block a streamed reply grows draws again alone.
     val layer = if (box.tag == null) Modifier.graphicsLayer() else Modifier
-    for (child in box.children) HtmlBoxView(child, drawing, Modifier.padding(top = child.gap.dp).then(layer))
+    for (child in box.children) HtmlBoxView(child, drawing, layer)
 }
 
 @Composable
@@ -192,7 +205,10 @@ private fun HtmlItem(marker: HtmlMarker, style: HtmlStyle, drawing: HtmlDrawing,
         val mark = measurables[1].measure(Constraints())
         val baseline = body[FirstBaseline]
         val y = if (baseline == AlignmentLine.Unspecified) 0 else baseline - mark[FirstBaseline]
-        layout(body.width, max(body.height, y + mark.height)) {
+        // A marker on the item's first line leaves the item as tall as its body: its own line,
+        // whole pixels, would make every item of 52.5 px a pixel taller and the list drift down.
+        val height = if (baseline == AlignmentLine.Unspecified) max(body.height, mark.height) else body.height
+        layout(body.width, height) {
             body.place(0, 0)
             mark.place(-mark.width, y)
         }
@@ -252,8 +268,15 @@ internal fun RichText.annotated(
             if (index == text.length) break
             val checked = checkboxes[index]
             when {
-                index == 0 && disclosure != null -> appendInlineContent(if (disclosure) OPEN_TRIANGLE else CLOSED_TRIANGLE, HTML_OBJECT.toString())
-                checked != null -> appendInlineContent(if (checked) CHECKED_BOX else UNCHECKED_BOX, HTML_OBJECT.toString())
+                index == 0 && disclosure != null -> {
+                    appendInlineContent(if (disclosure) OPEN_TRIANGLE else CLOSED_TRIANGLE, HTML_OBJECT.toString())
+                    // Shorter than the text's ascent, it never grows the line; counted all the same.
+                    addChromeAtomic(DISCLOSURE * block.size, length - 1, length)
+                }
+                checked != null -> {
+                    appendInlineContent(if (checked) CHECKED_BOX else UNCHECKED_BOX, HTML_OBJECT.toString())
+                    addChromeAtomic(CHECKBOX.toFloat(), length - 1, length)
+                }
                 else -> append(text[index])
             }
         }
@@ -263,6 +286,12 @@ internal fun RichText.annotated(
             val end = at[run.end - 1] + 1
             run.style.spanOver(block, base, tokens)?.let { addStyle(it, start, end) }
             if (run.style.dotted) addStringAnnotation(DOTTED, "${run.style.size};${run.style.font.name};${run.style.color.name}", start, end)
+            // Each inline box sizes the lines it is on from its own face and size, its line height
+            // the ratio the reply's text inherits; `sub` and `sup` have `line-height: 0`.
+            val style = run.style
+            if (style.font != block.font || style.size != block.size || style.shift != block.shift) {
+                addChromeInline(style.font.face(), style.size, if (style.shift != 0f) 0f else style.size * base.lineHeightRatio, start, end)
+            }
         }
         val edgeStyle = SpanStyle(fontFamily = PpmFonts.codeEdge, fontSize = edge)
         for (code in codes) {
@@ -326,7 +355,11 @@ private fun textStyle(block: HtmlStyle, base: MarkdownStyle, tokens: ThemeTokens
     )
 }
 
-/** A block's lines. */
+/**
+ * A block's lines, each line box as tall and each baseline where Chrome has them ([ChromeText]): a
+ * line holding an inline code or a checkbox grows by what its box reaches past the text's, and
+ * lines 52.5 px apart at 2.625x stay 52.5 apart.
+ */
 @Composable
 private fun HtmlLines(box: LinesBox, drawing: HtmlDrawing, modifier: Modifier) {
     val tokens = LocalPpmTokens.current
@@ -344,7 +377,6 @@ private fun HtmlLines(box: LinesBox, drawing: HtmlDrawing, modifier: Modifier) {
     val marks = remember(text) { text.getStringAnnotations(MARK, 0, text.length) }
     val drawn = codes.isNotEmpty() || dotted.isNotEmpty() || marks.isNotEmpty()
     val color = block.color.rgba(base, tokens).color
-    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val side = with(density) { CHECKBOX.dp.toSp() }
     val checkboxes = if (box.text.boxes.isEmpty()) emptyMap() else remember(side) { checkboxes(side) }
     val inline = if (box.text.disclosure == null) {
@@ -352,54 +384,36 @@ private fun HtmlLines(box: LinesBox, drawing: HtmlDrawing, modifier: Modifier) {
     } else {
         remember(checkboxes, block.size, color, density) { checkboxes + disclosures(with(density) { block.size.dp.toPx() }, color, density) }
     }
-    val style = textStyle(block, base, tokens)
-    val measurer = rememberTextMeasurer()
-    BasicText(
+    val strut = remember(block, base) { ChromeStrut(block.font.face(), block.size, block.size * base.lineHeightRatio) }
+    ChromeText(
         text,
-        modifier
-            .fillMaxWidth()
-            .then(if (checkboxes.isEmpty()) Modifier else Modifier.plainDepthUnderLastLine(measurer, style))
-            .then(
-                if (!drawn) {
-                    Modifier
-                } else {
-                    Modifier.drawBehind {
-                        val shown = layout ?: return@drawBehind
-                        drawMarks(shown, marks)
-                        drawCodeBoxes(shown, codes, tokens)
-                        drawDottedUnderlines(shown, files, color, fonts)
-                        for ((item, ranges) in dotted) {
-                            val (size, font, tint) = item.split(';')
-                            drawDottedUnderlines(shown, ranges, HtmlColor.valueOf(tint).rgba(base, tokens).color, fonts, size.toFloat(), HtmlFont.valueOf(font).family())
-                        }
-                    }
-                },
-            ),
-        style = style,
-        onTextLayout = { if (drawn) layout = it },
+        textStyle(block, base, tokens),
+        strut,
+        modifier.fillMaxWidth(),
         softWrap = block.whiteSpace != WhiteSpace.NOWRAP && block.whiteSpace != WhiteSpace.PRE,
         inlineContent = inline,
+        behind = if (!drawn) {
+            null
+        } else {
+            { lines ->
+                val shown = lines.result
+                drawMarks(shown, marks, lines::exactBaseline)
+                drawCodeBoxes(shown, codes, tokens, lines::exactBaseline)
+                drawDottedUnderlines(shown, files, color, fonts, lineBaseline = lines::baseline)
+                for ((item, ranges) in dotted) {
+                    val (size, font, tint) = item.split(';')
+                    drawDottedUnderlines(shown, ranges, HtmlColor.valueOf(tint).rgba(base, tokens).color, fonts, size.toFloat(), HtmlFont.valueOf(font).family(), lines::baseline)
+                }
+            }
+        },
     )
-}
-
-/**
- * Compose gives every line of a paragraph the ascent and descent it works out for the first one
- * (`LineHeightStyleSpan`), so a checkbox that makes the first line taller moves every baseline down
- * by as much and takes it off the last line's depth: a task wrapping onto a second line came out
- * 3 px short at 2x. Chrome grows that first line alone. The baselines already stand where Chrome's do,
- * so this gives the last one back the depth a line of plain text has under it.
- */
-private fun Modifier.plainDepthUnderLastLine(measurer: TextMeasurer, style: TextStyle): Modifier = layout { measurable, constraints ->
-    val lines = measurable.measure(constraints)
-    val plain = measurer.measure("x", style)
-    val depth = (plain.size.height - plain.firstBaseline).roundToInt()
-    val last = lines[LastBaseline]
-    val height = if (last == AlignmentLine.Unspecified) lines.height else max(lines.height, last + depth)
-    layout(lines.width, height) { lines.place(0, 0) }
 }
 
 /** A checkbox's side, CSS px: Chrome's on Android. */
 private const val CHECKBOX = 16
+
+/** A summary's disclosure triangle stands in a square this many ems on a side. */
+private const val DISCLOSURE = 0.66f
 
 private fun checkboxes(side: TextUnit): Map<String, InlineTextContent> {
     // `vertical-align: baseline`: an inline-block with no line in it stands its bottom on the baseline.
@@ -421,7 +435,7 @@ private fun checkboxes(side: TextUnit): Map<String, InlineTextContent> {
  * right) and the square is drawn at its own size.
  */
 private fun disclosures(fontPx: Float, color: Color, density: Density): Map<String, InlineTextContent> {
-    val side = 0.66f * fontPx
+    val side = DISCLOSURE * fontPx
     val advance = layoutUnit(side) + layoutUnit(0.4f * fontPx / density.density)
     val width = with(density) { (advance.roundToInt() - 0.01f).toSp() }
     val placeholder = Placeholder(width, with(density) { side.toSp() }, PlaceholderVerticalAlign.AboveBaseline)
@@ -463,9 +477,10 @@ private fun HtmlCheckbox(checked: Boolean) {
 
 /**
  * `mark`'s background: Chrome's `Mark` over the text's own box on each line, from the font's
- * ascent above the baseline to its descent below, as Chrome rounds them.
+ * ascent above the baseline to its descent below, as Chrome rounds them; [lineBaseline] says where
+ * each line's is, exactly, and each edge is snapped to its nearest pixel from there.
  */
-private fun DrawScope.drawMarks(layout: TextLayoutResult, marks: List<AnnotatedString.Range<String>>) {
+private fun DrawScope.drawMarks(layout: TextLayoutResult, marks: List<AnnotatedString.Range<String>>, lineBaseline: (Int) -> Float) {
     for (mark in marks) {
         val (ascent, descent) = PpmFonts.chromeAscentDescent(mark.item.toFloat().sp.toPx(), PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT)
         val first = layout.getLineForOffset(mark.start)
@@ -476,8 +491,9 @@ private fun DrawScope.drawMarks(layout: TextLayoutResult, marks: List<AnnotatedS
             if (end <= start) continue
             val left = layout.getBoundingBox(start).left
             val right = layout.getBoundingBox(end - 1).right
-            val baseline = layout.getLineBaseline(line)
-            drawRect(MARK_BACKGROUND, Offset(left, baseline - ascent), Size(right - left, ascent + descent))
+            val top = (lineBaseline(line) - ascent).roundToInt().toFloat()
+            val bottom = (lineBaseline(line) + descent).roundToInt().toFloat()
+            drawRect(MARK_BACKGROUND, Offset(left, top), Size(right - left, bottom - top))
         }
     }
 }
@@ -539,14 +555,16 @@ private fun HtmlCell(cell: TableCell, closesEnd: Boolean, closesBottom: Boolean,
                 if (closesBottom) drawRect(border, Offset(0f, size.height - line), Size(size.width, line))
             }
             .cssBorderInset(start = 1.dp, top = 1.dp, end = if (closesEnd) 1.dp else 0.dp, bottom = if (closesBottom) 1.dp else 0.dp)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 8.dp),
         contentAlignment = when (cell.valign) {
             CellAlign.TOP -> Alignment.TopStart
             CellAlign.MIDDLE -> Alignment.CenterStart
             CellAlign.BOTTOM -> Alignment.BottomStart
         },
     ) {
-        HtmlFlow(cell.box, drawing)
+        // The padding above and below counted with the lines, exactly: 10.5 px each at 2.625x,
+        // which padding would round to 11 and make every row a pixel taller than Chrome's.
+        CssColumn(top = 4.dp, bottom = 4.dp) { HtmlFlow(cell.box, drawing) }
     }
 }
 

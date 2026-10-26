@@ -139,9 +139,16 @@ internal fun Density.codeEdgePx(): Float = 4.dp.toPx() + cssBorderPx(1.dp)
  * `:not(pre) > code`'s box: the page's background, a 1px border rounded 4px, `padding: 0.125rem
  * 0.25rem`. Chrome draws one piece of it on each line the code runs over (`box-decoration-break:
  * slice`), with no border or rounding where it goes on, and above and below it reaches past the
- * code's own ascent and descent by its padding and border, as any inline box does.
+ * code's own ascent and descent by its padding and border, as any inline box does. Its top and
+ * bottom are snapped to the pixels nearest where they are exactly, from [lineBaseline]'s answer:
+ * a baseline drawn half a pixel low leaves the box's edges where they were.
  */
-internal fun DrawScope.drawCodeBoxes(layout: TextLayoutResult, boxes: List<AnnotatedString.Range<String>>, tokens: ThemeTokens) {
+internal fun DrawScope.drawCodeBoxes(
+    layout: TextLayoutResult,
+    boxes: List<AnnotatedString.Range<String>>,
+    tokens: ThemeTokens,
+    lineBaseline: (Int) -> Float = layout::getLineBaseline,
+) {
     val border = cssBorderPx(1.dp).toFloat()
     val size = INLINE_CODE_SIZE.sp.toPx()
     val (ascent, descent) = PpmFonts.chromeAscentDescent(size, PpmFonts.MONO_ASCENT, PpmFonts.MONO_DESCENT)
@@ -157,7 +164,7 @@ internal fun DrawScope.drawCodeBoxes(layout: TextLayoutResult, boxes: List<Annot
             val start = maxOf(box.start, layout.getLineStart(line))
             val end = minOf(box.end, layout.getLineEnd(line))
             val visible = minOf(end, maxOf(start, layout.getLineEnd(line, visibleEnd = true)))
-            val baseline = layout.getLineBaseline(line)
+            val baseline = lineBaseline(line)
             // A side is its edge's outer end, where Chrome's is. Spaces where the line breaks hang
             // inside the piece. Chrome snaps it to whole pixels.
             val left = if (line == first) layout.getBoundingBox(box.start).left else layout.getBoundingBox(start).left
@@ -201,6 +208,7 @@ internal fun DrawScope.drawDottedUnderlines(
     fonts: FontFamily.Resolver,
     size: Float = INLINE_CODE_SIZE,
     family: FontFamily = PpmFonts.mono,
+    lineBaseline: (Int) -> Float = layout::getLineBaseline,
 ) {
     if (codes.isEmpty()) return
     val css = maxOf(1f, size / 10f)
@@ -219,7 +227,7 @@ internal fun DrawScope.drawDottedUnderlines(
             val end = minOf(code.end, layout.getLineEnd(line, visibleEnd = true))
             if (end <= start) continue
             val right = layout.getBoundingBox(end - 1).right
-            val baseline = layout.getLineBaseline(line)
+            val baseline = lineBaseline(line)
             val top = (baseline + gap).roundToInt() + (dot - thickness) / 2
             // Chrome measures the ink against the line a stroke [dot] wide would cover, which sits
             // half a pixel up when its width truncates to an odd number, less half a pixel at the
