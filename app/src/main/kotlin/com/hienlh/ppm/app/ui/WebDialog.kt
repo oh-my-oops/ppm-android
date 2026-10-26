@@ -139,7 +139,8 @@ internal val DialogTitleStyle = ppmText(18f, FontWeight.SemiBold, lineHeight = 1
  * [widest] (`sm:max-w-lg`, or the caller's `sm:max-w-*`) and 16 in from each side,
  * `rounded-lg border bg-background p-6 shadow-lg`, the header (`DialogHeader`: [title] in
  * [titleStyle] and the [description] under it, `gap-2`, clear of the close cross) 16 over
- * [content]. A bare `border` is Tailwind 4's `currentColor`, the text's colour, as the web sets
+ * [content]; a null [title] is one read only to a screen reader (`sr-only`), which takes no room. A
+ * bare `border` is Tailwind 4's `currentColor`, the text's colour, as the web sets
  * no default border colour. It fades in and grows from 95%; it goes at once, as the web unmounts it.
  *
  * Radix gives the focus to the first thing in the card that takes it, and the cross comes after
@@ -148,7 +149,7 @@ internal val DialogTitleStyle = ppmText(18f, FontWeight.SemiBold, lineHeight = 1
  */
 @Composable
 internal fun WebDialog(
-    title: String,
+    title: String?,
     onDismiss: () -> Unit,
     widest: Dp = 512.dp,
     titleStyle: TextStyle = DialogTitleStyle,
@@ -203,10 +204,12 @@ internal fun WebDialog(
                 ) {
                     Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         // `flex flex-col gap-2 sm:text-left`, and `pr-8` for the cross.
-                        Column(Modifier.padding(end = 32.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            BasicText(title, Modifier.cssTightLines(titleStyle.fontSize.value, titleStyle.lineHeight.value), style = titleStyle.copy(color = tokens.text.color))
-                            // `DialogDescription`: `text-sm text-muted-foreground`.
-                            if (description != null) BasicText(description, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text2.color))
+                        if (title != null) {
+                            Column(Modifier.padding(end = 32.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                BasicText(title, Modifier.cssTightLines(titleStyle.fontSize.value, titleStyle.lineHeight.value), style = titleStyle.copy(color = tokens.text.color))
+                                // `DialogDescription`: `text-sm text-muted-foreground`.
+                                if (description != null) BasicText(description, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text2.color))
+                            }
                         }
                         content()
                     }

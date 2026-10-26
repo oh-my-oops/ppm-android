@@ -1357,7 +1357,9 @@ internal enum class WebSize { XS, SM, LG }
  * colour in the light, Tailwind 4's `currentColor`) or `ghost`, both `hover:bg-accent`; at `xs`
  * (`h-6 gap-1 px-2 text-xs`, a 12 px icon), `sm` (`h-8 gap-1.5 px-3`) or `lg` (`h-10 gap-2
  * px-6`), the padding `px-1.5`, `px-2.5` or `px-4` beside an icon. [content] is the colour an
- * outline or a ghost inherits, [hoverContent] what a mouse turns it to.
+ * outline or a ghost inherits, [hoverContent] what a mouse turns it to. [iconSize] is an icon's
+ * own `size-*`; a [spinning] icon is wrapped in a span (`fluentIcon`), which `has-[>svg]:` does
+ * not see, so the button keeps the padding it has without one.
  */
 @Composable
 internal fun ReviewButton(
@@ -1371,6 +1373,8 @@ internal fun ReviewButton(
     content: Rgba? = null,
     hoverContent: Rgba? = null,
     enabled: Boolean = true,
+    iconSize: Dp? = null,
+    spinning: Boolean = false,
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
@@ -1391,13 +1395,13 @@ internal fun ReviewButton(
         WebVariant.OUTLINE -> if (dark) tokens.border.opacity(0.3 + 0.2 * lit) else tokens.panel2.mix(tokens.bgSolid, lit)
         WebVariant.GHOST -> tokens.panel2.opacity(if (dark) 0.5 * lit else lit)
     }
-    val withIcon = icon != null || trailingIcon != null
+    val withIcon = (icon != null && !spinning) || trailingIcon != null
     val pad = when (size) {
         WebSize.XS -> if (withIcon) 6.dp else 8.dp
         WebSize.SM -> if (withIcon) 10.dp else 12.dp
         WebSize.LG -> if (withIcon) 16.dp else 24.dp
     }
-    val iconSize = if (size == WebSize.XS) 12.dp else 16.dp
+    val glyph = iconSize ?: if (size == WebSize.XS) 12.dp else 16.dp
     val text = if (size == WebSize.XS) ppmText(12f, FontWeight.Medium, lineHeight = 16f) else ppmText(14f, FontWeight.Medium, lineHeight = 20f)
     Row(
         modifier
@@ -1420,9 +1424,9 @@ internal fun ReviewButton(
             Alignment.CenterHorizontally,
         ),
     ) {
-        icon?.let { PpmIcon(it, iconSize, ink.color) }
+        icon?.let { PpmIcon(it, glyph, ink.color, spinning = spinning) }
         BasicText(label, style = text.copy(color = ink.color), maxLines = 1, softWrap = false)
-        trailingIcon?.let { PpmIcon(it, iconSize, ink.color) }
+        trailingIcon?.let { PpmIcon(it, glyph, ink.color) }
     }
 }
 

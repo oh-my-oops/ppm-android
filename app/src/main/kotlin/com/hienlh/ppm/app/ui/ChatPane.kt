@@ -710,7 +710,7 @@ private fun ChatToolbar(
             Row(Modifier.padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 ReloadButton(state.connected) { chat.reloadChat() }
                 // Its actions are a session's.
-                tab.session?.let { OverflowButton(model, it) }
+                tab.session?.let { OverflowButton(model, tab, it, state) }
             }
         }
     }
@@ -887,13 +887,18 @@ private fun ReloadButton(connected: Boolean, reload: () -> Unit) {
 
 /**
  * Session actions that do not earn a place of their own (`chat-toolbar-overflow-menu.tsx`),
- * `hover:text-text-secondary hover:bg-surface-elevated`.
+ * `hover:text-text-secondary hover:bg-surface-elevated`. Its rows are `max-md:py-3`. Logs are not
+ * in the app yet, so "Show logs for this chat" says so.
  */
 @Composable
-private fun OverflowButton(model: AppModel, session: SessionInfo) {
+private fun OverflowButton(model: AppModel, tab: ChatTab, session: SessionInfo, state: ChatState) {
     val tokens = LocalPpmTokens.current
     val unread = model.unreadSessions()[session.id] != null
     var open by remember { mutableStateOf(false) }
+    // Held here rather than by the menu, which goes as soon as an item is picked.
+    var debugOpen by remember { mutableStateOf(false) }
+    // `max-md:py-3`; the icons are `size-3.5` with no `mr-2` of their own.
+    val rows = if (LocalPpmMobile.current) 12.dp else 6.dp
     val hover = rememberHover()
     Box(
         Modifier
@@ -909,15 +914,27 @@ private fun OverflowButton(model: AppModel, session: SessionInfo) {
                     MenuItem("Mark as read", onClick = {
                         open = false
                         model.markRead(session.id)
-                    }, icon = { MenuIcon(ProductIcon.BellOff, tokens.warning) }, vertical = 12.dp)
+                    }, icon = { MenuIcon(ProductIcon.BellOff, tokens.warning) }, vertical = rows, iconEnd = 0.dp)
                 } else {
                     MenuItem("Mark as unread", onClick = {
                         open = false
                         model.markUnread(model.sessions.firstOrNull { it.id == session.id } ?: session)
-                    }, icon = { MenuIcon(ProductIcon.Circle, tokens.accent) }, vertical = 12.dp)
+                    }, icon = { MenuIcon(ProductIcon.Circle, tokens.accent) }, vertical = rows, iconEnd = 0.dp)
                 }
+                MenuItem("Session debug info", onClick = {
+                    open = false
+                    debugOpen = true
+                }, icon = { MenuIcon(ProductIcon.Bug) }, vertical = rows, iconEnd = 0.dp)
+                MenuItem("Show logs for this chat", onClick = {
+                    open = false
+                    model.toast = ErrorToastMessage("Logs are not in the Android app yet.", kind = ErrorToastMessage.Kind.PLAIN)
+                }, icon = { MenuIcon(ProductIcon.ScrollText) }, vertical = rows, iconEnd = 0.dp)
             }
         }
+    }
+    if (debugOpen) {
+        val items by rememberUpdatedState(state.items.size + if (state.live != null) 1 else 0)
+        SessionDebugDialog(model, tab.project, session.id, messageCount = { items }) { debugOpen = false }
     }
 }
 
