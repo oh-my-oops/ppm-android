@@ -249,6 +249,9 @@ internal fun breakMark(text: CharSequence, i: Int, codeEnd: Boolean = false, cod
     }
 }
 
+/** [breakMark] for a textarea's text, which wraps as a `pre-wrap` message does: the mark before [text]`[i]`. */
+fun textareaBreakMark(text: CharSequence, i: Int): Char? = breakMark(text, i)
+
 /** [text] with [breakMark]'s marks in it, for Android to end its lines where Chrome ends them. */
 internal fun chromeBreaks(text: String): String = buildString(text.length + 8) {
     for (i in text.indices) {

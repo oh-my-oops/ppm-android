@@ -9,6 +9,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.input.OutputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.verticalScroll
@@ -60,6 +61,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import java.text.BreakIterator
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -80,9 +82,22 @@ import kotlin.math.min
  * [selectionColors] (through `LocalTextSelectionColors`), [brush], [onTextLayout], [interactions]
  * and [fieldScroll], sits on [Modifier.chromeTextArea], and its decorator holds the inner field in
  * [ChromeTextAreaBox].
+ *
+ * Android's line breaker ends lines where Blink's would not (after the `/` inside a path) and
+ * keeps whole what Blink breaks, so a field handed [marks] — the invisible mark a line breaker
+ * needs before a character, if any — lays its text out with them in, through its
+ * [outputTransformation]: what is edited, copied and told the IME holds none of them.
  */
 @Stable
-class ChromeTextArea internal constructor(internal val state: TextFieldState, internal val caret: ChromeCaret) {
+class ChromeTextArea internal constructor(
+    internal val state: TextFieldState,
+    internal val caret: ChromeCaret,
+    private val marks: ((CharSequence, Int) -> Char?)?,
+) {
+    init {
+        caret.toLayout = ::toLayout
+    }
+
     val interactions: MutableInteractionSource get() = caret.interactions
     val brush: Brush get() = caret.brush
     val onTextLayout: Density.(getResult: () -> TextLayoutResult?) -> Unit get() = caret.onTextLayout
@@ -111,6 +126,62 @@ class ChromeTextArea internal constructor(internal val state: TextFieldState, in
 
     /** What the field draws its selection in: nothing, as this draws it; the handles as [colors] has them. */
     fun selectionColors(colors: TextSelectionColors) = TextSelectionColors(colors.handleColor, Color.Transparent)
+
+    /**
+     * The field's text laid out with its marks in; for its BasicTextField. Each mark replaces the
+     * character before it with that character and the mark: Compose stops a caret on both sides of
+     * text only inserted, so an arrow key would seem to do nothing at every mark, where it moves a
+     * caret over a replacement in one step. The whole character, or a caret moved back over it
+     * would land inside an emoji.
+     */
+    val outputTransformation: OutputTransformation? = marks?.let { mark ->
+        OutputTransformation {
+            val text = toString()
+            val characters = BreakIterator.getCharacterInstance().apply { setText(text) }
+            // From the end, so each mark leaves where the ones before it go as it found them.
+            for (i in text.length - 1 downTo 1) mark(text, i)?.let {
+                val from = characters.preceding(i)
+                replace(from, i, text.substring(from, i) + it)
+            }
+        }
+    }
+
+    private var markedFrom: CharSequence? = null
+    private var markedText: MarkedText? = null
+
+    /** [text], the field's, with its marks in, as the field lays it out; null with none to put in. */
+    internal fun marked(text: CharSequence): MarkedText? {
+        val mark = marks ?: return null
+        if (text !== markedFrom) {
+            markedText = markText(text, mark)
+            markedFrom = text
+        }
+        return markedText
+    }
+
+    /** Where [offset] into the field's text is in the text laid out. */
+    internal fun toLayout(offset: Int): Int = marked(state.text)?.toLayout(offset) ?: offset
+}
+
+/** A text with marks put in it ([text]), and where each character of the text it was made from went ([at]). */
+internal class MarkedText(val text: String, private val at: IntArray) {
+    /**
+     * Where [offset] into the unmarked text is in [text]: past the marks before it, so a wrap a
+     * mark makes puts it on the next line, as Chrome's caret goes.
+     */
+    fun toLayout(offset: Int): Int = if (offset >= at.size) text.length else at[max(0, offset)]
+}
+
+/** [text] with what [mark] gives before each character put in. */
+internal fun markText(text: CharSequence, mark: (CharSequence, Int) -> Char?): MarkedText {
+    val at = IntArray(text.length)
+    val out = StringBuilder(text.length + 8)
+    for (i in text.indices) {
+        if (i > 0) mark(text, i)?.let { out.append(it) }
+        at[i] = out.length
+        out.append(text[i])
+    }
+    return MarkedText(out.toString(), at)
 }
 
 /** How long after a pointer lifts from the field a focus it gains is still that pointer's. */
@@ -163,12 +234,19 @@ internal fun chromeRevealScroll(top: Float, bottom: Float, scroll: Int, view: In
  * the caret ([rememberChromeCaret]). While the field has focus, a caret moved or text typed scrolls
  * it as Chrome scrolls it, and so does a focus given by anything but a pointer on the field: Chrome's
  * `focus()` reveals the selection it restores, so text handed to the box to edit shows its end. The
- * text it opens with is shown from its top, as the web shows a draft.
+ * text it opens with is shown from its top, as the web shows a draft. [marks] gives the mark that
+ * goes before a character of the text for it to wrap where Chrome wraps it ([ChromeTextArea]).
  */
 @Composable
-fun rememberChromeTextArea(state: TextFieldState, style: TextStyle, padding: Dp, cssStart: Dp = 0.dp): ChromeTextArea {
+fun rememberChromeTextArea(
+    state: TextFieldState,
+    style: TextStyle,
+    padding: Dp,
+    cssStart: Dp = 0.dp,
+    marks: ((CharSequence, Int) -> Char?)? = null,
+): ChromeTextArea {
     val caret = rememberChromeCaret(state, style, multiline = true, cssStart = cssStart)
-    val area = remember(caret) { ChromeTextArea(state, caret) }
+    val area = remember(caret, marks) { ChromeTextArea(state, caret, marks) }
     val density = LocalDensity.current
     val focused by caret.interactions.collectIsFocusedAsState()
     val focusedNow by rememberUpdatedState(focused)
@@ -181,9 +259,11 @@ fun rememberChromeTextArea(state: TextFieldState, style: TextStyle, padding: Dp,
         var wasFocused = false
         snapshotFlow {
             val result = area.result
-            val text = state.text.toString()
+            val current = state.text
+            val text = current.toString()
+            val marked = area.marked(current)
             // Once the text is laid out: the caret's line is in the layout of the text it is in.
-            if (result == null || result.layoutInput.text.text != text) null else LaidOut(state.selection, text, result, focusedNow)
+            if (result == null || result.layoutInput.text.text != (marked?.text ?: text)) null else LaidOut(state.selection, text, result, focusedNow, marked)
         }.collect { laid ->
             if (laid == null) return@collect
             val before = seen
@@ -194,7 +274,8 @@ fun rememberChromeTextArea(state: TextFieldState, style: TextStyle, padding: Dp,
             val moved = before != null && before != seen
             if (!moved && !(gained && !area.pointerFocus(SystemClock.uptimeMillis()))) return@collect
             val lines = with(density) { chromeAreaLines(area.style, area.padding) }
-            val top = lines.top(laid.result.getLineForOffset(laid.selection.end.coerceIn(0, laid.text.length))) + lines.caretTop
+            val end = laid.selection.end.coerceIn(0, laid.text.length).let { laid.marked?.toLayout(it) ?: it }
+            val top = lines.top(laid.result.getLineForOffset(end)) + lines.caretTop
             val scroll = area.scroll
             scroll.scrollTo(chromeRevealScroll(top, top + lines.caretHeight, scroll.value, scroll.viewportSize, scroll.maxValue))
         }
@@ -202,7 +283,7 @@ fun rememberChromeTextArea(state: TextFieldState, style: TextStyle, padding: Dp,
     return area
 }
 
-private data class LaidOut(val selection: TextRange, val text: String, val result: TextLayoutResult, val focused: Boolean)
+private data class LaidOut(val selection: TextRange, val text: String, val result: TextLayoutResult, val focused: Boolean, val marked: MarkedText?)
 
 /**
  * The field's box as a [CssRow] or [CssColumn] counts it, outermost on the BasicTextField: the
@@ -358,12 +439,14 @@ private fun DrawScope.drawArea(area: ChromeTextArea, hint: TextLayoutResult?, sp
         val selected = arrayOfNulls<Rect>(last - first + 1)
         if (!selection.collapsed) {
             val text = result.layoutInput.text
+            val low = area.toLayout(selection.min)
+            val high = area.toLayout(selection.max)
             for (line in first..last) {
                 val end = result.getLineEnd(line)
-                val from = max(selection.min, result.getLineStart(line))
-                val to = min(selection.max, end)
+                val from = max(low, result.getLineStart(line))
+                val to = min(high, end)
                 if (from >= to) continue
-                val broken = line < count - 1 && to == end && (text[end - 1] == '\n' || selection.max > end)
+                val broken = line < count - 1 && to == end && (text[end - 1] == '\n' || high > end)
                 val left = floor(start + result.chromeX(line, from, space) + 0.5f)
                 val right = floor(start + result.chromeX(line, to, space) + (if (broken) space else 0f) + 0.5f)
                 // Each line's from where its top rounds to, its height rounded on its own (46 px at

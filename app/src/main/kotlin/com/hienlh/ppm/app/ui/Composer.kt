@@ -117,6 +117,7 @@ import com.hienlh.ppm.chat.ReplyCard
 import com.hienlh.ppm.chat.sky400
 import com.hienlh.ppm.chat.sky500
 import com.hienlh.ppm.chat.sky600
+import com.hienlh.ppm.chat.textareaBreakMark
 import com.hienlh.ppm.design.ChromeTextAreaBox
 import com.hienlh.ppm.design.CssAlign
 import com.hienlh.ppm.design.CssColumn
@@ -453,8 +454,8 @@ private fun ComposerField(
 ) {
     val tokens = LocalPpmTokens.current
     val inputStyle = style.copy(color = tokens.text.color)
-    // Its lines, caret and scroll drawn as Chrome draws a textarea's.
-    val area = rememberChromeTextArea(tab.draft, inputStyle, padding, cssStart)
+    // Its lines, caret and scroll drawn as Chrome draws a textarea's, wrapped where it wraps them.
+    val area = rememberChromeTextArea(tab.draft, inputStyle, padding, cssStart, marks = ::textareaBreakMark)
     val selectionColors = LocalTextSelectionColors.current
     val context = LocalContext.current
     var focused by remember { mutableStateOf(false) }
@@ -517,6 +518,7 @@ private fun ComposerField(
                     }
                 }
             },
+            outputTransformation = area.outputTransformation,
             enabled = enabled,
             textStyle = inputStyle.copy(color = Color.Transparent),
             cursorBrush = area.brush,

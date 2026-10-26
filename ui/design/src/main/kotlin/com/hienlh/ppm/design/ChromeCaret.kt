@@ -68,6 +68,9 @@ class ChromeCaret internal constructor(private val state: TextFieldState, privat
     internal var shown by mutableStateOf(false)
     internal var lit by mutableStateOf(true)
 
+    /** Where an offset into the field's text is in the text laid out, which a [ChromeTextArea] marks. */
+    internal var toLayout: (Int) -> Int = { it }
+
     /**
      * Draws the caret; given [lineTop] — where a line exactly starts in this box, as a
      * [ChromeTextArea] stacks them — it stands on that line, its edges each rounded.
@@ -75,7 +78,7 @@ class ChromeCaret internal constructor(private val state: TextFieldState, privat
     internal fun DrawScope.drawCaret(lineTop: ((Int) -> Float)? = null) {
         if (!shown || !lit || !state.selection.collapsed) return
         val result = layout?.invoke() ?: return
-        val offset = state.selection.start.coerceIn(0, result.layoutInput.text.length)
+        val offset = toLayout(state.selection.start).coerceIn(0, result.layoutInput.text.length)
         val line = result.getLineForOffset(offset)
         val width = 1.dp.toPx()
         val scrolled = scroll.value.toFloat()
