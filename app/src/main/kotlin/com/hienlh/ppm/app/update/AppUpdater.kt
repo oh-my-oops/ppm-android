@@ -1,12 +1,17 @@
 package com.hienlh.ppm.app.update
 
-import android.content.ActivityNotFoundException
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.IntentSender
 import android.content.pm.PackageInfo
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.os.Build
-import androidx.core.content.FileProvider
+import androidx.core.content.ContextCompat
+import androidx.core.content.IntentCompat
 import androidx.core.content.pm.PackageInfoCompat
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.BuildConfig
@@ -28,9 +33,9 @@ import java.io.IOException
 /**
  * Keeps the app up to date from GitHub Releases ([AppReleases]): looks when the app opens and once
  * a day after, offers a newer version in a toast, and on Update downloads it, makes sure it is this
- * app, newer and signed with this app's key, then opens Android's installer on it. The installer
- * asks before it installs, and first sends the user to "Install unknown apps" when PPM may not
- * install apps yet.
+ * app, newer and signed with this app's key, then hands it to Android's installer with its Baseline
+ * Profile, so that Android compiles the update as it installs it. The installer asks before it
+ * installs, and first sends the user to "Install unknown apps" when PPM may not install apps yet.
  */
 class AppUpdater(private val context: Context, private val model: AppModel) {
     private val prefs = PrefsStore(context, "ppm_updates")
@@ -41,8 +46,11 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
     /** The toast this updater shows last, so it takes back only its own. */
     private var shown: ErrorToastMessage? = null
 
-    /** The update the installer was last opened on, while this run of the app has not seen it installed. */
-    private var opened: Pair<AppRelease, File>? = null
+    /** The update handed to the installer, while this run of the app has not heard how that ended. */
+    private var pending: Pair<AppRelease, Update>? = null
+
+    /** A downloaded update: the APK, and the profile Android compiles it with when there is one. */
+    private class Update(val apk: File, val profile: File?)
 
     init {
         // An app left open for days, on a tablet kept awake, still looks once a day.
@@ -52,15 +60,23 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
                 checkIfDue()
             }
         }
+        ContextCompat.registerReceiver(
+            context,
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) = installStatus(intent)
+            },
+            IntentFilter(INSTALL_STATUS),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
     }
 
     /** The app came to the front. */
     fun becameActive() {
         // Back without the update, from Android's "Install unknown apps" page say, which takes the
         // installer away with it: one tap opens it again.
-        opened?.let { (release, file) ->
-            opened = null
-            show(ready(release, file))
+        pending?.let { (release, update) ->
+            pending = null
+            show(ready(release, update))
         }
         checkIfDue()
     }
@@ -110,7 +126,7 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
         job = model.scope.launch {
             // Done with, its own file deleted, before this one is written in its place.
             previous?.cancelAndJoin()
-            val file = File(dir, "ppm-android-${release.version}.apk")
+            val apk = File(dir, "ppm-android-${release.version}.apk")
             val cancel = ErrorToastMessage.Action("Cancel") { job?.cancel() }
             fun progress(percent: Int?) = ErrorToastMessage(
                 "Downloading the update",
@@ -123,7 +139,7 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
                 withContext(Dispatchers.IO) { dir.deleteRecursively() }
                 show(progress(null))
                 var percent: Int? = null
-                AppReleases.download(release, file) { share ->
+                AppReleases.download(release, apk) { share ->
                     val now = (share * 100).toInt()
                     if (now != percent) {
                         percent = now
@@ -131,15 +147,16 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
                         withContext(Dispatchers.Main) { if (model.toast === shown) show(progress(now)) }
                     }
                 }
-                val refusal = withContext(Dispatchers.IO) { refusal(file) }
+                val refusal = withContext(Dispatchers.IO) { refusal(apk) }
                 if (refusal != null) {
-                    file.delete()
+                    apk.delete()
                     show(ErrorToastMessage("Update failed", refusal, persistent = true))
                     return@launch
                 }
+                val update = Update(apk, profile(release))
                 hide()
                 // Android opens no window for an app that is not in front: the update waits there.
-                if (model.windowVisible) install(release, file) else show(ready(release, file))
+                if (model.windowVisible) install(release, update) else show(ready(release, update))
             } catch (error: CancellationException) {
                 hide()
                 throw error
@@ -148,6 +165,28 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
                 // a toast that timed out there would never have been seen: this one waits.
                 val reason = if (model.windowVisible) error.message else "The download stopped while PPM was in the background."
                 show(ErrorToastMessage("Update failed", reason, ErrorToastMessage.Action("Retry") { update(release) }, persistent = true))
+            }
+        }
+    }
+
+    /**
+     * [release]'s Baseline Profile for this device, or null when it has none or it cannot be had:
+     * the update installs all the same, and Android compiles it when the device is next idle.
+     */
+    private suspend fun profile(release: AppRelease): File? {
+        val profile = release.profileFor(Build.VERSION.SDK_INT) ?: return null
+        val file = File(dir, "ppm-android-${release.version}.dm")
+        try {
+            AppReleases.download(profile, file)
+        } catch (_: IOException) {
+            return null
+        }
+        return withContext(Dispatchers.IO) {
+            if (isProfileOnly(file)) {
+                file
+            } else {
+                file.delete()
+                null
             }
         }
     }
@@ -167,26 +206,97 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
         }
     }
 
-    private fun ready(release: AppRelease, file: File) = ErrorToastMessage(
+    private fun ready(release: AppRelease, update: Update) = ErrorToastMessage(
         "Update downloaded",
         "PPM for Android v${release.version}",
-        ErrorToastMessage.Action("Install") { install(release, file) },
+        ErrorToastMessage.Action("Install") { installLater(release, update) },
         ErrorToastMessage.Kind.INFO,
         persistent = true,
     )
 
-    private fun install(release: AppRelease, file: File) {
+    /** [install], from a toast's button. */
+    private fun installLater(release: AppRelease, update: Update) {
+        val previous = job
+        job = model.scope.launch {
+            previous?.cancelAndJoin()
+            install(release, update)
+        }
+    }
+
+    private suspend fun install(release: AppRelease, update: Update) {
         // Android may have cleared the cache it was downloaded to since.
-        if (!file.exists()) return update(release)
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.images", file)
-        val intent = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, "application/vnd.android.package-archive")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (!update.apk.exists()) return update(release)
+        // Before the commit: the installer may answer before this coroutine is back on its thread.
+        pending = release to update
         try {
-            context.startActivity(intent)
-            opened = release to file
-        } catch (_: ActivityNotFoundException) {
-            show(ErrorToastMessage("Update failed", "This device has no app that installs APKs.", persistent = true))
+            withContext(Dispatchers.IO) { commit(update) }
+        } catch (error: IOException) {
+            pending = null
+            val reason = error.message ?: "Android's installer did not take the update."
+            show(ErrorToastMessage("Update failed", reason, ErrorToastMessage.Action("Retry") { installLater(release, update) }, persistent = true))
+        }
+    }
+
+    /** Writes [update] into an install session and commits it; the installer answers [installStatus]. */
+    private fun commit(update: Update) {
+        val installer = context.packageManager.packageInstaller
+        // What an earlier try left open would otherwise wait there until Android drops it.
+        for (session in installer.mySessions) installer.abandonSession(session.sessionId)
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+        params.setAppPackageName(context.packageName)
+        val id = installer.createSession(params)
+        try {
+            installer.openSession(id).use { session ->
+                session.write("base.apk", update.apk)
+                // Android takes the dex metadata named as the APK is as that APK's profile.
+                update.profile?.takeIf { it.exists() }?.let { session.write("base.dm", it) }
+                session.commit(statusTarget(id))
+            }
+        } catch (error: Throwable) {
+            installer.abandonSession(id)
+            throw error
+        }
+    }
+
+    private fun PackageInstaller.Session.write(name: String, file: File) {
+        openWrite(name, 0, file.length()).use { output ->
+            file.inputStream().use { it.copyTo(output) }
+            fsync(output)
+        }
+    }
+
+    private fun statusTarget(id: Int): IntentSender {
+        val intent = Intent(INSTALL_STATUS).setPackage(context.packageName)
+        // Mutable: the installer writes how the install went into it.
+        val mutable = if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
+        return PendingIntent.getBroadcast(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or mutable).intentSender
+    }
+
+    /** How the install of [pending] is going, as the installer tells it. */
+    private fun installStatus(intent: Intent) {
+        val (release, update) = pending ?: return
+        val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
+        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+            val confirm = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)
+            // Android opens no window for an app that is not in front: the update waits there.
+            if (confirm != null && model.windowVisible) {
+                context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } else {
+                pending = null
+                show(ready(release, update))
+            }
+            return
+        }
+        pending = null
+        when (status) {
+            // Seldom heard: installing the update ends this process.
+            PackageInstaller.STATUS_SUCCESS -> Unit
+            // Turned down in the installer's window: one tap asks again.
+            PackageInstaller.STATUS_FAILURE_ABORTED -> show(ready(release, update))
+            else -> {
+                val reason = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Android did not install the update."
+                show(ErrorToastMessage("Update failed", reason, ErrorToastMessage.Action("Retry") { installLater(release, update) }, persistent = true))
+            }
         }
     }
 
@@ -203,6 +313,9 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
     private companion object {
         const val HOUR = 60 * 60 * 1000L
         const val DAY = 24 * HOUR
+
+        /** The broadcast the installer answers an install session with. */
+        const val INSTALL_STATUS = "com.hienlh.ppm.app.update.INSTALL_STATUS"
 
         @Suppress("DEPRECATION")
         val SIGNERS = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES

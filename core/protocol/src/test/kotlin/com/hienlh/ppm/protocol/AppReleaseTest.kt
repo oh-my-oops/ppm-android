@@ -40,6 +40,29 @@ class AppReleaseTest {
     }
 
     @Test
+    fun `a device gets the profile in the newest format it reads, and none without a digest`() {
+        fun profile(name: String, digest: Boolean = true) =
+            """{"name":"$name","size":13497,"browser_download_url":"https://x/$name"""" +
+                (if (digest) ""","digest":"sha256:${"cd".repeat(32)}"""" else "") + "}"
+        val assets = listOf(
+            APK,
+            profile("ppm-android-0.1.9.api28.dm"),
+            profile("ppm-android-0.1.9.api31.dm"),
+            profile("ppm-android-0.1.9.api33.dm", digest = false),
+            profile("ppm-android-0.1.9.dm"),
+        ).joinToString(",")
+        val release = AppRelease.newest(WireJson.parse("[" + release("android-v0.1.9", assets = assets) + "]"))!!
+        assertEquals(listOf(28, 31), release.profiles.map { it.minApi })
+        assertNull(release.profileFor(27))
+        assertEquals("https://x/ppm-android-0.1.9.api28.dm", release.profileFor(28)?.url)
+        assertEquals(28, release.profileFor(30)?.minApi)
+        assertEquals(31, release.profileFor(31)?.minApi)
+        assertEquals(31, release.profileFor(37)?.minApi)
+        assertEquals("cd".repeat(32), release.profileFor(37)?.sha256)
+        assertEquals(13497L, release.profileFor(37)?.size)
+    }
+
+    @Test
     fun `versions compare as the web's compareSemver does`() {
         assertTrue(compareVersions("0.1.10", "0.1.9") > 0)
         assertTrue(compareVersions("1.0.0", "0.99.99") > 0)

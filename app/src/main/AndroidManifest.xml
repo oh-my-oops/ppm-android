@@ -4,7 +4,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- The chat mic: asked for the first time it is pressed. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- Opening Android's installer on an update downloaded from GitHub Releases. Android still
+    <!-- Handing Android's installer an update downloaded from GitHub Releases. Android still
          asks the user to let PPM install apps ("Install unknown apps") before the first one. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
@@ -53,8 +53,8 @@
                 <data android:scheme="ppm" />
             </intent-filter>
         </activity>
-        <!-- Hands a picture copied in the lightbox to the app it is pasted into, the camera the
-             file to write a photo for the message box into, and the installer an update. -->
+        <!-- Hands a picture copied in the lightbox to the app it is pasted into, and the camera the
+             file to write a photo for the message box into. -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.images"

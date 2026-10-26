@@ -37,13 +37,19 @@ object AppReleases {
      * known; throws [IOException] when the download fails or its bytes are not the ones GitHub's
      * digest names, leaving no file behind.
      */
-    suspend fun download(release: AppRelease, file: File, onProgress: suspend (Float) -> Unit) {
-        val request = Request.Builder().url(release.apkUrl).build()
+    suspend fun download(release: AppRelease, file: File, onProgress: suspend (Float) -> Unit) =
+        download(release.apkUrl, release.apkSize, release.sha256, file, onProgress)
+
+    /** Writes [profile] to [file], as [download] writes the APK. */
+    suspend fun download(profile: AppRelease.Profile, file: File) = download(profile.url, profile.size, profile.sha256, file) {}
+
+    private suspend fun download(url: String, size: Long?, sha256: String?, file: File, onProgress: suspend (Float) -> Unit) {
+        val request = Request.Builder().url(url).build()
         try {
             PpmHttp.client.newCall(request).await().use { response ->
                 if (!response.isSuccessful) throw IOException("The download answered ${response.code}.")
                 withContext(Dispatchers.IO) {
-                    val total = response.body.contentLength().takeIf { it > 0 } ?: release.apkSize
+                    val total = response.body.contentLength().takeIf { it > 0 } ?: size
                     val digest = MessageDigest.getInstance("SHA-256")
                     val buffer = ByteArray(64 * 1024)
                     var done = 0L
@@ -61,8 +67,8 @@ object AppReleases {
                             }
                         }
                     }
-                    val sha256 = digest.digest().joinToString("") { "%02x".format(it) }
-                    if (release.sha256 != null && sha256 != release.sha256) throw IOException("The download does not match the release.")
+                    val got = digest.digest().joinToString("") { "%02x".format(it) }
+                    if (sha256 != null && got != sha256) throw IOException("The download does not match the release.")
                 }
             }
         } catch (error: Throwable) {

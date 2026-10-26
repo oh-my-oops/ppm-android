@@ -75,5 +75,27 @@ class AppReleasesTest {
         }
     }
 
+    @Test
+    fun `a profile is kept only when its bytes are the release's`() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse.Builder().body(Buffer().write(apk)).build())
+        server.enqueue(MockResponse.Builder().body(Buffer().write(apk)).build())
+        server.start()
+        val file = File.createTempFile("update", ".dm")
+        try {
+            AppReleases.download(AppRelease.Profile(31, server.url("/ppm.api31.dm").toString(), null, sha256), file)
+            assertArrayEquals(apk, file.readBytes())
+            try {
+                AppReleases.download(AppRelease.Profile(31, server.url("/ppm.api31.dm").toString(), null, "0".repeat(64)), file)
+                fail("a profile that does not match its digest must throw")
+            } catch (error: IOException) {
+                assertFalse(file.exists())
+            }
+        } finally {
+            file.delete()
+            server.close()
+        }
+    }
+
     private fun release(url: String, sha256: String) = AppRelease("0.1.1", url, apk.size.toLong(), sha256, "", null)
 }

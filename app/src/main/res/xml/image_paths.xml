@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- What the images provider may hand out: the picture last copied in the lightbox, the file
-     the camera is told to write a photo for the message box into, and an update's APK. -->
+<!-- What the images provider may hand out: the picture last copied in the lightbox, and the file
+     the camera is told to write a photo for the message box into. -->
 <paths>
     <cache-path name="clipboard" path="clipboard/" />
     <cache-path name="camera" path="camera/" />
-    <cache-path name="updates" path="updates/" />
 </paths>
