@@ -919,40 +919,6 @@ private class CssHeightNode(var height: Dp) : Modifier.Node(), LayoutModifierNod
 }
 
 /**
- * A text field's box: [padding] above and below lines [lineHeight] CSS px apart, held to [max]. A
- * [CssRow] or [CssColumn] counts it at the padding and its lines exactly — 31.5 + 60 px a line on
- * a phone, where Compose rounds the padding to 16 — and at [max] once it reaches that.
- */
-fun Modifier.cssFieldLines(padding: Dp, lineHeight: Float, max: Dp): Modifier = this then CssFieldLinesElement(padding, lineHeight, max)
-
-private data class CssFieldLinesElement(val padding: Dp, val lineHeight: Float, val max: Dp) : ModifierNodeElement<CssFieldLinesNode>() {
-    override fun create() = CssFieldLinesNode(padding, lineHeight, max)
-
-    override fun update(node: CssFieldLinesNode) {
-        if (node.padding == padding && node.lineHeight == lineHeight && node.max == max) return
-        node.padding = padding
-        node.lineHeight = lineHeight
-        node.max = max
-        node.invalidateMeasurement()
-    }
-}
-
-private class CssFieldLinesNode(var padding: Dp, var lineHeight: Float, var max: Dp) : Modifier.Node(), LayoutModifierNode, ParentDataModifierNode {
-    private val exact = CssExact()
-
-    override fun Density.modifyParentData(parentData: Any?): Any = exact
-
-    override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
-        val placeable = measurable.measure(constraints)
-        val line = lineHeight.sp.toPx()
-        val lines = max(1, ((placeable.height - 2 * padding.roundToPx()) / line).roundToInt())
-        exact.height = minOf(max.toPx(), 2 * padding.toPx() + lines * line)
-        exact.reported = placeable.height
-        return layout(placeable.width, placeable.height) { placeable.place(0, 0) }
-    }
-}
-
-/**
  * A box [width] wide in CSS pixels, which a [CssRow] counts at exactly that — a 14 px icon is
  * 36.75 px at 2.625x, where Compose sizes it 37 and a row of four buttons came out a pixel wider
  * than the web's. It measures [width] rounded, and must be the box's outermost width.

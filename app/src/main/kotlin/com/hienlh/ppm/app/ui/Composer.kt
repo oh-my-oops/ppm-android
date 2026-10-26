@@ -43,8 +43,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
@@ -115,6 +117,7 @@ import com.hienlh.ppm.chat.ReplyCard
 import com.hienlh.ppm.chat.sky400
 import com.hienlh.ppm.chat.sky500
 import com.hienlh.ppm.chat.sky600
+import com.hienlh.ppm.design.ChromeTextAreaBox
 import com.hienlh.ppm.design.CssAlign
 import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssExact
@@ -130,12 +133,11 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.brightness
-import com.hienlh.ppm.design.chromeCaret
+import com.hienlh.ppm.design.chromeTextArea
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.cssExact
-import com.hienlh.ppm.design.cssFieldLines
 import com.hienlh.ppm.design.cssFlex
 import com.hienlh.ppm.design.cssIcon
 import com.hienlh.ppm.design.cssLines
@@ -145,7 +147,7 @@ import com.hienlh.ppm.design.cssSize
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
-import com.hienlh.ppm.design.rememberChromeCaret
+import com.hienlh.ppm.design.rememberChromeTextArea
 import com.hienlh.ppm.design.rememberCssExact
 import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.ParsedUserMessage
@@ -451,7 +453,9 @@ private fun ComposerField(
 ) {
     val tokens = LocalPpmTokens.current
     val inputStyle = style.copy(color = tokens.text.color)
-    val caret = rememberChromeCaret(tab.draft, inputStyle, multiline = true, cssStart = cssStart)
+    // Its lines, caret and scroll drawn as Chrome draws a textarea's.
+    val area = rememberChromeTextArea(tab.draft, inputStyle, padding, cssStart)
+    val selectionColors = LocalTextSelectionColors.current
     val context = LocalContext.current
     var focused by remember { mutableStateOf(false) }
     // From the composition that gave the field the options [quietFocus] sets, and on the value it
@@ -463,78 +467,82 @@ private fun ComposerField(
         focus.requestFocus()
         focusQuietly.value = false
     }
-    BasicTextField(
-        state = tab.draft,
-        modifier = modifier
-            .cssFieldLines(padding, style.lineHeight.value, maxHeight)
-            // `disabled:opacity-50`.
-            .alpha(if (enabled) 1f else 0.5f)
-            .heightIn(max = maxHeight)
-            .focusRequester(focus)
-            .tracksTextFocus(tab.draft)
-            .onFocusChanged {
-                focused = it.isFocused
-                if (!it.isFocused) quietFocus.value = false
-            }
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        val finger = event.changes.any { it.type == PointerType.Touch || it.type == PointerType.Stylus }
-                        if (event.type == PointerEventType.Press && finger && !focused) quietFocus.value = true
+    CompositionLocalProvider(LocalTextSelectionColors provides area.selectionColors(selectionColors)) {
+        BasicTextField(
+            state = tab.draft,
+            modifier = modifier
+                .chromeTextArea(area, maxHeight)
+                // `disabled:opacity-50`.
+                .alpha(if (enabled) 1f else 0.5f)
+                .heightIn(max = maxHeight)
+                .focusRequester(focus)
+                .tracksTextFocus(tab.draft)
+                .onFocusChanged {
+                    focused = it.isFocused
+                    if (!it.isFocused) quietFocus.value = false
+                }
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val finger = event.changes.any { it.type == PointerType.Touch || it.type == PointerType.Stylus }
+                            if (event.type == PointerEventType.Press && finger && !focused) quietFocus.value = true
+                        }
                     }
                 }
-            }
-            .pastesImages(context, pasteImage)
-            .onPreviewKeyEvent(onKey)
-            // An arrow the text has no line for stays in the box, as a textarea keeps it: the
-            // caret goes to the start or the end (Blink's, but on Windows), where Compose would
-            // send focus on to whatever is above or below.
-            .onKeyEvent { event ->
-                val arrow = event.key == Key.DirectionUp || event.key == Key.DirectionDown
-                if (!arrow || event.isAltPressed || event.isCtrlPressed || event.isMetaPressed) return@onKeyEvent false
-                if (event.type == KeyEventType.KeyDown) {
-                    val end = if (event.key == Key.DirectionUp) 0 else tab.draft.text.length
-                    tab.draft.edit { selection = if (event.isShiftPressed) TextRange(selection.start, end) else TextRange(end) }
+                .pastesImages(context, pasteImage)
+                .onPreviewKeyEvent(onKey)
+                // An arrow the text has no line for stays in the box, as a textarea keeps it: the
+                // caret goes to the start or the end (Blink's, but on Windows), where Compose would
+                // send focus on to whatever is above or below.
+                .onKeyEvent { event ->
+                    val arrow = event.key == Key.DirectionUp || event.key == Key.DirectionDown
+                    if (!arrow || event.isAltPressed || event.isCtrlPressed || event.isMetaPressed) return@onKeyEvent false
+                    if (event.type == KeyEventType.KeyDown) {
+                        val end = if (event.key == Key.DirectionUp) 0 else tab.draft.text.length
+                        tab.draft.edit { selection = if (event.isShiftPressed) TextRange(selection.start, end) else TextRange(end) }
+                    }
+                    true
+                },
+            // Typing turns a recalled message back into a draft, saves it and opens or closes the
+            // pickers. Only what the user does runs this, not the recall's or a pick's own writes; the
+            // IME runs it for a moved caret too, which the web's `onChange` never hears of, so only a
+            // changed text counts.
+            inputTransformation = remember(tab) {
+                InputTransformation {
+                    if (!asCharSequence().contentEquals(originalText)) {
+                        tab.historyIndex = -1
+                        tab.updatePickers(asCharSequence(), selection.min)
+                        tab.edited(asCharSequence())
+                    }
                 }
-                true
             },
-        // Typing turns a recalled message back into a draft, saves it and opens or closes the
-        // pickers. Only what the user does runs this, not the recall's or a pick's own writes; the
-        // IME runs it for a moved caret too, which the web's `onChange` never hears of, so only a
-        // changed text counts.
-        inputTransformation = remember(tab) {
-            InputTransformation {
-                if (!asCharSequence().contentEquals(originalText)) {
-                    tab.historyIndex = -1
-                    tab.updatePickers(asCharSequence(), selection.min)
-                    tab.edited(asCharSequence())
-                }
-            }
-        },
-        enabled = enabled,
-        textStyle = inputStyle,
-        cursorBrush = caret.brush,
-        keyboardOptions = KeyboardOptions(
-            capitalization = KeyboardCapitalization.Sentences,
-            imeAction = ImeAction.Send,
-            showKeyboardOnFocus = !quietFocus.value,
-        ),
-        onKeyboardAction = { send() },
-        lineLimits = TextFieldLineLimits.MultiLine(),
-        onTextLayout = caret.onTextLayout,
-        interactionSource = caret.interactions,
-        scrollState = caret.scroll,
-        decorator = { field ->
-            // Inside the field, so the drop lands here rather than in the field's own target.
-            Box(Modifier.dragAndDropTarget(shouldStartDragAndDrop = { true }, target = fileDrop).padding(vertical = padding)) {
-                if (tab.draft.text.isEmpty()) {
-                    BasicText(placeholder, style = inputStyle.copy(color = tokens.text3.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                Box(Modifier.chromeCaret(caret)) { field() }
-            }
-        },
-    )
+            enabled = enabled,
+            textStyle = inputStyle.copy(color = Color.Transparent),
+            cursorBrush = area.brush,
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Sentences,
+                imeAction = ImeAction.Send,
+                showKeyboardOnFocus = !quietFocus.value,
+            ),
+            onKeyboardAction = { send() },
+            lineLimits = TextFieldLineLimits.MultiLine(),
+            onTextLayout = area.onTextLayout,
+            interactionSource = area.interactions,
+            scrollState = area.fieldScroll,
+            decorator = { field ->
+                // Inside the field, so the drop lands here rather than in the field's own target.
+                ChromeTextAreaBox(
+                    area,
+                    placeholder = placeholder.takeIf { tab.draft.text.isEmpty() },
+                    placeholderColor = tokens.text3.color,
+                    selectionColor = selectionColors.backgroundColor,
+                    scrollbarColor = tokens.border.color,
+                    modifier = Modifier.dragAndDropTarget(shouldStartDragAndDrop = { true }, target = fileDrop),
+                ) { field() }
+            },
+        )
+    }
 }
 
 /**

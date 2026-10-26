@@ -370,4 +370,18 @@ class DesignTest {
         // Nothing beside it known: where it was.
         assertEquals(7.25f to 44, cssLazyPlace(null, null, 7.25f, 43.3f, 0f, last = true))
     }
+
+    @Test
+    fun `a textarea scrolls only as far as its caret needs, as Chrome's does`() {
+        // The tablet's composer, measured: 4 lines of 45.5 px under 16 px of padding, 214 px of
+        // content in a 180 px box. Typing on the last line (caret 156.5 to 192.5) scrolls it 13.
+        assertEquals(214f, ChromeAreaLines(16f, 45.5f, 33f, 4f, 36f).height(4))
+        assertEquals(13, chromeRevealScroll(156.5f, 192.5f, 0, 180, 34))
+        // A caret already in view moves nothing; one above the view is brought to its top.
+        assertEquals(13, chromeRevealScroll(111f, 147f, 13, 180, 34))
+        assertEquals(4, chromeRevealScroll(4.375f, 40.375f, 13, 180, 34))
+        // Never past the end, nor above the start.
+        assertEquals(34, chromeRevealScroll(300f, 336f, 0, 180, 34))
+        assertEquals(0, chromeRevealScroll(-2f, 34f, 10, 180, 34))
+    }
 }

@@ -62,13 +62,17 @@ class ChromeCaret internal constructor(private val state: TextFieldState, privat
     val brush: Brush = SolidColor(Color.Transparent)
     val onTextLayout: Density.(getResult: () -> TextLayoutResult?) -> Unit = { layout = it }
 
-    private var layout by mutableStateOf<(() -> TextLayoutResult?)?>(null)
+    internal var layout by mutableStateOf<(() -> TextLayoutResult?)?>(null)
     internal var style by mutableStateOf(TextStyle.Default)
     internal var cssStart by mutableStateOf(0.dp)
     internal var shown by mutableStateOf(false)
     internal var lit by mutableStateOf(true)
 
-    internal fun DrawScope.drawCaret() {
+    /**
+     * Draws the caret; given [lineTop] — where a line exactly starts in this box, as a
+     * [ChromeTextArea] stacks them — it stands on that line, its edges each rounded.
+     */
+    internal fun DrawScope.drawCaret(lineTop: ((Int) -> Float)? = null) {
         if (!shown || !lit || !state.selection.collapsed) return
         val result = layout?.invoke() ?: return
         val offset = state.selection.start.coerceIn(0, result.layoutInput.text.length)
@@ -90,6 +94,12 @@ class ChromeCaret internal constructor(private val state: TextFieldState, privat
             PpmFonts.chromeAscentDescent(px, PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT)
         }
         val lineHeight = if (style.lineHeight.isSpecified) style.lineHeight.toPx() else up + down
+        if (lineTop != null) {
+            val exact = lineTop(line) + floor((lineHeight - up - down) / 2)
+            val y = floor(exact + 0.5f)
+            clipRect { drawRect(style.color, Offset(left, y), Size(right - left, floor(exact + up + down + 0.5f) - y)) }
+            return
+        }
         val top = result.getLineTop(line) + floor((lineHeight - up - down) / 2)
         val origin = if (multiline) Offset(left, top - scrolled) else Offset(left - scrolled, top)
         clipRect { drawRect(style.color, origin, Size(right - left, up + down)) }
