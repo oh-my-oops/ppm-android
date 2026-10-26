@@ -64,6 +64,7 @@ import com.hienlh.ppm.design.ViewerImage
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssSize
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.webTitle
 import java.io.File
@@ -178,7 +179,7 @@ fun AttachButton(mobile: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(10.dp)
     Box(
         Modifier
-            .size(if (mobile) 32.dp else 34.dp)
+            .cssSize(if (mobile) 32.dp else 34.dp)
             // `disabled:opacity-50`.
             .alpha(if (enabled) 1f else 0.5f)
             .clip(shape)

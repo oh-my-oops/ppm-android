@@ -475,6 +475,11 @@ private val NEAR_END = 70.dp
  * the end, a frame later, as the web's ResizeObserver does, and stops 1 px short of the last
  * pixel, as `targetScrollTop` does. Moving it up lets go; coming within 70 px of the end on the
  * way down, or the content shrinking there, takes hold again.
+ *
+ * Only on average: `scrollHeight - 1 - clientHeight` is in whole CSS px, each rounded, so the web
+ * stops 0 to 2 px short depending on the fraction of the whole transcript's height, the messages
+ * above the screen included, which a lazy list never measures. Measured 2.45 px short at 2x, where
+ * this stops 2: every message there sat 1 px higher than Chrome's.
  */
 @Stable
 private class TranscriptScroll(

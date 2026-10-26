@@ -11,8 +11,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.clickable
@@ -103,6 +101,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.hienlh.ppm.app.AppModel
@@ -116,6 +115,10 @@ import com.hienlh.ppm.chat.ReplyCard
 import com.hienlh.ppm.chat.sky400
 import com.hienlh.ppm.chat.sky500
 import com.hienlh.ppm.chat.sky600
+import com.hienlh.ppm.design.CssAlign
+import com.hienlh.ppm.design.CssColumn
+import com.hienlh.ppm.design.CssExact
+import com.hienlh.ppm.design.CssRow
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
@@ -131,11 +134,19 @@ import com.hienlh.ppm.design.chromeCaret
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderPx
+import com.hienlh.ppm.design.cssExact
+import com.hienlh.ppm.design.cssFieldLines
+import com.hienlh.ppm.design.cssFlex
+import com.hienlh.ppm.design.cssIcon
+import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.cssScrollY
+import com.hienlh.ppm.design.cssShrink
+import com.hienlh.ppm.design.cssSize
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberChromeCaret
+import com.hienlh.ppm.design.rememberCssExact
 import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.ParsedUserMessage
 import com.hienlh.ppm.protocol.PromptCacheState
@@ -151,6 +162,7 @@ import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.PromptCacheStatus
 import com.hienlh.ppm.state.stepHistory
 import kotlin.math.floor
+import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -306,10 +318,12 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
     val locked = tab.firstSendPending
 
     val shape = RoundedCornerShape(tokens.rad.dp)
-    Column(
+    // `p-2 md:p-3` around the box, and its rows, at their exact heights: what is above the box
+    // starts where they put it.
+    val pad = if (mobile) 8.dp else 12.dp
+    CssColumn(Modifier.fillMaxWidth().padding(horizontal = pad), top = pad, bottom = pad) {
+    CssColumn(
         Modifier
-            // `p-2 md:p-3`.
-            .padding(if (mobile) 8.dp else 12.dp)
             .fillMaxWidth()
             .ppmShadow(tokens.shadowFloat, shape)
             .clip(shape)
@@ -338,16 +352,13 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
         val mode = tab.permissionMode ?: PermissionMode.FALLBACK
         if (mobile) {
             // `flex flex-wrap items-center gap-1 px-2 pt-2 relative`: the mode panel opens over this row.
-            Box(Modifier.fillMaxWidth()) {
-                ChipsRow(model, tab, chat, state, narrow, onMode = { modeOpen = !modeOpen }, onModel = { modelOpen = true })
+            val chips = rememberCssExact()
+            Box(Modifier.fillMaxWidth().cssExact(chips)) {
+                ChipsRow(model, tab, chat, state, narrow, chips, onMode = { modeOpen = !modeOpen }, onModel = { modelOpen = true })
                 if (modeOpen && !tab.providerPending) ModePopover(mode, onDismiss = { modeOpen = false }, pick = pickMode)
             }
             // `flex items-end gap-1 px-2 py-2`.
-            Row(
-                Modifier.fillMaxWidth().padding(8.dp),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
+            CssRow(Modifier.fillMaxWidth(), gap = 4.dp, start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp, align = CssAlign.End) {
                 AttachButton(mobile = true, enabled = !locked, onClick = attach)
                 // `text-sm py-1.5 max-h-20`, the `py-1.5` inside the 80 px; a phone's inputs are 16 px.
                 ComposerField(
@@ -359,7 +370,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                     maxHeight = 80.dp,
                     placeholder = if (running) "Follow-up..." else "Ask anything...",
                     enabled = !locked,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.cssFlex(),
                 )
                 if (micShown) MicButton(tab, mobile = true, enabled = !locked, onClick = toggleMic)
                 if (running && !hasContent) {
@@ -380,11 +391,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 onModelDismiss = { modelOpen = false },
             )
             // `flex items-end gap-2 px-2.5 py-2`.
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+            CssRow(Modifier.fillMaxWidth(), gap = 8.dp, start = 10.dp, end = 10.dp, top = 8.dp, bottom = 8.dp, align = CssAlign.End) {
                 AttachButton(mobile = false, enabled = !locked, onClick = attach)
                 // `text-sm leading-relaxed py-2 max-h-[90px]`, the `py-2` inside the 90 px.
                 ComposerField(
@@ -396,7 +403,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                     maxHeight = 90.dp,
                     placeholder = if (running) "Follow-up or Stop..." else "Ask anything...",
                     enabled = !locked,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.cssFlex(),
                 )
                 if (micShown) MicButton(tab, mobile = false, enabled = !locked, onClick = toggleMic)
                 if (running && !hasContent) {
@@ -406,6 +413,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 }
             }
         }
+    }
     }
     if (mobile && modelOpen && !running) {
         ModelSheet(model, chat, state, onDismiss = { modelOpen = false })
@@ -458,6 +466,7 @@ private fun ComposerField(
     BasicTextField(
         state = tab.draft,
         modifier = modifier
+            .cssFieldLines(padding, style.lineHeight.value, maxHeight)
             // `disabled:opacity-50`.
             .alpha(if (enabled) 1f else 0.5f)
             .heightIn(max = maxHeight)
@@ -582,24 +591,21 @@ private fun strutRoomUnder(belowPx: Float): Dp {
     return ((strut - belowPx) / density).coerceAtLeast(0f).dp
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ChipsRow(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState, narrow: Boolean, onMode: () -> Unit, onModel: () -> Unit) {
+private fun ChipsRow(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState, narrow: Boolean, exact: CssExact, onMode: () -> Unit, onModel: () -> Unit) {
     val running = state.isRunning
     val name = modelName(model, chat, state)
-    FlowRow(
-        Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-        itemVerticalAlignment = Alignment.CenterVertically,
-    ) {
+    CssRow(Modifier.fillMaxWidth(), gap = 4.dp, start = 8.dp, end = 8.dp, top = 8.dp, wrap = true, exact = exact) {
         val mode = tab.permissionMode ?: PermissionMode.FALLBACK
         // While the provider resolves, nothing to pick a mode or a model for yet; while the first
         // message goes, the model is fixed and a mode picked changes nothing.
         if (!tab.providerPending) NeutralChip(mode.icon, if (narrow) null else mode.label, narrow, labelMax = 100.dp, onClick = onMode)
         if (choosesProvider(tab)) ProviderChip(model, tab)
         if (!tab.providerPending && !tab.firstSendPending) {
-            ModelChip(ModelNames.chipLabel(name, state.effort ?: Effort.DEFAULT.value), state.thinking, disabled = running, onClick = onModel)
+            // `relative min-w-0`: a block around the chip, as tall as the line the chip stands on.
+            CssColumn(bottom = chipStrut(14.dp)) {
+                ModelChip(ModelNames.chipLabel(name, state.effort ?: Effort.DEFAULT.value), state.thinking, disabled = running, onClick = onModel)
+            }
         }
         if (running) {
             NeutralChip(tab.priority.icon, if (narrow) null else tab.priority.label, narrow) { tab.priority = tab.priority.following }
@@ -609,11 +615,25 @@ private fun ChipsRow(model: AppModel, tab: ChatTab, chat: ChatController, state:
 }
 
 /**
+ * How far the line under a chip reaches below it, where the chip is an `inline-flex` button in a
+ * block (the model's `relative min-w-0`, the desktop mode's `relative shrink-0`, the provider's
+ * `relative`): it stands on its first item's bottom edge, its [icon]'s — the border, `py-1` and,
+ * when it is [labelled], half of what its 17.25 px line leaves around the icon above its own
+ * bottom. 0.75 px under the model chip at 2x, nothing under a labelled mode chip, 4 under a bare one.
+ */
+@Composable
+private fun chipStrut(icon: Dp, labelled: Boolean = true): Dp {
+    val below = with(LocalDensity.current) {
+        cssBorderPx(1.dp) + 4.dp.toPx() + if (labelled) max(0f, 17.25f.sp.toPx() - icon.toPx()) / 2 else 0f
+    }
+    return strutRoomUnder(below)
+}
+
+/**
  * The desktop chips (`flex flex-wrap items-center gap-1.5 px-2.5 pt-2.5`): each panel opens over
  * its own chip, the mode's from `relative shrink-0`, the model's from `relative min-w-0`. On a
  * narrow chat (`@max-[420px]/chat:flex-nowrap`) they stay on one line and the model chip gives way.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DesktopChipsRow(
     model: AppModel,
@@ -633,48 +653,25 @@ private fun DesktopChipsRow(
     val name = modelName(model, chat, state)
     val mode = tab.permissionMode ?: PermissionMode.FALLBACK
     // As on the phone: no mode while the provider resolves, no model then or while the first message goes.
-    val modeChip = @Composable {
+    CssRow(Modifier.fillMaxWidth(), gap = 6.dp, start = 10.dp, end = 10.dp, top = 10.dp, wrap = !narrow) {
         if (!tab.providerPending) {
-            Box {
+            CssColumn(bottom = chipStrut(12.dp, labelled = !narrow)) {
                 NeutralChip(mode.icon, if (narrow) null else mode.label, narrow, labelMax = 100.dp, onClick = onMode)
                 if (modeOpen) ModePopover(mode, onDismiss = onModeDismiss, pick = pickMode)
             }
         }
-    }
-    val modelChip = @Composable { modifier: Modifier ->
+        if (choosesProvider(tab)) ProviderChip(model, tab)
         if (!tab.providerPending && !tab.firstSendPending) {
-            Box(modifier) {
+            // On one line, the chip that gives way.
+            CssColumn(Modifier.cssShrink(), bottom = chipStrut(14.dp)) {
                 ModelChip(ModelNames.chipLabel(name, state.effort ?: Effort.DEFAULT.value), state.thinking, disabled = running, onClick = onModel)
                 if (modelOpen) ModelPopover(model, chat, state, onDismiss = onModelDismiss)
             }
         }
-    }
-    val rest = @Composable {
         if (running) {
             NeutralChip(tab.priority.icon, if (narrow) null else tab.priority.label, narrow) { tab.priority = tab.priority.following }
         }
         PromptCacheChip(state.promptCache)
-    }
-    val padding = Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 10.dp)
-    if (narrow) {
-        Row(padding, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            modeChip()
-            if (choosesProvider(tab)) ProviderChip(model, tab)
-            modelChip(Modifier.weight(1f, fill = false))
-            rest()
-        }
-    } else {
-        FlowRow(
-            padding,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            itemVerticalAlignment = Alignment.CenterVertically,
-        ) {
-            modeChip()
-            if (choosesProvider(tab)) ProviderChip(model, tab)
-            modelChip(Modifier)
-            rest()
-        }
     }
 }
 
@@ -695,7 +692,7 @@ private fun modelName(model: AppModel, chat: ChatController, state: ChatState): 
  */
 @Composable
 private fun NeutralChip(icon: ProductIcon, label: String?, narrow: Boolean, labelMax: Dp = Dp.Unspecified, onClick: () -> Unit) =
-    NeutralChip(label, narrow, labelMax, onClick) { color -> PpmIcon(icon, 12.dp, color) }
+    NeutralChip(label, narrow, labelMax, onClick) { color -> PpmIcon(icon, 12.dp, color, Modifier.cssIcon(12.dp)) }
 
 /** [NeutralChip] with its own [leading] mark, drawn in the chip's text colour. */
 @Composable
@@ -707,25 +704,28 @@ private fun NeutralChip(label: String?, narrow: Boolean, labelMax: Dp, onClick: 
     val fade = colorsFade(hovered)
     val lit = if (pressed) 1.0 else fade.toDouble()
     val color = tokens.text.mix(tokens.text2, lit)
-    Row(
+    val side = if (narrow) 7.dp else 9.dp
+    CssRow(
         Modifier
             .clip(CircleShape)
             .background(tokens.panel2.color)
             .pointerHoverIcon(WebCursor.Default)
             .hoverable(source)
             .clickable(source, indication = null, onClick = onClick)
-            .cssBorder(tokens.border.mix(tokens.borderSoft, lit).color, CircleShape)
-            // `px-[9px] py-1` (`px-[7px]` narrow).
-            .padding(horizontal = if (narrow) 7.dp else 9.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .cssBorder(tokens.border.mix(tokens.borderSoft, lit).color, CircleShape),
+        // `px-[9px] py-1` (`px-[7px]` narrow).
+        gap = 6.dp,
+        start = side,
+        end = side,
+        top = 4.dp,
+        bottom = 4.dp,
     ) {
         // An icon alone is the chip's whole height (21.5 px on the web): the hidden label leaves no line.
         leading(color.color)
         if (label != null) {
             BasicText(
                 label,
-                Modifier.widthIn(max = labelMax),
+                Modifier.cssShrink().widthIn(max = labelMax).cssLines(17.25f),
                 style = chipText.copy(color = color.color),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -747,7 +747,7 @@ internal fun ModelChip(text: String, thinking: Boolean, disabled: Boolean, label
     val hovered by source.collectIsHoveredAsState()
     val fade = colorsFade(hovered)
     val lit = if (pressed) 1f else fade
-    Row(
+    CssRow(
         Modifier
             .alpha(if (disabled) 0.5f else 1f)
             .brightness(1f + 0.1f * lit)
@@ -757,20 +757,22 @@ internal fun ModelChip(text: String, thinking: Boolean, disabled: Boolean, label
             .pointerHoverIcon(WebCursor.Default)
             .hoverable(source)
             .clickable(source, indication = null, enabled = !disabled, onClick = onClick)
-            .cssBorder(tokens.accentWashBorder.color, CircleShape)
-            .padding(horizontal = 9.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .cssBorder(tokens.accentWashBorder.color, CircleShape),
+        gap = 6.dp,
+        start = 9.dp,
+        end = 9.dp,
+        top = 4.dp,
+        bottom = 4.dp,
     ) {
-        PpmIcon(ProductIcon.Sparkles, 14.dp, tokens.accent.color)
+        PpmIcon(ProductIcon.Sparkles, 14.dp, tokens.accent.color, Modifier.cssIcon(14.dp))
         BasicText(
             text,
-            Modifier.widthIn(max = labelMax),
+            Modifier.cssShrink().widthIn(max = labelMax).cssLines(17.25f),
             style = chipText.copy(color = tokens.accent.color),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (thinking) PpmIcon(ProductIcon.Brain, 12.dp, tokens.accent.color)
+        if (thinking) PpmIcon(ProductIcon.Brain, 12.dp, tokens.accent.color, Modifier.cssIcon(12.dp))
     }
 }
 
@@ -792,17 +794,19 @@ private fun PromptCacheChip(cache: PromptCacheState?) {
     val label = status.label ?: return
     val cold = status is PromptCacheStatus.Cold
     val color = if (cold) tokens.error else tokens.text2
-    Row(
+    CssRow(
         Modifier
             .clip(CircleShape)
             .background((if (cold) tokens.error.opacity(0.1) else tokens.panel2).color)
-            .cssBorder((if (cold) tokens.error.opacity(0.4) else tokens.borderSoft).color, CircleShape)
-            .padding(horizontal = 9.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .cssBorder((if (cold) tokens.error.opacity(0.4) else tokens.borderSoft).color, CircleShape),
+        gap = 6.dp,
+        start = 9.dp,
+        end = 9.dp,
+        top = 4.dp,
+        bottom = 4.dp,
     ) {
-        PpmIcon(ProductIcon.Clock, 12.dp, color.color)
-        BasicText(label, style = chipText.copy(color = color.color, fontFeatureSettings = "tnum"), maxLines = 1)
+        PpmIcon(ProductIcon.Clock, 12.dp, color.color, Modifier.cssIcon(12.dp))
+        BasicText(label, Modifier.cssLines(17.25f), style = chipText.copy(color = color.color, fontFeatureSettings = "tnum"), maxLines = 1)
     }
 }
 
@@ -845,7 +849,7 @@ private fun MicButton(tab: ChatTab, mobile: Boolean, enabled: Boolean, onClick: 
     Box(
         Modifier
             .alpha(if (transcribing || !enabled) 0.5f else pulse)
-            .size(if (mobile) 32.dp else 34.dp)
+            .cssSize(if (mobile) 32.dp else 34.dp)
             .clip(shape)
             .background(tokens.error.mix(idleFill, open).color)
             .pointerHoverIcon(WebCursor.Default)
@@ -895,7 +899,7 @@ private fun SquareButton(
     Box(
         Modifier
             .alpha(if (enabled) 1f else 0.3f)
-            .size(36.dp)
+            .cssSize(36.dp)
             .then(if (enabled) Modifier.ppmShadow(tokens.shadowFloat, shape) else Modifier)
             .clip(shape)
             .background(hoverFill.mix(fill, lit).color)
@@ -1018,7 +1022,8 @@ private fun ProviderChip(model: AppModel, tab: ChatTab) {
     val providers = read?.providers ?: cache.peekProviders(tab.project) ?: emptyList()
     val current = tab.providerId
     val name = providers.firstOrNull { it.id == current }?.name ?: current
-    Box {
+    // `relative`: a block around the chip, as tall as the line the chip stands on.
+    CssColumn(bottom = chipStrut(14.dp)) {
         NeutralChip(cssCapitalized(name), narrow = false, labelMax = 80.dp, onClick = { open = !open }) { ProviderBadge(current, 14.dp) }
         if (open) {
             val status = when {

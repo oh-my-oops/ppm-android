@@ -195,11 +195,13 @@ internal fun ActionButton(icon: ProductIcon, label: String, title: String, touch
             .hoverable(source)
             .webTitle(title)
             .clickable(source, indication = null, role = Role.Button, onClick = onClick)
-            .defaultMinSize(target, target)
-            .padding(vertical = 4.dp),
+            .defaultMinSize(minWidth = target),
         gap = 4.dp,
         start = 6.dp,
         end = 6.dp,
+        top = 4.dp,
+        bottom = 4.dp,
+        minHeight = target,
         centre = true,
     ) {
         PpmIcon(icon, 14.dp, color, Modifier.cssWidth(14.dp))

@@ -144,6 +144,7 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.chromeCaret
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssFlex
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
@@ -300,7 +301,9 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         // The chat's own `@container`: under 420 px the chips drop their words.
         val narrow = maxWidth <= 420.dp
         // `backdrop-blur-sm` under the drop overlay and the edit's: CSS's blur(8px) is Android's at a radius of 13.
-        Column(Modifier.fillMaxSize().then(if (fileDrop.showing || tab.editForking) Modifier.blur(13.dp) else Modifier)) {
+        // Stacked as Chrome stacks the chat's flex column: what is under the transcript ends on its last
+        // pixel and starts where its exact height puts it, so the bars' rows round where the web's do.
+        CssColumn(Modifier.fillMaxSize().then(if (fileDrop.showing || tab.editForking) Modifier.blur(13.dp) else Modifier)) {
             if (tab.providerPending) NewChatGateLine(model, tab)
             BackgroundCommandBar(state.backgroundShells, onViewOutput = { model.openBackgroundOutput(tab.tabId, it.shellId) }, onStop = { chat.killBackgroundShell(it.shellId) })
             val images = remember(tab.project) {
@@ -345,7 +348,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
             ) {
                 val preview = tab.firstSendPreview
                 if (preview != null) {
-                    FirstSendView(preview.content, preview.timestamp, Modifier.weight(1f))
+                    FirstSendView(preview.content, preview.timestamp, Modifier.cssFlex(grow = true))
                 } else {
                     val turnChanges = rememberTurnChangesHost(model, tab, state)
                     // Fork and Edit are left out while a turn runs, and the switchers greyed out.
@@ -366,7 +369,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                             onRespond = { request, approved, data -> chat.respond(request, approved, data) },
                             onLoadEarlier = chat::loadEarlier,
                             onReload = { chat.reload() },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.cssFlex(grow = true),
                             jumps = remember(tab.tabId) { model.chatJumps.filter { it.first == tab.tabId }.map { it.second } },
                             welcome = {
                                 // `w-full px-4`; picking a chat shows it in this tab.
@@ -401,8 +404,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
             // Every file this session has changed, across all its turns.
             tab.sessionChanges?.let { changes -> SessionChangesSection(model, tab, state, changes, itemsWithLive, narrow) }
             // `border-t border-border bg-panel`, around the toolbar and the message box.
-            Column(Modifier.fillMaxWidth().background(tokens.panel.color).line(top = true, tokens.border.color)) {
-                Column(Modifier.fillMaxWidth().line(top = false, tokens.border.opacity(0.5).color)) {
+            CssColumn(Modifier.fillMaxWidth().background(tokens.panel.color).line(top = true, tokens.border.color)) {
+                CssColumn(Modifier.fillMaxWidth().line(top = false, tokens.border.opacity(0.5).color)) {
                     fun toggle(which: ToolbarPanel) {
                         panel = if (panel == which) null else which
                     }

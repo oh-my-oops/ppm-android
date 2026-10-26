@@ -6,7 +6,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -49,6 +48,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssGridRow
+import com.hienlh.ppm.design.CssRow
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FileIcon
 import com.hienlh.ppm.design.FontKind
@@ -63,11 +63,15 @@ import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderPx
+import com.hienlh.ppm.design.cssFlex
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssLines
+import com.hienlh.ppm.design.cssMaxHeight
+import com.hienlh.ppm.design.cssMinHeight
 import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberCssExact
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.SessionFileChange
@@ -308,12 +312,13 @@ fun SessionChangesBar(
         }
     }
 
-    // `shrink-0 border-t border-border bg-surface-elevated/60`.
-    Column(
+    // `shrink-0 border-t border-border bg-surface-elevated/60`, at its exact height: what is above
+    // it in the chat starts where that puts it.
+    CssColumn(
         Modifier.fillMaxWidth().background(tokens.panel2.opacity(0.6).color).cssBorder(tokens.border.color, sides = CssSides.Top),
     ) {
         // `flex items-center gap-1 px-1.5`.
-        Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        CssRow(Modifier.fillMaxWidth(), gap = 4.dp, start = 6.dp, end = 6.dp) {
             val label = when {
                 !loaded -> "${SessionChangeList.fileCount(unloadedCount)} changed"
                 allReviewed -> "All ${SessionChangeList.fileCount(reviewed.size)} reviewed"
@@ -322,8 +327,8 @@ fun SessionChangesBar(
             // `flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded px-1 text-xs md:min-h-8`.
             Row(
                 Modifier
-                    .weight(1f)
-                    .heightIn(min = if (mobile) 44.dp else 32.dp)
+                    .cssFlex()
+                    .cssMinHeight(if (mobile) 44.dp else 32.dp)
                     .ppmClickable(pressedColor = tokens.panel.color, hoverColor = tokens.panel.color, shape = RoundedCornerShape(4.dp), onClickLabel = label, onClick = toggle)
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -351,10 +356,11 @@ fun SessionChangesBar(
         if (!mobile && open) {
             // `max-h-56 overflow-y-auto border-t border-border-soft`; Escape closes it.
             val scroll = rememberScrollState()
+            val list = rememberCssExact()
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 224.dp)
+                    .cssMaxHeight(224.dp, lend = list)
                     .cssBorder(tokens.borderSoft.color, sides = CssSides.Top)
                     .onPreviewKeyEvent { event ->
                         if (event.key == Key.Escape && event.type == KeyEventType.KeyDown) {
@@ -365,7 +371,7 @@ fun SessionChangesBar(
                         }
                     },
             ) {
-                CssColumn(Modifier.fillMaxWidth().chromeScrollbar(scroll, vertical = true, tokens.border.color).verticalScroll(scroll)) {
+                CssColumn(Modifier.fillMaxWidth().chromeScrollbar(scroll, vertical = true, tokens.border.color).verticalScroll(scroll), exact = list) {
                     rows(true)
                     // `px-2.5 py-1.5 text-[11px] text-text-subtle`.
                     CssColumn(Modifier.fillMaxWidth().padding(horizontal = 10.dp), top = 6.dp, bottom = 6.dp) {
@@ -435,7 +441,7 @@ private fun MarkAllButton(narrow: Boolean, onClick: () -> Unit) {
     val color = tokens.text.mix(tokens.text2, hover.lit.toDouble()).color
     Row(
         Modifier
-            .heightIn(min = 32.dp)
+            .cssMinHeight(32.dp)
             .webTitle("Mark all reviewed")
             .ppmClickable(pressedColor = tokens.panel.color, hoverColor = tokens.panel.color, shape = RoundedCornerShape(4.dp), onClickLabel = "Mark all reviewed", source = hover.source, onClick = onClick)
             .padding(horizontal = if (narrow) 6.dp else 8.dp),
@@ -460,7 +466,7 @@ private fun RefreshButton(mobile: Boolean, loading: Boolean, onClick: () -> Unit
     Box(
         Modifier
             .alpha(if (loading) 0.6f else 1f)
-            .heightIn(min = side)
+            .cssMinHeight(side)
             .widthIn(min = side)
             .webTitle("Refresh changes")
             .ppmClickable(
@@ -479,7 +485,7 @@ private fun ReviewButton(mobile: Boolean, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     Row(
         Modifier
-            .heightIn(min = if (mobile) 44.dp else 32.dp)
+            .cssMinHeight(if (mobile) 44.dp else 32.dp)
             .ppmClickable(pressedColor = tokens.panel.color, hoverColor = tokens.panel.color, shape = RoundedCornerShape(4.dp), onClickLabel = "Review", onClick = onClick)
             .padding(horizontal = if (mobile) 12.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically,

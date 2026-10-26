@@ -11,6 +11,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
 import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 /** The design data and rules, without a device (`PPMSelfTest/DesignTests.swift`). */
 class DesignTest {
@@ -318,5 +319,38 @@ class DesignTest {
         assertEquals(88, icon.width)
         assertEquals(listOf(30), icon.x.toList())
         assertEquals(listOf(12), cssRowPlan(floatArrayOf(28f), 8f, 12f, 12f, 976f, 88, 1000, wrap = false, centre = false, alignEnd = false).x.toList())
+    }
+
+    @Test
+    fun `a CSS row stands its children where Chrome does up and down`() {
+        // The phone composer's input row (2.625x), measured by CDP: attach and mic 84 px, the field
+        // 91.5 (15.75 + 60 + 15.75), send 94.5, `items-end py-2`, the row starting on 1847.5.
+        val input = cssRowAcross(IntArray(4), floatArrayOf(84f, 91.5f, 84f, 94.5f), 1, 10.5f, 21f, 21f, 0f, -0.5f, CssAlign.End)
+        assertEquals(136.5f, input.exactHeight)
+        // From the row's first pixel, 1848: the buttons on 1879, the field on 1871.5, send on 1868.5.
+        assertEquals(listOf(31, 24, 31, 21), input.y.toList())
+        assertEquals(listOf(0f, -0.5f, 0f, -0.5f), input.phases.toList())
+        // 1847.5 to 1984 rounds to 136 pixels, and send's 94.5 from 1868.5 to 94.
+        assertEquals(136, input.height)
+        assertEquals(94, (input.phases[3] + 94.5f).roundToInt())
+        // The chips above it, from 1754.984: the mode chip (56.5) centred on the model chip's line (71.52).
+        val chips = cssRowAcross(IntArray(2), floatArrayOf(56.5f, 71.515625f), 1, 10.5f, 21f, 0f, 0f, -0.015625f, CssAlign.Center)
+        assertEquals(92.515625f, chips.exactHeight)
+        assertEquals(listOf(28, 21), chips.y.toList())
+        assertEquals(93, chips.height)
+    }
+
+    @Test
+    fun `a wrapping CSS row stacks its lines and a minimum height centres one`() {
+        val wrapped = cssRowAcross(intArrayOf(0, 0, 1), floatArrayOf(10f, 20f, 15f), 2, 4f, 2f, 3f, 0f, 0.25f, CssAlign.Center)
+        assertEquals(44f, wrapped.exactHeight)
+        assertEquals(listOf(7, 2, 26), wrapped.y.toList())
+        assertEquals(44, wrapped.height)
+        // `min-h-11` around one 10 px child: the line is the whole row.
+        val tall = cssRowAcross(IntArray(1), floatArrayOf(10f), 1, 0f, 0f, 0f, 115.5f, 0.25f, CssAlign.Center)
+        assertEquals(115.5f, tall.exactHeight)
+        assertEquals(listOf(53), tall.y.toList())
+        assertEquals(116, tall.height)
+        assertEquals(listOf(0), cssRowAcross(IntArray(1), floatArrayOf(10f), 1, 0f, 0f, 0f, 115.5f, 0.25f, CssAlign.Start).y.toList())
     }
 }
