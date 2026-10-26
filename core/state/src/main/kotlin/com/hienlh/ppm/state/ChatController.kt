@@ -229,6 +229,7 @@ class ChatController(
         if ((content.isEmpty() && images.isEmpty()) || sessionId == null || stopped) return
         val reply = replyTo?.takeIf { it.sessionId == sessionId && it.providerId == providerId }
         transmit(transcript.send(content, settings.turnOptions(options), clock(), reply, images, imagePaths))
+        onAttention?.invoke(ChatAttention.Answered)
         publish()
     }
 
@@ -250,6 +251,7 @@ class ChatController(
     fun cancel() {
         transmit(ChatClientMessage.Cancel)
         transcript.cancelled()
+        onAttention?.invoke(ChatAttention.Answered)
         publish()
     }
 
@@ -262,6 +264,7 @@ class ChatController(
     fun respond(request: ApprovalRequest, approved: Boolean, data: JsonElement? = null) {
         if (stopped) return
         transmit(transcript.respond(request, approved, data))
+        onAttention?.invoke(ChatAttention.Answered)
         publish()
     }
 

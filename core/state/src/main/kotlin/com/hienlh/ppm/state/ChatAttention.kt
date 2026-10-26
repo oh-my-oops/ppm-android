@@ -13,7 +13,10 @@ sealed interface ChatAttention {
     /** An approval or a question came in live (`approval_request`, never its replay). */
     data class Asked(val request: ApprovalRequest) : ChatAttention
 
-    /** It was answered, here or on another device (`approval_resolved`): the toast goes. */
+    /**
+     * Nothing waits any more (`approval_resolved`, or this chat sent, answered or stopped): the
+     * toast goes.
+     */
     data object Answered : ChatAttention
 
     /** The turn ended (`done` while it still ran). */

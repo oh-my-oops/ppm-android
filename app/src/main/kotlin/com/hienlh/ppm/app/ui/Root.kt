@@ -229,9 +229,9 @@ private fun Dialogs(model: AppModel) {
 
 /**
  * The web's error toast (sonner with its close button): the title, the description under it and
- * the action at the end, on the surface colour, for four seconds or until closed. `top-center` on
- * a phone — 16 px from three edges up to 600 px wide, else 356 px wide and 24 px down — and
- * `bottom-left`, 24 px in, on the desktop layout.
+ * the action at the end, on the surface colour, for four seconds (a persistent one for good) or
+ * until closed. `top-center` on a phone — 16 px from three edges up to 600 px wide, else 356 px
+ * wide and 24 px down — and `bottom-left`, 24 px in, on the desktop layout.
  */
 @Composable
 private fun ErrorToast(message: ErrorToastMessage?, mobile: Boolean, narrow: Boolean, dark: Boolean, onDismiss: () -> Unit) {
@@ -250,7 +250,7 @@ private fun ErrorToast(message: ErrorToastMessage?, mobile: Boolean, narrow: Boo
     val held = overBody || overClose
     var left by remember(message) { mutableLongStateOf(4_000L) }
     LaunchedEffect(message, held) {
-        if (message == null || held) return@LaunchedEffect
+        if (message == null || held || message.persistent) return@LaunchedEffect
         val start = SystemClock.uptimeMillis()
         try {
             delay(left)
@@ -277,6 +277,7 @@ private fun ErrorToast(message: ErrorToastMessage?, mobile: Boolean, narrow: Boo
             val icon = when (shown?.kind) {
                 ErrorToastMessage.Kind.INFO -> ProductIcon.InfoIcon
                 ErrorToastMessage.Kind.SUCCESS -> ProductIcon.CircleCheckIcon
+                ErrorToastMessage.Kind.WARNING -> ProductIcon.TriangleAlertIcon
                 ErrorToastMessage.Kind.PLAIN -> null
                 else -> ProductIcon.OctagonXIcon
             }

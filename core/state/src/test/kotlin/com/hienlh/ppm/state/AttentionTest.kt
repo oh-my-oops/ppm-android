@@ -2,6 +2,7 @@ package com.hienlh.ppm.state
 
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.protocol.ApprovalRequest
+import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionUnread
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -10,6 +11,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -41,6 +43,20 @@ class AttentionTest {
         // A subagent's end is not the turn's.
         chat.handle(frame("""{"type":"phase_changed","phase":"streaming"}"""))
         assertEquals(emptyList<ChatAttention>(), attention(chat.handle(frame("""{"type":"done","parentToolUseId":"t1"}"""))))
+    }
+
+    @Test
+    fun `sending, answering or stopping here takes the toast back, as the web does without waiting for the server`() = runBlocking {
+        val chat = ChatController(ApiClient("http://127.0.0.1:9".toHttpUrl(), ""), "p", SessionInfo(id = "s", providerId = "mock", title = ""), this)
+        val heard = mutableListOf<ChatAttention>()
+        chat.onAttention = { heard += it }
+        chat.respond(ApprovalRequest("r", "Bash", json("{}")), approved = false)
+        chat.send("go on")
+        chat.cancel()
+        // Nothing is sent: no toast to take back.
+        chat.send("  ")
+        assertEquals(List(3) { ChatAttention.Answered }, heard)
+        chat.stop()
     }
 
     @Test

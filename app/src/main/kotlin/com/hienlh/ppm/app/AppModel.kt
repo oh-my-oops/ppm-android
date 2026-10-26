@@ -79,7 +79,9 @@ import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.AgentSessionFallbacks
 import com.hienlh.ppm.state.AgentSessionOpening
 import com.hienlh.ppm.state.AgentSessionPayload
+import com.hienlh.ppm.state.AttentionNotice
 import com.hienlh.ppm.state.BackgroundOutput
+import com.hienlh.ppm.state.ChatAttention
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.ChatJumpRequest
@@ -98,6 +100,7 @@ import com.hienlh.ppm.state.McpSignInFlow
 import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.NewChatCache
+import com.hienlh.ppm.state.NotificationTones
 import com.hienlh.ppm.state.agentSessionKeysOnScreen
 import com.hienlh.ppm.state.agentSessionOpening
 import com.hienlh.ppm.state.workspace.NewChatDefaults
@@ -1164,6 +1167,56 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     }
 
     /**
+     * use-chat.ts for a chat that is not in front: a request that waits sounds and raises a toast
+     * that stays, with a way to the chat; its answer, or the chat moving on, takes that toast back;
+     * the turn's end only sounds. The unread side comes from the server (`session:unread_changed`).
+     */
+    private fun chatAttention(chat: ChatTab, attention: ChatAttention) {
+        val sessionId = chat.controller?.sessionId ?: chat.session?.id
+        when (attention) {
+            is ChatAttention.Asked -> {
+                if (sessionId == null || sessionInFront(sessionId)) return
+                val notice = AttentionNotice.of(attention.request, chat.project, sessionId)
+                NotificationSounds.play(notice.sound)
+                val raised = ErrorToastMessage(
+                    notice.title,
+                    notice.description,
+                    ErrorToastMessage.Action("Go to session") { goToSession(sessionId) },
+                    kind = if (notice.warning) ErrorToastMessage.Kind.WARNING else ErrorToastMessage.Kind.INFO,
+                    persistent = true,
+                )
+                chat.attentionToast = raised
+                toast = raised
+            }
+            ChatAttention.Answered -> {
+                if (toast != null && toast === chat.attentionToast) toast = null
+                chat.attentionToast = null
+            }
+            ChatAttention.Done -> if (sessionId != null && !sessionInFront(sessionId)) NotificationSounds.play(NotificationTones.DONE)
+        }
+    }
+
+    /** `isSessionTabActive`: the app is in front and some panel, a window's too, shows the session's tab. */
+    private fun sessionInFront(sessionId: String): Boolean {
+        if (!windowVisible) return false
+        val panels = workspace?.state?.value?.panels ?: return false
+        return panels.values.any { tabSessionId(it.activeTab) == sessionId }
+    }
+
+    /**
+     * The toast's "Go to session": the first panel holding the session's tab shows it. The web takes
+     * any tab naming the session, its Review tab too, which has no way to answer; this takes its chat.
+     */
+    private fun goToSession(sessionId: String) {
+        val store = workspace ?: return
+        for (panel in store.state.value.panels.values) {
+            val tab = panel.tabs.firstOrNull { tabSessionId(it) == sessionId } ?: continue
+            store.setActiveTab(tab.id, panel.id)
+            return
+        }
+    }
+
+    /**
      * The server's `tab_open` on [chat]'s socket (`answerTabOpen`): the tab the AI asked for,
      * opened beside the chat in the chat's project, and for a page it made, how that page rendered.
      */
@@ -1674,6 +1727,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                 chat.editSend = { message -> edits.send(chat, message) }
                 chat.prewarmTouch = { newChats.touchPrewarm(chat) }
                 chat.tabOpener = { request -> answerAiTabOpen(chat, request) }
+                chat.onAttention = { attention -> chatAttention(chat, attention) }
                 chat.modePicked = { mode -> patchTabMetadata(id, "permissionMode" to JsonPrimitive(mode.value), "permissionModeSource" to JsonPrimitive("user")) }
                 chat.changesListed = { sessionId, list ->
                     for (review in reviews.values) if (review.sessionId == sessionId && review.project == project) review.takeLive(list)
@@ -1884,6 +1938,34 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             )
             events?.markRead(session.id)
         }
+    }
+
+    /**
+     * A row of the bell (`handleGoToSession`): the session's chat in its project, its tab brought
+     * forward when it is open there. A session filed under no project the server has opens nothing,
+     * and says so ([false]) so the list stays. The web names every such chat Claude's; this names
+     * the provider it knows.
+     */
+    fun openUnreadSession(sessionId: String, projectName: String): Boolean {
+        if (projects.none { it.name == projectName }) return false
+        val providerId = sessions.firstOrNull { it.id == sessionId }?.providerId ?: "claude"
+        scope.launch {
+            openProject(projectName) { store ->
+                store.openTab(
+                    NewTab(
+                        type = "chat",
+                        title = "Chat",
+                        projectId = projectName,
+                        metadata = buildJsonObject {
+                            put("projectName", projectName)
+                            put("sessionId", sessionId)
+                            put("providerId", providerId)
+                        },
+                    ),
+                )
+            }
+        }
+        return true
     }
 
     /** `useUrlSync`'s pushState: the tab in front (the focused panel's, as the web's address follows it), in its project. */
@@ -2587,6 +2669,12 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     /** Opens the tabs the AI asks for on this chat's socket (`tab_open`), and says how that went. */
     var tabOpener: (suspend (TabOpenRequest) -> TabOpenAnswer)? = null
 
+    /** Hears what may need the user while this chat is not in front (set by the model). */
+    var onAttention: ((ChatAttention) -> Unit)? = null
+
+    /** The toast this chat raised for a request still waiting (`approvalToastRef`): it goes once that is answered. */
+    internal var attentionToast: ErrorToastMessage? = null
+
     /** The edited message waiting for its version's socket (`pendingSendRef`), and the work that waits. */
     internal var pendingEdit: PendingEdit? = null
     internal var editJob: Job? = null
@@ -3108,6 +3196,8 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         val from = startedWith
         val old = controller
         val stale = old?.transcript?.items.orEmpty()
+        // A request the old session raised a toast for is not this one's to answer (the web's session effect).
+        onAttention?.invoke(ChatAttention.Answered)
         old?.stop()
         turnsJob?.cancel()
         turnsJob = null
@@ -3126,6 +3216,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         }
         val controller = ChatController(from.api, project, next, from.scope, providerId = providerId, stale = stale).also {
             it.tabOpener = tabOpener
+            it.onAttention = onAttention
             it.start()
         }
         this.controller = controller
@@ -3174,6 +3265,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         welcomeList = HistoryList(api, project, scope)
         val controller = ChatController(api, project, session, scope, providerId = providerId).also {
             it.tabOpener = tabOpener
+            it.onAttention = onAttention
             it.start()
         }
         this.controller = controller
@@ -3235,10 +3327,17 @@ private const val CHAT_PROJECT_WAIT_MS = 15_000L
  * button that runs [action] and closes the toast. Each one is a toast of its own, even with the
  * text of the last. Its [kind] is the icon in front: `toast.info`'s, or a plain `toast()`'s none.
  */
-class ErrorToastMessage(val title: String, val description: String? = null, val action: Action? = null, val kind: Kind = Kind.ERROR) {
+class ErrorToastMessage(
+    val title: String,
+    val description: String? = null,
+    val action: Action? = null,
+    val kind: Kind = Kind.ERROR,
+    /** `duration: Infinity`: it stays until it is closed, its action runs or its raiser takes it back. */
+    val persistent: Boolean = false,
+) {
     class Action(val label: String, val run: () -> Unit)
 
-    enum class Kind { ERROR, INFO, SUCCESS, PLAIN }
+    enum class Kind { ERROR, INFO, SUCCESS, WARNING, PLAIN }
 }
 
 /** The lightbox open on [images] at [index] (`useImageOverlay`'s state). */

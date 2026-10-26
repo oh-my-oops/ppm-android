@@ -281,7 +281,7 @@ fun ProjectAvatar(model: AppModel, project: ProjectInfo, size: Dp, square: Boole
         }
     }
     Box(
-        Modifier.size(size).clip(shape).background(projectFill(project.color ?: PROJECT_PALETTE[index % PROJECT_PALETTE.size])),
+        Modifier.size(size).clip(shape).background(projectBackground(project.color, index)),
         contentAlignment = Alignment.Center,
     ) {
         BasicText(
@@ -309,6 +309,9 @@ private val PROJECT_PALETTE = listOf(
 )
 
 private val hexColor = Regex("#[0-9a-fA-F]{3,8}")
+
+/** `resolveProjectColor`: a project's own colour, else the palette's by its position, as a CSS `background`. */
+internal fun projectBackground(color: String?, index: Int): Brush = projectFill(color ?: PROJECT_PALETTE[index % PROJECT_PALETTE.size])
 
 /** A CSS `background` of one hex or a 135° two-stop gradient, which runs corner to corner. */
 private fun projectFill(color: String): Brush {

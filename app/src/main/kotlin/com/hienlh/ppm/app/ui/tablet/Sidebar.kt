@@ -298,6 +298,7 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
+            NotificationBell(model)
             FooterUtil(ProductIcon.Settings, "Settings") { model.openSettings() }
         }
     }
