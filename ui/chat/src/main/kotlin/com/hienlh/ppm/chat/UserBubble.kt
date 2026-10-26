@@ -70,6 +70,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.ClampedText
+import com.hienlh.ppm.design.CssColumn
+import com.hienlh.ppm.design.CssRow
+import com.hienlh.ppm.design.CssText
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.LocalPpmMobile
@@ -86,6 +89,8 @@ import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderInset
 import com.hienlh.ppm.design.cssBorderPx
+import com.hienlh.ppm.design.cssIcon
+import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
@@ -191,11 +196,8 @@ internal fun UserBubble(
     val linked = if (system || parsed.text.isEmpty()) null else remember(parsed.text, tokens, uriHandler) { linkedUserText(parsed.text, tokens, uriHandler) }
     // How wide the text is exactly: the bubble around it is that and its padding, as Chrome sizes it.
     val textWidth = if (linked == null) Float.NaN else rememberExactTextWidth(linked, BUBBLE_TEXT)
-    Column(
-        modifier.fillMaxWidth(),
-        horizontalAlignment = if (system) Alignment.Start else Alignment.End,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
+    // `flex flex-col gap-1`, stacked in Chrome's fractions: 4 px is 10.5 at 2.625x.
+    CssColumn(modifier.fillMaxWidth(), gap = 4.dp, alignEnd = !system) {
         // As wide as what it holds, as a box in a flex column is, up to 80%: the text's exact width
         // while it is the widest thing in it (measured, it is laid out to its next pixel).
         var bubble = if (system) {
@@ -214,7 +216,7 @@ internal fun UserBubble(
         if (editing > 0f) bubble = bubble.ring(2.dp * editing, tokens.accent.opacity(0.6 * editing).color, shape) { bubbleShape(system, rad, it) }
         val fill = if (system) tokens.panel.opacity(0.4) else tokens.accentWash
         val stroke = (if (system) tokens.border.opacity(0.4) else tokens.accentWashBorder).let { tokens.accent.opacity(0.4).mix(it, editing.toDouble()) }
-        Column(bubble.background(fill.color, shape).cssBorder(stroke.color, shape).padding(horizontal = 12.dp, vertical = 8.dp)) {
+        CssColumn(bubble.background(fill.color, shape).cssBorder(stroke.color, shape).padding(horizontal = 12.dp), top = 8.dp, bottom = 8.dp) {
             parsed.replyTo?.let { ReplyCard(it, replies.jump(it), Modifier.padding(bottom = 8.dp)) }
             if (parsed.tags.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -232,9 +234,11 @@ internal fun UserBubble(
                 LabelChip(command.name, tokens.accent.opacity(0.15), tokens.accent.opacity(0.2), tokens.accent) { PpmIcon(LucideIcon.Slash, 12.dp, it) }
             }
             parsed.idePath?.let { path ->
-                Row(Modifier.padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    BasicText("Opened in IDE:", style = ppmText(11f, lineHeight = 11f * SM_LINE).copy(color = tokens.text3.color))
-                    FilePathChip(path, lineHeight = 10f * SM_LINE)
+                CssColumn(bottom = 4.dp) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        BasicText("Opened in IDE:", style = ppmText(11f, lineHeight = 11f * SM_LINE).copy(color = tokens.text3.color))
+                        FilePathChip(path, lineHeight = 10f * SM_LINE)
+                    }
                 }
             }
             if (parsed.files.isNotEmpty()) {
@@ -290,10 +294,13 @@ private fun VersionSwitcher(group: VersionGroup, disabled: Boolean, onSwitch: (S
     if (group.ids.size < 2) return
     val tokens = LocalPpmTokens.current
     val index = group.currentIndex
-    Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        VersionStep(ProductIcon.ChevronLeft, "Previous version", enabled = !disabled && index > 0) { group.ids.getOrNull(index - 1)?.let(onSwitch) }
-        BasicText("${index + 1}/${group.ids.size}", style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color, fontFeatureSettings = "tnum"))
-        VersionStep(ProductIcon.ChevronRight, "Next version", enabled = !disabled && index < group.ids.lastIndex) { group.ids.getOrNull(index + 1)?.let(onSwitch) }
+    // 18 px tall, 47.25 at 2.625x, and 4 px under the text, both kept exact.
+    CssColumn(top = 4.dp) {
+        CssRow(gap = 4.dp) {
+            VersionStep(ProductIcon.ChevronLeft, "Previous version", enabled = !disabled && index > 0) { group.ids.getOrNull(index - 1)?.let(onSwitch) }
+            CssText("${index + 1}/${group.ids.size}", ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color, fontFeatureSettings = "tnum"))
+            VersionStep(ProductIcon.ChevronRight, "Next version", enabled = !disabled && index < group.ids.lastIndex) { group.ids.getOrNull(index + 1)?.let(onSwitch) }
+        }
     }
 }
 
@@ -308,15 +315,18 @@ private fun VersionStep(icon: ProductIcon, label: String, enabled: Boolean, onCl
     val hover = rememberHover(instant = true)
     val pressed by hover.source.collectIsPressedAsState()
     val color = (if (hover.lit > 0f || (pressed && enabled)) tokens.text else tokens.text3).color
-    Box(
+    CssRow(
         Modifier
             .alpha(if (enabled) 1f else 0.3f)
             .clip(RoundedCornerShape(4.dp))
             .semantics { contentDescription = label }
-            .ppmClickable(enabled = enabled, pressedColor = Color.Transparent, source = hover.source, hoverWhileDisabled = true, onClick = onClick)
-            .padding(2.dp),
+            .ppmClickable(enabled = enabled, pressedColor = Color.Transparent, source = hover.source, hoverWhileDisabled = true, onClick = onClick),
+        start = 2.dp,
+        end = 2.dp,
+        top = 2.dp,
+        bottom = 2.dp,
     ) {
-        PpmIcon(icon, 14.dp, color)
+        PpmIcon(icon, 14.dp, color, Modifier.cssIcon(14.dp))
     }
 }
 
@@ -339,7 +349,8 @@ private fun BubbleText(text: String, system: Boolean, linked: AnnotatedString?) 
     // The bubble is as wide as a user's text exactly, a fraction under the pixels it lays out in.
     val slack = if (system) Modifier else Modifier.exactTextSlack()
     WithoutOnCopy(if (system) "" else userTextMarks(text)) {
-        SelectionContainer {
+        // Counted at its lines, 52.5 px each at 2.625x where Compose makes 53, and at most half the window.
+        SelectionContainer(Modifier.cssLines(20f, max = if (expanded) expandedLimit else Dp.Unspecified)) {
             if (expanded) {
                 BasicText(annotated, slack.heightIn(max = expandedLimit).cssScrollY(), style, inlineContent = inline)
             } else {
@@ -352,13 +363,16 @@ private fun BubbleText(text: String, system: Boolean, linked: AnnotatedString?) 
         val hover = rememberHover()
         val lit = hover.lit.toDouble()
         val color = (if (system) tokens.text2.mix(tokens.text3, lit) else tokens.accent.mix(tokens.accent.opacity(0.7), lit)).color
-        Row(
-            Modifier.padding(top = 4.dp).ppmClickable(pressedColor = Color.Transparent, source = hover.source) { expanded = !expanded },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            PpmIcon(if (expanded) ProductIcon.ChevronUp else ProductIcon.ChevronDown, 12.dp, color)
-            BasicText(if (expanded) "Show less" else "Show more", style = ppmText(12f, lineHeight = 16f).copy(color = color))
+        // `mt-1`: 10.5 px at 2.625x, which padding would make 11.
+        CssColumn(top = 4.dp) {
+            Row(
+                Modifier.ppmClickable(pressedColor = Color.Transparent, source = hover.source) { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                PpmIcon(if (expanded) ProductIcon.ChevronUp else ProductIcon.ChevronDown, 12.dp, color)
+                BasicText(if (expanded) "Show less" else "Show more", style = ppmText(12f, lineHeight = 16f).copy(color = color))
+            }
         }
     }
 }

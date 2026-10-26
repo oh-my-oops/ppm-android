@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -85,11 +84,14 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssHeight
+import com.hienlh.ppm.design.cssLazyItem
 import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.cssScrollbar
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberCssLazyStack
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.ReplyReference
@@ -329,6 +331,22 @@ private fun TranscriptList(
             if (index < 0) viewer?.show(listOf(self), 0) else viewer?.show(images.toMutableList().also { it[index] = self }, index)
         }
     }
+    // Each item where the exact heights above it put it, as Chrome stacks the messages: rounded
+    // one at a time, 10.5 px gaps and 52.5 px lines put a message 3 px off the web's on a phone.
+    val stack = rememberCssLazyStack(0.dp)
+    val streams = !live.isNullOrEmpty()
+    val cold = idleCache != null
+    val keys = remember(rows, state.hasEarlier, state.loadingEarlier, streams, cold, trailing) {
+        buildList {
+            if (state.hasEarlier) add(SENTINEL)
+            if (state.loadingEarlier) add(SKELETON)
+            for (row in rows) add(row.item.id)
+            if (streams) add(LIVE)
+            if (cold) add(IDLE_CACHE)
+            if (trailing) add(TRAILING)
+        }
+    }
+    fun stacked(index: Int) = Modifier.cssLazyItem(stack, keys[index], keys.getOrNull(index - 1), keys.getOrNull(index + 1))
     // A shell call's card opens as its output starts to stream in, once (`isStreamingBash`).
     val streamed = remember { HashSet<String>() }
     LaunchedEffect(state.bashOutput.keys) {
@@ -346,8 +364,9 @@ private fun TranscriptList(
                 TaskTracker(state.tasks)
                 // The tag is how the Baseline Profile's journeys find the transcript (baselineprofile/).
                 LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scroll.connection).onGloballyPositioned { anchors.list = it }.testTag("chat-transcript").cssScrollbar(list), state = list) {
-                    if (state.hasEarlier) item(key = SENTINEL) { Spacer(Modifier.fillMaxWidth().height(1.dp)) }
-                    if (state.loadingEarlier) item(key = SKELETON) { PreCompactSkeleton() }
+                    // `h-px`: 2.625 px at 2.625x, which pushes every message under it a fraction down.
+                    if (state.hasEarlier) item(key = SENTINEL) { Spacer(stacked(0).fillMaxWidth().cssHeight(1.dp)) }
+                    if (state.loadingEarlier) item(key = SKELETON) { Box(stacked(head - 1)) { PreCompactSkeleton() } }
                     rows.forEachIndexed { index, row ->
                         item(key = row.item.id, contentType = row.item.role) {
                             val reply = remember(row, state.sessionId, state.providerId, onReply) { replyAction(row, state, onReply) }
@@ -359,7 +378,7 @@ private fun TranscriptList(
                             } else {
                                 null
                             }
-                            val place = Modifier.replyFlash(flashing == row.item.id, tokens.accent).padding(start = 16.dp, end = 16.dp, top = 16.dp)
+                            val place = stacked(head + index).replyFlash(flashing == row.item.id, tokens.accent).padding(start = 16.dp, end = 16.dp, top = 16.dp)
                             val compaction = row.item.compaction
                             val message: @Composable (Modifier) -> Unit = { modifier ->
                                 ChatMessageView(
@@ -383,17 +402,17 @@ private fun TranscriptList(
                         }
                     }
                     if (!live.isNullOrEmpty()) {
-                        item(key = "live") {
+                        item(key = LIVE) {
                             CompositionLocalProvider(LocalMarkdownImageScope provides LIVE_SCOPE) {
-                                AssistantBlocks(live, live = state.isRunning, actions = null, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp))
+                                AssistantBlocks(live, live = state.isRunning, actions = null, modifier = stacked(head + rows.size).padding(start = 16.dp, end = 16.dp, top = 16.dp))
                             }
                         }
                     }
                     idleCache?.let { cold ->
-                        item(key = "idle-cache") { IdleCacheNotice(cold) }
+                        item(key = IDLE_CACHE) { Box(stacked(keys.indexOf(IDLE_CACHE))) { IdleCacheNotice(cold) } }
                     }
                     if (trailing) {
-                        item(key = "trailing") { Trailing(state, onRespond) }
+                        item(key = TRAILING) { Box(stacked(keys.lastIndex)) { Trailing(state, onRespond) } }
                     }
                 }
             }
@@ -461,6 +480,11 @@ private fun Modifier.replyFlash(on: Boolean, accent: Rgba): Modifier = if (!on) 
 private const val SENTINEL = "earlier"
 private const val SKELETON = "earlier-skeleton"
 private val HEAD_KEYS = setOf(SENTINEL, SKELETON)
+
+/** The keys of what comes after the messages: the turn streaming in, the cold cache, the approval or the thinking line. */
+private const val LIVE = "live"
+private const val IDLE_CACHE = "idle-cache"
+private const val TRAILING = "trailing"
 
 /** Where the list starts before it is measured: far past its last item, which it then clamps to its end. */
 private const val OPEN_AT_END = 100_000_000

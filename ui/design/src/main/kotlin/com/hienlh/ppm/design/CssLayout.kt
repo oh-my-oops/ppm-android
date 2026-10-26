@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -70,9 +71,13 @@ class CssExact internal constructor(internal val fixed: Float = Float.NaN) {
 private fun exactWidth(data: CssExact?, placeable: Placeable): Float =
     if (data == null || data.width.isNaN() || data.reportedWidth < 0) placeable.width.toFloat() else data.width + (placeable.width - data.reportedWidth)
 
-/** How tall a child carrying [data] that measured [placeable] is exactly, as a [CssColumn] counts it. */
+/**
+ * How tall a child carrying [data] that measured [placeable] is exactly, as a [CssColumn] counts
+ * it. One that measures nothing is nothing, though what it lends was tall the last time it held
+ * something (a block whose text all went).
+ */
 private fun exactHeight(data: CssExact?, placeable: Placeable): Float = when {
-    data == null || data.height.isNaN() -> placeable.height.toFloat()
+    data == null || data.height.isNaN() || placeable.height == 0 -> placeable.height.toFloat()
     !data.fixed.isNaN() -> data.fixed
     data.reported >= 0 -> data.height + (placeable.height - data.reported)
     else -> data.height
@@ -156,7 +161,8 @@ fun Measurable.cssMeasure(constraints: Constraints, at: Float): Pair<Placeable, 
  * composer's 352.52 px under a chat at 2.625x, and only then learn where in a pixel that is.
  *
  * With [gaps] each child has its own space above it, the first one's included, in place of [gap]:
- * the margins CSS leaves between blocks once it has collapsed them.
+ * the margins CSS leaves between blocks once it has collapsed them. With [alignEnd] (`items-end`)
+ * each child is flush with the column's end instead of its start.
  */
 @Composable
 fun CssColumn(
@@ -166,6 +172,7 @@ fun CssColumn(
     bottom: Dp = 0.dp,
     exact: CssExact = rememberCssExact(),
     gaps: List<Dp>? = null,
+    alignEnd: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     Layout(content, modifier.then(CssExactElement(exact, reads = true))) { measurables, constraints ->
@@ -234,7 +241,7 @@ fun CssColumn(
         val height = at.roundToInt().coerceIn(constraints.minHeight, constraints.maxHeight)
         exact.reported = height
         layout(width, height) {
-            placeables.forEachIndexed { index, placeable -> placeable!!.place(0, tops[index]) }
+            placeables.forEachIndexed { index, placeable -> placeable!!.place(if (alignEnd) width - placeable.width else 0, tops[index]) }
         }
     }
 }
@@ -792,12 +799,16 @@ private class CssTightLinesNode(var fontSize: Float, var lineHeight: Float, var 
  * from its rounded top to the next one's, its gap included. Rounded an item at a time, 43.3 px
  * lines and 10.5 px gaps put every other card a pixel lower than the web's.
  *
- * An item measured before the one above it (a list opened at its end, rows scrolled in from above)
- * starts on a whole pixel, as in a plain list, until that one is measured and it is measured again.
+ * An item starts where the one above it ends once that one was measured, else where the one under
+ * it starts less its own height — a list opened at its end measures upwards from its last item —
+ * and the first one measured starts on a whole pixel. Each tells its content where in that pixel
+ * it starts, so the content rounds from its exact place, and one whose bottom moved has the item
+ * under it measured again.
  */
 class CssLazyStack internal constructor(internal val gap: Float) {
-    internal val tops = HashMap<Int, Float>()
-    internal val heights = HashMap<Int, Float>()
+    internal val tops = HashMap<Any, Float>()
+    internal val heights = HashMap<Any, Float>()
+    internal val nodes = HashMap<Any, CssLazyItemNode>()
 }
 
 @Composable
@@ -807,36 +818,74 @@ fun rememberCssLazyStack(gap: Dp): CssLazyStack {
 }
 
 /** The [index]th item of a lazy list laid out by [stack], its content at the top; the [last] has no gap under it. */
-fun Modifier.cssLazyItem(stack: CssLazyStack, index: Int, last: Boolean): Modifier = this then CssLazyItemElement(stack, index, last)
+fun Modifier.cssLazyItem(stack: CssLazyStack, index: Int, last: Boolean): Modifier =
+    cssLazyItem(stack, index, if (index > 0) index - 1 else null, if (last) null else index + 1)
 
-private data class CssLazyItemElement(val stack: CssLazyStack, val index: Int, val last: Boolean) : ModifierNodeElement<CssLazyItemNode>() {
-    override fun create() = CssLazyItemNode(stack, index, last)
+/**
+ * An item of a lazy list laid out by [stack], named by its [key] and the keys of the items [above]
+ * and [below] it, null at either end of the list; the last has no gap under it.
+ */
+fun Modifier.cssLazyItem(stack: CssLazyStack, key: Any, above: Any?, below: Any?): Modifier = this then CssLazyItemElement(stack, key, above, below)
+
+/**
+ * Where an item of a [CssLazyStack] [exact] px tall starts and how many pixels it takes: under
+ * the item above when that one's end is known ([aboveEnd], its gap included), else over the one
+ * under it ([belowTop]), else where it was ([own]), else on a whole pixel.
+ */
+internal fun cssLazyPlace(aboveEnd: Float?, belowTop: Float?, own: Float?, exact: Float, gap: Float, last: Boolean): Pair<Float, Int> {
+    val under = if (last) 0f else gap
+    val top = aboveEnd ?: belowTop?.let { it - under - exact } ?: own ?: 0f
+    return top to (top + exact + under).roundToInt() - top.roundToInt()
+}
+
+private data class CssLazyItemElement(val stack: CssLazyStack, val key: Any, val above: Any?, val below: Any?) : ModifierNodeElement<CssLazyItemNode>() {
+    override fun create() = CssLazyItemNode(stack, key, above, below)
 
     override fun update(node: CssLazyItemNode) {
-        if (node.stack === stack && node.index == index && node.last == last) return
+        if (node.stack === stack && node.key == key && node.above == above && node.below == below) return
+        node.release()
         node.stack = stack
-        node.index = index
-        node.last = last
+        node.key = key
+        node.above = above
+        node.below = below
+        if (node.isAttached) node.claim()
         node.invalidateMeasurement()
     }
 }
 
-private class CssLazyItemNode(var stack: CssLazyStack, var index: Int, var last: Boolean) : Modifier.Node(), LayoutModifierNode {
+internal class CssLazyItemNode(var stack: CssLazyStack, var key: Any, var above: Any?, var below: Any?) : Modifier.Node(), LayoutModifierNode {
+    override fun onAttach() = claim()
+
+    override fun onDetach() = release()
+
+    fun claim() {
+        stack.nodes[key] = this
+    }
+
+    fun release() {
+        if (stack.nodes[key] === this) stack.nodes.remove(key)
+    }
+
     override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
-        val placeable = measurable.measure(constraints)
+        val stack = stack
+        val last = below == null
+        val aboveEnd = above?.let { a -> stack.tops[a]?.let { top -> stack.heights[a]?.let { top + it + stack.gap } } }
+        val belowTop = below?.let { stack.tops[it] }
+        val own = stack.tops[key]
         val data = measurable.parentData as? CssExact
-        val exact = when {
-            data == null || data.height.isNaN() -> placeable.height.toFloat()
-            !data.fixed.isNaN() -> data.fixed
-            data.reported >= 0 -> data.height + (placeable.height - data.reported)
-            else -> data.height
-        }
-        val above = stack.tops[index - 1]?.let { top -> stack.heights[index - 1]?.let { top + it + stack.gap } }
-        val top = above ?: stack.tops[index] ?: 0f
-        stack.tops[index] = top
-        stack.heights[index] = exact
-        val bottom = top + exact + if (last) 0f else stack.gap
-        val height = bottom.roundToInt() - top.roundToInt()
+        // Told where it starts before it is measured, from its height last time; corrected after.
+        val guess = cssLazyPlace(aboveEnd, belowTop, own, stack.heights[key] ?: 0f, stack.gap, last).first
+        data?.givePhase(guess - guess.roundToInt())
+        val placeable = measurable.measure(constraints)
+        val exact = exactHeight(data, placeable)
+        val (top, height) = cssLazyPlace(aboveEnd, belowTop, own, exact, stack.gap, last)
+        if (top != guess) data?.givePhase(top - top.roundToInt())
+        stack.tops[key] = top
+        stack.heights[key] = exact
+        // The item under this one starts where it ends: measured again when that moved.
+        val end = top + exact + stack.gap
+        val next = below?.let { stack.nodes[it] }
+        if (next != null && belowTop != null && abs(belowTop - end) > 0.001f) next.invalidateMeasurement()
         return layout(placeable.width, height) { placeable.place(0, 0) }
     }
 }

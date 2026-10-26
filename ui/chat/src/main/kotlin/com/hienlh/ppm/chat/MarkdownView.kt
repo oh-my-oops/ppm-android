@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hienlh.ppm.design.CssExact
 import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeTokens
@@ -73,7 +74,8 @@ data class MarkdownStyle(
  * draws it; [streaming] while it still grows. The web holds it in a flex item or a scroller, which
  * stops the margins collapsing out of its first and last block, so they show. A `details` opened
  * or closed stays so while the text grows, as the DOM keeps it. While it grows, the blocks it had
- * are kept as they were and only the ones that changed are parsed, built and drawn again.
+ * are kept as they were and only the ones that changed are parsed, built and drawn again. Its
+ * exact height goes to [exact] when given, for a box around it to lend to a [CssColumn].
  */
 @Composable
 fun MarkdownView(
@@ -82,6 +84,7 @@ fun MarkdownView(
     style: MarkdownStyle = MarkdownStyle.chat,
     streaming: Boolean = false,
     rawHtml: Boolean = true,
+    exact: CssExact? = null,
 ) {
     val blocks = remember { MarkdownHtml.Blocks() }
     val kept = remember { KeptBoxes() }
@@ -90,7 +93,7 @@ fun MarkdownView(
     val root = remember(nodes, style, opened) { HtmlBoxes.build(nodes, style, opened, kept = kept) }
     val drawing = remember(style) { HtmlDrawing(style) { id, open -> opened = opened + (id to open) } }
     CompositionLocalProvider(LocalMarkdownStreaming provides streaming) {
-        HtmlFlow(root, drawing, modifier)
+        HtmlFlow(root, drawing, modifier, exact)
     }
 }
 
@@ -105,10 +108,11 @@ fun MarkdownContent(
     style: MarkdownStyle = MarkdownStyle.chat,
     streaming: Boolean = false,
     rawHtml: Boolean = true,
+    exact: CssExact? = null,
 ) {
     val content = remember(text) { markdownContent(text) }
     if (content.isEmpty()) return
-    MarkdownView(content, modifier, style, streaming, rawHtml)
+    MarkdownView(content, modifier, style, streaming, rawHtml, exact)
 }
 
 /** `.markdown-content code` is 0.75rem whatever the text around it. */

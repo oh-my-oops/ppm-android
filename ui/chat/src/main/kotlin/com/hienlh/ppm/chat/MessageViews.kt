@@ -54,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.ClampedText
+import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssRow
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.CssText
@@ -66,11 +67,14 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssExact
+import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.cssWidth
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberCssExact
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.ChatQuestions
@@ -218,15 +222,16 @@ internal fun ActionButton(icon: ProductIcon, label: String, title: String, touch
 @Composable
 fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActions?, modifier: Modifier = Modifier, usage: TurnUsage? = null) {
     val scope = LocalMarkdownImageScope.current
-    Column(modifier.fillMaxWidth()) {
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // Stacked in Chrome's fractions, as the transcript stacks its messages.
+    CssColumn(modifier.fillMaxWidth()) {
+        CssColumn(Modifier.fillMaxWidth(), gap = 8.dp) {
             blocks.forEachIndexed { index, block ->
                 // The turn is streaming: its last text or thinking block is still growing.
                 val growing = live && index == blocks.lastIndex
                 when (block) {
-                    is ChatBlock.Text -> Column {
+                    is ChatBlock.Text -> CssColumn {
                         CompositionLocalProvider(LocalMarkdownImageScope provides scope?.let { "$it/$index" }) {
-                            WithoutOnCopy(MARKDOWN_MARKS) { SelectionContainer { MarkdownContent(block.text, streaming = growing) } }
+                            WithoutOnCopy(MARKDOWN_MARKS) { SelectableMarkdown(block.text, growing) }
                         }
                         if (growing) StreamingMark()
                     }
@@ -243,18 +248,25 @@ fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActi
                     }
                     is ChatBlock.Error -> InlineError(block.message)
                     // The web quotes it into the answer as markdown of its own.
-                    is ChatBlock.Retry -> Column {
+                    is ChatBlock.Retry -> CssColumn {
                         val quote = "> ↻ ${block.reason} — retrying with **${block.accountLabel}**..."
-                        WithoutOnCopy(MARKDOWN_MARKS) { SelectionContainer { MarkdownContent(quote) } }
+                        WithoutOnCopy(MARKDOWN_MARKS) { SelectableMarkdown(quote, streaming = false) }
                         if (growing) StreamingMark()
                     }
                 }
             }
         }
         if (actions != null && usage != null) TurnCostWarning(usage, Modifier.padding(top = 8.dp))
-        // `-mt-1.5` against the column's `gap-2`: 2 px under the answer.
-        if (actions != null) TurnChangeRollup(actions, Modifier.padding(top = 2.dp))
+        // `-mt-1.5` against the column's `gap-2`: 2 px under the answer, 5.25 at 2.625x.
+        if (actions != null) CssColumn(top = 2.dp) { TurnChangeRollup(actions) }
     }
+}
+
+/** A text block's markdown, selectable, counted by the column around it at its exact height. */
+@Composable
+private fun SelectableMarkdown(text: String, streaming: Boolean) {
+    val exact = rememberCssExact()
+    SelectionContainer(Modifier.cssExact(exact)) { MarkdownContent(text, streaming = streaming, exact = exact) }
 }
 
 /** A read with no result yet is over once a later edit of the same file came back, which needed it. */
@@ -284,7 +296,7 @@ fun pulse(): Float {
 internal fun StreamingMark() {
     val tokens = LocalPpmTokens.current
     val alpha = pulse()
-    BasicText("Thinking...", Modifier.alpha(alpha), ppmText(14f, lineHeight = 20f).copy(color = tokens.text3.color))
+    BasicText("Thinking...", Modifier.alpha(alpha).cssLines(20f), ppmText(14f, lineHeight = 20f).copy(color = tokens.text3.color))
 }
 
 /** An error event inside an answer. */

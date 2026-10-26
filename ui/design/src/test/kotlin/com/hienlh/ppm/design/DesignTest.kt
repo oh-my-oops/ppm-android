@@ -353,4 +353,21 @@ class DesignTest {
         assertEquals(116, tall.height)
         assertEquals(listOf(0), cssRowAcross(IntArray(1), floatArrayOf(10f), 1, 0f, 0f, 0f, 115.5f, 0.25f, CssAlign.Start).y.toList())
     }
+
+    @Test
+    fun `a lazy stack opened at its end stacks upwards from its last item`() {
+        // The chat's last answer (215.25 px at 2.625x) is measured first, on a whole pixel.
+        assertEquals(0f to 215, cssLazyPlace(null, null, null, 215.25f, 0f, last = true))
+        // The message above it (371.5) ends where that one starts: 371 pixels, from -371.
+        assertEquals(-371.5f to 371, cssLazyPlace(null, 0f, null, 371.5f, 0f, last = false))
+        // Measured again with the one above it known, an item goes under that one, whatever it held.
+        assertEquals(0f to 215, cssLazyPlace(0f, 9f, 4f, 215.25f, 0f, last = true))
+        // Cards 10.5 px apart: each takes the pixels to the next one's top, the last none under it.
+        assertEquals(52.5f to 53, cssLazyPlace(52.5f, null, null, 43.3f, 10.5f, last = false))
+        assertEquals(52.5f to 43, cssLazyPlace(52.5f, null, null, 43.3f, 10.5f, last = true))
+        // Above one known: its own gap is between them.
+        assertEquals(-53.8f to 54, cssLazyPlace(null, 0f, null, 43.3f, 10.5f, last = false))
+        // Nothing beside it known: where it was.
+        assertEquals(7.25f to 44, cssLazyPlace(null, null, 7.25f, 43.3f, 0f, last = true))
+    }
 }

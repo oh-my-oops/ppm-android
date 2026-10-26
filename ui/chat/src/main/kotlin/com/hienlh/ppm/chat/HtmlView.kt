@@ -149,7 +149,7 @@ private fun HtmlAlign.textAlign(): TextAlign = when {
  * is 157.5 px and the 4 px under it 10.5, where whole pixels would put the next block one lower.
  */
 @Composable
-internal fun HtmlFlow(box: FlowBox, drawing: HtmlDrawing, modifier: Modifier = Modifier) {
+internal fun HtmlFlow(box: FlowBox, drawing: HtmlDrawing, modifier: Modifier = Modifier, lent: CssExact? = null) {
     val tokens = LocalPpmTokens.current
     var outer = modifier.fillMaxWidth()
     val toggles = box.toggles
@@ -160,7 +160,8 @@ internal fun HtmlFlow(box: FlowBox, drawing: HtmlDrawing, modifier: Modifier = M
     if (box.borderStart > 0f) outer = outer.cssBorder(tokens.border.color, width = box.borderStart.dp, sides = CssSides.Start)
     val inner = Modifier.padding(start = box.paddingStart.dp)
     val gaps = remember(box) { box.children.map { it.gap.dp } }
-    val exact = rememberCssExact()
+    val own = rememberCssExact()
+    val exact = lent ?: own
     val marker = box.marker
     if (marker == null) {
         CssColumn(outer.then(inner), top = box.insetTop.dp, bottom = box.insetBottom.dp, exact = exact, gaps = gaps) { HtmlChildren(box, drawing) }
