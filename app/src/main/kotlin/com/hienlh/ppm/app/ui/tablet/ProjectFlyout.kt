@@ -18,7 +18,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.rememberTextFieldState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -88,6 +87,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -333,7 +333,7 @@ private fun Flyout(model: AppModel, drag: RowDrag, modifier: Modifier, onDismiss
             Modifier
                 .weight(1f, fill = false)
                 .onGloballyPositioned { list = it.boundsInRoot() }
-                .verticalScroll(scroll)
+                .cssScrollY(scroll)
                 .padding(6.dp),
         ) {
             shown.forEachIndexed { index, project ->

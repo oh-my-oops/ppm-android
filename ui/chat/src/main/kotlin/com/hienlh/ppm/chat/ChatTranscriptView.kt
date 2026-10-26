@@ -25,11 +25,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -87,6 +85,8 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssScrollY
+import com.hienlh.ppm.design.cssScrollbar
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -345,7 +345,7 @@ private fun TranscriptList(
             Column(Modifier.fillMaxSize()) {
                 TaskTracker(state.tasks)
                 // The tag is how the Baseline Profile's journeys find the transcript (baselineprofile/).
-                LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scroll.connection).onGloballyPositioned { anchors.list = it }.testTag("chat-transcript"), state = list) {
+                LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scroll.connection).onGloballyPositioned { anchors.list = it }.testTag("chat-transcript").cssScrollbar(list), state = list) {
                     if (state.hasEarlier) item(key = SENTINEL) { Spacer(Modifier.fillMaxWidth().height(1.dp)) }
                     if (state.loadingEarlier) item(key = SKELETON) { PreCompactSkeleton() }
                     rows.forEachIndexed { index, row ->
@@ -861,7 +861,7 @@ private fun Welcome(below: @Composable () -> Unit) {
     val tokens = LocalPpmTokens.current
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val viewport = maxHeight
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Column(Modifier.fillMaxSize().cssScrollY()) {
             Column(
                 Modifier.fillMaxWidth().heightIn(min = viewport),
                 horizontalAlignment = Alignment.CenterHorizontally,

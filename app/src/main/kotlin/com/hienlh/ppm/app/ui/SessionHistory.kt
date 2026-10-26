@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,6 +50,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssScrollbar
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -152,6 +154,7 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
             return@Column
         }
         val sessions = state.shown(all)
+        val sessionList = rememberLazyListState()
         when {
             state.loading && all.isEmpty() || (state.searchPage == null && model.sessionsLoad == AppModel.Load.Loading && all.isEmpty()) ->
                 Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
@@ -162,7 +165,7 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
                 Modifier.fillMaxWidth().padding(vertical = 12.dp),
                 style = ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
             )
-            else -> LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+            else -> LazyColumn(Modifier.weight(1f).fillMaxWidth().cssScrollbar(sessionList), sessionList) {
                 items(sessions, key = { it.id }) { session ->
                     val entry = unread[session.id]
                     SidebarSessionRow(model, session, entry?.type, entry != null) {
@@ -373,6 +376,7 @@ private fun SearchResults(model: AppModel, page: com.hienlh.ppm.protocol.ChatSea
     val tokens = LocalPpmTokens.current
     val hits = page?.hits.orEmpty()
     val note = ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text3.color)
+    val hitList = rememberLazyListState()
     Column(modifier.fillMaxWidth()) {
         if (page?.indexing == true) {
             Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -389,7 +393,7 @@ private fun SearchResults(model: AppModel, page: com.hienlh.ppm.protocol.ChatSea
                 Modifier.fillMaxWidth().padding(vertical = 12.dp),
                 style = note.copy(textAlign = TextAlign.Center),
             )
-            else -> LazyColumn(Modifier.fillMaxWidth()) {
+            else -> LazyColumn(Modifier.fillMaxWidth().cssScrollbar(hitList), hitList) {
                 items(hits, key = { it.sessionId }) { hit ->
                     SearchHitRow(hit) {
                         model.open(hit)

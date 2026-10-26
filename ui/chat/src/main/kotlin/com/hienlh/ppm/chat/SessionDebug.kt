@@ -54,6 +54,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeTokens
+import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.cssExact
@@ -123,14 +124,16 @@ fun SessionDebugBody(
         // `max-h-[35vh] overflow-y-auto whitespace-pre-wrap break-all rounded-md border border-border
         // bg-surface p-2.5 font-mono text-[11px] leading-relaxed text-text-secondary select-text`.
         val shape = RoundedCornerShape(8.dp)
+        val scroll = rememberScrollState()
         CssColumn(
             Modifier
                 .fillMaxWidth()
                 .heightIn(max = viewport.height * 0.35f)
+                .chromeScrollbar(scroll, vertical = true, tokens.border.color, border = 1.dp)
                 .clip(shape)
                 .background(tokens.panel.color)
                 .cssBorder(tokens.border.color, shape)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scroll)
                 .padding(horizontal = 10.dp),
             top = 10.dp,
             bottom = 10.dp,
@@ -336,19 +339,25 @@ private fun TurnTable(turns: List<TurnRecord>, maxHeight: Dp) {
         val room = constraints.maxWidth - 2 * with(density) { cssBorderPx(1.dp) }
         val sum = content.sum()
         val widths = if (sum < room) FloatArray(content.size) { content[it] + (room - sum) * content[it] / sum } else content
+        val down = rememberScrollState()
+        val across = rememberScrollState()
         CssColumn(
             Modifier
                 .fillMaxWidth()
                 .heightIn(max = maxHeight)
+                // The box is the web's scroller both ways, its sticky head inside it: the bar down
+                // runs the box's whole height, head and all.
+                .chromeScrollbar(down, vertical = true, tokens.border.color, across = across, border = 1.dp)
+                .chromeScrollbar(across, vertical = false, tokens.border.color, across = down, border = 1.dp)
                 .clip(shape)
                 .cssBorder(tokens.border.color, shape)
-                .then(if (sum > room) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
+                .then(if (sum > room) Modifier.horizontalScroll(across) else Modifier),
             exact = exact,
         ) {
             TableRow(widths, Modifier.cssHeight(23.75.dp).background(tokens.panel.color)) {
                 HEADERS.forEach { (label, end) -> TableCell(label, tokens.text3, end, style) }
             }
-            CssColumn(Modifier.cssFlex().verticalScroll(rememberScrollState())) {
+            CssColumn(Modifier.cssFlex().verticalScroll(down)) {
                 rows.forEachIndexed { index, row ->
                     TableRow(widths, Modifier.cssHeight(23.75.dp + line).cssBorder(tokens.border.color, sides = CssSides.Top)) {
                         row.forEachIndexed { column, cell ->

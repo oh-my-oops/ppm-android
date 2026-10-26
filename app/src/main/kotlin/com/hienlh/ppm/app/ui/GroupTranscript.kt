@@ -15,10 +15,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -60,6 +59,8 @@ import com.hienlh.ppm.design.cssFlex
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssLazyItem
 import com.hienlh.ppm.design.cssLines
+import com.hienlh.ppm.design.cssScrollY
+import com.hienlh.ppm.design.cssScrollbar
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberCssLazyStack
@@ -142,7 +143,7 @@ private fun TranscriptBody(loaded: Result<GroupTranscript>?, summary: String?, m
         TranscriptMessages(transcript, modifier)
         return
     }
-    Box(modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+    Box(modifier.fillMaxWidth().cssScrollY()) {
         if (loaded == null) {
             Box(Modifier.fillMaxWidth().padding(vertical = 40.dp), contentAlignment = Alignment.Center) {
                 PpmIcon(ProductIcon.Loader2, 20.dp, tokens.accent.color, spinning = true)
@@ -200,7 +201,8 @@ private fun TranscriptMessages(transcript: GroupTranscript, modifier: Modifier) 
     val first = if (config.isEmpty()) 0 else 1
     val last = first + maxOf(transcript.messages.size, 1) - 1
     val stack = rememberCssLazyStack(12.dp)
-    LazyColumn(modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 4.dp)) {
+    val list = rememberLazyListState()
+    LazyColumn(modifier.fillMaxWidth().cssScrollbar(list), list, contentPadding = PaddingValues(horizontal = 4.dp)) {
         if (config.isNotEmpty()) item { TranscriptRow(stack, 0, last) { ConfigBlock(config) } }
         itemsIndexed(transcript.messages) { index, message -> TranscriptRow(stack, first + index, last) { TranscriptMessage(message) } }
         if (transcript.messages.isEmpty()) {

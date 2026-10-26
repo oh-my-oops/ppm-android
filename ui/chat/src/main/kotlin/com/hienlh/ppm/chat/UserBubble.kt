@@ -81,10 +81,12 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.ViewerImage
 import com.hienlh.ppm.design.WebCursor
+import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderInset
 import com.hienlh.ppm.design.cssBorderPx
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -323,7 +325,7 @@ private fun BubbleText(text: String, system: Boolean) {
     WithoutBreaksOnCopy(enabled = !system && BREAK !in text) {
         SelectionContainer {
             if (expanded) {
-                BasicText(annotated, Modifier.heightIn(max = expandedLimit).verticalScroll(rememberScrollState()), style, inlineContent = inline)
+                BasicText(annotated, Modifier.heightIn(max = expandedLimit).cssScrollY(), style, inlineContent = inline)
             } else {
                 ClampedText(annotated, style, maxLines = 2, preWrap = true, inlineContent = inline, onClamped = { clamped = it })
             }
@@ -539,15 +541,17 @@ private fun TerminalBlockPreview(content: String) {
         }
         if (expanded) {
             // `mt-1 max-h-40 overflow-auto rounded-md border bg-background p-2 text-xs font-mono`.
+            val scroll = rememberScrollState()
             SelectionContainer(
                 Modifier
                     .padding(top = 4.dp)
                     .fillMaxWidth()
                     .heightIn(max = 160.dp)
+                    .chromeScrollbar(scroll, vertical = true, tokens.border.color, border = 1.dp)
                     .clip(shape)
                     .background(tokens.bgSolid.color)
                     .cssBorder(tokens.border.color, shape)
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scroll)
                     .padding(8.dp),
             ) {
                 BasicText(content, style = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text.color))
@@ -580,15 +584,16 @@ private fun BadgePill(gap: Int, onClick: () -> Unit, content: @Composable (Color
 private fun BadgeBody(maxHeight: Int?, content: @Composable () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(4.dp)
+    val scroll = rememberScrollState()
     Box(
         Modifier
             .padding(top = 4.dp)
             .fillMaxWidth()
-            .then(if (maxHeight != null) Modifier.heightIn(max = maxHeight.dp) else Modifier)
+            .then(if (maxHeight != null) Modifier.heightIn(max = maxHeight.dp).chromeScrollbar(scroll, vertical = true, tokens.border.color, border = 1.dp) else Modifier)
             .clip(shape)
             .background(tokens.panel.opacity(0.3).color)
             .cssBorder(tokens.border.opacity(0.4).color, shape)
-            .then(if (maxHeight != null) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+            .then(if (maxHeight != null) Modifier.verticalScroll(scroll) else Modifier)
             .padding(horizontal = 8.dp, vertical = 6.dp),
     ) { content() }
 }
@@ -664,7 +669,7 @@ private fun TaskNotificationBadge(tag: ParsedUserMessage.SystemTag) {
 private fun TaskResult(markdown: String) {
     val tokens = LocalPpmTokens.current
     val style = MarkdownStyle(size = 11f, lineHeightRatio = 1.625f, color = tokens.text3.opacity(0.8))
-    Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
+    Box(Modifier.heightIn(max = 240.dp).cssScrollY()) {
         MarkdownContent(markdown, style = style, rawHtml = false)
     }
 }
@@ -726,7 +731,7 @@ fun ReplyCard(
         val quoteStyle = small.copy(color = tokens.text2.color)
         SelectionContainer {
             if (expanded) {
-                BasicText(reply.quote, Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState()), quoteStyle)
+                BasicText(reply.quote, Modifier.heightIn(max = 240.dp).cssScrollY(), quoteStyle)
             } else {
                 ClampedText(AnnotatedString(reply.quote), quoteStyle, maxLines = 2, preWrap = true)
             }

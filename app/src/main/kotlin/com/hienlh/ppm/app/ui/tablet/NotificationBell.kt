@@ -47,6 +47,7 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.ThemeTokens
+import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
@@ -115,15 +116,17 @@ internal fun NotificationBell(model: AppModel) {
 @Composable
 private fun BellPopover(model: AppModel, unread: Map<String, SessionUnread>, tokens: ThemeTokens, close: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
+    val scroll = rememberScrollState()
     Column(
         Modifier
             .width(288.dp)
             .heightIn(max = 320.dp)
             .then(ShadowLg.fold(Modifier as Modifier) { m, s -> m.ppmShadow(s, shape) })
+            .chromeScrollbar(scroll, vertical = true, tokens.border.color, border = 1.dp)
             .clip(shape)
             .background(tokens.bgSolid.color)
             .cssBorder(tokens.border.color, shape)
-            .verticalScroll(rememberScrollState()),
+            .verticalScroll(scroll),
     ) {
         Row(
             Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Bottom).padding(horizontal = 12.dp, vertical = 8.dp),

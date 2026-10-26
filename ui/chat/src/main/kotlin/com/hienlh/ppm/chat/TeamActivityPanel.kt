@@ -9,7 +9,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -26,7 +25,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -79,6 +77,8 @@ import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.cssPhase
 import com.hienlh.ppm.design.cssPhased
 import com.hienlh.ppm.design.cssReport
+import com.hienlh.ppm.design.cssScrollX
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberCssExact
@@ -199,7 +199,7 @@ private val badgeText = ppmText(9f, lineHeight = 12f)
 private fun TeamPicker(names: List<String>, selected: String, sessionId: String?, onPick: (String) -> Unit) {
     val tokens = LocalPpmTokens.current
     Row(
-        Modifier.cssHeight(20.5.dp).fillMaxWidth().horizontalScroll(rememberScrollState()),
+        Modifier.cssHeight(20.5.dp).fillMaxWidth().cssScrollX(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -339,7 +339,7 @@ private fun TeamMemberList(members: List<TeamMemberActivity>, loading: Boolean, 
         if (currentStep(member).isNullOrEmpty()) margin else maxOf(margin, strut - (44f - STEP_ROW_BASELINE))
     }
     val height = minOf(44f * members.size + unders.sum(), LIST_MAX.toFloat())
-    CssColumn(Modifier.cssHeight(height.dp).fillMaxWidth().verticalScroll(rememberScrollState())) {
+    CssColumn(Modifier.cssHeight(height.dp).fillMaxWidth().cssScrollY()) {
         members.forEachIndexed { index, member ->
             key(member.name) {
                 CssColumn(Modifier.fillMaxWidth(), bottom = unders[index].dp) { TeamMemberRow(member, now) { onOpen(member.name) } }
@@ -508,7 +508,7 @@ private fun TeamMessageList(messages: List<TeamMessage>) {
         withFrameNanos { }
         scroll.animateScrollTo(scroll.maxValue)
     }
-    CssColumn(Modifier.fillMaxWidth().heightIn(max = LIST_MAX.dp).verticalScroll(scroll), gap = 8.dp, bottom = 8.dp) {
+    CssColumn(Modifier.fillMaxWidth().heightIn(max = LIST_MAX.dp).cssScrollY(scroll), gap = 8.dp, bottom = 8.dp) {
         for (message in messages) TeamMessageRow(message)
     }
 }

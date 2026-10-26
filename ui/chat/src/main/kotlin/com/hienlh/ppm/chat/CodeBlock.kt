@@ -33,6 +33,7 @@ import com.hienlh.ppm.design.LocalPpmTheme
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.SyntaxHighlighter
+import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.lucideOutline
 import com.hienlh.ppm.design.ppmClickable
@@ -65,15 +66,17 @@ fun CodeBlockView(code: String, language: String?, modifier: Modifier = Modifier
         value = if (enabled) highlighter.cached(code, language, theme) else null
         if (enabled && value == null) value = highlighter.highlight(code, language, theme)
     }
+    val scroll = rememberScrollState()
     Box(modifier.fillMaxWidth()) {
         // The `pre` has the border; the copy button is placed in the box around it.
         Box(
             Modifier
                 .fillMaxWidth()
+                .chromeScrollbar(scroll, vertical = false, tokens.border.color, border = 1.dp)
                 .clip(shape)
                 .background(highlighted?.background ?: tokens.bgSolid.color)
                 .cssBorder(tokens.border.color, shape)
-                .horizontalScroll(rememberScrollState()),
+                .horizontalScroll(scroll),
         ) {
             BasicText(
                 highlighted?.text ?: AnnotatedString(code),

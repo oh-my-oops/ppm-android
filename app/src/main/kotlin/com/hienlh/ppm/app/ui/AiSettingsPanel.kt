@@ -15,12 +15,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -69,6 +67,7 @@ import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.cssExact
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssLines
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -182,7 +181,7 @@ internal fun AiSettingsPanel(model: AppModel) {
             .heightIn(max = 280.dp)
             .background(tokens.panel.color)
             .line(top = true, tokens.border.opacity(0.3).color)
-            .verticalScroll(rememberScrollState())
+            .cssScrollY()
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         AiSettingsSection(model)

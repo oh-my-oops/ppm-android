@@ -131,6 +131,7 @@ import com.hienlh.ppm.design.chromeCaret
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderPx
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -1179,9 +1180,11 @@ private fun ModelColumns(model: AppModel, chat: ChatController, state: ChatState
     val models: List<ModelOption> = remember(catalog, entries) { catalog?.models(chat.providerId).orEmpty() }
     val status: ModelListStatus? = remember(catalog, entries) { catalog?.status(chat.providerId) ?: ModelListStatus.LOADING }
     val effort = Effort.of(state.effort) ?: Effort.DEFAULT
+    // The tablet's popover scrolls with the web's thumb; the phone's sheet does not scroll on the web.
+    val scroll = rememberScrollState()
     Row(
         box
-            .verticalScroll(rememberScrollState())
+            .then(if (LocalPpmMobile.current) Modifier.verticalScroll(scroll) else Modifier.cssScrollY(scroll))
             .then(inner)
             .height(IntrinsicSize.Min),
     ) {

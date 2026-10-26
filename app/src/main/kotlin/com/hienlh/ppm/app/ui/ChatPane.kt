@@ -44,7 +44,6 @@ import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.selectAll
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -146,6 +145,7 @@ import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.chromeCaret
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssHeight
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberChromeCaret
@@ -981,7 +981,7 @@ private fun ChatHistoryDropdown(model: AppModel, tab: ChatTab, list: HistoryList
         }
         val sessions = state.shown(all)
         val unread = model.unreadSessions()
-        Column(Modifier.fillMaxWidth().heightIn(max = 200.dp).verticalScroll(rememberScrollState())) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 200.dp).cssScrollY()) {
             when {
                 (state.loading || (state.searchPage == null && model.sessionsLoad == AppModel.Load.Loading)) && all.isEmpty() ->
                     Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {

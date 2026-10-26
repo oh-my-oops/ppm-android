@@ -100,6 +100,7 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.SyntaxHighlighter
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.WebCursor
+import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.cssExact
@@ -110,6 +111,8 @@ import com.hienlh.ppm.design.cssMinHeight
 import com.hienlh.ppm.design.cssPhase
 import com.hienlh.ppm.design.cssPhased
 import com.hienlh.ppm.design.cssReport
+import com.hienlh.ppm.design.cssScrollY
+import com.hienlh.ppm.design.cssScrollbar
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -370,7 +373,7 @@ fun ReviewCode(
     }
 
     Box(modifier.fillMaxSize().background(tokens.bgSolid.color).closesTurnOutside(state, enabled = !compact)) {
-        LazyColumn(Modifier.fillMaxSize(), state = list) {
+        LazyColumn(Modifier.fillMaxSize().cssScrollbar(list), state = list) {
             itemsIndexed(entries, key = { _, entry -> entry.key }) { index, entry ->
                 val first = index == 0
                 val last = index == entries.lastIndex
@@ -1297,15 +1300,17 @@ private fun TurnCard(chip: TurnChip, compact: Boolean, onClose: () -> Unit, act:
         val quote = RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp)
         val maxHeight = if (compact) (LocalConfiguration.current.screenHeightDp * 0.4f).dp else 192.dp
         val style = ppmText(prompt, lineHeight = prompt * ratio)
+        val scroll = rememberScrollState()
         Box(
             Modifier
                 .padding(bottom = 10.dp)
                 .fillMaxWidth()
                 .heightIn(max = maxHeight)
+                .chromeScrollbar(scroll, vertical = true, tokens.border.color)
                 .clip(quote)
                 .background(tokens.text.opacity(0.05).color)
                 .cssBorder(tokens.accent.color, width = 2.dp, sides = CssSides.Start)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scroll)
                 .padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
             if (turn.prompt.isNotEmpty()) {
@@ -1492,7 +1497,7 @@ private fun WholeFile(review: FileReview, compact: Boolean, onRevertFile: () -> 
         else -> "This diff is too large to cut into blocks, so the file is kept or reverted whole."
     }
     val outcome = if (review.open == 0) SessionReviewModel.fileOutcome(review) else null
-    Box(modifier.fillMaxSize().background(tokens.bgSolid.color).verticalScroll(rememberScrollState()).padding(12.dp)) {
+    Box(modifier.fillMaxSize().background(tokens.bgSolid.color).cssScrollY().padding(12.dp)) {
         Column(
             Modifier
                 .fillMaxWidth()

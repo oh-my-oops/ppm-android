@@ -33,7 +33,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,6 +65,7 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeTokens
 import com.hienlh.ppm.design.TruncatedText
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -263,7 +263,7 @@ private fun StreamingBashOutput(output: BashPartial) {
             PpmIcon(ProductIcon.Loader2, 12.dp, tokens.warning.color, spinning = true)
             BasicText("Output (${lines(output.lineCount)}, streaming...)", style = tinyText.copy(color = tokens.warning.color))
         }
-        Box(Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(scroll)) {
+        Box(Modifier.fillMaxWidth().heightIn(max = 240.dp).cssScrollY(scroll)) {
             Mono(output.tail, tokens.text3, breakAll = true, style = streamMono)
         }
     }
@@ -673,7 +673,7 @@ private fun DbToolDetails(call: DbToolCall) {
             }
         }
         call.reason?.let { BasicText(it, style = ppmText(12f, lineHeight = 16f, italic = true).copy(color = tokens.text2.color)) }
-        Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
+        Box(Modifier.heightIn(max = 240.dp).cssScrollY()) {
             Mono(call.sql, tokens.text2, breakAll = true)
         }
         call.expectedRows?.let { rows ->
@@ -748,7 +748,7 @@ private fun FileDetails(name: String, input: JsonElement, toolUseId: String?) {
             }
         }
         if (name == "Write" && s("content").isNotEmpty()) {
-            Box(Modifier.editAnchor(toolUseId?.let { "$it-0" }).heightIn(max = 128.dp).verticalScroll(rememberScrollState())) {
+            Box(Modifier.editAnchor(toolUseId?.let { "$it-0" }).heightIn(max = 128.dp).cssScrollY()) {
                 Mono(truncate(s("content"), 300), tokens.text3)
             }
         }
@@ -890,7 +890,7 @@ private fun TaskStatusBadge(status: String) {
 @Composable
 internal fun MiniMarkdown(content: String, maxHeight: Dp, size: Float = 12f, lineHeightRatio: Float = 16f / 12f, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
-    Box(modifier.fillMaxWidth().heightIn(max = maxHeight).verticalScroll(rememberScrollState())) {
+    Box(modifier.fillMaxWidth().heightIn(max = maxHeight).cssScrollY()) {
         MarkdownView(content, style = MarkdownStyle(size = size, lineHeightRatio = lineHeightRatio, color = tokens.text2))
     }
 }
@@ -1041,7 +1041,7 @@ private fun AgentResultView(output: String, text: String) {
             MiniMarkdown(text, maxHeight = 240.dp)
             OutputToggle(if (showRaw) "Hide raw" else "Show raw", ProductIcon.Code) { showRaw = !showRaw }
             if (showRaw) {
-                Box(Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState())) {
+                Box(Modifier.heightIn(max = 160.dp).cssScrollY()) {
                     Mono(output, tokens.text3, breakAll = true, style = tinyMono)
                 }
             }
@@ -1066,7 +1066,7 @@ private fun SendMessageOutcomeView(output: String, outcome: SendMessageOutcome) 
             }
             OutputToggle(if (showRaw) "Hide raw" else "Show raw", ProductIcon.Code) { showRaw = !showRaw }
             if (showRaw) {
-                Box(Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState())) {
+                Box(Modifier.heightIn(max = 160.dp).cssScrollY()) {
                     Mono(output, tokens.text3, breakAll = true, style = tinyMono)
                 }
             }
@@ -1135,7 +1135,7 @@ private fun CollapsibleOutput(output: String) {
                 collapsed -> Box(Modifier.heightIn(max = 64.dp).clipToBounds()) {
                     Mono(remember(output) { collapsedPreview(output) }, tokens.text3, breakAll = true)
                 }
-                long -> Box(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) { Mono(output, tokens.text3, breakAll = true) }
+                long -> Box(Modifier.heightIn(max = 240.dp).cssScrollY()) { Mono(output, tokens.text3, breakAll = true) }
                 else -> Mono(output, tokens.text3, breakAll = true)
             }
         }

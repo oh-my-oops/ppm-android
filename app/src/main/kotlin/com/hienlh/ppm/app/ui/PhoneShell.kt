@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -91,6 +92,7 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderPx
+import com.hienlh.ppm.design.cssScrollbar
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.ProjectInfo
@@ -402,7 +404,8 @@ internal fun ProjectSheet(model: AppModel, onDismiss: () -> Unit) {
         val q = query.text.toString().trim().lowercase()
         val shown = model.sortedProjects.filter { q.isEmpty() || it.name.lowercase().contains(q) || it.path.lowercase().contains(q) }
         val maxList = LocalConfiguration.current.screenHeightDp.dp * 0.6f
-        LazyColumn(Modifier.fillMaxWidth().heightIn(max = maxList)) {
+        val list = rememberLazyListState()
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = maxList).cssScrollbar(list), list) {
             items(shown, key = { it.name }) { project ->
                 val active = project.name == model.selectedProject
                 Row(
@@ -550,7 +553,9 @@ private fun TabSwitcherSheet(model: AppModel, onDismiss: () -> Unit, onLongPress
                 style = ppmText(13f, lineHeight = 19.5f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
             )
         } else {
-            LazyColumn(Modifier.weight(1f, fill = false).fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp)) {
+            // The web's scroller is the padded box: its thumb runs down the padding's far edge.
+            val list = rememberLazyListState()
+            LazyColumn(Modifier.weight(1f, fill = false).fillMaxWidth().cssScrollbar(list).padding(start = 8.dp, end = 8.dp, bottom = 8.dp), list) {
                 for ((label, tabs) in groups) {
                     if (label.isNotEmpty()) item(key = "group\u0000$label") { GroupHeader(label, tabs.size) }
                     items(tabs, key = { (tab, panelId) -> "${tab.id}\u0000$panelId" }) { (tab, _) ->

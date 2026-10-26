@@ -72,6 +72,7 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeTokens
+import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderInset
 import com.hienlh.ppm.design.cssBorderPx
@@ -507,12 +508,14 @@ private fun HtmlImage(box: ImageBox, drawing: HtmlDrawing, modifier: Modifier) {
 private fun HtmlTable(box: TableBox, drawing: HtmlDrawing, modifier: Modifier) {
     val grid = remember(box) { TableGrid(box) }
     val policy = remember(grid) { HtmlTableLayout(grid) }
+    val scroll = rememberScrollState()
     Layout(
         content = {
             grid.cells.forEachIndexed { index, cell -> HtmlCell(cell, grid.closesEnd[index], grid.closesBottom[index], drawing) }
         },
-        // The scroller passes the line's width on as its minimum, its maximum being endless.
-        modifier.padding(vertical = 8.dp).fillMaxWidth().horizontalScroll(rememberScrollState()),
+        // The scroller passes the line's width on as its minimum, its maximum being endless. Its thumb
+        // runs along the bottom of the margins it keeps inside.
+        modifier.chromeScrollbar(scroll, vertical = false, LocalPpmTokens.current.border.color).padding(vertical = 8.dp).fillMaxWidth().horizontalScroll(scroll),
         policy,
     )
 }

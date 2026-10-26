@@ -30,6 +30,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.TruncatedText
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssScrollbar
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.webTitle
@@ -103,7 +104,7 @@ private fun OutputText(text: String, bottomInset: Dp, modifier: Modifier) {
     }
     WithoutOnCopy("$BREAK$JOIN") {
         SelectionContainer(modifier.fillMaxWidth().background(tokens.bgSolid.color)) {
-            LazyColumn(Modifier.fillMaxWidth(), list, PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + bottomInset)) {
+            LazyColumn(Modifier.fillMaxWidth().cssScrollbar(list), list, PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp + bottomInset)) {
                 items(lines.size) { index -> BasicText(lines[index], style = outputText.copy(color = tokens.text.color)) }
             }
         }

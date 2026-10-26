@@ -65,6 +65,7 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssLines
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -537,7 +538,7 @@ private fun ColumnScope.ChangesSheetContent(
     }
     // `min-h-0 flex-1 overflow-y-auto`.
     val scroll = rememberScrollState()
-    CssColumn(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(scroll)) { rows() }
+    CssColumn(Modifier.fillMaxWidth().weight(1f, fill = false).cssScrollY(scroll)) { rows() }
     // `shrink-0 space-y-2 border-t border-border-soft px-3 pt-2`.
     CssColumn(Modifier.fillMaxWidth().cssBorder(tokens.borderSoft.color, sides = CssSides.Top).padding(horizontal = 12.dp), gap = 8.dp, top = 8.dp) {
         // `text-xs leading-relaxed`.

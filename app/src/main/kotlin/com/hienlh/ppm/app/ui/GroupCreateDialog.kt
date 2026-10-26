@@ -11,13 +11,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -63,6 +61,7 @@ import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.cssFlex
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssLines
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -191,7 +190,7 @@ private fun GroupForm(model: AppModel, draft: GroupDraft, mobile: Boolean, modif
         modifier
             .fillMaxWidth()
             .onGloballyPositioned { viewport = Rect(it.positionOnScreen(), it.size.toSize()) }
-            .verticalScroll(rememberScrollState())
+            .cssScrollY()
             .padding(horizontal = 4.dp),
         gap = 16.dp,
         top = 4.dp,

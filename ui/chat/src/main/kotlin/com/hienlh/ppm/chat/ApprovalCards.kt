@@ -66,12 +66,14 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.WebCursor
+import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderInset
 import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.cssExact
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssLines
+import com.hienlh.ppm.design.cssScrollX
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberCssExact
@@ -126,7 +128,7 @@ private fun ToolApprovalCard(request: ApprovalRequest, respond: (Boolean, JsonEl
                 .fillMaxWidth()
                 .background(tokens.bgSolid.color, pre)
                 .cssBorder(tokens.border.color, pre)
-                .horizontalScroll(rememberScrollState()),
+                .cssScrollX(),
         ) {
             SelectionContainer {
                 BasicText(
@@ -332,10 +334,12 @@ internal fun QuestionCard(
             // `p-1` inside the border, kept at 4 px (10.5 at 2.625x) by a column of the strip's own,
             // around a track as tall as a tab, `py-1.5` and a 16 px line; each tab fills it.
             val strip = rememberCssExact()
+            val tabs = rememberScrollState()
             Box(Modifier.cssExact(strip).fillMaxWidth().background(tokens.bgSolid.color, tabsShape).cssBorder(tokens.border.color, tabsShape)) {
-                CssColumn(Modifier.padding(horizontal = 4.dp), top = 4.dp, bottom = 4.dp, exact = strip) {
+                // The bordered box is the web's scroller, its `p-1` included: the thumb runs along its bottom.
+                CssColumn(Modifier.chromeScrollbar(tabs, vertical = false, tokens.border.color).padding(horizontal = 4.dp), top = 4.dp, bottom = 4.dp, exact = strip) {
                     Row(
-                        Modifier.cssHeight(28.dp).fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        Modifier.cssHeight(28.dp).fillMaxWidth().horizontalScroll(tabs),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         questions.forEachIndexed { index, question ->

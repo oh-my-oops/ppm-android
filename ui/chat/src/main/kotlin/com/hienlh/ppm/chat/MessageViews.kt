@@ -28,7 +28,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -67,6 +66,7 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -393,7 +393,7 @@ internal fun ThinkingBlock(text: String, streaming: Boolean) {
             LaunchedEffect(streaming) {
                 if (streaming) snapshotFlow { scroll.maxValue }.collect { scroll.scrollTo(it) }
             }
-            Column(Modifier.heightIn(max = 240.dp).verticalScroll(scroll).padding(start = 8.dp, end = 8.dp, bottom = 8.dp)) {
+            Column(Modifier.heightIn(max = 240.dp).cssScrollY(scroll).padding(start = 8.dp, end = 8.dp, bottom = 8.dp)) {
                 WithoutOnCopy(MARKDOWN_MARKS) {
                     SelectionContainer {
                         MarkdownContent(text, style = thinkingStyle.copy(color = tokens.text3.opacity(0.8)), streaming = streaming)

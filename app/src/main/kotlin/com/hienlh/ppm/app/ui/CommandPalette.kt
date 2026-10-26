@@ -73,6 +73,7 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssScrollbar
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -201,7 +202,7 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
                     if (shown.isEmpty()) {
                         if (text.isNotBlank()) AskAiRow(text.trim(), ::askAi) else EmptyLine("No results")
                     } else {
-                        LazyColumn(Modifier.weight(1f, fill = false).heightIn(max = 288.dp), list, PaddingValues(vertical = 4.dp)) {
+                        LazyColumn(Modifier.weight(1f, fill = false).heightIn(max = 288.dp).cssScrollbar(list), list, PaddingValues(vertical = 4.dp)) {
                             itemsIndexed(shown) { index, command -> CommandRow(command, index == selected) }
                         }
                     }

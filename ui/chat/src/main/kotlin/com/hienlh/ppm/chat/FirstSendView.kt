@@ -5,9 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -18,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmText
 import java.time.Instant
 
@@ -30,7 +29,7 @@ import java.time.Instant
 @Composable
 fun FirstSendView(content: String, timestamp: Instant, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
-    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) {
+    Column(modifier.fillMaxWidth().cssScrollY().padding(16.dp)) {
         UserBubble(content, timestamp, ReplyTargets.None)
         Row(
             Modifier.padding(top = 12.dp).semantics { liveRegion = LiveRegionMode.Polite },

@@ -72,6 +72,7 @@ import com.hienlh.ppm.design.cssExact
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssLazyItem
 import com.hienlh.ppm.design.cssLines
+import com.hienlh.ppm.design.cssScrollbar
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberCssExact
@@ -214,7 +215,7 @@ private fun FeedList(group: GroupTab, state: GroupChat.State, speakers: GroupSpe
     // The rows stacked in fractions of a pixel, as Chrome stacks them: rounded a row at a time,
     // 83.5 px rows at 2.625x put each one a pixel lower than the last.
     val stack = rememberCssLazyStack(0.dp)
-    LazyColumn(Modifier.fillMaxSize(), state = list) {
+    LazyColumn(Modifier.fillMaxSize().cssScrollbar(list), state = list) {
         item(key = FEED_START) { Spacer(Modifier.cssLazyItem(stack, 0, last = false).cssHeight(8.dp)) }
         itemsIndexed(state.messages, key = { _, message -> message.id }) { index, message ->
             // Where the press that asked for the message's menu was, in its row.

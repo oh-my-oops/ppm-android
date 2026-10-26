@@ -15,10 +15,8 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,6 +44,7 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -109,7 +108,7 @@ fun GroupList(model: AppModel, onNavigate: () -> Unit = {}) {
     }
     Column(Modifier.fillMaxSize()) {
         GroupListHeader(mobile) { creating = true }
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(4.dp)) {
+        Column(Modifier.weight(1f).fillMaxWidth().cssScrollY().padding(4.dp)) {
             when {
                 loading -> Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
                     PpmIcon(ProductIcon.Loader2, 16.dp, tokens.accent.color, spinning = true)
@@ -239,7 +238,7 @@ internal fun OneItemMenu(mobile: Boolean, at: Offset, label: String, icon: Produ
     val vh = with(density) { (LocalWindowInfo.current.containerSize.height - WindowInsets.statusBars.getTop(density)).toDp() }
     val color = (if (destructive) tokens.error else tokens.text).color
     BottomSheet(onDismiss, inset = 8.dp, bottomPadding = WindowInsets.navigationBars.add(WindowInsets(bottom = 8.dp))) {
-        Column(Modifier.heightIn(max = vh * 0.6f).verticalScroll(rememberScrollState())) {
+        Column(Modifier.heightIn(max = vh * 0.6f).cssScrollY()) {
             val shape = RoundedCornerShape(12.dp)
             Row(
                 Modifier

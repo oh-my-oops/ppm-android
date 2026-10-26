@@ -73,6 +73,7 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.TruncatedText
 import com.hienlh.ppm.design.colorsFade
+import com.hienlh.ppm.design.cssScrollbar
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -223,7 +224,7 @@ private fun PickerBox(selection: () -> Int, content: LazyListScope.() -> Unit) {
     val list = rememberLazyListState()
     LaunchedEffect(list) { snapshotFlow(selection).drop(1).collect { list.revealNearest(it) } }
     LazyColumn(
-        Modifier.fillMaxWidth().heightIn(max = 208.dp).background(tokens.panel.color).edge(Edge.Bottom, tokens.border.color),
+        Modifier.fillMaxWidth().heightIn(max = 208.dp).background(tokens.panel.color).edge(Edge.Bottom, tokens.border.color).cssScrollbar(list),
         list,
         PaddingValues(vertical = 4.dp),
         content = content,

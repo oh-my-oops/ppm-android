@@ -22,6 +22,7 @@ import com.hienlh.ppm.client.sessionTurnUsage
 import com.hienlh.ppm.client.stripSessionImages
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.cssScrollY
 import java.math.BigDecimal
 import java.math.RoundingMode
 
@@ -58,7 +59,7 @@ internal fun SessionDebugDialog(model: AppModel, project: String, sessionId: Str
                 source,
                 stats,
                 viewport,
-                Modifier.heightIn(max = viewport.height * 0.85f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+                Modifier.heightIn(max = viewport.height * 0.85f).cssScrollY().padding(horizontal = 16.dp),
                 top = LocalSheetContentTop.current + 4.dp,
                 bottom = 16.dp,
             )

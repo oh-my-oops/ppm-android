@@ -88,6 +88,7 @@ import com.hienlh.ppm.design.cssFlex
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.cssMinHeight
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -1127,7 +1128,7 @@ private fun ColumnScope.TurnChangeSheetContent(
             )
             // `min-h-0 flex-1 overflow-y-auto px-4 text-sm leading-normal`.
             val scroll = rememberScrollState()
-            RevertTurnBody(flow, mobile = true, byCall, Modifier.fillMaxWidth().cssFlex().verticalScroll(scroll).padding(horizontal = 16.dp))
+            RevertTurnBody(flow, mobile = true, byCall, Modifier.fillMaxWidth().cssFlex().cssScrollY(scroll).padding(horizontal = 16.dp))
             val nothing = flow.preview != null && flow.reverted.isEmpty()
             // `flex gap-2 px-4 pt-3 pb-1`.
             Spacer(Modifier.cssHeight(12.dp))
@@ -1174,7 +1175,7 @@ private fun ColumnScope.TurnChangeSheetContent(
                     .fillMaxWidth()
                     .cssFlex()
                     .cssBorder(tokens.borderSoft.color, sides = CssSides.Top)
-                    .verticalScroll(scroll)
+                    .cssScrollY(scroll)
                     .padding(horizontal = 12.dp),
                 bottom = 12.dp,
             ) {

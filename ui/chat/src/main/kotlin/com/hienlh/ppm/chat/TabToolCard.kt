@@ -10,10 +10,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,6 +32,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.TruncatedText
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.webTitle
@@ -125,7 +124,7 @@ internal fun TabToolCard(call: TabToolCall, toolUseId: String?, output: String?,
                             .fillMaxWidth()
                             .heightIn(max = 240.dp)
                             .cssBorder(tokens.border.color, sides = CssSides.Top)
-                            .verticalScroll(rememberScrollState())
+                            .cssScrollY()
                             .padding(top = 6.dp),
                     ) {
                         Mono(text, tokens.text3)

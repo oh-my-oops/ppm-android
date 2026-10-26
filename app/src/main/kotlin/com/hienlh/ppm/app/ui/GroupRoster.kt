@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,7 +24,6 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,6 +61,7 @@ import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.cssFlex
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssLines
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
@@ -100,7 +99,7 @@ internal fun GroupRosterPanel(model: AppModel, group: GroupTab, state: GroupChat
                 .padding(horizontal = 12.dp),
             contentAlignment = Alignment.CenterStart,
         ) { MembersTitle() }
-        Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+        Box(Modifier.weight(1f).fillMaxWidth().cssScrollY()) {
             RosterBody(group.chat, state, mobile = false) { editing = it }
         }
     }
@@ -120,7 +119,7 @@ internal fun GroupRosterSheet(model: AppModel, group: GroupTab, state: GroupChat
     BottomSheet(onDismiss, Modifier.heightIn(max = vh * 0.72f)) {
         CssColumn(Modifier.fillMaxWidth().weight(1f, fill = false), top = LocalSheetContentTop.current) {
             Box(Modifier.fillMaxWidth().cssHeight(44.dp).padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) { MembersTitle() }
-            Box(Modifier.cssFlex().fillMaxWidth().verticalScroll(rememberScrollState())) {
+            Box(Modifier.cssFlex().fillMaxWidth().cssScrollY()) {
                 RosterBody(group.chat, state, mobile = true) { editing = it }
             }
         }

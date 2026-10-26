@@ -21,10 +21,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -62,6 +60,7 @@ import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.cssFlex
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssLines
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.SessionFileChange
@@ -139,7 +138,7 @@ fun ReviewPhone(review: SessionReview, ctx: ReviewTabContext, modifier: Modifier
     when (sheet) {
         PhoneSheet.FILES -> ctx.listSheet(close) { _ ->
             SheetHead("Files changed in this chat", "$decided of ${progress.total} blocks decided · ${progress.open} left", onClose = close)
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+            Column(Modifier.weight(1f, fill = false).cssScrollY()) {
                 ReviewFileList(state.reviews, focused?.path, mobile = true, projectPath = ctx.projectPath) { path ->
                     review.focusFile(path)
                     close()
@@ -412,7 +411,7 @@ private fun ColumnScope.FileActions(r: FileReview, ctx: ReviewTabContext, review
             .weight(1f, fill = false)
             .fillMaxWidth()
             .cssBorder(tokens.borderSoft.color, sides = CssSides.Top)
-            .verticalScroll(rememberScrollState())
+            .cssScrollY()
             .padding(vertical = 4.dp),
     ) {
         if (!deleted && !r.gone) {

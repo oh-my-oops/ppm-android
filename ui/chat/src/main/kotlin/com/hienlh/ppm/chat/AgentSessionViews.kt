@@ -16,7 +16,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -49,6 +48,8 @@ import com.hienlh.ppm.design.cssExact
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssLazyItem
 import com.hienlh.ppm.design.cssLines
+import com.hienlh.ppm.design.cssScrollY
+import com.hienlh.ppm.design.cssScrollbar
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberCssExact
@@ -226,7 +227,7 @@ internal fun SubagentChildren(events: List<ChatEvent>, window: Boolean, modifier
         // `space-y-1` in fractions of a pixel, as Chrome stacks the steps.
         val stack = rememberCssLazyStack(4.dp)
         LazyColumn(
-            modifier.fillMaxWidth(),
+            modifier.fillMaxWidth().cssScrollbar(list),
             state = list,
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         ) {
@@ -252,7 +253,7 @@ internal fun SubagentChildren(events: List<ChatEvent>, window: Boolean, modifier
                 .fillMaxWidth()
                 .heightIn(max = max)
                 .cssBorder(tokens.panel2.opacity(0.2).color, width = 2.dp, sides = CssSides.Start)
-                .verticalScroll(scroll)
+                .cssScrollY(scroll)
                 .padding(start = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
