@@ -37,6 +37,9 @@ sealed interface ChatEffect {
 
     /** The AI's tab tool asked this device for a tab; it waits for the answer, which must always come. */
     data class OpenTab(val request: TabOpenRequest) : ChatEffect
+
+    /** Worth a sound, and for an approval a toast, when the chat is not in front of the user. */
+    data class Attention(val attention: ChatAttention) : ChatEffect
 }
 
 /** A message the server refused: what was typed, what it quoted, and why ([message]). */
@@ -199,6 +202,7 @@ class ChatTranscript {
                 val answers = frame.answers
                 if (id == null || pendingApproval?.requestId == id) pendingApproval = null
                 if (id != null && answers != null) live?.addAnswers(answers, id)
+                effects += ChatEffect.Attention(ChatAttention.Answered)
             }
             is ChatFrame.CompactStatus -> compacting = frame.compacting
             is ChatFrame.TabOpen -> effects += ChatEffect.OpenTab(frame.request)
@@ -493,10 +497,15 @@ class ChatTranscript {
             is ChatEvent.Approval -> {
                 addToLive(event, now)
                 // On replay, `session_state.pendingApproval` is the authority.
-                if (!replaying) pendingApproval = event.request
+                if (!replaying) {
+                    pendingApproval = event.request
+                    effects += ChatEffect.Attention(ChatAttention.Asked(event.request))
+                }
             }
             // A subagent's own end finishes nothing of the turn.
             is ChatEvent.Done -> if (event.parent == null) {
+                // A second `done` for the same turn (provider, then the stream loop) finds the phase idle.
+                if (phase != SessionPhase.IDLE) effects += ChatEffect.Attention(ChatAttention.Done)
                 finalizeLive(event.lastMessageUuid, event.usage)
                 turnFinalized = true
                 statusMessage = null

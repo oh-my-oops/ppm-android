@@ -5,7 +5,7 @@ import kotlinx.serialization.json.JsonObject
 
 /**
  * A turn's token split as `done` reports it (`TurnUsage` in shared/turn-usage.ts), narrowed to
- * what the app reads: the cost notice and the prompt cache's clock.
+ * what the app reads: the cost notice, the prompt cache's clock and the session's token history.
  */
 data class TurnUsage(
     val model: String,
@@ -29,9 +29,15 @@ data class TurnUsage(
     val cacheTtlMs: Double? = null,
     /** A compaction the turn ended on, which the next message pays to re-cache. */
     val compactedAt: Double? = null,
+    /** The account the turn ran on, when PPM knows it. */
+    val accountId: String? = null,
+    val accountLabel: String? = null,
 ) {
     /** The whole prefix replayed this turn, cached or not (`prefixTokens`). */
     val prefixTokens: Long get() = inputTokens + cacheReadTokens + cacheWriteTokens
+
+    /** The part of the prefix sent at full price (`uncachedPrefixTokens`). */
+    val uncachedPrefixTokens: Long get() = inputTokens + cacheWriteTokens
 
     companion object {
         fun from(json: JsonElement?): TurnUsage? {
@@ -49,6 +55,8 @@ data class TurnUsage(
                 contextTokens = json["contextTokens"].double,
                 cacheTtlMs = json["cacheTtlMs"].double,
                 compactedAt = json["compactedAt"].double,
+                accountId = json["accountId"].string,
+                accountLabel = json["accountLabel"].string,
             )
         }
     }

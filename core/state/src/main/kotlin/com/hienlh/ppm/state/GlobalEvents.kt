@@ -2,6 +2,7 @@ package com.hienlh.ppm.state
 
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.SocketConnection
+import com.hienlh.ppm.client.markAllRead
 import com.hienlh.ppm.client.markUnread
 import com.hienlh.ppm.protocol.AgentTranscriptFrame
 import com.hienlh.ppm.protocol.SessionFileChangesPush
@@ -160,6 +161,27 @@ class GlobalEvents(
     fun seen(sessionId: String) {
         val entry = _unread.value[sessionId] ?: return
         if (!entry.manual) markRead(sessionId)
+    }
+
+    /**
+     * The bell's Clear all: every unread session read, in one request. A failed request puts them
+     * back, keeping any that arrived meanwhile: the server still holds them, so the button must not
+     * claim it cleared them.
+     */
+    fun clearAll() {
+        val entries = _unread.value
+        if (entries.isEmpty()) return
+        _unread.value = emptyMap()
+        scope.launch {
+            try {
+                api.markAllRead(entries.keys.toList())
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                val now = _unread.value
+                _unread.value = now + entries.filterKeys { it !in now }
+            }
+        }
     }
 
     // GlobalChannel

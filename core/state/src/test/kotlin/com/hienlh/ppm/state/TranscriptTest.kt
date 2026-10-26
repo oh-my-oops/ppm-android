@@ -330,7 +330,8 @@ class TranscriptTest {
         chat.handle(frame("""{"type":"turn_events","userMessage":"go","streamSeq":900,"truncated":true,"events":[{"type":"text","content":"tail","streamSeq":5}]}"""))
         assertEquals(emptyList<ChatEffect>(), chat.handle(frame("""{"type":"ping","streamSeq":950}""")))
         assertEquals(emptyList<ChatEffect>(), chat.handle(frame("""{"type":"text","content":"x","streamSeq":960}""")))
-        assertEquals(emptyList<ChatEffect>(), chat.handle(frame("""{"type":"done","streamSeq":961}""")))
+        // No resync asked for: only the end of the turn, for whoever is not looking at it.
+        assertEquals(listOf(ChatEffect.Attention(ChatAttention.Done)), chat.handle(frame("""{"type":"done","streamSeq":961}""")))
         assertEquals(reload, chat.handle(frame("""{"type":"phase_changed","phase":"idle"}""")))
     }
 

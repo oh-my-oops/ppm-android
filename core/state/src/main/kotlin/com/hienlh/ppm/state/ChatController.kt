@@ -134,6 +134,9 @@ class ChatController(
      * either way, so none is ever left unanswered.
      */
     var tabOpener: (suspend (TabOpenRequest) -> TabOpenAnswer)? = null
+
+    /** Hears what may need the user's attention: the app decides whether the chat is in front. */
+    var onAttention: ((ChatAttention) -> Unit)? = null
     var providerId: String = providerId
         private set
     var sessionId: String? = session?.id
@@ -456,6 +459,7 @@ class ChatController(
                 }
                 is ChatEffect.TeamMessages -> team = team.received(effect.messages)
                 is ChatEffect.OpenTab -> openTab(effect.request)
+                is ChatEffect.Attention -> onAttention?.invoke(effect.attention)
             }
         }
     }
