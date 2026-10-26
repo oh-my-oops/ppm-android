@@ -22,6 +22,7 @@ import com.hienlh.ppm.client.sessionTurnUsage
 import com.hienlh.ppm.client.stripSessionImages
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.cssFlex
 import com.hienlh.ppm.design.cssScrollY
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -67,7 +68,7 @@ internal fun SessionDebugDialog(model: AppModel, project: String, sessionId: Str
     } else {
         // Nothing in the body takes the focus as it opens (Copy waits for the facts), so the cross has it.
         WebDialog(title = null, onDismiss = onDismiss, closeFocused = true) {
-            SessionDebugBody(source, stats, viewport, Modifier.verticalScroll(rememberScrollState()))
+            SessionDebugBody(source, stats, viewport, Modifier.cssFlex().verticalScroll(rememberScrollState()))
         }
     }
 }

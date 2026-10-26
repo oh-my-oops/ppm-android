@@ -129,7 +129,7 @@ internal fun GroupTranscriptView(model: AppModel, groupId: String, message: Grou
                 titleStyle = ppmText(14f, FontWeight.SemiBold, lineHeight = 20f),
                 closeFocused = true,
                 tallest = vh * 0.8f,
-            ) { TranscriptBody(loaded, message.summary, Modifier) }
+            ) { TranscriptBody(loaded, message.summary, Modifier.cssFlex()) }
         }
     }
 }

@@ -10,7 +10,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
@@ -40,33 +39,44 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isFinite
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.hienlh.ppm.app.leavesTextOnTap
+import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssBorderInset
+import com.hienlh.ppm.design.cssExact
+import com.hienlh.ppm.design.cssLines
+import com.hienlh.ppm.design.cssMeasure
 import com.hienlh.ppm.design.cssTightLines
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberCssExact
 import com.hienlh.ppm.design.rememberHover
 import kotlinx.coroutines.launch
+import kotlin.math.floor
+import kotlin.math.roundToInt
 
 /**
  * The web's `Button` at its default size, `rounded-md text-sm font-medium`: either `default`
@@ -148,7 +158,8 @@ internal val DialogTitleStyle = ppmText(18f, FontWeight.SemiBold, lineHeight = 1
  * [content]; a null [title] is one read only to a screen reader (`sr-only`), which takes no room. A
  * bare `border` is Tailwind 4's `currentColor`, the text's colour, as the web sets
  * no default border colour. It fades in and grows from 95%; it goes at once, as the web unmounts it.
- * [tallest] is a `max-h-[…]` of the card's, under which a [content] that scrolls scrolls.
+ * [tallest] is a `max-h-[…]` of the card's, under which a [content] that scrolls scrolls: it is
+ * the child that gives way, `Modifier.cssFlex()`, as the web's `min-h-0 flex-1` is.
  *
  * Radix gives the focus to the first thing in the card that takes it, and the cross comes after
  * [content]: when nothing in [content] takes it as the dialog opens ([closeFocused]), the cross
@@ -183,66 +194,114 @@ internal fun WebDialog(
                 .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
         ) {
             // Centred where the page is, between the system bars, as the web's is in its viewport.
-            BoxWithConstraints(
-                Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout)),
-                contentAlignment = Alignment.Center,
-            ) {
+            BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
                 val shape = RoundedCornerShape(12.dp)
-                Box(
-                    Modifier
-                        .width(minOf(maxWidth - 32.dp, widest))
-                        .heightIn(max = tallest)
-                        .graphicsLayer {
+                val width = minOf(maxWidth - 32.dp, widest)
+                val exact = rememberCssExact()
+                Layout(
+                    content = {
+                        // The card's shadow, background and border, with room around them for the shadow,
+                        // which the layer they are drawn in would cut off.
+                        Box(
+                            Modifier
+                                .padding(SHADOW_ROOM)
+                                .then(ShadowLg.fold(Modifier as Modifier) { m, s -> m.ppmShadow(s, shape) })
+                                .clip(shape)
+                                .background(tokens.bgSolid.color)
+                                .cssBorder(tokens.text.color, shape),
+                        )
+                        Box(
+                            Modifier
+                                .cssExact(exact)
+                                .width(width)
+                                .heightIn(max = tallest)
+                                .clip(shape)
+                                // A tap on the card stays on it rather than reaching the backdrop.
+                                .pointerInput(Unit) { detectTapGestures {} }
+                                // A tap off the focused field takes the focus from it, as on the page.
+                                .leavesTextOnTap(focusManager)
+                                // Any press inside takes the focus from the cross: to a button, or the card.
+                                .pointerInput(Unit) {
+                                    awaitPointerEventScope {
+                                        while (true) {
+                                            if (awaitPointerEvent(PointerEventPass.Initial).type == PointerEventType.Press) ringed = false
+                                        }
+                                    }
+                                }
+                                .cssBorderInset(1.dp),
+                        ) {
+                            // `grid gap-4 p-6`: a body that scrolls is the one that gives way (`cssFlex`), as its `min-h-0 flex-1` does.
+                            CssColumn(Modifier.fillMaxWidth().padding(horizontal = 24.dp), gap = 16.dp, top = 24.dp, bottom = 24.dp, exact = exact) {
+                                // `flex flex-col gap-2 sm:text-left`, and `pr-8` for the cross.
+                                if (title != null) {
+                                    CssColumn(Modifier.padding(end = 32.dp), gap = 8.dp) {
+                                        BasicText(title, Modifier.cssTightLines(titleStyle.fontSize.value, titleStyle.lineHeight.value), style = titleStyle.copy(color = tokens.text.color))
+                                        // `DialogDescription`: `text-sm text-muted-foreground`.
+                                        if (description != null) BasicText(description, Modifier.cssLines(20f), style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text2.color))
+                                    }
+                                }
+                                content()
+                            }
+                            // `absolute top-4 right-4 rounded-xs opacity-70 hover:opacity-100`, a 16 px cross.
+                            val hover = rememberHover()
+                            Box(
+                                Modifier
+                                    .align(Alignment.TopEnd)
+                                    // The opacity draws the cross in a layer of its own, which cuts off
+                                    // whatever reaches out of it: the layer takes in the ring's 4 px.
+                                    .padding(top = 11.dp, end = 11.dp)
+                                    .alpha(0.7f + 0.3f * hover.lit)
+                                    .padding(5.dp)
+                                    .then(if (ringed) Modifier.focusRing(tokens.accent.color, tokens.bgSolid.color) else Modifier)
+                                    .pointerHoverIcon(WebCursor.Pointer)
+                                    .ppmClickable(pressedColor = Color.Transparent, source = hover.source, onClickLabel = "Close", onClick = onDismiss),
+                            ) {
+                                PpmIcon(ProductIcon.X, 16.dp, tokens.text.color)
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                ) { measurables, constraints ->
+                    val (body, measured) = measurables[1].cssMeasure(
+                        Constraints(maxWidth = constraints.maxWidth, maxHeight = constraints.maxHeight),
+                        at = 0f,
+                    )
+                    val height = when {
+                        // Held at its `max-h-*`: that length as Chrome keeps it, in 64ths of a CSS px.
+                        tallest.isFinite && body.height >= tallest.roundToPx() -> floor(tallest.value * 64) / 64 * density
+                        // Held between the system bars, which the web's runs past.
+                        body.height >= constraints.maxHeight -> body.height.toFloat()
+                        else -> measured
+                    }
+                    // `top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%]`, in the fractions it comes to.
+                    val left = (constraints.maxWidth - width.toPx()) / 2
+                    val top = (constraints.maxHeight - height) / 2
+                    val room = SHADOW_ROOM.roundToPx()
+                    val chrome = measurables[0].measure(Constraints.fixed(body.width + 2 * room, height.roundToInt() + 2 * room))
+                    layout(constraints.maxWidth, constraints.maxHeight) {
+                        // Chrome moves the card by the fraction its translate comes to, which spreads the
+                        // box's edges over two rows, but rounds the text in it to whole pixels and snaps a
+                        // body that scrolls whole: the box is drawn in a layer moved by the fraction, what
+                        // is in it from the pixel the card's top rounds to.
+                        chrome.placeWithLayer(floor(left).toInt() - room, floor(top).toInt() - room) {
+                            translationX = left - floor(left)
+                            translationY = top - floor(top)
+                            alpha = card.value
+                            scaleX = 0.95f + 0.05f * card.value
+                            scaleY = scaleX
+                            compositingStrategy = CompositingStrategy.Offscreen
+                        }
+                        body.placeWithLayer(left.roundToInt(), top.roundToInt()) {
                             alpha = card.value
                             scaleX = 0.95f + 0.05f * card.value
                             scaleY = scaleX
                         }
-                        .then(ShadowLg.fold(Modifier as Modifier) { m, s -> m.ppmShadow(s, shape) })
-                        .clip(shape)
-                        .background(tokens.bgSolid.color)
-                        // A tap on the card stays on it rather than reaching the backdrop.
-                        .pointerInput(Unit) { detectTapGestures {} }
-                        // A tap off the focused field takes the focus from it, as on the page.
-                        .leavesTextOnTap(focusManager)
-                        // Any press inside takes the focus from the cross: to a button, or the card.
-                        .pointerInput(Unit) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    if (awaitPointerEvent(PointerEventPass.Initial).type == PointerEventType.Press) ringed = false
-                                }
-                            }
-                        }
-                        .cssBorder(tokens.text.color, shape),
-                ) {
-                    Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        // `flex flex-col gap-2 sm:text-left`, and `pr-8` for the cross.
-                        if (title != null) {
-                            Column(Modifier.padding(end = 32.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                BasicText(title, Modifier.cssTightLines(titleStyle.fontSize.value, titleStyle.lineHeight.value), style = titleStyle.copy(color = tokens.text.color))
-                                // `DialogDescription`: `text-sm text-muted-foreground`.
-                                if (description != null) BasicText(description, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text2.color))
-                            }
-                        }
-                        content()
-                    }
-                    // `absolute top-4 right-4 rounded-xs opacity-70 hover:opacity-100`, a 16 px cross.
-                    val hover = rememberHover()
-                    Box(
-                        Modifier
-                            .align(Alignment.TopEnd)
-                            // The opacity draws the cross in a layer of its own, which cuts off
-                            // whatever reaches out of it: the layer takes in the ring's 4 px.
-                            .padding(top = 11.dp, end = 11.dp)
-                            .alpha(0.7f + 0.3f * hover.lit)
-                            .padding(5.dp)
-                            .then(if (ringed) Modifier.focusRing(tokens.accent.color, tokens.bgSolid.color) else Modifier)
-                            .pointerHoverIcon(WebCursor.Pointer)
-                            .ppmClickable(pressedColor = Color.Transparent, source = hover.source, onClickLabel = "Close", onClick = onDismiss),
-                    ) {
-                        PpmIcon(ProductIcon.X, 16.dp, tokens.text.color)
                     }
                 }
             }
         }
     }
 }
+
+/** Room around a dialog's box in its layer for `shadow-lg`, whose deepest blur reaches 29.5 px under it. */
+private val SHADOW_ROOM = 32.dp

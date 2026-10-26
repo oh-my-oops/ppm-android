@@ -157,7 +157,7 @@ internal fun GroupCreateDialog(model: AppModel, projectName: String, projectPath
         }
     } else {
         WebDialog("New group", onDismiss, tallest = vh * 0.85f) {
-            GroupForm(model, draft, mobile, Modifier, onCancel = onDismiss, onSubmit = ::submit)
+            GroupForm(model, draft, mobile, Modifier.cssFlex(), onCancel = onDismiss, onSubmit = ::submit)
         }
     }
 }
