@@ -1,7 +1,6 @@
 package com.hienlh.ppm.chat
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,7 +12,11 @@ import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.referentialEqualityPolicy
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -32,6 +35,7 @@ import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.MeasurePolicy
 import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
+import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.LocalUriHandler
@@ -62,6 +66,7 @@ import com.hienlh.ppm.design.ChromeFace
 import com.hienlh.ppm.design.ChromeStrut
 import com.hienlh.ppm.design.ChromeText
 import com.hienlh.ppm.design.CssColumn
+import com.hienlh.ppm.design.CssExact
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -75,6 +80,10 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderInset
 import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.cssExact
+import com.hienlh.ppm.design.cssMeasure
+import com.hienlh.ppm.design.cssPhase
+import com.hienlh.ppm.design.cssPhased
+import com.hienlh.ppm.design.cssReport
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberCssExact
@@ -518,53 +527,81 @@ private fun HtmlImage(box: ImageBox, drawing: HtmlDrawing, modifier: Modifier) {
 
 /**
  * `MdTable`: the table in a scroller that keeps its `0.5rem` margins inside, its columns as the
- * web's auto table layout sizes them, a cell spanning the columns its `colspan` says.
+ * web's auto table layout sizes them, a cell spanning the columns its `colspan` says. Its rows
+ * stack exactly, as tall as their tallest cell — 52.28 px at 2x, where whole pixels make the
+ * table under a pixel short — and the column around counts the table at that.
  */
 @Composable
 private fun HtmlTable(box: TableBox, drawing: HtmlDrawing, modifier: Modifier) {
+    val tokens = LocalPpmTokens.current
     val grid = remember(box) { TableGrid(box) }
-    val policy = remember(grid) { HtmlTableLayout(grid) }
+    val exact = rememberCssExact()
+    val edges = remember(grid) { TableEdges() }
+    val policy = remember(grid, exact, edges) { HtmlTableLayout(grid, exact, edges) }
     val scroll = rememberScrollState()
+    val border = tokens.border.color
+    val header = tokens.bgSolid.color
     Layout(
         content = {
             grid.cells.forEachIndexed { index, cell -> HtmlCell(cell, grid.closesEnd[index], grid.closesBottom[index], drawing) }
         },
         // The scroller passes the line's width on as its minimum, its maximum being endless. Its thumb
         // runs along the bottom of the margins it keeps inside.
-        modifier.chromeScrollbar(scroll, vertical = false, LocalPpmTokens.current.border.color).padding(vertical = 8.dp).fillMaxWidth().horizontalScroll(scroll),
+        modifier
+            .cssPhased(exact)
+            .chromeScrollbar(scroll, vertical = false, border)
+            .padding(vertical = 8.dp)
+            .fillMaxWidth()
+            .horizontalScroll(scroll)
+            .drawBehind { edges.laid?.let { (xs, ys) -> drawTable(grid, xs, ys, border, header) } },
         policy,
     )
 }
 
 /**
- * A `th` or `td`: `padding: 0.25rem 0.5rem`, a header on the page's background. Collapsed borders:
- * each cell draws its top and start edges, and its end or bottom where no cell follows.
+ * A `th` or `td`: `padding: 0.25rem 0.5rem` inside the room its collapsed borders take — its top
+ * and start edges, and its end or bottom where no cell follows — which the table draws, with a
+ * header's background, across the whole of the cell's row.
  */
 @Composable
 private fun HtmlCell(cell: TableCell, closesEnd: Boolean, closesBottom: Boolean, drawing: HtmlDrawing) {
-    val tokens = LocalPpmTokens.current
-    val border = tokens.border.color
-    Box(
+    // The padding above and below counted with the lines, exactly: 10.5 px each at 2.625x,
+    // which padding would round to 11 and make every row a pixel taller than Chrome's.
+    val exact = rememberCssExact()
+    CssColumn(
         Modifier
-            .then(if (cell.header) Modifier.background(tokens.bgSolid.color) else Modifier)
-            .drawBehind {
-                val line = cssBorderPx(1.dp).toFloat()
-                drawRect(border, size = Size(size.width, line))
-                drawRect(border, size = Size(line, size.height))
-                if (closesEnd) drawRect(border, Offset(size.width - line, 0f), Size(line, size.height))
-                if (closesBottom) drawRect(border, Offset(0f, size.height - line), Size(size.width, line))
-            }
+            .cssExact(exact)
             .cssBorderInset(start = 1.dp, top = 1.dp, end = if (closesEnd) 1.dp else 0.dp, bottom = if (closesBottom) 1.dp else 0.dp)
             .padding(horizontal = 8.dp),
-        contentAlignment = when (cell.valign) {
-            CellAlign.TOP -> Alignment.TopStart
-            CellAlign.MIDDLE -> Alignment.CenterStart
-            CellAlign.BOTTOM -> Alignment.BottomStart
-        },
-    ) {
-        // The padding above and below counted with the lines, exactly: 10.5 px each at 2.625x,
-        // which padding would round to 11 and make every row a pixel taller than Chrome's.
-        CssColumn(top = 4.dp, bottom = 4.dp) { HtmlFlow(cell.box, drawing) }
+        top = 4.dp,
+        bottom = 4.dp,
+        exact = exact,
+    ) { HtmlFlow(cell.box, drawing) }
+}
+
+/** Where a table's column edges and row edges were last laid out, whole pixels, for [drawTable]. */
+private class TableEdges {
+    var laid by mutableStateOf<Pair<IntArray, IntArray>?>(null, referentialEqualityPolicy())
+}
+
+/** Each header's background over its whole cell, then every cell's borders over the backgrounds, as Chrome paints collapsed borders. */
+private fun DrawScope.drawTable(grid: TableGrid, xs: IntArray, ys: IntArray, border: Color, header: Color) {
+    val line = cssBorderPx(1.dp).toFloat()
+    for (pass in 0..1) {
+        grid.cells.forEachIndexed { index, cell ->
+            val left = xs[grid.column[index]].toFloat()
+            val width = xs[grid.column[index] + grid.span[index]] - left
+            val top = ys[grid.row[index]].toFloat()
+            val height = ys[grid.row[index] + 1] - top
+            if (pass == 0) {
+                if (cell.header) drawRect(header, Offset(left, top), Size(width, height))
+                return@forEachIndexed
+            }
+            drawRect(border, Offset(left, top), Size(width, line))
+            drawRect(border, Offset(left, top), Size(line, height))
+            if (grid.closesEnd[index]) drawRect(border, Offset(left + width - line, top), Size(line, height))
+            if (grid.closesBottom[index]) drawRect(border, Offset(left, top + height - line), Size(width, line))
+        }
     }
 }
 
@@ -604,16 +641,41 @@ private class TableGrid(box: TableBox) {
  * column at its content's narrowest, or widest, as CSS sizes a table inside a box that sizes itself
  * from it. A cell counts one border, its start one; the table's end border is the table's own.
  */
-private class HtmlTableLayout(private val grid: TableGrid) : MeasurePolicy {
+private class HtmlTableLayout(private val grid: TableGrid, private val exact: CssExact, private val edges: TableEdges) : MeasurePolicy {
     override fun MeasureScope.measure(measurables: List<Measurable>, constraints: Constraints): MeasureResult {
         val xs = edges(measurables, constraints.minWidth.takeIf { it > 0 })
-        val heights = heights(measurables, xs)
-        val ys = IntArray(grid.rows + 1).also { for (r in 0 until grid.rows) it[r + 1] = it[r] + heights[r] }
-        val placeables = measurables.mapIndexed { index, cell ->
-            cell.measure(Constraints.fixed(spanWidth(index, xs), heights[grid.row[index]]))
+        val phase = exact.cssPhase()
+        // Row by row, each cell measured where its row starts exactly and as tall as it is.
+        val tops = FloatArray(grid.rows + 1)
+        val placeables = ArrayList<Placeable>(measurables.size)
+        val heights = FloatArray(measurables.size)
+        var index = 0
+        for (row in 0 until grid.rows) {
+            var tallest = 0f
+            while (index < measurables.size && grid.row[index] == row) {
+                val width = spanWidth(index, xs)
+                val (placeable, height) = measurables[index].cssMeasure(Constraints(minWidth = width, maxWidth = width), phase + tops[row])
+                placeables += placeable
+                heights[index] = height
+                tallest = max(tallest, height)
+                index++
+            }
+            tops[row + 1] = tops[row] + tallest
         }
+        val ys = IntArray(grid.rows + 1) { (phase + tops[it]).roundToInt() }
+        edges.laid = xs to ys
+        exact.cssReport(tops[grid.rows], ys[grid.rows])
         return layout(xs[grid.columns], ys[grid.rows]) {
-            placeables.forEachIndexed { index, cell -> cell.place(xs[grid.column[index]], ys[grid.row[index]]) }
+            placeables.forEachIndexed { cell, placeable ->
+                val row = grid.row[cell]
+                val room = tops[row + 1] - tops[row] - heights[cell]
+                val down = when (grid.cells[cell].valign) {
+                    CellAlign.TOP -> 0f
+                    CellAlign.MIDDLE -> room / 2
+                    CellAlign.BOTTOM -> room
+                }
+                placeable.place(xs[grid.column[cell]], (phase + tops[row] + down).roundToInt())
+            }
         }
     }
 

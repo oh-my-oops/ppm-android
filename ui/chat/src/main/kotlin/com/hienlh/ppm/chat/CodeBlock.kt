@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -28,6 +27,10 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.design.ChromeFace
+import com.hienlh.ppm.design.ChromeStrut
+import com.hienlh.ppm.design.ChromeText
+import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTheme
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -35,9 +38,11 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.SyntaxHighlighter
 import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssExact
 import com.hienlh.ppm.design.lucideOutline
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberCssExact
 import com.hienlh.ppm.design.rememberHover
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -45,6 +50,7 @@ import kotlinx.coroutines.launch
 /** `.markdown-content pre`: 0.75rem Monaspace with the paragraph's line-height ratio. */
 internal const val CODE_SIZE = 12f
 internal const val CODE_LINE_HEIGHT = 12f * 20f / 14f
+private val CODE_STRUT = ChromeStrut(ChromeFace.Mono, CODE_SIZE, CODE_LINE_HEIGHT)
 
 /** The markdown being drawn is still streaming in: its code stays plain until it is done (`MdContext.isStreaming`). */
 internal val LocalMarkdownStreaming = compositionLocalOf { false }
@@ -67,7 +73,10 @@ fun CodeBlockView(code: String, language: String?, modifier: Modifier = Modifier
         if (enabled && value == null) value = highlighter.highlight(code, language, theme)
     }
     val scroll = rememberScrollState()
-    Box(modifier.fillMaxWidth()) {
+    // Counted exactly by the column around: 34.28 px lines at 2x and a 31.5 px padding at 2.625x,
+    // where whole pixels make a one-line block 79 px against Chrome's 78.28.
+    val exact = rememberCssExact()
+    Box(modifier.fillMaxWidth().cssExact(exact)) {
         // The `pre` has the border; the copy button is placed in the box around it.
         Box(
             Modifier
@@ -78,13 +87,15 @@ fun CodeBlockView(code: String, language: String?, modifier: Modifier = Modifier
                 .cssBorder(tokens.border.color, shape)
                 .horizontalScroll(scroll),
         ) {
-            BasicText(
-                highlighted?.text ?: AnnotatedString(code),
-                Modifier.padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 12.dp),
-                style = ppmText(CODE_SIZE, kind = FontKind.MONO, lineHeight = CODE_LINE_HEIGHT)
-                    .copy(color = highlighted?.foreground ?: tokens.text.color),
-                softWrap = false,
-            )
+            CssColumn(Modifier.padding(horizontal = 8.dp), top = 8.dp, bottom = 12.dp, exact = exact) {
+                ChromeText(
+                    highlighted?.text ?: AnnotatedString(code),
+                    ppmText(CODE_SIZE, kind = FontKind.MONO, lineHeight = CODE_LINE_HEIGHT)
+                        .copy(color = highlighted?.foreground ?: tokens.text.color),
+                    CODE_STRUT,
+                    softWrap = false,
+                )
+            }
         }
         CopyIconButton(code, Modifier.align(Alignment.TopEnd).padding(4.dp))
     }

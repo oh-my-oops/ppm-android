@@ -83,6 +83,30 @@ fun CssExact.cssReport(height: Float, measured: Int) {
 }
 
 /**
+ * Measures a child as a [CssColumn] measures one, for a layout that stacks its children itself
+ * (a table's rows): the child's exact top is [at] px down from the layout's first pixel, and it
+ * is told where in the pixel that rounds to it starts, measured again whenever that changed.
+ * Answers how tall it is exactly — what it reports, the whole pixels added around it included —
+ * or what it measures when it knows nothing finer.
+ */
+fun Measurable.cssMeasure(constraints: Constraints, at: Float): Pair<Placeable, Float> {
+    val data = parentData as? CssExact
+    if (data != null) {
+        data.phase = at - at.roundToInt()
+        val reader = data.reader
+        if (reader != null && data.measuredPhase != data.phase) reader.invalidateMeasurement()
+    }
+    val placeable = measure(constraints)
+    val height = when {
+        data == null || data.height.isNaN() -> placeable.height.toFloat()
+        !data.fixed.isNaN() -> data.fixed
+        data.reported >= 0 -> data.height + (placeable.height - data.reported)
+        else -> data.height
+    }
+    return placeable to height
+}
+
+/**
  * A column laid out as Chrome stacks blocks: each child [gap] under the last and [top] / [bottom]
  * inside its edges, all kept in fractions of a pixel, and each child put on the whole pixel its
  * exact place rounds to. A child that knows its exact height ([cssLines], [cssHeight], another
