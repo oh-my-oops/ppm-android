@@ -119,12 +119,13 @@ internal fun GroupTranscriptView(model: AppModel, groupId: String, message: Grou
                 }
             }
         } else {
-            // Nothing in the body takes the focus while it loads, so the cross has it.
+            // Nothing in the body takes the focus while it loads, so the cross has it. The title's
+            // `text-sm` takes `leading-none` away with `text-lg` (tailwind-merge), so its line is 20px.
             WebDialog(
                 title,
                 onClose,
                 widest = 672.dp,
-                titleStyle = ppmText(14f, FontWeight.SemiBold, lineHeight = 14f),
+                titleStyle = ppmText(14f, FontWeight.SemiBold, lineHeight = 20f),
                 closeFocused = true,
                 tallest = vh * 0.8f,
             ) { TranscriptBody(loaded, message.summary, Modifier) }
