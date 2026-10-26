@@ -19,4 +19,7 @@ class GroupTab(val chat: GroupChat) {
 
     /** The feed's length and who was typing when it last scrolled to its end. */
     internal var scrolledFor: Pair<Int, List<String>>? = null
+
+    /** The feed rests at its end: kept on the tab, not in the feed, so a feed composed again still knows. */
+    internal var feedAtEnd = false
 }

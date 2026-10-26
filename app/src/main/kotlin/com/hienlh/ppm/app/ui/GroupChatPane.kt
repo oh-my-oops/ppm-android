@@ -84,6 +84,7 @@ import com.hienlh.ppm.state.workspace.WorkspaceTab
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 /** Tailwind's `amber-500`, as Chrome draws its `oklch()` in sRGB. */
 internal val AMBER_500 = Rgba(253.54 / 255, 153.53 / 255, 0.0, 1.0)
@@ -243,6 +244,27 @@ private fun FeedList(group: GroupTab, state: GroupChat.State, speakers: GroupSpe
         list.scrollToItem(count - 1)
         list.scrollBy(-pad)
         group.scrolledFor = seen
+    }
+    // A feed at its end stays there when the layout, not a finger, moves the end away: on the first
+    // start after a boot the system bars' insets land after that scroll and hid the last message,
+    // and the error bar opens under the feed (the web leaves both covered).
+    LaunchedEffect(list) {
+        snapshotFlow { list.layoutInfo }.collect { info ->
+            // How far the end is below the viewport; at rest the end spacer sits just under it, out of view.
+            val last = info.visibleItemsInfo.lastOrNull() ?: return@collect
+            if (info.viewportSize.height <= 0) return@collect
+            val behind = when (last.index) {
+                info.totalItemsCount - 1 -> last.offset + last.size - info.viewportEndOffset
+                info.totalItemsCount - 2 -> last.offset + last.size - info.viewportEndOffset + pad.roundToInt()
+                else -> Int.MAX_VALUE
+            }
+            if (group.feedAtEnd && behind > pad + 1 && !list.isScrollInProgress) {
+                list.scrollToItem(info.totalItemsCount - 1)
+                list.scrollBy(-pad)
+            } else {
+                group.feedAtEnd = behind <= pad + 1
+            }
+        }
     }
 }
 
