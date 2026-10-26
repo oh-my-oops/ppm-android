@@ -725,10 +725,10 @@ private fun NeutralChip(label: String?, narrow: Boolean, labelMax: Dp, onClick: 
 /**
  * `text-primary bg-accent-wash border border-accent-wash-border`, sparkles, a brain while
  * thinking; `hover:brightness-110` faded in. 50% while the turn runs, when a mouse over it still
- * brightens it, as CSS `:hover` matches a disabled button.
+ * brightens it, as CSS `:hover` matches a disabled button. [labelMax] is the name's `max-w-[…]`.
  */
 @Composable
-private fun ModelChip(text: String, thinking: Boolean, disabled: Boolean, onClick: () -> Unit) {
+internal fun ModelChip(text: String, thinking: Boolean, disabled: Boolean, labelMax: Dp = 140.dp, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -753,7 +753,7 @@ private fun ModelChip(text: String, thinking: Boolean, disabled: Boolean, onClic
         PpmIcon(ProductIcon.Sparkles, 14.dp, tokens.accent.color)
         BasicText(
             text,
-            Modifier.widthIn(max = 140.dp),
+            Modifier.widthIn(max = labelMax),
             style = chipText.copy(color = tokens.accent.color),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -1041,7 +1041,7 @@ private fun ProviderPopover(current: String, providers: List<ProviderInfo>, stat
                 .background(tokens.panel2.over(tokens.bgSolid).color)
                 .cssBorder(tokens.border.color, shape),
         ) {
-            ProviderPopoverHeader()
+            PopoverHeader("Provider")
             Column(Modifier.padding(vertical = 4.dp)) {
                 if (providers.isEmpty()) {
                     BasicText(
@@ -1076,17 +1076,18 @@ private fun ProviderPopover(current: String, providers: List<ProviderInfo>, stat
 }
 
 /**
- * "Provider" (`px-3 py-2 border-b`): a block, so its line is the page's 16 px text on 24 px lines,
- * the label on that line's baseline as Chrome rounds it in device pixels.
+ * A selector popover's [label], "Provider" or "Model" (`px-3 py-2 border-b`): a block, so its line
+ * is the page's 16 px text on 24 px lines, the label on that line's baseline as Chrome rounds it in
+ * device pixels.
  */
 @Composable
-private fun ProviderPopoverHeader() {
+internal fun PopoverHeader(label: String) {
     val tokens = LocalPpmTokens.current
     val density = LocalDensity.current.density
     val (up, down) = PpmFonts.chromeAscentDescent(16f * density, PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT)
     val baseline = floor((24f * density - up - down) / 2) + up
     Layout(
-        { BasicText("Provider", style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color)) },
+        { BasicText(label, style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color)) },
         Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Bottom).padding(horizontal = 12.dp, vertical = 8.dp).height(24.dp),
     ) { measurables, constraints ->
         val label = measurables.first().measure(constraints.copy(minWidth = 0, minHeight = 0))
@@ -1106,7 +1107,7 @@ private fun cssCapitalized(text: String): String {
 }
 
 /** Over the anchor, left edges together, [gap] clear of it (`absolute bottom-full left-0 mb-1`), kept on screen. */
-private fun aboveStart(gap: Int) = { anchor: IntRect, window: IntSize, box: IntSize ->
+internal fun aboveStart(gap: Int) = { anchor: IntRect, window: IntSize, box: IntSize ->
     IntOffset(anchor.left.coerceIn(0, maxOf(0, window.width - box.width)), maxOf(0, anchor.top - gap - box.height))
 }
 

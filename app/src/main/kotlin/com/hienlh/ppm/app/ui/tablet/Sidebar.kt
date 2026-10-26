@@ -51,6 +51,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.toSize
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ui.FeatureBadge
+import com.hienlh.ppm.app.ui.FeatureBadgeKind
+import com.hienlh.ppm.app.ui.GroupList
 import com.hienlh.ppm.app.ui.ProjectAvatar
 import com.hienlh.ppm.app.ui.SessionHistoryPanel
 import com.hienlh.ppm.app.ui.unreadSessions
@@ -70,7 +73,7 @@ import kotlin.math.roundToInt
 /**
  * The sidebar (sidebar.tsx): the PPM wordmark and the project switcher on top, the section rail
  * and the open section below, its right edge dragged to resize it; folded, only the rail. Chat
- * History is the one section this app has, so it is the one on the rail.
+ * History and Teams are the sections this app has, so they are the ones on the rail.
  */
 @Composable
 fun Sidebar(model: AppModel) {
@@ -111,7 +114,9 @@ fun Sidebar(model: AppModel) {
                 }
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                     NavSectionRail(model, Modifier.edge(Edge.Right, tokens.border.color))
-                    Box(Modifier.weight(1f).fillMaxHeight()) { HistorySection(model) }
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                        if (model.sidebarSection == "teams") GroupList(model) else HistorySection(model)
+                    }
                 }
             }
             ResizeHandle(model, Modifier.align(Alignment.CenterEnd))
@@ -271,8 +276,9 @@ private fun HistorySection(model: AppModel) {
 }
 
 /**
- * The section rail (nav-section-rail.tsx): the sections, then the footer utilities. Tapping a
- * section opens it — unfolding the sidebar — and tapping the open one folds the sidebar.
+ * The section rail (nav-section-rail.tsx): the sections in the order the web's rail was dragged
+ * into, then the footer utilities. Tapping a section opens it — unfolding the sidebar — and tapping
+ * the open one folds the sidebar. Dragging them into another order is not built yet.
  */
 @Composable
 private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
@@ -285,13 +291,17 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
-            // The open section stays lit while the sidebar is folded, as on the web; History is the only one.
-            NavItem(
-                ProductIcon.BotMessageSquare,
-                "Chat History",
-                active = true,
-                badge = model.unread(model.selectedProject, unread).size,
-            ) { model.toggleSidebar() }
+            // The open section stays lit while the sidebar is folded, as on the web.
+            for (section in model.sidebarSections) {
+                val active = model.sidebarSection == section
+                if (section == "teams") {
+                    NavItem(ProductIcon.Users, "Teams", active, badge = 0, featureBadge = FeatureBadgeKind.BETA) { model.pickSidebarSection(section) }
+                } else {
+                    NavItem(ProductIcon.BotMessageSquare, "Chat History", active, badge = model.unread(model.selectedProject, unread).size) {
+                        model.pickSidebarSection(section)
+                    }
+                }
+            }
         }
         Column(
             Modifier.fillMaxWidth().edge(Edge.Top, tokens.border.color).padding(horizontal = 3.dp, vertical = 8.dp),
@@ -307,10 +317,19 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
 /**
  * A section (`size-[38px] rounded-[9px]`): the open one on the accent wash, the accent's 2 px bar
  * inset along its left edge and bending with its corners; another lit under a mouse
- * (`hover:bg-surface-elevated hover:text-foreground`).
+ * (`hover:bg-surface-elevated hover:text-foreground`). A [featureBadge] hangs over its top right
+ * corner, 2 px out (`absolute -top-0.5 -right-0.5`).
  */
 @Composable
-private fun NavItem(icon: ProductIcon, label: String, active: Boolean, badge: Int, onClick: () -> Unit) {
+private fun NavItem(icon: ProductIcon, label: String, active: Boolean, badge: Int, featureBadge: FeatureBadgeKind? = null, onClick: () -> Unit) {
+    Box(Modifier.size(38.dp)) {
+        NavTile(icon, label, active, badge, onClick)
+        if (featureBadge != null) FeatureBadge(featureBadge, Modifier.align(Alignment.TopEnd).offset(2.dp, (-2).dp), corner = true)
+    }
+}
+
+@Composable
+private fun NavTile(icon: ProductIcon, label: String, active: Boolean, badge: Int, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(9.dp)
     val hover = rememberHover(enabled = !active)

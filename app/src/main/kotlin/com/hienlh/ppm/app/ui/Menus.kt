@@ -109,7 +109,8 @@ private val LocalMenuMouse = compositionLocalOf<MenuMouse?> { null }
  * the menu's own fill, so the highlight never shows; it is lit here in `surface-hover`, as PPM's
  * own popover rows are (window-dock-list.tsx). The web's icons carry `mr-2` on top of the gap
  * ([iconEnd], 0 for a menu whose icons do not); [vertical] is 12 where the web asks for
- * `max-md:py-3`; [lit] holds the highlight, as an open submenu's trigger keeps it.
+ * `max-md:py-3`; [lit] holds the highlight, as an open submenu's trigger keeps it. A destructive
+ * item lights in its own [highlight] (`focus:bg-destructive/10`).
  */
 @Composable
 fun MenuItem(
@@ -122,6 +123,7 @@ fun MenuItem(
     iconEnd: Dp = 8.dp,
     lit: Boolean = false,
     source: MutableInteractionSource? = null,
+    highlight: Rgba? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(6.dp)
@@ -130,13 +132,13 @@ fun MenuItem(
     val hovered by interactions.collectIsHoveredAsState()
     val mouse = LocalMenuMouse.current
     LaunchedEffect(hovered, mouse) { if (hovered) mouse?.on = interactions }
-    val highlight = tokens.surfaceHover.color
+    val fill = (highlight ?: tokens.surfaceHover).color
     Row(
         Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(if (lit) highlight else Color.Transparent)
-            .ppmClickable(pressedColor = highlight, hoverColor = highlight, fade = false, shape = shape, source = interactions, onClick = onClick)
+            .background(if (lit) fill else Color.Transparent)
+            .ppmClickable(pressedColor = fill, hoverColor = fill, fade = false, shape = shape, source = interactions, onClick = onClick)
             .padding(horizontal = 8.dp, vertical = vertical),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),

@@ -53,7 +53,7 @@ fun CornerChrome(model: AppModel, mobile: Boolean, modifier: Modifier = Modifier
 }
 
 /** Tailwind's `shadow-sm`. */
-private val SHADOW_SM = listOf(
+internal val SHADOW_SM = listOf(
     ThemeShadow(0.0, 1.0, 3.0, 0.0, Rgba(0.0, 0.0, 0.0, 0.1)),
     ThemeShadow(0.0, 1.0, 2.0, -1.0, Rgba(0.0, 0.0, 0.0, 0.1)),
 )

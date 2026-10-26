@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
@@ -69,8 +70,8 @@ import kotlinx.coroutines.launch
  * The web's `Button` at its default size, `rounded-md text-sm font-medium`: either `default`
  * (the accent) or `outline`, half-faded while it cannot be used. It is `px-4`, and `px-3` around
  * an icon (`has-[>svg]:px-3`) unless the icon spins: the web wraps a spinner in a span, which the
- * rule does not see. [height] is the caller's (`min-h-11`, `h-11 md:h-9`), [gap] the icon's
- * distance from the label (the button's own `gap-2`, or a class's).
+ * rule does not see ([padding] where it does). [height] is the caller's (`min-h-11`, `h-11 md:h-9`),
+ * [gap] the icon's distance from the label (the button's own `gap-2`, or a class's).
  */
 @Composable
 internal fun DialogButton(
@@ -83,6 +84,7 @@ internal fun DialogButton(
     spinning: Boolean = false,
     height: Dp = 44.dp,
     gap: Dp = 6.dp,
+    padding: Dp = if (icon != null && !spinning) 12.dp else 16.dp,
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
@@ -104,7 +106,7 @@ internal fun DialogButton(
                 onClick = onClick,
             )
             .then(if (primary) Modifier else Modifier.cssBorder(outlineBorder(tokens, dark), shape))
-            .padding(horizontal = if (icon != null && !spinning) 12.dp else 16.dp),
+            .padding(horizontal = padding),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
     ) {
@@ -142,6 +144,7 @@ internal val DialogTitleStyle = ppmText(18f, FontWeight.SemiBold, lineHeight = 1
  * [content]; a null [title] is one read only to a screen reader (`sr-only`), which takes no room. A
  * bare `border` is Tailwind 4's `currentColor`, the text's colour, as the web sets
  * no default border colour. It fades in and grows from 95%; it goes at once, as the web unmounts it.
+ * [tallest] is a `max-h-[…]` of the card's, under which a [content] that scrolls scrolls.
  *
  * Radix gives the focus to the first thing in the card that takes it, and the cross comes after
  * [content]: when nothing in [content] takes it as the dialog opens ([closeFocused]), the cross
@@ -155,6 +158,7 @@ internal fun WebDialog(
     titleStyle: TextStyle = DialogTitleStyle,
     description: String? = null,
     closeFocused: Boolean = false,
+    tallest: Dp = Dp.Infinity,
     content: @Composable () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
@@ -182,6 +186,7 @@ internal fun WebDialog(
                 Box(
                     Modifier
                         .width(minOf(maxWidth - 32.dp, widest))
+                        .heightIn(max = tallest)
                         .graphicsLayer {
                             alpha = card.value
                             scaleX = 0.95f + 0.05f * card.value

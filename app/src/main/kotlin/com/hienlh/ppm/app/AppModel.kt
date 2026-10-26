@@ -56,6 +56,7 @@ import com.hienlh.ppm.protocol.ChatReply
 import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.DraftAttachment
 import com.hienlh.ppm.protocol.FileMention
+import com.hienlh.ppm.protocol.Group
 import com.hienlh.ppm.protocol.McpServerName
 import com.hienlh.ppm.protocol.McpSignInDismissals
 import com.hienlh.ppm.protocol.PickedAccount
@@ -91,6 +92,7 @@ import com.hienlh.ppm.state.DraftLocalStore
 import com.hienlh.ppm.state.DraftSync
 import com.hienlh.ppm.state.FileIndexStore
 import com.hienlh.ppm.state.GlobalEvents
+import com.hienlh.ppm.state.GroupChat
 import com.hienlh.ppm.state.HealthCheck
 import com.hienlh.ppm.state.HealthWatch
 import com.hienlh.ppm.state.HistoryList
@@ -321,6 +323,22 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     var mcpSignInDismissed by mutableStateOf<List<String>>(emptyList())
         private set
 
+    /** The section the rail last opened (`sidebarActiveTab`), shared like [sidebarCollapsed]; it may be one this app has not. */
+    var sidebarTab by mutableStateOf("history")
+        private set
+
+    /** The rail's order as it was dragged on the web (`sidebarTabOrder`), shared like [sidebarCollapsed]. */
+    var sidebarTabOrder by mutableStateOf<List<String>>(emptyList())
+        private set
+
+    /** This app's sections in the rail's order: those dragged into place first, then the rest as the web lists them (`resolveTabOrder`). */
+    val sidebarSections: List<String>
+        get() = (sidebarTabOrder.filter { it in SIDEBAR_SECTIONS } + SIDEBAR_SECTIONS).distinct()
+
+    /** The section shown: the one opened last, or the rail's first when that is one this app has not (the drawer's fallback). */
+    val sidebarSection: String
+        get() = sidebarTab.takeIf { it in SIDEBAR_SECTIONS } ?: sidebarSections.first()
+
     /** The open server's OS (`/api/system/host`), kept per server so the first frame already knows it. */
     var hostPlatform by mutableStateOf<String?>(null)
         private set
@@ -353,6 +371,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** The review behind each session-review tab in memory, by tab id. */
     private val reviews = mutableStateMapOf<String, ReviewTab>()
+
+    /** The group chat behind each group tab in memory, by tab id. */
+    private val groupChats = mutableStateMapOf<String, GroupChat>()
 
     /** Each session's turns: an open chat publishes its own, a Review tab reads them (`useSessionTurnsStore`). */
     val sessionTurns = SessionTurnsStore()
@@ -733,6 +754,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                     prefs.explorerSkin?.let { explorerSkin = it }
                     prefs.tabWrap?.let { tabWrap = it }
                     prefs.mcpSignInDismissed?.let { mcpSignInDismissed = it }
+                    prefs.sidebarActiveTab?.let { sidebarTab = it }
+                    prefs.sidebarTabOrder?.let { sidebarTabOrder = it }
                     saveUiPrefs()
                 }
                 projects
@@ -775,10 +798,24 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         explorerSkin = saved.explorerSkin
         tabWrap = saved.tabWrap ?: false
         mcpSignInDismissed = saved.mcpSignInDismissed ?: emptyList()
+        sidebarTab = saved.sidebarActiveTab ?: "history"
+        sidebarTabOrder = saved.sidebarTabOrder ?: emptyList()
     }
 
     private fun saveUiPrefs() {
-        prefs.put("uiPrefs.$serverKey", UiPrefs(projectSortMode, projectOpenedAt, sidebarCollapsed, sidebarWidth, keepScreenAwake, explorerSkin, tabWrap, mcpSignInDismissed).toJson().toString())
+        val saved = UiPrefs(
+            projectSortMode = projectSortMode,
+            recentOpen = projectOpenedAt,
+            sidebarCollapsed = sidebarCollapsed,
+            sidebarWidth = sidebarWidth,
+            keepScreenAwake = keepScreenAwake,
+            explorerSkin = explorerSkin,
+            tabWrap = tabWrap,
+            mcpSignInDismissed = mcpSignInDismissed,
+            sidebarActiveTab = sidebarTab,
+            sidebarTabOrder = sidebarTabOrder,
+        )
+        prefs.put("uiPrefs.$serverKey", saved.toJson().toString())
     }
 
     private fun startEvents(api: ApiClient) {
@@ -815,6 +852,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     fun becameActive() {
         resumes++
         for (tab in chats.values) tab.controller?.resumed()
+        for (group in groupChats.values) group.wake()
         events?.wake()
         refreshWorkspace()
         val readAt = sessionsReadAt ?: return
@@ -1596,6 +1634,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             store.state.collect { state ->
                 syncChats(state)
                 syncReviews(state)
+                syncGroups(state)
                 layout = state
                 recordNavigation(state)
                 reconcileWindowPanels()
@@ -1618,6 +1657,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         agentFallbacks = AgentSessionFallbacks()
         chats.values.forEach { it.stop() }
         chats.clear()
+        groupChats.values.forEach { it.close() }
+        groupChats.clear()
         shownSession = null
         waitingForWorkspace.clear()
     }
@@ -1795,6 +1836,51 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** The Review tab of a session-review tab; none for a tab that names no session. */
     fun review(tabId: String): ReviewTab? = reviews[tabId]
+
+    /**
+     * Gives a group tab its group chat once the tab is first shown, as the web mounts it, and
+     * closes the chats of tabs that went or that name another group now.
+     */
+    private fun syncGroups(state: WorkspaceState) {
+        val live = HashMap<String, WorkspaceTab>()
+        for (panel in state.panels.values) for (tab in panel.tabs) if (tab.type == "group") live[tab.id] = tab
+        for ((id, chat) in groupChats.toList()) {
+            val tab = live[id]
+            if (tab == null || tab.metaString("groupId") != chat.groupId || groupProject(tab) != chat.project) {
+                chat.close()
+                groupChats.remove(id)
+            }
+        }
+        val api = api ?: return
+        for (tab in shownTabs(state)) {
+            if (tab.type != "group" || tab.id in groupChats) continue
+            val groupId = tab.metaString("groupId")?.takeIf { it.isNotEmpty() } ?: continue
+            groupChats[tab.id] = GroupChat(api, groupProject(tab), groupId, scope).also { it.start() }
+        }
+    }
+
+    /** The project a group tab names, else the open one (group-chat-tab.tsx). */
+    private fun groupProject(tab: WorkspaceTab): String = tab.metaString("projectName") ?: selectedProject.orEmpty()
+
+    /** The group chat of a group tab; none for a tab that names no group, or one not shown yet. */
+    fun group(tabId: String): GroupChat? = groupChats[tabId]
+
+    /** A group's tab (group-list.tsx), named after it; a group already open comes to the front. */
+    fun openGroup(project: String, group: Group) {
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = "group",
+                    title = group.name,
+                    projectId = project,
+                    metadata = buildJsonObject {
+                        put("groupId", group.id)
+                        put("projectName", project)
+                    },
+                ),
+            )
+        }
+    }
 
     /** An answer landed: the session's changes bars ask again, those that ever asked (`announceReviewMarks`). */
     private fun reviewAnswered(project: String, sessionId: String) {
@@ -2229,6 +2315,24 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         putUiPref { put("sidebarCollapsed", sidebarCollapsed) }
     }
 
+    /** A rail section tapped (`handleTabClick`): a folded sidebar unfolds on it, and the open one folds the sidebar. */
+    fun pickSidebarSection(id: String) {
+        when {
+            sidebarCollapsed -> {
+                openSidebarSection(id)
+                toggleSidebar()
+            }
+            sidebarSection == id -> toggleSidebar()
+            else -> openSidebarSection(id)
+        }
+    }
+
+    private fun openSidebarSection(id: String) {
+        sidebarTab = id
+        saveUiPrefs()
+        putUiPref { put("sidebarActiveTab", id) }
+    }
+
     /** The tab bar's "Wrap Tabs" / "Scroll Tabs". */
     fun toggleTabWrap() {
         tabWrap = !tabWrap
@@ -2569,6 +2673,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 }
 
 private val DOCK_POSITIONS = setOf("bottom", "left", "right")
+
+/** The sidebar sections this app has, in the web's order (`BUILTIN_SIDEBAR_TABS`). */
+private val SIDEBAR_SECTIONS = listOf("history", "teams")
 
 private val PROJECT_SORT_MODES = setOf("recent", "priority", "name")
 

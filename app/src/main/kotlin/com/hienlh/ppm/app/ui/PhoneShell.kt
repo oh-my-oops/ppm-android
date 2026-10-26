@@ -109,6 +109,8 @@ import java.time.Instant
 @Composable
 fun PhoneShell(model: AppModel) {
     var drawerOpen by rememberSaveable { mutableStateOf(false) }
+    // The drawer's own section (`activeTab`), kept while it is closed as the web's mounted drawer keeps it.
+    var drawerSection by rememberSaveable { mutableStateOf<String?>(null) }
     var projectsOpen by remember { mutableStateOf(false) }
     var tabsOpen by remember { mutableStateOf(false) }
     var tabMenu by remember { mutableStateOf<String?>(null) }
@@ -148,7 +150,7 @@ fun PhoneShell(model: AppModel) {
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
             if (!covered) CornerChrome(model, mobile = true)
-            MobileDrawer(model, drawerOpen) { drawerOpen = false }
+            MobileDrawer(model, drawerOpen, drawerSection, onSection = { drawerSection = it }) { drawerOpen = false }
         }
     }
     if (projectsOpen) ProjectSheet(model) { projectsOpen = false }
@@ -806,11 +808,13 @@ private fun RenameSheet(model: AppModel, session: SessionInfo, onDismiss: () -> 
 
 /**
  * The drawer (`MobileDrawer`): 90% of the width from the left over a 50% black backdrop — the
- * project's name, its History, the tab bar and the footer tiles. Only the History tab and the
- * Settings tile are built yet, so they are the ones shown.
+ * project's name, the open section, the tab bar and the footer tiles. History and Teams are the
+ * sections built yet, and the Settings tile the only tile, so they are the ones shown. The drawer
+ * keeps a section of its own ([section]), not the desktop sidebar's; one it does not have — at
+ * first, the web's Explorer — gives way to the first in the rail's order.
  */
 @Composable
-private fun MobileDrawer(model: AppModel, open: Boolean, onClose: () -> Unit) {
+private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSection: (String) -> Unit, onClose: () -> Unit) {
     val tokens = LocalPpmTokens.current
     // The whole drawer fades in 200 ms while the panel slides in 300 ms, both ways.
     val shown by animateFloatAsState(if (open) 1f else 0f, tween(200, easing = Ease), label = "drawerFade")
@@ -851,10 +855,15 @@ private fun MobileDrawer(model: AppModel, open: Boolean, onClose: () -> Unit) {
                     contentAlignment = Alignment.Center,
                 ) { PpmIcon(ProductIcon.X, 16.dp, tokens.text.color) }
             }
+            val sections = model.sidebarSections
+            val shown = section?.takeIf { it in sections } ?: sections.first()
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 val list = model.sidebarList
                 val search = model.sidebarSearch
-                if (list != null && search != null) {
+                // The web's GroupList closes nothing as it opens a group, which leaves the tab it opened behind the drawer.
+                if (shown == "teams" && model.currentProject != null) {
+                    GroupList(model, onNavigate = onClose)
+                } else if (shown == "history" && list != null && search != null) {
                     SessionHistoryPanel(model, list, search, onNavigate = onClose)
                 } else {
                     BasicText(
@@ -865,15 +874,17 @@ private fun MobileDrawer(model: AppModel, open: Boolean, onClose: () -> Unit) {
                 }
             }
             Column(Modifier.fillMaxWidth().line(top = true, tokens.border.color).navigationBarsPadding()) {
-                // The tab bar: 64 px slots, the History tab the one there is.
+                // The tab bar (`MobileDrawerTabBar`): 64 px slots in the rail's order. Too few to need its
+                // "More", and dragging them into another order is not built yet.
                 Row(Modifier.fillMaxWidth()) {
-                    Column(
-                        Modifier.width(64.dp).padding(vertical = 10.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        PpmIcon(ProductIcon.BotMessageSquare, 16.dp, tokens.accent.color)
-                        BasicText("History", style = ppmText(10f, lineHeight = 15f).copy(color = tokens.accent.color))
+                    for (id in sections) {
+                        val teams = id == "teams"
+                        DrawerTabSlot(
+                            if (teams) ProductIcon.Users else ProductIcon.BotMessageSquare,
+                            if (teams) "Teams" else "History",
+                            active = id == shown,
+                            badge = if (teams) FeatureBadgeKind.BETA else null,
+                        ) { onSection(id) }
                     }
                 }
                 Column(Modifier.fillMaxWidth().line(top = true, tokens.border.color).padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -903,5 +914,27 @@ private fun MobileDrawer(model: AppModel, open: Boolean, onClose: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/**
+ * A slot of the drawer's tab bar: `relative flex flex-col items-center gap-0.5 py-2.5 text-[10px]`,
+ * 64 px wide, the icon over the short label, `text-primary` when open and `text-text-secondary`
+ * else, the feature tag in its corner without a shadow (`top-1 right-2 shadow-none`).
+ */
+@Composable
+private fun DrawerTabSlot(icon: ProductIcon, label: String, active: Boolean, badge: FeatureBadgeKind?, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val color = (if (active) tokens.accent else tokens.text2).color
+    Box(Modifier.width(64.dp).clickable(remember { MutableInteractionSource() }, indication = null, onClick = onClick)) {
+        Column(
+            Modifier.fillMaxWidth().padding(vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            PpmIcon(icon, 16.dp, color)
+            BasicText(label, style = ppmText(10f, lineHeight = 15f).copy(color = color))
+        }
+        if (badge != null) FeatureBadge(badge, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 8.dp), corner = true, shadow = false)
     }
 }

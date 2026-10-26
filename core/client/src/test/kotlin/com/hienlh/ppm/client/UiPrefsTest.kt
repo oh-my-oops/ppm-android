@@ -32,4 +32,17 @@ class UiPrefsTest {
         assertEquals(listOf("linear", "github"), prefs.mcpSignInDismissed)
         assertEquals(emptyList<String>(), UiPrefs.from(Json.parseToJsonElement("""{"mcpSignInDismissed":[]}""")).mcpSignInDismissed)
     }
+
+    @Test
+    fun `the sidebar section and the rail's order are read as the web sanitizes them`() {
+        val prefs = UiPrefs.from(
+            Json.parseToJsonElement("""{"sidebarActiveTab":"teams","sidebarTabOrder":["teams","bogus",3,"ext:todo","teams","history"]}"""),
+        )
+        assertEquals("teams", prefs.sidebarActiveTab)
+        assertEquals(listOf("teams", "ext:todo", "history"), prefs.sidebarTabOrder)
+        assertEquals(prefs, UiPrefs.from(Json.parseToJsonElement(prefs.toJson().toString())))
+        val wrong = UiPrefs.from(Json.parseToJsonElement("""{"sidebarActiveTab":"chat","sidebarTabOrder":"teams"}"""))
+        assertEquals(null, wrong.sidebarActiveTab)
+        assertEquals(null, wrong.sidebarTabOrder)
+    }
 }

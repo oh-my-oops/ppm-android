@@ -1,6 +1,7 @@
 package com.hienlh.ppm.client
 
 import com.hienlh.ppm.protocol.McpSignInDismissals
+import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.double
 import com.hienlh.ppm.protocol.get
@@ -31,6 +32,10 @@ data class UiPrefs(
     val tabWrap: Boolean? = null,
     /** The MCP servers whose sign-in bar was hidden; null when the stored value is not a list. */
     val mcpSignInDismissed: List<String>? = null,
+    /** The sidebar section open on the desktop layout; null when never set or not a section id. */
+    val sidebarActiveTab: String? = null,
+    /** The sections in the order the rail was dragged into, valid and once each; null when the stored value is not a list. */
+    val sidebarTabOrder: List<String>? = null,
 ) {
     /** The same keys as the server's, which [from] reads back: what a device keeps between starts. */
     fun toJson(): JsonObject = buildJsonObject {
@@ -42,6 +47,8 @@ data class UiPrefs(
         explorerSkin?.let { put("explorerSkin", it) }
         tabWrap?.let { put("tabWrap", it) }
         mcpSignInDismissed?.let { names -> put("mcpSignInDismissed", JsonArray(names.map(::JsonPrimitive))) }
+        sidebarActiveTab?.let { put("sidebarActiveTab", it) }
+        sidebarTabOrder?.let { ids -> put("sidebarTabOrder", JsonArray(ids.map(::JsonPrimitive))) }
     }
 
     companion object {
@@ -55,9 +62,16 @@ data class UiPrefs(
             explorerSkin = json["explorerSkin"].string?.takeIf { it in EXPLORER_SKINS },
             tabWrap = json["tabWrap"].bool,
             mcpSignInDismissed = McpSignInDismissals.sanitized(json["mcpSignInDismissed"]),
+            sidebarActiveTab = json["sidebarActiveTab"].string?.takeIf(::isSidebarTab),
+            sidebarTabOrder = json["sidebarTabOrder"].array?.mapNotNull { it.string?.takeIf(::isSidebarTab) }?.distinct(),
         )
 
         private val EXPLORER_SKINS = setOf("auto", "windows", "macos")
+
+        private val SIDEBAR_TABS = setOf("explorer", "git", "database", "search", "jira", "ai-resources", "history", "tunnels", "teams", "designs")
+
+        /** A section of the web's sidebar, an extension's view (`ext:`) included (`isValidSidebarTab`). */
+        private fun isSidebarTab(id: String): Boolean = id in SIDEBAR_TABS || id.startsWith("ext:")
     }
 }
 

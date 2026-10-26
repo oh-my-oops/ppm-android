@@ -331,7 +331,8 @@ val LocalSheetContentTop = staticCompositionLocalOf { 0.dp }
  * sheet whose class drops the padding (`p-0`) keeps only the navigation bar's, which Chrome's
  * page never reaches under. [overlay] is drawn over the sheet and its backdrop, where the page's
  * fixed corners stay above a sheet given a lower `zIndex`. [radius] is the panel's top corners'
- * (`rounded-t-2xl`, or a class's own).
+ * (`rounded-t-2xl`, or a class's own). [inset] is a class's padding on the other three sides
+ * (`p-2`), the handle inside it.
  */
 @Composable
 fun BottomSheet(
@@ -341,6 +342,7 @@ fun BottomSheet(
     background: Color? = null,
     dismissible: Boolean = true,
     bottomPadding: WindowInsets = WindowInsets.ime.union(WindowInsets.navigationBars).union(WindowInsets(bottom = 8.dp)),
+    inset: Dp = 0.dp,
     overlay: (@Composable BoxScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -402,6 +404,7 @@ fun BottomSheet(
                         },
                     )
                     .cssBorderInset(top = 1.dp)
+                    .padding(start = inset, top = inset, end = inset)
                     .windowInsetsPadding(bottomPadding),
             ) {
                 // Drag handle: `pt-3 pb-1`, `w-10 h-1 rounded-full bg-border`. 20dp rounded once, as Chrome
