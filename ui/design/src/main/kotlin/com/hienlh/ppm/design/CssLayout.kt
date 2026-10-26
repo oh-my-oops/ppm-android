@@ -779,13 +779,8 @@ private class CssTightLinesNode(var fontSize: Float, var lineHeight: Float, var 
         val first = placeable[FirstBaseline]
         val known = first != AlignmentLine.Unspecified
         val lines = if (known) ((placeable[LastBaseline] - first) / line).roundToInt() + 1 else 1
-        val sans = kind == FontKind.SANS
-        val below = PpmFonts.chromeBelowBaseline(
-            fontSize.sp.toPx(),
-            line,
-            if (sans) PpmFonts.SANS_ASCENT else PpmFonts.MONO_ASCENT,
-            if (sans) PpmFonts.SANS_DESCENT else PpmFonts.MONO_DESCENT,
-        )
+        val (ascent, descent) = PpmFonts.chromeMetrics(kind)
+        val below = PpmFonts.chromeBelowBaseline(fontSize.sp.toPx(), line, ascent, descent)
         exact.height = lines * line
         val height = exact.height.roundToInt().coerceIn(constraints.minHeight, constraints.maxHeight)
         exact.reported = height

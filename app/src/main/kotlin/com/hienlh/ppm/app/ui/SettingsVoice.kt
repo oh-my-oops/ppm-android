@@ -122,7 +122,7 @@ internal fun VoiceSection(model: AppModel) {
                 client.installSpeech(id)
                 load()
             } catch (error: PpmError) {
-                model.toast = ErrorToastMessage("Could not start the install", error.message)
+                model.toast(ErrorToastMessage("Could not start the install", error.message))
             } finally {
                 busy = false
             }
@@ -138,7 +138,7 @@ internal fun VoiceSection(model: AppModel) {
                 model.selectVoiceEngine(VoiceEngine.DEVICE)
                 load()
             } catch (error: PpmError) {
-                model.toast = ErrorToastMessage("Could not remove Whisper", error.message)
+                model.toast(ErrorToastMessage("Could not remove Whisper", error.message))
             } finally {
                 busy = false
             }

@@ -49,10 +49,10 @@ internal class MessageEdits(private val model: AppModel) {
             } catch (error: Exception) {
                 model.signInIfRefused(error)
                 val text = error.message?.takeIf { it.isNotEmpty() } ?: "Unknown error"
-                model.toast = ErrorToastMessage(
+                model.toast(ErrorToastMessage(
                     "Cannot fork from this message",
                     if (gone(text)) "The original message is no longer available in the session transcript. Try forking from a different message." else text,
-                )
+                ))
                 return@launch
             }
             // Titled by its body: the message as stored ends in its quote when it was a reply.
@@ -87,13 +87,13 @@ internal class MessageEdits(private val model: AppModel) {
             try {
                 fun failed(text: String) {
                     chat.editForking = false
-                    model.toast = ErrorToastMessage(
+                    model.toast(ErrorToastMessage(
                         "Cannot edit from this message",
                         if (gone(text)) "The original message is no longer available in the session transcript." else text,
-                    )
+                    ))
                     // The box emptied as the message went: it goes back there, as `restoreUnsentMessage` puts it.
                     chat.restore(RejectedSend(message.content, message.replyTo, text))
-                    model.toast = ErrorToastMessage("Message not sent", "$text Your text is back in the input.")
+                    model.toast(ErrorToastMessage("Message not sent", "$text Your text is back in the input."))
                 }
                 // Bounded as a new chat's session is, at the same cost: a fork the server finished
                 // after the wait is a stray version in the tree.
@@ -159,7 +159,7 @@ internal class MessageEdits(private val model: AppModel) {
         chat.editForking = false
         val pending = chat.takePendingEdit() ?: return
         chat.abandonEdit(pending, reason)
-        model.toast = ErrorToastMessage("Message not sent", "$reason Your text is back in the input.")
+        model.toast(ErrorToastMessage("Message not sent", "$reason Your text is back in the input."))
     }
 
     /** The server's word for a message its transcript no longer holds. */

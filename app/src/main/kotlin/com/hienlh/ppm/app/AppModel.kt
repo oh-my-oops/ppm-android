@@ -472,18 +472,50 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** Settings' Add server was chosen: the connect screen shows over everything until it is done or cancelled. */
     var addingServer by mutableStateOf(false)
 
-    /** The error toast on screen, if any. */
-    var toast by mutableStateOf<ErrorToastMessage?>(null)
+    /** The toasts up, the newest first as sonner keeps them, those on their way out included. */
+    val toasts = mutableStateListOf<AppToast>()
+    private var toastCount = 0L
+
+    /** `toast()`: [message] in front of the others. */
+    fun toast(message: ErrorToastMessage) {
+        toasts.add(0, AppToast(++toastCount, message))
+    }
+
+    /** `toast.dismiss(id)`: [message] goes, if it is still up. */
+    fun dismissToast(message: ErrorToastMessage) {
+        toasts.firstOrNull { it.message === message }?.dismiss()
+    }
+
+    /** A toast raised again under its id: [next] in place of [shown], while that is up. False once it is not. */
+    fun replaceToast(shown: ErrorToastMessage, next: ErrorToastMessage): Boolean {
+        val toast = toasts.firstOrNull { it.message === shown && !it.dismissed } ?: return false
+        toast.message = next
+        return true
+    }
+
+    /** `removeToast`: [toast] has left, and comes off the stack. */
+    fun forgetToast(toast: AppToast) {
+        toasts.remove(toast)
+    }
+
+    init {
+        // A debug launch's toasts, raised once the app is up and 450 ms apart, as the probe raises the web's.
+        debug?.toasts?.takeIf { it.isNotEmpty() }?.let { raised ->
+            scope.launch {
+                delay(1_000)
+                raised.forEachIndexed { i, message ->
+                    if (i > 0) delay(450)
+                    toast(message)
+                }
+            }
+        }
+    }
 
     /** Offers this app's newer releases, and installs one the user takes. */
     private val updater = AppUpdater(context, this)
 
     /** An error toast that is only its title. */
-    var actionError: String?
-        get() = toast?.title
-        set(value) {
-            toast = value?.let(::ErrorToastMessage)
-        }
+    fun actionError(title: String) = toast(ErrorToastMessage(title))
 
     /** The HTML previews on screen, which the AI's `open_preview` asks how its page rendered. */
     val previews = PreviewLoads()
@@ -528,7 +560,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     val chatJumps = MutableSharedFlow<Pair<String, Int>>(extraBufferCapacity = 8)
 
     /** The chat mic, one for every message box. */
-    val voice = VoiceInput(context, scope, api = { api }, toast = { toast = it })
+    val voice = VoiceInput(context, scope, api = { api }, toast = ::toast)
 
     /** What the mic listens with, kept on this device (`voiceEngine`): Settings → Voice picks it. */
     var voiceEngine by mutableStateOf(VoiceEngine.of(prefs.get("voiceEngine")))
@@ -770,7 +802,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             val link = pendingLink?.takeIf { it.first == serverKey }?.second
             pendingLink = null
             val linked = link?.projectName?.takeIf { name -> projects.any { it.name == name } }
-            link?.projectName?.takeIf { linked == null }?.let { actionError = noSuchProject(it) }
+            link?.projectName?.takeIf { linked == null }?.let { actionError(noSuchProject(it)) }
             val last = linked ?: debug?.project ?: prefs.get("lastProject.$serverKey")
             when {
                 last != null && projects.any { it.name == last } ->
@@ -899,7 +931,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            actionError = describe(error)
+            actionError(describe(error))
             refreshSessions(quiet = true)
         }
     }
@@ -921,7 +953,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            actionError = describe(error)
+            actionError(describe(error))
             refreshSessions(quiet = true)
         }
         reloadTags()
@@ -937,7 +969,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            actionError = describe(error)
+            actionError(describe(error))
         } finally {
             deletingOld = false
         }
@@ -956,7 +988,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             throw error
         } catch (error: Exception) {
             patchSession(session.id) { it.copy(tag = previous) }
-            actionError = describe(error)
+            actionError(describe(error))
         }
         reloadTags()
     }
@@ -1197,14 +1229,14 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                toast = ErrorToastMessage(title, describe(error))
+                toast(ErrorToastMessage(title, describe(error)))
                 return@launch
             }
             openProject(project) { store ->
                 try {
                     store.openAiTab(target, sessionId)
                 } catch (error: IllegalStateException) {
-                    toast = ErrorToastMessage(title, describe(error))
+                    toast(ErrorToastMessage(title, describe(error)))
                 }
             }
         }
@@ -1230,10 +1262,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                     persistent = true,
                 )
                 chat.attentionToast = raised
-                toast = raised
+                toast(raised)
             }
             ChatAttention.Answered -> {
-                if (toast != null && toast === chat.attentionToast) toast = null
+                chat.attentionToast?.let(::dismissToast)
                 chat.attentionToast = null
             }
             ChatAttention.Done -> if (sessionId != null && !sessionInFront(sessionId)) NotificationSounds.play(NotificationTones.DONE)
@@ -1341,12 +1373,12 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     private fun openExplorer(path: String) {
         val windows = windows
         when {
-            !wide || windows == null -> toast = ErrorToastMessage(
+            !wide || windows == null -> toast(ErrorToastMessage(
                 "${path.trimEnd('/', '\\').split('/', '\\').last()} is a folder",
                 "Folders do not open in the Android app yet.",
                 kind = ErrorToastMessage.Kind.PLAIN,
-            )
-            windows.state.value.windows.size >= MAX_WINDOWS -> actionError = TOO_MANY_WINDOWS
+            ))
+            windows.state.value.windows.size >= MAX_WINDOWS -> actionError(TOO_MANY_WINDOWS)
             else -> windows.open(WindowKind.Explorer, buildJsonObject { put("path", path) })
         }
     }
@@ -1550,7 +1582,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         } catch (error: Exception) {
             if (selectedProject == project) {
                 sessionsSyncError = describe(error)
-                if (!quiet) actionError = describe(error)
+                if (!quiet) actionError(describe(error))
             }
         } finally {
             syncsRunning--
@@ -1597,7 +1629,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                 opening.closeFirst?.let { store?.close(it) }
                 store?.open(WindowKind.AgentSession, payload.toJson(), opening.rect)
             }
-            AgentSessionOpening.Refused -> toast = ErrorToastMessage("Too many windows open", "Close one to open this session.")
+            AgentSessionOpening.Refused -> toast(ErrorToastMessage("Too many windows open", "Close one to open this session."))
         }
         pruneAgentFallbacks()
     }
@@ -1970,11 +2002,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** The sign-in bar's ×: [names] hidden in every chat until one of them is signed in to. */
     fun dismissMcpSignIn(names: List<String>) {
         storeMcpSignInDismissed(McpSignInDismissals.dismissing(names, mcpSignInDismissed))
-        toast = ErrorToastMessage(
+        toast(ErrorToastMessage(
             "Sign-in bar hidden",
             "You can still sign in to these MCP servers from AI Resources → MCP. The bar comes back only for a server that is not on this list.",
             kind = ErrorToastMessage.Kind.INFO,
-        )
+        ))
     }
 
     /** Signed in, so no longer a server the user chose to ignore: should it need a sign-in again, the bar says so. */
@@ -2108,19 +2140,19 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
      */
     fun openLink(link: String) {
         val parsed = parsePpmLink(link) ?: run {
-            actionError = "This is not a PPM link: $link"
+            actionError("This is not a PPM link: $link")
             return
         }
         val where = parsed.host + (parsed.port?.let { ":$it" } ?: "")
         fun matches(url: HttpUrl) = url.host.equals(parsed.host, ignoreCase = true) && (parsed.port == null || parsed.port == url.port)
         if (debug != null) {
             if (!matches(debug.url)) {
-                actionError = "This link is for $where, not for the server open here."
+                actionError("This link is for $where, not for the server open here.")
                 return
             }
         } else {
             val server = store.servers.value.firstOrNull { ApiClient.normalizedServerUrl(it.url)?.let(::matches) == true } ?: run {
-                actionError = "No server at $where is saved here. Add it in Settings, Servers."
+                actionError("No server at $where is saved here. Add it in Settings, Servers.")
                 return
             }
             if (store.selected?.id != server.id) {
@@ -2135,7 +2167,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         }
         val name = parsed.state.projectName ?: return
         if (projects.none { it.name == name }) {
-            actionError = noSuchProject(name)
+            actionError(noSuchProject(name))
             return
         }
         scope.launch { openProject(name) { store -> openFromLink(store, parsed.state, name) } }
@@ -2191,7 +2223,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         when {
             existing != null -> windows.focus(existing.id)
             // At the cap the web's `open` raises the oldest window instead, which is not Settings.
-            windows.state.value.windows.size >= MAX_WINDOWS -> actionError = TOO_MANY_WINDOWS
+            windows.state.value.windows.size >= MAX_WINDOWS -> actionError(TOO_MANY_WINDOWS)
             else -> windows.open(WindowKind.Settings)
         }
     }
@@ -2208,7 +2240,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
      */
     fun popOutTab(tabId: String, panelId: String) {
         val store = workspace ?: return
-        if (store.popOutTab(tabId, panelId) == null) actionError = TOO_MANY_WINDOWS
+        if (store.popOutTab(tabId, panelId) == null) actionError(TOO_MANY_WINDOWS)
     }
 
     /**
@@ -2501,7 +2533,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         }
         chat.servingAccount = PickedAccount(accountId, label)
         scope.launch { reloadUsage() }
-        toast = ErrorToastMessage("This chat will use the selected account from the next message.", kind = ErrorToastMessage.Kind.SUCCESS)
+        toast(ErrorToastMessage("This chat will use the selected account from the next message.", kind = ErrorToastMessage.Kind.SUCCESS))
         return null
     }
 
@@ -2636,7 +2668,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         return when (val command = ClientCommand.of(text, items, replying = tab.replyTo != null)) {
             null -> null
             ClientCommand.Refused -> {
-                actionError = "Cancel reply before running this command"
+                actionError("Cancel reply before running this command")
                 false
             }
             is ClientCommand.Clear -> {
@@ -2664,7 +2696,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     } catch (error: CancellationException) {
         throw error
     } catch (error: Exception) {
-        actionError = describe(error)
+        actionError(describe(error))
         false
     }
 
@@ -3451,6 +3483,25 @@ class ErrorToastMessage(
     class Action(val label: String, val run: () -> Unit)
 
     enum class Kind { ERROR, INFO, SUCCESS, WARNING, PLAIN }
+}
+
+/**
+ * A toast in the stack, as sonner keeps one: what it says, which its raiser may change while it is
+ * up, and whether it was dismissed (`delete`) — it then slides out, and the toaster takes it off
+ * the stack once it is out of sight.
+ */
+@Stable
+class AppToast internal constructor(val id: Long, message: ErrorToastMessage) {
+    var message by mutableStateOf(message)
+        internal set
+
+    /** Closed, timed out, swiped away or taken back by its raiser. */
+    var dismissed by mutableStateOf(false)
+        private set
+
+    fun dismiss() {
+        dismissed = true
+    }
 }
 
 /** The lightbox open on [images] at [index] (`useImageOverlay`'s state). */

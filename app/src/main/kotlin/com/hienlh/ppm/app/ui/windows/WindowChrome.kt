@@ -41,7 +41,6 @@ import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
@@ -54,6 +53,7 @@ import com.hienlh.ppm.app.ui.tabTitle
 import com.hienlh.ppm.app.ui.tablet.Edge
 import com.hienlh.ppm.app.ui.tablet.edge
 import com.hienlh.ppm.app.ui.tabTypeIcon
+import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -334,10 +334,11 @@ internal fun WindowBusyDot(modifier: Modifier = Modifier) {
 
 /**
  * The titlebar's text is set in the skin's `--x-font`: Segoe UI or SF Pro where a desktop has
- * them, and on Android, where neither exists, `system-ui` — the platform's own sans.
+ * them, and on Android, where neither exists, `system-ui` — the platform's own sans, on that
+ * font's baseline (set on Geist's, the 13 px title sat 2 px low at 2x).
  */
 private fun titlebarText(size: Float, weight: FontWeight = FontWeight.Normal): TextStyle =
-    ppmText(size, weight, lineHeight = size * 1.5f).copy(fontFamily = FontFamily.Default)
+    ppmText(size, weight, FontKind.SYSTEM, size * 1.5f)
 
 /**
  * `WindowTitleText`: the title, a dimmer subtitle and the "Working" marker in a row (`gap-2`).

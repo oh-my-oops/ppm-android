@@ -2,6 +2,7 @@ package com.hienlh.ppm.design
 
 import android.content.Context
 import android.content.res.Resources
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.Build
 import android.util.DisplayMetrics
@@ -89,6 +90,23 @@ object PpmFonts {
     /** Monaspace's typo ascender and descender, 1565 and 435 of its 2000 units, which Chrome takes (`USE_TYPO_METRICS`). */
     const val MONO_ASCENT = 0.7825f
     const val MONO_DESCENT = 0.2175f
+
+    /**
+     * The system's sans-serif ascent and descent, as fractions of its size: what `system-ui` is set
+     * in. Android and Chrome both take them from the system's own file — Roboto's 1900 and 500 of
+     * 2048 units on the emulators — so they are read from it rather than written down.
+     */
+    val systemAscentDescent: Pair<Float, Float> by lazy {
+        val metrics = Paint().apply { typeface = Typeface.SANS_SERIF; textSize = 1000f }.fontMetrics
+        -metrics.ascent / 1000f to metrics.descent / 1000f
+    }
+
+    /** The ascent and descent Chrome sets a line of [kind] on, as fractions of its size. */
+    fun chromeMetrics(kind: FontKind): Pair<Float, Float> = when (kind) {
+        FontKind.SANS -> SANS_ASCENT to SANS_DESCENT
+        FontKind.MONO -> MONO_ASCENT to MONO_DESCENT
+        FontKind.SYSTEM -> systemAscentDescent
+    }
 
     /** Monaspace's one advance, 1240 of its 2000 units. */
     const val MONO_ADVANCE = 0.62f
@@ -244,7 +262,8 @@ private fun withChromeFallback(families: List<android.graphics.fonts.FontFamily>
         .build()
 }
 
-enum class FontKind { SANS, MONO }
+/** Geist, Monaspace, or the system's sans-serif that `system-ui` names (sonner's toaster, window titlebars). */
+enum class FontKind { SANS, MONO, SYSTEM }
 
 /**
  * Text set as a CSS rule would: [kind] at [size] CSS pixels (sp, so the system font size still
@@ -260,7 +279,11 @@ fun ppmText(
     lineHeight: Float? = null,
     italic: Boolean = false,
 ): TextStyle = TextStyle(
-    fontFamily = if (kind == FontKind.SANS) PpmFonts.sans else PpmFonts.mono,
+    fontFamily = when (kind) {
+        FontKind.SANS -> PpmFonts.sans
+        FontKind.MONO -> PpmFonts.mono
+        FontKind.SYSTEM -> FontFamily.SansSerif
+    },
     fontSize = size.sp,
     fontWeight = weight,
     fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
@@ -273,11 +296,9 @@ private fun chromeAlignment(kind: FontKind, size: Float, lineHeight: Float): Lin
     val metrics = systemMetrics ?: return LineHeightStyle.Alignment.Center
     val px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, size, metrics)
     val line = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, lineHeight, metrics)
-    val ratio = if (kind == FontKind.SANS) {
-        PpmFonts.chromeTopRatio(px, line, PpmFonts.SANS_ASCENT, PpmFonts.SANS_DESCENT, PpmFonts.SANS_ANDROID_ASCENT)
-    } else {
-        PpmFonts.chromeTopRatio(px, line, PpmFonts.MONO_ASCENT, PpmFonts.MONO_DESCENT)
-    }
+    val (ascent, descent) = PpmFonts.chromeMetrics(kind)
+    // Only the app's own Geist files differ from the web's, in their ascender.
+    val ratio = PpmFonts.chromeTopRatio(px, line, ascent, descent, if (kind == FontKind.SANS) PpmFonts.SANS_ANDROID_ASCENT else ascent)
     return ratio?.let(LineHeightStyle::Alignment) ?: LineHeightStyle.Alignment.Center
 }
 

@@ -224,12 +224,12 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         val rejected = state.rejected ?: return@LaunchedEffect
         fun restore() {
             tab.restore(rejected)
-            model.toast = ErrorToastMessage("Message not sent", "${rejected.message} Your text is back in the input.")
+            model.toast(ErrorToastMessage("Message not sent", "${rejected.message} Your text is back in the input."))
         }
         if (tab.draft.text.isBlank() && tab.replyTo == null) {
             restore()
         } else {
-            model.toast = ErrorToastMessage("Message not sent", rejected.message, ErrorToastMessage.Action("Restore", ::restore))
+            model.toast(ErrorToastMessage("Message not sent", rejected.message, ErrorToastMessage.Action("Restore", ::restore)))
         }
         chat.takeRejected()
     }
@@ -931,7 +931,7 @@ private fun OverflowButton(model: AppModel, tab: ChatTab, session: SessionInfo, 
                 }, icon = { MenuIcon(ProductIcon.Bug) }, vertical = rows, iconEnd = 0.dp)
                 MenuItem("Show logs for this chat", onClick = {
                     open = false
-                    model.toast = ErrorToastMessage("Logs are not in the Android app yet.", kind = ErrorToastMessage.Kind.PLAIN)
+                    model.toast(ErrorToastMessage("Logs are not in the Android app yet.", kind = ErrorToastMessage.Kind.PLAIN))
                 }, icon = { MenuIcon(ProductIcon.ScrollText) }, vertical = rows, iconEnd = 0.dp)
             }
         }

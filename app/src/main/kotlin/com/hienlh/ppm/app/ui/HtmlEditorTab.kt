@@ -161,7 +161,7 @@ private fun HtmlPreviewToolbar(
         // `ml-auto md:ml-0`: on a phone, with no breadcrumb, the menu keeps to the right edge.
         if (mobile) Spacer(Modifier.weight(1f))
         HtmlAction(ProductIcon.MoreHorizontal, 16.dp, null, "More HTML actions", mobile) {
-            model.toast = ErrorToastMessage("More HTML actions are not in the Android app yet.", kind = ErrorToastMessage.Kind.PLAIN)
+            model.toast(ErrorToastMessage("More HTML actions are not in the Android app yet.", kind = ErrorToastMessage.Kind.PLAIN))
         }
     }
 }

@@ -993,11 +993,11 @@ private fun McpSignInList(model: AppModel, modifier: Modifier) {
         }
         for (server in pending) {
             McpSignInRow(server, mobile) {
-                model.toast = ErrorToastMessage(
+                model.toast(ErrorToastMessage(
                     "MCP sign-in is not in the app yet",
                     "Sign in to ${server.name} from PPM in a browser for now.",
                     kind = ErrorToastMessage.Kind.INFO,
-                )
+                ))
             }
         }
     }

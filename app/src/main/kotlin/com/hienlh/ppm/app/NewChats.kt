@@ -508,7 +508,7 @@ internal class NewChats(private val model: AppModel) {
     /** `restoreUnsentMessage`: the message back in the box, saved as its draft again, and said out loud. */
     private fun restore(chat: ChatTab, reason: String) {
         chat.restoreFirst(reason)
-        model.toast = ErrorToastMessage("Message not sent", "$reason Your text is back in the input.")
+        model.toast(ErrorToastMessage("Message not sent", "$reason Your text is back in the input."))
     }
 
     /** [call], or a failure once [millis] pass: never a cancellation, which would cancel whoever waits on it. */

@@ -68,7 +68,7 @@ private fun WebPreviewBody(model: AppModel, tab: WorkspaceTab) {
         aiOpenAt = (tab.metadata["aiOpenAt"] as? JsonPrimitive)?.content.orEmpty(),
         appUrl = app,
         onNavigate = { url -> model.keepPreviewUrl(tab.id, url) },
-        onCopyFailed = { model.toast = ErrorToastMessage("Failed to copy URL") },
+        onCopyFailed = { model.toast(ErrorToastMessage("Failed to copy URL")) },
     )
 }
 

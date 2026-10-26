@@ -144,7 +144,7 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
                     if (now != percent) {
                         percent = now
                         // Closed, it stays closed: the download goes on.
-                        withContext(Dispatchers.Main) { if (model.toast === shown) show(progress(now)) }
+                        withContext(Dispatchers.Main) { replace(progress(now)) }
                     }
                 }
                 val refusal = withContext(Dispatchers.IO) { refusal(apk) }
@@ -300,13 +300,21 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
         }
     }
 
+    /** [toast] in place of this updater's last one while that is up, as one raised again under its id; else on top. */
     private fun show(toast: ErrorToastMessage) {
+        if (!replace(toast)) model.toast(toast)
         shown = toast
-        model.toast = toast
+    }
+
+    /** [toast] in place of this updater's last one, only while that is up. */
+    private fun replace(toast: ErrorToastMessage): Boolean {
+        val replaced = shown?.let { model.replaceToast(it, toast) } == true
+        if (replaced) shown = toast
+        return replaced
     }
 
     private fun hide() {
-        if (model.toast === shown) model.toast = null
+        shown?.let(model::dismissToast)
         shown = null
     }
 
