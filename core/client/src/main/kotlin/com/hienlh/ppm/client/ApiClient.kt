@@ -183,6 +183,10 @@ class ApiClient(val baseUrl: HttpUrl, val token: String) {
     /** The app-wide socket: running and unread sessions, file changes, and other broadcasts. */
     fun globalSocketUrl(): String = socketUrl("/ws/global", emptyList())
 
+    /** A group's feed as it is written, and the client's `message` and `stop`. */
+    fun groupSocketUrl(project: String, groupId: String): String =
+        socketUrl("/ws/project/${escape(project)}/group/${escape(groupId)}", emptyList())
+
     /** Sockets authenticate by `?token=` only: the server reads no header on upgrade. */
     private fun socketUrl(path: String, query: List<Pair<String, String>>): String {
         val http = url(path, query + ("token" to token)).toString()
