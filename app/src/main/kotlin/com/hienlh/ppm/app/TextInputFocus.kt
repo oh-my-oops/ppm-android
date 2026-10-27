@@ -21,10 +21,13 @@ import androidx.compose.ui.input.pointer.SuspendingPointerInputModifierNode
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.findRootCoordinates
+import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
 import androidx.compose.ui.node.DelegatingNode
 import androidx.compose.ui.node.LayoutAwareModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.PointerInputModifierNode
+import androidx.compose.ui.node.currentValueOf
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.IntSize
 
 /**
@@ -37,6 +40,9 @@ object TextInputFocus {
 
     /** Where the focused field is laid out, once it has been. */
     private var placed: LayoutCoordinates? = null
+
+    /** The focus of the window the field is in: each window (the palette's, a dialog's) keeps one of its own. */
+    private var window: FocusManager? = null
 
     /** The field the press going on landed in, focused or not. */
     private var pressedIn: TextFieldState? = null
@@ -74,15 +80,27 @@ object TextInputFocus {
         return page.localBoundingBoxOf(field, clipBounds = false)
     }
 
-    internal fun take(state: TextFieldState, placed: LayoutCoordinates? = null) {
+    internal fun take(state: TextFieldState, placed: LayoutCoordinates? = null, window: FocusManager? = null) {
+        val before = this.window
+        // A page has one focus: a field taking it in another window takes it from the one in
+        // this, as the palette's input does from the composer's textarea, which is left with
+        // nothing focused once the palette closes.
+        if (this.state !== state && before != null && window != null && before !== window) before.clearFocus()
         this.state = state
         this.placed = placed
+        this.window = window
+    }
+
+    /** Where the focused [state] is laid out now. */
+    internal fun place(state: TextFieldState, placed: LayoutCoordinates) {
+        if (this.state === state) this.placed = placed
     }
 
     internal fun release(state: TextFieldState) {
         if (this.state !== state) return
         this.state = null
         placed = null
+        window = null
     }
 
     internal fun pressed(state: TextFieldState) {
@@ -184,22 +202,26 @@ private data class TextFocusElement(val state: TextFieldState) : ModifierNodeEle
         if (node.state === state) return
         TextInputFocus.release(node.state)
         node.state = state
+        if (node.focused) node.take()
     }
 }
 
-private class TextFocusNode(var state: TextFieldState) : Modifier.Node(), FocusEventModifierNode, PointerInputModifierNode, LayoutAwareModifierNode {
+private class TextFocusNode(var state: TextFieldState) : Modifier.Node(), FocusEventModifierNode, PointerInputModifierNode, LayoutAwareModifierNode, CompositionLocalConsumerModifierNode {
     private var placed: LayoutCoordinates? = null
-    private var focused = false
+    var focused = false
+        private set
+
+    fun take() = TextInputFocus.take(state, placed, currentValueOf(LocalFocusManager))
 
     override fun onFocusEvent(focusState: FocusState) {
         focused = focusState.isFocused
-        if (focused) TextInputFocus.take(state, placed) else TextInputFocus.release(state)
+        if (focused) take() else TextInputFocus.release(state)
     }
 
     override fun onPlaced(coordinates: LayoutCoordinates) {
         placed = coordinates
         // Focused before it was first laid out.
-        if (focused) TextInputFocus.take(state, coordinates)
+        if (focused) TextInputFocus.place(state, coordinates)
     }
 
     override fun onPointerEvent(pointerEvent: PointerEvent, pass: PointerEventPass, bounds: IntSize) {
