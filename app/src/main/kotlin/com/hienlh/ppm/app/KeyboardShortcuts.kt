@@ -51,9 +51,21 @@ class KeyboardShortcuts(private val model: AppModel) {
     }
 
     /**
-     * The letters of a hardware keyboard reach no key event here while an IME shows its keyboard
-     * (Gboard types them itself), so a capital is Shift down and up alone: what the field gained
-     * since the last Shift is the typing those events would have shown.
+     * A key going down before an IME showing its keyboard takes it: Gboard types a hardware
+     * keyboard's letters itself, Telex too, and [dispatch] never sees them, where a browser still
+     * fires a `keydown` ("Process") for each. One between two Shifts is typing, not a double tap:
+     * capitals typed fast opened the palette, the field's text not yet showing the letters.
+     */
+    fun beforeIme(event: KeyEvent) {
+        val code = event.keyCode
+        if (event.action != KeyEvent.ACTION_DOWN || code == KeyEvent.KEYCODE_SHIFT_LEFT || code == KeyEvent.KEYCODE_SHIFT_RIGHT) return
+        doubleShift.keyDown(isShift = false, shiftHeld = event.isShiftPressed)
+    }
+
+    /**
+     * Typing that comes with no key event at all, the on-screen keyboard's own keys say, shows
+     * only in the field's text, where Chrome fires a `keydown` for it all the same: what the field
+     * gained since the last Shift is typing too.
      */
     private fun noteTyping() {
         val text = TextInputFocus.text

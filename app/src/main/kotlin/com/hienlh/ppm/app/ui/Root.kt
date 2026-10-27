@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.onPreInterceptKeyBeforeSoftKeyboard
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -56,10 +57,11 @@ import kotlinx.coroutines.launch
 /**
  * Everything the activity shows: the connect screen until there is a server, then the phone
  * layout under 768 dp — the web's `md` breakpoint — and the desktop one from there, with the
- * dialogs and the toasts over it.
+ * dialogs and the toasts over it. [beforeIme] sees each key going to a field in it before the IME
+ * does, which may type the key itself.
  */
 @Composable
-fun PpmRoot(model: AppModel) {
+fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
     val systemDark = isSystemInDarkTheme()
     LaunchedEffect(systemDark) { model.systemIsDark = systemDark }
     val theme = model.theme
@@ -105,6 +107,10 @@ fun PpmRoot(model: AppModel) {
             // A tap outside the text field leaves it, as a press outside an input does in a browser:
             // the keyboard goes, shortcuts work.
             .leavesTextOnTap(focusManager)
+            .onPreInterceptKeyBeforeSoftKeyboard {
+                beforeIme(it.nativeKeyEvent)
+                false
+            }
             .toasterTaps(toaster)
             // Test tags as resource ids, which UI Automator can find (baselineprofile/).
             .semantics { testTagsAsResourceId = true },

@@ -20,7 +20,7 @@ class MainActivity : ComponentActivity() {
         model = (application as PpmApplication).model(DebugLaunch.from(this, intent))
         shortcuts = KeyboardShortcuts(model)
         enableEdgeToEdge()
-        setContent { PpmRoot(model) }
+        setContent { PpmRoot(model, beforeIme = shortcuts::beforeIme) }
         // Recreated after the process went: its link was opened then.
         if (savedInstanceState == null) openLink(intent)
     }
