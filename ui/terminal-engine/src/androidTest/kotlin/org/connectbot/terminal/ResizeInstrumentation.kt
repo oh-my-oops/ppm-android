@@ -25,6 +25,24 @@ internal object ResizeChecks {
         }
     }
 
+    /**
+     * [verifyResizeModel] for the scenarios of [ResizeDiff.regionScript]: the one scroll region libvterm keeps for both screens, set in every shape,
+     * kept across the alternate screen and a resize, and shown by a probe, which `ScrollRegionTest` relies on [FakeVterm] to do as the library does.
+     * A trace that is not the golden one is in the message, for the first scenario that differs.
+     */
+    fun verifyRegionModel() {
+        val coverage = ResizeDiff.RegionCoverage()
+        val traces = ResizeDiff.REGION_SEEDS.map { seed -> ResizeDiff.regionTrace(seed, coverage) { rec, rows, cols -> DeviceHost(rec, rows, cols) } }
+        val actual = traces.map { ResizeDiff.checksum(it) }
+        val first = actual.indices.firstOrNull { it >= ResizeDiff.GOLDEN_REGION.size || actual[it] != ResizeDiff.GOLDEN_REGION[it] }
+        check(first == null && actual.size == ResizeDiff.GOLDEN_REGION.size) {
+            "The library's traces of ${ResizeDiff.REGION_SEEDS} are\n$actual\nnot\n${ResizeDiff.GOLDEN_REGION}\nThe first that differs is index $first:\n${first?.let { traces[it] }}"
+        }
+        check(coverage.acrossResize >= 20 && coverage.acrossAlternate >= 20 && coverage.rejected >= 20 && coverage.scrolledInside >= 20 && coverage.originMode >= 10 && coverage.regionInOrigin >= 10 && coverage.explicitBottom >= 10) {
+            "The region scenarios no longer reach the corners of the region: $coverage"
+        }
+    }
+
     private class Screen(rows: Int, cols: Int) : AutoCloseable {
         val emulator = TerminalEmulatorFactory.create(initialRows = rows, initialCols = cols) as TerminalEmulatorImpl
 

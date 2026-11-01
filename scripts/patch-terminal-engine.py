@@ -180,7 +180,7 @@ def emulator(text):
             semanticSegmentTexts.clear()
             segmentRowsShifted = 0
             resizePushes = -1
-            hyperlinkCuts.reset()
+            writeCuts.reset(rows)
             unrecordedLinks.clear()
             damagePosted = false
             nextSnapshotNanos = System.nanoTime()
@@ -375,8 +375,8 @@ def emulator(text):
             if (added.semanticType != SemanticType.HYPERLINK) segments
             else segments.filterNot { it.semanticType == SemanticType.HYPERLINK && it != added && it.overlaps(added.startCol, added.endCol) }
 
-        /** Where the OSC 8 sequences of what is written end (see [HyperlinkCuts]). */
-        private val hyperlinkCuts = HyperlinkCuts()
+        /** Where the OSC 8 sequences of what is written end, and what scroll region the library holds and the screen it shows has (see [WriteCuts]). */
+        private val writeCuts = WriteCuts(initialRows)
 
         /** The links the piece just written made: they are on the screen, with their text recorded, once the piece is over. */
         private val unrecordedLinks = mutableListOf<PendingSemanticSegment>()
@@ -400,10 +400,24 @@ def emulator(text):
                     inWrite = false
                 }
                 endScrollBatch()
-                if (cut >= 0) recordLinkTexts()
+                if (cut >= 0) {
+                    recordLinkTexts()
+                    writeRegionFix()
+                }
                 if (to >= end) return
                 from = to
             }
+        }
+
+        /**
+         * libvterm keeps one scroll region for both screens and a resize only ever shortens it, where xterm.js keeps one for each screen,
+         * starts the alternate one whole, gives the shell's back when it is left and resets both when the size changes (see [WriteCuts]).
+         * When what the library holds is not what the screen it shows should have, this is the region and the cursor put back where the
+         * region moved it from: the bytes are two sequences that answer nothing, and none are written otherwise.
+         */
+        private fun writeRegionFix() {
+            val fix = writeCuts.regionFix(cursorRow, cursorCol) ?: return
+            terminalNative.writeInput(fix, 0, fix.size)
         }
 
         /**
@@ -468,7 +482,7 @@ def emulator(text):
     # A write reaches the library in pieces, each ending after an OSC 8, and the text under a link is recorded as it ends (see writeInPieces).
     text = replace(text, "        terminalNative.writeInput(data, offset, length)\n", indent(dedent('''\
         val end = offset + length
-        writeInPieces(offset, end, { hyperlinkCuts.next(data, it, end) }) { from, to ->
+        writeInPieces(offset, end, { writeCuts.next(data, it, end) }) { from, to ->
             // The library copies the whole array on every call, so a piece is an array of its own.
             if (from == offset && to == end) {
                 terminalNative.writeInput(data, offset, length)
@@ -486,7 +500,7 @@ def emulator(text):
         }
         // The library reads a direct buffer from its start up to the length given, whatever its position and limit are.
         val bytes = buffer.duplicate().apply { clear() }
-        writeInPieces(0, length, { hyperlinkCuts.next(bytes, it, length) }) { from, to ->
+        writeInPieces(0, length, { writeCuts.next(bytes, it, length) }) { from, to ->
             if (from == 0 && to == length) {
                 terminalNative.writeInput(buffer, length)
             } else {
@@ -506,7 +520,7 @@ def emulator(text):
                    "        val updatedSegments = (withoutOverlappedLinks(line.semanticSegments, newSegment) + newSegment)\n            .sortedBy { it.startCol }\n")
     # A link is put on the screen when the piece that made it is over, with its text (see writeInPieces), so it is not one of the pending
     # segments that are applied blindly at the next snapshot. A link no piece recorded (none, unless libvterm ends an OSC 8 where
-    # HyperlinkCuts sees no end) still is.
+    # WriteCuts sees no end) still is.
     text = replace(text, "            val updatedSegments = (line.semanticSegments + newSegment).sortedBy { it.startCol }\n", indent(dedent('''\
         if (semanticType == SemanticType.HYPERLINK) {
             unrecordedLinks.add(PendingSemanticSegment(row, startCol, endCol, semanticType, metadata, promptId))
@@ -543,6 +557,12 @@ def emulator(text):
                          "            transferRanges = IntArray(newRows * 2)\n"
                          "            semanticSegmentTexts.keys.removeAll { it.row >= newRows }\n",
                    "            remapScreen(oldRows, oldCols, pushed, restored)\n            transferRanges = IntArray(newRows * 2)\n")
+    # xterm.js resets the scroll region of both screens whenever the size really changes, and libvterm only cuts it down to a shorter screen, so
+    # a region an explicit bottom was set for stays when the screen grows (see WriteCuts). The size is told to the scan once the library has it.
+    text = replace(text, "            // Rebuild all lines after resize\n            invalidateDisplay()\n",
+                   "            // Rebuild all lines after resize\n            invalidateDisplay()\n"
+                   "            writeCuts.resized(newRows)\n"
+                   "            writeRegionFix()\n")
     # A wrap the library lost in a resize (TerminalLine.wrapKept) stays on its row until a write changes the row, and then the library says what is true. A
     # row the damage only covers, as a scroll's moverect or the one rectangle a flush reports for everything it touched does, keeps it while its cells are the same.
     text = replace(text, "                if (cells !== previousLine.cells || softWrapped != previousLine.softWrapped || preservedSegments != existingSegments) {\n"

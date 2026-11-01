@@ -11,7 +11,8 @@ import java.nio.ByteBuffer
  * that changed only when the write is flushed, which is the end of each [write] (the JNI flushes after every write).
  *
  * The emulator is given this through `TerminalEmulatorImpl`'s `nativeFactory`. Only what the engine's tests need is modelled: ASCII text with auto-wrap, CR, LF, BS, the cursor movements, ED / EL / ECH, ICH /
- * DCH, IL / DL, SU / SD, DECSTBM, RI, RIS, the alternate screen (`?1049`), OSC and a resize in rows and columns (rows pushed into
+ * DCH, IL / DL, SU / SD, DECSTBM, DECOM, RI, RIS, DECSTR, the alternate screen and the saved cursor (`?1047`, `?1048`, `?1049`, each argument of one
+ * `CSI ? Pm h` or `l` in turn), OSC and a resize in rows and columns (rows pushed into
  * the history and popped back, as `resize_buffer` does them with reflow off) and the colours a default cell resolves to. Anything else in the input is ignored,
  * and the model refuses wide characters rather than guess. `EngineInstrumentation` runs the same bytes through the real library on
  * a device, so the model cannot drift from it unnoticed.
@@ -60,6 +61,9 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
     private var savedCol = 0
     private var regionTop = 0
     private var regionBottom = rows
+
+    /** `mode.origin` (DECOM): rows are counted from the top of the scroll region, and the cursor stays inside it. */
+    private var origin = false
 
     /** `scrollregion_bottom == -1`: the region reaches the last row, whatever the screen's height becomes. */
     private var regionBottomUnset = true
@@ -130,6 +134,7 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
         col = col.coerceIn(0, cols - 1)
         damagerect(Rect(0, rows, 0, cols))
         flush()
+        reportCursor()
         return 0
     }
 
@@ -286,6 +291,21 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
             consumed++
         }
         flush()
+        reportCursor()
+    }
+
+    private var reportedRow = 0
+    private var reportedCol = 0
+
+    /**
+     * `updatecursor`: the emulator hears where the cursor is. The library says so at every move and the emulator keeps the last, so
+     * the model says it once a write or a resize is over, and only when the cursor is elsewhere than it was last said to be.
+     */
+    private fun reportCursor() {
+        if (row == reportedRow && col == reportedCol) return
+        emulator.moveCursor(CursorPosition(row, col), CursorPosition(reportedRow, reportedCol), true)
+        reportedRow = row
+        reportedCol = col
     }
 
     /**
@@ -358,20 +378,33 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
         fun count() = maxOf(1, arg(0, 1))
         val old = row to col
         when {
+            // `INTERMED('!', 0x70)`: the soft reset puts the scroll region and the origin mode back and leaves the cursor and the screens alone.
+            raw == "!" && final == 'p' -> {
+                regionTop = 0; regionBottom = rows; regionBottomUnset = true; origin = false
+                return
+            }
             leader == '?' && (final == 'h' || final == 'l') -> {
-                if (arg(0, 0) == 1049) alternateScreen(final == 'h')
+                // `set_dec_mode` of state.c for every argument in turn: 1047 is the alternate screen, 1048 the saved cursor and 1049 both.
+                // 47, the one older programs use, is not a mode of this library, so it changes nothing.
+                val on = final == 'h'
+                for (mode in numbers) when (mode) {
+                    6 -> setOrigin(on)
+                    1047 -> setAlternate(on)
+                    1048 -> saveCursor(on)
+                    1049 -> { setAlternate(on); saveCursor(on) }
+                }
                 return
             }
             leader != null -> return
         }
         when (final) {
-            'H', 'f' -> { row = (arg(0, 1) - 1).coerceIn(0, rows - 1); col = (arg(1, 1) - 1).coerceIn(0, cols - 1); atPhantom = false }
+            'H', 'f' -> { row = (arg(0, 1) - 1 + originOffset()).coerceIn(0, rows - 1); col = (arg(1, 1) - 1).coerceIn(0, cols - 1); atPhantom = false }
             'A' -> { row = maxOf(0, row - count()); atPhantom = false }
             'B' -> { row = minOf(rows - 1, row + count()); atPhantom = false }
             'C' -> { col = minOf(cols - 1, col + count()); atPhantom = false }
             'D' -> { col = maxOf(0, col - count()); atPhantom = false }
             'G' -> { col = (arg(0, 1) - 1).coerceIn(0, cols - 1); atPhantom = false }
-            'd' -> { row = (arg(0, 1) - 1).coerceIn(0, rows - 1); atPhantom = false }
+            'd' -> { row = (arg(0, 1) - 1 + originOffset()).coerceIn(0, rows - 1); atPhantom = false }
             'J' -> when (arg(0, 0)) {
                 0 -> {
                     if (cols > col) erase(Rect(row, row + 1, col, cols))
@@ -400,15 +433,31 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
             'S' -> scroll(Rect(regionTop, regionBottom, 0, cols), count(), 0)
             'T' -> scroll(Rect(regionTop, regionBottom, 0, cols), -count(), 0)
             'r' -> {
+                // `DECSTBM` of state.c: a bottom that is missing is none (the region follows the screen's height), one that is the screen's height
+                // is none too, but only when the top is the first row; any other is kept, cut down to the height the screen has now and no taller
+                // when it grows. A region that has no height is dropped. Setting one puts the cursor home.
                 var top = (arg(0, 1) - 1).coerceIn(0, rows)
-                var bottom = arg(1, rows).coerceIn(0, rows)
-                if (bottom <= top) { top = 0; bottom = rows }
-                regionTop = top; regionBottom = bottom
-                regionBottomUnset = top == 0 && bottom == rows
-                // Setting the region puts the cursor home.
-                row = 0; col = 0; atPhantom = false
+                var bottom = if (numbers.size < 2) -1 else maxOf(-1, numbers[1] ?: -1)
+                if (top == 0 && bottom == rows) bottom = -1 else if (bottom > rows) bottom = rows
+                if ((if (bottom > -1) bottom else rows) <= top) { top = 0; bottom = -1 }
+                regionTop = top
+                regionBottomUnset = bottom == -1
+                regionBottom = if (bottom == -1) rows else bottom
+                row = originOffset(); col = 0; atPhantom = false
             }
         }
+        // The end of `on_csi`: in the origin mode every command leaves the cursor inside the scroll region.
+        if (origin) row = row.coerceIn(regionTop, regionBottom - 1)
+        cursorChanged(old)
+    }
+
+    private fun originOffset() = if (origin) regionTop else 0
+
+    /** `DECOM`: the cursor goes to the home of the new mode, which is the top of the region when the rows are counted from it. */
+    private fun setOrigin(on: Boolean) {
+        val old = row to col
+        origin = on
+        row = originOffset(); col = 0
         cursorChanged(old)
     }
 
@@ -452,14 +501,15 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
     private fun reset() {
         primary = blankScreen(); screen = primary; alternate = null; onAlternate = false
         primaryContinuation = BooleanArray(rows); alternateContinuation = BooleanArray(rows); continuation = primaryContinuation
-        row = 0; col = 0; atPhantom = false; regionTop = 0; regionBottom = rows; regionBottomUnset = true
+        row = 0; col = 0; atPhantom = false; regionTop = 0; regionBottom = rows; regionBottomUnset = true; origin = false
         damagerect(Rect(0, rows, 0, cols))
     }
 
-    private fun alternateScreen(on: Boolean) {
-        if (on == onAlternate) return
-        if (on) { savedRow = row; savedCol = col }
-        // screen.c setprop(): the emulator hears of it first, then the buffer is switched, and a screen that is left is damaged.
+    /**
+     * `VTERM_PROP_ALTSCREEN`, every time a mode says so, whether or not the screen in use changes: the emulator hears of it, the alternate
+     * screen is erased when it is entered (again, if it already was), and the shell's is damaged when it is left (even if it never was left).
+     */
+    private fun setAlternate(on: Boolean) {
         emulator.setTermProp(3, TerminalProperty.BoolValue(on))
         onAlternate = on
         if (on) {
@@ -468,7 +518,17 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
         } else {
             screen = primary; continuation = primaryContinuation
             damagerect(Rect(0, rows, 0, cols))
-            row = savedRow; col = savedCol; atPhantom = false
+        }
+    }
+
+    /** `savecursor`: the position is saved, or put back as it was saved (home if it never was), unclamped; `updatecursor` leaves a pending wrap alone when the cursor did not move. */
+    private fun saveCursor(save: Boolean) {
+        if (save) {
+            savedRow = row; savedCol = col
+        } else {
+            val old = row to col
+            row = savedRow; col = savedCol
+            cursorChanged(old)
         }
     }
 

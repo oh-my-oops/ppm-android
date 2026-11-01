@@ -166,6 +166,186 @@ internal object ResizeDiff {
         return Triple(rows0, cols0, ops)
     }
 
+    /** What the region scripts of a set of seeds exercised, counted per scenario: the corners of the one scroll region libvterm keeps. */
+    class RegionCoverage {
+        var scenarios = 0
+        var acrossResize = 0
+        var acrossAlternate = 0
+        var rejected = 0
+        var scrolledInside = 0
+        var originMode = 0
+        var regionInOrigin = 0
+        var explicitBottom = 0
+        override fun toString() = "scenarios=$scenarios resizeWithRegion=$acrossResize alternateWithRegion=$acrossAlternate rejected=$rejected scrolledInside=$scrolledInside origin=$originMode regionInOrigin=$regionInOrigin explicitBottom=$explicitBottom"
+    }
+
+    private fun cup(row: Int, column: Int) = ESC + "[" + row + ";" + column + "H"
+
+    /**
+     * A scenario about the scroll region, which libvterm keeps once for both screens and a resize only ever shortens: regions of every shape
+     * (a top alone, a bottom alone, a bottom past the screen, upside down, the whole screen said out loud), line feeds on the last row of a
+     * region and of the screen, the alternate screen entered and left with a region standing, DECOM, DECSTR, and resizes with a region standing.
+     * After most regions a probe shows which rows the region has: every row is labelled, then one `SU` moves the rows of the region and no others.
+     * The size at the start is the size at the end, as a keyboard's round trip is.
+     */
+    fun regionScript(seed: Int, coverage: RegionCoverage? = null): Triple<Int, Int, List<Op>> {
+        val random = Random(seed * 7919 + 13)
+        val rows0 = random.nextInt(4, 13)
+        val cols0 = random.nextInt(6, 15)
+        var rows = rows0
+        var cols = cols0
+        var serial = 0
+        var altMode = 0
+        // The region the library should hold: its first row (counted from 0), and the row after its last, or -1 for down to the last row.
+        var top = 0
+        var bottom = -1
+        var acrossResize = false
+        var acrossAlternate = false
+        var rejected = false
+        var scrolledInside = false
+        var originMode = false
+        var regionInOrigin = false
+        var explicitBottom = false
+        val ops = mutableListOf<Op>()
+        fun bottomRow() = if (bottom == -1) rows else bottom
+        fun whole() = top == 0 && bottomRow() == rows
+        fun text(maxLength: Int): String {
+            serial++
+            val length = random.nextInt(0, maxLength + 1)
+            return buildString {
+                append(serial)
+                append(':')
+                for (i in 0 until length) append('a' + (i + serial) % 26)
+            }.take(maxLength.coerceAtLeast(1))
+        }
+        fun probe(): String {
+            val b = StringBuilder()
+            for (r in 1..rows) b.append(cup(r, 1)).append('r').append(r)
+            return b.append(ESC).append("[1S").toString()
+        }
+        fun region(): String {
+            val first = random.nextInt(1, rows + 1)
+            return when (random.nextInt(10)) {
+                0 -> { top = 0; bottom = -1; ESC + "[r" }
+                1 -> { top = first - 1; bottom = -1; ESC + "[" + first + "r" }
+                2 -> { top = 0; bottom = if (first == rows) -1 else first; ESC + "[;" + first + "r" }
+                3 -> { rejected = true; top = 0; bottom = -1; ESC + "[" + (rows + random.nextInt(1, 4)) + ";" + random.nextInt(1, rows + 1) + "r" }
+                4 -> {
+                    val below = random.nextInt(1, 6)
+                    top = first - 1; bottom = rows; explicitBottom = true
+                    ESC + "[" + first + ";" + (rows + below) + "r"
+                }
+                5 -> if (rows >= 2) {
+                    val t = random.nextInt(2, rows + 1)
+                    rejected = true; top = 0; bottom = -1
+                    ESC + "[" + t + ";" + random.nextInt(1, t) + "r"
+                } else ESC + "[r"
+                6 -> { rejected = true; top = 0; bottom = -1; ESC + "[0;0r" }
+                7 -> { top = 0; bottom = -1; ESC + "[1;" + rows + "r" }
+                else -> {
+                    val b = random.nextInt(first, rows + 1)
+                    top = first - 1; bottom = if (top == 0 && b == rows) -1 else b
+                    ESC + "[" + first + ";" + b + "r"
+                }
+            }
+        }
+        // The size is changed with the first row of a region on the new screen: one below the new last row is undefined in libvterm.
+        fun resize(newRows: Int, newCols: Int) {
+            if (top >= newRows) { ops += Op.Write(ESC + "[r"); top = 0; bottom = -1 }
+            else if (newRows != rows && !whole()) acrossResize = true
+            ops += Op.Resize(newRows, newCols)
+            if (bottom != -1) bottom = minOf(bottom, newRows)
+            rows = newRows
+            cols = newCols
+        }
+        repeat(random.nextInt(12, 33)) {
+            val pick = random.nextInt(100)
+            when {
+                pick < 18 -> {
+                    val b = StringBuilder()
+                    repeat(random.nextInt(1, 5)) {
+                        b.append(text(cols * random.nextInt(1, 3)))
+                        if (random.nextInt(10) < 8) b.append("\r\n")
+                    }
+                    ops += Op.Write(b.toString())
+                }
+                pick < 36 -> {
+                    ops += Op.Write(region())
+                    if (random.nextInt(10) < 6) ops += Op.Write(probe())
+                }
+                pick < 46 -> {
+                    if (!whole()) scrolledInside = true
+                    ops += Op.Write(cup(bottomRow(), 1) + text(5) + "\r\n" + text(5) + "\r\n" + text(5))
+                }
+                pick < 52 -> ops += Op.Write(cup(rows, 1) + text(5) + "\r\n" + text(5))
+                pick < 57 -> ops += Op.Write(cup(random.nextInt(1, rows + 1), random.nextInt(1, cols + 1)))
+                pick < 62 -> ops += Op.Write(cup(random.nextInt(1, rows + 1), 1) + ESC + "[" + random.nextInt(1, 3) + (if (random.nextBoolean()) "L" else "M"))
+                pick < 65 -> ops += Op.Write(cup(top + 1, 1) + ESC + "M")
+                pick < 77 -> {
+                    // The cursor saved when the alternate screen is entered is put back unclamped when it is left: save it at home.
+                    if (!whole()) acrossAlternate = true
+                    if (altMode == 0) {
+                        altMode = if (random.nextBoolean()) 1049 else 1047
+                        ops += Op.Write(if (altMode == 1049) ESC + "[H" + ESC + "[?1049h" else ESC + "[?1047h")
+                    } else {
+                        ops += Op.Write(ESC + "[?" + altMode + "l")
+                        altMode = 0
+                    }
+                    if (random.nextInt(10) < 4) ops += Op.Write(probe())
+                }
+                pick < 80 -> {
+                    originMode = true
+                    when (random.nextInt(4)) {
+                        0 -> {
+                            val rowsInRegion = bottomRow() - top
+                            ops += Op.Write(ESC + "[?6h" + cup(random.nextInt(1, rowsInRegion + 2), random.nextInt(1, cols + 1)) + text(4) + "\r\n" + text(4) + ESC + "[?6l")
+                        }
+                        // The mode itself sends the cursor to the top of the region, and the text goes there.
+                        1 -> ops += Op.Write(ESC + "[?6h" + text(4) + "\r\n" + text(4) + ESC + "[?6l")
+                        // A region set while the mode is on sends the cursor to the top of the new one.
+                        2 -> {
+                            regionInOrigin = true
+                            ops += Op.Write(ESC + "[?6h" + region() + text(4) + "\r\n" + text(4) + ESC + "[?6l")
+                        }
+                        // A soft reset ends the mode: the region set after it sends the cursor to the first row.
+                        else -> {
+                            regionInOrigin = true
+                            ops += Op.Write(ESC + "[?6h" + ESC + "[!p" + region() + text(4) + "\r\n" + text(4) + ESC + "[?6l")
+                        }
+                    }
+                }
+                pick < 82 -> { ops += Op.Write(ESC + "[!p"); top = 0; bottom = -1 }
+                pick < 84 -> if (altMode == 0) { ops += Op.Write(ESC + "c"); top = 0; bottom = -1 }
+                else -> {
+                    val kind = random.nextInt(10)
+                    val newRows = if (kind < 8) random.nextInt(2, 15) else rows
+                    val newCols = if (kind in 5..9) cols else random.nextInt(4, 25)
+                    if (newRows != rows || newCols != cols) {
+                        resize(newRows, newCols)
+                        if (random.nextInt(10) < 5) ops += Op.Write(probe())
+                    }
+                }
+            }
+        }
+        ops += Op.Write(probe())
+        if (rows != rows0 || cols != cols0) {
+            resize(rows0, cols0)
+            ops += Op.Write(probe())
+        }
+        ops += Op.Write("\r\nend")
+        coverage?.let {
+            it.scenarios++
+            if (acrossResize) it.acrossResize++
+            if (acrossAlternate) it.acrossAlternate++
+            if (rejected) it.rejected++
+            if (scrolledInside) it.scrolledInside++
+            if (originMode) it.originMode++
+            if (regionInOrigin) it.regionInOrigin++
+            if (explicitBottom) it.explicitBottom++
+        }
+        return Triple(rows0, cols0, ops)
+    }
+
     private fun crc(text: String): Long = CRC32().also { it.update(text.toByteArray()) }.value
 
     private fun escape(text: String) = buildString {
@@ -199,6 +379,12 @@ internal object ResizeDiff {
     fun trace(seed: Int, coverage: Coverage? = null, make: (Rec, Int, Int) -> Host): String {
         val (rows0, cols0, ops) = script(seed)
         return traceOps("seed $seed", rows0, cols0, ops, coverage, make)
+    }
+
+    /** The trace of one scenario of [regionScript]. */
+    fun regionTrace(seed: Int, coverage: RegionCoverage? = null, make: (Rec, Int, Int) -> Host): String {
+        val (rows0, cols0, ops) = regionScript(seed, coverage)
+        return traceOps("region seed " + seed, rows0, cols0, ops, null, make)
     }
 
     fun traceOps(name: String, rows0: Int, cols0: Int, ops: List<Op>, coverage: Coverage? = null, make: (Rec, Int, Int) -> Host): String {
@@ -258,6 +444,21 @@ internal object ResizeDiff {
 
     /** The seeds both sides run: 50 of the scripts above, and two more for the alternate screen. */
     val SEEDS: List<Int> = (1..50).toList() + listOf(57, 60)
+
+    /** The seeds of [regionScript] both sides run. */
+    val REGION_SEEDS: List<Int> = (1..60).toList()
+
+    /** The CRC of the trace of each of [REGION_SEEDS] as the real library produced it, in the same order. */
+    val GOLDEN_REGION: List<Long> = listOf(
+        3444071398L, 3728238434L, 3367960437L, 4256761455L, 4172753520L, 2221510172L, 4287352547L, 4260665160L,
+        355788781L, 2713341532L, 1917504821L, 2522283580L, 453093450L, 1009057628L, 3458157848L, 4017219683L,
+        2945233264L, 2714981875L, 3180600951L, 2456969709L, 2027953069L, 3991982998L, 3664072424L, 1043886082L,
+        2324563343L, 2795594061L, 1635253093L, 1386335231L, 3735416740L, 3664361080L, 227659054L, 3009278104L,
+        3641954408L, 1771031190L, 74165361L, 4134786335L, 2295457237L, 150978105L, 4259576330L, 155220941L,
+        4039207971L, 941329712L, 4053360114L, 972135183L, 2556043902L, 3246540727L, 87236218L, 808190064L,
+        3688179828L, 1666948867L, 940703142L, 3516042779L, 447704445L, 101616344L, 2337291799L, 3076176711L,
+        3944108423L, 3379998616L, 3198453393L, 1890929849L,
+    )
 
     /** The CRC of the trace of each of [SEEDS] as the real library produced it, in the same order. */
     val GOLDEN: List<Long> = listOf(

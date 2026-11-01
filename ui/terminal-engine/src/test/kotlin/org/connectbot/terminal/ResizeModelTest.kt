@@ -26,6 +26,21 @@ class ResizeModelTest {
         println("scenarios: $coverage")
     }
 
+    @Test fun `the model's trace of every scroll region scenario is the library's`() {
+        val coverage = ResizeDiff.RegionCoverage()
+        val traces = ResizeDiff.REGION_SEEDS.map { seed -> ResizeDiff.regionTrace(seed, coverage) { rec, rows, cols -> ModelHost(rec, rows, cols) } }
+        val actual = traces.map { ResizeDiff.checksum(it) }
+        val first = actual.indices.firstOrNull { actual[it] != ResizeDiff.GOLDEN_REGION[it] }
+        assertEquals("The model's traces of ${ResizeDiff.REGION_SEEDS} differ from the library's, the first at index $first:\n${first?.let { traces[it] }}", ResizeDiff.GOLDEN_REGION, actual)
+        println("region scenarios: $coverage")
+    }
+
+    @Test fun `the region scenarios reach the corners of the region that the model has to get right`() {
+        val coverage = ResizeDiff.RegionCoverage()
+        ResizeDiff.REGION_SEEDS.forEach { seed -> ResizeDiff.regionTrace(seed, coverage) { rec, rows, cols -> ModelHost(rec, rows, cols) } }
+        assertTrue("$coverage", coverage.acrossResize >= 20 && coverage.acrossAlternate >= 20 && coverage.rejected >= 20 && coverage.scrolledInside >= 20 && coverage.originMode >= 10 && coverage.regionInOrigin >= 10 && coverage.explicitBottom >= 10)
+    }
+
     @Test fun `the scenarios reach the branches of a resize that the model has to get right`() {
         val coverage = ResizeDiff.Coverage()
         ResizeDiff.SEEDS.forEach { seed -> ResizeDiff.trace(seed, coverage) { rec, rows, cols -> ModelHost(rec, rows, cols) } }

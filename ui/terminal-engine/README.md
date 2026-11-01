@@ -138,7 +138,7 @@ The added APIs are:
   once at the end of a whole replay) before applying the link blindly: a link whose cells had been erased or written over by
   then showed up over whatever they held (`ls --hyperlink`, `clear`, a plain listing, reached through a reconnect, which
   replays the shell's buffer as one write: a click on `https:` of a plain line opened the address of a line that had scrolled
-  away). `HyperlinkCuts` follows libvterm's parser over what is written, in UTF-8 mode as the JNI sets it, and the emulator hands
+  away). `WriteCuts` follows libvterm's parser over what is written, in UTF-8 mode as the JNI sets it, and the emulator hands
   the library the bytes in pieces that each end right after an OSC 8 (`writeInPieces`), so the link, its row and the text under it
   are read the moment the link ends (`placeLinks`, one small read of the screen per link). Measured on an emulator, a 1 MB replay
   takes the same with no link, 0.58 s instead of 0.48 s with 3,000 links, and 0.92 s instead of 0.65 s with one on every line. A
@@ -150,9 +150,9 @@ The added APIs are:
   Limits: a link made again over the same text, or the same text written over it, is not told from the first; a redraw of the whole
   screen in the same flush as a scroll (Enter on the last row, then `clear`, in one write) looks like the scroll to the emulator, so a
   link over text that came back identical stays; leaving the alternate screen loses the primary screen's links, as before; and an OSC 8
-  that is written over before it closes is linked where it ended, as upstream. The JVM tests (`StaleLinksTest`, `HyperlinkCutsTest`,
+  that is written over before it closes is linked where it ended, as upstream. The JVM tests (`StaleLinksTest`, `WriteCutsTest`,
   `ResizeWrapTest`) run the real emulator over `FakeVterm`, a model of libvterm's parse, screen and resize (`ScreenNative` is the one
-  place they stand in for the JNI); `verifyStaleLinks`, `verifyHyperlinkCuts` and `verifyResize` run the same bytes through the real
+  place they stand in for the JNI); `verifyStaleLinks`, `verifyWriteCuts` and `verifyResize` run the same bytes through the real
   library (22 operations, three ways of writing each, a replay, a resize, random streams for where the writes are cut), so the model
   cannot drift from it unnoticed. For the resize that is also a differential: `src/sharedTest/kotlin/.../ResizeDiff.kt`, compiled by
   both the unit tests and the instrumentation, scripts 52 fixed-seed scenarios (writes of every kind, resizes in rows and columns, the
@@ -160,6 +160,41 @@ The added APIs are:
   `verifyResizeModel` hold the model and the library to the same list of CRCs (`ResizeDiff.GOLDEN`, taken from the library), so a model
   that drifts fails on the JVM and a library that stops doing what the model does fails on the device. Change a script or the trace and
   `GOLDEN` must be taken again: run the instrumentation with it empty and it prints what the library gave.
+- The scroll region of the screen that is shown. libvterm keeps one region for the whole terminal and shows either screen through
+  it; xterm.js, which the web app is, keeps one for each screen, starts the alternate one whole every time it is entered, gives the
+  shell's own back when it is left, and resets both whenever the size really changes. Vim sets `ESC [ 1 ; 18 r` on the alternate
+  screen and leaves it with `?1049l`, never `ESC [ r`, so in libvterm the shell went on with vim's region: a line feed on the bottom
+  row no longer scrolled and everything printed after it was drawn over the last rows (`$ stty size`, its answer and the next prompt on
+  one row; `printf '\033[r'` healed it). `ESC [ 1 ; 18 r` is also not "the whole screen" to libvterm on a screen that is not 18 rows
+  tall but an explicit bottom of 18, which a resize only ever clamps downwards: a replay written before the screen had its final height
+  left a region the screen outgrew. That is why it only showed after a cold start, when the terminal is the replay of a session that
+  ran vim. `WriteCuts` (the scan above, now a model of the parser over CSI and strings as well) keeps the region each screen would have
+  in xterm.js, from what the stream says (DECSTBM as `state.c` takes it, the modes 1047 and 1049, RIS, DECSTR, the origin mode) and what
+  the emulator says (a real size change), and the one libvterm holds. Where they differ it ends a piece at the next place the parser is
+  between sequences, and `writeRegionFix` writes the library `ESC [ top ; bottom r` (`ESC [ r` for none) and puts the cursor back with a
+  CUP from where the callbacks last put it, since setting a region homes it. The fix is made inside a replay's window, where the
+  answers to queries are dropped, and answers nothing itself. A plain shell, or a program that leaves its region as it found it, is
+  never written to; vim costs one write of a dozen bytes when it exits, and a size change with a region standing one more. The scan
+  costs, per MB of output on the emulator: 0.43 ms of plain text, 1.0 ms of colours, 4.9 ms of cursor movements with `?25h` and `l` in
+  them (the OSC-only scan it replaces took 0.43, 1.0 and 1.9 ms): a CSI that does not end in `r`, `p`, `h` or `l` is skipped whole
+  (`skipPlainCsi`). Limits: with the origin mode on, a cursor that is outside the region cannot be put back (the library homes it into
+  the region), and libvterm does not tell the emulator about a cursor it moved and put back inside one sequence, so the position the
+  emulator has can be stale there; the pending wrap does not survive a fix (the cursor goes to the same cell, and the next character
+  overwrites it instead of wrapping); the left and right margins (DECSLRM) are not followed; mode 47 is not a mode of this libvterm, so
+  it switches nothing here either; and a sequence of 16 arguments or more is not modelled as the library's `args[]` holds it. The JVM
+  tests are `WriteCutsTest` (the scan: every shape of sequence, cut anywhere, one random stream per seed) and `ScrollRegionTest` (the
+  real emulator over `FakeVterm`: the three cases of the report, vim as a live program, the screens apart, the cursor, what is not
+  written to, the replay answering nothing). On a device `RegionChecks` (`-e only region` runs just these) runs the same flows through
+  the real library, with `src/androidTest/assets/replay-vim.bin`, a vim session captured on a device (its user and host names replaced,
+  byte for byte), as a replay at 30 rows, at 6 rows then 18, and at 18 as captured; holds the scan's region, alternate-screen flag, origin
+  mode and cursor to the library's own answers (DECRQSS, DECRQM, DSR) at every place the scan says it is between sequences, over 1,500
+  random streams of every sequence that can change a region, written in chunks of random sizes and each ended by a resize (the region the
+  library has bounded to the new height must be the scan's, and the fix must give the whole screen back); and holds the region the emulator
+  leaves on each screen to a model written from xterm.js's rule alone, over 60 random sessions with replays and resizes. `FakeVterm`'s
+  region, DECOM and alternate screen are held to the library as the resize is: `ResizeDiff.regionScript` scripts 60 scenarios (regions
+  of every shape, line feeds on their last row, the alternate screen, DECOM (alone, and with a region set or a soft reset inside it), DECSTR,
+  resizes with a region standing, and a probe that
+  shows which rows the region has), `ResizeModelTest` and `verifyRegionModel` hold the model and the library to `GOLDEN_REGION`.
 - With `imeMode = CommittedText`, a view that lost the focus tells the IME it is no editor once nothing else took the
   focus (`onCreateInputConnection` answers `null` with `TYPE_NULL`, as Chrome does for a blurred textarea), and asks for a
   new editor, then reports the caret moved and came back, when the focus returns.

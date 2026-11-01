@@ -19,12 +19,25 @@ import kotlin.random.Random
 
 /** JNI smoke checks in an isolated test APK; no app activity or clipboard access. */
 class EngineInstrumentation : Instrumentation() {
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
+    /** `-e only region` runs the scroll region checks alone. */
+    private var only: String? = null
+
+    override fun onCreate(arguments: Bundle?) { only = arguments?.getString("only"); super.onCreate(arguments); start() }
+
+    private fun verifyScrollRegions() {
+        ResizeChecks.verifyRegionModel()
+        RegionChecks.verifyScrollRegion(context)
+        RegionChecks.verifyRegionScan()
+        RegionChecks.verifyRegionOps()
+    }
 
     override fun onStart() {
-        val result = runCatching { verifyEngine(); verifyScrollbackWraps(); verifyWrapFlagsAcrossWrites(); verifyLinks(); verifyLinksAcrossScrolls(); verifyStaleLinks(); ResizeChecks.verifyResizeModel(); ResizeChecks.verifyResize(); verifyHyperlinkCuts(); verifyReplayCursor(); verifyRenderer() }
+        val result = runCatching {
+            if (only == "region") verifyScrollRegions()
+            else { verifyEngine(); verifyScrollbackWraps(); verifyWrapFlagsAcrossWrites(); verifyLinks(); verifyLinksAcrossScrolls(); verifyStaleLinks(); ResizeChecks.verifyResizeModel(); ResizeChecks.verifyResize(); verifyWriteCuts(); verifyScrollRegions(); verifyReplayCursor(); verifyRenderer() }
+        }
         finish(if (result.isSuccess) Activity.RESULT_OK else Activity.RESULT_CANCELED, Bundle().apply {
-            putString("stream", if (result.isSuccess) "PASS: pinned JNI, scrollback, wrapped lines in it, wrap flags across writes, links (OSC 8, plain, wrapped, in the history, on their own rows while the screen scrolls, none left over text that is not theirs: 22 operations in 3 ways of writing, a replay, a resize), a prompt beside them, a resize (the model of the library's resize held to its traces in 52 scripted scenarios, the wraps and links of the rows through a shrink and a grow, the alternate screen), where writes are cut for them, the cursor after a replay, text/cursor, reset, close, late work, truecolor/inverse contrast, cursor colours\n"
+            putString("stream", if (result.isSuccess && only != null) "PASS: only the " + only + " checks ran\n" else if (result.isSuccess) "PASS: pinned JNI, scrollback, wrapped lines in it, wrap flags across writes, links (OSC 8, plain, wrapped, in the history, on their own rows while the screen scrolls, none left over text that is not theirs: 22 operations in 3 ways of writing, a replay, a resize), a prompt beside them, a resize (the model of the library's resize held to its traces in 52 scripted scenarios, the wraps and links of the rows through a shrink and a grow, the alternate screen), where writes are cut for them, the scroll region (the model of the library's held to its traces in 60 scripted scenarios, the shell's region and the alternate screen's through a vim session captured on a device, a resize and a replay, the scan's region held to the library's own answer over random streams and a resize after each, the emulator's held to xterm.js's rule over random sessions), the cursor after a replay, text/cursor, reset, close, late work, truecolor/inverse contrast, cursor colours\n"
                 else result.exceptionOrNull()!!.stackTraceToString())
         })
     }
@@ -423,11 +436,12 @@ class EngineInstrumentation : Instrumentation() {
     }
 
     /**
-     * Where `HyperlinkCuts` says an OSC 8 ends is where libvterm finishes one: random streams of links in both terminators, other
+     * Where `WriteCuts` says an OSC 8 ends is where libvterm finishes one: random streams of links in both terminators, other
      * OSCs, strings that are cancelled or aborted and stray ESCs go to the library a byte at a time, and the byte it reports an
-     * OSC 8 done on is compared with the scan. Strings nested in strings may be cut once too often (see HyperlinkCuts), never missed.
+     * OSC 8 done on is compared with the scan, which follows the library's parser exactly: a string opened inside a string cancels it (the
+     * `nested` fragment), and nothing is cut inside it.
      */
-    private fun verifyHyperlinkCuts() {
+    private fun verifyWriteCuts() {
         val esc = "\u001b"
         var finished = 0
         val callbacks = object : TerminalCallbacks {
@@ -469,7 +483,7 @@ class EngineInstrumentation : Instrumentation() {
         )
         val nested: (Int) -> String = { n -> "$esc]8;;https://a.test/$esc]8;;https://b.test/\u0007text$n$esc]8;;\u0007" }
 
-        fun compare(pool: List<(Int) -> String>, seed: Int, exact: Boolean) {
+        fun compare(pool: List<(Int) -> String>, seed: Int) {
             val random = Random(seed)
             repeat(300) { round ->
                 val text = (1..random.nextInt(1, 14)).joinToString("") { pool[random.nextInt(pool.size)](it) }
@@ -486,7 +500,7 @@ class EngineInstrumentation : Instrumentation() {
                 } finally {
                     native.close()
                 }
-                val scanner = HyperlinkCuts()
+                val scanner = WriteCuts()
                 val cuts = mutableListOf<Int>()
                 var from = 0
                 while (true) {
@@ -496,12 +510,11 @@ class EngineInstrumentation : Instrumentation() {
                     from = cut
                 }
                 val shown = text.replace(esc, "<ESC>")
-                if (exact) check(cuts == finishedAt) { "Round $round: libvterm finished OSC 8 at $finishedAt, the scan cuts at $cuts, in $shown" }
-                else check(finishedAt.all { it in cuts }) { "Round $round: libvterm finished OSC 8 at $finishedAt, the scan cuts at only $cuts, in $shown" }
+                check(cuts == finishedAt) { "Round $round: libvterm finished OSC 8 at $finishedAt, the scan cuts at $cuts, in $shown" }
             }
         }
-        compare(fragments, seed = 8, exact = true)
-        compare(fragments + nested, seed = 88, exact = false)
+        compare(fragments, seed = 8)
+        compare(fragments + nested, seed = 88)
     }
 
     private fun verifyRenderer() {
