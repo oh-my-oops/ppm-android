@@ -78,7 +78,8 @@ The added APIs are:
   caller's `onGloballyPositioned` after any padding, and map `rect.topLeft` / `rect.bottomRight`
   from those coordinates into the page with `page.localPositionOf(terminalCoordinates, ...)`.
   The callback is stable across cursor blinking, returns null for a hidden cursor or scrollback
-  view, and clears on disposal. It is not a window/screen coordinate and is not a dp value.
+  view, and clears on disposal. It is not a window/screen coordinate and is not a dp value. The cell is the one the emulator tracks,
+  which is stale only where libvterm skips the cursor callback (the limit named with the scroll regions below).
 - `Terminal(selectionActions = { controller -> ... })`: optional composable override for
   the selected-text actions. `null` retains the original Copy + More row. Use a `Row` or
   wrapping `FlowRow` for multiple buttons; content is measured within the terminal's available
@@ -178,8 +179,9 @@ The added APIs are:
   costs, per MB of output on the emulator: 0.43 ms of plain text, 1.0 ms of colours, 4.9 ms of cursor movements with `?25h` and `l` in
   them (the OSC-only scan it replaces took 0.43, 1.0 and 1.9 ms): a CSI that does not end in `r`, `p`, `h` or `l` is skipped whole
   (`skipPlainCsi`). Limits: with the origin mode on, a cursor that is outside the region cannot be put back (the library homes it into
-  the region), and libvterm does not tell the emulator about a cursor it moved and put back inside one sequence, so the position the
-  emulator has can be stale there; the pending wrap does not survive a fix (the cursor goes to the same cell, and the next character
+  the region), and libvterm does not tell the emulator about a cursor it moved and put back inside one sequence (`updatecursor` in `state.c`
+  compares the position at the end of a sequence with the one at its start and skips `movecursor` when they are equal), so the
+  position the emulator has can be stale there, and the cell `onCursorBoundsChanged` reports with it; the pending wrap does not survive a fix (the cursor goes to the same cell, and the next character
   overwrites it instead of wrapping); the left and right margins (DECSLRM) are not followed; mode 47 is not a mode of this libvterm, so
   it switches nothing here either; and a sequence of 16 arguments or more is not modelled as the library's `args[]` holds it. The JVM
   tests are `WriteCutsTest` (the scan: every shape of sequence, cut anywhere, one random stream per seed) and `ScrollRegionTest` (the

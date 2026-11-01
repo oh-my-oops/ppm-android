@@ -33,11 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -93,8 +90,9 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     val visible = LocalWindowContentVisible.current
     val inputReady = visible && state.connected && state.shellReady && !state.exited && state.error == null
     val focusManager = LocalFocusManager.current
-    val placed = remember { arrayOfNulls<LayoutCoordinates>(1) }
-    val cursor = remember(emulator) { arrayOfNulls<Rect>(1) }
+    // One for the session's life, not the engine's: the keyboard's pan is given its lambdas when the terminal takes the focus, which an
+    // engine replaced afterwards does not repeat.
+    val caret = remember(session) { TerminalCaret() }
     SideEffect { session.theme(theme) }
     DisposableEffect(session, visible) {
         session.controller.setVisible(visible)
@@ -181,19 +179,14 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
             Terminal(
                 terminalEmulator = emulator,
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(4.dp)
-                    .onGloballyPositioned { placed[0] = it }
+                    .onGloballyPositioned(caret::terminalPlaced)
                     .onFocusChanged { focusState ->
                         // A tap on nothing blurs the terminal as it does xterm's textarea: the keyboard goes with the
                         // focus, and the next tap on the terminal asks for it again like the first one did.
                         if (focusState.hasFocus) TextInputFocus.takeNative(session, focusManager, onBlur = {
                             keyboardRequested = false
                             imeController?.hideKeyboard()
-                        }) { page ->
-                            val field = placed[0]
-                            val caret = cursor[0]
-                            if (field == null || caret == null || !field.isAttached || !page.isAttached || field.findRootCoordinates() != page.findRootCoordinates()) null
-                            else Rect(page.localPositionOf(field, caret.topLeft), page.localPositionOf(field, caret.bottomRight))
-                        } else TextInputFocus.releaseNative(session)
+                        }, keep = caret::keysIn, bounds = caret::cursorIn) else TextInputFocus.releaseNative(session)
                     },
                 typeface = face, initialFontSize = 13.sp,
                 backgroundColor = tokens.bgSolid.color, foregroundColor = tokens.text.color,
@@ -205,7 +198,7 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
                 onImeControllerAvailable = { imeController = it },
                 // Every tap asks, as the web's touchend does, except in select mode, which raises nothing (it has no touchend).
                 onTerminalTap = { if (!selecting) { TextInputFocus.asked(); keyboardRequested = true } },
-                onCursorBoundsChanged = { cursor[0] = it },
+                onCursorBoundsChanged = caret::cursorMoved,
                 modifierManager = modifiers,
                 onSelectionControllerAvailable = { selection = it },
                 // Select mode: a one-finger drag selects from where it came down (useTerminalTouchSelection) and does not scroll.
@@ -262,6 +255,7 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
             onPaste = ::paste,
             onSendToChat = ::chat,
             onOpenLinks = { links = session.bufferUrls() },
+            modifier = Modifier.onGloballyPositioned(caret::keysPlaced),
         )
     }
     oscLink?.let { uri -> Osc8LinkConfirm(uri, open = ::openLink, onDismiss = { oscLink = null }) }

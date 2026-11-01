@@ -69,11 +69,12 @@ fun TerminalMobileToolbar(
     onPaste: () -> Unit,
     onSendToChat: () -> Unit,
     onOpenLinks: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
     val repeat = remember { systemKeyRepeat() }
     // Chrome Android offers this row on touch tablets too, not only below 768dp.
-    Box(Modifier.fillMaxWidth().background(tokens.panel.color).cssBorder(tokens.border.color, sides = CssSides.Top)) {
+    Box(modifier.fillMaxWidth().background(tokens.panel.color).cssBorder(tokens.border.color, sides = CssSides.Top)) {
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,

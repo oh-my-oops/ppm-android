@@ -39,6 +39,7 @@ object TextInputFocus {
     private var state by mutableStateOf<TextFieldState?>(null)
     private var nativeOwner by mutableStateOf<Any?>(null)
     private var nativeBounds: ((LayoutCoordinates) -> Rect?)? = null
+    private var nativeKeep: ((LayoutCoordinates) -> Rect?)? = null
     private var nativeBlur: (() -> Unit)? = null
 
     /** Where the focused field is laid out, once it has been. */
@@ -84,6 +85,15 @@ object TextInputFocus {
         return page.localBoundingBoxOf(field, clipBounds = false)
     }
 
+    /**
+     * What the keyboard has to leave in view for the focused field of [page], null where [boundsIn] is: the field's own bounds, and for a
+     * native editor the row of keys that goes with it, which the page shows as well when both fit above the keyboard ([panFor]).
+     */
+    fun panTargetIn(page: LayoutCoordinates): PanTarget? {
+        val field = boundsIn(page) ?: return null
+        return PanTarget(field, if (nativeOwner != null) nativeKeep?.invoke(page) else null)
+    }
+
     internal fun take(state: TextFieldState, placed: LayoutCoordinates? = null, window: FocusManager? = null) {
         val before = this.window
         // A page has one focus: a field taking it in another window takes it from the one in
@@ -93,6 +103,7 @@ object TextInputFocus {
         this.state = state
         nativeOwner = null
         nativeBounds = null
+        nativeKeep = null
         nativeBlur = null
         this.placed = placed
         this.window = window
@@ -100,15 +111,24 @@ object TextInputFocus {
 
     /**
      * A native terminal editor participates in the same focus/keyboard-pan rules as Compose fields.
-     * [onBlur] is what it does as a tap on nothing is about to take the focus from it ([blurNative]).
+     * [onBlur] is what it does as a tap on nothing is about to take the focus from it ([blurNative]). [bounds] says where the editor's
+     * caret is in the page it is given, and [keep] where the row of keys that goes with it is, each null where it is not known or not in
+     * that page: the pan follows [bounds] as they change and shows [keep] with them when both fit ([panFor]).
      */
-    internal fun takeNative(owner: Any, window: FocusManager, onBlur: () -> Unit = {}, bounds: (LayoutCoordinates) -> Rect?) {
+    internal fun takeNative(
+        owner: Any,
+        window: FocusManager,
+        onBlur: () -> Unit = {},
+        keep: ((LayoutCoordinates) -> Rect?)? = null,
+        bounds: (LayoutCoordinates) -> Rect?,
+    ) {
         val before = this.window
         if (field !== owner && before != null && before !== window) before.clearFocus()
         state = null
         placed = null
         nativeOwner = owner
         nativeBounds = bounds
+        nativeKeep = keep
         nativeBlur = onBlur
         this.window = window
     }
@@ -117,6 +137,7 @@ object TextInputFocus {
         if (nativeOwner !== owner) return
         nativeOwner = null
         nativeBounds = null
+        nativeKeep = null
         nativeBlur = null
         window = null
     }
@@ -164,6 +185,9 @@ object TextInputFocus {
     internal fun tapLeaves(start: TapStart): Boolean =
         field === start.focused && asks == start.asks && (start.focused == null || pressedIn !== start.focused)
 }
+
+/** Where the focused field is in the page, and what is to be seen with it, both in the page's pixels. */
+data class PanTarget(val field: Rect, val keep: Rect?)
 
 /**
  * A tap that is not on the focused field takes the focus from it, as a press does in Chrome:
