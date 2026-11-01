@@ -18,6 +18,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.BottomSheet
+import com.hienlh.ppm.app.ui.CornerChrome
 import com.hienlh.ppm.design.*
 import com.hienlh.ppm.protocol.HostFileEntry
 import com.hienlh.ppm.protocol.get
@@ -36,19 +37,30 @@ fun HostExplorerWindow(model: AppModel, window: WindowRuntimeState) {
     HostExplorerBody(model, window.id, path, visible = window.state != WindowVisualState.Minimized)
 }
 
+/**
+ * The explorer on a phone (`MobileExplorerSheet`): the sheet over the whole of the app's area, `h-[var(--sheet-vh)]`
+ * and `p-0`, with the panel's rounded top corners and line, the handle above the title bar, and a swipe down that
+ * closes it, which stops while a name is being typed. Its `zIndex` is 45, so the page's fixed corners stay over it.
+ * The toolbar sits on the navigation bar, with no 0.5rem under it, and on the keyboard while one is up.
+ */
 @Composable
 fun HostExplorerSheet(model: AppModel, path: String) {
-    // The web's class is `p-0`: the toolbar sits on the navigation bar, or on the keyboard, with no 0.5rem under it.
-    BottomSheet(onDismiss = model::closeExplorerSheet, modifier = Modifier.fillMaxHeight(), radius = 0.dp,
-        bottomPadding = WindowInsets.ime.union(WindowInsets.navigationBars)) {
-        HostExplorerBody(model, "phone-explorer", path)
+    var renaming by remember { mutableStateOf(false) }
+    BottomSheet(
+        onDismiss = model::closeExplorerSheet,
+        modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars).fillMaxHeight(),
+        bottomPadding = WindowInsets.ime.union(WindowInsets.navigationBars),
+        overlay = { CornerChrome(model, mobile = true) },
+        swipeFromContent = !renaming,
+    ) {
+        HostExplorerBody(model, "phone-explorer", path, onRenaming = { renaming = it })
     }
 }
 
 private data class HostMenu(val entries: List<HostFileEntry>, val at: Offset, val directory: String? = null)
 
 @Composable
-private fun HostExplorerBody(model: AppModel, id: String, path: String, visible: Boolean = true) {
+private fun HostExplorerBody(model: AppModel, id: String, path: String, visible: Boolean = true, onRenaming: (Boolean) -> Unit = {}) {
     val session = remember(model.api, id) { model.hostExplorer(id, path) } ?: return
     val hostStore = model.hostFilesystem ?: return
     val host by hostStore.state.collectAsState()
@@ -58,6 +70,9 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
     val uploadQueue = remember(model.api, host.host?.separator, state.directory?.separator) {
         (state.directory?.separator ?: host.host?.separator)?.let(model::hostUploads)
     }
+    // `mobile-explorer-sheet.tsx` stops the sheet's swipe while an entry is being renamed (not while one is created).
+    val renaming = commands?.edit?.entry != null
+    LaunchedEffect(renaming) { onRenaming(renaming) }
     val uploadFiles = rememberHostUploadPicker(model, uploadQueue, commands)
     val downloads = rememberHostDownloads(model)
     val dropModifier: @Composable (String) -> Modifier = { directory -> hostExternalDrop(model, uploadQueue, commands, directory) }

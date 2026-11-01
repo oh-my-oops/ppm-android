@@ -91,6 +91,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -393,6 +394,9 @@ fun PpmTextField(
  */
 val LocalSheetContentTop = staticCompositionLocalOf { 0.dp }
 
+/** What a test finds the sheet's drag handle by. */
+internal const val SHEET_HANDLE_TAG = "sheet-handle"
+
 /**
  * The web's `BottomSheet` (`mobile-bottom-sheet.tsx`): a 40% black backdrop, the panel on the
  * bottom edge with a 16px top radius and a drag handle, sliding up in 200 ms; a tap on the
@@ -405,7 +409,9 @@ val LocalSheetContentTop = staticCompositionLocalOf { 0.dp }
  * page never reaches under. [overlay] is drawn over the sheet and its backdrop, where the page's
  * fixed corners stay above a sheet given a lower `zIndex`. [radius] is the panel's top corners'
  * (`rounded-t-2xl`, or a class's own). [inset] is a class's padding on the other three sides
- * (`p-2`), the handle inside it.
+ * (`p-2`), the handle inside it. A swipe down starts anywhere on the panel; with [swipeFromContent]
+ * false it starts on the handle alone, as where the sheet's content stops the touches before the
+ * panel's swipe handlers see them (the explorer's, while a name is being typed).
  */
 @Composable
 fun BottomSheet(
@@ -417,6 +423,7 @@ fun BottomSheet(
     bottomPadding: WindowInsets = WindowInsets.ime.union(WindowInsets.navigationBars).union(WindowInsets(bottom = 8.dp)),
     inset: Dp = 0.dp,
     overlay: (@Composable BoxScope.() -> Unit)? = null,
+    swipeFromContent: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
@@ -458,6 +465,13 @@ fun BottomSheet(
             )
             val shape = RoundedCornerShape(topStart = radius, topEnd = radius)
             val border = tokens.border.color
+            val swipe = Modifier.draggable(
+                rememberDraggableState { delta -> scope.launch { offset.snapTo((offset.value + delta).coerceAtLeast(0f)) } },
+                Orientation.Vertical,
+                onDragStopped = { velocity ->
+                    if (dismissible && (offset.value > panelHeight * 0.25f || velocity > 1_500f)) close() else offset.animateTo(0f, tween(150))
+                },
+            )
             Column(
                 modifier
                     .align(Alignment.BottomCenter)
@@ -470,13 +484,7 @@ fun BottomSheet(
                         val line = topBorder(size, radius.toPx(), cssBorderPx(1.dp).toFloat())
                         onDrawBehind { drawPath(line, border) }
                     }
-                    .draggable(
-                        rememberDraggableState { delta -> scope.launch { offset.snapTo((offset.value + delta).coerceAtLeast(0f)) } },
-                        Orientation.Vertical,
-                        onDragStopped = { velocity ->
-                            if (dismissible && (offset.value > panelHeight * 0.25f || velocity > 1_500f)) close() else offset.animateTo(0f, tween(150))
-                        },
-                    )
+                    .then(if (swipeFromContent) swipe else Modifier)
                     // A tap off the focused field takes the focus from it, as on the page.
                     .leavesTextOnTap(focusManager)
                     .cssBorderInset(top = 1.dp)
@@ -485,7 +493,7 @@ fun BottomSheet(
             ) {
                 // Drag handle: `pt-3 pb-1`, `w-10 h-1 rounded-full bg-border`. 20dp rounded once, as Chrome
                 // snaps it: 53 px at 2.625x, where its three parts rounded apiece come to 54.
-                Box(Modifier.fillMaxWidth().cssHeight(20.dp).padding(top = 12.dp, bottom = 4.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxWidth().cssHeight(20.dp).testTag(SHEET_HANDLE_TAG).then(if (swipeFromContent) Modifier else swipe).padding(top = 12.dp, bottom = 4.dp), contentAlignment = Alignment.Center) {
                     Box(Modifier.width(40.dp).height(4.dp).clip(CircleShape).background(tokens.border.color))
                 }
                 val contentTop = with(LocalDensity.current) { (20.dp.toPx() - 20.dp.roundToPx()).toDp() }
