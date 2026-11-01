@@ -42,7 +42,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Project explorer only: its owner opens/resets [tree] and wires reconnect/file-change events.
- * [activeFilePath] and [onOpenTerminal]'s directory are project-relative (root is "").
+ * [activeFilePath] and the directory [onOpenExplorer] and [onOpenTerminal] get are project-relative (root is "").
  * [onOpenFile] owns viewer routing and closing the phone drawer. Framework icons inherit
  * LocalIconFramework. Additional implemented commands come from [actionsForNode].
  */
@@ -53,6 +53,7 @@ fun ExplorerTree(
     modifier: Modifier = Modifier,
     activeFilePath: String? = null,
     onOpenTerminal: ((String) -> Unit)? = null,
+    onOpenExplorer: ((String) -> Unit)? = null,
     actionsForNode: (FileTreeNode) -> List<ExplorerTreeAction> = { emptyList() },
     mutations: ExplorerMutationCallbacks? = null,
     dropModifier: @Composable (directory: String) -> Modifier = { Modifier },
@@ -157,7 +158,7 @@ fun ExplorerTree(
                         onSubmit = { if (tree.state.value.project == commands?.project) commands?.let { session.submit(display.edit, field.text.toString(), it) } },
                         onCancel = session::cancelEdit, onEdit = session::edited)
                     is ExplorerDisplayRow.Node -> ExplorerTreeItem(display.row, tree, state, visiblePaths, selected,
-                        onOpenFile, onOpenTerminal, actionsForNode, commands, session, busy, ::create, dropModifier)
+                        onOpenFile, onOpenTerminal, onOpenExplorer, actionsForNode, commands, session, busy, ::create, dropModifier)
                 }
             }
             }

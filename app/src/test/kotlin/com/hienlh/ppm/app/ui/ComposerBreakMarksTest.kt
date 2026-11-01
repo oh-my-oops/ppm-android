@@ -143,6 +143,15 @@ class ComposerBreakMarksTest {
     }
 
     @Test
+    fun `an accessibility service reads text typed after the field was shown`() {
+        show()
+
+        compose.onNode(hasSetTextAction()).performTextInput(typed)
+
+        assertEquals(typed, info().text.toString())
+    }
+
+    @Test
     fun `an accessibility service is told the caret at its place in the typed text`() {
         show(typed)
 

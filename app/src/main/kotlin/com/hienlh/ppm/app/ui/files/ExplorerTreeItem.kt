@@ -21,7 +21,7 @@ import com.hienlh.ppm.state.files.ProjectFileTree
 @Composable
 internal fun ExplorerTreeItem(
     row: FileTreeRow, tree: ProjectFileTree, state: FileTreeState, visiblePaths: List<String>, selected: Set<String>,
-    onOpenFile: (FileTreeNode) -> Unit, onOpenTerminal: ((String) -> Unit)?,
+    onOpenFile: (FileTreeNode) -> Unit, onOpenTerminal: ((String) -> Unit)?, onOpenExplorer: ((String) -> Unit)?,
     actionsForNode: (FileTreeNode) -> List<ExplorerTreeAction>,
     mutations: ExplorerMutationCallbacks?, session: ExplorerMutationSession, busy: Boolean,
     onCreate: (String, Boolean) -> Unit,
@@ -65,9 +65,7 @@ internal fun ExplorerTreeItem(
                 }
                 add(ExplorerTreeAction(if (node.isDirectory) { if (expanded) "Collapse" else "Expand" } else "Open",
                     if (node.isDirectory) ProductIcon.FolderOpen else ProductIcon.File, onClick = ::activate))
-                if (node.isDirectory && onOpenTerminal != null) {
-                    add(ExplorerTreeAction("Open in Terminal", ProductIcon.Terminal) { onOpenTerminal(node.path) })
-                }
+                addAll(explorerOpenActions(node, onOpenExplorer, onOpenTerminal))
                 if (mutations != null && !busy) {
                     add(ExplorerTreeAction("Cut", ProductIcon.Scissors) {
                         session.clipboard(explorerClipboardTargets(node.path, tree.state.value.selectedFiles), true, mutations)
@@ -90,4 +88,13 @@ internal fun ExplorerTreeItem(
             ExplorerTreeMenu(node.name, at, actions, onDismiss = { menuAt = null })
         }
     }
+}
+
+/** A folder's entries that open it elsewhere, in the web's order: a File Explorer window on it, then a terminal in it. */
+internal fun explorerOpenActions(
+    node: FileTreeNode, onOpenExplorer: ((String) -> Unit)?, onOpenTerminal: ((String) -> Unit)?,
+): List<ExplorerTreeAction> = buildList {
+    if (!node.isDirectory) return@buildList
+    if (onOpenExplorer != null) add(ExplorerTreeAction("Open in File Explorer", ProductIcon.FolderOpen) { onOpenExplorer(node.path) })
+    if (onOpenTerminal != null) add(ExplorerTreeAction("Open in Terminal", ProductIcon.Terminal) { onOpenTerminal(node.path) })
 }

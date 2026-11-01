@@ -58,5 +58,11 @@ fun ExplorerBody(model: AppModel, onNavigate: () -> Unit = {}) {
                 onNavigate()
             }
         },
+        onOpenExplorer = model.currentProject?.path?.let { root ->
+            { directory ->
+                model.openExplorer(absoluteProjectPath(root, directory))
+                onNavigate()
+            }
+        },
     )
 }
