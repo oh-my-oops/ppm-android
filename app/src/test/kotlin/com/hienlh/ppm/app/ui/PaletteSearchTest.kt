@@ -122,6 +122,24 @@ class PaletteSearchTest {
     }
 
     @Test
+    fun `a query of several words is scored word by word, so the second word picks the action`() {
+        // The palette's own actions, with the words it gives them.
+        val index = PaletteSearchIndex(
+            listOf(
+                action("New AI Chat", "ai assistant claude"),
+                action("New Terminal", "bash shell console"),
+                action("Voice Input", "speech microphone dictate voice"),
+                action("Settings", "config preferences theme"),
+                action("Open File Explorer", "open file explorer finder browse files folders disk drive window"),
+            ),
+        )
+        assertEquals(listOf("New Terminal"), index.rank("new term").map { it.label })
+        assertEquals(listOf("New AI Chat"), index.rank("new chat").map { it.label })
+        // The first word alone ties them at a prefix match, and the shorter name goes first.
+        assertEquals(listOf("New AI Chat", "New Terminal"), index.rank("new").map { it.label }.take(2))
+    }
+
+    @Test
     fun `equal scores keep the order given, and a shallower path comes first when nothing else tells them apart`() {
         val given = listOf(file("a/x.ts"), file("b/x.ts"))
         assertEquals(listOf("a/x.ts", "b/x.ts"), PaletteSearchIndex(given).rank("x.ts").paths())
