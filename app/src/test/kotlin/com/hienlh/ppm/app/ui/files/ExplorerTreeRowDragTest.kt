@@ -1,10 +1,7 @@
 package com.hienlh.ppm.app.ui.files
 
-import android.graphics.Canvas
-import android.view.View
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.test.MouseButton
 import androidx.compose.ui.test.advanceEventTime
 import androidx.compose.ui.test.down
@@ -31,7 +28,7 @@ import org.robolectric.shadows.ShadowWindowManagerGlobal
 /**
  * The real tree row with the drag source on it: the gestures the row already had still do what they did, and a mouse drag from
  * it starts a drag and nothing else. A file row, because a folder's chevron is a vector icon, which this module's unit tests
- * cannot draw, and the drag needs the row drawn once.
+ * cannot draw (what the row draws is [ExplorerRowDragSourceDrawTest]'s, in native graphics).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -41,7 +38,6 @@ class ExplorerTreeRowDragTest {
     @get:Rule
     val rules: RuleChain = withComposeActivity(compose)
 
-    private var host: View? = null
     private var clicks = 0
     private val menus = mutableListOf<Offset>()
 
@@ -49,7 +45,6 @@ class ExplorerTreeRowDragTest {
         installBlankFileIcons()
         val node = FileTreeNode("app.kt", "src/app.kt", isDirectory = false, isIgnored = false)
         compose.setContent {
-            host = LocalView.current
             ExplorerTreeRow(
                 FileTreeRow(node, depth = 1), expanded = false, loading = false, selected = false, focused = false,
                 onClick = { _, _ -> clicks++ }, onMenu = { menus += it },
@@ -57,8 +52,6 @@ class ExplorerTreeRowDragTest {
             )
         }
         compose.waitForIdle()
-        // Compose drags the row's own picture and only has it once the row has been drawn, which this window never does by itself.
-        compose.runOnUiThread { host!!.draw(Canvas()) }
         ShadowWindowManagerGlobal.clearLastDragClipData()
     }
 

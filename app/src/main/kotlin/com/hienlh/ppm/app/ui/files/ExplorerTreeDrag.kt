@@ -24,8 +24,11 @@ import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.DragAndDropTransferData
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -99,7 +102,13 @@ internal class ExplorerDragOver {
  * Compose's own start detector cannot be told to ignore a finger: it waits out a long press and consumes the lift of a
  * tap that is not one, so a tap on a row that was a drag source opened nothing. This one watches in the initial pass and
  * consumes nothing, so a tap, the long-press menu and a right click reach the row as if it were not a source. The block
- * overload is the only one that leaves the detection to the caller, and it is deprecated.
+ * overloads are the only ones that leave the detection to the caller, and they are deprecated.
+ *
+ * Not the one that draws the ghost itself: `dragAndDropSource(block)` records the row's content into a picture the first time
+ * the row is drawn and only plays that picture back after, so a chevron, a label's weight, a spinner or an icon that changed
+ * since was never drawn again, and every row of the tree stayed as it first looked. The ghost here is the layer the row is
+ * drawn through, which is recorded again each time the row is drawn: the row as it is when the drag starts, as the browser's
+ * drag image of the row is.
  */
 @Suppress("DEPRECATION")
 @OptIn(ExperimentalFoundationApi::class)
@@ -107,7 +116,11 @@ internal class ExplorerDragOver {
 internal fun Modifier.explorerRowDragSource(drag: ExplorerRowDrag, enabled: Boolean): Modifier {
     if (!enabled) return this
     val current by rememberUpdatedState(drag)
-    return dragAndDropSource(block = {
+    val look = rememberGraphicsLayer()
+    return drawWithContent {
+        look.record { this@drawWithContent.drawContent() }
+        drawLayer(look)
+    }.dragAndDropSource(drawDragDecoration = { drawLayer(look) }, block = {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             if (explorerDragStarts(down.type, currentEvent.buttons.isPrimaryPressed) && awaitPastSlop(down)) {

@@ -1,6 +1,5 @@
 package com.hienlh.ppm.app.ui.files
 
-import android.graphics.Canvas
 import android.view.View
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -56,8 +55,6 @@ class ExplorerRowDragSourceTest {
             Box(Modifier.size(200.dp, 40.dp).testTag("row").explorerRowDragSource(drag, enabled))
         }
         compose.waitForIdle()
-        // Compose drags the row's own picture and only has it once the row has been drawn, which these tests' window never does by itself.
-        compose.runOnUiThread { host!!.draw(Canvas()) }
         ShadowWindowManagerGlobal.clearLastDragClipData()
     }
 
