@@ -186,6 +186,118 @@ class FileDocumentControllerTest {
         }
     }
 
+    @Test fun `a failed watcher or reconnect read keeps the content, sets no error and stays stale until the next show`() = runTest {
+        val triggers = listOf<(FileDocumentController) -> Unit>({ it.fileChanged("app", "a.txt") }, { it.reconnected() })
+        for (trigger in triggers) {
+            val reader = Reader()
+            FileDocumentController(reader, "app", "a.txt", this).use { doc ->
+                doc.show(); runCurrent(); reader.answer("old"); runCurrent()
+
+                trigger(doc); runCurrent()
+                assertTrue(doc.state.value.loading)
+                reader.reads.last().answer.completeExceptionally(IllegalStateException("atomic save in progress")); runCurrent()
+
+                assertEquals("old", doc.state.value.content)
+                assertNull(doc.state.value.error)
+                assertFalse(doc.state.value.loading)
+                assertTrue(doc.state.value.stale)
+                assertEquals(2, reader.reads.size) // nothing retries by itself
+                doc.hide(); doc.show(); runCurrent()
+                assertEquals(3, reader.reads.size)
+                reader.answer("new"); runCurrent()
+                assertEquals("new", doc.state.value.content)
+                assertFalse(doc.state.value.stale)
+            }
+        }
+    }
+
+    @Test fun `a failed watcher read keeps a binary notice or the bytes of an image as it keeps text`() = runTest {
+        val first = RawFile(byteArrayOf(1, 2), "test/type")
+        val cases = listOf(
+            "a.bin" to FileDocumentLoaded(cannotDisplay = true),
+            "photo.png" to FileDocumentLoaded(raw = first),
+        )
+        for ((path, loaded) in cases) {
+            val reader = Reader()
+            FileDocumentController(reader, "app", path, this).use { doc ->
+                doc.show(); runCurrent()
+                reader.reads.last().answer.complete(loaded); runCurrent()
+
+                doc.fileChanged("app", path); runCurrent()
+                reader.reads.last().answer.completeExceptionally(IllegalStateException("gone")); runCurrent()
+
+                assertNull(doc.state.value.error)
+                assertEquals(loaded.cannotDisplay, doc.state.value.cannotDisplay)
+                assertSame(loaded.raw, doc.state.value.raw)
+                assertTrue(doc.state.value.stale)
+            }
+        }
+    }
+
+    @Test fun `a watcher read that fails with nothing on screen shows its error`() = runTest {
+        val reader = Reader()
+        FileDocumentController(reader, "app", "a.txt", this).use { doc ->
+            doc.show(); runCurrent()
+            doc.fileChanged("app", "a.txt"); runCurrent()
+            reader.answer("rejected as stale"); runCurrent()
+            assertEquals(2, reader.reads.size)
+
+            reader.reads.last().answer.completeExceptionally(IllegalStateException("permission denied")); runCurrent()
+
+            assertEquals("permission denied", doc.state.value.error)
+            assertNull(doc.state.value.content)
+        }
+    }
+
+    @Test fun `a refresh that was asked for shows its error even when a watcher event restarts the read`() = runTest {
+        val reader = Reader()
+        FileDocumentController(reader, "app", "a.txt", this).use { doc ->
+            doc.show(); runCurrent(); reader.answer("old"); runCurrent()
+            doc.refresh(); runCurrent()
+            doc.fileChanged("app", "a.txt"); runCurrent()
+            reader.answer("rejected as stale"); runCurrent()
+            assertEquals(3, reader.reads.size)
+
+            reader.reads.last().answer.completeExceptionally(IllegalStateException("offline")); runCurrent()
+
+            assertEquals("old", doc.state.value.content)
+            assertEquals("offline", doc.state.value.error)
+        }
+    }
+
+    @Test fun `once a refresh has succeeded the next watcher failure is quiet`() = runTest {
+        val reader = Reader()
+        FileDocumentController(reader, "app", "a.txt", this).use { doc ->
+            doc.show(); runCurrent(); reader.answer("old"); runCurrent()
+            doc.refresh(); runCurrent(); reader.answer("fresh"); runCurrent()
+
+            doc.fileChanged("app", "a.txt"); runCurrent()
+            reader.reads.last().answer.completeExceptionally(IllegalStateException("atomic save in progress")); runCurrent()
+
+            assertEquals("fresh", doc.state.value.content)
+            assertNull(doc.state.value.error)
+        }
+    }
+
+    @Test fun `once a refresh is answered the next watcher failure is quiet again`() = runTest {
+        val reader = Reader()
+        FileDocumentController(reader, "app", "a.txt", this).use { doc ->
+            doc.show(); runCurrent(); reader.answer("old"); runCurrent()
+            doc.refresh(); runCurrent()
+            reader.reads.last().answer.completeExceptionally(IllegalStateException("offline")); runCurrent()
+            assertEquals("offline", doc.state.value.error)
+
+            doc.fileChanged("app", "a.txt"); runCurrent()
+            reader.reads.last().answer.completeExceptionally(IllegalStateException("offline again")); runCurrent()
+
+            assertEquals("old", doc.state.value.content)
+            assertNull(doc.state.value.error)
+            doc.refresh(); runCurrent()
+            reader.reads.last().answer.completeExceptionally(IllegalStateException("still offline")); runCurrent()
+            assertEquals("still offline", doc.state.value.error)
+        }
+    }
+
     @Test fun `binary refresh clears text and later text clears cannot display`() = runTest {
         val reader = Reader()
         FileDocumentController(reader, "app", "a.txt", this).use { doc ->

@@ -28,6 +28,9 @@ internal fun interface FileDocumentReader {
  * An invalidated response is discarded, then a fresh read follows if still visible and clean.
  * Reads are serialized because ApiClient shares in-flight GETs: cancelling and immediately
  * restarting would otherwise join the old response again. Close cancels this owner's waiter.
+ * A read that fails shows its error, except one the watcher or a reconnect asked for while there is
+ * a file to keep (the web's `file:changed` handler ends in `.catch(() => {})`): that one keeps what
+ * is on screen, says nothing and leaves the document stale for the next show. Only [refresh] is loud.
  */
 class FileDocumentController internal constructor(
     private val reader: FileDocumentReader,
@@ -59,6 +62,9 @@ class FileDocumentController internal constructor(
     private var epoch = 0
     private var loading: Job? = null
 
+    /** A [refresh] has been asked for and not yet answered: when the read fails the error shows. */
+    private var manual = false
+
     /** HTML's Code mode opts into a text read; normal previews still delegate without a request. */
     fun show(readAsText: Boolean = false) {
         if (!alive()) return
@@ -80,22 +86,31 @@ class FileDocumentController internal constructor(
         }
     }
 
-    /** Manual retry also covers servers whose watcher missed a change. Hidden refresh stays lazy. */
+    /**
+     * Manual retry also covers servers whose watcher missed a change. Hidden refresh stays lazy.
+     * The one reload whose failure is shown (the web's `reloadFile`), even over a file on screen.
+     */
     fun refresh() {
         if (!alive()) return
-        epoch++
-        mutable.value = current.copy(stale = true)
-        ensureLoaded()
+        manual = true
+        invalidate()
     }
 
     /** OS Explorer tabs without a project do not subscribe to project watcher events. */
     fun fileChanged(project: String, path: String?) {
         if (current.project == null || project != current.project || path != current.path) return
-        refresh()
+        invalidate()
     }
 
     /** The watch gap may have missed changes, so revalidate only when visible and clean. */
-    fun reconnected() = refresh()
+    fun reconnected() = invalidate()
+
+    private fun invalidate() {
+        if (!alive()) return
+        epoch++
+        mutable.value = current.copy(stale = true)
+        ensureLoaded()
+    }
 
     /** Reserved for an editing owner: never replace its unsaved buffer with a server response. */
     fun setDirty(dirty: Boolean) {
@@ -122,14 +137,22 @@ class FileDocumentController internal constructor(
             try {
                 if (!accepts(version)) return@launch
                 val answer = reader.read(current.project, current.path, viewer)
-                if (accepts(version)) mutable.value = current.copy(
-                    content = answer.content, raw = answer.raw, cannotDisplay = answer.cannotDisplay,
-                    loading = false, error = null, stale = false, revision = current.revision + 1,
-                )
+                if (accepts(version)) {
+                    manual = false
+                    mutable.value = current.copy(
+                        content = answer.content, raw = answer.raw, cannotDisplay = answer.cannotDisplay,
+                        loading = false, error = null, stale = false, revision = current.revision + 1,
+                    )
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (accepts(version)) mutable.value = current.copy(loading = false, error = error.message ?: "Failed to load file")
+                if (accepts(version)) {
+                    // Stale stays set, so the next show reads again; nothing here retries by itself.
+                    val keep = !manual && (current.content != null || current.raw != null || current.cannotDisplay)
+                    manual = false
+                    mutable.value = current.copy(loading = false, error = if (keep) null else error.message ?: "Failed to load file")
+                }
             } finally {
                 loading = null
                 if (version != epoch) ensureLoaded()
