@@ -171,6 +171,7 @@ import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.ChatState
 import com.hienlh.ppm.state.Effort
 import com.hienlh.ppm.state.MessagePriority
+import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.ModelListStatus
 import com.hienlh.ppm.state.ModelNames
 import com.hienlh.ppm.state.PermissionMode
@@ -1090,9 +1091,19 @@ private fun SendButton(tab: ChatTab, arrowSize: Dp, label: String, enabled: Bool
  * hover tint instead.
  */
 @Composable
-private fun ModePopover(current: PermissionMode, onDismiss: () -> Unit, pick: (PermissionMode) -> Unit) {
+private fun ModePopover(current: PermissionMode, onDismiss: () -> Unit, pick: (PermissionMode) -> Unit) =
+    ComposerPopover(onDismiss) { ModePanel(current, pick) }
+
+/**
+ * The window the mode, provider and model panels open in, over the chip they came from with its left edge on the chip's,
+ * 4 px clear (`absolute bottom-full left-0 mb-1`). One definition for the three: it is a focusable window of its own, so
+ * the keyboard that moves over a panel's rows stays in it and no key reaches the window behind, and a panel opened
+ * some other way would not have that. [PassThroughProperties] says what makes it so.
+ */
+@Composable
+private fun ComposerPopover(onDismiss: () -> Unit, content: @Composable () -> Unit) {
     val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
-    PlacedPopup(remember(gap) { aboveStart(gap) }, onDismiss, passThrough = true) { ModePanel(current, pick) }
+    PlacedPopup(remember(gap) { aboveStart(gap) }, onDismiss, passThrough = true, content)
 }
 
 /** What [ModePopover] opens: "Modes" and its key over a row for each mode. */
@@ -1211,10 +1222,8 @@ internal fun providerChipName(name: String) = "AI Provider: $name"
  * lit and checked; [status] while there is none. A press anywhere else closes it and goes on.
  */
 @Composable
-private fun ProviderPopover(current: String, providers: List<ProviderInfo>, status: String, onDismiss: () -> Unit, pick: (String) -> Unit) {
-    val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
-    PlacedPopup(remember(gap) { aboveStart(gap) }, onDismiss, passThrough = true) { ProviderPanel(current, providers, status, pick) }
-}
+private fun ProviderPopover(current: String, providers: List<ProviderInfo>, status: String, onDismiss: () -> Unit, pick: (String) -> Unit) =
+    ComposerPopover(onDismiss) { ProviderPanel(current, providers, status, pick) }
 
 /** What [ProviderPopover] opens: "Provider" over a row for each provider, or the [status] while there is none. */
 @Composable
@@ -1307,7 +1316,7 @@ private fun ModelSheet(model: AppModel, chat: ChatController, state: ChatState, 
     BottomSheet(onDismiss) {
         // `px-1 pb-2`.
         ModelColumns(
-            model, chat, state,
+            model.models, chat, state,
             Modifier.heightIn(max = LocalConfiguration.current.screenHeightDp.dp * 0.8f),
             Modifier.padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
             onPicked = {},
@@ -1323,11 +1332,10 @@ private fun ModelSheet(model: AppModel, chat: ChatController, state: ChatState, 
 @Composable
 private fun ModelPopover(model: AppModel, chat: ChatController, state: ChatState, onDismiss: () -> Unit) {
     val tokens = LocalPpmTokens.current
-    val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
-    PlacedPopup(remember(gap) { aboveStart(gap) }, onDismiss, passThrough = true) {
+    ComposerPopover(onDismiss) {
         val shape = RoundedCornerShape(12.dp)
         ModelColumns(
-            model, chat, state,
+            model.models, chat, state,
             Modifier
                 .width(320.dp)
                 .ppmShadow(tokens.shadowPanel, shape)
@@ -1347,14 +1355,36 @@ private fun ModelPopover(model: AppModel, chat: ChatController, state: ChatState
  * pads the columns inside the scroll. [onPicked] runs after a model or an effort is picked.
  */
 @Composable
-private fun ModelColumns(model: AppModel, chat: ChatController, state: ChatState, box: Modifier, inner: Modifier, onPicked: () -> Unit) {
-    val tokens = LocalPpmTokens.current
-    val catalog = model.models
+internal fun ModelColumns(catalog: ModelCatalog?, chat: ChatController, state: ChatState, box: Modifier, inner: Modifier, onPicked: () -> Unit) {
     val entries = catalog?.entries?.collectAsState()?.value
     LaunchedEffect(catalog, chat.providerId) { catalog?.load(chat.providerId) }
     val models: List<ModelOption> = remember(catalog, entries) { catalog?.models(chat.providerId).orEmpty() }
     val status: ModelListStatus? = remember(catalog, entries) { catalog?.status(chat.providerId) ?: ModelListStatus.LOADING }
-    val effort = Effort.of(state.effort) ?: Effort.DEFAULT
+    ModelPickerColumns(
+        models, status, state.model, Effort.of(state.effort) ?: Effort.DEFAULT, state.thinking, box, inner,
+        onModel = {
+            chat.setModel(it)
+            onPicked()
+        },
+        onEffort = {
+            chat.setEffort(it)
+            onPicked()
+        },
+        onThinking = { chat.setThinking(it) },
+    )
+}
+
+/**
+ * What [ModelColumns] draws once it has what it shows, apart from where that comes from: [model] and [effort] are the ones
+ * chosen, [thinking] whether the switch is on, and [onThinking] is told what it would turn it to.
+ */
+@Composable
+internal fun ModelPickerColumns(
+    models: List<ModelOption>, status: ModelListStatus?, model: String?, effort: Effort, thinking: Boolean,
+    box: Modifier, inner: Modifier,
+    onModel: (String) -> Unit, onEffort: (Effort) -> Unit, onThinking: (Boolean) -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
     // The tablet's popover scrolls with the web's thumb; the phone's sheet does not scroll on the web.
     val scroll = rememberScrollState()
     Row(
@@ -1373,10 +1403,7 @@ private fun ModelColumns(model: AppModel, chat: ChatController, state: ChatState
                 )
             }
             for (option in models) {
-                OptionRow(active = option.value == state.model, onClick = {
-                    chat.setModel(option.value)
-                    onPicked()
-                }) {
+                OptionRow(active = option.value == model, onClick = { onModel(option.value) }) {
                     BasicText(
                         ModelNames.shortLabel(option.label),
                         Modifier.weight(1f),
@@ -1390,10 +1417,7 @@ private fun ModelColumns(model: AppModel, chat: ChatController, state: ChatState
         Column(Modifier.weight(1f).fillMaxHeight().cssBorder(tokens.border.color, sides = CssSides.Start).padding(vertical = 4.dp)) {
             SectionLabel("Effort")
             for (option in Effort.entries) {
-                OptionRow(active = option == effort, onClick = {
-                    chat.setEffort(option)
-                    onPicked()
-                }) {
+                OptionRow(active = option == effort, onClick = { onEffort(option) }) {
                     Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                         BasicText(option.label, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1)
                         if (option == Effort.DEFAULT) {
@@ -1408,7 +1432,7 @@ private fun ModelColumns(model: AppModel, chat: ChatController, state: ChatState
                 }
             }
             Box(Modifier.padding(vertical = 4.dp).fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top))
-            ThinkingRow(state.thinking) { chat.setThinking(!state.thinking) }
+            ThinkingRow(thinking) { onThinking(!thinking) }
         }
     }
 }
@@ -1426,7 +1450,9 @@ private fun SectionLabel(text: String) {
 
 /**
  * `flex items-center gap-3 px-3 min-h-[44px] text-sm`, lit and checked when chosen. Its
- * `hover:bg-surface-elevated` is the sheet's own fill, so the hover tint lights it instead.
+ * `hover:bg-surface-elevated` is the sheet's own fill, so the hover tint lights it instead. The web's row has no
+ * `focus:` colour, which leaves a keyboard with no sign of where it is in this picker, so the hover tint lights the row
+ * the focus is on too, as it does in the mode and provider pickers, whose web rows do have `focus:bg-surface-elevated`.
  */
 @Composable
 private fun OptionRow(active: Boolean, onClick: () -> Unit, label: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
@@ -1436,7 +1462,7 @@ private fun OptionRow(active: Boolean, onClick: () -> Unit, label: @Composable a
             .fillMaxWidth()
             .heightIn(min = 44.dp)
             .background(if (active) tokens.panel2.color else Color.Transparent)
-            .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color, onClick = onClick)
+            .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color, litOnFocus = true, onClick = onClick)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1446,7 +1472,7 @@ private fun OptionRow(active: Boolean, onClick: () -> Unit, label: @Composable a
     }
 }
 
-/** `role="switch"`: a 36×20 track, its 16 px knob 2 px in when off and 16 px in when on; lit at once under a mouse. */
+/** `role="switch"`: a 36×20 track, its 16 px knob 2 px in when off and 16 px in when on; lit at once under a mouse, and as [OptionRow] is while the keyboard's focus is on it. */
 @Composable
 private fun ThinkingRow(on: Boolean, onToggle: () -> Unit) {
     val tokens = LocalPpmTokens.current
@@ -1455,7 +1481,7 @@ private fun ThinkingRow(on: Boolean, onToggle: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .heightIn(min = 44.dp)
-            .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color, fade = false, onClick = onToggle)
+            .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color, fade = false, litOnFocus = true, onClick = onToggle)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),

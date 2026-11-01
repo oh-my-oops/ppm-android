@@ -252,11 +252,14 @@ fun PlacedPopup(
     }
 }
 
-/** Unclipped, so that the room can reach past the screen's edge while the box stays on it. */
-private val MenuProperties = PopupProperties(focusable = true, clippingEnabled = false)
+/**
+ * Unclipped, so that the room can reach past the screen's edge while the box stays on it. Focusable: the window takes
+ * the keyboard, so a key reaches what is in it and none the window behind (internal, for a test that reads the flags).
+ */
+internal val MenuProperties = PopupProperties(focusable = true, clippingEnabled = false)
 
-/** [MenuProperties], but a press outside the popup's window goes on to the window under it. */
-private val PassThroughProperties = PopupProperties(
+/** [MenuProperties], but a press outside the popup's window goes on to the window under it. Just as focusable. */
+internal val PassThroughProperties = PopupProperties(
     flags = WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
         WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
         WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
