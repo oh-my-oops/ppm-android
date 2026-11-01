@@ -42,6 +42,9 @@ object WebCursor {
     /** `row-resize`, `ns-resize`, `n-resize` and `s-resize`. */
     val ResizeVertical = PointerIcon(android.view.PointerIcon.TYPE_VERTICAL_DOUBLE_ARROW)
 
+    /** `move`: Chrome's four-way arrow, where two dividers cross. */
+    val Move = PointerIcon(android.view.PointerIcon.TYPE_ALL_SCROLL)
+
     /** `nw-resize` and `se-resize`. */
     val ResizeTopLeft = PointerIcon(android.view.PointerIcon.TYPE_TOP_LEFT_DIAGONAL_DOUBLE_ARROW)
 

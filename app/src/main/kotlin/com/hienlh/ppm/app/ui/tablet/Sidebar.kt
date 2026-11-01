@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
@@ -39,6 +40,7 @@ import androidx.compose.ui.geometry.toRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionOnScreen
@@ -95,11 +97,13 @@ fun Sidebar(model: AppModel) {
             NavSectionRail(model, Modifier.weight(1f))
         }
     } else {
+        val resize = remember { SidebarResize() }
         Box(
             Modifier
                 .width(model.sidebarWidth.dp)
                 .fillMaxHeight()
                 .onGloballyPositioned { shellBottom = it.positionOnScreen().y + it.size.height }
+                .resizesSidebar(model, resize)
                 .background(tokens.panel.color)
                 .edge(Edge.Right, tokens.border.color),
         ) {
@@ -119,7 +123,7 @@ fun Sidebar(model: AppModel) {
                     }
                 }
             }
-            ResizeHandle(model, Modifier.align(Alignment.CenterEnd))
+            ResizeLine(resize, Modifier.align(Alignment.CenterEnd))
         }
     }
     flyoutAt?.let { ProjectFlyout(model, it, shellBottom) { flyoutAt = null } }
@@ -211,50 +215,64 @@ internal fun SwitcherAvatar(model: AppModel, project: ProjectInfo, size: Dp, unr
     }
 }
 
+/** The sidebar's drag of its right edge; held while it runs. */
+private class SidebarResize {
+    var held by mutableStateOf(false)
+
+    /** The width the drag has reached, in pixels; the sidebar follows it whole dp by whole dp. */
+    var reached = 0f
+}
+
 /**
- * The sidebar's right edge (`absolute right-0 w-1 cursor-col-resize`), wider to the finger than to
- * the eye: the accent at 30 % under a mouse (`hover:bg-primary/30`), 50 % while held. The double
- * arrow shows over the 4 px line alone, as on the web.
+ * The sidebar's right edge dragged to resize it. The web's handle is the 4 px line at the edge
+ * (`absolute right-0 w-1`), which a mouse has to hit; a finger gets 12 dp of the edge, as the
+ * line is too thin to find. Outside those a press belongs to the sidebar's content, so the
+ * sidebar box takes the drag itself, seeing each press before its content does.
+ */
+private fun Modifier.resizesSidebar(model: AppModel, resize: SidebarResize): Modifier = composed {
+    val density = LocalDensity.current.density
+    screenDrag(
+        horizontal = true,
+        cursor = WebCursor.ResizeHorizontal,
+        // Measured from inside the 1 px border, where `right-0` puts the line.
+        takes = { down ->
+            val inside = size.width - 1.dp.toPx() - down.position.x
+            inside > 0f && inside <= (if (down.type == PointerType.Mouse) 4.dp else 12.dp).toPx()
+        },
+        onStart = { down ->
+            resize.held = true
+            // The web uses `clientX` for every pointer type, so the edge comes under the
+            // pointer at the first move, including a finger in the wider touch target.
+            resize.reached = down.position.x
+        },
+        onDrag = { delta ->
+            resize.reached += delta
+            model.resizeSidebar((resize.reached / density).roundToInt())
+        },
+        onEnd = {
+            resize.held = false
+            model.saveSidebarWidth()
+        },
+    )
+}
+
+/**
+ * The sidebar's resize line (`w-1 cursor-col-resize`): the accent at 30 % under a mouse
+ * (`hover:bg-primary/30`), 50 % while a drag holds it. The double arrow shows over the line alone,
+ * as on the web.
  */
 @Composable
-private fun ResizeHandle(model: AppModel, modifier: Modifier) {
+private fun ResizeLine(resize: SidebarResize, modifier: Modifier) {
     val tokens = LocalPpmTokens.current
-    val density = LocalDensity.current.density
-    var held by remember { mutableStateOf(false) }
     val hover = rememberHover()
-    // The width the drag has reached, in pixels; the sidebar follows it whole dp by whole dp.
-    var reached by remember { mutableFloatStateOf(0f) }
     Box(
         modifier
             .fillMaxHeight()
-            .width(12.dp)
-            .screenDrag(
-                horizontal = true,
-                cursor = WebCursor.ResizeHorizontal,
-                onStart = {
-                    held = true
-                    reached = model.sidebarWidth * density
-                },
-                onDrag = { delta ->
-                    reached += delta
-                    model.resizeSidebar((reached / density).roundToInt())
-                },
-                onEnd = {
-                    held = false
-                    model.saveSidebarWidth()
-                },
-            ),
-    ) {
-        Box(
-            Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .width(4.dp)
-                .pointerHoverIcon(WebCursor.ResizeHorizontal)
-                .hoverable(hover.source)
-                .background(tokens.accent.opacity(if (held) 0.5 else 0.3 * hover.lit).color),
-        )
-    }
+            .width(4.dp)
+            .pointerHoverIcon(WebCursor.ResizeHorizontal)
+            .hoverable(hover.source)
+            .background(tokens.accent.opacity(if (resize.held) 0.5 else 0.3 * hover.lit).color),
+    )
 }
 
 /** Chat History, or what to do when there is no project. */

@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,12 +34,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.hienlh.ppm.app.AppModel
@@ -99,67 +104,51 @@ fun Modifier.edge(edge: Edge, color: Color): Modifier = cssBorder(
 
 /**
  * The 1 px line between two resizable panes (panel-layout.tsx's `ResizeHandle`): `bg-border/30`,
- * the accent at 30% under a mouse and at 50% while held, a grip in its middle (always drawn: a
- * touch screen has no hover). It takes one pixel of the layout but a 20 dp strip of touch and
- * mouse, laid over both neighbours: react-resizable-panels widens a separator to
- * `resizeTargetMinimumSize.coarse`, as Chrome on Android reports a coarse pointer, and shows the
- * double arrow (`ew-resize` / `ns-resize`) over all of it. Only the pixel itself lights, as CSS's
- * `:hover` covers the line and not the grab area around it. [vertical] is a line between
- * side-by-side panes. [onDragStart] comes at the press, and [onDrag] gets how far the pointer has
- * moved since, in pixels: react-resizable-panels moves the layout the drag began with by the whole
- * offset, so a line held at its limit while the pointer runs on comes back under the pointer.
+ * the accent at 30% under a mouse and at 50% while a mouse press that began on it holds, a grip in
+ * its middle (always drawn: a touch screen has no hover). It takes one pixel of the layout but a
+ * 20 dp strip of touch and mouse, laid over both neighbours: react-resizable-panels widens a
+ * separator to `resizeTargetMinimumSize.coarse`, as Chrome on Android reports a coarse pointer, and
+ * shows the double arrow (`ew-resize` / `ns-resize`) over all of it. Only the line and its grip
+ * light, as CSS's `:hover` and `:active` cover the separator and not the grab area around it. The
+ * area the line divides hit-tests every line together ([SplitStrips]), so where two cross a press
+ * takes both. [vertical] is a line between side-by-side panes; [order] is where it comes in the
+ * page, a later line drawn over an earlier one. [onDragStart] comes at the press, and [onDrag] gets
+ * how far the pointer has moved since, in pixels, and answers whether a limit holds the line:
+ * react-resizable-panels moves the layout the drag began with by the whole offset, so a line held
+ * at its limit while the pointer runs on comes back under the pointer.
  */
 @Composable
-fun SplitHandle(vertical: Boolean, onDragStart: () -> Unit = {}, onDrag: (Float) -> Unit, onDragEnd: () -> Unit = {}) {
+fun SplitHandle(vertical: Boolean, order: Int, onDragStart: () -> Unit = {}, onDrag: (Float) -> Boolean, onDragEnd: () -> Unit = {}) {
     val tokens = LocalPpmTokens.current
-    var held by remember { mutableStateOf(false) }
-    val moved = remember { FloatArray(1) }
-    var onLine by remember { mutableStateOf(false) }
+    val strips = LocalSplitStrips.current
+    val density = LocalDensity.current
+    val strip = remember(vertical) { SplitStrip(vertical) }
+    SideEffect {
+        strip.order = order
+        strip.reach = with(density) { 10.dp.toPx() }
+        strip.gripHalf = with(density) { 6.dp.toPx() }
+        strip.onStart = onDragStart
+        strip.onDrag = onDrag
+        strip.onEnd = onDragEnd
+    }
+    DisposableEffect(strips, strip) {
+        strips.add(strip)
+        onDispose { strips.remove(strip) }
+    }
     // `transition-colors duration-150` between the three.
-    val lit = colorsFade(onLine || held).toDouble()
-    val press = colorsFade(held).toDouble()
+    val lit = colorsFade(strip.hovered).toDouble()
+    val press = colorsFade(strip.pressed).toDouble()
     val line = tokens.accent.opacity(0.5).mix(tokens.accent.opacity(0.3).mix(tokens.border.opacity(0.3), lit), press)
-    val cursor = if (vertical) WebCursor.ResizeHorizontal else WebCursor.ResizeVertical
     Box(
         (if (vertical) Modifier.width(1.dp).fillMaxHeight() else Modifier.height(1.dp).fillMaxWidth())
             .zIndex(1f)
-            .background(line.color),
+            .background(line.color)
+            .onGloballyPositioned { strip.coordinates = it },
         contentAlignment = Alignment.Center,
     ) {
         Box(
             (if (vertical) Modifier.fillMaxHeight().requiredWidth(20.dp) else Modifier.fillMaxWidth().requiredHeight(20.dp))
-                .pointerHoverIcon(cursor)
-                .pointerInput(vertical) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                            val change = event.changes.firstOrNull() ?: continue
-                            // A mouse moving with no button down; a finger never hovers.
-                            if (change.pressed) continue
-                            val at = if (vertical) change.position.x else change.position.y
-                            val middle = (if (vertical) size.width else size.height) / 2f
-                            val half = 0.5.dp.toPx()
-                            onLine = event.type != PointerEventType.Exit && at >= middle - half && at < middle + half
-                        }
-                    }
-                }
-                .screenDrag(
-                    horizontal = vertical,
-                    cursor = cursor,
-                    onStart = {
-                        held = true
-                        moved[0] = 0f
-                        onDragStart()
-                    },
-                    onDrag = { delta ->
-                        moved[0] += delta
-                        onDrag(moved[0])
-                    },
-                    onEnd = {
-                        held = false
-                        onDragEnd()
-                    },
-                ),
+                .pointerHoverIcon(if (vertical) WebCursor.ResizeHorizontal else WebCursor.ResizeVertical),
             contentAlignment = Alignment.Center,
         ) {
             PpmIcon(if (vertical) ProductIcon.GripVertical else ProductIcon.GripHorizontal, 12.dp, tokens.text.opacity(0.5).color)
@@ -185,13 +174,15 @@ val LocalHeldCursor = staticCompositionLocalOf { HeldCursor() }
  * A drag along one axis, measured on the screen. A handle moves with the edge it drags, and
  * `draggable` measures in the handle's own coordinates, so it saw the finger move only about half
  * as far (a 100 dp swipe moved the dock 52 dp). As on the web, the edge follows from the first
- * pixel, with no touch slop. [horizontal] drags along x; [onDrag] gets each move in pixels;
- * [cursor] is held until the drag ends.
+ * pixel, with no touch slop. [horizontal] drags along x; [onStart] gets the press, [onDrag] each
+ * move in pixels; [cursor] is held until the drag ends. A press [takes] is seen before anything in the box, so a
+ * box can hold the drag for its edge alone and leave the rest of itself to its content.
  */
 fun Modifier.screenDrag(
     horizontal: Boolean,
     cursor: PointerIcon,
-    onStart: () -> Unit,
+    takes: PointerInputScope.(PointerInputChange) -> Boolean = { true },
+    onStart: (PointerInputChange) -> Unit,
     onDrag: (Float) -> Unit,
     onEnd: () -> Unit,
 ): Modifier = composed {
@@ -199,21 +190,25 @@ fun Modifier.screenDrag(
     val move by rememberUpdatedState(onDrag)
     val end by rememberUpdatedState(onEnd)
     val icon by rememberUpdatedState(cursor)
+    val accepts by rememberUpdatedState(takes)
     val held = LocalHeldCursor.current
     val placed = remember { PlacedAt() }
     onGloballyPositioned { placed.coordinates = it }.pointerInput(horizontal) {
         awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false)
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            if (!accepts(down)) return@awaitEachGesture
             var last = placed.coordinates?.localToRoot(down.position) ?: return@awaitEachGesture
             down.consume()
-            start()
+            start(down)
             held.icon = icon
             try {
                 // Every event of this finger up to and including its release, which can carry the
-                // last stretch of the move: `drag()` drops it (a 100 dp drag came out 95 dp).
+                // last stretch of the move: `drag()` drops it (a 100 dp drag came out 95 dp). A
+                // mouse's release moves nothing, as the web reads only its moves.
                 while (true) {
-                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
-                    placed.coordinates?.localToRoot(change.position)?.let { now ->
+                    val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
+                    val moves = change.pressed || change.type != PointerType.Mouse
+                    placed.coordinates?.localToRoot(change.position)?.takeIf { moves }?.let { now ->
                         val delta = if (horizontal) now.x - last.x else now.y - last.y
                         last = now
                         if (delta != 0f) move(delta)
@@ -230,7 +225,7 @@ fun Modifier.screenDrag(
 }
 
 /** Where a handle was last laid out; read by its gesture, never by composition. */
-private class PlacedAt {
+internal class PlacedAt {
     var coordinates: LayoutCoordinates? = null
 }
 

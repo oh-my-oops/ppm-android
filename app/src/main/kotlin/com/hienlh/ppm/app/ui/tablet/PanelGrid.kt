@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -77,11 +78,15 @@ fun PanelArea(model: AppModel) {
     // the pointer once the pointer returns from past a limit.
     val from = remember { FloatArray(1) }
     val dragStart = { from[0] = share }
-    val drag: (Float) -> Unit = { moved ->
+    val drag: (Float) -> Boolean = { moved ->
         if (extent > 0) {
             // Dragging toward the grid grows the dock: up for a bottom dock, toward the middle for a side one.
             val toward = if (position == "left") moved else -moved
-            share = (from[0] + toward / extent).coerceIn(DOCK_MIN, DOCK_MAX)
+            val wanted = from[0] + toward / extent
+            share = wanted.coerceIn(DOCK_MIN, DOCK_MAX)
+            share != wanted
+        } else {
+            false
         }
     }
     // A maximized dock's size is not the one to keep: restoring returns to the saved one.
@@ -92,24 +97,30 @@ fun PanelArea(model: AppModel) {
             DockPanel(model, state, if (bottom) Edge.Top else if (position == "left") Edge.Right else Edge.Left)
         }
     }
-    if (bottom) {
-        Column(Modifier.fillMaxSize().onSizeChanged { extent = it.height }) {
-            grid(Modifier.weight(if (visible) 1f - share else 1f).fillMaxWidth())
-            if (visible) {
-                SplitHandle(vertical = false, onDragStart = dragStart, onDrag = drag, onDragEnd = dragEnd)
-                dock(Modifier.weight(share).fillMaxWidth())
+    // The dock's line comes after the grid in the page, unless the dock is on the left.
+    val dockOrder = if (position == "left") -1 else Int.MAX_VALUE
+    val strips = remember { SplitStrips() }
+    val area = Modifier.fillMaxSize().splitStrips(strips, LocalHeldCursor.current)
+    CompositionLocalProvider(LocalSplitStrips provides strips) {
+        if (bottom) {
+            Column(area.onSizeChanged { extent = it.height }) {
+                grid(Modifier.weight(if (visible) 1f - share else 1f).fillMaxWidth())
+                if (visible) {
+                    SplitHandle(vertical = false, order = dockOrder, onDragStart = dragStart, onDrag = drag, onDragEnd = dragEnd)
+                    dock(Modifier.weight(share).fillMaxWidth())
+                }
             }
-        }
-    } else {
-        Row(Modifier.fillMaxSize().onSizeChanged { extent = it.width }) {
-            if (visible && position == "left") {
-                dock(Modifier.weight(share).fillMaxHeight())
-                SplitHandle(vertical = true, onDragStart = dragStart, onDrag = drag, onDragEnd = dragEnd)
-            }
-            grid(Modifier.weight(if (visible) 1f - share else 1f).fillMaxHeight())
-            if (visible && position == "right") {
-                SplitHandle(vertical = true, onDragStart = dragStart, onDrag = drag, onDragEnd = dragEnd)
-                dock(Modifier.weight(share).fillMaxHeight())
+        } else {
+            Row(area.onSizeChanged { extent = it.width }) {
+                if (visible && position == "left") {
+                    dock(Modifier.weight(share).fillMaxHeight())
+                    SplitHandle(vertical = true, order = dockOrder, onDragStart = dragStart, onDrag = drag, onDragEnd = dragEnd)
+                }
+                grid(Modifier.weight(if (visible) 1f - share else 1f).fillMaxHeight())
+                if (visible && position == "right") {
+                    SplitHandle(vertical = true, order = dockOrder, onDragStart = dragStart, onDrag = drag, onDragEnd = dragEnd)
+                    dock(Modifier.weight(share).fillMaxHeight())
+                }
             }
         }
     }
@@ -140,8 +151,10 @@ private fun PanelGrid(model: AppModel, state: WorkspaceState) {
                         val from = remember { FloatArray(1) }
                         SplitHandle(
                             vertical = true,
+                            // A row's lines, then the line under the row.
+                            order = 2 * r,
                             onDragStart = { from[0] = columns[r][c] },
-                            onDrag = { moved -> if (width > 0) columns[r].place(c, from[0] + moved / width) },
+                            onDrag = { moved -> width > 0 && columns[r].place(c, from[0] + moved / width) },
                         )
                     }
                 }
@@ -150,8 +163,9 @@ private fun PanelGrid(model: AppModel, state: WorkspaceState) {
                 val from = remember { FloatArray(1) }
                 SplitHandle(
                     vertical = false,
+                    order = 2 * r + 1,
                     onDragStart = { from[0] = rows[r] },
-                    onDrag = { moved -> if (height > 0) rows.place(r, from[0] + moved / height) },
+                    onDrag = { moved -> height > 0 && rows.place(r, from[0] + moved / height) },
                 )
             }
         }
@@ -160,12 +174,16 @@ private fun PanelGrid(model: AppModel, state: WorkspaceState) {
 
 private fun equalShares(n: Int): SnapshotStateList<Float> = mutableStateListOf<Float>().apply { repeat(n) { add(1f / n) } }
 
-/** Gives pane [index] [share] of the whole line, from its neighbour after it, neither under its minimum. */
-private fun SnapshotStateList<Float>.place(index: Int, share: Float) {
+/**
+ * Gives pane [index] [share] of the whole line, from its neighbour after it, neither under its
+ * minimum, and answers whether a minimum held it back.
+ */
+private fun SnapshotStateList<Float>.place(index: Int, share: Float): Boolean {
     val pair = this[index] + this[index + 1]
     val first = share.coerceIn(PANE_MIN, (pair - PANE_MIN).coerceAtLeast(PANE_MIN))
     this[index] = first
     this[index + 1] = pair - first
+    return first != share
 }
 
 /**
