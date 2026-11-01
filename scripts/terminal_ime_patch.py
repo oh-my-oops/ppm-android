@@ -5,8 +5,8 @@ Import by path (the main generator uses python -I):
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
     text = module.patch_terminal_ime(filename, text)
 
-Apply to Terminal.kt, ImeInputView.kt and KeyboardHandler.kt. Register all three as patch
-targets, and include this file as a Gradle task input. Unknown filenames pass through.
+Apply to Terminal.kt, ImeInputView.kt, KeyboardHandler.kt and TerminalDispatcher.kt. Register all
+four as patch targets, and include this file as a Gradle task input. Unknown filenames pass through.
 New Kotlin types live in ui/terminal-engine/src/main and are compiled normally, not generated.
 """
 
@@ -141,10 +141,21 @@ def keyboard(text):
     new = replace(old, marker, "    fun onCommittedText(text: String, applyModifiers: Boolean = true) {")
     new = replace(new, "        val modifiers = getModifierMask()", "        val modifiers = if (applyModifiers) getModifierMask() else 0")
     new = replace(new, "        modifierManager?.clearTransients()", "        if (applyModifiers) modifierManager?.clearTransients()")
-    return replace(text, old, new)
+    text = replace(text, old, new)
+    # Ctrl+character as xterm.js writes it (ControlKeys), not as libvterm does: for a key event here and
+    # for committed text in dispatchText.
+    return replace(
+        text,
+        "            dispatchCodePoint(codepoint) { cp -> terminalEmulator.dispatchCharacter(modifiers, cp) }",
+        "            dispatchCodePoint(codepoint) { cp -> terminalEmulator.dispatchCharacterLikeXterm(modifiers, cp) }",
+    )
+
+
+def dispatcher(text):
+    return replace(text, "            terminal.dispatchCharacter(modifiers, cp)\n", "            terminal.dispatchCharacterLikeXterm(modifiers, cp)\n")
 
 
 def patch_terminal_ime(filename, text):
     """Pure, fail-closed transformation; never reads/writes files or downloads anything."""
-    patch = {"Terminal.kt": terminal, "ImeInputView.kt": ime_input, "KeyboardHandler.kt": keyboard}.get(PurePosixPath(filename).name)
+    patch = {"Terminal.kt": terminal, "ImeInputView.kt": ime_input, "KeyboardHandler.kt": keyboard, "TerminalDispatcher.kt": dispatcher}.get(PurePosixPath(filename).name)
     return patch(text) if patch else text

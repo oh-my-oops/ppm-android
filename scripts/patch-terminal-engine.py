@@ -22,7 +22,7 @@ PINS = {
     "pom": "45d82483a6f78c6cd34411168ceee39c7041f5875469b43eee2d1f2b5d23cb88",
 }
 REPO = Path(__file__).resolve().parents[2]
-IME_TARGETS = {"Terminal.kt", "ImeInputView.kt", "KeyboardHandler.kt"}
+IME_TARGETS = {"Terminal.kt", "ImeInputView.kt", "KeyboardHandler.kt", "TerminalDispatcher.kt"}
 
 
 def load_ime_patch():

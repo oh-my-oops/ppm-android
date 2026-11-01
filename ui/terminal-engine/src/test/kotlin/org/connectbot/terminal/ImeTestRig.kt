@@ -16,8 +16,9 @@ internal const val DEL = "\u007f"
  * What libvterm writes to the PTY for the two calls [KeyboardHandler] makes, and a one-line shell to
  * read the bytes with. The real emulator's JNI cannot load on the JVM, so its answers are modelled
  * here from `vterm_keyboard_unichar` / `vterm_keyboard_key`: plain text is UTF-8, Ctrl+letter is the
- * control byte, Enter is CR and Backspace is DEL. `CommittedImeInstrumentation` asserts the same
- * literals against the real JNI on a device, so the two cannot drift apart unnoticed.
+ * control byte (and Ctrl on a character libvterm cannot fold is CSI u, see [character]), Enter is CR and
+ * Backspace is DEL. `CommittedImeInstrumentation` asserts the same literals against the real JNI on a
+ * device, so the two cannot drift apart unnoticed.
  */
 internal class FakePty {
     private val sent = ByteArrayOutputStream()
@@ -40,13 +41,31 @@ internal class FakePty {
 
     fun clear() = sent.reset()
 
+    /**
+     * `vterm_keyboard_unichar`, as its machine code in the shipped libjni_cb_term.so does it: Shift only
+     * matters for Space; with no modifier the character is its UTF-8; Ctrl+[ i j m and every character
+     * outside a-z except `\ ] ^ _` (and Space without Shift) is CSI u (`ESC [ code ; modifiers+1 u`)
+     * unless only Alt is held; the rest is the character with Ctrl folded into it (`and 0x1f`), after an
+     * ESC when Alt is held.
+     */
     fun character(modifiers: Int, codepoint: Int) {
-        when {
-            modifiers == 0 -> sent.write(String(Character.toChars(codepoint)).toByteArray(Charsets.UTF_8))
-            modifiers == CTRL && codepoint in 'a'.code..'z'.code -> sent.write(codepoint and 0x1f)
-            else -> error("modifiers $modifiers on U+${codepoint.toString(16)} is not modelled")
+        val mod = if (codepoint == ' '.code) modifiers else modifiers and SHIFT.inv()
+        if (mod == 0) return write(codepoint)
+        val csiU = when (codepoint) {
+            '['.code, 'i'.code, 'j'.code, 'm'.code -> true
+            '\\'.code, ']'.code, '^'.code, '_'.code -> false
+            ' '.code -> modifiers and SHIFT != 0
+            else -> codepoint !in 'a'.code..'z'.code
         }
+        if (csiU && mod and ALT.inv() != 0) {
+            sent.write("\u001b[$codepoint;${mod + 1}u".toByteArray(Charsets.UTF_8))
+            return
+        }
+        if (mod and ALT != 0) sent.write(0x1b)
+        write(if (mod and CTRL != 0) codepoint and 0x1f else codepoint)
     }
+
+    private fun write(codepoint: Int) = sent.write(String(Character.toChars(codepoint)).toByteArray(Charsets.UTF_8))
 
     fun key(modifiers: Int, key: Int) {
         check(modifiers == 0) { "modifiers $modifiers on key $key is not modelled" }
@@ -59,7 +78,11 @@ internal class FakePty {
         })
     }
 
-    companion object { const val CTRL = 4 }
+    companion object {
+        const val SHIFT = 1
+        const val ALT = 2
+        const val CTRL = 4
+    }
 }
 
 /** The app's sticky Ctrl, as `TerminalModifiers` in TerminalBody is. */
@@ -102,12 +125,23 @@ internal class ImeRig {
         doAnswer { pty.key(it.getArgument(0), it.getArgument(1)) }.`when`(it).dispatchKey(anyInt(), anyInt())
     }
     val keyboard = KeyboardHandler(emulator, modifiers, onInterceptKey = { keys += it.nativeKeyEvent; false }).also {
-        // A letter key is its own character: the machine's key maps are not what is under test.
+        // A US keyboard's keys, each its own character: the machine's key maps are not what is under test.
         it.unicodeCharLookup = { _, keyCode, meta ->
-            if (keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z) {
-                val letter = 'a' + (keyCode - KeyEvent.KEYCODE_A)
-                (if (meta and KeyEvent.META_SHIFT_ON != 0) letter.uppercaseChar() else letter).code
-            } else 0
+            val shifted = meta and KeyEvent.META_SHIFT_ON != 0
+            val capital = shifted || meta and KeyEvent.META_CAPS_LOCK_ON != 0
+            val symbol = SYMBOLS[keyCode]
+            when {
+                keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> {
+                    val letter = 'a' + (keyCode - KeyEvent.KEYCODE_A)
+                    (if (capital) letter.uppercaseChar() else letter).code
+                }
+                keyCode in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> {
+                    val digit = keyCode - KeyEvent.KEYCODE_0
+                    if (shifted) SHIFTED_DIGITS[digit].code else '0'.code + digit
+                }
+                symbol != null -> (if (shifted) symbol.second else symbol.first).code
+                else -> 0
+            }
         }
     }
     val view = ImeInputView(
@@ -141,4 +175,22 @@ internal class ImeRig {
         val event = KeyEvent(0, 0, KeyEvent.ACTION_DOWN, keyCode, 0, meta)
         return view.onKeyPreIme(keyCode, event)
     }
+
+    /** A key pressed with Ctrl held on a physical keyboard, which the view routes to the terminal's key path. */
+    fun ctrlKey(keyCode: Int, meta: Int = 0): Boolean =
+        view.handleRawKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, keyCode, 0, meta or KeyEvent.META_CTRL_ON))
 }
+
+/** A US keyboard's symbol keys, unshifted and shifted. */
+private val SYMBOLS = mapOf(
+    KeyEvent.KEYCODE_SPACE to (' ' to ' '),
+    KeyEvent.KEYCODE_MINUS to ('-' to '_'),
+    KeyEvent.KEYCODE_LEFT_BRACKET to ('[' to '{'),
+    KeyEvent.KEYCODE_RIGHT_BRACKET to (']' to '}'),
+    KeyEvent.KEYCODE_BACKSLASH to ('\\' to '|'),
+    KeyEvent.KEYCODE_SLASH to ('/' to '?'),
+    KeyEvent.KEYCODE_SEMICOLON to (';' to ':'),
+)
+
+/** What Shift makes of the digit keys 0 to 9. */
+private const val SHIFTED_DIGITS = ")!@#$%^&*("

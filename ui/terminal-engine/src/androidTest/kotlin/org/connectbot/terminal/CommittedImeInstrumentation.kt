@@ -347,6 +347,27 @@ class CommittedImeInstrumentation : Instrumentation() {
             check(drain() == "\u001bOA\u001bOB\u001bOC\u001bOD\u001b[1;5A") { "Toolbar arrows in application cursor mode: ${drain().toList()}" }
             passed += "PASS: toolbar keys through real libvterm: Tab, Esc, ^C, arrows in both cursor modes, Ctrl+arrow"
 
+            // Ctrl+character as xterm.js writes it (ControlKeys; CtrlTypingImeTest models these bytes), through the
+            // real handler and libvterm, which alone writes CSI u for [ i j m, capitals, digits and the slash.
+            main {
+                bytes.reset()
+                for (text in listOf("[", "i", "j", "m", "C", "@", "3", "8", "/", "\\", "]", "^", "_", " ", "1")) {
+                    modifiers.ctrl = true
+                    keyboard.onCommittedText(text)
+                }
+            }
+            check(drain() == "\u001b\t\n\r\u0003\u0000\u001b\u007f\u001f\u001c\u001d\u001e\u001f\u0000") { "Sticky Ctrl on text: ${drain().toList()}" }
+            main {
+                bytes.reset()
+                for ((code, meta) in listOf(
+                    KeyEvent.KEYCODE_LEFT_BRACKET to 0, KeyEvent.KEYCODE_I to 0, KeyEvent.KEYCODE_M to 0,
+                    KeyEvent.KEYCODE_C to KeyEvent.META_CAPS_LOCK_ON, KeyEvent.KEYCODE_6 to KeyEvent.META_SHIFT_ON,
+                    KeyEvent.KEYCODE_A to KeyEvent.META_SHIFT_ON,
+                )) view.handleRawKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, code, 0, meta or KeyEvent.META_CTRL_ON))
+            }
+            check(drain() == "\u001b\t\r\u0003\u001e") { "Physical Ctrl keys: ${drain().toList()}" }
+            passed += "PASS: Ctrl+character as xterm.js writes it through real libvterm: [ i j m, capitals, digits, / and ^, nothing for Ctrl+Shift+letter"
+
             main {
                 bytes.reset()
                 connection = create()
