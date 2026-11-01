@@ -29,8 +29,9 @@ internal fun interface FileDocumentReader {
  * Reads are serialized because ApiClient shares in-flight GETs: cancelling and immediately
  * restarting would otherwise join the old response again. Close cancels this owner's waiter.
  * A read that fails shows its error, except one the watcher or a reconnect asked for while there is
- * a file to keep (the web's `file:changed` handler ends in `.catch(() => {})`): that one keeps what
- * is on screen, says nothing and leaves the document stale for the next show. Only [refresh] is loud.
+ * a file to keep (the web's `file:changed` handler ends in `.catch(() => {})`): that one is quiet. It
+ * keeps what is on screen, sets no error and clears none when it starts, and leaves the document stale
+ * for the next show; only its success clears an error already shown. Only [refresh] is loud.
  */
 class FileDocumentController internal constructor(
     private val reader: FileDocumentReader,
@@ -132,7 +133,8 @@ class FileDocumentController internal constructor(
             return
         }
         val version = epoch
-        mutable.value = current.copy(loading = true, error = null)
+        val quiet = !manual && (current.content != null || current.raw != null || current.cannotDisplay)
+        mutable.value = current.copy(loading = true, error = if (quiet) current.error else null)
         val job = owner.launch(start = CoroutineStart.LAZY) {
             try {
                 if (!accepts(version)) return@launch
@@ -149,9 +151,8 @@ class FileDocumentController internal constructor(
             } catch (error: Exception) {
                 if (accepts(version)) {
                     // Stale stays set, so the next show reads again; nothing here retries by itself.
-                    val keep = !manual && (current.content != null || current.raw != null || current.cannotDisplay)
                     manual = false
-                    mutable.value = current.copy(loading = false, error = if (keep) null else error.message ?: "Failed to load file")
+                    mutable.value = current.copy(loading = false, error = if (quiet) current.error else error.message ?: "Failed to load file")
                 }
             } finally {
                 loading = null

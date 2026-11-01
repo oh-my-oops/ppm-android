@@ -279,7 +279,7 @@ class FileDocumentControllerTest {
         }
     }
 
-    @Test fun `once a refresh is answered the next watcher failure is quiet again`() = runTest {
+    @Test fun `once a refresh is answered the next watcher failure is quiet again, and leaves the line already shown as it was`() = runTest {
         val reader = Reader()
         FileDocumentController(reader, "app", "a.txt", this).use { doc ->
             doc.show(); runCurrent(); reader.answer("old"); runCurrent()
@@ -288,13 +288,37 @@ class FileDocumentControllerTest {
             assertEquals("offline", doc.state.value.error)
 
             doc.fileChanged("app", "a.txt"); runCurrent()
+            assertTrue(doc.state.value.loading)
+            assertEquals("the line went when a quiet read began", "offline", doc.state.value.error)
             reader.reads.last().answer.completeExceptionally(IllegalStateException("offline again")); runCurrent()
 
             assertEquals("old", doc.state.value.content)
-            assertNull(doc.state.value.error)
+            assertEquals("a quiet failure changed the line", "offline", doc.state.value.error)
+            assertTrue(doc.state.value.stale)
             doc.refresh(); runCurrent()
+            assertNull("a Refresh clears the line as it starts", doc.state.value.error)
             reader.reads.last().answer.completeExceptionally(IllegalStateException("still offline")); runCurrent()
             assertEquals("still offline", doc.state.value.error)
+        }
+    }
+
+    @Test fun `a quiet read that succeeds clears the line a failed Refresh left and shows the new content`() = runTest {
+        for (trigger in listOf<(FileDocumentController) -> Unit>({ it.fileChanged("app", "a.txt") }, { it.reconnected() })) {
+            val reader = Reader()
+            FileDocumentController(reader, "app", "a.txt", this).use { doc ->
+                doc.show(); runCurrent(); reader.answer("old"); runCurrent()
+                doc.refresh(); runCurrent()
+                reader.reads.last().answer.completeExceptionally(IllegalStateException("offline")); runCurrent()
+                assertEquals("offline", doc.state.value.error)
+
+                trigger(doc); runCurrent()
+                assertEquals("offline", doc.state.value.error)
+                reader.answer("the file is back"); runCurrent()
+
+                assertNull(doc.state.value.error)
+                assertEquals("the file is back", doc.state.value.content)
+                assertFalse(doc.state.value.stale)
+            }
         }
     }
 
