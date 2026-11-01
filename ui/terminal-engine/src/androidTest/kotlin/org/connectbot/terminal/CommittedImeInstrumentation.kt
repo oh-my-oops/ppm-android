@@ -531,50 +531,59 @@ class CommittedImeInstrumentation : Instrumentation() {
      * focus mode is reported, not asserted: the web answers both on a replay, and its symbols show no code that would.
      */
     private fun replayChecks() {
+        // What a fresh emulator's libvterm answers live: the cursor position, DA2, the pixel and cell size (the
+        // engine's own words, from its image store) and DECRQM ?12, which reports the cursor blink and is either
+        // state however the library starts, so both answers count.
         val seen = listOf(
-            "\u001b[6n" to "\u001b[1;1R",
-            "\u001b[>c" to "\u001b[>0;100;0c",
-            "\u001b[14t" to "\u001b[4;384;640t",
-            "\u001b[16t" to "\u001b[6;16;8t",
-            "\u001b[?12\$p" to "\u001b[?12;2\$y",
+            "\u001b[6n" to listOf("\u001b[1;1R"),
+            "\u001b[>c" to listOf("\u001b[>0;100;0c"),
+            "\u001b[14t" to listOf("\u001b[4;384;640t"),
+            "\u001b[16t" to listOf("\u001b[6;16;8t"),
+            "\u001b[?12\$p" to listOf("\u001b[?12;1\$y", "\u001b[?12;2\$y"),
         )
-        for ((query, answer) in seen) {
-            val live = through(query, replay = false).first
-            check(live == answer) { "Live ${show(query)} was answered ${show(live)}, expected ${show(answer)}" }
-            val replayed = through(query, replay = true).first
-            check(replayed.isEmpty()) { "A replayed ${show(query)} was answered: ${show(replayed)}" }
-        }
-        passed += "PASS: real libvterm answers cursor position, DA2, pixel size, cell size and DECRQM live, and none of them in a replay"
-
         val unverified = listOf(
             "\u001b[c", "\u001b[5n", "\u001b[?6n", "\u001b[18t", "\u001b[>q", "\u001b[?u", "\u001b[?1004h", "\u001b[?1004l",
             "\u001b]10;?\u0007", "\u001b]11;?\u0007", "\u001b]10;?\u001b\\", "\u001b]11;?\u001b\\", "\u001b]4;1;?\u0007",
             "\u001bP\$qm\u001b\\", "\u001b[4\$p",
         )
-        for (query in unverified) {
+        val queries = seen.map { it.first } + unverified
+        // The queries as a vim session leaves them, one replay.
+        val session = queries.joinToString("text ", prefix = "prompt$ ")
+        val write = "\u001b]52;c;aGVsbG8=\u0007"
+
+        // The replay checks come first and wait for nothing else: they are the point, and a live answer that is not
+        // what was expected must not keep them from running.
+        for (query in queries) {
             val replayed = through(query, replay = true).first
             check(replayed.isEmpty()) { "A replayed ${show(query)} was answered: ${show(replayed)}" }
-            notes += "INFO: live ${show(query)} -> ${show(through(query, replay = false).first)}"
         }
-
-        // The queries as a vim session leaves them, one replay.
-        val session = (seen.map { it.first } + unverified).joinToString("text ", prefix = "prompt$ ")
-        val replayed = through(session, replay = true)
-        check(replayed.first.isEmpty()) { "A replayed session was answered: ${show(replayed.first)}" }
-        val live = through(session, replay = false).first
-        var at = 0
-        for ((query, answer) in seen) {
-            val found = live.indexOf(answer, at)
-            check(found >= 0) { "Live session lost the answer to ${show(query)}: ${show(live)}" }
-            at = found + answer.length
-        }
-        passed += "PASS: the whole session of queries, replayed: 0 bytes to the PTY; the same live: ${live.length} bytes"
-
-        val write = "\u001b]52;c;aGVsbG8=\u0007"
-        val liveCopy = through(write, replay = false).second
+        passed += "PASS: each of ${queries.size} queries replayed through real libvterm, one at a time (cursor position, DA1/DA2, DSR, pixel and cell size, DECRQM, DECRQSS, OSC 4/10/11, the focus mode): 0 bytes to the PTY"
+        val replayedSession = through(session, replay = true).first
+        check(replayedSession.isEmpty()) { "A replayed session was answered: ${show(replayedSession)}" }
+        passed += "PASS: the whole session of queries replayed in one go: 0 bytes to the PTY"
         val replayedCopy = through(write, replay = true).second
         check(replayedCopy.isEmpty()) { "A replayed OSC 52 wrote the clipboard: $replayedCopy" }
-        notes += "INFO: live OSC 52 wrote the clipboard: $liveCopy" + if (liveCopy.isEmpty()) " (the replay check above proves nothing for it)" else ""
         passed += "PASS: a replayed OSC 52 clipboard write is not performed"
+
+        // Live, last: what shows the checks above are not empty because nothing is ever answered. What the
+        // library says to what it is not seen to answer is only reported.
+        val mismatches = mutableListOf<String>()
+        val answers = seen.associate { (query, accepted) ->
+            val answer = through(query, replay = false).first
+            if (answer !in accepted) mismatches += "live ${show(query)} was answered ${show(answer)}, expected one of ${accepted.map { show(it) }}"
+            query to answer
+        }
+        for (query in unverified) notes += "INFO: live ${show(query)} -> ${show(through(query, replay = false).first)}"
+        val liveCopy = through(write, replay = false).second
+        notes += "INFO: live OSC 52 wrote the clipboard: $liveCopy" + if (liveCopy.isEmpty()) " (the replay check above proves nothing for it)" else ""
+        val liveSession = through(session, replay = false).first
+        notes += "INFO: the whole session live: ${liveSession.length} bytes"
+        var at = 0
+        for ((query, answer) in answers) {
+            val found = if (answer.isEmpty()) -1 else liveSession.indexOf(answer, at)
+            if (found < 0) mismatches += "the live session lost the answer to ${show(query)}: ${show(liveSession)}" else at = found + answer.length
+        }
+        check(mismatches.isEmpty()) { mismatches.joinToString("\n") }
+        passed += "PASS: the same queries live are answered, in order: cursor position, DA2, pixel size, cell size and DECRQM"
     }
 }
