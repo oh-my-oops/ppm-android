@@ -118,6 +118,8 @@ class TerminalSocketTest {
             onOutput = { delivery += it.toString(Charsets.UTF_8) }, onReset = { delivery += "RESET" },
         )
         controller.use {
+            // Output is written once the view has a size, which the owner of a laid-out emulator has.
+            controller.resize(80, 24)
             controller.start()
             peer.sockets.next()
             waitFor { delivery.isNotEmpty() }

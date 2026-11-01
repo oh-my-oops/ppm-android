@@ -55,6 +55,13 @@ internal class TerminalFixture(
     onOutput: ((ByteArray) -> Unit)? = null,
     /** An owner that tells a replay from live output: it lands in [replays] and in [delivery] as `REPLAY:<text>`. Else it is plain output. */
     separateReplay: Boolean = false,
+    /**
+     * An owner whose view was laid out before it started the controller, so a size is known from the start and output is written
+     * as it arrives. Off, it has reported none, as in the app, where the layout comes after the composition that starts it.
+     */
+    measured: Boolean = true,
+    /** A server that answers at once: it is handed each socket the moment the controller makes it, before anything else can happen. */
+    server: ((TestTerminalSocket) -> Unit)? = null,
 ) : AutoCloseable {
     val urls = mutableListOf<String>()
     val sockets = mutableListOf<TestTerminalSocket>()
@@ -75,10 +82,14 @@ internal class TerminalFixture(
         clock = { test.testScheduler.currentTime },
         connectSocket = { url ->
             urls += url
-            TestTerminalSocket().also { sockets += it }
+            TestTerminalSocket().also { sockets += it; server?.invoke(it) }
         },
         onReplay = if (separateReplay) { bytes -> replays += bytes; delivery += "REPLAY:" + bytes.toString(Charsets.UTF_8) } else null,
     )
+    init {
+        if (measured) controller.resize(80, 24)
+    }
+
     val socket get() = sockets.last()
     val state get() = controller.state.value
     fun open() {

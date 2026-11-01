@@ -81,6 +81,9 @@ class NativeTerminal(
         return TerminalEmulatorFactory.create(
             initialRows = rows, initialCols = columns,
             onKeyboardInput = { if (!closed && ownGeneration == generation) sendBytes(it) },
+            // The first report, made when the view is laid out, is what lets the controller write into this emulator: the server
+            // replays the shell's buffer at once and an emulator wraps what it is written at the width it has then, so the
+            // controller holds the output until it has the real one.
             onResize = { if (!closed && ownGeneration == generation) controller.resize(it.columns, it.rows) },
             onClipboardCopy = { if (!closed && ownGeneration == generation) copyToClipboard(it) },
             // The engine's own scan underlined every URL and opened one on any tap. A link is found where the web finds one, for a mouse.

@@ -205,7 +205,7 @@ class TerminalReplayTest {
     @Test
     fun `a size below 20 by 2 is never sent, before or after a shell is picked up again`() = runTest {
         val disk = TerminalValues().apply { put("server-a:ppm:terminal-session:tab-1", "s1") }
-        TerminalFixture(this, disk).use { f ->
+        TerminalFixture(this, disk, measured = false).use { f ->
             f.controller.setVisible(true)
             // A terminal laid out with no room (a hidden dock, a keyboard mid-animation) is measured at nothing.
             f.controller.resize(1, 1)

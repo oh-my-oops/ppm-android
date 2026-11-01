@@ -37,6 +37,18 @@ import kotlinx.serialization.json.JsonNull
  * queries inside it: a program that asked for the cursor position or the device attributes was
  * answered when it asked, and an answer now lands at whatever is running, a prompt typically, as text
  * that Enter then runs.
+ *
+ * What the shell prints before the owner has reported a usable size through [resize] is held back, in
+ * order and each piece as the replay or the live output it is, and written the moment the first size
+ * arrives. The socket itself opens at [start], so a shell stays attached whether or not its view is ever
+ * laid out. But the server replays its buffer as soon as a socket attaches, the shell made it for the size
+ * it was last given, and an emulator wraps whatever it is written at the width it has *then*: one that has
+ * not been laid out has its default, so a typed line that took three rows came back cut, a prompt's redraws
+ * landed on the wrong rows, and nothing reflowed once the real width was known. The web fits its terminal
+ * before it connects and sends its size first thing after the socket opens; so does this, and the owner's
+ * emulator is at that size, and still empty, when it reports it. At most [MAX_HELD_BYTES] are held, the
+ * newest, as the server's own buffer is. A reconnect or a restart drops them: the server replays the shell
+ * again, and a restart is another shell.
  */
 class TerminalController internal constructor(
     private val api: ApiClient,
@@ -101,6 +113,13 @@ class TerminalController internal constructor(
     private var lastActivity = 0L
     private var size: Pair<Int, Int>? = null
     private var sentSize: Pair<Int, Int>? = null
+
+    /** What arrived before [size] was first known, oldest first; see the class comment. */
+    private val held = ArrayDeque<Held>()
+
+    /** What [held] adds up to, for the cap. A test reads it to see that nothing is kept once the output is written or dropped. */
+    internal var heldBytes = 0
+        private set
     private val active get() = started && !closed && controllerScope.isActive
 
     /** Idempotent. Construction alone never opens a socket. */
@@ -132,13 +151,23 @@ class TerminalController internal constructor(
         if (visible) scheduleResize()
     }
 
-    /** Retain the last usable size; send only after 100 ms of quiet and while visible. */
+    /**
+     * Retain the last usable size; send only after 100 ms of quiet and while visible. The first usable one is not waited
+     * out: the owner's emulator is already that size and empty, so it is sent at once (or as the socket opens) and what the
+     * shell printed meanwhile is written into the emulator now.
+     */
     fun resize(cols: Int, rows: Int) {
         if (closed) return
         resizeJob?.cancel()
         if (cols < 20 || rows < 2) return
+        val first = size == null
         size = cols to rows
-        scheduleResize()
+        if (first) {
+            sendSize()
+            release()
+        } else {
+            scheduleResize()
+        }
     }
 
     /** Raw keystrokes. Returns false when unavailable; input is never queued for another shell. */
@@ -164,6 +193,7 @@ class TerminalController internal constructor(
         persistSession(null)
         failures = 0
         mutableState.value = TerminalState()
+        discardHeld()
         connect()
     }
 
@@ -211,7 +241,11 @@ class TerminalController internal constructor(
     }
 
     private fun opened(source: TerminalConnection) {
-        if (hasConnected) onReset()
+        if (hasConnected) {
+            // The server replays the whole shell again, so whatever was held for the last connection is in it.
+            discardHeld()
+            onReset()
+        }
         // An owner can close/restart from its reset callback.
         if (!active || source !== socket) return
         hasConnected = true
@@ -222,7 +256,8 @@ class TerminalController internal constructor(
             delay(3_000)
             markReady()
         }
-        scheduleResize()
+        // As the web's onopen does: the shell reads its size from here on, and there is no burst of sizes to wait out.
+        sendSize()
     }
 
     private fun frame(text: String, bytes: ByteArray) {
@@ -249,7 +284,7 @@ class TerminalController internal constructor(
                     cancelReadiness()
                     val message = json["message"].string ?: "Terminal error"
                     mutableState.value = state.value.copy(error = message, shellReady = false)
-                    onOutput("\r\n\u001b[31mError: $message\u001b[0m\r\n".toByteArray(Charsets.UTF_8))
+                    deliver("\r\n\u001b[31mError: $message\u001b[0m\r\n".toByteArray(Charsets.UTF_8), replay = false)
                 }
                 "exited" -> {
                     replayPending = false
@@ -271,7 +306,50 @@ class TerminalController internal constructor(
         // queries go unanswered that once. The mistake the other way, a replay answered, is what this exists to stop.
         val replay = replayPending
         replayPending = false
+        deliver(bytes, replay)
+    }
+
+    /** To the owner's emulator, or held until the owner has a size to lay it out at. */
+    private fun deliver(bytes: ByteArray, replay: Boolean) {
+        if (size != null) write(bytes, replay) else hold(bytes, replay)
+    }
+
+    private fun write(bytes: ByteArray, replay: Boolean) {
         if (replay && onReplay != null) onReplay.invoke(bytes) else onOutput(bytes)
+    }
+
+    private fun hold(bytes: ByteArray, replay: Boolean) {
+        held.addLast(Held(bytes, replay))
+        heldBytes += bytes.size
+        // Keep the newest [MAX_HELD_BYTES]: whole pieces off the front, then the front of the oldest left, never inside a character.
+        while (heldBytes > MAX_HELD_BYTES) {
+            val oldest = held.first()
+            val excess = heldBytes - MAX_HELD_BYTES
+            if (oldest.size <= excess) {
+                held.removeFirst()
+                heldBytes -= oldest.size
+            } else {
+                var cut = oldest.from + excess
+                while (cut < oldest.bytes.size && (oldest.bytes[cut].toInt() and 0xC0) == 0x80) cut++
+                heldBytes -= cut - oldest.from
+                oldest.from = cut
+            }
+        }
+    }
+
+    /** The first size is known: what was held goes to the emulator it was waiting for, in the order it arrived. */
+    private fun release() {
+        val pieces = held.toList()
+        discardHeld()
+        for (piece in pieces) {
+            if (closed) return
+            if (piece.size > 0) write(if (piece.from == 0) piece.bytes else piece.bytes.copyOfRange(piece.from, piece.bytes.size), piece.replay)
+        }
+    }
+
+    private fun discardHeld() {
+        held.clear()
+        heldBytes = 0
     }
 
     private fun markReady() {
@@ -292,9 +370,13 @@ class TerminalController internal constructor(
         resizeJob?.cancel()
         resizeJob = controllerScope.launch {
             delay(100)
-            val dimensions = size ?: return@launch
-            if (visible && send("\u0001RESIZE:${dimensions.first},${dimensions.second}")) sentSize = dimensions
+            sendSize()
         }
+    }
+
+    private fun sendSize() {
+        val dimensions = size ?: return
+        if (visible && send("\u0001RESIZE:${dimensions.first},${dimensions.second}")) sentSize = dimensions
     }
 
     private fun probe(foreground: Boolean) {
@@ -356,4 +438,13 @@ class TerminalController internal constructor(
             // A storage failure must not discard the live session or interrupt output.
         }
     }
+}
+
+/** The most [TerminalController] holds for an owner that has reported no size: what the server keeps of a shell's output (`MAX_BUFFER_SIZE`, 1 MB). */
+internal const val MAX_HELD_BYTES = 1024 * 1024
+
+/** One frame held back. [from] moves up when the front of the oldest piece is cut to keep within [MAX_HELD_BYTES]. */
+private class Held(val bytes: ByteArray, val replay: Boolean) {
+    var from = 0
+    val size get() = bytes.size - from
 }
