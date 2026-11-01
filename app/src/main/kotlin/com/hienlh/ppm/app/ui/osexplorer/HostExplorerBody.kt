@@ -5,7 +5,6 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -13,16 +12,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.BottomSheet
-import com.hienlh.ppm.app.ui.files.ExplorerTreeAction
-import com.hienlh.ppm.app.ui.files.ExplorerTreeMenu
 import com.hienlh.ppm.design.*
 import com.hienlh.ppm.protocol.HostFileEntry
 import com.hienlh.ppm.protocol.get
@@ -43,12 +38,14 @@ fun HostExplorerWindow(model: AppModel, window: WindowRuntimeState) {
 
 @Composable
 fun HostExplorerSheet(model: AppModel, path: String) {
-    BottomSheet(onDismiss = model::closeExplorerSheet, modifier = Modifier.fillMaxHeight(), radius = 0.dp) {
+    // The web's class is `p-0`: the toolbar sits on the navigation bar, or on the keyboard, with no 0.5rem under it.
+    BottomSheet(onDismiss = model::closeExplorerSheet, modifier = Modifier.fillMaxHeight(), radius = 0.dp,
+        bottomPadding = WindowInsets.ime.union(WindowInsets.navigationBars)) {
         HostExplorerBody(model, "phone-explorer", path)
     }
 }
 
-private data class HostMenu(val entries: List<HostFileEntry>, val at: Offset, val preferences: Boolean = false, val directory: String? = null)
+private data class HostMenu(val entries: List<HostFileEntry>, val at: Offset, val directory: String? = null)
 
 @Composable
 private fun HostExplorerBody(model: AppModel, id: String, path: String, visible: Boolean = true) {
@@ -81,6 +78,8 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
     fun copyText(value: String) { systemClipboard.setPrimaryClip(android.content.ClipData.newPlainText("File path", value)) }
     val entries = remember(state.directory, state.filter, preferences) { session.visibleEntries() }
     var selectMode by remember { mutableStateOf(false) }
+    // Going to another folder clears the selection, and Select mode follows it, or the bar is left on Cut, Copy and Trash with nothing to act on.
+    LaunchedEffect(state.path) { selectMode = false }
     var menu by remember { mutableStateOf<HostMenu?>(null) }
     var menuAt by remember { mutableStateOf(Offset.Zero) }
     val focus = remember { FocusRequester() }
@@ -91,6 +90,7 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
         else if (FileDocumentClassifier.canOpenInPpm(entry.name)) model.openHostFile(entry.path)
     }
     fun selected(): List<HostFileEntry> = entries.filter { it.path in session.state.value.selection }
+    val menuActions = HostExplorerMenuActions(model, session, commands, uploadFiles, downloads, ::copyText, ::open)
     fun copy(cut: Boolean) {
         val paths = selected().map { it.path }
         if (paths.isNotEmpty()) model.fileMutations?.setClipboard(FileClipboard(paths, if (cut) FileClipboardOperation.CUT else FileClipboardOperation.COPY))
@@ -99,15 +99,11 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
         val showPlaces = !mobile && maxWidth >= 640.dp
         Column(Modifier.fillMaxSize()) {
             if (mobile) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    BasicText(state.directory?.breadcrumbs?.lastOrNull()?.name ?: state.path, Modifier.weight(1f),
-                        style = ppmText(15f, FontWeight.SemiBold).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    HostExplorerButton(ProductIcon.X, "Close file explorer", onClick = model::closeExplorerSheet)
-                }
-                HostExplorerPlaces(session, host.host, windows, mobile = true, dropModifier = dropModifier)
+                HostPhoneTopBar(hostFolderName(state.path, state.directory?.breadcrumbs.orEmpty()), model::closeExplorerSheet)
+                HostPhonePlaces(session, host.host, windows, dropModifier)
             } else HostExplorerToolbar(session, state, preferences) { menu = HostMenu(emptyList(), menuAt) }
             Row(Modifier.weight(1f)) {
-                if (showPlaces) HostExplorerPlaces(session, host.host, windows, mobile = false, dropModifier = dropModifier)
+                if (showPlaces) HostExplorerPlaces(session, host.host, windows, dropModifier)
                 Column(Modifier.weight(1f).fillMaxHeight()) {
                     state.error?.let { failure ->
                         Column(Modifier.fillMaxWidth().padding(12.dp)) {
@@ -170,55 +166,39 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
             }
             uploadQueue?.let { HostUploadProgress(it) }
             downloads?.let { HostDownloadProgress(it) }
-            val count = entries.count { it.path in state.selection }
-            BasicText(buildString {
-                append("${entries.size}${if (state.directory?.truncated == true) "+" else ""} item${if (entries.size == 1) "" else "s"}")
-                if (count > 0) { append(" · $count selected"); val bytes = hostSelectionSize(entries.filter { it.path in state.selection }); if (bytes > 0) append(" · ${hostDisplaySize(bytes)}") }
-            }, Modifier.fillMaxWidth().background(tokens.panel2.color).padding(horizontal = 8.dp, vertical = 4.dp),
-                style = ppmText(11f).copy(color = tokens.text3.color))
-            if (mobile) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                HostExplorerButton(if (selectMode) ProductIcon.X else ProductIcon.ArrowLeft, if (selectMode) "Cancel selection" else "Back",
-                    enabled = selectMode || state.canBack) { if (selectMode) selectMode = false else session.back() }
-                if (selectMode) {
-                    HostExplorerButton(ProductIcon.Scissors, "Cut", enabled = count > 0) { copy(true) }
-                    HostExplorerButton(ProductIcon.Copy, "Copy", enabled = count > 0) { copy(false) }
-                    HostExplorerButton(ProductIcon.Trash2, "Trash", enabled = count > 0) { commands?.trash(selected()) }
-                    HostExplorerButton(ProductIcon.MoreHorizontal, "Selection actions", enabled = count > 0) { menu = HostMenu(selected(), menuAt) }
-                } else {
-                    HostExplorerButton(ProductIcon.Plus, "New") { menu = HostMenu(emptyList(), menuAt) }
-                    HostExplorerButton(ProductIcon.ClipboardPaste, "Paste", enabled = clipboard != null) { commands?.paste() }
-                    HostExplorerButton(ProductIcon.Check, "Select") { selectMode = true }
-                    HostExplorerButton(ProductIcon.MoreHorizontal, "More") { menu = HostMenu(emptyList(), menuAt, preferences = true) }
-                }
+            if (mobile) HostPhoneToolbar(
+                state, entries, preferences, selectMode,
+                hasClipboard = clipboard?.paths?.isNotEmpty() == true,
+                canUpload = uploadQueue != null,
+                onSelectMode = { selectMode = it },
+                onBack = { session.back() },
+                onPreferences = { session.preferences.update(it) },
+                onCommand = { command, targets -> menuActions.run(command, targets, state.currentDirectory) },
+            ) else {
+                // The web draws no status bar on a phone: the toolbar is the last thing under the list.
+                val count = entries.count { it.path in state.selection }
+                BasicText(buildString {
+                    append("${entries.size}${if (state.directory?.truncated == true) "+" else ""} item${if (entries.size == 1) "" else "s"}")
+                    if (count > 0) { append(" · $count selected"); val bytes = hostSelectionSize(entries.filter { it.path in state.selection }); if (bytes > 0) append(" · ${hostDisplaySize(bytes)}") }
+                }, Modifier.fillMaxWidth().background(tokens.panel2.color).padding(horizontal = 8.dp, vertical = 4.dp),
+                    style = ppmText(11f).copy(color = tokens.text3.color))
             }
         }
     }
     commands?.Dialogs()
     menu?.let { request ->
-        if (request.preferences) {
-            // The phone's "More", until its own sheet replaces it.
-            val actions = buildList {
-                for (mode in ExplorerView.entries) add(ExplorerTreeAction("${mode.name.lowercase().replaceFirstChar(Char::uppercaseChar)} view") { session.preferences.update(preferences.copy(view = mode)) })
-                for (sort in ExplorerSort.entries) add(ExplorerTreeAction("Sort by ${sort.name.lowercase()}") { session.preferences.update(preferences.copy(sort = sort)) })
-                add(ExplorerTreeAction(if (preferences.descending) "Ascending" else "Descending") { session.preferences.update(preferences.copy(descending = !preferences.descending)) })
-                add(ExplorerTreeAction(if (preferences.showHidden) "Hide hidden files" else "Show hidden files") { session.preferences.update(preferences.copy(showHidden = !preferences.showHidden)) })
-            }
-            ExplorerTreeMenu("File explorer", request.at, actions) { menu = null }
-        } else {
-            val directory = request.directory ?: state.currentDirectory
-            val items = hostEntryMenu(request.entries, HostMenuContext(
-                phone = mobile,
-                hasClipboard = clipboard?.paths?.isNotEmpty() == true,
-                pinned = session.preferences.pins.value.map { it.path }.toSet(),
-                sort = preferences.sort,
-                descending = preferences.descending,
-                canUpload = uploadQueue != null,
-            ))
-            val actions = HostExplorerMenuActions(model, session, commands, uploadFiles, downloads, ::copyText, ::open)
-            HostExplorerMenu(items, request.at,
-                onCommand = { actions.run(it, request.entries, directory) },
-                onSort = { key, descending -> session.preferences.update(preferences.copy(sort = key, descending = descending)) },
-                onDismiss = { menu = null })
-        }
+        val directory = request.directory ?: state.currentDirectory
+        val items = hostEntryMenu(request.entries, HostMenuContext(
+            phone = mobile,
+            hasClipboard = clipboard?.paths?.isNotEmpty() == true,
+            pinned = session.preferences.pins.value.map { it.path }.toSet(),
+            sort = preferences.sort,
+            descending = preferences.descending,
+            canUpload = uploadQueue != null,
+        ))
+        HostExplorerMenu(items, request.at,
+            onCommand = { menuActions.run(it, request.entries, directory) },
+            onSort = { key, descending -> session.preferences.update(preferences.copy(sort = key, descending = descending)) },
+            onDismiss = { menu = null })
     }
 }

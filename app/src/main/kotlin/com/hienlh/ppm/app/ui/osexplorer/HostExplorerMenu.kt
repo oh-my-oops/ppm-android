@@ -41,6 +41,8 @@ import com.hienlh.ppm.app.ui.MenuSeparator
 import com.hienlh.ppm.app.ui.SubMenuItem
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.PpmIcon
+import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
@@ -127,11 +129,28 @@ private fun HostMenuSheet(
     onSort: (ExplorerSort, Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    // A `vh` is Chrome's large viewport: everything under the status bar.
+    HostSheet(onDismiss, inset = 8.dp, maxHeight = 0.6f) { HostSheetRows(items, onCommand, onSort, onDismiss) }
+}
+
+/**
+ * A `vh` as Chrome measures it on a phone: the large viewport, everything under the status bar.
+ */
+@Composable
+internal fun hostSheetVh(): Dp {
     val density = LocalDensity.current
-    val vh = with(density) { (LocalWindowInfo.current.containerSize.height - WindowInsets.statusBars.getTop(density)).toDp() }
-    BottomSheet(onDismiss, inset = 8.dp, bottomPadding = WindowInsets.navigationBars.add(WindowInsets(bottom = 8.dp))) {
-        Column(Modifier.heightIn(max = vh * 0.6f).cssScrollY()) { HostSheetRows(items, onCommand, onSort, onDismiss) }
+    return with(density) { (LocalWindowInfo.current.containerSize.height - WindowInsets.statusBars.getTop(density)).toDp() }
+}
+
+/**
+ * The explorer's `BottomSheet` whose class gives it `p-[inset]` (`p-2` for a menu, `p-1` for the places): that
+ * padding on its sides and under it, the navigation bar beneath, and [content] scrolling once it is taller than
+ * [maxHeight] of the viewport (the `max-h-[60vh] overflow-y-auto` wrapper a sheet puts round its rows).
+ */
+@Composable
+internal fun HostSheet(onDismiss: () -> Unit, inset: Dp, maxHeight: Float, content: @Composable ColumnScope.() -> Unit) {
+    val vh = hostSheetVh()
+    BottomSheet(onDismiss, inset = inset, bottomPadding = WindowInsets.navigationBars.add(WindowInsets(bottom = inset))) {
+        Column(Modifier.heightIn(max = vh * maxHeight).cssScrollY(), content = content)
     }
 }
 
@@ -169,17 +188,22 @@ internal fun ColumnScope.HostSheetRows(
     }
 }
 
-/** `BottomSheetItem`: `rounded-lg px-3 py-3 text-sm`, lit while pressed; half faded and dead when disabled. */
+/**
+ * `BottomSheetItem`: `rounded-lg px-3 py-3 text-sm`, lit while pressed; half faded and dead when disabled. A
+ * destructive one is red, its [icon] (`size-4`, the colour of the text) too.
+ */
 @Composable
-private fun SheetItem(
+internal fun SheetItem(
     label: String,
-    enabled: Boolean,
-    destructive: Boolean,
+    enabled: Boolean = true,
+    destructive: Boolean = false,
     modifier: Modifier = Modifier,
+    icon: ProductIcon? = null,
     leading: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
+    val color = (if (destructive) tokens.error else tokens.text).color
     val shape = RoundedCornerShape(12.dp)
     Row(
         modifier
@@ -192,7 +216,8 @@ private fun SheetItem(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         leading?.invoke()
-        BasicText(label, style = ppmText(14f, lineHeight = 20f).copy(color = (if (destructive) tokens.error else tokens.text).color))
+        if (icon != null) PpmIcon(icon, 16.dp, color)
+        BasicText(label, style = ppmText(14f, lineHeight = 20f).copy(color = color))
     }
 }
 
@@ -204,7 +229,7 @@ private fun SheetRadio(label: String, selected: Boolean, onClick: () -> Unit) {
 
 /** `px-3 py-2 text-xs font-medium text-muted-foreground`. */
 @Composable
-private fun SheetSubLabel(text: String) {
+internal fun SheetSubLabel(text: String) {
     BasicText(
         text,
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -214,7 +239,7 @@ private fun SheetSubLabel(text: String) {
 
 /** `-mx-1 my-1 h-px bg-border`, which the sheet's `overflow-x-hidden` cuts to its own width. */
 @Composable
-private fun SheetSeparator() {
+internal fun SheetSeparator() {
     Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(LocalPpmTokens.current.border.color))
 }
 
