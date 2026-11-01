@@ -10,8 +10,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.*
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -96,7 +94,6 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
     // Going to another folder clears the selection, and Select mode follows it, or the bar is left on Cut, Copy and Trash with nothing to act on.
     LaunchedEffect(state.path) { selectMode = false }
     var menu by remember { mutableStateOf<HostMenu?>(null) }
-    var menuAt by remember { mutableStateOf(Offset.Zero) }
     val focus = remember { FocusRequester() }
     var typed by remember { mutableStateOf("") }
     var typedAt by remember { mutableLongStateOf(0) }
@@ -116,7 +113,9 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
             if (mobile) {
                 HostPhoneTopBar(hostFolderName(state.path, state.directory?.breadcrumbs.orEmpty()), model::closeExplorerSheet)
                 HostPhonePlaces(session, host.host, windows, dropModifier)
-            } else HostExplorerToolbar(session, state, preferences) { menu = HostMenu(emptyList(), menuAt) }
+            } else HostExplorerToolbar(session, state, preferences, canUpload = uploadQueue != null) { folder ->
+                menuActions.run(if (folder) HostMenuCommand.UPLOAD_FOLDER else HostMenuCommand.UPLOAD_FILES, emptyList(), state.currentDirectory)
+            }
             Row(Modifier.weight(1f)) {
                 if (showPlaces) HostExplorerPlaces(session, host.host, windows, dropModifier)
                 Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -130,7 +129,7 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
                     }
                     if (state.loading && state.directory == null) BasicText("Loading…", Modifier.padding(12.dp), style = ppmText(12f).copy(color = tokens.text3.color))
                     commands?.edit?.takeIf { it.entry == null }?.let { HostInlineName(commands, it) }
-                    Box(Modifier.weight(1f).fillMaxWidth().then(dropModifier(state.currentDirectory)).onGloballyPositioned { menuAt = it.positionInWindow() + Offset(20f, 20f) }
+                    Box(Modifier.weight(1f).fillMaxWidth().then(dropModifier(state.currentDirectory))
                         .focusRequester(focus).onKeyEvent { event ->
                             if (event.type != KeyEventType.KeyDown || com.hienlh.ppm.app.TextInputFocus.focused) return@onKeyEvent false
                             val ctrl = event.isCtrlPressed || event.isMetaPressed

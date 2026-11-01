@@ -81,6 +81,11 @@ class HostExplorerChromeTest {
     }
 
     @Test
+    fun `the window toolbar words its three views as the web does, the third Column view in the singular`() {
+        assertEquals(listOf("List view", "Icons view", "Column view"), ExplorerView.entries.map(::hostViewLabel))
+    }
+
+    @Test
     fun `the folder is named by its last breadcrumb, or by its path before there are any`() {
         val crumbs = listOf(HostPlace("/", "/"), HostPlace("home", "/home"), HostPlace("me", "/home/me"))
         assertEquals("me", hostFolderName("/home/me", crumbs))

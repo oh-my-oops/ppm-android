@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -117,8 +116,18 @@ internal fun ColumnScope.HostSortRadios(sort: HostMenuItem.SortBy, onPick: (Expl
  * `left-2 size-3.5` gutter before it.
  */
 @Composable
-private fun MenuRadio(label: String, selected: Boolean, onClick: () -> Unit) {
+internal fun MenuRadio(label: String, selected: Boolean, onClick: () -> Unit) {
     MenuItem(label, onClick, icon = { RadioMark(selected, 14.dp) }, iconEnd = 2.dp, modifier = Modifier.radio(selected))
+}
+
+/** `DropdownMenuLabel`: `px-2 py-1.5 text-sm font-medium`, in the menu's own text colour. */
+@Composable
+internal fun HostMenuLabel(text: String) {
+    BasicText(
+        text,
+        Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+        style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = LocalPpmTokens.current.text.color),
+    )
 }
 
 /** The phone's sheet, as the web's `BottomSheet` takes a context menu: `p-2`, at most 60vh. */
@@ -244,13 +253,14 @@ internal fun SheetSeparator() {
 }
 
 /**
- * A slot of [slot] holding the `size-2 fill-current` circle of the chosen radio. The icon is
- * lucide's `circle`, r=10 and a 2 stroke in a 24 box, so filled and drawn at 8 it spans 22/24 of that.
+ * A slot of [slot] holding the `CircleIcon size-2 fill-current` of the chosen radio. That icon is Fluent's `circle`,
+ * two circles wound against each other (radius 8 and 7 in a 20 box), so `fill-current` has nothing to fill: the web
+ * draws a thin ring 6.4 across and 0.4 thick, never a dot. The glyph is the web's own, so the ring is too.
  */
 @Composable
 private fun RadioMark(selected: Boolean, slot: Dp) {
     Box(Modifier.size(slot), contentAlignment = Alignment.Center) {
-        if (selected) Box(Modifier.size((8f * 22f / 24f).dp).clip(CircleShape).background(LocalPpmTokens.current.text.color))
+        if (selected) PpmIcon(ProductIcon.CircleIcon, 8.dp, LocalPpmTokens.current.text.color)
     }
 }
 

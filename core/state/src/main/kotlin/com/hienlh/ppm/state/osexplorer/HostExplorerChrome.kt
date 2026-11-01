@@ -38,6 +38,16 @@ fun hostSortPillLabel(key: ExplorerSort, sort: ExplorerSort, descending: Boolean
     key.label + if (key != sort) "" else if (descending) " ↓" else " ↑"
 
 /**
+ * What the window toolbar's button for a view is called (`VIEW_LABEL`, explorer-toolbar.tsx): the third is
+ * "Column view" in the singular. The phone's More sheet words the same three shorter ("List", "Icons", "Columns").
+ */
+fun hostViewLabel(view: ExplorerView): String = when (view) {
+    ExplorerView.LIST -> "List view"
+    ExplorerView.ICONS -> "Icons view"
+    ExplorerView.COLUMNS -> "Column view"
+}
+
+/**
  * The folder's name where the phone shows it, and in the properties of the folder (`currentFolderName`,
  * `currentFolderEntry`): the last breadcrumb, which is the folder itself, else the path as it stands.
  */

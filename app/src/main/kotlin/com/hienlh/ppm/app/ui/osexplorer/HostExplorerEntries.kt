@@ -2,6 +2,7 @@ package com.hienlh.ppm.app.ui.osexplorer
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -57,7 +58,8 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
         }
     }
     if (preferences.view == ExplorerView.ICONS) {
-        LazyVerticalGrid(GridCells.Adaptive(if (mobile) 100.dp else 112.dp), Modifier.fillMaxSize(), contentPadding = PaddingValues(8.dp)) {
+        LazyVerticalGrid(GridCells.Adaptive(if (mobile) 100.dp else 112.dp), Modifier.fillMaxSize().hostBackgroundMenu { onMenu(emptyList(), it) },
+            contentPadding = PaddingValues(8.dp)) {
             items(entries, key = { it.path }) { entry ->
                 val edit = commands?.edit
                 if (edit?.entry?.path == entry.path) { HostInlineName(commands, edit); return@items }
@@ -96,7 +98,7 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
                             textAlign = if (sort == ExplorerSort.NAME) TextAlign.Start else TextAlign.End))
                 }
             }
-            LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = scroll) {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth().hostBackgroundMenu { onMenu(emptyList(), it) }, state = scroll) {
                 itemsIndexed(entries, key = { _, entry -> entry.path }) { index, entry ->
                     val edit = commands?.edit
                     if (edit?.entry?.path == entry.path) { HostInlineName(commands, edit); return@itemsIndexed }
@@ -160,6 +162,30 @@ private fun Modifier.hostEntryInput(entry: HostFileEntry, selected: Boolean, onT
             }
         }
         .combinedClickable(onClick = { onTap(toggle, range) }, onDoubleClick = onOpen, onLongClick = { menu(at) })
+}
+
+/**
+ * The folder's own menu from the space the rows leave, in the list and in the grid (`backgroundLongPress` and the
+ * `ContextMenuTrigger` round the web's views): a right click, or a press held on a finger, that no row took. A row
+ * claims its right click before this looks (at the initial pass, where this waits for the main one), and its touch
+ * never reaches the long press here, so a row's menu and the folder's do not both open.
+ */
+internal fun Modifier.hostBackgroundMenu(onMenu: (Offset) -> Unit): Modifier = composed {
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    val menu by rememberUpdatedState(onMenu)
+    onGloballyPositioned { origin = it.positionInWindow() }
+        .pointerInput(Unit) { detectTapGestures(onLongPress = { menu(origin + it) }) }
+        .pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Main)
+                    if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed && event.changes.none { it.isConsumed }) {
+                        event.changes.forEach { it.consume() }
+                        menu(origin + event.changes.first().position)
+                    }
+                }
+            }
+        }
 }
 
 internal fun hostDisplaySize(bytes: Long?): String = when {
