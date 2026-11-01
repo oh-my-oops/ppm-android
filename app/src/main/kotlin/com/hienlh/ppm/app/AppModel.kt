@@ -378,6 +378,12 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         if (!wide) closeExplorerSheet()
     }
 
+    /** A file chip's file (`FilePathChip`): opened whether or not it can be read, as the web's chip does after its `/api/fs/read` either way. */
+    fun openFilePath(path: String, projectName: String? = selectedProject) {
+        val tab = filePathTab(path, projectName)
+        withWorkspace { it.openTab(tab) }
+    }
+
     /** Refresh explicit mutation results even when the host watcher misses the change. */
     fun filesMutated(report: com.hienlh.ppm.state.files.FileMutationReport) {
         val affected = report.affectedDirectories
@@ -3095,6 +3101,21 @@ internal fun terminalTab(project: String?, cwd: String?) = NewTab(
     metadata = buildJsonObject {
         project?.let { put("projectName", it) }
         cwd?.let { put("cwd", it) }
+    },
+)
+
+/**
+ * The tab of a file chip (`FilePathChip`): titled by the file's name, belonging to no project, with
+ * the project the chip was shown in only named in its metadata, and not even there when it has none
+ * (`if (pName) meta.projectName = pName`).
+ */
+internal fun filePathTab(path: String, projectName: String?) = NewTab(
+    type = "editor",
+    title = path.split('/', '\\').last(),
+    projectId = null,
+    metadata = buildJsonObject {
+        put("filePath", path)
+        projectName?.takeIf { it.isNotEmpty() }?.let { put("projectName", it) }
     },
 )
 

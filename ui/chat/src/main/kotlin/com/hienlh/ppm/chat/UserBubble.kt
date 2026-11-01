@@ -420,18 +420,25 @@ private fun filePathStyle(lineHeight: Float) = ppmText(10f, kind = FontKind.MONO
 
 /**
  * `FilePathChip`: a path by its name, `rounded border-border/50 bg-surface/50 font-mono
- * text-[10px]`. [lineHeight] is what the box it sits in makes of 10 px. The web opens the file in a
- * tab when it is clicked; this app has no file tab yet (06a), so it is only drawn.
+ * text-[10px] text-text-secondary`, and a button (`cursor-pointer`) that opens the file in an
+ * editor tab. `hover:text-text-primary hover:bg-surface` fades in, and shows while a finger is on
+ * it. [lineHeight] is what the box it sits in makes of 10 px.
  */
 @Composable
 private fun FilePathChip(path: String, lineHeight: Float, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
+    val tabs = LocalChatTabs.current
+    val hover = rememberHover()
+    val pressed by hover.source.collectIsPressedAsState()
+    val lit = if (pressed) 1.0 else hover.lit.toDouble()
     val shape = RoundedCornerShape(4.dp)
-    val color = tokens.text2.color
+    val color = tokens.text.mix(tokens.text2, lit).color
     Row(
         modifier
             .clip(shape)
-            .background(tokens.panel.opacity(0.5).color)
+            .background(tokens.panel.mix(tokens.panel.opacity(0.5), lit).color)
+            .pointerHoverIcon(WebCursor.Pointer)
+            .ppmClickable(pressedColor = Color.Transparent, source = hover.source) { tabs?.openFilePath(path) }
             .cssBorder(tokens.border.opacity(0.5).color, shape)
             .padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,

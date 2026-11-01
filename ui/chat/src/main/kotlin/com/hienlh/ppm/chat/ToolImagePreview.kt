@@ -180,6 +180,12 @@ interface ChatTabs {
      * [line] when the host has it, a folder in the explorer, and anything else searched for.
      */
     fun openFileOrSearch(path: String, line: SourceLine?)
+
+    /**
+     * A file chip's file (`FilePathChip`): in an editor tab that belongs to no project but names the
+     * chat's, opened whether or not the file can be read. Where there are no chips, nothing.
+     */
+    fun openFilePath(path: String) = Unit
 }
 
 /** How this chat opens tabs; none, and its file buttons do nothing, as the web's do without a project. */

@@ -333,6 +333,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     }
 
                     override fun openFileOrSearch(path: String, line: SourceLine?) = model.openFileOrSearch(tab.project, path, line)
+
+                    override fun openFilePath(path: String) = model.openFilePath(path, tab.project)
                 }
             }
             CompositionLocalProvider(
