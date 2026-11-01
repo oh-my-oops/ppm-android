@@ -3544,6 +3544,22 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     }
 
     /**
+     * A project row dropped on the chat (`externalPaths`, and the message box's own drop): `@path ` at the end of the box
+     * ([FileMention.append]) and the box focused, the keyboard with it as for a file dropped there. The web puts the path in
+     * twice when the box itself is let go on, because the box's handler and the chat's both run; here a drop is one event. The
+     * pickers are left as they were, as the web's write leaves them.
+     */
+    fun dropPath(path: String) {
+        val dropped = FileMention.append(path, draft.text.toString())
+        draft.edit {
+            replace(0, length, dropped.text)
+            selection = TextRange(dropped.caret)
+        }
+        edited()
+        requestFocus()
+    }
+
+    /**
      * What the mic heard so far (`voiceResultCb`), after what the box held as it opened, with the
      * caret at the end; the pickers are left as they were, as the web's write does not reach them.
      */

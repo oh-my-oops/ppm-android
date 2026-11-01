@@ -63,5 +63,15 @@ object FileMention {
         return Picked(head + text.substring(at), head.length)
     }
 
+    /**
+     * The box after a project row is dropped on it (`externalPaths`, and the textarea's own drop): `@path ` at the very end,
+     * after a space unless the box is empty or already ends in one (a space only: a new line gets one), the cursor after it.
+     * Wherever the cursor was, and whatever `@query` is left of it, which a pick would have replaced.
+     */
+    fun append(path: String, text: String): Picked {
+        val separator = if (text.isNotEmpty() && !text.endsWith(" ")) " " else ""
+        return (text + separator + "@$path ").let { Picked(it, it.length) }
+    }
+
     private fun atIndex(text: String): Int? = text.indexOf('@', lastRunStart(text)).takeIf { it >= 0 }
 }

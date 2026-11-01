@@ -53,6 +53,19 @@ class FileMentionTest {
         }
     }
 
+    /** Not from the vectors: the web's drop handler is three lines, `cur + sep + "@" + path + " "` with `sep` a space unless `cur` is empty or ends in one. */
+    @Test
+    fun `a dropped path goes at the end, after a space unless the box is empty or ends in one`() {
+        assertEquals(FileMention.Picked("@src/app.kt ", 12), FileMention.append("src/app.kt", ""))
+        assertEquals(FileMention.Picked("see @a.kt ", 10), FileMention.append("a.kt", "see"))
+        assertEquals(FileMention.Picked("see @a.kt ", 10), FileMention.append("a.kt", "see "))
+        // Only a space ends it: after a new line there is a space too.
+        assertEquals(FileMention.Picked("see\n @a.kt ", 11), FileMention.append("a.kt", "see\n"))
+        assertEquals(FileMention.Picked("@src/util/ ", 11), FileMention.append("src/util/", ""))
+        // An `@query` that a pick would have replaced stays, as the cursor is not where the path goes.
+        assertEquals(FileMention.Picked("@sr @a.kt ", 10), FileMention.append("a.kt", "@sr"))
+    }
+
     @Test
     fun `the list holds what the web's filter keeps, fifty at most`() {
         val entries = vectors["entries"].array!!.mapNotNull(FileEntry::from)

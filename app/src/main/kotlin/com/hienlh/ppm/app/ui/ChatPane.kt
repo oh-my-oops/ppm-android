@@ -105,6 +105,7 @@ import com.hienlh.ppm.app.PREWARM_SETTLE_MILLIS
 import com.hienlh.ppm.app.PrewarmAsk
 import com.hienlh.ppm.app.attach
 import com.hienlh.ppm.app.tracksTextFocus
+import com.hienlh.ppm.app.ui.files.TREE_PATH_MIME
 import com.hienlh.ppm.app.ui.tablet.dashedBorder
 import com.hienlh.ppm.chat.AgentSessionOpener
 import com.hienlh.ppm.chat.AsyncQuestions
@@ -499,7 +500,9 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
  * chat while they hover it, then attached once wherever in it they are let go — the message box
  * too, where the web attaches them twice. Chrome reports a drag of text files as text, so it shows
  * no overlay for those, but still attaches them; plain text dropped here is swallowed, as the
- * web's handlers swallow it. Also the message box's own target, to keep the drop from its field.
+ * web's handlers swallow it. A row of the project tree (`application/x-ppm-path`) is no file: it
+ * lights the same overlay and its path goes into the box as `@path ` ([ChatTab.dropPath]), once
+ * wherever in the chat it is let go. Also the message box's own target, to keep the drop from its field.
  */
 class ChatFileDrop(private val tab: ChatTab, private val drop: (List<Uri>, DragEvent) -> Unit) : DragAndDropTarget {
     /** Entries less exits, over the chat and the message box (`dragCounterRef`). */
@@ -535,6 +538,11 @@ class ChatFileDrop(private val tab: ChatTab, private val drop: (List<Uri>, DragE
         count(0)
         val drag = event.toAndroidDragEvent()
         val clip = drag.clipData ?: return true
+        // A row of the project tree is looked for first, as `handleDrop` does: not a file, its path goes into the box.
+        if (clip.description.hasMimeType(TREE_PATH_MIME)) {
+            clip.getItemAt(0).text?.toString()?.takeIf { it.isNotEmpty() }?.let(tab::dropPath)
+            return true
+        }
         val uris = (0 until clip.itemCount).mapNotNull { index -> clip.getItemAt(index).uri?.takeIf { it.scheme == ContentResolver.SCHEME_CONTENT } }
         if (uris.isNotEmpty()) drop(uris, drag)
         return true
