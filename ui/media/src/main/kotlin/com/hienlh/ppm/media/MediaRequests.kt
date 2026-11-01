@@ -46,15 +46,21 @@ internal fun mediaStatus(error: Throwable): Int? {
     return null
 }
 
-/** Whether [status] is the server refusing the request itself, a 4xx, which asking again will not change. */
-internal fun isClientError(status: Int?): Boolean = status != null && status in 400..499
+/**
+ * Whether the server answered with an error status, which is all [mediaStatus] ever finds: a 4xx, a 5xx, and a 3xx too, as the
+ * transport follows no redirect. A failure with no status is a connection that broke or timed out.
+ */
+internal fun isHttpError(status: Int?): Boolean = status != null
 
 /**
- * Media3 asks again after a failed load, three times, 0, 1 and 2 seconds apart, whatever the failure was, so a file the server
- * answered 404 for showed no error for three seconds. A 4xx will be answered the same each time, so the first is the last, as
- * `<audio onError>` is; every other failure keeps the default's retries.
+ * Media3 asks again after a failed load, three times, 1, 2 and 3 seconds apart (its delay is `min((errorCount - 1) * 1000, 5000)`,
+ * with the count already at 2 at the first retry, as the gaps measured on a device show), whatever the failure was, so a file the
+ * server answered 404 or 500 for showed no error until 6.6 seconds after the first request. A server that has answered with an
+ * error status has said what it will say, so the first answer is the last, as `<audio onError>` is: Chrome on a 500 asked once or
+ * twice (the second a same-Range twin within 0.3 seconds, not a back-off) and reported the error within a millisecond of the last
+ * answer. A failure with no answer (a connection reset, a timeout) keeps the default's retries; Chrome was not measured there.
  */
-internal class NoRetryOnClientError : DefaultLoadErrorHandlingPolicy() {
+internal class NoRetryOnHttpError : DefaultLoadErrorHandlingPolicy() {
     override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long =
-        if (isClientError(mediaStatus(loadErrorInfo.exception))) C.TIME_UNSET else super.getRetryDelayMsFor(loadErrorInfo)
+        if (isHttpError(mediaStatus(loadErrorInfo.exception))) C.TIME_UNSET else super.getRetryDelayMsFor(loadErrorInfo)
 }

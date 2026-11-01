@@ -100,7 +100,7 @@ internal class NativeMediaPlayer(
             next.volume = volume
             texture?.let(next::setVideoTextureView)
             val factory = OkHttpDataSource.Factory(mediaHttp).setDefaultRequestProperties(request.headers.toMap())
-            val media = ProgressiveMediaSource.Factory(factory).setLoadErrorHandlingPolicy(NoRetryOnClientError())
+            val media = ProgressiveMediaSource.Factory(factory).setLoadErrorHandlingPolicy(NoRetryOnHttpError())
                 .createMediaSource(MediaItem.fromUri(request.url.toString()))
             next.setMediaSource(media, (playback.initialPositionSeconds * 1000).toLong())
             next.playWhenReady = state.playWhenReady

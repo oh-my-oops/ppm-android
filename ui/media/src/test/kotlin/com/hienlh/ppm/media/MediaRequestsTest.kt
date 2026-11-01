@@ -101,8 +101,8 @@ class MediaRequestsTest {
         } finally { release.countDown(); server.stop(0) }
     }
 
-    @Test fun `only the server's own refusals, the 4xx, are final`() {
-        for (status in listOf(400, 401, 403, 404, 410, 416, 429, 499)) assertTrue("status " + status, isClientError(status))
-        for (status in listOf(null, 200, 206, 301, 399, 500, 502, 503, 504)) assertFalse("status " + status, isClientError(status))
+    @Test fun `every HTTP error status is final, and a failure that had none is not`() {
+        for (status in listOf(301, 302, 399, 400, 401, 403, 404, 410, 416, 429, 499, 500, 502, 503, 504, 599)) assertTrue("status " + status, isHttpError(status))
+        assertFalse(isHttpError(null))
     }
 }
