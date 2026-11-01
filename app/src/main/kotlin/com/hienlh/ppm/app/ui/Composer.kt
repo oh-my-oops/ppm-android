@@ -89,8 +89,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -707,17 +712,36 @@ private fun modelName(model: AppModel, chat: ChatController, state: ChatState): 
 }
 
 /**
+ * A chip as the web's `<button aria-label=[name] disabled>` is to a screen reader: one node with the
+ * name, a button's role, its press ([action]) and, while [enabled] is false, disabled. Left to
+ * `clickable` and a `contentDescription`, Compose hands the services three nodes: the clickable,
+ * which presses and can be disabled but has no name, the name as a child of it that does neither,
+ * and the text as a second child. Clearing what lies below leaves the one node holding it all. Put it
+ * ahead of the chip's own `clickable`, whose gestures it leaves alone and whose semantics it replaces.
+ */
+private fun Modifier.chipSemantics(name: String, enabled: Boolean = true, action: () -> Unit): Modifier =
+    clearAndSetSemantics {
+        contentDescription = name
+        role = Role.Button
+        onClick {
+            if (enabled) action()
+            enabled
+        }
+        if (!enabled) disabled()
+    }
+
+/**
  * `px-[9px] py-1 rounded-full text-[11.5px] text-text-2 bg-panel-2 border border-border-soft`,
  * `hover:text-text-primary hover:border-border` faded in: the mode and the priority. [label] null
- * draws the icon alone, at `px-[7px]`.
+ * draws the icon alone, at `px-[7px]`; [name] is the chip's `aria-label`.
  */
 @Composable
-private fun NeutralChip(icon: ProductIcon, label: String?, narrow: Boolean, modifier: Modifier = Modifier, labelMax: Dp = Dp.Unspecified, onClick: () -> Unit) =
-    NeutralChip(label, narrow, labelMax, onClick, modifier) { color -> PpmIcon(icon, 12.dp, color, Modifier.cssIcon(12.dp)) }
+private fun NeutralChip(icon: ProductIcon, label: String?, name: String, narrow: Boolean, modifier: Modifier = Modifier, labelMax: Dp = Dp.Unspecified, onClick: () -> Unit) =
+    NeutralChip(label, name, narrow, labelMax, onClick, modifier) { color -> PpmIcon(icon, 12.dp, color, Modifier.cssIcon(12.dp)) }
 
 /** [NeutralChip] with its own [leading] mark, drawn in the chip's text colour. */
 @Composable
-private fun NeutralChip(label: String?, narrow: Boolean, labelMax: Dp, onClick: () -> Unit, modifier: Modifier = Modifier, leading: @Composable (Color) -> Unit) {
+private fun NeutralChip(label: String?, name: String, narrow: Boolean, labelMax: Dp, onClick: () -> Unit, modifier: Modifier = Modifier, leading: @Composable (Color) -> Unit) {
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -728,6 +752,7 @@ private fun NeutralChip(label: String?, narrow: Boolean, labelMax: Dp, onClick: 
     val side = if (narrow) 7.dp else 9.dp
     CssRow(
         modifier
+            .chipSemantics(name, action = onClick)
             .clip(CircleShape)
             .background(tokens.panel2.color)
             .pointerHoverIcon(WebCursor.Default)
@@ -760,13 +785,14 @@ private fun NeutralChip(label: String?, narrow: Boolean, labelMax: Dp, onClick: 
  * tooltip, and its `aria-label`, the name a screen reader gives it, are the same text.
  */
 @Composable
-private fun ModeChip(mode: PermissionMode, narrow: Boolean, onClick: () -> Unit) {
+internal fun ModeChip(mode: PermissionMode, narrow: Boolean, onClick: () -> Unit) {
     val name = modeChipName(mode)
     NeutralChip(
         mode.icon,
         if (narrow) null else mode.label,
+        name,
         narrow,
-        Modifier.webTitle(name).semantics { contentDescription = name },
+        Modifier.webTitle(name),
         labelMax = 100.dp,
         onClick = onClick,
     )
@@ -786,11 +812,10 @@ private fun ComposerModelChip(name: String, state: ChatState, onClick: () -> Uni
     val running = state.isRunning
     ModelChip(
         text,
+        modelChipName(name, effort, state.thinking),
         state.thinking,
         disabled = running,
-        modifier = Modifier
-            .webTitle(modelChipTitle(running, text))
-            .semantics { contentDescription = modelChipName(name, effort, state.thinking) },
+        modifier = Modifier.webTitle(modelChipTitle(running, text)),
         onClick = onClick,
     )
 }
@@ -816,18 +841,20 @@ private fun PriorityChip(tab: ChatTab, narrow: Boolean) {
     NeutralChip(
         priority.icon,
         if (narrow) null else priority.label,
+        "Message priority: ${priority.label}",
         narrow,
-        Modifier.webTitle("Priority: ${priority.label} (click to cycle)").semantics { contentDescription = "Message priority: ${priority.label}" },
+        Modifier.webTitle("Priority: ${priority.label} (click to cycle)"),
     ) { tab.priority = priority.following }
 }
 
 /**
  * `text-primary bg-accent-wash border border-accent-wash-border`, sparkles, a brain while
  * thinking; `hover:brightness-110` faded in. 50% while the turn runs, when a mouse over it still
- * brightens it, as CSS `:hover` matches a disabled button. [labelMax] is the name's `max-w-[…]`.
+ * brightens it, as CSS `:hover` matches a disabled button. [labelMax] is the name's `max-w-[…]`,
+ * [name] the chip's `aria-label`.
  */
 @Composable
-internal fun ModelChip(text: String, thinking: Boolean, disabled: Boolean, modifier: Modifier = Modifier, labelMax: Dp = 140.dp, onClick: () -> Unit) {
+internal fun ModelChip(text: String, name: String, thinking: Boolean, disabled: Boolean, modifier: Modifier = Modifier, labelMax: Dp = 140.dp, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -836,6 +863,7 @@ internal fun ModelChip(text: String, thinking: Boolean, disabled: Boolean, modif
     val lit = if (pressed) 1f else fade
     CssRow(
         modifier
+            .chipSemantics(name, enabled = !disabled, action = onClick)
             .alpha(if (disabled) 0.5f else 1f)
             .brightness(1f + 0.1f * lit)
             .clip(CircleShape)
@@ -1115,10 +1143,10 @@ private fun ProviderChip(model: AppModel, tab: ChatTab) {
     CssColumn(bottom = chipStrut(14.dp)) {
         NeutralChip(
             cssCapitalized(name),
+            providerChipName(name),
             narrow = false,
             labelMax = 80.dp,
             onClick = { open = !open },
-            modifier = Modifier.semantics { contentDescription = providerChipName(name) },
         ) { ProviderBadge(current, 14.dp) }
         if (open) {
             val status = when {

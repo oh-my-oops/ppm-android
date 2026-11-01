@@ -28,8 +28,6 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
@@ -65,12 +63,11 @@ internal fun ModelSelector(model: AppModel, value: String?, providerId: String, 
     Box {
         ModelChip(
             current?.let { ModelNames.shortLabel(it.label) } ?: value ?: "Model",
+            formModelChipName(title, value),
             thinking = false,
             disabled = false,
-            modifier = Modifier
-                // No `title` for a model the provider does not list, as `title={undefined}`.
-                .then(if (title != null) Modifier.webTitle(title) else Modifier)
-                .semantics { contentDescription = formModelChipName(title, value) },
+            // No `title` for a model the provider does not list, as `title={undefined}`.
+            modifier = if (title != null) Modifier.webTitle(title) else Modifier,
             labelMax = 90.dp,
         ) { open = !open }
         if (open) {
