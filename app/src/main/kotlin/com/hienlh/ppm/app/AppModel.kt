@@ -147,6 +147,7 @@ import com.hienlh.ppm.state.workspace.resolveFileNavigation
 import com.hienlh.ppm.state.workspace.resolveToolCallTarget
 import com.hienlh.ppm.state.workspace.buildMetadataFromUrl
 import com.hienlh.ppm.state.workspace.buildTitleFromUrl
+import com.hienlh.ppm.state.workspace.frontTabs
 import com.hienlh.ppm.state.workspace.isWindowPanelId
 import com.hienlh.ppm.state.workspace.parsePpmLink
 import com.hienlh.ppm.state.workspace.reopenedTab
@@ -226,7 +227,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         for (id in documents.keys.toList()) if (id !in live) documents.remove(id)?.close()
     }
 
-    /** Create only when shown, then keep the parser and socket across tab/dock moves. */
+    /**
+     * A tab's shell, made the first time it is asked for and kept, parser and socket, across tab, panel and dock moves until the tab
+     * closes. [syncTerminals] asks as soon as the tab is in front anywhere, shown or not; a terminal that is shown first asks itself.
+     */
     fun terminal(tab: WorkspaceTab): com.hienlh.ppm.terminal.NativeTerminal? {
         terminals[tab.id]?.let { return it }
         val client = api ?: return null
@@ -237,14 +241,28 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         ).also { terminals[tab.id] = it }
     }
 
-    private fun syncTerminals(state: WorkspaceState) {
+    /**
+     * Ends the shells of tabs that went and attaches those of tabs the web would mount ([frontTabs]): the front tab of every
+     * panel, a collapsed phone dock's, a hidden tablet dock's and a minimized window's included. Attached, not shown: a view that
+     * is never laid out holds what its shell prints and says nothing of a size, but its socket is open, so the server does not
+     * end the shell 30 minutes after the last socket went (`RECONNECT_GRACE_MS`). A shell that was attached stays so while its
+     * tab is behind another, in another panel or in another project, until the tab closes: it is in [terminals] and only a tab
+     * that is gone takes it out, which is the web's keep-alive.
+     */
+    internal fun syncTerminals(state: WorkspaceState) {
         val live = state.panels.values.flatMap { it.tabs }.filter { it.type == "terminal" }.map { it.id }.toSet()
         for (id in knownTerminalIds - live) {
             terminals.remove(id)?.close()
             prefs.put("terminal.$serverKey.ppm:terminal-session:$id", null)
         }
         knownTerminalIds = live
+        for (tab in frontTabs(state)) {
+            if (tab.type == "terminal" && tab.id !in terminals) terminal(tab)?.controller?.start()
+        }
     }
+
+    /** The shell of [tabId] if it has been made; the test of what [syncTerminals] attached. */
+    internal fun terminalOf(tabId: String): com.hienlh.ppm.terminal.NativeTerminal? = terminals[tabId]
 
     /** A shell in the open project, or in none: the web opens it all the same, with no project on the tab. */
     fun openTerminal(inDock: Boolean = wide) {
