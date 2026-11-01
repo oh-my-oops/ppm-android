@@ -81,7 +81,8 @@ fun splitAttachmentMarkers(attachments: List<SendableAttachment>, inline: List<I
 fun messageWithAttachments(content: String, attachments: List<SendableAttachment>, inline: List<InlineImage>): String {
     if (attachments.isEmpty()) return content
     val parts = mutableListOf<String>()
-    attachments.mapNotNullTo(parts) { it.textContent }
+    // `if (att.textContent)`: a chip with no text adds no part, however it came to have none.
+    attachments.mapNotNullTo(parts) { it.textContent?.takeIf(String::isNotEmpty) }
     val markers = splitAttachmentMarkers(attachments, inline)
     markers.inlineImagePaths.mapTo(parts) { "[Attached image (contents included in this message): $it]" }
     val paths = markers.pathOnlyPaths

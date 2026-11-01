@@ -351,7 +351,7 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                 tab.requestFocus()
             }
         }
-        AttachmentChips(tab.attachments, inset) { id -> model.removeAttachment(tab, id) }
+        AttachmentChips(tab.attachments, inset, onRemove = { id -> model.removeAttachment(tab, id) }, onTextTap = { tab.requestFocus() })
         val mode = tab.permissionMode ?: PermissionMode.FALLBACK
         if (mobile) {
             // `flex flex-wrap items-center gap-1 px-2 pt-2 relative`: the mode panel opens over this row.

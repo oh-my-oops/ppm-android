@@ -138,9 +138,13 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     fun copy() {
         val selected = selection?.getSelectionText().orEmpty()
         val text = selected.ifEmpty { session.lastOutput() }
-        if (text.isBlank()) model.toast(ErrorToastMessage("Nothing to copy")) else {
-            clipboard.setPrimaryClip(ClipData.newPlainText("Terminal", text))
-            model.toast(ErrorToastMessage(if (selected.isNotEmpty()) "Selection copied" else "Last output copied", kind = ErrorToastMessage.Kind.SUCCESS))
+        if (text.isBlank()) model.toast(ErrorToastMessage("Nothing to copy", kind = ErrorToastMessage.Kind.PLAIN, durationMillis = TERMINAL_TOAST_MS)) else {
+            // The clipboard service refuses a very large output; the web answers that "Could not copy".
+            val copied = runCatching { clipboard.setPrimaryClip(ClipData.newPlainText("Terminal", text)) }.isSuccess
+            model.toast(
+                if (copied) ErrorToastMessage(if (selected.isNotEmpty()) "Selection copied" else "Last output copied", kind = ErrorToastMessage.Kind.SUCCESS, durationMillis = TERMINAL_TOAST_MS)
+                else ErrorToastMessage("Could not copy", durationMillis = TERMINAL_TOAST_MS),
+            )
         }
     }
     fun paste() {
@@ -149,6 +153,7 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     fun chat() {
         val draft = TerminalText.chatDraft(selection = selection?.getSelectionText().orEmpty(), command = session.lastCommand(), output = session.lastOutput()) ?: return
         model.terminalToChat(draft.text, draft.label, session.project)
+        model.toast(ErrorToastMessage("Sent to chat", kind = ErrorToastMessage.Kind.SUCCESS, durationMillis = TERMINAL_TOAST_MS))
     }
     fun openLink(value: String) = openTerminalLink(context, value) {
         model.toast(ErrorToastMessage("No browser is available to open this link"))
@@ -254,6 +259,9 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     }
     links?.let { urls -> TerminalLinks(model, urls, onClose = { links = null }) }
 }
+
+/** How long terminal-tab.tsx's toasts stay (`duration: 1500`). */
+private const val TERMINAL_TOAST_MS = 1_500L
 
 private class TerminalModifiers : ModifierManager {
     var ctrl by mutableStateOf(false)

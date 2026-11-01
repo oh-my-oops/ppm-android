@@ -298,7 +298,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         }.maxWithOrNull(compareBy<Triple<WorkspaceTab, Int, Double>> { it.second }.thenBy { it.third })?.first
         val chat = target?.let { chats[it.id] }
         if (chat == null) withWorkspace { store ->
-            store.openTab(NewTab(type = "chat", title = "AI Chat", projectId = project, metadata = buildJsonObject {
+            // The tab `sendToChat` opens is a plain "Chat" until its session names it.
+            store.openTab(NewTab(type = "chat", title = "Chat", projectId = project, metadata = buildJsonObject {
                 project?.let { put("projectName", it) }
                 if (asContext) put("pendingContexts", JsonArray(listOf(buildJsonObject { put("text", text); put("label", label) })))
                 else put("pendingMessage", text)
@@ -2167,7 +2168,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                     val context = entry as? JsonObject ?: return@forEach
                     val text = context["text"].string ?: return@forEach
                     chat.attachments += ComposerAttachment(
-                        id = java.util.UUID.randomUUID().toString(), name = context["label"].string ?: "Context",
+                        id = java.util.UUID.randomUUID().toString(), name = context["label"].string ?: "Selected code",
                         isImage = false, status = ComposerAttachment.Status.READY, textContent = text,
                     )
                     chat.tookPendingMessage = true
@@ -3852,6 +3853,8 @@ class ErrorToastMessage(
     val kind: Kind = Kind.ERROR,
     /** `duration: Infinity`: it stays until it is closed, its action runs or its raiser takes it back. */
     val persistent: Boolean = false,
+    /** `duration: n`: how long it stays, in milliseconds; sonner's four seconds when none is given. */
+    val durationMillis: Long? = null,
 ) {
     class Action(val label: String, val run: () -> Unit)
 

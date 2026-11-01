@@ -268,8 +268,8 @@ private fun ToastSlot(
         for (transition in listOf(transform, alpha, boxHeight, children, close, swipe.shift, swipe.fade)) launch { transition.run() }
     }
 
-    // Four seconds, held while the toasts are spread out, pressed or out of sight; a persistent one stays.
-    val left = remember { longArrayOf(TOAST_LIFETIME) }
+    // Four seconds, or the toast's own `duration`, held while the toasts are spread out, pressed or out of sight; a persistent one stays.
+    val left = remember { longArrayOf(message.durationMillis ?: TOAST_LIFETIME) }
     val paused = expanded || state.interacting || hidden
     LaunchedEffect(paused, message, removed) {
         if (paused || message.persistent || removed) return@LaunchedEffect

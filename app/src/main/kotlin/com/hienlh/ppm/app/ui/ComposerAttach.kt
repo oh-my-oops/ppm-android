@@ -10,6 +10,7 @@ import android.os.Parcelable
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,14 +20,17 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.contextmenu.builder.item
@@ -34,6 +38,8 @@ import androidx.compose.foundation.text.contextmenu.data.TextContextMenuKeys
 import androidx.compose.foundation.text.contextmenu.data.TextContextMenuSession
 import androidx.compose.foundation.text.contextmenu.modifier.appendTextContextMenuComponents
 import androidx.compose.foundation.text.contextmenu.modifier.filterTextContextMenuComponents
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.ContentScale
@@ -55,6 +62,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.hienlh.ppm.app.ComposerAttachment
+import com.hienlh.ppm.app.onEveryTap
+import com.hienlh.ppm.design.ColorsFade
+import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.LocalImageViewer
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -62,11 +72,13 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ViewerImage
 import com.hienlh.ppm.design.WebCursor
+import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssSize
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.webTitle
+import com.hienlh.ppm.protocol.isJsSpace
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -198,12 +210,15 @@ fun AttachButton(mobile: Boolean, enabled: Boolean, onClick: () -> Unit) {
  * The files waiting in the box (`AttachmentChips`): `px-2 md:px-4 pt-2`, chips `gap-1.5` with
  * `gap-y-5` between wrapped rows — a touch screen's pointer is coarse, and the web keeps a
  * finger's target off the row below. A chip with a picture opens it in the lightbox, the others
- * waiting in the box beside it.
+ * waiting in the box beside it; one with text (terminal output, a selection) opens that text under
+ * the row, and a second tap closes it. [onTextTap] is what such a tap, and one on the text, does
+ * beyond that: the click bubbles on to the box's own `onClick`, which gives the message field the focus.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun AttachmentChips(attachments: List<ComposerAttachment>, inset: Dp, onRemove: (String) -> Unit) {
+fun AttachmentChips(attachments: List<ComposerAttachment>, inset: Dp, onRemove: (String) -> Unit, onTextTap: () -> Unit = {}) {
     if (attachments.isEmpty()) return
+    var expandedId by remember { mutableStateOf<String?>(null) }
     val viewer = LocalImageViewer.current
     fun preview(attachment: ComposerAttachment) {
         val pictures = attachments.filter { it.previewable }
@@ -221,44 +236,117 @@ fun AttachmentChips(attachments: List<ComposerAttachment>, inset: Dp, onRemove: 
             index,
         )
     }
-    FlowRow(
-        Modifier.fillMaxWidth().padding(start = inset, end = inset, top = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        for (attachment in attachments) {
-            // A flex line's items stretch to its tallest, so a chip without a thumbnail is as tall as one with.
-            AttachmentChip(attachment, Modifier.fillMaxRowHeight(), onPreview = { preview(attachment) }, onRemove = { onRemove(attachment.id) })
+    // The chip whose text is open, while it is still in the box.
+    val opened = attachments.firstOrNull { it.id == expandedId }?.textContent?.takeIf { it.isNotEmpty() }
+    Column(Modifier.fillMaxWidth().padding(start = inset, end = inset, top = 8.dp)) {
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            for (attachment in attachments) {
+                // A flex line's items stretch to its tallest, so a chip without a thumbnail is as tall as one with.
+                AttachmentChip(
+                    attachment, Modifier.fillMaxRowHeight(), expanded = attachment.id == expandedId,
+                    onBody = {
+                        when (chipBodyAction(attachment.textContent, attachment.previewable)) {
+                            ChipBodyAction.EXPAND -> {
+                                expandedId = if (expandedId == attachment.id) null else attachment.id
+                                onTextTap()
+                            }
+                            ChipBodyAction.PREVIEW -> preview(attachment)
+                            ChipBodyAction.NONE -> {}
+                        }
+                    },
+                    onRemove = {
+                        onRemove(attachment.id)
+                        if (expandedId == attachment.id) expandedId = null
+                    },
+                )
+            }
         }
+        opened?.let { TextAttachmentPreview(stripCodeFence(it), onTextTap) }
     }
 }
 
 /** A picture this device can show: the web's `previewUrl`. */
 private val ComposerAttachment.previewable get() = thumbnail != null && file != null
 
+/** What a tap on a chip's body does. */
+internal enum class ChipBodyAction { EXPAND, PREVIEW, NONE }
+
 /**
- * `flex items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-xs text-text-secondary
- * max-w-48`, `hover:border-primary/50` when it opens something: a thumbnail or an icon, the name,
- * then a spinner, a red "!", or the size it was reduced to, and the remove button.
+ * `chipBodyAction`: a chip with text opens that text, one with a picture the picture, any other
+ * nothing. The text is asked first, as the web asks it: a picture never has any.
+ */
+internal fun chipBodyAction(textContent: String?, previewable: Boolean): ChipBodyAction = when {
+    !textContent.isNullOrEmpty() -> ChipBodyAction.EXPAND
+    previewable -> ChipBodyAction.PREVIEW
+    else -> ChipBodyAction.NONE
+}
+
+private val CODE_FENCE = Regex("```\\w*\n([\\s\\S]*?)\n```")
+
+/** `stripCodeFence`: the text without the Markdown fence around all of it, as the opened chip shows it. */
+internal fun stripCodeFence(text: String): String {
+    val trimmed = text.trim(::isJsSpace)
+    return CODE_FENCE.matchEntire(trimmed)?.groupValues?.get(1) ?: trimmed
+}
+
+/**
+ * The text of an opened chip, under the row: `<pre class="mt-1.5 max-h-40 overflow-auto rounded-md
+ * border border-border bg-background p-2 text-xs text-text-primary font-mono whitespace-pre-wrap
+ * break-words">`.
  */
 @Composable
-private fun AttachmentChip(attachment: ComposerAttachment, modifier: Modifier, onPreview: () -> Unit, onRemove: () -> Unit) {
+private fun TextAttachmentPreview(text: String, onTap: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
-    val opens = attachment.previewable
+    val scroll = rememberScrollState()
+    SelectionContainer(
+        Modifier
+            .padding(top = 6.dp)
+            .fillMaxWidth()
+            .heightIn(max = 160.dp)
+            .chromeScrollbar(scroll, vertical = true, tokens.border.color, border = 1.dp)
+            .clip(shape)
+            .background(tokens.bgSolid.color)
+            .cssBorder(tokens.border.color, shape)
+            .onEveryTap(onTap)
+            .verticalScroll(scroll)
+            .padding(8.dp),
+    ) {
+        BasicText(text, style = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text.color))
+    }
+}
+
+/**
+ * `flex items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-xs text-text-secondary
+ * max-w-48`, `hover:border-primary/50` when it opens something, `border-primary/50
+ * bg-surface-elevated` while its text is [expanded]: a thumbnail or an icon (a terminal for text),
+ * the name, a chevron for text, then a spinner, a red "!", or the size it was reduced to, and the
+ * remove button. [onBody] is a tap anywhere on it but the remove button.
+ */
+@Composable
+private fun AttachmentChip(attachment: ComposerAttachment, modifier: Modifier, expanded: Boolean, onBody: () -> Unit, onRemove: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(8.dp)
+    val opens = chipBodyAction(attachment.textContent, attachment.previewable) != ChipBodyAction.NONE
+    val hasText = !attachment.textContent.isNullOrEmpty()
     val source = remember { MutableInteractionSource() }
     val hovered by source.collectIsHoveredAsState()
     val lit = if (opens) colorsFade(hovered).toDouble() else 0.0
     val text = tokens.text2.color
+    val border = tokens.accent.opacity(0.5)
     Row(
         modifier
             .widthIn(max = 192.dp)
             .clip(shape)
-            .background(tokens.panel.color)
+            .background((if (expanded) tokens.panel2 else tokens.panel).color)
             .pointerHoverIcon(if (opens) WebCursor.Pointer else WebCursor.Default)
             .hoverable(source)
-            .clickable(source, indication = null, enabled = opens, onClick = onPreview)
-            .cssBorder(tokens.accent.opacity(0.5).mix(tokens.border, lit).color, shape)
+            .clickable(source, indication = null, enabled = opens, onClick = onBody)
+            .cssBorder((if (expanded) border else border.mix(tokens.border, lit)).color, shape)
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -276,7 +364,12 @@ private fun AttachmentChip(attachment: ComposerAttachment, modifier: Modifier, o
             }
         } else {
             // A picture that would not decode has no preview, which the web draws as an image file.
-            PpmIcon(if (attachment.isImage) ProductIcon.Image else ProductIcon.FileText, 14.dp, tokens.text3.color)
+            val icon = when {
+                hasText -> ProductIcon.TerminalSquare
+                attachment.isImage -> ProductIcon.Image
+                else -> ProductIcon.FileText
+            }
+            PpmIcon(icon, 14.dp, tokens.text3.color)
         }
         BasicText(
             attachment.name,
@@ -285,6 +378,11 @@ private fun AttachmentChip(attachment: ComposerAttachment, modifier: Modifier, o
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        if (hasText) {
+            // `size-3 transition-transform`, turned over while the text is open.
+            val turn by animateFloatAsState(if (expanded) 180f else 0f, ColorsFade, label = "chevron")
+            PpmIcon(ProductIcon.ChevronDown, 12.dp, tokens.text3.color, Modifier.rotate(turn))
+        }
         when {
             attachment.status == ComposerAttachment.Status.UPLOADING ->
                 Box(Modifier.height(16.dp), contentAlignment = Alignment.Center) { PpmIcon(ProductIcon.Loader2, 12.dp, tokens.text3.color, spinning = true) }
