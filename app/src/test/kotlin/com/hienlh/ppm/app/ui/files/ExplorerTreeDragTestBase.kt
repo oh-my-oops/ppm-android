@@ -121,6 +121,12 @@ internal abstract class ExplorerTreeDragTestBase {
     /** A point of the list under its last row. */
     protected fun blank(): Offset = compose.onRoot().fetchSemanticsNode().boundsInRoot.let { Offset(it.center.x, it.bottom - 4f) }
 
+    /** A point of the header, above the list: the toolbar's own top padding, clear of its buttons. */
+    protected fun header(): Offset = compose.onRoot().fetchSemanticsNode().boundsInRoot.let { Offset(it.center.x, 3f) }
+
+    /** A drag of entries that are not rows of this tree, as a window's are: absolute paths, and no project folder to put them under. */
+    protected fun entries(vararg paths: String) = ExplorerRowDrag("p", paths.first(), true, paths.toList(), root = null)
+
     /** A row of the tree dragged, with [paths] the whole drag when it is a selection. */
     protected fun row(path: String, isDirectory: Boolean = false, paths: List<String> = listOf(path)) =
         ExplorerRowDrag("p", path, isDirectory, paths, ROOT)

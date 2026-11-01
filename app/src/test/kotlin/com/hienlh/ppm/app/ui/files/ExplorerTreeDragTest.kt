@@ -52,6 +52,15 @@ class ExplorerTreeDragTest {
         assertEquals(12, explorerPointerScrollStep(Offset(10f, 476f), area, density = 2f))
     }
 
+    @Test fun `a pointer outside the list, over the header above it, scrolls nothing, as the web's list hears only a drag over itself`() {
+        val area = Rect(0f, 100f, 300f, 500f)
+        assertEquals(0, explorerPointerScrollStep(Offset(10f, 99f), area, density = 1f))
+        assertEquals(0, explorerPointerScrollStep(Offset(10f, 20f), area, density = 1f))
+        assertEquals(0, explorerPointerScrollStep(Offset(10f, 501f), area, density = 1f))
+        assertEquals("the edge itself is the list's", 16, explorerPointerScrollStep(Offset(10f, 500f), area, density = 1f))
+        assertEquals(-16, explorerPointerScrollStep(Offset(10f, 100f), area, density = 1f))
+    }
+
     @Test fun `no pointer or no list means no scroll`() {
         assertEquals(0, explorerPointerScrollStep(Offset.Unspecified, Rect(0f, 0f, 100f, 100f), density = 1f))
         assertEquals(0, explorerPointerScrollStep(Offset(10f, 99f), null, density = 1f))
@@ -68,19 +77,51 @@ class ExplorerTreeDragTest {
     private fun drag(path: String, vararg more: String, isDirectory: Boolean = false, root: String? = "/home/me/p") =
         ExplorerRowDrag("p", path, isDirectory, listOf(path) + more, root)
 
+    private val root = "/home/me/p"
+
     @Test fun `a move to the project folder is taken unless every row is in it already`() {
-        assertTrue(explorerRootDropTaken(drag("src/app.kt"), copy = false))
-        assertTrue(explorerRootDropTaken(drag("src/util", isDirectory = true), copy = false))
-        assertTrue("one row below the root is enough", explorerRootDropTaken(drag("README.md", "src/app.kt"), copy = false))
-        assertFalse(explorerRootDropTaken(drag("README.md"), copy = false))
-        assertFalse(explorerRootDropTaken(drag("src", isDirectory = true), copy = false))
-        assertFalse(explorerRootDropTaken(drag("README.md", "docs"), copy = false))
+        assertTrue(explorerRootDropTaken(drag("src/app.kt"), copy = false, root))
+        assertTrue(explorerRootDropTaken(drag("src/util", isDirectory = true), copy = false, root))
+        assertTrue("one row below the root is enough", explorerRootDropTaken(drag("README.md", "src/app.kt"), copy = false, root))
+        assertFalse(explorerRootDropTaken(drag("README.md"), copy = false, root))
+        assertFalse(explorerRootDropTaken(drag("src", isDirectory = true), copy = false, root))
+        assertFalse(explorerRootDropTaken(drag("README.md", "docs"), copy = false, root))
     }
 
     @Test fun `a copy to the project folder is always taken, for it makes name (2) of what is there`() {
-        assertTrue(explorerRootDropTaken(drag("README.md"), copy = true))
-        assertTrue(explorerRootDropTaken(drag("README.md", "docs"), copy = true))
-        assertTrue(explorerRootDropTaken(drag("src/app.kt"), copy = true))
+        assertTrue(explorerRootDropTaken(drag("README.md"), copy = true, root))
+        assertTrue(explorerRootDropTaken(drag("README.md", "docs"), copy = true, root))
+        assertTrue(explorerRootDropTaken(drag("src/app.kt"), copy = true, root))
+    }
+
+    /** A drag whose paths are absolute, as a window's entry carries them: no project folder to put them under. */
+    private fun entries(vararg paths: String) = ExplorerRowDrag("p", paths.first(), true, paths.toList(), root = null)
+
+    @Test fun `the project folder itself, or a folder above it, dragged onto the project's blank area is refused, a move or a copy`() {
+        for (dragged in listOf("/home/me/p", "/home/me/p/", "/home/me", "/home", "/")) {
+            assertFalse(dragged, explorerRootDropTaken(entries(dragged), copy = false, root))
+            assertFalse(dragged, explorerRootDropTaken(entries(dragged), copy = true, root))
+        }
+    }
+
+    @Test fun `one such entry among others refuses the whole drag`() {
+        assertFalse(explorerRootDropTaken(entries("/home/me/p/src/app.kt", "/home/me"), copy = true, root))
+    }
+
+    @Test fun `an entry beside the project folder, or inside it, is not that`() {
+        assertTrue(explorerRootDropTaken(entries("/home/me/p2"), copy = false, root))
+        assertTrue(explorerRootDropTaken(entries("/home/me/other/app.kt"), copy = false, root))
+        assertTrue(explorerRootDropTaken(entries("/home/me/p/src/app.kt"), copy = false, root))
+        assertFalse("directly in the folder already, a move changes nothing", explorerRootDropTaken(entries("/home/me/p/src"), copy = false, root))
+        assertTrue("and a copy of it makes name (2)", explorerRootDropTaken(entries("/home/me/p/src"), copy = true, root))
+    }
+
+    @Test fun `Windows paths are compared without case, and either separator`() {
+        val windows = "C:\\Users\\Me\\P"
+        assertFalse(explorerRootDropTaken(entries("c:\\users\\me\\p"), copy = true, windows))
+        assertFalse(explorerRootDropTaken(entries("C:/Users/Me"), copy = true, windows))
+        assertTrue(explorerRootDropTaken(entries("C:\\Users\\Me\\P2"), copy = false, windows))
+        assertFalse("directly in it, whatever the case", explorerRootDropTaken(entries("c:\\users\\me\\p\\a.txt"), copy = false, windows))
     }
 
     @Test fun `the chip says the name of one row and the count of several`() {

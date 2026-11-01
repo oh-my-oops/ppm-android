@@ -1,6 +1,8 @@
 package com.hienlh.ppm.app.ui.files
 
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.moveBy
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performMouseInput
@@ -40,6 +42,114 @@ internal class ExplorerRootDropTest : ExplorerTreeDragTestBase() {
         show()
         assertTrue(dropOnBlank(row("README.md", paths = listOf("README.md", "src/app.kt"))))
         assertEquals(listOf("$ROOT/README.md", "$ROOT/src/app.kt"), transfers.single().paths)
+    }
+
+    private fun dropOnHeader(drag: ExplorerRowDrag): Boolean {
+        assertTrue(begin(drag))
+        over(drag, header())
+        return drop(drag, header())
+    }
+
+    @Test fun `a drop on the header is taken as one on the blank area is, the web's root target being the whole tree`() {
+        show()
+        assertTrue(dropOnHeader(row("src/app.kt")))
+        assertEquals(listOf(Transfer(listOf("$ROOT/src/app.kt"), ROOT, copy = false)), transfers)
+        assertEquals("not the move of a row onto a row", emptyList<Pair<String, String>>(), moves)
+    }
+
+    @Test fun `a selection dropped on the header goes whole, and Ctrl or Alt makes it a copy there too`() {
+        show()
+        val selection = listOf("src/main.kt", "src/util", "docs/guide.md")
+        assertTrue(dropOnHeader(row("src/util", isDirectory = true, paths = selection)))
+        copyHeld = true
+        assertTrue(dropOnHeader(row("README.md")))
+        assertEquals(
+            listOf(Transfer(selection.map { "$ROOT/$it" }, ROOT, copy = false), Transfer(listOf("$ROOT/README.md"), ROOT, copy = true)),
+            transfers,
+        )
+    }
+
+    @Test fun `the header refuses what the blank area does, a move of rows that are in the root already`() {
+        show()
+        assertFalse(dropOnHeader(row("README.md", paths = listOf("README.md", "docs"))))
+        assertEquals(emptyList<Transfer>(), transfers)
+    }
+
+    @Test fun `the header takes no drag of another project, and none while a drop is carried out`() {
+        show()
+        val elsewhere = ExplorerRowDrag("elsewhere", "src/app.kt", false)
+        assertFalse(begin(elsewhere))
+
+        transferHeld = CompletableDeferred()
+        assertTrue(dropOnHeader(row("src/app.kt")))
+        compose.waitForIdle()
+        assertFalse("busy", begin(row("src/main.kt")))
+        compose.runOnUiThread { transferHeld!!.complete(Unit) }
+        compose.waitForIdle()
+        assertEquals(1, transfers.size)
+    }
+
+    @Test fun `a tree with no shared transfer takes nothing on the header either`() {
+        show(content = { tree, commands -> ExplorerTree(tree, onOpenFile = {}, mutations = commands) })
+        val drag = row("src/app.kt")
+        assertTrue(begin(drag))
+        over(drag, header())
+        assertFalse(drop(drag, header()))
+        assertEquals(emptyList<Transfer>(), transfers)
+    }
+
+    @Test fun `a point just above the list is the project folder, though the first row, scrolled half out of sight, is laid out there`() {
+        listing[""] = (0 until 40).map { dir("d%02d".format(it)) }
+        show(expand = emptyList())
+        compose.runOnUiThread { compose.onNode(hasScrollAction()).fetchSemanticsNode().config[SemanticsActions.ScrollBy].action!!.invoke(0f, 13f) }
+        compose.waitForIdle()
+        val above = Offset(blank().x, compose.onNode(hasScrollAction()).fetchSemanticsNode().boundsInRoot.top - 5f)
+        copyHeld = true
+        val drag = row("d30", isDirectory = true)
+        assertTrue(begin(drag))
+        over(drag, above)
+        assertTrue(drop(drag, above))
+        assertEquals(listOf(Transfer(listOf("$ROOT/d30"), ROOT, copy = true)), transfers)
+        assertEquals("not a move into the row that is half in sight", emptyList<Pair<String, String>>(), moves)
+    }
+
+    @Test fun `the list's own first pixel is still the row there, not the project folder`() {
+        listing[""] = (0 until 40).map { dir("d%02d".format(it)) }
+        show(expand = emptyList())
+        compose.runOnUiThread { compose.onNode(hasScrollAction()).fetchSemanticsNode().config[SemanticsActions.ScrollBy].action!!.invoke(0f, 13f) }
+        compose.waitForIdle()
+        val top = Offset(blank().x, compose.onNode(hasScrollAction()).fetchSemanticsNode().boundsInRoot.top)
+        val drag = row("d30", isDirectory = true)
+        assertTrue(begin(drag))
+        over(drag, top)
+        assertTrue(drop(drag, top))
+        assertEquals(listOf("d30" to "d00/d30"), moves)
+        assertEquals(emptyList<Transfer>(), transfers)
+    }
+
+    @Test fun `the project folder, or a folder above it, dragged onto the tree is refused, on the blank area and on the header, and nothing is sent`() {
+        show()
+        for (copy in listOf(false, true)) {
+            copyHeld = copy
+            for (dragged in listOf(ROOT, "/home/me", "/home")) {
+                val drag = entries(dragged)
+                assertTrue(dragged, begin(drag))
+                over(drag, blank())
+                assertFalse("$dragged on the blank area", drop(drag, blank()))
+                assertTrue(begin(drag))
+                over(drag, header())
+                assertFalse("$dragged on the header", drop(drag, header()))
+            }
+        }
+        assertEquals(emptyList<Transfer>(), transfers)
+        assertFalse("the tree is free after a refusal", drops.running)
+    }
+
+    @Test fun `one such entry among others refuses the whole drag, and entries beside the project folder are taken`() {
+        show()
+        assertFalse(dropOnBlank(entries("$ROOT/src/app.kt", "/home/me")))
+        assertTrue(dropOnBlank(entries("/home/me/other/app.kt", "/home/me/p2")))
+        assertEquals(listOf(Transfer(listOf("/home/me/other/app.kt", "/home/me/p2"), ROOT, copy = false)), transfers)
     }
 
     @Test fun `a selection that is in the root already is refused as a move`() {

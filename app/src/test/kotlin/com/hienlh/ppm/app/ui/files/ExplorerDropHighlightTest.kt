@@ -121,6 +121,78 @@ internal class ExplorerDropHighlightTest : ExplorerTreeDragTestBase() {
         assertColor("the rows are drawn over the same tint, as the web's rows are over the container's", tinted5, fill("docs"))
     }
 
+    @Test fun `a drag resting on the header tints the whole tree after 120 ms as one on the blank area does, the header being the same target`() {
+        showOnBlack()
+        compose.mainClock.autoAdvance = false
+        val drag = row("src/app.kt")
+        begin(drag)
+        hover(drag, header())
+        advance(64)
+        settle()
+        assertColor("blank area before 120 ms", Color.Black, blankFill())
+        assertColor("header before 120 ms", Color.Black, headerFill())
+
+        advance(40)
+        settle()
+        assertColor("blank area after 120 ms", tinted5, blankFill())
+        assertColor("header after 120 ms", tinted5, headerFill())
+    }
+
+    @Test fun `a drag that sweeps across the header flashes nothing, and moving from the header to a row takes the tint away`() {
+        showOnBlack()
+        compose.mainClock.autoAdvance = false
+        val drag = row("src/app.kt")
+        begin(drag)
+        hover(drag, header())
+        advance(64)
+        hover(drag, center("docs"))
+        advance(500)
+        settle()
+        assertColor("header once the drag is over a row", Color.Black, headerFill())
+
+        hover(drag, header())
+        advance(200)
+        settle()
+        assertColor("lit on the header", tinted5, headerFill())
+        hover(drag, center("docs"))
+        settle()
+        assertColor("over a row again", Color.Black, headerFill())
+    }
+
+    @Test fun `a move of a row of the root is no more tinted on the header than on the blank area`() {
+        showOnBlack()
+        compose.mainClock.autoAdvance = false
+        val drag = row("README.md")
+        begin(drag)
+        hover(drag, header())
+        advance(1000)
+        settle()
+        assertColor("header", Color.Black, headerFill())
+        assertColor("blank area", Color.Black, blankFill())
+    }
+
+    @Test fun `the project folder, or a folder above it, dragged over the tree is tinted nowhere, however long it rests and whatever key is held`() {
+        showOnBlack()
+        compose.mainClock.autoAdvance = false
+        for (copy in listOf(false, true)) {
+            copyHeld = copy
+            for (dragged in listOf(ROOT, "/home/me")) {
+                val drag = entries(dragged)
+                begin(drag)
+                hover(drag, blank())
+                advance(1000)
+                settle()
+                assertColor("$dragged on the blank area, copy $copy", Color.Black, blankFill())
+                hover(drag, header())
+                advance(1000)
+                settle()
+                assertColor("$dragged on the header, copy $copy", Color.Black, headerFill())
+                dispatch(DragEvent.ACTION_DRAG_ENDED, drag)
+                settle()
+            }
+        }
+    }
+
     @Test fun `a drag that sweeps across the blank area flashes nothing`() {
         showOnBlack()
         compose.mainClock.autoAdvance = false

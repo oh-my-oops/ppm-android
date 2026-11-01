@@ -29,6 +29,18 @@ data class FileClipboard(val paths: List<String>, val operation: FileClipboardOp
 enum class FileMutationOperation { CREATE_FILE, CREATE_DIRECTORY, RENAME, DELETE, MOVE, COPY, WRITE }
 enum class FileMutationOutcome { SUCCEEDED, FAILED, PARTIAL }
 
+/**
+ * Which step of a Replace a failed transfer item stopped at, so a UI can say it in its own words (the web's `transfer()` titles them
+ * apart). Null for the copy or the move that simply failed, which is the usual case and has none.
+ */
+enum class FileTransferFailure {
+    /** The entry already there could not be removed (Trash first, then, with no Trash and the user's word, for good); nothing was written. */
+    EXISTING_NOT_REMOVED,
+
+    /** The entry already there is gone, and what should have replaced it could not be written. */
+    REPLACEMENT_NOT_WRITTEN,
+}
+
 /** Paths are relative when project is present, otherwise absolute; write follows its path's form. */
 data class FileMutationItem(
     val operation: FileMutationOperation,
@@ -40,6 +52,8 @@ data class FileMutationItem(
     val httpStatus: Int? = null,
     val code: String? = null,
     val transfer: FileTransferResult? = null,
+    /** Only on a failed MOVE or COPY of a Replace, and only when it failed at one of its steps; see [FileTransferFailure]. */
+    val transferFailure: FileTransferFailure? = null,
 )
 
 data class FileMutationReport(

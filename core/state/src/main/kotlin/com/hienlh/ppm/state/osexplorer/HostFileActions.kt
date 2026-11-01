@@ -16,6 +16,7 @@ import com.hienlh.ppm.state.files.FileMutationOperation
 import com.hienlh.ppm.state.files.FileMutationOutcome
 import com.hienlh.ppm.state.files.FileMutationReport
 import com.hienlh.ppm.state.files.FileMutations
+import com.hienlh.ppm.state.files.FileTransferFailure
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -42,6 +43,8 @@ data class HostFileActionResult(
     val skipped: List<String> = emptyList(),
     /** Trash refused these paths. UI may separately confirm a new delete(permanent = true). */
     val needsPermanent: List<String> = emptyList(),
+    /** What a [HostFileActions.transfer] or [HostFileActions.paste] did with its entries (a paste of a cut moves); null for anything else. */
+    val operation: HostTransferOperation? = null,
 ) {
     val failed: Int get() = report.failures.size
 }
@@ -123,7 +126,10 @@ class HostFileActions(
         return batch(prompts) { transferEntries(snapshot, destinationDirectory, operation, prompts) }
     }
 
-    /** CUT is consumed only after no failures, including skipped entries, and only if still the same clipboard. */
+    /**
+     * A CUT is consumed once nothing failed, and only if it is still the same clipboard. A skipped entry is not a failure, as in the
+     * web's `pasteInto`; one that was copied but whose source could not be removed ([FileMutationOutcome.PARTIAL]) is, there it is not.
+     */
     suspend fun paste(destinationDirectory: String, prompts: HostTransferPrompts = HostTransferPrompts()): HostFileActionResult {
         val clipboard = sharedFiles.state.value.clipboard
         return batch(prompts) {
@@ -175,8 +181,9 @@ class HostFileActions(
         val needsPermanent = mutableListOf<String>()
         var succeeded = 0
         var cancelled = false
+        var operation: HostTransferOperation? = null
         fun result() = HostFileActionResult(FileMutationReport(items.toList(), touched.toSet(), cancelled),
-            succeeded, skipped.toList(), needsPermanent.toList())
+            succeeded, skipped.toList(), needsPermanent.toList(), operation)
         fun record(item: FileMutationItem) {
             items += item
             mutable.value = mutable.value.copy(result = result())
@@ -185,10 +192,10 @@ class HostFileActions(
             skipped += path
             mutable.value = mutable.value.copy(result = result())
         }
-        fun failure(operation: FileMutationOperation, path: String, destination: String?, error: Exception, prefix: String = "") {
+        fun failure(operation: FileMutationOperation, path: String, destination: String?, error: Exception, step: FileTransferFailure? = null) {
             val server = error as? PpmError.Server
             record(FileMutationItem(operation, null, path, destination, FileMutationOutcome.FAILED,
-                prefix + (server?.hint ?: error.message ?: "File operation failed"), server?.status, server?.code))
+                server?.hint ?: error.message ?: "File operation failed", server?.status, server?.code, transferFailure = step))
         }
 
         suspend fun remove(path: String, permanent: Boolean, countAsSuccess: Boolean = false) {
@@ -201,6 +208,7 @@ class HostFileActions(
         }
 
         suspend fun transferEntries(paths: List<String>, directory: String, operation: HostTransferOperation, prompts: HostTransferPrompts) {
+            this.operation = operation
             touched += directory
             for (source in paths) {
                 currentCoroutineContext().ensureActive()
@@ -216,7 +224,8 @@ class HostFileActions(
             val sameDirectory = parent(source) == directory
             if (moving && sameDirectory) { skip(source); return }
             var destination = join(directory, name)
-            var removed = false
+            // Which step of a Replace a failure belongs to; null until there is one, and for every other way an item can fail.
+            var step: FileTransferFailure? = null
             try {
                 if (sameDirectory) {
                     destination = join(directory, freeName(directory, name) ?: throw IllegalStateException("No free name available"))
@@ -234,6 +243,7 @@ class HostFileActions(
                     HostCollisionChoice.KEEP_BOTH ->
                         destination = join(directory, freeName(directory, name) ?: throw IllegalStateException("No free name available"))
                     HostCollisionChoice.REPLACE -> {
+                        step = FileTransferFailure.EXISTING_NOT_REMOVED
                         try { remove(destination, permanent = false) }
                         catch (error: CancellationException) { throw error }
                         catch (error: Exception) {
@@ -241,15 +251,12 @@ class HostFileActions(
                             if (!prompts.confirmPermanentOverwrite(collision)) { skip(source); return }
                             remove(destination, permanent = true)
                         }
-                        removed = true
+                        step = FileTransferFailure.REPLACEMENT_NOT_WRITTEN
                     }
                 }
                 runTransfer(source, destination, moving)
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) {
-                failure(mutation, source, destination, error,
-                    if (removed) name + " was removed but the replacement could not be written: " else "")
-            }
+            catch (error: Exception) { failure(mutation, source, destination, error, step) }
         }
 
         suspend fun runTransfer(source: String, destination: String, moving: Boolean) {

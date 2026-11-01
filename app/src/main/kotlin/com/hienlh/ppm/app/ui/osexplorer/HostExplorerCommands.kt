@@ -29,6 +29,17 @@ internal class HostInlineEdit(val directory: String, val entry: HostFileEntry?, 
 }
 private fun HostToast.message() = ErrorToastMessage(title, description)
 
+/**
+ * What a finished transfer tells the user, one function for every surface that runs one, as the web's `transfer()` is: a toast for each
+ * item that did not go, in its words ([hostFailureToast]), and when [announce] one for what did, "Moved 2 items" ([hostTransferSuccessToast]).
+ * A window announces, as `pasteInto` and `transferInto` do. The project tree's blank area is silent about what went, as the web's
+ * `transferRunner` is, and so will the places and the breadcrumb be.
+ */
+internal fun reportTransfer(result: HostFileActionResult, announce: Boolean, toast: (ErrorToastMessage) -> Unit) {
+    result.report.failures.forEach { toast(hostFailureToast(it).message()) }
+    if (announce) hostTransferSuccessToast(result)?.let { toast(ErrorToastMessage(it.title, it.description, kind = ErrorToastMessage.Kind.SUCCESS)) }
+}
+
 @Composable
 internal fun rememberHostExplorerCommands(model: AppModel, session: ExplorerSession, platform: String?, separator: String): HostExplorerCommands? {
     val client = model.api ?: return null
@@ -83,8 +94,7 @@ internal class HostExplorerCommands(private val toast: (ErrorToastMessage) -> Un
         }
     }
     fun paste(directory: String = session.state.value.currentDirectory) = work {
-        val result = core.paste(directory, prompts())
-        report(result, "Pasted")
+        reportTransfer(core.paste(directory, prompts()), announce = true, toast)
     }
     fun trash(entries: List<HostFileEntry>) = remove(entries.map { it.path }, permanent = false)
     fun permanentlyDelete(entries: List<HostFileEntry>) = remove(entries.map { it.path }, permanent = true)
@@ -97,7 +107,7 @@ internal class HostExplorerCommands(private val toast: (ErrorToastMessage) -> Un
         }
     }
     fun transfer(paths: List<String>, directory: String, copy: Boolean) = work {
-        report(core.transfer(paths, directory, if (copy) HostTransferOperation.COPY else HostTransferOperation.MOVE, prompts()), if (copy) "Copied" else "Moved")
+        reportTransfer(core.transfer(paths, directory, if (copy) HostTransferOperation.COPY else HostTransferOperation.MOVE, prompts()), announce = true, toast)
     }
     fun prompts(): HostTransferPrompts = promptHost.prompts()
     private suspend fun confirmDelete(paths: List<String>, noTrash: Boolean): Boolean = promptHost.confirmDelete(paths, noTrash)

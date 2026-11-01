@@ -117,10 +117,17 @@ class ExplorerDragAutoScrollTest {
         assertEquals(16, movesIn(1))
     }
 
-    @Test fun `a pointer past the edge moves it at the full step`() {
+    @Test fun `a pointer outside the list moves nothing, above it or below, as the web's list hears only a drag over itself`() {
         show()
+        // In the middle of a long list, so that it can move both ways.
+        compose.runOnUiThread { runBlocking { list.scrollToItem(20) } }
         pointerAt(10f, area.bottom + 30f)
-        assertEquals(16, movesIn(1))
+        assertEquals(0, movesIn(3))
+        pointerAt(10f, area.top - 30f)
+        assertEquals(0, movesIn(3))
+        assertEquals(emptyList<Offset>(), rehits)
+        pointerAt(10f, area.bottom - 2f)
+        assertEquals("back on the list's edge it moves again", 16, movesIn(1))
     }
 
     @Test fun `in the middle of the list nothing moves`() {

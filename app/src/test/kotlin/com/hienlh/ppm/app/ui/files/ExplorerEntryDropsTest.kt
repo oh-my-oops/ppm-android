@@ -12,9 +12,6 @@ import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.protocol.WireJson
-import com.hienlh.ppm.state.files.FileMutationItem
-import com.hienlh.ppm.state.files.FileMutationOperation
-import com.hienlh.ppm.state.files.FileMutationOutcome
 import com.hienlh.ppm.state.files.FileMutationReport
 import com.hienlh.ppm.state.files.FileMutations
 import kotlinx.coroutines.CoroutineScope
@@ -30,7 +27,6 @@ import mockwebserver3.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -87,6 +83,21 @@ internal class ExplorerEntryDropsTest {
         }.toString()).build()
 
     private fun transferred(source: String, destination: String) = ok(buildJsonObject { put("source", source); put("destination", destination) }.toString())
+
+    private fun exists(path: String) = ok(buildJsonObject { put("path", path); put("kind", "file") }.toString())
+
+    /** A cross-device move that wrote the destination and could not remove the source. */
+    private fun copiedButNotRemoved(source: String, destination: String) = ok(buildJsonObject {
+        put("source", source); put("destination", destination); put("crossDevice", true); put("sourceRemoved", false)
+    }.toString())
+
+    /** A server on which every name is taken: a stat of any path finds it, and a move or a copy to the name it wanted is refused. */
+    private fun everyNameTaken() {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.target!!.startsWith("/api/fs/stat")) exists("/taken") else failure("EEXIST")
+        }
+    }
 
     private fun trashed(path: String, permanent: Boolean = false) =
         ok(buildJsonObject { put("removed", path); put("permanent", permanent); put("trashed", !permanent) }.toString())
@@ -382,12 +393,89 @@ internal class ExplorerEntryDropsTest {
         assertEquals(setOf("C:\\p", "C:\\p\\src"), changes.single().affectedDirectories)
     }
 
-    @Test fun `the toast names the last part of the path, whichever separator the host uses`() {
-        fun item(path: String) = FileMutationItem(FileMutationOperation.MOVE, null, path, null, FileMutationOutcome.FAILED, "Permission denied")
-        assertEquals("Move failed: app.kt", explorerDropFailureToast(item("/home/me/p/src/app.kt"), copy = false).title)
-        assertEquals("Move failed: app.kt", explorerDropFailureToast(item("C:\\p\\src\\app.kt"), copy = false).title)
-        assertEquals("Copy failed: src", explorerDropFailureToast(item("/home/me/p/src/"), copy = true).title)
-        assertEquals("Permission denied", explorerDropFailureToast(item("/a"), copy = false).description)
-        assertNull(explorerDropFailureToast(item("/a").copy(error = null), copy = false).description)
+    @Test fun `a Replace whose Trash step is refused writes nothing, and says it could not remove the existing one`() {
+        enqueue(failure("EEXIST"), failure("EACCES", 403, "Check host permissions"))
+        show()
+        assertTrue(drop("src/app.kt"))
+        waitFor(TAKEN)
+        click("Replace")
+        waitUntilDone()
+        val toast = toasts.single()
+        assertEquals("Could not remove existing app.kt", toast.title)
+        assertEquals("Check host permissions", toast.description)
+        assertEquals(ErrorToastMessage.Kind.ERROR, toast.kind)
+        assertEquals("the move and the Trash, and nothing written over what could not be removed", 2, server.requestCount)
+    }
+
+    @Test fun `a Replace that removed the existing one and could not write the replacement says that as its title`() {
+        enqueue(failure("EEXIST"), trashed("$ROOT/app.kt"), failure("EACCES", 403, "Check host permissions"))
+        show()
+        assertTrue(drop("src/app.kt"))
+        waitFor(TAKEN)
+        click("Replace")
+        waitUntilDone()
+        val toast = toasts.single()
+        assertEquals("app.kt was removed but the replacement could not be written", toast.title)
+        assertEquals("what the server said, with nothing glued in front of it", "Check host permissions", toast.description)
+        assertEquals(ErrorToastMessage.Kind.ERROR, toast.kind)
+    }
+
+    @Test fun `on a host with no Trash, a delete for good that is refused is the same toast as a Trash that is`() {
+        enqueue(failure("EEXIST"), failure("NO_TRASH", 400), failure("EACCES", 403, "Check host permissions"))
+        show()
+        assertTrue(drop("src/app.kt"))
+        waitFor(TAKEN)
+        click("Replace")
+        waitFor("This host has no Trash")
+        click("Delete permanently")
+        waitUntilDone()
+        assertEquals("Could not remove existing app.kt", toasts.single().title)
+        assertEquals("Check host permissions", toasts.single().description)
+        assertEquals("the move, the Trash, the delete for good, and no write", 3, server.requestCount)
+    }
+
+    @Test fun `Keep both with no name left to give is a Move failed toast that says so`() {
+        everyNameTaken()
+        show()
+        assertTrue(drop("src/app.kt"))
+        waitFor(TAKEN)
+        click("Keep both")
+        waitUntilDone()
+        assertEquals("Move failed: app.kt", toasts.single().title)
+        assertEquals("No free name available", toasts.single().description)
+    }
+
+    @Test fun `a copy into the folder it is in, with no name left to give, is a Copy failed toast that says so`() {
+        copyHeld = true
+        everyNameTaken()
+        show()
+        assertTrue(drop("README.md"))
+        waitUntilDone()
+        assertEquals("Copy failed: README.md", toasts.single().title)
+        assertEquals("No free name available", toasts.single().description)
+    }
+
+    @Test fun `a move that copied the row but could not remove it is reported, which the web calls a success`() {
+        enqueue(copiedButNotRemoved("$ROOT/src/app.kt", "$ROOT/app.kt"))
+        show()
+        assertTrue(drop("src/app.kt"))
+        waitUntilDone()
+        val toast = toasts.single()
+        assertEquals("Move failed: app.kt", toast.title)
+        assertEquals("Copied to $ROOT/app.kt, but the source was not removed.", toast.description)
+        assertEquals(ErrorToastMessage.Kind.ERROR, toast.kind)
+    }
+
+    @Test fun `every row that fails has its own toast, in the order they were dropped, and what went is not announced`() {
+        enqueue(
+            failure("EACCES", 403, "Check host permissions"), failure("ENOSPC", 507, "Disk full"),
+            transferred("$ROOT/docs/guide.md", "$ROOT/guide.md"),
+        )
+        show()
+        assertTrue(drop("src/app.kt", "src/main.kt", "docs/guide.md"))
+        waitUntilDone()
+        assertEquals(listOf("Move failed: app.kt", "Move failed: main.kt"), toasts.map { it.title })
+        assertEquals(listOf("Check host permissions", "Disk full"), toasts.map { it.description })
+        assertEquals("nothing says that guide.md went, as the web's tree does not", listOf(ErrorToastMessage.Kind.ERROR, ErrorToastMessage.Kind.ERROR), toasts.map { it.kind })
     }
 }

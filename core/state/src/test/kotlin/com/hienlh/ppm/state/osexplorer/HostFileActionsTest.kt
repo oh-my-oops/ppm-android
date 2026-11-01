@@ -7,6 +7,7 @@ import com.hienlh.ppm.state.files.FileMutationOperation
 import com.hienlh.ppm.state.files.FileMutationOutcome
 import com.hienlh.ppm.state.files.FileMutationReport
 import com.hienlh.ppm.state.files.FileMutations
+import com.hienlh.ppm.state.files.FileTransferFailure
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -109,6 +110,7 @@ class HostFileActionsTest {
         val result = c.actions.transfer(listOf("/d/archive.tar.gz"), "/d", HostTransferOperation.COPY)
         assertEquals(1, result.failed)
         assertEquals("No free name available", result.report.failures.single().error)
+        assertNull("a copy that has no name to go to is not a step of a Replace", result.report.failures.single().transferFailure)
         assertEquals(99, c.server.requestCount) // Previous dotfile check + 98 numbered candidates.
         assertEquals("/api/fs/stat?path=%2Fd%2Farchive.tar%20%282%29.gz", request(c.server).target)
         repeat(96) { request(c.server) }
@@ -140,12 +142,97 @@ class HostFileActionsTest {
         assertTrue(result.report.partial)
         assertEquals(FileMutationOperation.DELETE, result.report.changed.single().operation)
         assertEquals("/dst/a", result.report.changed.single().path)
-        assertEquals("a was removed but the replacement could not be written: Check host permissions", result.report.failures.single().error)
+        val failure = result.report.failures.single()
+        assertEquals("the reason alone: the words over it are the UI's", "Check host permissions", failure.error)
+        assertEquals(FileTransferFailure.REPLACEMENT_NOT_WRITTEN, failure.transferFailure)
         assertEquals(0, result.succeeded)
         assertRequest(c.server, "POST", "/api/fs/copy", """{"source":"/src/a","destination":"/dst/a"}""")
         assertRequest(c.server, "DELETE", "/api/fs/delete", """{"path":"/dst/a","permanent":false}""")
         assertRequest(c.server, "POST", "/api/fs/copy", """{"source":"/src/a","destination":"/dst/a"}""")
         assertEquals(result.report, c.changes.single())
+    }
+
+    @Test fun replaceThatCannotRemoveWhatIsThereWritesNothingAndIsRecordedAsThat() = withActions { c ->
+        c.server.enqueue(error("EEXIST")); c.server.enqueue(error("EACCES", 403, "Check host permissions"))
+        val result = c.actions.transfer(listOf("/src/a"), "/dst", HostTransferOperation.MOVE,
+            HostTransferPrompts(resolveCollision = { HostCollisionChoice.REPLACE }))
+        val failure = result.report.failures.single()
+        assertEquals(FileTransferFailure.EXISTING_NOT_REMOVED, failure.transferFailure)
+        assertEquals("Check host permissions", failure.error)
+        assertEquals(FileMutationOperation.MOVE, failure.operation)
+        assertEquals("/src/a", failure.path)
+        assertEquals(FileMutationOutcome.FAILED, failure.outcome)
+        assertEquals("nothing was removed, so nothing changed", emptyList<Any>(), result.report.changed)
+        assertEquals(0, result.succeeded)
+        assertEquals("the move, then the Trash, and no write over what could not be removed", 2, c.server.requestCount)
+    }
+
+    @Test fun aPermanentRemovalThatFailsAfterNoTrashIsRecordedAsNotRemovedToo() = withActions { c ->
+        c.server.enqueue(error("EEXIST")); c.server.enqueue(error("NO_TRASH")); c.server.enqueue(error("EACCES", 403, "Check host permissions"))
+        val result = c.actions.transfer(listOf("/src/a"), "/dst", HostTransferOperation.COPY, HostTransferPrompts(
+            resolveCollision = { HostCollisionChoice.REPLACE }, confirmPermanentOverwrite = { true },
+        ))
+        val failure = result.report.failures.single()
+        assertEquals(FileTransferFailure.EXISTING_NOT_REMOVED, failure.transferFailure)
+        assertEquals("Check host permissions", failure.error)
+        assertEquals("the copy, the Trash, the delete for good, and nothing after it", 3, c.server.requestCount)
+    }
+
+    @Test fun anyOtherRefusalOfTheTrashStepIsNotRemovedToo() = withActions { c ->
+        // Only NO_TRASH asks for the user's word; a refusal with any other code ends the item.
+        c.server.enqueue(error("EEXIST")); c.server.enqueue(error("EPROTECTED", 403))
+        val result = c.actions.transfer(listOf("/src/a"), "/dst", HostTransferOperation.COPY, HostTransferPrompts(
+            resolveCollision = { HostCollisionChoice.REPLACE }, confirmPermanentOverwrite = { fail("only NO_TRASH is asked about"); true },
+        ))
+        assertEquals(FileTransferFailure.EXISTING_NOT_REMOVED, result.report.failures.single().transferFailure)
+        assertEquals("EPROTECTED", result.report.failures.single().code)
+    }
+
+    @Test fun aFailureThatIsNotAStepOfAReplaceHasNoStep() = withActions { c ->
+        c.server.enqueue(error("EACCES", 403, "Check host permissions"))
+        val ordinary = c.actions.transfer(listOf("/src/a"), "/dst", HostTransferOperation.COPY)
+        assertNull(ordinary.report.failures.single().transferFailure)
+        assertEquals("Check host permissions", ordinary.report.failures.single().error)
+
+        // Keep both, with every name it could go to taken.
+        c.server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.target!!.startsWith("/api/fs/stat")) exists("/occupied") else error("EEXIST")
+        }
+        val full = c.actions.transfer(listOf("/src/b"), "/dst", HostTransferOperation.MOVE,
+            HostTransferPrompts(resolveCollision = { HostCollisionChoice.KEEP_BOTH }))
+        assertNull(full.report.failures.single().transferFailure)
+        assertEquals("No free name available", full.report.failures.single().error)
+    }
+
+    @Test fun aMoveThatCopiedButCouldNotRemoveItsSourceHasNoStepAndStaysPartial() = withActions { c ->
+        c.server.enqueue(transfer("/src/a", "/dst/a", removed = false))
+        val result = c.actions.transfer(listOf("/src/a"), "/dst", HostTransferOperation.MOVE)
+        val item = result.report.items.single()
+        assertEquals(FileMutationOutcome.PARTIAL, item.outcome)
+        assertNull(item.transferFailure)
+        assertEquals("Copied to /dst/a, but the source was not removed.", item.error)
+        assertEquals(0, result.succeeded)
+    }
+
+    @Test fun theResultSaysWhichTransferItWas() = withActions { c ->
+        c.server.enqueue(transfer("/src/a", "/dst/a")); c.server.enqueue(transfer("/src/b", "/dst/b"))
+        assertEquals(HostTransferOperation.MOVE, c.actions.transfer(listOf("/src/a"), "/dst", HostTransferOperation.MOVE).operation)
+        assertEquals(HostTransferOperation.COPY, c.actions.transfer(listOf("/src/b"), "/dst", HostTransferOperation.COPY).operation)
+
+        c.actions.setClipboard(listOf("/src/c"), FileClipboardOperation.CUT)
+        c.server.enqueue(transfer("/src/c", "/dst/c"))
+        assertEquals("a paste of a cut moves", HostTransferOperation.MOVE, c.actions.paste("/dst").operation)
+        c.actions.setClipboard(listOf("/src/d"), FileClipboardOperation.COPY)
+        c.server.enqueue(transfer("/src/d", "/dst/d"))
+        assertEquals("a paste of a copy copies", HostTransferOperation.COPY, c.actions.paste("/dst").operation)
+    }
+
+    @Test fun anythingThatIsNotATransferHasNoOperation() = withActions { c ->
+        c.server.enqueue(ok()); c.server.enqueue(removed("/d/a"))
+        assertNull(c.actions.create("/d", "a.txt").operation)
+        assertNull(c.actions.delete(listOf("/d/a")).operation)
+        assertNull("nothing on the clipboard", c.actions.paste("/dst").operation)
     }
 
     @Test fun noTrashReplaceRequiresSeparateConfirmationAndCanBeDeclined() = withActions { c ->

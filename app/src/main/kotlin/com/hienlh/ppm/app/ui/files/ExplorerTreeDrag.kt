@@ -36,6 +36,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.rememberTextMeasurer
 import com.hienlh.ppm.app.DragModifierKeys
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.state.osexplorer.EntryDropDecision
+import com.hienlh.ppm.state.osexplorer.decideEntryDrop
 import com.hienlh.ppm.state.workspace.absoluteProjectPath
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -99,11 +101,14 @@ internal fun explorerDragLabel(drag: ExplorerRowDrag): String {
 }
 
 /**
- * The web's `decideDrop` for a drop on the project folder: a move of rows that are all in it already changes nothing, so it is refused,
- * and a copy of them is not (it makes `name (2)`, as every OS does). Self and descendants cannot be asked of the folder every
- * dragged path is under.
+ * The web's `decideDrop` for a drop on the project folder [root], which [ExplorerEntryDrops] takes on the tree's blank area and on its header:
+ * whether [drag] let go there now, with [copy] as Ctrl or Alt hold it, would be taken. The drag's paths are compared as the web
+ * compares them, absolute and normalised. A move of rows that are all in the folder already changes nothing, so it is refused, and a
+ * copy of them is not (it makes `name (2)`, as every OS does). So is a drag that holds the folder itself or one above it, which would
+ * go into itself: from the tree's own rows (all under the folder) it never happens, from a window's entries it can.
  */
-internal fun explorerRootDropTaken(drag: ExplorerRowDrag, copy: Boolean): Boolean = copy || drag.paths.any { '/' in it }
+internal fun explorerRootDropTaken(drag: ExplorerRowDrag, copy: Boolean, root: String): Boolean =
+    decideEntryDrop(drag.absolutePaths, root, copy) is EntryDropDecision.Accept
 
 /**
  * Only a mouse's primary button drags a row. The web gives a coarse pointer no drag at all, a long press is the menu,
@@ -266,11 +271,11 @@ internal fun explorerRootTint(over: ExplorerDragOver, takes: (ExplorerRowDrag) -
 }
 
 /**
- * Dp to scroll in a frame for a pointer at [pointer] over [area]: 0 with no pointer or no area. [area] is read inside a
- * `snapshotFlow`, so it has to be state.
+ * Dp to scroll in a frame for a pointer at [pointer] over [area]: 0 with no pointer or no area, and 0 for a pointer outside it, over
+ * the header above the list, as the web's list hears only a drag over itself. [area] is read inside a `snapshotFlow`, so it has to be state.
  */
 internal fun explorerPointerScrollStep(pointer: Offset, area: Rect?, density: Float): Int {
-    if (pointer == Offset.Unspecified || area == null) return 0
+    if (pointer == Offset.Unspecified || area == null || pointer.y < area.top || pointer.y > area.bottom) return 0
     return explorerAutoScrollStep((pointer.y - area.top) / density.toDouble(), (area.bottom - pointer.y) / density.toDouble())
 }
 

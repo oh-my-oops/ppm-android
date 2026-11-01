@@ -91,9 +91,10 @@ fun ExplorerTree(
     val dragOver = remember(tree, state.project) { ExplorerDragOver() }
     val listArea = remember { mutableStateOf<Rect?>(null) }
     // What a dragged row is over at [at] (root pixels), asked of the list's own layout each time because the rows scroll under a held pointer.
+    // A point above the list, over the header, is the project folder, though the first row, scrolled half out of sight, is laid out above it.
     fun siteAt(drag: ExplorerRowDrag, at: Offset): ExplorerDropSite {
         val y = at.y - (listArea.value?.top ?: 0f)
-        val item = list.layoutInfo.visibleItemsInfo.firstOrNull { y >= it.offset && y < it.offset + it.size }
+        val item = if (y < 0f) null else list.layoutInfo.visibleItemsInfo.firstOrNull { y >= it.offset && y < it.offset + it.size }
         val node = (item?.let { displayRows.getOrNull(it.index) } as? ExplorerDisplayRow.Node)?.row?.node
             ?: return ExplorerDropSite(drag, ROOT_DROP_KEY, "", collapsedFolder = false)
         return ExplorerDropSite(
@@ -135,9 +136,11 @@ fun ExplorerTree(
     fun drop(drag: ExplorerRowDrag, site: ExplorerDropSite): Boolean =
         if (site.key == ROOT_DROP_KEY) commands != null && entryDrops?.dropOnRoot(drag) == true
         else commands?.let { session.move(drag.path, site.directory, it) } != null
-    // `bg-primary/5` over the whole tree, its header too, as the web tints its container, while a drag is over its blank area.
+    // The web's root target is the container, header and all (file-tree.tsx puts `backgroundDrop` and `bg-primary/5` on the div that wraps
+    // SidebarHeader), so the whole tree is the drop target and a point above the list is the project folder, as one under the rows is.
     Column(modifier.fillMaxSize().explorerMutationKeys(tree, session, commands)
-        .then(if (rootTint) Modifier.background(LocalPpmTokens.current.accent.opacity(0.05).color) else Modifier)) {
+        .then(if (rootTint) Modifier.background(LocalPpmTokens.current.accent.opacity(0.05).color) else Modifier)
+        .explorerMoveTarget(dragOver, state.project.orEmpty(), commands != null && !busy, ::siteAt, ::drop)) {
         ExplorerMutationToolbar(
             hasProject = state.project != null,
             busy = busy,
@@ -171,7 +174,6 @@ fun ExplorerTree(
         if (mutationState.pasting) ExplorerNote("Pasting files…")
         mutationState.error?.let { error -> ExplorerError(error, retryLabel = "Dismiss", onRetry = session::clearError) }
         Box(Modifier.weight(1f).fillMaxWidth().then(dropModifier(""))
-            .explorerMoveTarget(dragOver, state.project.orEmpty(), commands != null && !busy, ::siteAt, ::drop)
             .onGloballyPositioned { listArea.value = it.boundsInRoot() }
             .explorerContextGesture(
             onMenu = { rootMenu = it },
