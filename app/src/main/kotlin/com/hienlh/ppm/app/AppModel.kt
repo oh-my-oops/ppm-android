@@ -537,11 +537,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     /** The skin every window wears (use-explorer-skin.ts): the one picked, else Windows' on a Windows server, macOS' on any other. */
     val windowsSkin: Boolean
-        get() = when (explorerSkin) {
-            "windows" -> true
-            "macos" -> false
-            else -> hostPlatform == "win32"
-        }
+        get() = com.hienlh.ppm.state.osexplorer.explorerSkinIsWindows(explorerSkin, hostPlatform)
 
     /** The open server's floating windows (the web's `useWindowStore`), drawn on a tablet only. */
     var windows by mutableStateOf<WindowStore?>(null)

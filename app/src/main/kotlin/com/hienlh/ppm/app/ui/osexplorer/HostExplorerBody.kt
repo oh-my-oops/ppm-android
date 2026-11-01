@@ -74,7 +74,7 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
     }
     DisposableEffect(session) { onDispose { session.hide() } }
     val mobile = LocalPpmMobile.current
-    val windows = model.explorerSkin?.let { it == "windows" } ?: (host.host?.platform == "win32")
+    val windows = model.windowsSkin
     val tokens = LocalPpmTokens.current
     val context = androidx.compose.ui.platform.LocalContext.current
     val systemClipboard = remember(context) { context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager }
