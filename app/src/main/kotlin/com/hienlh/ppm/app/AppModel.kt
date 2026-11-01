@@ -230,7 +230,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     fun terminal(tab: WorkspaceTab): com.hienlh.ppm.terminal.NativeTerminal? {
         terminals[tab.id]?.let { return it }
         val client = api ?: return null
-        val project = tab.projectId ?: tab.metaString("projectName") ?: selectedProject ?: return null
+        // No project at all is named "", as the web names it (`projectName ?? ""`): the server starts that shell in the host's home folder.
+        val project = tab.projectId ?: tab.metaString("projectName") ?: selectedProject ?: ""
         return com.hienlh.ppm.terminal.NativeTerminal(
             client, project, tab.id, scope, prefs, "terminal.$serverKey.", tab.metaString("cwd"),
             initialSessionId = tab.metaString("sessionId") ?: "new",
@@ -247,15 +248,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         knownTerminalIds = live
     }
 
+    /** A shell in the open project, or in none: the web opens it all the same, with no project on the tab. */
     fun openTerminal(cwd: String? = null, inDock: Boolean = wide) {
-        val project = selectedProject ?: return
-        withWorkspace { store ->
-            val tab = NewTab(type = "terminal", title = "Terminal", projectId = project, metadata = buildJsonObject {
-                put("projectName", project)
-                cwd?.let { put("cwd", it) }
-            })
-            if (inDock) store.openInDock(tab) else store.openTab(tab)
-        }
+        val tab = terminalTab(selectedProject, cwd)
+        withWorkspace { store -> if (inDock) store.openInDock(tab) else store.openTab(tab) }
     }
 
     internal fun terminalCommandTaken(tabId: String) = patchTabMetadata(tabId, "pendingCommand" to null)
@@ -284,6 +280,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     /** Put terminal text into an editable chat draft; never submit it automatically. */
     fun terminalToChat(text: String, label: String = "Terminal output", project: String? = selectedProject, newTab: Boolean = false, asContext: Boolean = false) {
+        // A shell opened with no project is named "" (see [terminal]): its text goes to any chat, as the web's `sendToChat` with no `projectName`.
+        if (project != null && project.isEmpty()) return terminalToChat(text, label, null, newTab, asContext)
         if (project != null && project != selectedProject) {
             scope.launch { openProject(project) { terminalToChat(text, label, project, newTab, asContext) } }
             return
@@ -2084,10 +2082,14 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         for (open in waiting) open(store)
     }
 
-    /** Runs [open] on the selected project's layout: a tab opened before it is shown would land in no project's. */
+    /**
+     * Runs [open] on the selected project's layout: a tab opened before it is shown would land in no
+     * project's. With no project selected it runs at once, on the layout that has no project: Settings,
+     * a terminal and a host's file open there as they do on the web.
+     */
     private fun withWorkspace(open: (WorkspaceStore) -> Unit) {
         val store = workspace ?: return
-        if (selectedProject != null && store.state.value.currentProject == selectedProject) open(store) else waitingForWorkspace += open
+        if (store.state.value.currentProject == selectedProject) open(store) else waitingForWorkspace += open
     }
 
     /** Back in front: another device may have changed this project's tabs meanwhile (the web reads them on every load). */
@@ -3081,6 +3083,20 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     }
 
 }
+
+/**
+ * A terminal tab as the web opens one (`openTab`, `openTerminalAt`): the project it belongs to on the
+ * tab and in its metadata, neither when there is none, and a start folder when one was asked for.
+ */
+internal fun terminalTab(project: String?, cwd: String?) = NewTab(
+    type = "terminal",
+    title = "Terminal",
+    projectId = project,
+    metadata = buildJsonObject {
+        project?.let { put("projectName", it) }
+        cwd?.let { put("cwd", it) }
+    },
+)
 
 private val DOCK_POSITIONS = setOf("bottom", "left", "right")
 

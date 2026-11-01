@@ -75,13 +75,7 @@ class KeyboardShortcuts(private val model: AppModel) {
 
     /** What this app runs, for the system's list of shortcuts (Meta + /), with the keys set in Settings. */
     fun groups(): List<KeyboardShortcutGroup> {
-        val ids = buildList {
-            add("command-palette")
-            if (model.wide) addAll(listOf("toggle-sidebar", "toggle-dock"))
-            addAll(listOf("next-tab", "prev-tab", "open-chat", "open-settings", "voice-input", "chat-nav-prev", "chat-nav-next"))
-            for (n in 1..minOf(9, model.projects.size)) add("switch-project-$n")
-        }
-        val items = ids.mapNotNull { id ->
+        val items = shortcutActionIds(model.wide, model.projects.size).mapNotNull { id ->
             val label = KEY_ACTIONS.first { it.id == id }.label
             model.keyBindings.binding(id).takeIf { it.isNotEmpty() }?.let { shortcutInfo(label, KeyCombo.parse(it)) }
         }
@@ -133,6 +127,18 @@ class KeyboardShortcuts(private val model: AppModel) {
         model.jumpInChat(direction)
         return true
     }
+}
+
+/**
+ * The actions this app runs that the system's list names, in the web's catalog order
+ * (`KEY_ACTIONS`). One with no key set is left out of the list, as "Open Terminal Tab" is until
+ * Settings gives it a key: the web ships it without one.
+ */
+internal fun shortcutActionIds(wide: Boolean, projectCount: Int): List<String> = buildList {
+    add("command-palette")
+    if (wide) addAll(listOf("toggle-sidebar", "toggle-dock"))
+    addAll(listOf("next-tab", "prev-tab", "open-chat", "open-terminal", "open-settings", "voice-input", "chat-nav-prev", "chat-nav-next"))
+    for (n in 1..minOf(9, projectCount)) add("switch-project-$n")
 }
 
 /** `KeyboardEvent.key` for an Android key: the name of one that types nothing, else what it types with Shift alone. */
