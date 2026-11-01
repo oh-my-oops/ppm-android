@@ -141,10 +141,16 @@ internal class ImeRig {
         private set
     private var restartPending = true
 
+    /** What the view told the IME about the editor's selection, each as start, end, composing start, composing end. */
+    val reports = mutableListOf<List<Int>>()
+
+    /** What the view posted to end its editor: no looper runs it for a view with no window, [settle] does. */
+    private var pendingDetach: Runnable? = null
+
     private var lastInfo = EditorInfo()
 
     /** What the view told the IME about its editor the last time the IME connected. */
-    val info: EditorInfo get() { ime; return lastInfo }
+    val info: EditorInfo get() { imeOrNull; return lastInfo }
     private val emulator: TerminalEmulatorImpl = mock(TerminalEmulatorImpl::class.java).also {
         doAnswer { pty.character(it.getArgument(0), it.getArgument(1)) }.`when`(it).dispatchCharacter(anyInt(), anyInt())
         doAnswer { pty.key(it.getArgument(0), it.getArgument(1)) }.`when`(it).dispatchKey(anyInt(), anyInt())
@@ -171,25 +177,35 @@ internal class ImeRig {
     }
     val view = ImeInputView(
         RuntimeEnvironment.getApplication(), keyboard,
-        onUpdateSelection = { _, _, _, _, _ -> },
+        onUpdateSelection = { _, start, end, from, to -> reports += listOf(start, end, from, to) },
         onRestartInput = { restarts++; restartPending = true },
     ).also {
         it.imeMode = TerminalImeMode.CommittedText
         it.onImePreeditChanged = { text -> preedit = text }
+        it.postDetach = { post -> pendingDetach = post }
     }
     private var current: InputConnection? = null
 
     /**
-     * The IME's connection. A view that asked for a restart gets a new one on the IME's next call, as
-     * `InputMethodManager.restartInput` makes the IME reconnect; otherwise the IME keeps its own.
+     * The IME's connection, null when the view told it there is no editor. A view that asked for a restart gets a
+     * new one on the IME's next call, as `InputMethodManager.restartInput` makes the IME reconnect; otherwise the
+     * IME keeps its own.
      */
-    val ime: InputConnection get() {
+    val imeOrNull: InputConnection? get() {
         if (restartPending || current == null) {
             restartPending = false
             lastInfo = EditorInfo()
             current = view.onCreateInputConnection(lastInfo)
         }
-        return current!!
+        return current
+    }
+
+    /** The IME's connection, for a test that expects one. */
+    val ime: InputConnection get() = imeOrNull!!
+
+    /** Lets what the view posted run, as the main looper does once the focus has had its chance to move on. */
+    fun settle() {
+        pendingDetach?.also { pendingDetach = null }?.run()
     }
 
     /** The IME's idea of the text before the caret — what Gboard reads to decide a Telex revision. */

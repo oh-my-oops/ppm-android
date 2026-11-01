@@ -1,7 +1,9 @@
 package org.connectbot.terminal
 
+import android.view.inputmethod.EditorInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -19,6 +21,11 @@ import org.robolectric.annotation.Config
  * gains the focus when it is *another* one (`checkFocusInternalLocked`: served view equals next served view
  * means nothing to do), so the IME keeps typing into the ended editor until the view asks it to start over.
  * The rig models exactly that: the IME holds its connection until the view calls `restartInput`.
+ *
+ * Then a hardware key pressed with nothing focused reaches Gboard through the same attachment, with no
+ * editor behind it, and Gboard goes on composing the word: the next editor inherits it, soft taps add to it and
+ * no byte reaches the shell. Chrome tells the IME that a blurred textarea is no editor at all (no connection,
+ * `TYPE_NULL`), which drops the word with the session, so the view does the same once the focus has stayed away.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -44,16 +51,68 @@ class FocusImeTest {
         assertEquals("ab", rig.pty.line)
     }
 
-    @Test fun `the IME is asked to start over when the focus comes back to a view whose editor ended with it, and not before`() {
+    @Test fun `the IME is asked to start over once the focus has stayed away, and again when it comes back`() {
         rig.view.requestFocus()
         rig.ime
         assertEquals("the first focus finds nothing to replace", 0, rig.restarts)
 
         rig.view.clearFocus()
-        assertEquals("a view with no focus must not pull the IME back to itself", 0, rig.restarts)
+        assertEquals("the focus may be going to another view, which the IME starts a connection for itself", 0, rig.restarts)
+
+        rig.settle()
+        assertEquals("nothing took it: the IME is told there is no editor", 1, rig.restarts)
 
         rig.view.requestFocus()
-        assertEquals(1, rig.restarts)
+        assertEquals("and it is asked for a new one when the focus is back", 2, rig.restarts)
+    }
+
+    @Test fun `once nothing took the focus the IME is told there is no editor, as Chrome tells it for a blurred textarea`() {
+        rig.view.requestFocus()
+        assertTrue(rig.ime.commitText("a", 1))
+
+        rig.view.clearFocus()
+        rig.settle()
+
+        assertNull("nothing to type into", rig.imeOrNull)
+        assertEquals(EditorInfo.TYPE_NULL, rig.info.inputType)
+    }
+
+    @Test fun `the focus coming back before the IME was told leaves it one restart, for the new editor`() {
+        rig.view.requestFocus()
+        rig.ime
+
+        rig.view.clearFocus()
+        rig.view.requestFocus()
+        rig.settle()
+
+        assertEquals("what was posted finds the focus back and does nothing", 1, rig.restarts)
+        assertTrue(rig.ime.commitText("b", 1))
+        assertEquals("b", rig.pty.line)
+    }
+
+    @Test fun `a view that lost the focus before the IME ever connected gets an editor when it comes back`() {
+        rig.view.requestFocus()
+        rig.view.clearFocus()
+        rig.settle()
+        assertNull(rig.imeOrNull)
+
+        rig.view.requestFocus()
+
+        assertTrue("the IME is not left with no editor", rig.ime.commitText("a", 1))
+        assertEquals("a", rig.pty.line)
+    }
+
+    @Test fun `the editor after a blur starts empty, and the IME is told the caret moved and came back so it drops a word it still composes`() {
+        rig.view.requestFocus()
+        assertTrue(rig.ime.setComposingText("tiê", 1))
+        rig.view.clearFocus()
+        rig.settle()
+        rig.reports.clear()
+
+        rig.view.requestFocus()
+
+        assertEquals(listOf(listOf(1, 1, -1, -1), listOf(0, 0, -1, -1)), rig.reports)
+        assertEquals("", rig.imeContext)
     }
 
     @Test fun `a tap on a terminal that kept its focus leaves the word being composed alone`() {

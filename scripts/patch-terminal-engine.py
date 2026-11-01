@@ -216,8 +216,8 @@ def terminal(text):
     text = replace(text, "import androidx.compose.ui.layout.onSizeChanged", "import androidx.compose.ui.layout.LayoutCoordinates\nimport androidx.compose.ui.layout.onGloballyPositioned\nimport androidx.compose.ui.geometry.Rect\nimport androidx.compose.ui.layout.onSizeChanged")
     # Append options to preserve existing positional Kotlin calls.
     signature = "    onPageGesture: ((Int) -> Unit)? = null,\n) {"
-    text = replace(text, signature, "    onPageGesture: ((Int) -> Unit)? = null,\n    cursorColor: Color = Color.Unspecified,\n    cursorAccent: Color = Color.Unspecified,\n    minimumContrastRatio: Double = 4.5,\n    onCursorBoundsChanged: ((Rect?) -> Unit)? = null,\n    selectionActions: (@Composable (SelectionController) -> Unit)? = null,\n) {\n    require(minimumContrastRatio.isFinite() && minimumContrastRatio in 1.0..21.0)", 2)
-    text = replace(text, "        onPageGesture = onPageGesture,", "        onPageGesture = onPageGesture,\n        cursorColor = cursorColor, cursorAccent = cursorAccent, minimumContrastRatio = minimumContrastRatio,\n        onCursorBoundsChanged = onCursorBoundsChanged,\n        selectionActions = selectionActions,")
+    text = replace(text, signature, "    onPageGesture: ((Int) -> Unit)? = null,\n    cursorColor: Color = Color.Unspecified,\n    cursorAccent: Color = Color.Unspecified,\n    minimumContrastRatio: Double = 4.5,\n    onCursorBoundsChanged: ((Rect?) -> Unit)? = null,\n    selectionActions: (@Composable (SelectionController) -> Unit)? = null,\n    touchSelect: Boolean = false,\n) {\n    require(minimumContrastRatio.isFinite() && minimumContrastRatio in 1.0..21.0)", 2)
+    text = replace(text, "        onPageGesture = onPageGesture,", "        onPageGesture = onPageGesture,\n        cursorColor = cursorColor, cursorAccent = cursorAccent, minimumContrastRatio = minimumContrastRatio,\n        onCursorBoundsChanged = onCursorBoundsChanged,\n        selectionActions = selectionActions,\n        touchSelect = touchSelect,")
     text = replace(text, "remember(typeface, calculatedFontSize, density)", "remember(typeface, calculatedFontSize, density, minimumContrastRatio)")
     text = replace(text, "TerminalTextPaint(typeface, with(density) { calculatedFontSize.toPx() })", "TerminalTextPaint(typeface, with(density) { calculatedFontSize.toPx() }, minimumContrastRatio)")
     marker = "    LaunchedEffect(terminalEmulator, baseCharWidth, baseCharHeight) {\n        terminalEmulator.commands.execute {"
@@ -295,7 +295,7 @@ def terminal(text):
 """
     text = replace(text, marker, addition + marker)
     text = replace(text, "                selectionBackgroundColor.takeUnless { it == Color.Unspecified } ?: Color(0xFFB3D7FF)", "                (selectionBackgroundColor.takeUnless { it == Color.Unspecified } ?: Color(0xFFB3D7FF))\n                    .compositeOver(if (cells.flags(col) and 32 != 0) cells.foreground(col) else cells.background(col))")
-    return tap_asks_for_focus(text)
+    return touch_select(tap_asks_for_focus(text))
 
 
 def tap_asks_for_focus(text):
@@ -326,6 +326,38 @@ def tap_asks_for_focus(text):
                                 // Record tap for double-tap detection
 """
     return replace(text, old, new)
+
+
+def touch_select(text):
+    # Select mode, as the web's useTerminalTouchSelection does it: a one-finger drag is a selection from the cell the
+    # finger came down on, as xterm's own mouse selection makes one, and it is not a scroll, a long press, a double tap,
+    # a handle grab or a link. Upstream turns a drag into a scroll, and the app's old select mode (one cell at the
+    # cursor, `isSelecting` left on) therefore showed nothing at all.
+    text = replace(text, "    val currentKeyboardEnabled by rememberUpdatedState(keyboardEnabled)\n", "    val currentKeyboardEnabled by rememberUpdatedState(keyboardEnabled)\n    val currentTouchSelect by rememberUpdatedState(touchSelect)\n")
+    marker = "                        scrollJob?.cancel()\n\n                        // 1a. Check for double-tap to start word selection\n"
+    text = replace(text, marker, """                        // Select mode: the cell the finger came down on anchors a character selection that the drag extends.
+                        fun beginTouchSelection() {
+                            val target = selectionPoint(down.position)
+                            val col = (target.x / baseCharWidth).toInt().coerceIn(0, screenState.snapshot.cols - 1)
+                            val row = (target.y / baseCharHeight).toInt().coerceIn(0, screenState.snapshot.rows - 1)
+                            selectionManager.beginDragSelection(
+                                row,
+                                textPaint.logicalColumn(screenState, row, col, baseCharWidth),
+                                screenState.snapshot,
+                                screenState.scrollbackPosition,
+                            )
+                            selectionManager.selectionRange?.let { releaseFilter.record(it, down.uptimeMillis) }
+                            onAutoScroll = { if (selectionManager.isSelecting) selectAt(autoScrollPointer, android.os.SystemClock.uptimeMillis()) }
+                            startAutoScroll()
+                        }
+""" + marker)
+    text = replace(text, "                        val isDoubleTap = (down.uptimeMillis", "                        val isDoubleTap = !currentTouchSelect && (down.uptimeMillis")
+    text = replace(text, "                        val longPressJob = if (gestureType == GestureType.Undetermined) {", "                        val longPressJob = if (gestureType == GestureType.Undetermined && !currentTouchSelect) {")
+    text = replace(text, "                                        gestureType = if (pagingCandidate && singleTouch &&", """                                        gestureType = if (dragSelects(currentTouchSelect, singleTouch)) {
+                                            beginTouchSelection()
+                                            GestureType.Selection
+                                        } else if (pagingCandidate && singleTouch &&""")
+    return replace(text, "                                    if (hyperlinkUrl != null) {", "                                    if (hyperlinkUrl != null && !currentTouchSelect) {")
 
 
 def text_paint(text):

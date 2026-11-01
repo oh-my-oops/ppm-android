@@ -74,6 +74,16 @@ The added APIs are:
   `keyboardEnabled`, the keyboard. A tap that only cleared a selection or opened a link did neither
   upstream, which left the terminal unfocused (the web's capture-phase `touchend` focuses it on every
   tap). A caller that must raise nothing, as in select mode, turns `keyboardEnabled` off and ignores the call.
+- `Terminal(touchSelect = true)`: the web's select mode (`useTerminalTouchSelection`). A one-finger drag past the
+  touch slop is a character selection from the cell the finger came down on to the one it is on, both included, which
+  replaces whatever was selected (xterm's `mousedown`) and ends, kept, when the finger lifts. It is not a scroll, and
+  there is no long press, double tap or link while it is on; a second finger is ignored, a tap clears the selection and
+  the handles of a finished selection still adjust it. Entering the mode selects nothing and leaving it clears nothing,
+  as the web does. `dragSelects` and `SelectionManager.beginDragSelection` (`TerminalTouchSelection.kt`) are the
+  testable half; the gesture itself is `touch_select` in `patch-terminal-engine.py` (guarded replaces).
+- With `imeMode = CommittedText`, a view that lost the focus tells the IME it is no editor once nothing else took the
+  focus (`onCreateInputConnection` answers `null` with `TYPE_NULL`, as Chrome does for a blurred textarea), and asks for a
+  new editor, then reports the caret moved and came back, when the focus returns.
 
 The contrast algorithm matches the repository's xterm `Color.ts`, including its alternate
 direction search and powerline/box/block exclusions. A bounded 1,024-entry cache belongs to

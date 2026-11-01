@@ -217,6 +217,8 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
                 onCursorBoundsChanged = { cursor[0] = it },
                 modifierManager = modifiers,
                 onSelectionControllerAvailable = { selection = it },
+                // Select mode: a one-finger drag selects from where it came down (useTerminalTouchSelection) and does not scroll.
+                touchSelect = selecting,
                 selectionActions = { selected ->
                     TerminalText.selectionContext(selected.getSelectionText())?.let { context ->
                         FlowRow(
@@ -252,10 +254,8 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
                 modifiers.ctrl = MobileKey.Ctrl.press(modifiers.ctrl).ctrlArmed
             },
             selectMode = selecting,
-            onToggleSelect = {
-                selecting = !selecting
-                if (selecting) selection?.startSelection() else selection?.clearSelection()
-            },
+            // Like the web's, it selects nothing by itself: the drag does, and a selection outlives the mode.
+            onToggleSelect = { selecting = !selecting },
             onKey = { key, repeated ->
                 if (!repeated) {
                     focusTerminal()

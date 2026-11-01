@@ -297,14 +297,14 @@ class CommittedImeInstrumentation : Instrumentation() {
         lateinit var view: ImeInputView
         lateinit var connection: InputConnection
         fun drain(): String { emulator.commands.call { }; waitForIdleSync(); return bytes.toByteArray().toString(Charsets.UTF_8) }
-        fun create(): InputConnection = view.onCreateInputConnection(EditorInfo())
+        fun create(): InputConnection = view.onCreateInputConnection(EditorInfo())!!
         main {
             emulator = TerminalEmulatorFactory.create(onKeyboardInput = bytes::write) as TerminalEmulatorImpl
             keyboard = KeyboardHandler(QueuedTerminal(emulator), modifiers)
             view = ImeInputView(targetContext, keyboard, onRestartInput = {})
             view.imeMode = TerminalImeMode.CommittedText
             val info = EditorInfo()
-            connection = view.onCreateInputConnection(info)
+            connection = view.onCreateInputConnection(info)!!
             check(connection is TerminalImeConnectionHandle)
             // Chrome's numbers for xterm.js's textarea (dumpsys input_method); 0x200000 is its Android 17 flag.
             // The options carry one more, 0x01000000 (no personalised learning), which Chrome omits.
@@ -424,7 +424,7 @@ class CommittedImeInstrumentation : Instrumentation() {
                 check(modifiers.ctrl) { "Flushing preedit consumed the newly armed Ctrl" }
                 check(!connection.commitText("stale", 1))
                 val shortcutInfo = EditorInfo()
-                connection = view.onCreateInputConnection(shortcutInfo)
+                connection = view.onCreateInputConnection(shortcutInfo)!!
                 check(shortcutInfo.inputType and InputType.TYPE_MASK_CLASS == InputType.TYPE_NULL)
                 connection.commitText("c", 1)
                 check(!modifiers.ctrl)
@@ -485,7 +485,7 @@ class CommittedImeInstrumentation : Instrumentation() {
                 bytes.reset()
                 view = ImeInputView(targetContext, keyboard, onRestartInput = {})
                 val info = EditorInfo()
-                connection = view.onCreateInputConnection(info)
+                connection = view.onCreateInputConnection(info)!!
                 check(connection !is CommittedImeConnection)
                 check(info.inputType and InputType.TYPE_MASK_CLASS == InputType.TYPE_NULL)
                 val legacy = ComposeMode().also { it.activate() }
@@ -579,11 +579,18 @@ class CommittedImeInstrumentation : Instrumentation() {
         val liveSession = through(session, replay = false).first
         notes += "INFO: the whole session live: ${liveSession.length} bytes"
         var at = 0
+        val cursorReport = Regex("\u001b\\[\\d+;\\d+R")
         for ((query, answer) in answers) {
-            val found = if (answer.isEmpty()) -1 else liveSession.indexOf(answer, at)
-            if (found < 0) mismatches += "the live session lost the answer to ${show(query)}: ${show(liveSession)}" else at = found + answer.length
+            // The session prints its prompt first, so the cursor is where the prompt left it (column 9) and not in
+            // the corner a fresh emulator reports to the query alone: for the position, that it was answered is the check.
+            val found = when {
+                answer.isEmpty() -> null
+                cursorReport.matches(answer) -> cursorReport.find(liveSession, at)?.range
+                else -> liveSession.indexOf(answer, at).takeIf { it >= 0 }?.let { it until it + answer.length }
+            }
+            if (found == null) mismatches += "the live session lost the answer to ${show(query)}: ${show(liveSession)}" else at = found.last + 1
         }
         check(mismatches.isEmpty()) { mismatches.joinToString("\n") }
-        passed += "PASS: the same queries live are answered, in order: cursor position, DA2, pixel size, cell size and DECRQM"
+        passed += "PASS: the same queries live are answered, in order: cursor position (at the column the prompt left it), DA2, pixel size, cell size and DECRQM"
     }
 }

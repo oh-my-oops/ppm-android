@@ -73,6 +73,7 @@ def ime_input(text):
                 if (field == value) return
                 committedConnection?.closeConnection()
                 committedConnection = null
+                detached = false
                 field = value
                 if (windowToken != null) onRestartInput(this)
             }
@@ -81,19 +82,50 @@ def ime_input(text):
         fun finishBeforeExternalInput() { committedConnection?.finishBeforeExternalInput() }
 
         /**
-         * The editor ends with the view's focus ([onFocusChanged]), but Android leaves the IME attached to a view
-         * whose focus a tap on nothing took: it starts a new connection only for a view that gains the focus when
-         * another one is served, so the IME keeps typing into the ended editor and nothing is sent. When the focus
-         * comes back, the IME has to be told to ask for a new editor.
+         * The IME was last told this view is no editor at all: no connection and `TYPE_NULL`, which is how Chrome
+         * describes a textarea that lost the focus. The editor ends with the view's focus ([onFocusChanged]), but
+         * Android leaves the IME attached to a view whose focus a tap on nothing took, because it starts a new
+         * connection only for a view that gains the focus when another one is served. The IME then went on typing
+         * into an editor that no longer writes anywhere, and a key pressed with nothing focused (one hardware
+         * letter was enough) left Gboard composing a word that the next editor inherited: soft taps were added to
+         * it, no byte reached the shell, and only a key that restarts the IME brought typing back.
          */
+        private var detached = false
+
+        /** How [detachEditor] is posted; the tests run it themselves, as no looper does for a view with no window. */
+        internal var postDetach: (Runnable) -> Unit = { post(it) }
+
+        // Posted, not run as the focus goes: it may be going to another view, which makes the IME start a
+        // connection for that one, and `restartInput` does nothing for a view the IME no longer serves.
+        private val detachEditor = Runnable {
+            if (imeMode == TerminalImeMode.CommittedText && !hasFocus()) {
+                detached = true
+                restartInputSoon()
+            }
+        }
+
+        /** The focus is back: the IME has to be told to ask for a new editor, as it will not by itself. */
         private fun restartIfEditorEnded() {
-            if (imeMode == TerminalImeMode.CommittedText && committedConnection?.isActive == false) restartInputSoon()
+            if (imeMode != TerminalImeMode.CommittedText) return
+            val ended = detached || committedConnection?.isActive == false
+            detached = false
+            if (!ended) return
+            restartInputSoon()
+            // The same editor description does not make the IME drop a word it still composes, and
+            // `InputMethodManager` drops a report equal to the last it sent. A caret that moved and came back,
+            // with no composing region, is one the IME did not expect: it ends the word.
+            onUpdateSelection(this, 1, 1, -1, -1)
+            onUpdateSelection(this, 0, 0, -1, -1)
         }
 
     ''') + marker)
     marker = "        val useFullEditor = isComposeModeActive && shortcutInputMode != ImeShortcutInputMode.TYPE_NULL"
     text = replace(text, marker, dedent('''
         if (imeMode == TerminalImeMode.CommittedText) {
+            if (detached) {
+                outAttrs.inputType = EditorInfo.TYPE_NULL
+                return null
+            }
             activeConnection = null
             val raw = shortcutInputMode != ImeShortcutInputMode.DISABLED
             // The same editor Chrome describes for xterm.js's textarea: no keyboard autocorrects it.
@@ -142,8 +174,10 @@ def ime_input(text):
     text = replace(text, "            isComposeModeActive &&\n            keyboardHandler.hasTerminalShortcutModifiers()", "            (isComposeModeActive || imeMode == TerminalImeMode.CommittedText) &&\n            keyboardHandler.hasTerminalShortcutModifiers()")
     text = replace(text, "        resetImeBuffer()\n        shortcutInputMode = nextMode", "        committedConnection?.flushPending()\n        resetImeBuffer()\n        shortcutInputMode = nextMode")
     text = replace(text, "    fun resetImeBuffer() {", "    fun resetImeBuffer() {\n        committedConnection?.closeConnection()\n        committedConnection = null")
-    text = replace(text, "        if (!gainFocus) {", "        if (gainFocus) restartIfEditorEnded()\n        if (!gainFocus) {\n            committedConnection?.closeConnection()")
-    return replace(text, "    override fun onDetachedFromWindow() {", "    override fun onDetachedFromWindow() {\n        committedConnection?.closeConnection()")
+    text = replace(text, "        if (!gainFocus) {", "        if (gainFocus) restartIfEditorEnded()\n        if (!gainFocus) {\n            committedConnection?.closeConnection()\n            if (imeMode == TerminalImeMode.CommittedText) postDetach(detachEditor)")
+    # No editor is a null connection, which the platform's own signature allows.
+    text = replace(text, "    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {", "    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {")
+    return replace(text, "    override fun onDetachedFromWindow() {", "    override fun onDetachedFromWindow() {\n        removeCallbacks(detachEditor)\n        committedConnection?.closeConnection()")
 
 
 def keyboard(text):
