@@ -240,6 +240,71 @@ class WorkspaceStoreTest {
         assertEquals("terminal:1", store.s.dockPanel!!.activeTabId)
     }
 
+    // A tab that names no project (what Send to Chat opens: `projectId: null`, the project in its
+    // metadata) is not another project's. tab-pool-collect.ts skips a tab only when it has a
+    // projectId that differs from the project's.
+
+    @Test
+    fun `a tab that names no project is visible under every project, and only one that names another is hidden`() {
+        val loose = WorkspaceTab("chat:x", "chat", "Chat", null, meta("projectName" to "one"))
+        val own = WorkspaceTab("editor:a", "editor", "a", "one")
+        val foreign = WorkspaceTab("editor:b", "editor", "b", "two")
+        // `tab.projectId &&` is falsy for "" as well.
+        val empty = WorkspaceTab("chat:y", "chat", "Chat", "")
+        val tabs = listOf(loose, own, foreign, empty)
+        assertEquals(listOf("chat:x", "editor:a", "chat:y"), visibleTabs(tabs, "one").map { it.id })
+        assertEquals(listOf("chat:x", "editor:b", "chat:y"), visibleTabs(tabs, "two").map { it.id })
+        assertEquals(listOf("chat:x", "chat:y"), visibleTabs(tabs, "three").map { it.id })
+        assertEquals(tabs, visibleTabs(tabs, null))
+    }
+
+    @Test
+    fun `a chat that names no project is still there after switching away and back, and after a restore`() {
+        val storage = MemoryStorage()
+        val store = store(storage)
+        store.switchProject("one")
+        val id = store.openTab(NewTab("chat", "Chat", null, meta("projectName" to "one", "pendingMessage" to "hi")))
+        store.switchProject("two")
+        store.switchProject("one")
+        assertEquals(listOf(id), store.focused().tabs.map { it.id })
+
+        // A fresh start reads the saved layout back and drops other projects' tabs, not this one.
+        val restored = store(storage)
+        restored.switchProject("one")
+        val tab = restored.focused().tab(id)!!
+        assertNull(tab.projectId)
+        assertEquals("hi", tab.metaString("pendingMessage"))
+    }
+
+    @Test
+    fun `the dock offers a tab that names no project under every project, and one that names a project under its own`() {
+        val storage = MemoryStorage(
+            "one" to layout(
+                """{"panels":{"a":{"id":"a","tabs":[],"activeTabId":null,"tabHistory":[]}},"grid":[["a"]],"focusedPanelId":"a",
+                   "dockPanel":{"id":"__dock__","tabs":[
+                     {"id":"terminal:1","type":"terminal","title":"T","projectId":null,"metadata":{},"closable":true},
+                     {"id":"terminal:2","type":"terminal","title":"T","projectId":"one","metadata":{"projectName":"one"},"closable":true}],
+                   "activeTabId":"terminal:2","tabHistory":["terminal:1","terminal:2"]}}""",
+            ),
+            "two" to layout(
+                """{"panels":{"b":{"id":"b","tabs":[],"activeTabId":null,"tabHistory":[]}},"grid":[["b"]],"focusedPanelId":"b"}""",
+            ),
+        )
+        val store = store(storage)
+        store.switchProject("one")
+        assertEquals("terminal:2", store.s.dockPanel!!.activeTabId)
+        assertEquals(2, store.activeProjectDockTabCount())
+
+        store.switchProject("two")
+        assertEquals(listOf("terminal:1"), visibleTabs(store.s.dockPanel!!.tabs, "two").map { it.id })
+        assertEquals("terminal:1", store.s.dockPanel!!.activeTabId)
+        assertEquals(1, store.activeProjectDockTabCount())
+
+        store.switchProject("one")
+        assertEquals("terminal:2", store.s.dockPanel!!.activeTabId)
+        assertEquals(2, store.activeProjectDockTabCount())
+    }
+
     @Test
     fun `a phone restores a visible dock collapsed`() {
         mobile = true

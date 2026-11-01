@@ -7,16 +7,13 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertSame
 import org.junit.Test
 
 /**
  * The project a terminal's shell is started for ([terminalProject]), which is also the project its
- * Send to Chat goes to and the one a command run for a project looks for ([shownTerminalOf]). The
- * web reads `metadata.projectName` and nothing else (`terminal-tab.tsx`), and names a shell with
- * none "" (`projectName ?? ""` in `useTerminal`): its socket is `/ws/project//terminal/...`, which
- * the server starts in the host's home folder, or in the tab's `cwd`.
+ * Send to Chat goes to. The web reads `metadata.projectName` and nothing else (`terminal-tab.tsx`),
+ * and names a shell with none "" (`projectName ?? ""` in `useTerminal`): its socket is
+ * `/ws/project//terminal/...`, which the server starts in the host's home folder, or in the tab's `cwd`.
  */
 class TerminalProjectTest {
     private fun tab(opened: NewTab, id: String = "terminal:1") =
@@ -57,30 +54,5 @@ class TerminalProjectTest {
     fun `an empty or null project name is no project`() {
         assertEquals("", terminalProject(terminalWith("ppm", mapOf("projectName" to JsonPrimitive("")))))
         assertEquals("", terminalProject(terminalWith("ppm", mapOf("projectName" to JsonNull))))
-    }
-
-    @Test
-    fun `a command for a project goes to the shown terminal that is the project's`() {
-        val host = tab(terminalAtTab("/home/me", null), "terminal:1")
-        val ppm = tab(terminalTab("ppm"), "terminal:2")
-        val ppmToo = tab(terminalTab("ppm"), "terminal:3")
-        assertSame(ppm, shownTerminalOf(listOf(host, ppm, ppmToo), "ppm"))
-    }
-
-    @Test
-    fun `a terminal of the host's explorer does not take a project's command`() {
-        assertNull(shownTerminalOf(listOf(tab(terminalAtTab("/home/me", null))), "ppm"))
-        assertNull(shownTerminalOf(listOf(tab(terminalTab("other"))), "ppm"))
-    }
-
-    @Test
-    fun `a tab that names the project but is not a terminal does not take it`() {
-        val chat = WorkspaceTab("chat:1", "chat", "Chat", "ppm", JsonObject(mapOf("projectName" to JsonPrimitive("ppm"))))
-        assertNull(shownTerminalOf(listOf(chat), "ppm"))
-    }
-
-    @Test
-    fun `a terminal whose shell is not started for the project does not take its command, whatever its tab says`() {
-        assertNull(shownTerminalOf(listOf(terminalWith("ppm", emptyMap())), "ppm"))
     }
 }

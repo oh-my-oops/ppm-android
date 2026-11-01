@@ -264,26 +264,17 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     internal fun terminalCommandTaken(tabId: String) = patchTabMetadata(tabId, "pendingCommand" to null)
 
-    /** Code-block action: type a command into an on-screen terminal, or open one to hold it. */
+    /**
+     * Code-block action (`runInTerminal`): type a command into a terminal that is on screen, whichever
+     * project its shell was started for ([shownTerminalOf]), or open one in the dock to hold it
+     * ([runInTerminalTab]). No project is opened first: the dock is the same for every project.
+     */
     fun runInTerminal(command: String, projectName: String? = selectedProject) {
         if (command.isBlank()) return
-        val project = projectName ?: return
-        if (project != selectedProject) {
-            scope.launch { openProject(project) { runInTerminal(command, project) } }
-            return
-        }
         val state = layout ?: return
-        val candidates = buildList {
-            if (state.dock.visible) state.dockPanel?.let { p -> p.tabs.firstOrNull { it.id == p.activeTabId }?.let(::add) }
-            for (id in state.gridPanelIds) state.panels[id]?.let { p -> p.tabs.firstOrNull { it.id == p.activeTabId }?.let(::add) }
-        }
-        val shown = shownTerminalOf(candidates, project)
-        if (shown != null) terminal(shown)?.pendingCommand = command else withWorkspace { store ->
-            store.openInDock(NewTab(type = "terminal", title = "Terminal", projectId = project, metadata = buildJsonObject {
-                put("projectName", project)
-                put("pendingCommand", command)
-            }))
-        }
+        val shown = shownTerminalOf(state)
+        if (shown != null) terminal(shown)?.pendingCommand = command
+        else withWorkspace { store -> store.openInDock(runInTerminalTab(command, projectName)) }
     }
 
     /** Put terminal text into an editable chat draft; never submit it automatically. */
@@ -303,14 +294,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 }
         }.maxWithOrNull(compareBy<Triple<WorkspaceTab, Int, Double>> { it.second }.thenBy { it.third })?.first
         val chat = target?.let { chats[it.id] }
-        if (chat == null) withWorkspace { store ->
-            // The tab `sendToChat` opens is a plain "Chat" until its session names it.
-            store.openTab(NewTab(type = "chat", title = "Chat", projectId = project, metadata = buildJsonObject {
-                project?.let { put("projectName", it) }
-                if (asContext) put("pendingContexts", JsonArray(listOf(buildJsonObject { put("text", text); put("label", label) })))
-                else put("pendingMessage", text)
-            }))
-        } else {
+        if (chat == null) withWorkspace { store -> store.openTab(sendToChatTab(text, label, project, asContext)) } else {
             chat.attachments += ComposerAttachment(
                 id = java.util.UUID.randomUUID().toString(), name = label, isImage = false,
                 status = ComposerAttachment.Status.READY, textContent = text,
@@ -3102,9 +3086,49 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
  */
 internal fun terminalProject(tab: WorkspaceTab): String = tab.metaString("projectName") ?: ""
 
-/** The terminal among [tabs], the ones on screen, that is [project]'s: a command run for the project is typed there. */
-internal fun shownTerminalOf(tabs: List<WorkspaceTab>, project: String): WorkspaceTab? =
-    tabs.firstOrNull { it.type == "terminal" && terminalProject(it) == project }
+/**
+ * The terminal a command run from a code block is typed into (`use-terminal-command-queue`): one on
+ * screen, whichever project its shell was started for. The web hands the command to every terminal on
+ * screen and each queues it, so one command is typed into all of them; here exactly one takes it: the
+ * focused panel's terminal if that panel shows one, else the first shown, the dock's before the grid's.
+ */
+internal fun shownTerminalOf(state: WorkspaceState): WorkspaceTab? {
+    val focused = state.panels[state.focusedPanelId]?.takeIf { it.id in state.gridPanelIds }?.activeTab
+    if (focused?.type == "terminal") return focused
+    val dock = if (state.dock.visible) state.dockPanel?.activeTab else null
+    return (listOf(dock) + state.gridPanelIds.map { state.panels[it]?.activeTab }).firstOrNull { it?.type == "terminal" }
+}
+
+/**
+ * The chat `sendToChat` opens when none takes the text: a plain "Chat" until its session names it, on
+ * no project, with the project only in its metadata (when there is one) and the text as its first
+ * message or, as [asContext], a context chip.
+ */
+internal fun sendToChatTab(text: String, label: String, project: String?, asContext: Boolean) = NewTab(
+    type = "chat",
+    title = "Chat",
+    projectId = null,
+    metadata = buildJsonObject {
+        project?.takeIf { it.isNotEmpty() }?.let { put("projectName", it) }
+        if (asContext) put("pendingContexts", JsonArray(listOf(buildJsonObject { put("text", text); put("label", label) })))
+        else put("pendingMessage", text)
+    },
+)
+
+/**
+ * The tab that holds a command when no terminal is on screen (`runInTerminal`): in the dock, with the
+ * project as given on the tab and named in its metadata only when that is not empty, and the command as
+ * its `pendingCommand` for the shell to type once it has a prompt.
+ */
+internal fun runInTerminalTab(command: String, projectName: String?) = NewTab(
+    type = "terminal",
+    title = "Terminal",
+    projectId = projectName,
+    metadata = buildJsonObject {
+        projectName?.takeIf { it.isNotEmpty() }?.let { put("projectName", it) }
+        put("pendingCommand", command)
+    },
+)
 
 /**
  * A terminal tab as the web opens one (`openTab`): the project it belongs to on the tab and in its
