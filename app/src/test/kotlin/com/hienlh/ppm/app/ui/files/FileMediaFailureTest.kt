@@ -2,6 +2,8 @@ package com.hienlh.ppm.app.ui.files
 
 import android.app.Application
 import android.net.Uri
+import android.view.PointerIcon
+import android.view.View
 import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.ActivityResultRegistryOwner
@@ -15,9 +17,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -31,8 +35,10 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.moveTo
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityOptionsCompat
@@ -43,6 +49,7 @@ import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.state.media.MediaFailure
+import com.hienlh.ppm.state.media.TRANSCODE_FAILURE_LINE
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -52,6 +59,7 @@ import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -65,12 +73,14 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * A media file that cannot play shows what the web's audio-preview.tsx and video-preview.tsx show: for
- * audio the warning icon over "Failed to load audio.", and for a video that no server tool can
- * transcode, the codecs, how to get ffmpeg and a "Download file" button. No player controls, no Retry.
- * The screens are drawn on their own in boxes of a size the test sets, then through the file tab
- * against a server that answers as asked. Robolectric measures a character as one pixel, so a wrap
- * is seen at a density that makes the web's 384 and 24 smaller than the hint.
+ * A media file that cannot play shows what the web's audio-preview.tsx, video-preview.tsx and
+ * video-player.tsx show. For audio the warning icon over "Failed to load audio.", and for a video that
+ * no server tool can transcode, the codecs, how to get ffmpeg and a "Download file" button: no player
+ * controls, no Retry. A transcode that stopped is a black overlay with the message and a Retry over the
+ * video's area, the controls still under it, and a video being probed is a spinner alone. The screens
+ * are drawn on their own in boxes of a size the test sets, then through the file tab against a server
+ * that answers as asked. Robolectric measures a character as one pixel, so a wrap is seen at a density
+ * that makes the web's 384, 24 and 16 smaller than the text.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -115,7 +125,7 @@ class FileMediaFailureTest {
 
     @Test
     fun `an audio file that failed is the warning over Failed to load audio and nothing else`() {
-        compose.setContent { MediaFailureView(MediaFailure.Audio, onDownload = {}) }
+        compose.setContent { MediaFailureView(MediaFailure.Audio, onDownload = {}, onRetry = {}) }
 
         compose.onNodeWithText("Failed to load audio.").assertIsDisplayed()
         assertEquals("the web's audio screen has nothing to press", 0, compose.onAllNodes(hasClickAction()).fetchSemanticsNodes().size)
@@ -126,7 +136,7 @@ class FileMediaFailureTest {
     @Test
     fun `an unsupported video names its codecs, says how to get ffmpeg and offers the download, once`() {
         var downloads = 0
-        compose.setContent { MediaFailureView(MediaFailure.UnsupportedVideo("hevc + aac")) { downloads++ } }
+        compose.setContent { MediaFailureView(MediaFailure.UnsupportedVideo("hevc + aac"), { downloads++ }, onRetry = {}) }
 
         compose.onNodeWithText(line).assertIsDisplayed()
         compose.onNodeWithText(hint).assertIsDisplayed()
@@ -140,14 +150,14 @@ class FileMediaFailureTest {
 
     @Test
     fun `a video with no codecs to name has no brackets`() {
-        compose.setContent { MediaFailureView(MediaFailure.UnsupportedVideo(""), onDownload = {}) }
+        compose.setContent { MediaFailureView(MediaFailure.UnsupportedVideo(""), onDownload = {}, onRetry = {}) }
 
         compose.onNodeWithText("This video cannot be played in the browser.").assertIsDisplayed()
     }
 
     @Test
     fun `the install commands are monospace and the rest of the hint is not`() {
-        compose.setContent { MediaFailureView(MediaFailure.UnsupportedVideo("hevc + aac"), onDownload = {}) }
+        compose.setContent { MediaFailureView(MediaFailure.UnsupportedVideo("hevc + aac"), onDownload = {}, onRetry = {}) }
 
         val text = compose.onNodeWithText(hint).fetchSemanticsNode().config[SemanticsProperties.Text].single()
         val mono = text.spanStyles.filter { it.item.fontFamily == PpmFonts.mono }
@@ -163,7 +173,7 @@ class FileMediaFailureTest {
     fun `the download button is dimmed and inert while a download runs, and back once it is done`() {
         var downloads = 0
         var running by mutableStateOf(false)
-        compose.setContent { MediaFailureView(MediaFailure.UnsupportedVideo("hevc + aac"), if (running) null else ({ downloads++ })) }
+        compose.setContent { MediaFailureView(MediaFailure.UnsupportedVideo("hevc + aac"), if (running) null else ({ downloads++ }), onRetry = {}) }
 
         compose.onNodeWithText("Download file").assertIsEnabled().performClick()
         assertEquals(1, downloads)
@@ -193,7 +203,7 @@ class FileMediaFailureTest {
         compose.setContent {
             secondary = LocalPpmTokens.current.text2.color
             subtle = LocalPpmTokens.current.text3.color
-            MediaFailureView(MediaFailure.UnsupportedVideo("hevc + aac"), onDownload = {})
+            MediaFailureView(MediaFailure.UnsupportedVideo("hevc + aac"), onDownload = {}, onRetry = {})
         }
 
         val first = styleOf(line)
@@ -213,7 +223,7 @@ class FileMediaFailureTest {
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(density)) {
                 Box(Modifier.testTag("box").requiredSize(width.dp, height.dp)) {
-                    MediaFailureView(MediaFailure.UnsupportedVideo("hevc + aac"), onDownload = {})
+                    MediaFailureView(MediaFailure.UnsupportedVideo("hevc + aac"), onDownload = {}, onRetry = {})
                 }
             }
         }
@@ -267,6 +277,125 @@ class FileMediaFailureTest {
         assertEquals(272f, (bounds.right - bounds.left).value, 0.6f)
     }
 
+    // A transcode that stopped, on its own.
+
+    private val stoppedLine = "Transcoding failed. ffmpeg may have stopped or the file is corrupt."
+
+    @Test
+    fun `a stopped transcode is the web's sentence over a Retry button, and Retry is the only thing to press`() {
+        var retries = 0
+        compose.setContent { MediaFailureView(MediaFailure.TranscodeStopped(TRANSCODE_FAILURE_LINE), onDownload = {}, onRetry = { retries++ }) }
+
+        compose.onNodeWithText(stoppedLine).assertIsDisplayed()
+        compose.onNodeWithText("Retry").assertIsDisplayed().assertIsEnabled().assertHasClickAction()
+        assertEquals("the overlay swallows taps without being something to press", 1, compose.onAllNodes(hasClickAction()).fetchSemanticsNodes().size)
+        assertEquals("the web's overlay has no download", 0, count("Download file"))
+        assertEquals("and no unsupported screen's hint", 0, count(hint))
+
+        compose.onNodeWithText("Retry").performClick()
+        assertEquals(1, retries)
+    }
+
+    /** The stopped overlay alone in a [width] x [height] box (dp at [density]), whose bounds [box] answers. */
+    private fun showStoppedSized(width: Int, height: Int, density: Float = 1f) {
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(density)) {
+                Box(Modifier.testTag("box").requiredSize(width.dp, height.dp)) {
+                    MediaFailureView(MediaFailure.TranscodeStopped(stoppedLine), onDownload = {}, onRetry = {})
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `the Retry button is 44 high with 16 of padding in a 1 border and no icon`() {
+        showStoppedSized(800, 600)
+
+        val button = compose.onNodeWithText("Retry").getBoundsInRoot()
+        val label = compose.onNodeWithText("Retry", useUnmergedTree = true).getBoundsInRoot()
+        assertEquals(44f, (button.bottom - button.top).value, 0f)
+        // px-4 beside a 1 border: with no icon, has-[>svg]:px-2.5 does not apply.
+        assertEquals(17f, (label.left - button.left).value, 0.6f)
+        assertEquals(17f, (button.right - label.right).value, 0.6f)
+    }
+
+    @Test
+    fun `the message and the button are centred in both directions and 12 apart`() {
+        showStoppedSized(800, 600)
+
+        val box = box()
+        val message = compose.onNodeWithText(stoppedLine).getBoundsInRoot()
+        val button = compose.onNodeWithText("Retry").getBoundsInRoot()
+        assertEquals(12f, (button.top - message.bottom).value, 1f)
+        assertEquals((box.bottom - button.bottom).value, (message.top - box.top).value, 1f)
+        assertEquals((box.left + box.right).value / 2f, (button.left + button.right).value / 2f, 1f)
+        assertEquals((box.left + box.right).value / 2f, (message.left + message.right).value / 2f, 1f)
+    }
+
+    @Test
+    fun `the message wraps 16 in from the edge of the video's area`() {
+        // 200 dp at a quarter of the density is 50 pixels, 16 dp of padding 4 on each side, and the 42 left are short of the 67 characters.
+        showStoppedSized(200, 2400, density = 0.25f)
+
+        val bounds = compose.onNodeWithText(stoppedLine).getBoundsInRoot()
+        assertEquals(168f, (bounds.right - bounds.left).value, 0.6f)
+    }
+
+    @Test
+    fun `the message is 14 on 20 centred in the secondary colour and the label 14 medium in the same`() {
+        var secondary = Color.Unspecified
+        compose.setContent {
+            secondary = LocalPpmTokens.current.text2.color
+            MediaFailureView(MediaFailure.TranscodeStopped(stoppedLine), onDownload = {}, onRetry = {})
+        }
+
+        val message = styleOf(stoppedLine)
+        assertEquals(14f, message.fontSize.value, 0f)
+        assertEquals(20f, message.lineHeight.value, 0f)
+        assertEquals(secondary, message.color)
+        assertEquals(TextAlign.Center, message.textAlign)
+        val label = styleOf("Retry")
+        assertEquals(14f, label.fontSize.value, 0f)
+        assertEquals(20f, label.lineHeight.value, 0f)
+        assertEquals(FontWeight.Medium, label.fontWeight)
+        assertEquals("at rest the label is the colour of the box around it", secondary, label.color)
+    }
+
+    private lateinit var view: View
+
+    private fun icon(type: Int): PointerIcon = PointerIcon.getSystemIcon(ApplicationProvider.getApplicationContext(), type)
+
+    private fun cursorOver(text: String): PointerIcon? {
+        compose.onNodeWithText(text).performMouseInput { moveTo(center) }
+        compose.waitForIdle()
+        return view.pointerIcon
+    }
+
+    @Test
+    fun `the Download file link shows the hand, as a link does, also while a download runs`() {
+        var running by mutableStateOf(false)
+        compose.setContent {
+            view = LocalView.current
+            MediaFailureView(MediaFailure.UnsupportedVideo("hevc"), if (running) null else ({}), onRetry = {})
+        }
+
+        assertEquals(icon(PointerIcon.TYPE_HAND), cursorOver("Download file"))
+        running = true
+        compose.waitForIdle()
+        assertEquals("a link does not change its cursor while it is dimmed", icon(PointerIcon.TYPE_HAND), cursorOver("Download file"))
+    }
+
+    @Test
+    fun `the Retry button shows the arrow, as a button does`() {
+        compose.setContent {
+            view = LocalView.current
+            MediaFailureView(MediaFailure.TranscodeStopped(stoppedLine), onDownload = {}, onRetry = {})
+        }
+
+        // The arrow is the window's own, which it answers with no icon at all.
+        assertNull(cursorOver("Retry"))
+    }
+
     // Through the file tab.
 
     private fun mediaTab(path: String) = WorkspaceTab("editor:$path", "editor", path.substringAfterLast('/'), "app", buildJsonObject {
@@ -310,13 +439,14 @@ class FileMediaFailureTest {
     }
 
     @Test
-    fun `a video the server cannot transcode goes from the player to the unsupported screen, codecs and all`() {
+    fun `a video the server cannot transcode goes from the spinner to the unsupported screen, codecs and all`() {
         val probe = ProbeServer(json(200, """{"ok":true,"data":{"transcodable":false,"video":{"codec":"hevc"},"audio":{"codec":"aac"}}}"""))
         server.dispatcher = probe
         showMedia(mediaTab("/tmp/clip.mkv"))
 
-        compose.waitUntil(10_000) { compose.waitForIdle(); compose.onAllNodesWithContentDescription("Playback settings").fetchSemanticsNodes().isNotEmpty() }
-        assertEquals("a video still being probed is the player", 0, count("Download file"))
+        compose.waitUntil(10_000) { compose.waitForIdle(); probe.arrived.count == 0L }
+        assertEquals("a video still being probed is no unsupported screen", 0, count("Download file"))
+        assertEquals("nor a player", 0, compose.onAllNodesWithContentDescription("Playback settings").fetchSemanticsNodes().size)
         probe.release.countDown()
 
         waitForText("Download file")

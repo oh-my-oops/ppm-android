@@ -63,7 +63,7 @@ fun FileMediaView(model: AppModel, tab: WorkspaceTab) {
         try { picker.launch(filename.ifBlank { "media" }) }
         catch (_: Exception) { pending = null; model.toast(ErrorToastMessage("The system file picker is unavailable.")) }
     })
-    MediaFilePlayer(api, source, Modifier.fillMaxSize(), visible = LocalWindowContentVisible.current, onDownload = download) { failure ->
-        MediaFailureView(failure, download)
+    MediaFilePlayer(api, source, Modifier.fillMaxSize(), visible = LocalWindowContentVisible.current) { failure, retry ->
+        MediaFailureView(failure, download, retry)
     }
 }

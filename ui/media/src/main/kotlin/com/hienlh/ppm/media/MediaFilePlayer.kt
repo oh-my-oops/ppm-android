@@ -39,7 +39,9 @@ import kotlinx.coroutines.delay
 
 /**
  * One visible file owner. No media is opened until visible AND the host lifecycle is started.
- * A file that cannot be played ([mediaFailure]) is drawn by [failure] instead of the player.
+ * A file that cannot be played ([mediaFailure]) is drawn by [failure], given what Retry does: in
+ * place of the player, or over the video's area for a transcode that stopped, the controls still
+ * under it. A video being probed is a spinner alone, as the web shows it.
  */
 @Composable
 fun MediaFilePlayer(
@@ -47,16 +49,15 @@ fun MediaFilePlayer(
     source: MediaSource,
     modifier: Modifier = Modifier,
     visible: Boolean = true,
-    onDownload: (() -> Unit)? = null,
-    failure: @Composable (MediaFailure) -> Unit,
+    failure: @Composable (MediaFailure, onRetry: () -> Unit) -> Unit,
 ) {
-    key(api, source) { MediaOwner(api, source, modifier, visible, onDownload, failure) }
+    key(api, source) { MediaOwner(api, source, modifier, visible, failure) }
 }
 
 @Composable
 private fun MediaOwner(
-    api: ApiClient, source: MediaSource, modifier: Modifier, visible: Boolean, onDownload: (() -> Unit)?,
-    failure: @Composable (MediaFailure) -> Unit,
+    api: ApiClient, source: MediaSource, modifier: Modifier, visible: Boolean,
+    failure: @Composable (MediaFailure, onRetry: () -> Unit) -> Unit,
 ) {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
@@ -125,7 +126,7 @@ private fun MediaOwner(
     val content: @Composable (Modifier) -> Unit = { area ->
         MediaContent(source, native, state, area, video, speed, volume, transform, fullscreen, scrub,
             action, { volume = volume.slider(it) }, { speed = it }, { transform = it }, onScrub, onSeek,
-            { controller.retry() }, onDownload, failure)
+            { controller.retry() }, failure)
     }
     Box(modifier) {
         if (!fullscreen) content(Modifier.fillMaxSize())
@@ -160,11 +161,18 @@ private fun MediaContent(
     source: MediaSource, native: NativeMediaPlayer, state: MediaPlaybackState, modifier: Modifier,
     video: Boolean, speed: Float, volume: MediaVolume, transform: VideoTransform, fullscreen: Boolean, scrub: Double?,
     onAction: (MediaAction) -> Unit, onVolume: (Float) -> Unit, onSpeed: (Float) -> Unit, onTransform: (VideoTransform) -> Unit,
-    onScrub: (Double) -> Unit, onSeek: () -> Unit, onRetry: () -> Unit, onDownload: (() -> Unit)?,
-    failure: @Composable (MediaFailure) -> Unit,
+    onScrub: (Double) -> Unit, onSeek: () -> Unit, onRetry: () -> Unit,
+    failure: @Composable (MediaFailure, onRetry: () -> Unit) -> Unit,
 ) {
-    mediaFailure(state)?.let { failed -> failure(failed); return }
     val colors = LocalPpmTokens.current
+    val failed = mediaFailure(state)
+    // The web draws a transcode that stopped over the picture, the controls under it; the others replace the player.
+    if (failed != null && failed !is MediaFailure.TranscodeStopped) { failure(failed, onRetry); return }
+    // `<Loader2 className="size-5 animate-spin text-text-subtle" />` alone, at once, where the player will be.
+    if (state.mode == MediaMode.PROBING) {
+        Box(modifier.background(colors.bgSolid.color), Alignment.Center) { PpmIcon(ProductIcon.Loader2, 20.dp, colors.text3.color, spinning = true) }
+        return
+    }
     val focus = remember { FocusRequester() }
     val action by rememberUpdatedState(onAction)
     var waiting by remember { mutableStateOf(false) }
@@ -193,18 +201,7 @@ private fun MediaContent(
                 native.artist?.let { BasicText(it, style = ppmText(12f).copy(color = colors.text2.color)) }
             }
             if (waiting && state.error == null) PpmIcon(ProductIcon.Loader2, 28.dp, if (video) Color.White else colors.text2.color, spinning = true)
-            if (state.error != null) Column(Modifier.widthIn(max = 480.dp).background(colors.panel.color).padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                BasicText(state.error!!.message, style = ppmText(14f).copy(color = colors.text.color))
-                state.probe?.let { probe ->
-                    val description = listOfNotNull(probe.container, probe.video?.codec, probe.audio?.codec).joinToString(" · ")
-                    if (description.isNotEmpty()) BasicText(description, style = ppmText(12f).copy(color = colors.text2.color))
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MediaButton(ProductIcon.RotateCw, "Retry", onClick = onRetry)
-                    if (onDownload != null) MediaButton(ProductIcon.Download, "Download", onClick = onDownload)
-                }
-            }
+            if (failed is MediaFailure.TranscodeStopped) failure(failed, onRetry)
         }
         MediaPlayerControls(state, scrub ?: state.positionSeconds, video, speed, volume, transform, fullscreen,
             onAction, onVolume, onSpeed, onTransform, onScrub, onSeek)

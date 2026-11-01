@@ -120,7 +120,7 @@ class MediaPlaybackController internal constructor(
             val fallback = when (httpStatus) {
                 501 -> "ffmpeg is not installed or has no working H.264 encoder. Install ffmpeg on the PPM server and restart PPM."
                 503 -> "The PPM server is busy transcoding other videos. Try again shortly."
-                else -> if (current.mode == MediaMode.TRANSCODE) "Transcoding failed. ffmpeg may have stopped or the file is corrupt." else "Failed to load audio."
+                else -> if (current.mode == MediaMode.TRANSCODE) TRANSCODE_FAILURE_LINE else "Failed to load audio."
             }
             mutable.value = current.copy(playback = null, playing = false, waiting = false,
                 error = MediaPlaybackError(message?.takeIf { it.isNotBlank() } ?: fallback, httpStatus))
