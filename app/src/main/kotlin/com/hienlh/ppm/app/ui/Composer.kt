@@ -1059,53 +1059,57 @@ private fun SendButton(tab: ChatTab, arrowSize: Dp, label: String, enabled: Bool
  */
 @Composable
 private fun ModePopover(current: PermissionMode, onDismiss: () -> Unit, pick: (PermissionMode) -> Unit) {
+    val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
+    PlacedPopup(remember(gap) { aboveStart(gap) }, onDismiss, passThrough = true) { ModePanel(current, pick) }
+}
+
+/** What [ModePopover] opens: "Modes" and its key over a row for each mode. */
+@Composable
+internal fun ModePanel(current: PermissionMode, pick: (PermissionMode) -> Unit) {
     val tokens = LocalPpmTokens.current
     val width = if (LocalPpmMobile.current) 288.dp else 320.dp
-    val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
-    PlacedPopup(remember(gap) { aboveStart(gap) }, onDismiss, passThrough = true) {
-        val shape = RoundedCornerShape(12.dp)
-        Column(
-            Modifier
-                .width(width)
-                .ppmShadow(tokens.shadowPanel, shape)
-                .clip(shape)
-                .background(tokens.panel2.over(tokens.bgSolid).color)
-                .cssBorder(tokens.border.color, shape),
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        Modifier
+            .width(width)
+            .ppmShadow(tokens.shadowPanel, shape)
+            .clip(shape)
+            .background(tokens.panel2.over(tokens.bgSolid).color)
+            .cssBorder(tokens.border.color, shape),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Bottom).padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Bottom).padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                BasicText("Modes", Modifier.weight(1f), style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color))
-                val kbd = RoundedCornerShape(4.dp)
-                BasicText(
-                    "Shift + Tab",
+            BasicText("Modes", Modifier.weight(1f), style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color))
+            val kbd = RoundedCornerShape(4.dp)
+            BasicText(
+                "Shift + Tab",
+                Modifier
+                    .clip(kbd)
+                    .background(tokens.panel2.color)
+                    .cssBorder(tokens.border.color, kbd)
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text3.color),
+            )
+        }
+        Column(Modifier.padding(vertical = 4.dp)) {
+            for (mode in PermissionMode.entries) {
+                val active = mode == current
+                Row(
                     Modifier
-                        .clip(kbd)
-                        .background(tokens.panel2.color)
-                        .cssBorder(tokens.border.color, kbd)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                    style = ppmText(10f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text3.color),
-                )
-            }
-            Column(Modifier.padding(vertical = 4.dp)) {
-                for (mode in PermissionMode.entries) {
-                    val active = mode == current
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(if (active) tokens.panel2.color else Color.Transparent)
-                            .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color) { pick(mode) }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        PpmIcon(mode.icon, 16.dp, tokens.text2.color, Modifier.padding(top = 2.dp))
-                        Column(Modifier.weight(1f)) {
-                            BasicText(mode.label, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color))
-                            BasicText(mode.detail, style = ppmText(12f, lineHeight = 16.5f).copy(color = tokens.text3.color))
-                        }
-                        if (active) PpmIcon(ProductIcon.Check, 16.dp, tokens.accent.color, Modifier.padding(top = 2.dp))
+                        .fillMaxWidth()
+                        .background(if (active) tokens.panel2.color else Color.Transparent)
+                        .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color, litOnFocus = true) { pick(mode) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    PpmIcon(mode.icon, 16.dp, tokens.text2.color, Modifier.padding(top = 2.dp))
+                    Column(Modifier.weight(1f)) {
+                        BasicText(mode.label, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color))
+                        BasicText(mode.detail, style = ppmText(12f, lineHeight = 16.5f).copy(color = tokens.text3.color))
                     }
+                    if (active) PpmIcon(ProductIcon.Check, 16.dp, tokens.accent.color, Modifier.padding(top = 2.dp))
                 }
             }
         }
@@ -1176,46 +1180,50 @@ internal fun providerChipName(name: String) = "AI Provider: $name"
  */
 @Composable
 private fun ProviderPopover(current: String, providers: List<ProviderInfo>, status: String, onDismiss: () -> Unit, pick: (String) -> Unit) {
-    val tokens = LocalPpmTokens.current
     val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
-    PlacedPopup(remember(gap) { aboveStart(gap) }, onDismiss, passThrough = true) {
-        val shape = RoundedCornerShape(12.dp)
-        Column(
-            Modifier
-                .width(224.dp)
-                .ppmShadow(tokens.shadowPanel, shape)
-                .clip(shape)
-                .background(tokens.panel2.over(tokens.bgSolid).color)
-                .cssBorder(tokens.border.color, shape),
-        ) {
-            PopoverHeader("Provider")
-            Column(Modifier.padding(vertical = 4.dp)) {
-                if (providers.isEmpty()) {
+    PlacedPopup(remember(gap) { aboveStart(gap) }, onDismiss, passThrough = true) { ProviderPanel(current, providers, status, pick) }
+}
+
+/** What [ProviderPopover] opens: "Provider" over a row for each provider, or the [status] while there is none. */
+@Composable
+internal fun ProviderPanel(current: String, providers: List<ProviderInfo>, status: String, pick: (String) -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        Modifier
+            .width(224.dp)
+            .ppmShadow(tokens.shadowPanel, shape)
+            .clip(shape)
+            .background(tokens.panel2.over(tokens.bgSolid).color)
+            .cssBorder(tokens.border.color, shape),
+    ) {
+        PopoverHeader("Provider")
+        Column(Modifier.padding(vertical = 4.dp)) {
+            if (providers.isEmpty()) {
+                BasicText(
+                    status,
+                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+                )
+            }
+            for (provider in providers) {
+                val active = provider.id == current
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(if (active) tokens.panel2.color else Color.Transparent)
+                        .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color, litOnFocus = true) { pick(provider.id) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ProviderBadge(provider.id, 16.dp)
                     BasicText(
-                        status,
-                        Modifier.padding(horizontal = 12.dp, vertical = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
-                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+                        cssCapitalized(provider.name),
+                        Modifier.weight(1f),
+                        style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color),
                     )
-                }
-                for (provider in providers) {
-                    val active = provider.id == current
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(if (active) tokens.panel2.color else Color.Transparent)
-                            .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color) { pick(provider.id) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        ProviderBadge(provider.id, 16.dp)
-                        BasicText(
-                            cssCapitalized(provider.name),
-                            Modifier.weight(1f),
-                            style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color),
-                        )
-                        if (active) PpmIcon(ProductIcon.Check, 16.dp, tokens.accent.color)
-                    }
+                    if (active) PpmIcon(ProductIcon.Check, 16.dp, tokens.accent.color)
                 }
             }
         }

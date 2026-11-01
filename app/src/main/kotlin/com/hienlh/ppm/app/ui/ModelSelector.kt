@@ -93,44 +93,48 @@ internal fun formModelChipName(label: String?, value: String?) = "Model: ${label
  */
 @Composable
 private fun ModelPopover(models: List<ModelOption>, value: String?, clip: Rect?, onDismiss: () -> Unit, pick: (String) -> Unit) {
-    val tokens = LocalPpmTokens.current
     val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
+    PlacedPopup(remember(gap) { aboveStart(gap) }, onDismiss, passThrough = true) { ModelPanel(models, value, clip, pick) }
+}
+
+/** What [ModelPopover] opens: "Model" over a row for each of the provider's [models]. */
+@Composable
+internal fun ModelPanel(models: List<ModelOption>, value: String?, clip: Rect?, pick: (String) -> Unit) {
+    val tokens = LocalPpmTokens.current
     var at by remember { mutableStateOf(Offset.Zero) }
-    PlacedPopup(remember(gap) { aboveStart(gap) }, onDismiss, passThrough = true) {
-        val shape = RoundedCornerShape(12.dp)
-        Column(
-            Modifier
-                .width(224.dp)
-                .onGloballyPositioned { at = it.positionOnScreen() }
-                // Cut, shadow and all, by the form it sits in.
-                .drawWithContent {
-                    if (clip == null) drawContent() else clipRect(clip.left - at.x, clip.top - at.y, clip.right - at.x, clip.bottom - at.y) { this@drawWithContent.drawContent() }
-                }
-                .ppmShadow(tokens.shadowPanel, shape)
-                .clip(shape)
-                .background(tokens.panel2.over(tokens.bgSolid).color)
-                .cssBorder(tokens.border.color, shape),
-        ) {
-            PopoverHeader("Model")
-            Column(Modifier.padding(vertical = 4.dp)) {
-                for (option in models) {
-                    val active = option.value == value
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(if (active) tokens.panel2.color else Color.Transparent)
-                            .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color) { pick(option.value) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        BasicText(
-                            option.label,
-                            Modifier.weight(1f),
-                            style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color),
-                        )
-                        if (active) PpmIcon(ProductIcon.Check, 16.dp, tokens.accent.color)
-                    }
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        Modifier
+            .width(224.dp)
+            .onGloballyPositioned { at = it.positionOnScreen() }
+            // Cut, shadow and all, by the form it sits in.
+            .drawWithContent {
+                if (clip == null) drawContent() else clipRect(clip.left - at.x, clip.top - at.y, clip.right - at.x, clip.bottom - at.y) { this@drawWithContent.drawContent() }
+            }
+            .ppmShadow(tokens.shadowPanel, shape)
+            .clip(shape)
+            .background(tokens.panel2.over(tokens.bgSolid).color)
+            .cssBorder(tokens.border.color, shape),
+    ) {
+        PopoverHeader("Model")
+        Column(Modifier.padding(vertical = 4.dp)) {
+            for (option in models) {
+                val active = option.value == value
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(if (active) tokens.panel2.color else Color.Transparent)
+                        .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color, litOnFocus = true) { pick(option.value) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    BasicText(
+                        option.label,
+                        Modifier.weight(1f),
+                        style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color),
+                    )
+                    if (active) PpmIcon(ProductIcon.Check, 16.dp, tokens.accent.color)
                 }
             }
         }

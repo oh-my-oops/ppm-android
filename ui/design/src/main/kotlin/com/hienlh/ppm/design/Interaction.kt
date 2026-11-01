@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
@@ -58,6 +59,9 @@ fun rememberHover(enabled: Boolean = true, instant: Boolean = false): Hover {
  * CSS `:hover` still matches a disabled button, so where the web gives its `disabled:` look no
  * `disabled:hover:` and no `pointer-events-none`, a mouse over it lights it all the same:
  * [hoverWhileDisabled].
+ *
+ * [litOnFocus] is for a control whose `focus:bg-…` is the `hover:bg-…` it has: [hoverColor] is lit
+ * while it has the focus too (a keyboard's: a touch puts none on it), faded in as the hover is.
  */
 @Composable
 fun Modifier.ppmClickable(
@@ -70,6 +74,7 @@ fun Modifier.ppmClickable(
     onClickLabel: String? = null,
     source: MutableInteractionSource? = null,
     hoverWhileDisabled: Boolean = false,
+    litOnFocus: Boolean = false,
     onClick: () -> Unit,
 ): Modifier {
     val own = remember { MutableInteractionSource() }
@@ -77,7 +82,9 @@ fun Modifier.ppmClickable(
     val pressed by interactions.collectIsPressedAsState()
     val hovered by interactions.collectIsHoveredAsState()
     val hovers = enabled || hoverWhileDisabled
-    val on = hovered && hovers
+    // Only a control that lights on focus watches for it.
+    val focused = litOnFocus && interactions.collectIsFocusedAsState().value
+    val on = (hovered && hovers) || focused
     val lit = when {
         hoverColor.alpha == 0f -> 0f
         fade -> colorsFade(on)
