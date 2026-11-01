@@ -56,12 +56,14 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.CssSides
+import com.hienlh.ppm.design.CursorText
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.TextCursorRegion
 import com.hienlh.ppm.design.ThemeTokens
 import com.hienlh.ppm.design.TruncatedText
 import com.hienlh.ppm.design.cssBorder
@@ -212,13 +214,16 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
                 Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                ToolDetails(tool.name, tool.input, tool.toolUseId)
-                if (partial != null) StreamingBashOutput(partial)
-                if (!nested.isNullOrEmpty()) SubagentChildren(nested, window = false)
-                if (imagePath != null) ToolImagePreview(imagePath, tool.toolUseId)
-                // The preview names the file already, so the result's echo of it is left out.
-                if (result != null && showsResult(tool.name, result) && !(imagePath != null && !result.isError)) {
-                    ToolResultView(tool.name, result.output)
+                // `select-text`: the I-beam over the glyphs of what the card details; its buttons keep the arrow.
+                TextCursorRegion {
+                    ToolDetails(tool.name, tool.input, tool.toolUseId)
+                    if (partial != null) StreamingBashOutput(partial)
+                    if (!nested.isNullOrEmpty()) SubagentChildren(nested, window = false)
+                    if (imagePath != null) ToolImagePreview(imagePath, tool.toolUseId)
+                    // The preview names the file already, so the result's echo of it is left out.
+                    if (result != null && showsResult(tool.name, result) && !(imagePath != null && !result.isError)) {
+                        ToolResultView(tool.name, result.output)
+                    }
                 }
             }
         }
@@ -261,7 +266,7 @@ private fun StreamingBashOutput(output: BashPartial) {
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             PpmIcon(ProductIcon.Loader2, 12.dp, tokens.warning.color, spinning = true)
-            BasicText("Output (${lines(output.lineCount)}, streaming...)", style = tinyText.copy(color = tokens.warning.color))
+            CursorText("Output (${lines(output.lineCount)}, streaming...)", style = tinyText.copy(color = tokens.warning.color))
         }
         Box(Modifier.fillMaxWidth().heightIn(max = 240.dp).cssScrollY(scroll)) {
             Mono(output.tail, tokens.text3, breakAll = true, style = streamMono)
@@ -580,7 +585,7 @@ private fun ToolDetails(name: String, input: JsonElement, toolUseId: String? = n
     when (name) {
         "Bash", "PowerShell" -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (s("description").isNotEmpty()) {
-                BasicText(s("description"), style = ppmText(12f, lineHeight = 16f, italic = true).copy(color = tokens.text3.color))
+                CursorText(s("description"), style = ppmText(12f, lineHeight = 16f, italic = true).copy(color = tokens.text3.color))
             }
             Mono(s("command"), tokens.text2, breakAll = true)
         }
@@ -588,7 +593,7 @@ private fun ToolDetails(name: String, input: JsonElement, toolUseId: String? = n
         "Glob" -> Mono(s("pattern") + if (s("path").isEmpty()) "" else " in ${s("path")}", tokens.text2)
         "Grep" -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Mono("/${s("pattern")}/", tokens.text2)
-            if (s("path").isNotEmpty()) BasicText("in ${s("path")}", style = cardText.copy(color = tokens.text3.color))
+            if (s("path").isNotEmpty()) CursorText("in ${s("path")}", style = cardText.copy(color = tokens.text3.color))
         }
         "TodoWrite" -> TodoList(input["todos"].array.orEmpty())
         "WebFetch" -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -608,13 +613,13 @@ private fun ToolDetails(name: String, input: JsonElement, toolUseId: String? = n
                     )
                 }
             }
-            if (s("prompt").isNotEmpty()) BasicText(truncate(s("prompt"), 100), style = cardText.copy(color = tokens.text3.color))
+            if (s("prompt").isNotEmpty()) CursorText(truncate(s("prompt"), 100), style = cardText.copy(color = tokens.text3.color))
         }
         "SendMessage" -> SendMessageDetails(input)
         "Agent", "Task" -> AgentDetails(input)
         "ToolSearch" -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Mono(s("query"), tokens.text2)
-            if (truthy(input["max_results"])) BasicText("Max results: ${s("max_results")}", style = cardText.copy(color = tokens.text3.color))
+            if (truthy(input["max_results"])) CursorText("Max results: ${s("max_results")}", style = cardText.copy(color = tokens.text3.color))
         }
         "AskUserQuestion" -> AnsweredQuestions(input)
         "ScheduleWakeup" -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -628,28 +633,28 @@ private fun ToolDetails(name: String, input: JsonElement, toolUseId: String? = n
             }
             // `mr-1`.
             val clock = inlineIcon(ProductIcon.Clock, tokens.text2.color, marginStart = 4f, end = false)
-            BasicText(line, style = cardText.copy(color = tokens.text2.color), inlineContent = mapOf("clock" to clock))
-            if (truthy(input["reason"])) BasicText(s("reason"), style = ppmText(12f, lineHeight = 16f, italic = true).copy(color = tokens.text2.color))
+            CursorText(line, style = cardText.copy(color = tokens.text2.color), inlineContent = mapOf("clock" to clock))
+            if (truthy(input["reason"])) CursorText(s("reason"), style = ppmText(12f, lineHeight = 16f, italic = true).copy(color = tokens.text2.color))
             if (truthy(input["prompt"])) {
                 Column {
                     // `mb-0.5`.
-                    BasicText("Prompt on wake", Modifier.padding(bottom = 2.dp), tinyText.copy(color = tokens.text3.color))
+                    CursorText("Prompt on wake", Modifier.padding(bottom = 2.dp), tinyText.copy(color = tokens.text3.color))
                     MiniMarkdown(s("prompt"), maxHeight = 192.dp)
                 }
             }
         }
         "TaskCreate" -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            BasicText(s("subject"), style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
-            if (truthy(input["description"])) BasicText(s("description"), style = cardText.copy(color = tokens.text3.color))
-            if (truthy(input["activeForm"])) BasicText(s("activeForm"), style = ppmText(12f, lineHeight = 16f, italic = true).copy(color = tokens.text3.color))
+            CursorText(s("subject"), style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
+            if (truthy(input["description"])) CursorText(s("description"), style = cardText.copy(color = tokens.text3.color))
+            if (truthy(input["activeForm"])) CursorText(s("activeForm"), style = ppmText(12f, lineHeight = 16f, italic = true).copy(color = tokens.text3.color))
         }
         "TaskUpdate", "TaskStop" -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            BasicText("#${s("taskId")}", style = monoText.copy(color = tokens.text2.color))
+            CursorText("#${s("taskId")}", style = monoText.copy(color = tokens.text2.color))
             TaskStatusBadge(if (name == "TaskStop") "stopped" else s("status"))
         }
         "ImageGen" -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (truthy(input["prompt"])) BasicText(s("prompt"), style = cardText.copy(color = tokens.text2.color))
-            if (input["transparentBackground"].bool == true) BasicText("Transparent background", style = cardText.copy(color = tokens.text3.color))
+            if (truthy(input["prompt"])) CursorText(s("prompt"), style = cardText.copy(color = tokens.text2.color))
+            if (input["transparentBackground"].bool == true) CursorText("Transparent background", style = cardText.copy(color = tokens.text3.color))
         }
         else -> Mono(if (input is JsonNull) "null" else input.prettyString, tokens.text2, breakAll = true)
     }
@@ -662,17 +667,17 @@ private fun DbToolDetails(call: DbToolCall) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val middle = Modifier.align(Alignment.CenterVertically)
-            BasicText("Connection", middle, cardText.copy(color = tokens.text3.color))
-            BasicText(call.connection, middle, ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
+            CursorText("Connection", middle, cardText.copy(color = tokens.text3.color))
+            CursorText(call.connection, middle, ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
             call.database?.let { database ->
                 val line = buildAnnotatedString {
                     append("database ")
                     withStyle(SpanStyle(color = tokens.text2.color, fontFamily = PpmFonts.mono)) { append(database) }
                 }
-                BasicText(line, middle, cardText.copy(color = tokens.text3.color))
+                CursorText(line, middle, cardText.copy(color = tokens.text3.color))
             }
         }
-        call.reason?.let { BasicText(it, style = ppmText(12f, lineHeight = 16f, italic = true).copy(color = tokens.text2.color)) }
+        call.reason?.let { CursorText(it, style = ppmText(12f, lineHeight = 16f, italic = true).copy(color = tokens.text2.color)) }
         Box(Modifier.heightIn(max = 240.dp).cssScrollY()) {
             Mono(call.sql, tokens.text2, breakAll = true)
         }
@@ -681,7 +686,7 @@ private fun DbToolDetails(call: DbToolCall) {
                 append("Expected rows changed: ")
                 withStyle(SpanStyle(color = tokens.text2.color)) { append(jsNumberText(rows)) }
             }
-            BasicText(line, style = cardText.copy(color = tokens.text3.color))
+            CursorText(line, style = cardText.copy(color = tokens.text3.color))
         }
     }
 }
@@ -701,7 +706,7 @@ private fun DeviceToolDetails(call: DeviceToolCall) {
                         append(if (BREAK in cwd) cwd else breakAnywhere(cwd))
                     }
                 }
-                BasicText(line, style = cardText.copy(color = tokens.text3.color))
+                CursorText(line, style = cardText.copy(color = tokens.text3.color))
             }
         }
         is DeviceToolCall.ReadTerminal -> {
@@ -714,7 +719,7 @@ private fun DeviceToolDetails(call: DeviceToolCall) {
                 }
                 call.lines?.let { append(", last $it lines") }
             }
-            BasicText(line, style = cardText.copy(color = tokens.text3.color))
+            CursorText(line, style = cardText.copy(color = tokens.text3.color))
         }
     }
 }
@@ -741,7 +746,7 @@ private fun FileDetails(name: String, input: JsonElement, toolUseId: String?) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 edits.forEachIndexed { index, edit ->
                     Column(Modifier.editAnchor(toolUseId?.let { "$it-$index" }), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        BasicText("Edit ${index + 1}", style = tinyText.copy(color = tokens.text3.color))
+                        CursorText("Edit ${index + 1}", style = tinyText.copy(color = tokens.text3.color))
                         EditDiffView(edit["old_string"].string ?: "", edit["new_string"].string ?: "")
                     }
                 }
@@ -795,7 +800,7 @@ internal fun Mono(text: String, color: Rgba, modifier: Modifier = Modifier, brea
     val shown = remember(laid, breaking) { if (breaking || '\t' in laid) preText(laid, breaking) else AnnotatedString(laid) }
     WithoutBreaksOnCopy(breaking) {
         SelectionContainer(modifier.fillMaxWidth()) {
-            BasicText(shown, style = style.copy(color = color.color))
+            CursorText(shown, style = style.copy(color = color.color))
         }
     }
 }
@@ -814,8 +819,8 @@ private fun TodoList(todos: List<JsonElement>) {
                     else -> "○" to tokens.text3
                 }
                 // `items-start` and the mark's `mt-0.5`: it sits 2 px below the text, and each row is 2 px taller for it.
-                BasicText(glyph, Modifier.padding(top = 2.dp), cardText.copy(color = color.color))
-                BasicText(
+                CursorText(glyph, Modifier.padding(top = 2.dp), cardText.copy(color = color.color))
+                CursorText(
                     todo["content"].string ?: "",
                     style = cardText.copy(
                         color = (if (done) tokens.text3 else tokens.text2).color,
@@ -840,7 +845,7 @@ private fun AnsweredQuestions(input: JsonElement) {
             // Keyed by Codex's id when the question has one, by its text otherwise.
             val answer = answers[q["id"].string ?: question].string ?: answers[question].string ?: ""
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                BasicText(
+                CursorText(
                     (header?.let { "$it: " } ?: "") + question,
                     style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color),
                 )
@@ -849,7 +854,7 @@ private fun AnsweredQuestions(input: JsonElement) {
                         val label = option["label"].string ?: ""
                         val selected = answer.split(", ").contains(label)
                         val shape = RoundedCornerShape(4.dp)
-                        BasicText(
+                        CursorText(
                             label,
                             Modifier
                                 .background((if (selected) tokens.accent.opacity(0.2) else Rgba(0.0, 0.0, 0.0, 0.0)).color, shape)
@@ -859,7 +864,7 @@ private fun AnsweredQuestions(input: JsonElement) {
                         )
                     }
                 }
-                if (answer.isNotEmpty()) BasicText("Answer: $answer", style = cardText.copy(color = tokens.text.color))
+                if (answer.isNotEmpty()) CursorText("Answer: $answer", style = cardText.copy(color = tokens.text.color))
             }
         }
     }
@@ -876,7 +881,7 @@ private fun TaskStatusBadge(status: String) {
         else -> Triple(tokens.text3, tokens.border, tokens.panel)
     }
     val shape = RoundedCornerShape(4.dp)
-    BasicText(
+    CursorText(
         status,
         Modifier.background(fill.color, shape).cssBorder(border.color, shape).padding(horizontal = 6.dp, vertical = 2.dp),
         tinyText.copy(color = text.color),
@@ -905,14 +910,14 @@ private fun AgentDetails(input: JsonElement) {
         if (handle != null) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 val middle = Modifier.align(Alignment.CenterVertically)
-                BasicText("Name", middle, cardText.copy(color = tokens.text3.color))
-                BasicText(handle, middle, ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
+                CursorText("Name", middle, cardText.copy(color = tokens.text3.color))
+                CursorText(handle, middle, ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
                 Badge("teammate", tokens.accent2.opacity(0.15), tokens.accent2, middle)
                 if (input["isolation"].string == "worktree") Badge("worktree", tokens.panel2, tokens.text3, middle)
             }
         }
-        if (truthy(input["description"])) BasicText(s("description"), style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color))
-        if (truthy(input["subagent_type"])) BasicText("Type: ${s("subagent_type")}", style = cardText.copy(color = tokens.text3.color))
+        if (truthy(input["description"])) CursorText(s("description"), style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color))
+        if (truthy(input["subagent_type"])) CursorText("Type: ${s("subagent_type")}", style = cardText.copy(color = tokens.text3.color))
         if (truthy(input["prompt"])) MiniMarkdown(s("prompt"), maxHeight = 192.dp)
     }
 }
@@ -920,7 +925,7 @@ private fun AgentDetails(input: JsonElement) {
 /** `inline-block rounded px-1.5 py-0.5 text-[10px]`. */
 @Composable
 private fun Badge(label: String, fill: Rgba, text: Rgba, modifier: Modifier = Modifier) {
-    BasicText(
+    CursorText(
         label,
         modifier.background(fill.color, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
         tinyText.copy(color = text.color),
@@ -933,7 +938,7 @@ private fun KindBadge(kind: String) {
     val tokens = LocalPpmTokens.current
     val badge = TEAM_BADGES[kind]
     val (fill, text) = badge?.second?.colors(tokens) ?: (tokens.panel2 to tokens.text3)
-    BasicText(
+    CursorText(
         badge?.first ?: kind,
         Modifier.background(fill.color, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
         tinyText.copy(color = text.color),
@@ -948,8 +953,8 @@ private fun SendMessageDetails(input: JsonElement) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val middle = Modifier.align(Alignment.CenterVertically)
-            BasicText("To", middle, cardText.copy(color = tokens.text3.color))
-            BasicText(message.to.ifEmpty { "unknown" }, middle, ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
+            CursorText("To", middle, cardText.copy(color = tokens.text3.color))
+            CursorText(message.to.ifEmpty { "unknown" }, middle, ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
             if (message.kind != "message") Box(middle) { KindBadge(message.kind) }
             if (message.notifyWhenIdle) {
                 Row(
@@ -958,7 +963,7 @@ private fun SendMessageDetails(input: JsonElement) {
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     PpmIcon(ProductIcon.Clock, 12.dp, tokens.text3.color)
-                    BasicText("notify when idle", style = tinyText.copy(color = tokens.text3.color))
+                    CursorText("notify when idle", style = tinyText.copy(color = tokens.text3.color))
                 }
             }
         }
@@ -973,10 +978,10 @@ private fun SendMessageDetails(input: JsonElement) {
                             withStyle(SpanStyle(color = tokens.text3.color, fontFamily = PpmFonts.mono)) { append(" · ${protocol.requestId}") }
                         }
                     }
-                    BasicText(line, style = cardText.copy(color = tokens.text2.color))
+                    CursorText(line, style = cardText.copy(color = tokens.text2.color))
                 }
                 for (note in listOf(protocol.reason, protocol.feedback)) {
-                    if (!note.isNullOrEmpty()) BasicText(note, style = cardText.copy(color = tokens.text3.color))
+                    if (!note.isNullOrEmpty()) CursorText(note, style = cardText.copy(color = tokens.text3.color))
                 }
             }
         }
@@ -987,7 +992,7 @@ private fun SendMessageDetails(input: JsonElement) {
                         withStyle(SpanStyle(fontFamily = PpmFonts.mono)) { append(key) }
                         append(": $value")
                     }
-                    BasicText(line, style = cardText.copy(color = tokens.text3.color))
+                    CursorText(line, style = cardText.copy(color = tokens.text3.color))
                 }
             }
         }
@@ -1060,9 +1065,9 @@ private fun SendMessageOutcomeView(output: String, outcome: SendMessageOutcome) 
                 val middle = Modifier.align(Alignment.CenterVertically)
                 val tone = if (outcome.ok) tokens.success else tokens.error
                 PpmIcon(if (outcome.ok) ProductIcon.CheckCircle2 else ProductIcon.XCircle, 12.dp, tone.color, middle)
-                BasicText(if (outcome.ok) "Delivered" else "Not delivered", middle, cardText.copy(color = tone.color))
-                outcome.detail?.let { BasicText("· $it", middle, cardText.copy(color = tokens.text3.color)) }
-                outcome.ref?.let { BasicText("[$it]", middle, tinyMono.copy(color = tokens.text3.color)) }
+                CursorText(if (outcome.ok) "Delivered" else "Not delivered", middle, cardText.copy(color = tone.color))
+                outcome.detail?.let { CursorText("· $it", middle, cardText.copy(color = tokens.text3.color)) }
+                outcome.ref?.let { CursorText("[$it]", middle, tinyMono.copy(color = tokens.text3.color)) }
             }
             OutputToggle(if (showRaw) "Hide raw" else "Show raw", ProductIcon.Code) { showRaw = !showRaw }
             if (showRaw) {

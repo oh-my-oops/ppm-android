@@ -105,7 +105,7 @@ fun AnnotatedString.Builder.addChromeInline(face: ChromeFace, size: Float, lineH
 fun AnnotatedString.Builder.addChromeAtomic(above: Float, start: Int, end: Int) =
     addStringAnnotation(CHROME_INLINE, "$ATOMIC;$above", start, end)
 
-private const val ATOMIC = "atomic"
+internal const val ATOMIC = "atomic"
 
 /** An inline box as [CHROME_INLINE] annotates it, CSS px; [face] null for an atomic box [size] px over the baseline. */
 private class ChromeInline(val start: Int, val end: Int, val face: ChromeFace?, val size: Float, val lineHeight: Float)
@@ -230,7 +230,7 @@ class ChromeTextLayout internal constructor(
 }
 
 /** The annotation `appendInlineContent` marks a placeholder with, naming its [InlineTextContent]. */
-private const val INLINE_CONTENT = "androidx.compose.foundation.text.inlineContent"
+internal const val INLINE_CONTENT = "androidx.compose.foundation.text.inlineContent"
 
 /**
  * [text] in [style], lines broken as Compose breaks them, each line box as tall and its baseline
@@ -238,8 +238,9 @@ private const val INLINE_CONTENT = "androidx.compose.foundation.text.inlineConte
  * or size, or an atomic box ([CHROME_INLINE]), grows as Chrome grows it, and lines stack in
  * fractions of a pixel from where [exact] says the box starts, each baseline on the pixel Chrome
  * paints it on. A [CssColumn] counts the box at its exact height. Links open as [BasicText]'s do,
- * a mouse over one takes its hovered style and the hand; [inlineContent] fills the placeholders
- * the text names; [behind] draws under the text, given where its lines went.
+ * a mouse over one takes its hovered style and the hand, and over a glyph run in a
+ * [TextCursorRegion] it shows the I-beam; [inlineContent] fills the placeholders the text names;
+ * [behind] draws under the text, given where its lines went.
  */
 @Composable
 fun ChromeText(
@@ -273,6 +274,7 @@ fun ChromeText(
         ChromeTextPolicy(measurer, laid, style, strut, softWrap, placeholders, boxes, exact, state)
     }
     val justify = style.textAlign == TextAlign.Justify
+    val density = LocalDensity.current
     Layout(
         content = {
             for (slot in slots) {
@@ -283,6 +285,8 @@ fun ChromeText(
         modifier = modifier
             .cssPhased(exact)
             .semantics { this.text = text }
+            // Before the link's hand, which a pointer icon further in takes over.
+            .hoverTextCursor(LocalTextCursor.current) { position -> state.layout?.overRun(position, text, strut, boxes, density) == true }
             .then(if (links.isEmpty()) Modifier else Modifier.chromeLinks(links, state, uriHandler) { hovered = it })
             .then(if (hovered != null) Modifier.pointerHoverIcon(WebCursor.Pointer) else Modifier)
             .drawBehind {
@@ -297,6 +301,22 @@ fun ChromeText(
 /** The layout a [ChromeText] last measured, which it draws and hit-tests. */
 private class ChromeTextState {
     var layout by mutableStateOf<ChromeTextLayout?>(null, referentialEqualityPolicy())
+}
+
+/**
+ * Whether [position] is over a glyph run of the text this laid out, where a [LocalTextCursor]
+ * region shows the I-beam: a character of [text] that [isTextRun], in the box Chrome gives its
+ * fragment on the line it is drawn on, from its own face — the block's [strut], or the inline box
+ * ([boxes]) it is in.
+ */
+private fun ChromeTextLayout.overRun(position: Offset, text: AnnotatedString, strut: ChromeStrut, boxes: List<ChromeInline>, density: Density): Boolean {
+    val offset = characterAt(position)
+    if (offset < 0 || !text.isTextRun(offset)) return false
+    val inline = boxes.lastOrNull { offset >= it.start && offset < it.end }
+    // An atomic box has no face of its own; its characters are no text anyway.
+    val face = if (inline == null) strut.face else inline.face ?: return false
+    val size = inline?.size ?: strut.size
+    return overFragment(position.y, baseline(result.getLineForOffset(offset)), with(density) { size.sp.toPx() }, face)
 }
 
 /** Opens a link tapped as [BasicText] opens one, and tells [hover] which link a mouse is over. */

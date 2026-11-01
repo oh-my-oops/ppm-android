@@ -73,6 +73,7 @@ import com.hienlh.ppm.design.ClampedText
 import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssRow
 import com.hienlh.ppm.design.CssText
+import com.hienlh.ppm.design.CursorText
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.LocalPpmMobile
@@ -81,6 +82,7 @@ import com.hienlh.ppm.design.LucideIcon
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.TextCursorRegion
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.ViewerImage
 import com.hienlh.ppm.design.WebCursor
@@ -351,10 +353,13 @@ private fun BubbleText(text: String, system: Boolean, linked: AnnotatedString?) 
     WithoutOnCopy(if (system) "" else userTextMarks(text)) {
         // Counted at its lines, 52.5 px each at 2.625x where Compose makes 53, and at most half the window.
         SelectionContainer(Modifier.cssLines(20f, max = if (expanded) expandedLimit else Dp.Unspecified)) {
-            if (expanded) {
-                BasicText(annotated, slack.heightIn(max = expandedLimit).cssScrollY(), style, inlineContent = inline)
-            } else {
-                ClampedText(annotated, style, maxLines = 2, slack, preWrap = true, inlineContent = inline, onClamped = { clamped = it })
+            // `select-text`: the I-beam over the glyphs, the arrow after a short line and over a chip.
+            TextCursorRegion {
+                if (expanded) {
+                    CursorText(annotated, slack.heightIn(max = expandedLimit).cssScrollY(), style, inlineContent = inline)
+                } else {
+                    ClampedText(annotated, style, maxLines = 2, slack, preWrap = true, inlineContent = inline, onClamped = { clamped = it })
+                }
             }
         }
     }
@@ -764,10 +769,13 @@ fun ReplyCard(
         val quote = remember(reply.quote) { if (marked) chromeBreaks(reply.quote) else reply.quote }
         WithoutOnCopy(if (marked) "$BREAK$JOIN" else "") {
             SelectionContainer {
-                if (expanded) {
-                    BasicText(quote, Modifier.heightIn(max = 240.dp).cssScrollY(), quoteStyle)
-                } else {
-                    ClampedText(AnnotatedString(quote), quoteStyle, maxLines = 2, preWrap = true)
+                // `select-text`; over the message box the I-beam is the box's own, everywhere in it.
+                TextCursorRegion(enabled = !preview) {
+                    if (expanded) {
+                        CursorText(quote, Modifier.heightIn(max = 240.dp).cssScrollY(), quoteStyle)
+                    } else {
+                        ClampedText(AnnotatedString(quote), quoteStyle, maxLines = 2, preWrap = true)
+                    }
                 }
             }
         }

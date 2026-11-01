@@ -39,9 +39,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssSides
+import com.hienlh.ppm.design.CursorText
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.TextCursorRegion
 import com.hienlh.ppm.design.TruncatedText
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssExact
@@ -195,7 +197,10 @@ private fun PromptRow(prompt: String, key: String) {
             BasicText("Prompt", style = promptText.copy(color = color))
         }
         if (open) {
-            BasicText(prompt, Modifier.fillMaxWidth().padding(horizontal = 12.dp).cssLines(16.5f), promptText.copy(color = tokens.text2.color))
+            // `select-text`: the I-beam over the prompt's glyphs.
+            TextCursorRegion {
+                CursorText(prompt, Modifier.fillMaxWidth().padding(horizontal = 12.dp).cssLines(16.5f), promptText.copy(color = tokens.text2.color))
+            }
         }
     }
 }
@@ -271,7 +276,10 @@ private fun StepRow(row: AgentStepRow, window: Boolean, modifier: Modifier = Mod
             // One paragraph counts as its lines, as Chrome adds them up; anything with blocks as it measures.
             val paragraph = window && remember(row.text) { Markdown.parse(row.text).singleOrNull() is MarkdownBlock.Paragraph }
             val lines = if (paragraph) Modifier.cssLines(16.5f, max = 96.dp) else Modifier
-            MiniMarkdown(row.text, maxHeight = 96.dp, size = 11f, lineHeightRatio = if (window) 1.5f else 4f / 3, modifier = modifier.then(lines))
+            // Under no `select-none`, here or in a card's `select-text` details: the I-beam over its glyphs.
+            TextCursorRegion {
+                MiniMarkdown(row.text, maxHeight = 96.dp, size = 11f, lineHeightRatio = if (window) 1.5f else 4f / 3, modifier = modifier.then(lines))
+            }
         }
         is AgentStepRow.Tool -> {
             val use = row.use

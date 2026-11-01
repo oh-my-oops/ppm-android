@@ -30,6 +30,7 @@ import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.TextCursorRegion
 import com.hienlh.ppm.design.TruncatedText
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssScrollY
@@ -116,18 +117,21 @@ internal fun TabToolCard(call: TabToolCall, toolUseId: String?, output: String?,
         }
         if (expanded) {
             Column(Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, bottom = 8.dp)) {
-                Mono(call.path, tokens.text3, breakAll = true)
-                if (text.isNotEmpty()) {
-                    Box(
-                        Modifier
-                            .padding(top = 6.dp)
-                            .fillMaxWidth()
-                            .heightIn(max = 240.dp)
-                            .cssBorder(tokens.border.color, sides = CssSides.Top)
-                            .cssScrollY()
-                            .padding(top = 6.dp),
-                    ) {
-                        Mono(text, tokens.text3)
+                // `select-text`: the I-beam over the glyphs of the path and the text.
+                TextCursorRegion {
+                    Mono(call.path, tokens.text3, breakAll = true)
+                    if (text.isNotEmpty()) {
+                        Box(
+                            Modifier
+                                .padding(top = 6.dp)
+                                .fillMaxWidth()
+                                .heightIn(max = 240.dp)
+                                .cssBorder(tokens.border.color, sides = CssSides.Top)
+                                .cssScrollY()
+                                .padding(top = 6.dp),
+                        ) {
+                            Mono(text, tokens.text3)
+                        }
                     }
                 }
             }

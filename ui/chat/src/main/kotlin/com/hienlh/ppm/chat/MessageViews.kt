@@ -58,12 +58,14 @@ import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssRow
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.CssText
+import com.hienlh.ppm.design.CursorText
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.TextCursorRegion
 import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
@@ -262,11 +264,16 @@ fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActi
     }
 }
 
-/** A text block's markdown, selectable, counted by the column around it at its exact height. */
+/**
+ * A text block's markdown, selectable (`select-text`, so the I-beam over its glyphs), counted by
+ * the column around it at its exact height.
+ */
 @Composable
 private fun SelectableMarkdown(text: String, streaming: Boolean) {
     val exact = rememberCssExact()
-    SelectionContainer(Modifier.cssExact(exact)) { MarkdownContent(text, streaming = streaming, exact = exact) }
+    SelectionContainer(Modifier.cssExact(exact)) {
+        TextCursorRegion { MarkdownContent(text, streaming = streaming, exact = exact) }
+    }
 }
 
 /** A read with no result yet is over once a later edit of the same file came back, which needed it. */
@@ -291,12 +298,14 @@ fun pulse(): Float {
     return alpha
 }
 
-/** The pulsing "Thinking..." under text that is still streaming. */
+/** The pulsing "Thinking..." under text that is still streaming: inside the text's `select-text` div, so it has the I-beam too. */
 @Composable
 internal fun StreamingMark() {
     val tokens = LocalPpmTokens.current
     val alpha = pulse()
-    BasicText("Thinking...", Modifier.alpha(alpha).cssLines(20f), ppmText(14f, lineHeight = 20f).copy(color = tokens.text3.color))
+    TextCursorRegion {
+        CursorText("Thinking...", Modifier.alpha(alpha).cssLines(20f), ppmText(14f, lineHeight = 20f).copy(color = tokens.text3.color))
+    }
 }
 
 /** An error event inside an answer. */

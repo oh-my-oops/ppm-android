@@ -59,12 +59,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.design.CssColumn
+import com.hienlh.ppm.design.CursorText
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.TextCursorRegion
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.cssBorder
@@ -395,7 +397,10 @@ internal fun QuestionCard(
                 )
             }
             SelectionContainer(Modifier.cssLines(20f)) {
-                BasicText(current.question, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color))
+                // `select-text`: the I-beam over the question's glyphs.
+                TextCursorRegion {
+                    CursorText(current.question, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color))
+                }
             }
             if (current.multiSelect) BasicText("Select multiple", Modifier.cssLines(16.5f), ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text2.color))
             CssColumn(gap = 6.dp) {

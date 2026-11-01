@@ -74,6 +74,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.CssSides
+import com.hienlh.ppm.design.CursorText
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.LocalImageViewer
@@ -373,7 +374,7 @@ private fun Stage(image: ToolImage.Loaded, path: String, cardKey: String?, narro
                 Tile(image, layout, name, band = false, colors, Modifier.width((if (narrow) TILE_WIDTH_NARROW else TILE_WIDTH).dp), openFull)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     if (!narrow) {
-                        BasicText(
+                        CursorText(
                             name,
                             style = ppmText(13f, FontWeight.SemiBold, lineHeight = 13f * 4 / 3).copy(color = tokens.text.color),
                             maxLines = 1,
@@ -487,8 +488,8 @@ private fun Facts(image: ToolImage.Loaded, layout: PreviewLayout, path: String, 
     val value = valueText(narrow)
     FactRows(narrow, colors) { index, modifier ->
         when (index) {
-            0 -> BasicText(dimensionsLabel(image.natural, layout.fit), modifier, value, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            1 -> BasicText(sizeLabel(image), modifier, value, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            0 -> CursorText(dimensionsLabel(image.natural, layout.fit), modifier, value, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            1 -> CursorText(sizeLabel(image), modifier, value, maxLines = 1, overflow = TextOverflow.Ellipsis)
             else -> RtlTruncated(path, value, modifier)
         }
     }
@@ -504,7 +505,7 @@ private fun FactRows(narrow: Boolean, colors: StageColors, value: @Composable (I
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         listOf("dimensions", "size", "path").forEachIndexed { index, name ->
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                if (!narrow) BasicText(name, Modifier.width(labelWidth), label, maxLines = 1)
+                if (!narrow) CursorText(name, Modifier.width(labelWidth), label, maxLines = 1)
                 value(index, Modifier.weight(1f))
             }
         }
@@ -523,8 +524,8 @@ private fun valueText(narrow: Boolean): TextStyle {
 private fun BandFacts(image: ToolImage.Loaded, layout: PreviewLayout, path: String, narrow: Boolean) {
     val value = valueText(narrow)
     Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-        BasicText(dimensionsLabel(image.natural, layout.fit), style = value, maxLines = 1)
-        BasicText(sizeLabel(image), style = value, maxLines = 1)
+        CursorText(dimensionsLabel(image.natural, layout.fit), style = value, maxLines = 1)
+        CursorText(sizeLabel(image), style = value, maxLines = 1)
         RtlTruncated(path, value, Modifier.weight(1f))
     }
 }
@@ -560,7 +561,7 @@ private fun RtlTruncated(text: String, style: TextStyle, modifier: Modifier) {
                 LRO + "…" + visual.substring(low)
             }
         }
-        BasicText(shown, style = drawn, maxLines = 1, softWrap = false)
+        CursorText(shown, style = drawn, maxLines = 1, softWrap = false)
     }
 }
 
@@ -701,7 +702,7 @@ private fun ImagePreviewFailure(code: String?, onRetry: () -> Unit) {
     ) {
         PpmIcon(ProductIcon.AlertCircle, 12.dp, tokens.text2.color)
         // `truncate`, with the retry pushed to the far end (`ml-auto`).
-        BasicText(
+        CursorText(
             "preview unavailable" + (code?.let { " · $it" } ?: ""),
             Modifier.weight(1f),
             text.copy(color = tokens.text2.color),

@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.design.CssExact
+import com.hienlh.ppm.design.CursorText
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.cssExact
@@ -161,7 +162,7 @@ internal fun EditDiffView(old: String, new: String, lineHeight: Float = 11f * 16
                                 BasicText(prefix, Modifier.padding(start = 6.dp).width(6.dp), style.copy(color = gutter), overflow = TextOverflow.Visible, softWrap = false)
                             }
                             val text = remember(row, word, breaking) { codeLine(row, word, breaking) }
-                            BasicText(text, Modifier.padding(end = 6.dp), style.copy(color = tokens.text.color))
+                            CursorText(text, Modifier.padding(end = 6.dp), style.copy(color = tokens.text.color))
                         }
                     }
                     if (diff.extra > 0) {

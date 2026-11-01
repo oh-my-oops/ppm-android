@@ -30,7 +30,8 @@ import java.text.Bidi
  *
  * The whole text is laid out and its last line clipped at the cut, so the box keeps the width the
  * whole text asks for (a bubble is as wide as its widest line, a hidden one too) and a selection
- * is of the text itself, never of the "…". Right-to-left text keeps Android's ellipsis.
+ * is of the text itself, never of the "…". Right-to-left text keeps Android's ellipsis. In a
+ * [TextCursorRegion] a mouse over what is shown of its glyph runs sees the I-beam.
  */
 @Composable
 fun ClampedText(
@@ -45,12 +46,16 @@ fun ClampedText(
     onClamped: (Boolean) -> Unit = {},
 ) {
     val bidi = remember(text) { Bidi.requiresBidi(text.text.toCharArray(), 0, text.length) }
+    val runs = remember { TextLayoutHolder() }
     if (bidi) {
         BasicText(
             text,
-            modifier,
+            modifier.textRunCursor(runs),
             style,
-            onTextLayout = { onClamped(it.hasVisualOverflow) },
+            onTextLayout = {
+                runs.result = it
+                onClamped(it.hasVisualOverflow)
+            },
             overflow = TextOverflow.Ellipsis,
             maxLines = maxLines,
             inlineContent = inlineContent,
@@ -66,18 +71,22 @@ fun ClampedText(
     var cut by remember { mutableStateOf<LineClamp.Cut?>(null) }
     BasicText(
         text,
-        modifier.drawWithContent {
-            val at = cut
-            if (at == null) {
-                drawContent()
-            } else {
-                clipRect(bottom = at.top) { this@drawWithContent.drawContent() }
-                clipRect(top = at.top, right = at.x) { this@drawWithContent.drawContent() }
-                drawText(ellipsis, topLeft = Offset(at.x, at.baseline - ellipsis.firstBaseline))
+        modifier
+            .drawWithContent {
+                val at = cut
+                if (at == null) {
+                    drawContent()
+                } else {
+                    clipRect(bottom = at.top) { this@drawWithContent.drawContent() }
+                    clipRect(top = at.top, right = at.x) { this@drawWithContent.drawContent() }
+                    drawText(ellipsis, topLeft = Offset(at.x, at.baseline - ellipsis.firstBaseline))
+                }
             }
-        },
+            // What the cut leaves out of the last line is not there to point at.
+            .textRunCursor(runs) { position -> cut?.let { position.y >= it.top && position.x >= it.x + ellipsis.getLineRight(0) } == true },
         style,
         onTextLayout = { layout ->
+            runs.result = layout
             cut = LineClamp.cut(layout, maxLines, preWrap, ellipsis.getLineRight(0), spaces)
             onClamped(cut != null)
         },
