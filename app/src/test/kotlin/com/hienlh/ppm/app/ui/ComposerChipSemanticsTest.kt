@@ -7,12 +7,15 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeProvider
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.pressKey
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.state.PermissionMode
 import org.junit.Assert.assertEquals
@@ -137,6 +140,39 @@ class ComposerChipSemanticsTest {
         compose.onNodeWithContentDescription(modeChipName(PermissionMode.PLAN)).performClick()
         compose.onNodeWithContentDescription(modeChipName(PermissionMode.DEFAULT)).performClick()
         assertEquals(2, presses)
+    }
+
+    /**
+     * Clearing a chip's semantics replaces what a service reads, not what the keyboard reaches: the
+     * focus target stays on its `clickable`, though the node no longer says it is focusable.
+     */
+    @Test
+    fun `a hardware keyboard still reaches a chip, Tab focusing it and Enter pressing it`() {
+        var presses = 0
+        compose.setContent { ModelChip("Opus 4.7 · High", NAME, thinking = false, disabled = false) { presses++ } }
+        compose.waitForIdle()
+
+        compose.onRoot().performKeyInput { pressKey(Key.Tab) }
+        compose.onRoot().performKeyInput { pressKey(Key.Enter) }
+        assertEquals(1, presses)
+    }
+
+    @Test
+    fun `Tab passes the disabled model chip by to the next chip, and Enter presses only that one`() {
+        var model = 0
+        var mode = 0
+        compose.setContent {
+            Column {
+                ModelChip("Opus 4.7 · High", NAME, thinking = false, disabled = true) { model++ }
+                ModeChip(PermissionMode.PLAN, narrow = false) { mode++ }
+            }
+        }
+        compose.waitForIdle()
+
+        compose.onRoot().performKeyInput { pressKey(Key.Tab) }
+        compose.onRoot().performKeyInput { pressKey(Key.Enter) }
+        assertEquals(0, model)
+        assertEquals(1, mode)
     }
 
     private companion object {
