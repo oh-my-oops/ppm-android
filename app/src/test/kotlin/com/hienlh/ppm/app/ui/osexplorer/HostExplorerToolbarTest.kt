@@ -1,7 +1,12 @@
 package com.hienlh.ppm.app.ui.osexplorer
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -22,6 +27,7 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.ui.MenuBox
 import com.hienlh.ppm.app.withComposeActivity
@@ -67,10 +73,15 @@ class HostExplorerToolbarTest {
     /** What a radio of the Sort dropdown picked: `KIND descending`. */
     private val picks = mutableListOf<String>()
 
+    /** How wide the bar is held, to see where it breaks; the screen's own width unless a test narrows it. */
+    private var barWidth by mutableStateOf(1000.dp)
+
     private fun toolbar(canUpload: Boolean = true) = compose.setContent {
         val state by session.state.collectAsState()
         val preferences by session.preferences.state.collectAsState()
-        HostExplorerToolbar(session, state, preferences, canUpload) { folder -> uploads += if (folder) "folder" else "files" }
+        Box(Modifier.width(barWidth)) {
+            HostExplorerToolbar(session, state, preferences, canUpload) { folder -> uploads += if (folder) "folder" else "files" }
+        }
     }
 
     private fun button(description: String) = compose.onNodeWithContentDescription(description)
@@ -162,6 +173,62 @@ class HostExplorerToolbarTest {
         compose.waitForIdle()
         assertEquals("/home/me", typed(0))
         assertEquals("/home/me", session.state.value.path)
+    }
+
+    @Test
+    fun `losing focus closes the path field, as onBlur does, without going anywhere`() {
+        toolbar()
+        button("Edit path").performClick()
+        compose.waitForIdle()
+        assertEquals("the field stays open once it has the focus it asked for", 2, compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size)
+        field(0).performTextInput("/typed")
+        field(1).performClick()
+        compose.waitForIdle()
+        assertEquals("only the filter is left", 1, compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size)
+        assertEquals("/home/me", session.state.value.path)
+        button("Edit path").performClick()
+        compose.waitForIdle()
+        assertEquals("the draft stays for the next time, as the web's draftPath does after a blur (only Escape drops it)", "/home/me/typed", typed(0))
+    }
+
+    @Test
+    fun `the path box takes what the buttons leave, so the bar is full and the last button sits at its right edge`() {
+        toolbar()
+        assertEquals(1000f - 6f, button("Show hidden files").getBoundsInRoot().right.value, 0.5f)
+        // 1000 - the 6 dp either side - the buttons, the filter and the gaps: far more than the 350 it was held to.
+        val pathBox = button("Edit path").getBoundsInRoot().right.value + 5f - (button("Refresh").getBoundsInRoot().right.value + 4f)
+        assertTrue("the path box is $pathBox dp wide", pathBox > 500f)
+    }
+
+    /** The top of a few of the bar's items with the bar held [width] wide: items on one line share a top. */
+    private fun tops(width: Dp): Map<String, Float> {
+        barWidth = width
+        compose.waitForIdle()
+        return listOf("Back", "Edit path", "List view", "Show hidden files").associateWith { button(it).getBoundsInRoot().top.value } +
+            ("Filter" to field(0).getBoundsInRoot().top.value)
+    }
+
+    @Test
+    fun `the filter box is 124 dp, so the bar holds it on the first line at 396 dp wide and not at 395`() {
+        toolbar()
+        // The history buttons 124, a gap, the path box's 8rem, a gap and the filter box 124, in the 6 dp the bar keeps either side.
+        val fits = tops(396.dp)
+        assertEquals(fits.getValue("Back"), fits.getValue("Filter"), 1.5f)
+        assertEquals(fits.getValue("Back"), fits.getValue("Edit path"), 1.5f)
+        assertTrue("the views are on the second line", fits.getValue("List view") > fits.getValue("Back") + 20f)
+        val short = tops(395.dp)
+        assertEquals("the path box keeps the first line", short.getValue("Back"), short.getValue("Edit path"), 1.5f)
+        assertTrue("the filter wraps", short.getValue("Filter") > short.getValue("Back") + 20f)
+        assertEquals("and the views follow it", short.getValue("Filter"), short.getValue("List view"), 1.5f)
+    }
+
+    @Test
+    fun `a bar too narrow for the history buttons and the path box's 8rem puts the path box on a line of its own, full width`() {
+        toolbar()
+        val tiny = tops(200.dp)
+        assertTrue("the path box is under the history buttons", tiny.getValue("Edit path") > tiny.getValue("Back") + 20f)
+        val box = button("Edit path").getBoundsInRoot()
+        assertEquals("it fills its line, 6 dp in from the edge, the pencil 5 dp inside the box", 200f - 6f - 5f, box.right.value, 1.5f)
     }
 
     @Test

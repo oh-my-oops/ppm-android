@@ -95,17 +95,16 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
     LaunchedEffect(state.path) { selectMode = false }
     var menu by remember { mutableStateOf<HostMenu?>(null) }
     val focus = remember { FocusRequester() }
-    var typed by remember { mutableStateOf("") }
-    var typedAt by remember { mutableLongStateOf(0) }
+    val typeAhead = remember { HostTypeAhead() }
+    val gridColumns = remember { HostGridColumns() }
     fun open(entry: HostFileEntry) {
         if (entry.isDirectory) session.go(entry.path)
         else if (FileDocumentClassifier.canOpenInPpm(entry.name)) model.openHostFile(entry.path)
     }
-    fun selected(): List<HostFileEntry> = entries.filter { it.path in session.state.value.selection }
     val menuActions = HostExplorerMenuActions(model, session, commands, uploadFiles, downloads, ::copyText, ::open)
-    fun copy(cut: Boolean) {
-        val paths = selected().map { it.path }
-        if (paths.isNotEmpty()) model.fileMutations?.setClipboard(FileClipboard(paths, if (cut) FileClipboardOperation.CUT else FileClipboardOperation.COPY))
+    fun copy(targets: List<HostFileEntry>, cut: Boolean) {
+        if (targets.isNotEmpty()) model.fileMutations?.setClipboard(
+            FileClipboard(targets.map { it.path }, if (cut) FileClipboardOperation.CUT else FileClipboardOperation.COPY))
     }
     BoxWithConstraints(Modifier.fillMaxSize().background(tokens.panel.color)) {
         val showPlaces = !mobile && maxWidth >= 640.dp
@@ -132,35 +131,25 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
                     Box(Modifier.weight(1f).fillMaxWidth().then(dropModifier(state.currentDirectory))
                         .focusRequester(focus).onKeyEvent { event ->
                             if (event.type != KeyEventType.KeyDown || com.hienlh.ppm.app.TextInputFocus.focused) return@onKeyEvent false
-                            val ctrl = event.isCtrlPressed || event.isMetaPressed
-                            if (event.isAltPressed) when (event.key) {
-                                Key.DirectionLeft -> { session.back(); return@onKeyEvent true }
-                                Key.DirectionRight -> { session.forward(); return@onKeyEvent true }
-                                Key.DirectionUp -> { session.up(); return@onKeyEvent true }
-                            }
-                            when {
-                                ctrl && event.key == Key.A -> session.selectAll()
-                                ctrl && event.key == Key.C -> copy(false)
-                                ctrl && event.key == Key.X -> copy(true)
-                                ctrl && event.key == Key.V -> commands?.paste()
-                                event.key == Key.F2 -> selected().singleOrNull()?.let { commands?.rename(it) }
-                                event.key == Key.Delete -> if (event.isShiftPressed) commands?.permanentlyDelete(selected()) else commands?.trash(selected())
-                                event.key == Key.Escape -> { session.clearSelection(); selectMode = false }
-                                event.key == Key.Backspace -> session.up()
-                                event.key == Key.Enter || event.key == Key.NumPadEnter -> selected().firstOrNull()?.let(::open)
-                                event.key in listOf(Key.DirectionDown, Key.DirectionUp, Key.MoveHome, Key.MoveEnd) -> {
-                                    val current = entries.indexOfFirst { it.path == session.state.value.anchor }
-                                    val next = when (event.key) { Key.MoveHome -> 0; Key.MoveEnd -> entries.lastIndex
-                                        Key.DirectionUp -> (current - 1).coerceAtLeast(0); else -> (current + 1).coerceAtMost(entries.lastIndex) }
-                                    entries.getOrNull(next)?.let { session.select(it.path, range = event.isShiftPressed) }
-                                }
-                                !ctrl && !event.isAltPressed && event.nativeKeyEvent.unicodeChar >= 32 -> {
-                                    val now = System.currentTimeMillis()
-                                    typed = (if (now - typedAt < 700) typed else "") + event.nativeKeyEvent.unicodeChar.toChar().lowercaseChar()
-                                    typedAt = now
-                                    entries.firstOrNull { it.name.lowercase().startsWith(typed) }?.let { session.select(it.path) }
-                                }
-                                else -> return@onKeyEvent false
+                            val now = session.state.value
+                            val columns = if (preferences.view == ExplorerView.ICONS) gridColumns.count else null
+                            val command = hostKeyCommand(hostKeyPress(event), entries, now.selection, now.anchor, columns, typeAhead,
+                                System.currentTimeMillis()) ?: return@onKeyEvent false
+                            when (command) {
+                                HostKeyCommand.Handled -> Unit
+                                HostKeyCommand.Back -> session.back()
+                                HostKeyCommand.Forward -> session.forward()
+                                HostKeyCommand.Up -> session.up()
+                                HostKeyCommand.Paste -> commands?.paste()
+                                HostKeyCommand.SelectAll -> session.selectAll()
+                                HostKeyCommand.ClearSelection -> { session.clearSelection(); selectMode = false }
+                                is HostKeyCommand.Select -> session.select(command.path, range = command.range)
+                                is HostKeyCommand.Open -> open(command.entry)
+                                is HostKeyCommand.Rename -> commands?.rename(command.entry)
+                                is HostKeyCommand.Copy -> copy(command.entries, cut = false)
+                                is HostKeyCommand.Cut -> copy(command.entries, cut = true)
+                                is HostKeyCommand.Trash -> commands?.trash(command.entries)
+                                is HostKeyCommand.DeletePermanently -> commands?.permanentlyDelete(command.entries)
                             }
                             true
                         }.focusable()) {
@@ -174,7 +163,7 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
                         ) else HostExplorerEntries(model.api, session, entries, state, preferences, mobile, selectMode, windows, commands,
                             if (clipboard?.operation == FileClipboardOperation.CUT) clipboard.paths.toSet() else emptySet(),
                             onFocus = { focus.requestFocus() }, onOpen = ::open,
-                            onMenu = { targets, at -> menu = HostMenu(targets, at) }, dropModifier = dropModifier)
+                            onMenu = { targets, at -> menu = HostMenu(targets, at) }, dropModifier = dropModifier, gridColumns = gridColumns)
                     }
                 }
             }

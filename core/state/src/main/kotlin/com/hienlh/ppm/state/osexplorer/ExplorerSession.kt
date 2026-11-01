@@ -86,20 +86,17 @@ class ExplorerSession(
     fun setFilter(filter: String) { mutable.value = current.copy(filter = filter) }
     fun visibleEntries(): List<HostFileEntry> = sortHostEntries(current.directory?.entries.orEmpty(), current.filter, preferences.state.value)
 
+    /** A click on a visible row, as the web's `applySelection` takes it: [toggle] wins over [range] and moves the anchor to the row, [range] extends from the anchor and leaves it, neither selects the row alone. */
     fun select(path: String, toggle: Boolean = false, range: Boolean = false) {
-        val paths = visibleEntries().map { it.path }
-        val position = paths.indexOf(path)
-        if (position < 0) return
-        val anchor = paths.indexOf(current.anchor)
-        val selection = when {
-            range && anchor >= 0 -> paths.subList(minOf(anchor, position), maxOf(anchor, position) + 1).toSet()
-            toggle -> if (path in current.selection) current.selection - path else current.selection + path
-            else -> setOf(path)
-        }
-        mutable.value = current.copy(selection = selection, anchor = if (range && anchor >= 0) current.anchor else path)
+        val order = visibleEntries().map { it.path }
+        if (path in order) apply(order, HostSelectionEvent.Click(path, shift = range, ctrl = toggle))
     }
-    fun selectAll() { mutable.value = current.copy(selection = visibleEntries().map { it.path }.toSet()) }
-    fun clearSelection() { mutable.value = current.copy(selection = emptySet(), anchor = null) }
+    fun selectAll() = apply(visibleEntries().map { it.path }, HostSelectionEvent.SelectAll)
+    fun clearSelection() = apply(emptyList(), HostSelectionEvent.Clear)
+    private fun apply(order: List<String>, event: HostSelectionEvent) {
+        val next = applyHostSelection(HostSelection(current.selection, current.anchor), order, event)
+        mutable.value = current.copy(selection = next.selection, anchor = next.anchor)
+    }
 
     fun directoryChanged(path: String) { if (path == current.path || path == current.directory?.current) refresh() }
     fun refresh() {

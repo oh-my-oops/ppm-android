@@ -10,7 +10,6 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import org.junit.Assert.*
-import org.junit.Ignore
 import org.junit.Test
 import java.util.Locale
 
@@ -36,7 +35,6 @@ class ExplorerSessionParityTest {
         runCurrent()
     }
 
-    @Ignore("Known parity gap: ExplorerSession.selectAll must initialize a missing anchor to the first visible row.")
     @Test fun selectAllStartsFollowingShiftRangeAtFirstVisibleRow() = runTest {
         session(listOf(entry("file10"), entry("file2"), entry("file1"))).use { session ->
             show(session)
@@ -47,7 +45,6 @@ class ExplorerSessionParityTest {
         }
     }
 
-    @Ignore("Known parity gap: ExplorerSession.select must give toggle precedence over range, including the anchor update.")
     @Test fun controlShiftTogglesClickedRowAndMovesAnchor() = runTest {
         session(listOf(entry("a"), entry("b"), entry("c"))).use { session ->
             show(session)

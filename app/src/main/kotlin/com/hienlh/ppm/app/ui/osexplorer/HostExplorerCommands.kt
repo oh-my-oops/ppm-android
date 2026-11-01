@@ -30,6 +30,7 @@ import kotlinx.coroutines.sync.withLock
 internal class HostInlineEdit(val directory: String, val entry: HostFileEntry?, val folder: Boolean) {
     val field = TextFieldState(entry?.name.orEmpty(), TextRange(0, entry?.name?.lastIndexOf('.')?.takeIf { it > 0 } ?: entry?.name?.length ?: 0))
 }
+private fun HostToast.message() = ErrorToastMessage(title, description)
 private data class CollisionPrompt(val collision: HostCollision, val reply: CompletableDeferred<Pair<HostCollisionChoice, Boolean>>)
 private data class DeletePrompt(val paths: List<String>, val noTrash: Boolean, val reply: CompletableDeferred<Boolean>)
 
@@ -40,7 +41,7 @@ internal fun rememberHostExplorerCommands(model: AppModel, session: ExplorerSess
     val scope = rememberCoroutineScope()
     val commands = remember(client, files, session, platform, separator) {
         val core = HostFileActions(client, files, separator, platform) { report -> if (model.api === client) model.filesMutated(report) }
-        HostExplorerCommands(model, client, session, core, platform, scope)
+        HostExplorerCommands(model::toast, client, session, core, platform, scope)
     }
     DisposableEffect(commands) {
         commands.attach()
@@ -49,7 +50,7 @@ internal fun rememberHostExplorerCommands(model: AppModel, session: ExplorerSess
     return commands
 }
 
-internal class HostExplorerCommands(private val model: AppModel, val api: ApiClient, private val session: ExplorerSession,
+internal class HostExplorerCommands(private val toast: (ErrorToastMessage) -> Unit, val api: ApiClient, private val session: ExplorerSession,
                                    val core: HostFileActions, private val platform: String?, private val scope: CoroutineScope) {
     var edit by mutableStateOf<HostInlineEdit?>(null)
         private set
@@ -72,16 +73,25 @@ internal class HostExplorerCommands(private val model: AppModel, val api: ApiCli
     fun create(folder: Boolean, directory: String = session.state.value.currentDirectory) { if (!busy) { inlineError = null; edit = HostInlineEdit(directory, null, folder) } }
     fun rename(entry: HostFileEntry) { if (!busy) { inlineError = null; edit = HostInlineEdit(session.state.value.currentDirectory, entry, entry.isDirectory) } }
     fun cancelEdit() { if (!busy) { edit = null; inlineError = null } }
+    /**
+     * Enter in the name field (`commitInline`): the name is trimmed, a rename to the name it has just closes the field, a name the host
+     * refuses (an empty one included) is said under the field, and one that is sent and fails is a toast with the field left open.
+     */
     fun commitEdit() {
         val current = edit ?: return
         if (busy || current.field.composition != null) return
-        val name = current.field.text.toString()
-        if (name.isEmpty() || name == current.entry?.name) { cancelEdit(); return }
-        validateHostEntryName(name, platform)?.let { inlineError = it; return }
-        running = scope.launch {
-            val result = if (current.entry == null) core.create(current.directory, name, current.folder) else core.rename(current.entry.path, name)
-            if (result.failed == 0) { edit = null; inlineError = null }
-            else inlineError = result.report.failures.firstOrNull()?.error
+        when (val commit = hostNameCommit(current.field.text.toString(), current.entry?.name, platform)) {
+            HostNameCommit.Unchanged -> cancelEdit()
+            is HostNameCommit.Refused -> inlineError = commit.message
+            is HostNameCommit.Send -> {
+                inlineError = null
+                running = scope.launch {
+                    val result = if (current.entry == null) core.create(current.directory, commit.name, current.folder)
+                    else core.rename(current.entry.path, commit.name)
+                    if (result.failed == 0) edit = null
+                    else result.report.failures.firstOrNull()?.let { toast(hostFailureToast(it).message()) }
+                }
+            }
         }
     }
     fun paste(directory: String = session.state.value.currentDirectory) = work {
@@ -126,13 +136,13 @@ internal class HostExplorerCommands(private val model: AppModel, val api: ApiCli
         running = scope.launch {
             try { block() }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { model.toast(ErrorToastMessage("File operation failed", error.message)) }
+            catch (error: Exception) { toast(ErrorToastMessage("File operation failed", error.message)) }
         }
     }
     private fun report(result: HostFileActionResult, verb: String, omitNoTrash: Boolean = false) {
         val failures = result.report.failures.filterNot { omitNoTrash && it.code == "NO_TRASH" }
-        if (failures.isNotEmpty()) model.toast(ErrorToastMessage("File operation failed", failures.joinToString("\n") { it.error ?: it.path }))
-        if (result.succeeded > 0) model.toast(ErrorToastMessage("$verb ${result.succeeded} item${if (result.succeeded == 1) "" else "s"}", kind = ErrorToastMessage.Kind.SUCCESS))
+        if (failures.isNotEmpty()) toast(ErrorToastMessage("File operation failed", failures.joinToString("\n") { it.error ?: it.path }))
+        if (result.succeeded > 0) toast(ErrorToastMessage("$verb ${result.succeeded} item${if (result.succeeded == 1) "" else "s"}", kind = ErrorToastMessage.Kind.SUCCESS))
     }
 
     @Composable

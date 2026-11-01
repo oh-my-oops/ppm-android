@@ -8,8 +8,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.*
@@ -42,8 +44,11 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
                                  preferences: ExplorerViewPreferences, mobile: Boolean, selectMode: Boolean, windows: Boolean, commands: HostExplorerCommands?,
                                  cut: Set<String>, onFocus: () -> Unit, onOpen: (HostFileEntry) -> Unit,
                                  onMenu: (List<HostFileEntry>, Offset) -> Unit,
-                                 dropModifier: @Composable (String) -> Modifier = { Modifier }) {
+                                 dropModifier: @Composable (String) -> Modifier = { Modifier },
+                                 gridColumns: HostGridColumns = HostGridColumns()) {
     val tokens = LocalPpmTokens.current
+    // A name being typed for a new file or folder takes the place of the "empty" line, as in the web's views.
+    val creating = commands?.edit?.let { it.entry == null } == true
     fun menu(entry: HostFileEntry, at: Offset) {
         if (entry.path !in state.selection) session.select(entry.path)
         onMenu(if (entry.path in state.selection) entries.filter { it.path in state.selection } else listOf(entry), at)
@@ -58,8 +63,15 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
         }
     }
     if (preferences.view == ExplorerView.ICONS) {
-        LazyVerticalGrid(GridCells.Adaptive(if (mobile) 100.dp else 112.dp), Modifier.fillMaxSize().hostBackgroundMenu { onMenu(emptyList(), it) },
-            contentPadding = PaddingValues(8.dp)) {
+        val grid = rememberLazyGridState()
+        val cells = remember(mobile, gridColumns) { HostRecordedCells(GridCells.Adaptive(if (mobile) 100.dp else 112.dp), gridColumns) }
+        // Keep the cursor row in view when the arrow keys moved it, as the list does.
+        LaunchedEffect(state.anchor) {
+            val index = entries.indexOfFirst { it.path == state.anchor }
+            if (index >= 0 && grid.layoutInfo.visibleItemsInfo.none { it.index == index }) grid.animateScrollToItem(index)
+        }
+        LazyVerticalGrid(cells, Modifier.fillMaxSize().hostBackgroundMenu(session::clearSelection) { onMenu(emptyList(), it) },
+            state = grid, contentPadding = PaddingValues(8.dp)) {
             items(entries, key = { it.path }) { entry ->
                 val edit = commands?.edit
                 if (edit?.entry?.path == entry.path) { HostInlineName(commands, edit); return@items }
@@ -75,6 +87,7 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
                         style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color, textAlign = TextAlign.Center))
                 }
             }
+            if (entries.isEmpty() && !state.loading && !creating) item(span = { GridItemSpan(maxLineSpan) }) { HostEmptyMessage(state.filter) }
         }
     } else {
         val scroll = rememberLazyListState()
@@ -98,7 +111,7 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
                             textAlign = if (sort == ExplorerSort.NAME) TextAlign.Start else TextAlign.End))
                 }
             }
-            LazyColumn(Modifier.weight(1f).fillMaxWidth().hostBackgroundMenu { onMenu(emptyList(), it) }, state = scroll) {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth().hostBackgroundMenu(session::clearSelection) { onMenu(emptyList(), it) }, state = scroll) {
                 itemsIndexed(entries, key = { _, entry -> entry.path }) { index, entry ->
                     val edit = commands?.edit
                     if (edit?.entry?.path == entry.path) { HostInlineName(commands, edit); return@itemsIndexed }
@@ -123,13 +136,17 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
                         }
                     }
                 }
-                if (entries.isEmpty() && !state.loading) item {
-                    BasicText(if (state.filter.isNotEmpty()) "No entries match the filter." else "This folder is empty.", Modifier.padding(12.dp),
-                        style = ppmText(12f).copy(color = tokens.text3.color))
-                }
+                if (entries.isEmpty() && !state.loading && !creating) item { HostEmptyMessage(state.filter) }
             }
         }
     }
+}
+
+/** The line a folder with nothing to show gets (`p.p-3.text-xs.text-text-subtle` in list-view.tsx and icons-view.tsx). */
+@Composable
+private fun HostEmptyMessage(filter: String) {
+    BasicText(if (filter.isNotEmpty()) "No entries match the filter." else "This folder is empty.", Modifier.padding(12.dp),
+        style = ppmText(12f).copy(color = LocalPpmTokens.current.text3.color))
 }
 
 @Composable
@@ -165,22 +182,25 @@ private fun Modifier.hostEntryInput(entry: HostFileEntry, selected: Boolean, onT
 }
 
 /**
- * The folder's own menu from the space the rows leave, in the list and in the grid (`backgroundLongPress` and the
- * `ContextMenuTrigger` round the web's views): a right click, or a press held on a finger, that no row took. A row
- * claims its right click before this looks (at the initial pass, where this waits for the main one), and its touch
- * never reaches the long press here, so a row's menu and the folder's do not both open.
+ * What the space the rows leave does, in the list and in the grid (`onMouseDown` and `backgroundLongPress` round the web's
+ * views, and the `ContextMenuTrigger`): a press on it empties the selection ([onClear]), a right click or a press held
+ * on a finger opens the folder's own menu ([onMenu]), and a right click does both, as it does there. A row claims its own
+ * right click before this looks (at the initial pass, where this waits for the main one), and its touch never reaches
+ * the press here, so a row's menu and the folder's do not both open and a row's tap does not clear the selection it set.
  */
-internal fun Modifier.hostBackgroundMenu(onMenu: (Offset) -> Unit): Modifier = composed {
+internal fun Modifier.hostBackgroundMenu(onClear: () -> Unit, onMenu: (Offset) -> Unit): Modifier = composed {
     var origin by remember { mutableStateOf(Offset.Zero) }
     val menu by rememberUpdatedState(onMenu)
+    val clear by rememberUpdatedState(onClear)
     onGloballyPositioned { origin = it.positionInWindow() }
-        .pointerInput(Unit) { detectTapGestures(onLongPress = { menu(origin + it) }) }
+        .pointerInput(Unit) { detectTapGestures(onLongPress = { menu(origin + it) }, onTap = { clear() }) }
         .pointerInput(Unit) {
             awaitPointerEventScope {
                 while (true) {
                     val event = awaitPointerEvent(PointerEventPass.Main)
                     if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed && event.changes.none { it.isConsumed }) {
                         event.changes.forEach { it.consume() }
+                        clear()
                         menu(origin + event.changes.first().position)
                     }
                 }
