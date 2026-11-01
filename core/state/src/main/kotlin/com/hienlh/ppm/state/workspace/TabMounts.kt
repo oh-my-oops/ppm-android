@@ -15,6 +15,10 @@ package com.hienlh.ppm.state.workspace
  * first: the open project's grid, then the other projects', the windows', the dock's. A grid does not hold another project's tab
  * (the web guards a race in `openTab` while a project is switched); the windows and the dock are shared by every project and hold
  * whatever is put in them. Extension tabs, which the web leaves unmounted outside the open project, do not exist here.
+ *
+ * No shell is attached by this rule any more: [heldTabs] below replaced it for terminals. It stays, with its tests, as the pinned
+ * statement of what the web mounts, because the other kinds of tab (chat, editor) will likely follow the web's rule in a later
+ * sprint, and whoever starts those asks for these tabs, not for every tab.
  */
 fun frontTabs(state: WorkspaceState): List<WorkspaceTab> = panelTabs(state).filter { it.inFront }.map { it.tab }
 
