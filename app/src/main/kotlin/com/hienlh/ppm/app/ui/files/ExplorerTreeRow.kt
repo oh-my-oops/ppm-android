@@ -25,6 +25,7 @@ import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.FileIcon
@@ -32,7 +33,7 @@ import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
-import com.hienlh.ppm.design.StartTruncatedText
+import com.hienlh.ppm.design.TruncatedText
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.files.FileTreeRow
@@ -89,8 +90,9 @@ internal fun ExplorerTreeRow(
                 14.dp, tokens.text3.color, spinning = loading)
         } else Box(Modifier.size(14.dp))
         FileIcon(node.name, folder = node.isDirectory, open = expanded)
-        StartTruncatedText(
-            node.name,
+        // `truncate` (tree-node.tsx): a name too long for the row loses its end behind the "…".
+        TruncatedText(
+            AnnotatedString(node.name),
             ppmText(13f, if (node.isDirectory && expanded) FontWeight.Medium else FontWeight.Normal, lineHeight = 18f).copy(
                 color = when { selected -> tokens.text.color; node.isIgnored -> tokens.textDim.color; node.isDirectory && expanded -> tokens.text.color; else -> tokens.text2.color }),
             Modifier.weight(1f),

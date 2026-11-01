@@ -54,6 +54,9 @@ internal abstract class ExplorerTreeDragTestBase {
         "src/util" to listOf(file("x.kt")),
     )
 
+    /** What the backend answers a batch with (Refresh, a restore after a reconnect): no test here expects one, so it fails unless a test says how. */
+    protected open suspend fun batchListing(paths: List<String>): List<FileDirectoryResult> = error("Unexpected batch")
+
     protected fun callbacks(project: String = "p") = ExplorerMutationCallbacks(
         project, create = { _, _, _ -> }, rename = { _, _ -> }, delete = {}, cut = {}, copy = {}, paste = {},
         move = { source, destination -> moves += source to destination },
@@ -61,20 +64,21 @@ internal abstract class ExplorerTreeDragTestBase {
 
     protected fun show(
         mutations: ExplorerMutationCallbacks? = callbacks(), expand: List<String> = listOf("src"),
+        content: @Composable (ProjectFileTree, ExplorerMutationCallbacks?) -> Unit = { tree, commands -> ExplorerTree(tree, onOpenFile = {}, mutations = commands) },
         around: @Composable (@Composable () -> Unit) -> Unit = { it() },
     ) {
         installBlankFileIcons()
         tree = ProjectFileTree(
             object : FileTreeBackend {
                 override suspend fun list(project: String, path: String) = listing.getValue(path)
-                override suspend fun listBatch(project: String, paths: List<String>): List<FileDirectoryResult> = error("Unexpected batch")
+                override suspend fun listBatch(project: String, paths: List<String>): List<FileDirectoryResult> = batchListing(paths)
             }, scope, idleMillis = 60_000,
         )
         runBlocking { tree.open("p")?.join() }
         expand.forEach { tree.setExpanded(it, true) }
         compose.setContent {
             view = LocalView.current
-            around { ExplorerTree(tree, onOpenFile = {}, mutations = mutations) }
+            around { content(tree, mutations) }
         }
         compose.waitForIdle()
     }

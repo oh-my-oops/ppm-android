@@ -124,10 +124,13 @@ class ExplorerTransfers internal constructor(
     fun cancel() { cancelChoice(); session.cancel() }
     fun dismiss() = session.dismiss()
 
+    /** The web's last two groups of a row's menu: the two copy rows, then Download (the only one with an icon) under a divider of its own. */
     fun actionsForNode(node: FileTreeNode): List<ExplorerTreeAction> = buildList {
-        add(ExplorerTreeAction("Copy Path", ProductIcon.Copy) { copy(node.path) })
-        add(ExplorerTreeAction("Copy Full Path", ProductIcon.Copy) { copy(absoluteProjectPath(project.path, node.path)) })
-        if (!state.value.busy) add(ExplorerTreeAction(if (node.isDirectory) "Download as Zip" else "Download", ProductIcon.Download) { choose(node) })
+        add(ExplorerTreeAction("Copy Path") { copy(node.path) })
+        add(ExplorerTreeAction("Copy Full Path") { copy(absoluteProjectPath(project.path, node.path)) })
+        if (!state.value.busy) {
+            add(ExplorerTreeAction(if (node.isDirectory) "Download as Zip" else "Download", ProductIcon.Download, separatorBefore = true) { choose(node) })
+        }
     }
 
     private fun copy(path: String) { scope.launch {

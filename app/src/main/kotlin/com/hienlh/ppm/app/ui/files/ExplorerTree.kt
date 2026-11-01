@@ -190,16 +190,8 @@ fun ExplorerTree(
             }
             }
             rootMenu?.let { at ->
-                val actions = buildList {
-                    if (commands != null && !busy) {
-                        add(ExplorerTreeAction("New File", ProductIcon.FilePlus) { create("", false) })
-                        add(ExplorerTreeAction("New Folder", ProductIcon.FolderPlus) { create("", true) })
-                        if (commands.canPaste) add(ExplorerTreeAction("Paste", ProductIcon.ClipboardPaste) { session.paste("", commands) })
-                    }
-                    if (onOpenTerminal != null) add(ExplorerTreeAction("Open in Terminal", ProductIcon.Terminal) { onOpenTerminal("") })
-                    add(ExplorerTreeAction("Refresh", ProductIcon.RefreshCw) { tree.refresh() })
-                }
-                ExplorerTreeMenu(state.project.orEmpty(), at, actions, onDismiss = { rootMenu = null })
+                val actions = explorerRootActions(canCreate = commands != null && !busy, onCreate = { directory -> create("", directory) }, onRefresh = tree::refresh)
+                ExplorerTreeMenu(at, actions, onDismiss = { rootMenu = null })
             }
         }
     }

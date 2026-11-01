@@ -32,11 +32,6 @@ internal fun ExplorerTreeItem(
     val node = row.node
     val expanded = node.path in state.expandedPaths
     var menuAt by remember(tree, node.path) { mutableStateOf<Offset?>(null) }
-    fun activate() {
-        tree.setFocusedPath(node.path)
-        tree.clearSelection()
-        if (node.isDirectory) tree.toggleExpand(node.path) else onOpenFile(node)
-    }
     val dropOver by remember(dragOver, node.path) { derivedStateOf { dragOver.site?.key == node.path } }
     Box(dropModifier(if (node.isDirectory) node.path else node.path.substringBeforeLast('/', ""))) {
         Column {
@@ -63,34 +58,19 @@ internal fun ExplorerTreeItem(
             }
         }
         menuAt?.let { at ->
-            val actions = buildList {
-                if (mutations != null && !busy && node.isDirectory) {
-                    add(ExplorerTreeAction("New File", ProductIcon.FilePlus) { onCreate(node.path, false) })
-                    add(ExplorerTreeAction("New Folder", ProductIcon.FolderPlus) { onCreate(node.path, true) })
-                }
-                add(ExplorerTreeAction(if (node.isDirectory) { if (expanded) "Collapse" else "Expand" } else "Open",
-                    if (node.isDirectory) ProductIcon.FolderOpen else ProductIcon.File, onClick = ::activate))
-                addAll(explorerOpenActions(node, onOpenExplorer, onOpenTerminal))
-                if (mutations != null && !busy) {
-                    add(ExplorerTreeAction("Cut", ProductIcon.Scissors) {
-                        session.clipboard(explorerClipboardTargets(node.path, tree.state.value.selectedFiles), true, mutations)
-                    })
-                    add(ExplorerTreeAction("Copy", ProductIcon.Copy) {
-                        session.clipboard(explorerClipboardTargets(node.path, tree.state.value.selectedFiles), false, mutations)
-                    })
-                    if (node.isDirectory && mutations.canPaste) {
-                        add(ExplorerTreeAction("Paste", ProductIcon.ClipboardPaste) { session.paste(node.path, mutations) })
-                    }
-                    add(ExplorerTreeAction("Rename", ProductIcon.Pencil) { TextInputFocus.asked(); session.rename(node) })
-                    add(ExplorerTreeAction("Delete", ProductIcon.Trash2, destructive = true) { session.askDelete(node) })
-                }
-                add(ExplorerTreeAction(if (node.path in selected) "Deselect" else "Select", ProductIcon.Check) {
-                    tree.setFocusedPath(node.path)
-                    tree.toggleFileSelect(node.path)
-                })
-                addAll(actionsForNode(node))
+            val writes = mutations?.takeIf { !busy }?.let { commands ->
+                ExplorerNodeWrites(
+                    canPaste = commands.canPaste,
+                    create = { directory -> onCreate(node.path, directory) },
+                    cut = { session.clipboard(explorerClipboardTargets(node.path, tree.state.value.selectedFiles), true, commands) },
+                    copy = { session.clipboard(explorerClipboardTargets(node.path, tree.state.value.selectedFiles), false, commands) },
+                    paste = { session.paste(node.path, commands) },
+                    rename = { TextInputFocus.asked(); session.rename(node) },
+                    delete = { session.askDelete(node) },
+                )
             }
-            ExplorerTreeMenu(node.name, at, actions, onDismiss = { menuAt = null })
+            val actions = explorerNodeActions(node, writes, explorerOpenActions(node, onOpenExplorer, onOpenTerminal), actionsForNode(node))
+            ExplorerTreeMenu(at, actions, onDismiss = { menuAt = null })
         }
     }
 }
