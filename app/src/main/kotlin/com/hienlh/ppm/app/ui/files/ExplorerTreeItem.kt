@@ -27,6 +27,7 @@ internal fun ExplorerTreeItem(
     mutations: ExplorerMutationCallbacks?, session: ExplorerMutationSession, busy: Boolean,
     onCreate: (String, Boolean) -> Unit,
     dragOver: ExplorerDragOver,
+    projectRoot: String? = null,
     dropModifier: @Composable (String) -> Modifier = { Modifier },
 ) {
     val node = row.node
@@ -49,7 +50,14 @@ internal fun ExplorerTreeItem(
                 },
                 onMenu = { menuAt = it },
                 dropOver = dropOver,
-                dragSource = Modifier.explorerRowDragSource(ExplorerRowDrag(state.project.orEmpty(), node.path, node.isDirectory), mutations != null && !busy),
+                dragSource = Modifier.explorerRowDragSource(
+                    // The whole selection when this row is one of several selected, as the web's `dragAbsolutePaths`; else the row alone.
+                    ExplorerRowDrag(
+                        state.project.orEmpty(), node.path, node.isDirectory,
+                        paths = if (node.path in selected && selected.size > 1) selected.toList() else listOf(node.path), root = projectRoot,
+                    ),
+                    mutations != null && !busy,
+                ),
             )
             val error = state.errors[node.path]
             if (node.isDirectory && error != null) ExplorerError(error, Modifier.padding(start = (row.depth * 16 + 28).dp)) {

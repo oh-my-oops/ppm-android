@@ -21,9 +21,9 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * What a dragged row lights, drawn for real (native graphics, 3 pixels to the dp) on a black ground: a row is `ring-1 ring-primary
- * bg-primary/10` while a drag of the tree's own is over it, the list `bg-primary/5` while one is over its blank area. The
- * web lights every row for such a drag, even one whose drop it will refuse, but the blank area only when the drop would move
- * the row.
+ * bg-primary/10` while a drag of the tree's own is over it, the whole tree, its header too, `bg-primary/5` while one is over its
+ * blank area. The web lights every row for such a drag, even one whose drop it will refuse, but the tree only once the drag has rested
+ * 120 ms on the blank area and only when the drop would be taken (a move of rows that are in the root already is not, a copy is).
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -48,6 +48,12 @@ internal class ExplorerDropHighlightTest : ExplorerTreeDragTestBase() {
 
     /** The list's blank area, a pixel inside the bottom of the window. */
     private fun blankFill(): Color = compose.onRoot().captureToImage().toPixelMap().let { it[it.width / 2, it.height - 6] }
+
+    /** The header's own corner, clear of its icon and its words: the toolbar has 8 dp of padding. */
+    private fun headerFill(): Color = compose.onRoot().captureToImage().toPixelMap()[3, 3]
+
+    /** Drawn after a frame, because the clock of these is held by hand. */
+    private fun settle() = compose.mainClock.advanceTimeByFrame()
 
     @Test fun `a row is plain until a drag is over it`() {
         showOnBlack()
@@ -96,22 +102,122 @@ internal class ExplorerDropHighlightTest : ExplorerTreeDragTestBase() {
         assertColor("after a drag that ended elsewhere", Color.Black, fill("src"))
     }
 
-    @Test fun `the blank area is tinted for a row that would change folders`() {
+    @Test fun `the whole tree is tinted once a drag has rested 120 ms on the blank area, the header with it`() {
         showOnBlack()
+        compose.mainClock.autoAdvance = false
         val drag = row("src/app.kt")
         begin(drag)
-        over(drag, blank())
-        assertColor("blank area", tinted5, blankFill())
+        hover(drag, blank())
+        // Each of `hover` and `settle` runs a frame (16 ms), so this is 96 ms on the blank area, then 152.
+        advance(64)
+        settle()
+        assertColor("blank area before 120 ms", Color.Black, blankFill())
+        assertColor("header before 120 ms", Color.Black, headerFill())
+
+        advance(40)
+        settle()
+        assertColor("blank area after 120 ms", tinted5, blankFill())
+        assertColor("header", tinted5, headerFill())
         assertColor("the rows are drawn over the same tint, as the web's rows are over the container's", tinted5, fill("docs"))
-        over(drag, center("docs"))
-        assertColor("blank area once the drag is over a row", Color.Black, blankFill())
     }
 
-    @Test fun `the blank area is not tinted for a row of the root, whose drop it would refuse`() {
+    @Test fun `a drag that sweeps across the blank area flashes nothing`() {
         showOnBlack()
+        compose.mainClock.autoAdvance = false
+        val drag = row("src/app.kt")
+        begin(drag)
+        hover(drag, blank())
+        advance(64)
+        hover(drag, center("docs"))
+        advance(500)
+        settle()
+        assertColor("blank area once the drag is over a row", Color.Black, blankFill())
+        assertColor("header", Color.Black, headerFill())
+    }
+
+    @Test fun `the tint goes when the drag leaves the blank area, and coming back waits again`() {
+        showOnBlack()
+        compose.mainClock.autoAdvance = false
+        val drag = row("src/app.kt")
+        begin(drag)
+        hover(drag, blank())
+        advance(200)
+        settle()
+        assertColor("lit", tinted5, blankFill())
+
+        hover(drag, center("docs"))
+        settle()
+        assertColor("over a row", Color.Black, blankFill())
+        assertColor("over a row, the header", Color.Black, headerFill())
+
+        hover(drag, blank())
+        advance(64)
+        settle()
+        assertColor("back for less than 120 ms", Color.Black, blankFill())
+        advance(40)
+        settle()
+        assertColor("back for more than 120 ms", tinted5, blankFill())
+    }
+
+    @Test fun `the tint goes with the drop and with a drag that ends elsewhere`() {
+        showOnBlack()
+        compose.mainClock.autoAdvance = false
+        val drag = row("src/app.kt")
+        begin(drag)
+        hover(drag, blank())
+        advance(200)
+        settle()
+        assertColor("lit", tinted5, blankFill())
+        dispatch(DragEvent.ACTION_DROP, drag, blank())
+        dispatch(DragEvent.ACTION_DRAG_ENDED, drag)
+        settle()
+        assertColor("after the drop", Color.Black, blankFill())
+        assertColor("after the drop, the header", Color.Black, headerFill())
+
+        begin(drag)
+        hover(drag, blank())
+        advance(200)
+        settle()
+        assertColor("lit again", tinted5, blankFill())
+        dispatch(DragEvent.ACTION_DRAG_ENDED, drag)
+        settle()
+        assertColor("after a drag that ended elsewhere", Color.Black, blankFill())
+    }
+
+    @Test fun `the tree is not tinted for a move of a row of the root, whose drop it would refuse, however long the drag rests`() {
+        showOnBlack()
+        compose.mainClock.autoAdvance = false
         val drag = row("README.md")
         begin(drag)
-        over(drag, blank())
+        hover(drag, blank())
+        advance(1000)
+        settle()
+        assertColor("blank area", Color.Black, blankFill())
+        assertColor("header", Color.Black, headerFill())
+    }
+
+    @Test fun `it is tinted for a copy of a row of the root, which the drop would take`() {
+        showOnBlack()
+        compose.mainClock.autoAdvance = false
+        copyHeld = true
+        val drag = row("README.md")
+        begin(drag)
+        hover(drag, blank())
+        advance(200)
+        settle()
+        assertColor("blank area", tinted5, blankFill())
+    }
+
+    @Test fun `a tree with no shared transfer is never tinted, for its blank area takes no drop`() {
+        show(content = { tree, commands -> ExplorerTree(tree, onOpenFile = {}, mutations = commands) }) { content ->
+            Box(Modifier.fillMaxSize().background(Color.Black)) { content() }
+        }
+        compose.mainClock.autoAdvance = false
+        val drag = row("src/app.kt")
+        begin(drag)
+        hover(drag, blank())
+        advance(500)
+        settle()
         assertColor("blank area", Color.Black, blankFill())
     }
 

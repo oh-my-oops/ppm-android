@@ -65,20 +65,61 @@ class ExplorerTreeDragTest {
         }
     }
 
-    private fun site(path: String, key: String = path, isDirectory: Boolean = false) =
-        ExplorerDropSite(ExplorerRowDrag("p", path, isDirectory), key, directory = "", collapsedFolder = false)
+    private fun drag(path: String, vararg more: String, isDirectory: Boolean = false, root: String? = "/home/me/p") =
+        ExplorerRowDrag("p", path, isDirectory, listOf(path) + more, root)
 
-    @Test fun `every row lights for a drag of its own tree, taken or not`() {
-        assertTrue(site("src/app.kt", key = "src/app.kt").lit)
-        assertTrue(site("src", key = "src", isDirectory = true).lit)
-        assertTrue(site("src/app.kt", key = "src/util").lit)
-        assertTrue(site("README.md", key = "docs").lit)
+    @Test fun `a move to the project folder is taken unless every row is in it already`() {
+        assertTrue(explorerRootDropTaken(drag("src/app.kt"), copy = false))
+        assertTrue(explorerRootDropTaken(drag("src/util", isDirectory = true), copy = false))
+        assertTrue("one row below the root is enough", explorerRootDropTaken(drag("README.md", "src/app.kt"), copy = false))
+        assertFalse(explorerRootDropTaken(drag("README.md"), copy = false))
+        assertFalse(explorerRootDropTaken(drag("src", isDirectory = true), copy = false))
+        assertFalse(explorerRootDropTaken(drag("README.md", "docs"), copy = false))
     }
 
-    @Test fun `the blank area lights only for a row that would change folders`() {
-        assertTrue(site("src/app.kt", key = ROOT_DROP_KEY).lit)
-        assertTrue(site("src/util", key = ROOT_DROP_KEY, isDirectory = true).lit)
-        assertFalse(site("README.md", key = ROOT_DROP_KEY).lit)
-        assertFalse(site("src", key = ROOT_DROP_KEY, isDirectory = true).lit)
+    @Test fun `a copy to the project folder is always taken, for it makes name (2) of what is there`() {
+        assertTrue(explorerRootDropTaken(drag("README.md"), copy = true))
+        assertTrue(explorerRootDropTaken(drag("README.md", "docs"), copy = true))
+        assertTrue(explorerRootDropTaken(drag("src/app.kt"), copy = true))
+    }
+
+    @Test fun `the chip says the name of one row and the count of several`() {
+        assertEquals("app.kt", explorerDragLabel(drag("src/app.kt")))
+        assertEquals("util", explorerDragLabel(drag("src/util", isDirectory = true)))
+        assertEquals("README.md", explorerDragLabel(drag("README.md")))
+        assertEquals("2 items", explorerDragLabel(drag("a", "b/c")))
+        assertEquals("3 items", explorerDragLabel(drag("a", "b/c", "d")))
+    }
+
+    @Test fun `the payload is the web's, the absolute paths under the project folder, from a tree and of a project`() {
+        assertEquals(
+            """{"paths":["/home/me/p/src/app.kt"],"origin":"tree","projectName":"p"}""",
+            explorerEntryPayload(drag("src/app.kt")),
+        )
+        assertEquals(
+            """{"paths":["/home/me/p/README.md","/home/me/p/src/app.kt"],"origin":"tree","projectName":"p"}""",
+            explorerEntryPayload(drag("README.md", "src/app.kt")),
+        )
+    }
+
+    @Test fun `a Windows project's paths are under its folder in its own separators`() {
+        assertEquals(
+            """{"paths":["C:\\Users\\me\\p\\src\\app.kt"],"origin":"tree","projectName":"p"}""",
+            explorerEntryPayload(drag("src/app.kt", root = "C:\\Users\\me\\p")),
+        )
+    }
+
+    @Test fun `a tree that does not know the project folder carries the paths as they are, as the web does`() {
+        assertEquals(
+            """{"paths":["src/app.kt","docs"],"origin":"tree","projectName":"p"}""",
+            explorerEntryPayload(drag("src/app.kt", "docs", root = null)),
+        )
+    }
+
+    @Test fun `the payload names no project for a drag that has none`() {
+        assertEquals(
+            """{"paths":["/home/me/p/a.kt"],"origin":"tree"}""",
+            explorerEntryPayload(ExplorerRowDrag("", "a.kt", false, listOf("a.kt"), "/home/me/p")),
+        )
     }
 }

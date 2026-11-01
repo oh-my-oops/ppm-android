@@ -13,6 +13,7 @@ import com.hienlh.ppm.protocol.FileDirectoryEntry
 import com.hienlh.ppm.protocol.FileDirectoryResult
 import com.hienlh.ppm.state.files.FileTreeBackend
 import com.hienlh.ppm.state.files.ProjectFileTree
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,13 +26,18 @@ import org.robolectric.shadows.DragEventBuilder
 
 /**
  * The real project tree in a window, and a row of it dragged over it as Android delivers a drag (started, entered, a location
- * per move, a drop, ended). The tree is
+ * per move, a drop, ended). The project folder is [ROOT], and what a drop on the blank area asks the shared transfer for is [transfers].
+ * The tree is
  *
  *     docs/            shut, holds guide.md
  *     src/             open: util/ (shut, holds x.kt), app.kt, main.kt
  *     README.md
  */
 internal abstract class ExplorerTreeDragTestBase {
+    companion object {
+        const val ROOT = "/home/me/p"
+    }
+
     protected val compose = createComposeRule()
 
     @get:Rule
@@ -43,6 +49,24 @@ internal abstract class ExplorerTreeDragTestBase {
 
     /** What the tree's `move` callback was asked for, as source to destination. */
     protected val moves = mutableListOf<Pair<String, String>>()
+
+    /** What a drop on the blank area asked the shared transfer for. */
+    internal data class Transfer(val paths: List<String>, val directory: String, val copy: Boolean)
+
+    protected val transfers = mutableListOf<Transfer>()
+
+    /** Ctrl or Alt held, as the blank area reads it at the drop. */
+    protected var copyHeld = false
+
+    /** While set, a transfer does not finish: the drop is still being carried out. */
+    protected var transferHeld: CompletableDeferred<Unit>? = null
+
+    internal val drops by lazy {
+        ExplorerEntryDrops(ROOT, scope, copyHeld = { copyHeld }) { paths, directory, copy, _ ->
+            transfers += Transfer(paths, directory, copy)
+            transferHeld?.await()
+        }
+    }
 
     protected fun dir(name: String) = FileDirectoryEntry(name, isDirectory = true)
     protected fun file(name: String) = FileDirectoryEntry(name, isDirectory = false)
@@ -64,7 +88,9 @@ internal abstract class ExplorerTreeDragTestBase {
 
     protected fun show(
         mutations: ExplorerMutationCallbacks? = callbacks(), expand: List<String> = listOf("src"),
-        content: @Composable (ProjectFileTree, ExplorerMutationCallbacks?) -> Unit = { tree, commands -> ExplorerTree(tree, onOpenFile = {}, mutations = commands) },
+        content: @Composable (ProjectFileTree, ExplorerMutationCallbacks?) -> Unit = { tree, commands ->
+            ExplorerTree(tree, onOpenFile = {}, mutations = commands, entryDrops = drops)
+        },
         around: @Composable (@Composable () -> Unit) -> Unit = { it() },
     ) {
         installBlankFileIcons()
@@ -95,7 +121,9 @@ internal abstract class ExplorerTreeDragTestBase {
     /** A point of the list under its last row. */
     protected fun blank(): Offset = compose.onRoot().fetchSemanticsNode().boundsInRoot.let { Offset(it.center.x, it.bottom - 4f) }
 
-    protected fun row(path: String, isDirectory: Boolean = false) = ExplorerRowDrag("p", path, isDirectory)
+    /** A row of the tree dragged, with [paths] the whole drag when it is a selection. */
+    protected fun row(path: String, isDirectory: Boolean = false, paths: List<String> = listOf(path)) =
+        ExplorerRowDrag("p", path, isDirectory, paths, ROOT)
 
     protected fun dispatch(action: Int, drag: ExplorerRowDrag, at: Offset = Offset.Zero): Boolean {
         var result = false

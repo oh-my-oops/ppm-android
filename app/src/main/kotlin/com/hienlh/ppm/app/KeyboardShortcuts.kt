@@ -28,6 +28,7 @@ class KeyboardShortcuts(private val model: AppModel) {
     private val taken = mutableSetOf<Int>()
 
     fun dispatch(event: KeyEvent, nativeEditor: Boolean = false): Boolean {
+        DragModifierKeys.track(event)
         val code = event.keyCode
         val isShift = code == KeyEvent.KEYCODE_SHIFT_LEFT || code == KeyEvent.KEYCODE_SHIFT_RIGHT
         when (event.action) {

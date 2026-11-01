@@ -44,11 +44,13 @@ fun ExplorerBody(model: AppModel, onNavigate: () -> Unit = {}) {
                 com.hienlh.ppm.state.workspace.absoluteProjectPath(info.path, directory))))
         }
     } else null
+    val entryDrops = rememberExplorerEntryDrops(model, info)
     ExplorerTree(
         tree = tree,
         onOpenFile = { node -> model.openFileTab(project, node.path); onNavigate() },
         activeFilePath = active?.metaString("filePath"),
         mutations = callbacks,
+        entryDrops = entryDrops,
         actionsForNode = { node -> transfers?.actionsForNode(node).orEmpty() },
         dropModifier = { directory -> transfers?.dropModifier(directory) ?: Modifier },
         transferStatus = { transfers?.let { ExplorerTransferStatus(it) } },
@@ -65,4 +67,5 @@ fun ExplorerBody(model: AppModel, onNavigate: () -> Unit = {}) {
             }
         },
     )
+    entryDrops?.Dialogs()
 }

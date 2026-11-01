@@ -20,7 +20,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -49,7 +48,8 @@ import kotlinx.coroutines.launch
  * Project explorer only: its owner opens/resets [tree] and wires reconnect/file-change events.
  * [activeFilePath] and the directory [onOpenExplorer] and [onOpenTerminal] get are project-relative (root is "").
  * [onOpenFile] owns viewer routing and closing the phone drawer. Framework icons inherit
- * LocalIconFramework. Additional implemented commands come from [actionsForNode].
+ * LocalIconFramework. Additional implemented commands come from [actionsForNode]. [entryDrops] takes a drag of the tree's rows
+ * dropped on its blank area (the project folder): without it the blank area takes none.
  */
 @Composable
 fun ExplorerTree(
@@ -61,6 +61,7 @@ fun ExplorerTree(
     onOpenExplorer: ((String) -> Unit)? = null,
     actionsForNode: (FileTreeNode) -> List<ExplorerTreeAction> = { emptyList() },
     mutations: ExplorerMutationCallbacks? = null,
+    entryDrops: ExplorerEntryDrops? = null,
     dropModifier: @Composable (directory: String) -> Modifier = { Modifier },
     transferStatus: @Composable () -> Unit = {},
 ) {
@@ -79,7 +80,7 @@ fun ExplorerTree(
     val session = remember(tree, state.project) { ExplorerMutationSession(state.project, scope) }
     val mutationState by session.state.collectAsState()
     val commands = mutations?.takeIf { it.project == state.project }
-    val busy = mutationState.busy || commands?.busy == true
+    val busy = mutationState.busy || commands?.busy == true || entryDrops?.running == true
     val edit = mutationState.edit.takeIf { commands != null }
     val displayRows = remember(rows, state.expandedPaths, edit) { explorerMutationRows(rows, state.expandedPaths, edit) }
     val field = remember(edit?.id, session) {
@@ -102,7 +103,7 @@ fun ExplorerTree(
     }
     ExplorerDragAutoScroll(dragOver, list, { listArea.value }) { dragOver.site?.let { dragOver.site = siteAt(it.drag, dragOver.pointer) } }
     ExplorerDragSpringLoad(dragOver) { path -> tree.setExpanded(path, true) }
-    val rootOver by remember(dragOver) { derivedStateOf { dragOver.site?.let { it.key == ROOT_DROP_KEY && it.lit } == true } }
+    val rootTint = explorerRootTint(dragOver) { drag -> commands != null && entryDrops?.takes(drag) == true }
     DisposableEffect(session) { onDispose { session.close() } }
     LaunchedEffect(edit?.id) {
         if (edit != null) {
@@ -130,8 +131,13 @@ fun ExplorerTree(
         if (parent.isNotEmpty()) tree.setExpanded(parent, true)
         session.create(parent, directory)
     }
-    fun move(drag: ExplorerRowDrag, directory: String) = commands?.let { session.move(drag.path, directory, it) } != null
-    Column(modifier.fillMaxSize().explorerMutationKeys(tree, session, commands)) {
+    // The blank area is the project folder, which the web's background target takes whole; a row keeps the tree's own single-path move.
+    fun drop(drag: ExplorerRowDrag, site: ExplorerDropSite): Boolean =
+        if (site.key == ROOT_DROP_KEY) commands != null && entryDrops?.dropOnRoot(drag) == true
+        else commands?.let { session.move(drag.path, site.directory, it) } != null
+    // `bg-primary/5` over the whole tree, its header too, as the web tints its container, while a drag is over its blank area.
+    Column(modifier.fillMaxSize().explorerMutationKeys(tree, session, commands)
+        .then(if (rootTint) Modifier.background(LocalPpmTokens.current.accent.opacity(0.05).color) else Modifier)) {
         ExplorerMutationToolbar(
             hasProject = state.project != null,
             busy = busy,
@@ -165,10 +171,8 @@ fun ExplorerTree(
         if (mutationState.pasting) ExplorerNote("Pasting files…")
         mutationState.error?.let { error -> ExplorerError(error, retryLabel = "Dismiss", onRetry = session::clearError) }
         Box(Modifier.weight(1f).fillMaxWidth().then(dropModifier(""))
-            .explorerMoveTarget(dragOver, state.project.orEmpty(), commands != null && !busy, ::siteAt, ::move)
+            .explorerMoveTarget(dragOver, state.project.orEmpty(), commands != null && !busy, ::siteAt, ::drop)
             .onGloballyPositioned { listArea.value = it.boundsInRoot() }
-            // `bg-primary/5` over the tree while a drag is over its blank area.
-            .then(if (rootOver) Modifier.background(LocalPpmTokens.current.accent.opacity(0.05).color) else Modifier)
             .explorerContextGesture(
             onMenu = { rootMenu = it },
             eligible = { at -> list.layoutInfo.visibleItemsInfo.none { item ->
@@ -185,7 +189,7 @@ fun ExplorerTree(
                         onSubmit = { if (tree.state.value.project == commands?.project) commands?.let { session.submit(display.edit, field.text.toString(), it) } },
                         onCancel = session::cancelEdit, onEdit = session::edited)
                     is ExplorerDisplayRow.Node -> ExplorerTreeItem(display.row, tree, state, visiblePaths, selected,
-                        onOpenFile, onOpenTerminal, onOpenExplorer, actionsForNode, commands, session, busy, ::create, dragOver, dropModifier)
+                        onOpenFile, onOpenTerminal, onOpenExplorer, actionsForNode, commands, session, busy, ::create, dragOver, entryDrops?.root, dropModifier)
                 }
             }
             }

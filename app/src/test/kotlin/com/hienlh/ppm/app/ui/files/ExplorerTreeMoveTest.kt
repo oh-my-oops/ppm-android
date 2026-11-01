@@ -46,13 +46,14 @@ internal class ExplorerTreeMoveTest : ExplorerTreeDragTestBase() {
         assertEquals(listOf("README.md" to "src/README.md"), moves)
     }
 
-    @Test fun `a drop under the last row moves to the project root`() {
+    @Test fun `a drop under the last row goes to the shared transfer, into the project folder, and not to the tree's own move`() {
         show()
         val drag = row("src/app.kt")
         assertTrue(begin(drag))
         over(drag, blank())
         assertTrue(drop(drag, blank()))
-        assertEquals(listOf("src/app.kt" to "app.kt"), moves)
+        assertEquals(listOf(Transfer(listOf("$ROOT/src/app.kt"), ROOT, copy = false)), transfers)
+        assertEquals(emptyList<Pair<String, String>>(), moves)
     }
 
     @Test fun `the drop goes where the pointer is when it is let go, not where it last was`() {
@@ -83,6 +84,7 @@ internal class ExplorerTreeMoveTest : ExplorerTreeDragTestBase() {
         over(inRoot, blank())
         assertFalse("a row of the root onto the blank area", drop(inRoot, blank()))
         assertEquals(emptyList<Pair<String, String>>(), moves)
+        assertEquals(emptyList<Transfer>(), transfers)
     }
 
     @Test fun `a drag from another project's tree is not taken`() {

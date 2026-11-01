@@ -1,6 +1,5 @@
 package com.hienlh.ppm.app.ui.files
 
-import android.graphics.Canvas
 import android.view.View
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalView
@@ -54,7 +53,7 @@ class ExplorerTreeItemDragTest {
         "p", create = { _, _, _ -> }, rename = { _, _ -> }, delete = {}, cut = {}, copy = {}, paste = {}, move = { _, _ -> },
     )
 
-    private fun show(mutations: ExplorerMutationCallbacks?, busy: Boolean = false) {
+    private fun show(mutations: ExplorerMutationCallbacks?, busy: Boolean = false, selected: Set<String> = emptySet(), root: String? = null) {
         installBlankFileIcons()
         tree = ProjectFileTree(
             object : FileTreeBackend {
@@ -68,14 +67,12 @@ class ExplorerTreeItemDragTest {
         compose.setContent {
             host = LocalView.current
             ExplorerTreeItem(
-                FileTreeRow(node, depth = 1), tree, tree.state.value, listOf(node.path), emptySet(),
+                FileTreeRow(node, depth = 1), tree, tree.state.value, listOf(node.path), selected,
                 onOpenFile = {}, onOpenTerminal = null, onOpenExplorer = null, actionsForNode = { emptyList() },
-                mutations = mutations, session = session, busy = busy, onCreate = { _, _ -> }, dragOver = ExplorerDragOver(),
+                mutations = mutations, session = session, busy = busy, onCreate = { _, _ -> }, dragOver = ExplorerDragOver(), projectRoot = root,
             )
         }
         compose.waitForIdle()
-        // Compose drags the row's own picture and only has it once the row has been drawn, which this window never does by itself.
-        compose.runOnUiThread { host!!.draw(Canvas()) }
         ShadowWindowManagerGlobal.clearLastDragClipData()
     }
 
@@ -115,6 +112,45 @@ class ExplorerTreeItemDragTest {
         show(callbacks())
         dragTheRow()
         assertEquals(ExplorerRowDrag("p", "src/app.kt", isDirectory = false), localState())
+    }
+
+    private fun payload() = clip()!!.getItemAt(1).text.toString()
+
+    @Test fun `a row of the project carries its path under the project folder`() {
+        show(callbacks(), root = "/home/me/p")
+        dragTheRow()
+        assertEquals("""{"paths":["/home/me/p/src/app.kt"],"origin":"tree","projectName":"p"}""", payload())
+        assertEquals("src/app.kt", clip()!!.getItemAt(0).text)
+    }
+
+    @Test fun `a row that is one of several selected carries the whole selection, in the order it was selected`() {
+        val selection = linkedSetOf("docs", node.path, "README.md")
+        show(callbacks(), selected = selection, root = "/home/me/p")
+        dragTheRow()
+        assertEquals(
+            """{"paths":["/home/me/p/docs","/home/me/p/src/app.kt","/home/me/p/README.md"],"origin":"tree","projectName":"p"}""",
+            payload(),
+        )
+        assertEquals("the legacy value is still the row dragged, which the chat's drop and a row's move read", "src/app.kt", clip()!!.getItemAt(0).text)
+        assertEquals(listOf("docs", "src/app.kt", "README.md"), (localState() as ExplorerRowDrag).paths)
+    }
+
+    @Test fun `a row that is not among the selected carries itself alone`() {
+        show(callbacks(), selected = setOf("docs", "README.md"), root = "/home/me/p")
+        dragTheRow()
+        assertEquals("""{"paths":["/home/me/p/src/app.kt"],"origin":"tree","projectName":"p"}""", payload())
+    }
+
+    @Test fun `a row that is the only one selected carries itself alone`() {
+        show(callbacks(), selected = setOf(node.path), root = "/home/me/p")
+        dragTheRow()
+        assertEquals("""{"paths":["/home/me/p/src/app.kt"],"origin":"tree","projectName":"p"}""", payload())
+    }
+
+    @Test fun `a tree that does not know the project folder carries the paths as they are, as the web does`() {
+        show(callbacks(), selected = linkedSetOf(node.path, "docs"))
+        dragTheRow()
+        assertEquals("""{"paths":["src/app.kt","docs"],"origin":"tree","projectName":"p"}""", payload())
     }
 
     @Test fun `a tree with nothing to write with is not a drag source`() {
