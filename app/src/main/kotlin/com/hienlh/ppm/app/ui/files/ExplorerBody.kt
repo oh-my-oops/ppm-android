@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.state.workspace.absoluteProjectPath
 
 /** Mounted only while the sidebar/drawer shows Explorer; the recursive index stays untouched. */
 @Composable
@@ -53,7 +54,7 @@ fun ExplorerBody(model: AppModel, onNavigate: () -> Unit = {}) {
         transferStatus = { transfers?.let { ExplorerTransferStatus(it) } },
         onOpenTerminal = model.currentProject?.path?.let { root ->
             { directory ->
-                model.openTerminal(if (directory.isEmpty()) root else root.trimEnd('/', '\\') + "/" + directory, inDock = true)
+                model.openTerminalAt(absoluteProjectPath(root, directory), project)
                 onNavigate()
             }
         },

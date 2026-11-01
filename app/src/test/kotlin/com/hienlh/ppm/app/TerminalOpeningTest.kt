@@ -11,7 +11,7 @@ import org.junit.Test
 class TerminalOpeningTest {
     @Test
     fun `a terminal in a project names it on the tab and in its metadata`() {
-        val tab = terminalTab("ppm", null)
+        val tab = terminalTab("ppm")
         assertEquals("terminal", tab.type)
         assertEquals("Terminal", tab.title)
         assertEquals("ppm", tab.projectId)
@@ -20,18 +20,9 @@ class TerminalOpeningTest {
 
     @Test
     fun `a terminal with no project carries none, as the web's openTab does`() {
-        val tab = terminalTab(null, null)
+        val tab = terminalTab(null)
         assertNull(tab.projectId)
         assertTrue(tab.metadata.isEmpty())
-    }
-
-    @Test
-    fun `a start folder is kept with or without a project`() {
-        assertEquals(
-            mapOf("projectName" to JsonPrimitive("ppm"), "cwd" to JsonPrimitive("/home/me/ppm/src")),
-            terminalTab("ppm", "/home/me/ppm/src").metadata.toMap(),
-        )
-        assertEquals(mapOf("cwd" to JsonPrimitive("/home/me")), terminalTab(null, "/home/me").metadata.toMap())
     }
 
     @Test

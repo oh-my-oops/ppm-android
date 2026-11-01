@@ -214,7 +214,7 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
                 add(ExplorerTreeAction("Open", ProductIcon.FolderOpen) { open(entry) })
                 if (entry.isDirectory) {
                     add(ExplorerTreeAction("Open in New Window", ProductIcon.FolderOpen) { model.openExplorer(entry.path) })
-                    add(ExplorerTreeAction("Open in Terminal", ProductIcon.Terminal) { model.openTerminal(entry.path) })
+                    add(ExplorerTreeAction("Open in Terminal", ProductIcon.Terminal) { model.openTerminalAt(entry.path) })
                 }
                 add(ExplorerTreeAction("Cut (${request.entries.size})", ProductIcon.Scissors) { model.fileMutations?.setClipboard(FileClipboard(request.entries.map { it.path }, FileClipboardOperation.CUT)) })
                 add(ExplorerTreeAction("Copy (${request.entries.size})", ProductIcon.Copy) { model.fileMutations?.setClipboard(FileClipboard(request.entries.map { it.path }, FileClipboardOperation.COPY)) })
@@ -228,7 +228,7 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
                 add(ExplorerTreeAction("Copy Path", ProductIcon.Copy) { copyText(request.directory ?: state.currentDirectory) })
                 add(ExplorerTreeAction("Properties", ProductIcon.Info) { commands?.property = HostFileEntry(state.directory?.breadcrumbs?.lastOrNull()?.name ?: state.path,
                     state.currentDirectory, "directory", "directory") })
-                add(ExplorerTreeAction("Open in Terminal", ProductIcon.Terminal) { model.openTerminal(request.directory ?: state.currentDirectory) })
+                add(ExplorerTreeAction("Open in Terminal", ProductIcon.Terminal) { model.openTerminalAt(request.directory ?: state.currentDirectory) })
                 add(ExplorerTreeAction("View and sort", ProductIcon.List) { menu = request.copy(preferences = true) })
                 add(ExplorerTreeAction("Refresh", ProductIcon.RefreshCw, onClick = session::refresh))
             }

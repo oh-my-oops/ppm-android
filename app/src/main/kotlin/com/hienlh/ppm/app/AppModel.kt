@@ -249,9 +249,19 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     }
 
     /** A shell in the open project, or in none: the web opens it all the same, with no project on the tab. */
-    fun openTerminal(cwd: String? = null, inDock: Boolean = wide) {
-        val tab = terminalTab(selectedProject, cwd)
+    fun openTerminal(inDock: Boolean = wide) {
+        val tab = terminalTab(selectedProject)
         withWorkspace { store -> if (inDock) store.openInDock(tab) else store.openTab(tab) }
+    }
+
+    /**
+     * "Open in Terminal" (`openTerminalAt`): a shell in the dock that starts in [dir], an absolute
+     * host path. [project] keeps the tab on a project when the folder belongs to one; a folder of the
+     * host's own explorer passes none.
+     */
+    fun openTerminalAt(dir: String, project: String? = null) {
+        val tab = terminalAtTab(dir, project)
+        withWorkspace { store -> store.openInDock(tab) }
     }
 
     internal fun terminalCommandTaken(tabId: String) = patchTabMetadata(tabId, "pendingCommand" to null)
@@ -3091,16 +3101,30 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 }
 
 /**
- * A terminal tab as the web opens one (`openTab`, `openTerminalAt`): the project it belongs to on the
- * tab and in its metadata, neither when there is none, and a start folder when one was asked for.
+ * A terminal tab as the web opens one (`openTab`): the project it belongs to on the tab and in its
+ * metadata, neither when there is none.
  */
-internal fun terminalTab(project: String?, cwd: String?) = NewTab(
+internal fun terminalTab(project: String?) = NewTab(
     type = "terminal",
     title = "Terminal",
     projectId = project,
     metadata = buildJsonObject {
         project?.let { put("projectName", it) }
-        cwd?.let { put("cwd", it) }
+    },
+)
+
+/**
+ * The tab of "Open in Terminal" (`openTerminalAt`): titled by the folder's name, or by the whole
+ * path when that is empty ("/", a trailing separator), starting in [dir]. The project is the tab's
+ * as given, and named in the metadata only when it is not empty (`projectName ? {…} : {}`).
+ */
+internal fun terminalAtTab(dir: String, project: String?) = NewTab(
+    type = "terminal",
+    title = dir.split('/', '\\').last().ifEmpty { dir },
+    projectId = project,
+    metadata = buildJsonObject {
+        put("cwd", dir)
+        project?.takeIf { it.isNotEmpty() }?.let { put("projectName", it) }
     },
 )
 
