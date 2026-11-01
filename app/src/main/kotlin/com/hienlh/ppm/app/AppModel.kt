@@ -3234,6 +3234,9 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     /** For a message sent while the turn runs; back to Queue after each send. */
     var priority by mutableStateOf(MessagePriority.DEFAULT)
 
+    /** What a message sent now carries of the composer's choices: the mode, and the priority only during a turn (`isStreaming ? priority : undefined`). */
+    internal fun sendOptions(running: Boolean) = TurnOptions(permissionMode = permissionMode?.value, priority = if (running) priority.value else null)
+
     /** The message the next one answers, shown over the message box until it is sent or cancelled. */
     var replyTo by mutableStateOf<ReplyReference?>(null)
 
@@ -3586,7 +3589,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         // The priority goes only with a message sent during a turn, and is Queue again after it.
         chat.send(
             content,
-            TurnOptions(permissionMode = permissionMode?.value, priority = if (chat.state.value.isRunning) priority.value else null),
+            sendOptions(chat.state.value.isRunning),
             replyTo,
             images,
             imagePaths,
@@ -3652,7 +3655,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     }
 
     /** The box after a send: no text, files, agent or reply, Queue again. */
-    private fun emptyBox() {
+    internal fun emptyBox() {
         for (attachment in attachments) attachment.file?.parentFile?.deleteRecursively()
         draft.clearText()
         attachments.clear()

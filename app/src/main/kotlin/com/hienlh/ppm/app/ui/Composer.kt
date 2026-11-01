@@ -150,6 +150,7 @@ import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberChromeTextArea
 import com.hienlh.ppm.design.rememberCssExact
+import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.ParsedUserMessage
 import com.hienlh.ppm.protocol.PromptCacheState
@@ -174,6 +175,16 @@ import kotlinx.coroutines.flow.filter
 
 /** Chips of the composer row: 11.5 px, with the body's 1.5 line height. */
 private val chipText = ppmText(11.5f, lineHeight = 17.25f)
+
+/** `showCancel`: Stop takes Send's place while a turn runs and the box has nothing to send. */
+internal fun showsStop(running: Boolean, hasContent: Boolean) = running && !hasContent
+
+/** The box's placeholder: a turn running asks for a follow-up, and a tablet's adds that Stop is there. */
+internal fun composerPlaceholder(running: Boolean, mobile: Boolean) = when {
+    !running -> "Ask anything..."
+    mobile -> "Follow-up..."
+    else -> "Follow-up or Stop..."
+}
 
 /**
  * The message box (`message-input.tsx`): the chips that set how the next turn runs over the text
@@ -371,12 +382,12 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                     // `px-2`, the 32 px attach button and `gap-1`.
                     cssStart = 44.dp,
                     maxHeight = 80.dp,
-                    placeholder = if (running) "Follow-up..." else "Ask anything...",
+                    placeholder = composerPlaceholder(running, mobile = true),
                     enabled = !locked,
                     modifier = Modifier.cssFlex(),
                 )
                 if (micShown) MicButton(tab, mobile = true, enabled = !locked, onClick = toggleMic)
-                if (running && !hasContent) {
+                if (showsStop(running, hasContent)) {
                     SquareButton(ProductIcon.Square, 14.dp, tokens.error, Color.White, hoverFill = tokens.error.opacity(0.8), label = "Stop") { chat.cancel() }
                 } else {
                     SendButton(tab, 16.dp, label = "Send", enabled = canSend, onClick = ::send)
@@ -404,12 +415,12 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
                     // `px-2.5`, the 34 px attach button and `gap-2`.
                     cssStart = 52.dp,
                     maxHeight = 90.dp,
-                    placeholder = if (running) "Follow-up or Stop..." else "Ask anything...",
+                    placeholder = composerPlaceholder(running, mobile = false),
                     enabled = !locked,
                     modifier = Modifier.cssFlex(),
                 )
                 if (micShown) MicButton(tab, mobile = false, enabled = !locked, onClick = toggleMic)
-                if (running && !hasContent) {
+                if (showsStop(running, hasContent)) {
                     SquareButton(ProductIcon.Square, 16.dp, tokens.error, Color.White, hoverFill = tokens.error.opacity(0.8), label = "Stop response") { chat.cancel() }
                 } else {
                     SendButton(tab, 17.dp, label = "Send message", enabled = canSend, onClick = ::send)
@@ -618,7 +629,7 @@ private fun ChipsRow(model: AppModel, tab: ChatTab, chat: ChatController, state:
             }
         }
         if (running) {
-            NeutralChip(tab.priority.icon, if (narrow) null else tab.priority.label, narrow) { tab.priority = tab.priority.following }
+            PriorityChip(tab, narrow)
         }
         PromptCacheChip(state.promptCache)
     }
@@ -679,7 +690,7 @@ private fun DesktopChipsRow(
             }
         }
         if (running) {
-            NeutralChip(tab.priority.icon, if (narrow) null else tab.priority.label, narrow) { tab.priority = tab.priority.following }
+            PriorityChip(tab, narrow)
         }
         PromptCacheChip(state.promptCache)
     }
@@ -701,12 +712,12 @@ private fun modelName(model: AppModel, chat: ChatController, state: ChatState): 
  * draws the icon alone, at `px-[7px]`.
  */
 @Composable
-private fun NeutralChip(icon: ProductIcon, label: String?, narrow: Boolean, labelMax: Dp = Dp.Unspecified, onClick: () -> Unit) =
-    NeutralChip(label, narrow, labelMax, onClick) { color -> PpmIcon(icon, 12.dp, color, Modifier.cssIcon(12.dp)) }
+private fun NeutralChip(icon: ProductIcon, label: String?, narrow: Boolean, modifier: Modifier = Modifier, labelMax: Dp = Dp.Unspecified, onClick: () -> Unit) =
+    NeutralChip(label, narrow, labelMax, onClick, modifier) { color -> PpmIcon(icon, 12.dp, color, Modifier.cssIcon(12.dp)) }
 
 /** [NeutralChip] with its own [leading] mark, drawn in the chip's text colour. */
 @Composable
-private fun NeutralChip(label: String?, narrow: Boolean, labelMax: Dp, onClick: () -> Unit, leading: @Composable (Color) -> Unit) {
+private fun NeutralChip(label: String?, narrow: Boolean, labelMax: Dp, onClick: () -> Unit, modifier: Modifier = Modifier, leading: @Composable (Color) -> Unit) {
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -716,7 +727,7 @@ private fun NeutralChip(label: String?, narrow: Boolean, labelMax: Dp, onClick: 
     val color = tokens.text.mix(tokens.text2, lit)
     val side = if (narrow) 7.dp else 9.dp
     CssRow(
-        Modifier
+        modifier
             .clip(CircleShape)
             .background(tokens.panel2.color)
             .pointerHoverIcon(WebCursor.Default)
@@ -742,6 +753,22 @@ private fun NeutralChip(label: String?, narrow: Boolean, labelMax: Dp, onClick: 
             )
         }
     }
+}
+
+/**
+ * `PriorityToggle`, in both rows: how a message sent during the turn is handled, one step on
+ * (Queue, Later, Interrupt) with each press. Its `title` is the mouse's tooltip and its
+ * `aria-label` the name a screen reader gives it, which a narrow chat's icon alone does not.
+ */
+@Composable
+private fun PriorityChip(tab: ChatTab, narrow: Boolean) {
+    val priority = tab.priority
+    NeutralChip(
+        priority.icon,
+        if (narrow) null else priority.label,
+        narrow,
+        Modifier.webTitle("Priority: ${priority.label} (click to cycle)").semantics { contentDescription = "Message priority: ${priority.label}" },
+    ) { tab.priority = priority.following }
 }
 
 /**
