@@ -221,9 +221,12 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
         value = withContext(Dispatchers.Default) { PaletteSearchIndex(actions + files.map(::fileItem)) }
     }
     val ranking = searchIndex
-    val filtered by produceState(actions, ranking, filesystemItems, typed.path) {
-        value = withContext(Dispatchers.Default) { paletteResults(ranking, actions, filesystemItems, typed.path) }
+    val ranked by produceState(PaletteRanked("", actions), actions, ranking, filesystemItems, typed.path) {
+        value = withContext(Dispatchers.Default) { PaletteRanked(typed.path, paletteResults(ranking, actions, filesystemItems, typed.path)) }
     }
+    val filtered = ranked.items
+    // The list on screen can still be the one for the text before; an Enter must not run its first row.
+    val answered = ranked.answers(typed.path, listing)
     val groups = availableGroups(hasActions = actions.isNotEmpty(), hasFiles = files.isNotEmpty(), hasFilesystem = filesystemPaths.isNotEmpty())
     val counts = remember(filtered) { groupCounts(filtered) }
     val shown = remember(filtered, activeGroups) { visibleResults(filtered, activeGroups) }
@@ -260,9 +263,19 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
         onDismiss()
         model.newChat(pendingMessage = message)
     }
-    fun enter() {
-        val item = shown.getOrNull(selected)
+    // The web's list follows the text within a frame, so its Enter runs on the list of what is typed. Here an Enter that
+    // comes before that list lands waits for it, and typing on drops it.
+    val enterGate = remember { PaletteEnter() }
+    fun act() {
+        // `selected` is clamped by an effect that may not have run yet for a list that has just landed.
+        val item = shown.getOrNull(selected.coerceAtMost(shown.lastIndex))
         if (item != null) pick(item) else askAi()
+    }
+    fun enter() {
+        if (enterGate.press(text, answered)) act()
+    }
+    LaunchedEffect(text, answered, ranked) {
+        if (enterGate.due(text, answered)) act()
     }
 
     if (closedByConnectionLost(onDismiss)) return

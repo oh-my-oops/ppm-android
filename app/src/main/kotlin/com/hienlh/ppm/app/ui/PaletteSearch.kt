@@ -161,6 +161,45 @@ internal fun paletteResults(index: PaletteSearchIndex, actions: List<PaletteItem
 }
 
 /**
+ * A list and the text it answers. The web makes `filtered` from the text within a frame of the
+ * keystroke, so the list on screen is, as far as a hand can tell, the one for it. Here it is ranked
+ * off the main thread and arrives after the text, so the one on screen can still answer what was
+ * typed before.
+ */
+internal class PaletteRanked(val query: String, val items: List<PaletteItem>) {
+    /** Whether this is the list for [searchPath], the host's folder not being read meanwhile ([listing]). */
+    fun answers(searchPath: String, listing: Boolean): Boolean = query == searchPath && !listing
+}
+
+/**
+ * An Enter, which on the web runs on the list of the text it was pressed on. Pressed before that
+ * list has landed, it waits for it (milliseconds) rather than run the first row of the list for the
+ * text before: for "new" that is New AI Chat, which starts a real chat. Typing on drops it, and a
+ * list that was already there runs it at once.
+ */
+internal class PaletteEnter {
+    private var waitingOn: String? = null
+
+    /** Enter was pressed on [text]. True when its list is there and it runs now, else it is kept for [due]. */
+    fun press(text: String, answered: Boolean): Boolean {
+        waitingOn = if (answered) null else text
+        return answered
+    }
+
+    /** The text or the list moved on: true once the list of the text a waiting Enter was pressed on has landed. */
+    fun due(text: String, answered: Boolean): Boolean {
+        val pressedOn = waitingOn ?: return false
+        if (pressedOn != text) {
+            waitingOn = null
+            return false
+        }
+        if (!answered) return false
+        waitingOn = null
+        return true
+    }
+}
+
+/**
  * The chips to offer (`availableGroups`), in the order the web finds them: a group is there when
  * something of it exists, not when something of it matches, so the chips do not come and go as
  * the query changes.
