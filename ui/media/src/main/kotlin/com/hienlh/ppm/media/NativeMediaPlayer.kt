@@ -63,10 +63,12 @@ internal class NativeMediaPlayer(
             val policy = MetadataPreload(state.source?.kind == MediaKind.AUDIO)
             policy.requestedPlay = state.playWhenReady
             preload = policy
-            val defaults = DefaultLoadControl.Builder().build()
-            val loadControl = object : LoadControl by defaults {
+            // A subclass, not `LoadControl by DefaultLoadControl()`: Kotlin forwards only the abstract methods of a Java
+            // interface, media3's other ones default to a throw ("getBackBufferDurationUs not implemented"), and the
+            // ExoPlayer constructor calls the first of them, so no player was ever built.
+            val loadControl = object : DefaultLoadControl() {
                 override fun shouldContinueLoading(parameters: LoadControl.Parameters): Boolean =
-                    policy.allowLoading() && defaults.shouldContinueLoading(parameters)
+                    policy.allowLoading() && super.shouldContinueLoading(parameters)
             }
             val next = ExoPlayer.Builder(context).setLoadControl(loadControl).build()
             player = next
