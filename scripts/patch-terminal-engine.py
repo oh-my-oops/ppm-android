@@ -148,6 +148,7 @@ def emulator(text):
             imageStore.switchScreen(false)
             oscParser = OscParser()
             scrollback.clear()
+            scrollbackWrap.reset()
             scrollbackSnapshot = emptyList()
             scrollbackDirty = false
             pendingScrollback = null
@@ -198,6 +199,13 @@ def emulator(text):
     # History must not overwrite what the user has copied since: a replayed OSC 52 write is not performed either.
     text = replace(text, "                        handler.post {\n                            onClipboardCopy?.invoke(action.data)\n                        }",
                    "                        if (!replaying) {\n                            handler.post {\n                                onClipboardCopy?.invoke(action.data)\n                            }\n                        }")
+    # libvterm's scrollback callback sends the soft-wrap flag of the row after the one pushed (see ScrollbackWrap),
+    # so the history stored every row with its neighbour's flag: URLs wrapped across rows came out glued or cut.
+    text = replace(text, "    private val scrollback = ArrayDeque<TerminalLine>()\n",
+                   "    private val scrollback = ArrayDeque<TerminalLine>()\n    private val scrollbackWrap = ScrollbackWrap()\n")
+    text = replace(text, "softWrapped = softWrapped, semanticSegments = line0Segments)", "softWrapped = scrollbackWrap.push(softWrapped), semanticSegments = line0Segments)")
+    text = replace(text, "            imageStore.trimHistory(0)\n            scrollback.clear()\n", "            imageStore.trimHistory(0)\n            scrollback.clear()\n            scrollbackWrap.reset()\n")
+    text = replace(text, "            scrollback.removeLast()\n            scrollbackDirty = true", "            scrollbackWrap.pop(scrollback.removeLast().softWrapped)\n            scrollbackDirty = true")
     return text
 
 

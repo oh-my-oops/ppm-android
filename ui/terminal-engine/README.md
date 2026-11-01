@@ -28,6 +28,11 @@ The added APIs are:
 - `emulator.getBufferLines()`: `TerminalBufferLine(text, isWrapped)` values. `isWrapped`
   means this row continues onto the next row, matching libvterm's outgoing soft-wrap flag;
   this is the opposite row convention from xterm's incoming `IBufferLine.isWrapped`.
+  A row that scrolled into the history keeps the flag it had on the screen: the shipped JNI sends
+  the flag of the row *after* the one it pushes (libvterm shifts its line infos before it calls the
+  screen back, and `termSbPushline` reads index 1 after that), so `ScrollbackWrap` hands each pushed
+  row the flag that came with the push before it. Rows pushed by a resize, in one batch, still share
+  one flag, as upstream.
 - `emulator.getTextBetweenRows(start, endExclusive)` and `emulator.getScreenText()`:
   non-mutating reads that join soft wraps, preserve indentation and strip blank line tails.
   Range indices refer to currently retained history, so eviction/reset invalidates saved
