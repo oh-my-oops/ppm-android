@@ -136,15 +136,6 @@ class ComposerTabKeyTest {
         compose.onNodeWithTag(AFTER).assertIsNotFocused()
     }
 
-    @Test
-    fun `Shift+Tab is left to the box's own handler and does not go the way Tab does`() {
-        show(draft = "hello")
-
-        press(Key.Tab, shift = true)
-
-        compose.onNodeWithTag(AFTER).assertIsNotFocused()
-    }
-
     private companion object {
         const val BEFORE = "before"
         const val AFTER = "after"

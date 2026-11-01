@@ -59,6 +59,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -75,6 +76,12 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
@@ -301,6 +308,23 @@ fun SecondaryButton(title: String, modifier: Modifier = Modifier, onClick: () ->
 }
 
 /**
+ * What a Tab does in a textarea: it goes on to the control that takes the focus next and types
+ * nothing, where Compose's field of several lines types a tab. Shift+Tab is left alone: the field
+ * types nothing for it, and the default traversal takes the focus back, as it does on the web.
+ * Put it after the handlers that have a use of Tab of their own, which hear it first: an open
+ * picker's Tab picks, and the message box's Shift+Tab changes the permission mode.
+ */
+@Composable
+internal fun Modifier.tabMovesFocus(): Modifier {
+    val focusManager = LocalFocusManager.current
+    return onPreviewKeyEvent { event ->
+        if (event.type != KeyEventType.KeyDown || event.key != Key.Tab || event.isShiftPressed) return@onPreviewKeyEvent false
+        focusManager.moveFocus(FocusDirection.Next)
+        true
+    }
+}
+
+/**
  * A text field drawn as the web's inputs are: [placeholder] in the subtle colour while empty (or
  * the field's own [placeholderColor]), Chrome's caret ([ChromeCaret]). Inputs are 16px on a phone (`globals.css`),
  * so that is the default size; outside the phone layout a field takes its class's own size,
@@ -333,7 +357,8 @@ fun PpmTextField(
         modifier = modifier
             .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
             .onFocusChanged { onFocusChanged(it.isFocused) }
-            .tracksTextFocus(state),
+            .tracksTextFocus(state)
+            .let { if (multiline) it.tabMovesFocus() else it },
         textStyle = textStyle,
         cursorBrush = caret.brush,
         keyboardOptions = keyboardOptions,

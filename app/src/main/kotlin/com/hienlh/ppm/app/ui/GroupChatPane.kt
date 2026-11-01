@@ -312,7 +312,7 @@ private class ShiftReturn {
 // `TextFieldBuffer.changes`, to tell a typed line break from a pasted one.
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun GroupMessageBox(group: GroupTab, mobile: Boolean) {
+internal fun GroupMessageBox(group: GroupTab, mobile: Boolean) {
     val tokens = LocalPpmTokens.current
     val draft = group.draft
     val scope = rememberCoroutineScope()

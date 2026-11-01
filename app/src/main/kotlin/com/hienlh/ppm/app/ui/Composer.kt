@@ -61,7 +61,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -87,7 +86,6 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -451,7 +449,7 @@ private const val INPUT_LINE = 16f * 1.25f / 0.875f
  * a picture pasted from the text menu. While [quietFocus] holds, gaining focus starts no input
  * session, so no keyboard: set by a touch landing on the unfocused box, dropped as it loses focus.
  * [focusQuietly] focuses it that way. [onKey] hears a key first, and a Tab it leaves alone moves the
- * focus on.
+ * focus on ([tabMovesFocus]).
  */
 @Composable
 internal fun ComposerField(
@@ -477,7 +475,6 @@ internal fun ComposerField(
     val area = rememberChromeTextArea(tab.draft, inputStyle, padding, cssStart, marks = ::textareaBreakMark)
     val selectionColors = LocalTextSelectionColors.current
     val context = LocalContext.current
-    val focusManager = LocalFocusManager.current
     var focused by remember { mutableStateOf(false) }
     // From the composition that gave the field the options [quietFocus] sets, and on the value it
     // composed: a focus asked of a field still holding the old ones brings the keyboard, and an
@@ -513,14 +510,9 @@ internal fun ComposerField(
                 }
                 .pastesImages(context, pasteImage)
                 .onPreviewKeyEvent(onKey)
-                // A Tab leaves the box for whatever takes the focus next, as a textarea's does, and
-                // types nothing: Compose's multi-line field would type a tab. Shift+Tab, and Tab
-                // for an open picker, are onKey's, which is asked first.
-                .onPreviewKeyEvent { event ->
-                    if (event.type != KeyEventType.KeyDown || event.key != Key.Tab || event.isShiftPressed) return@onPreviewKeyEvent false
-                    focusManager.moveFocus(FocusDirection.Next)
-                    true
-                }
+                // Shift+Tab, and Tab for an open picker, are onKey's, which is asked first; any other
+                // Tab moves the focus on, as a textarea's does, instead of typing a tab.
+                .tabMovesFocus()
                 // An arrow the text has no line for stays in the box, as a textarea keeps it: the
                 // caret goes to the start or the end (Blink's, but on Windows), where Compose would
                 // send focus on to whatever is above or below.
