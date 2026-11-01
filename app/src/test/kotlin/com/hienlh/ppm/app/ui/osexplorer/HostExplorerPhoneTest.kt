@@ -37,9 +37,9 @@ import org.robolectric.annotation.Config
 
 /**
  * The phone's chrome as it is drawn (`mobile/` on the web): the rows of the bar under the list, what each
- * sheet holds, the strip of places and the sheet behind its last chip. The sheets themselves are windows,
- * which this module's Robolectric cannot show with their resources, so their rows are drawn directly, as
- * they sit inside one. The screen is tall enough for all of them.
+ * sheet holds, the strip of places and the sheet behind its last chip. The sheets' rows are drawn directly, as
+ * they sit inside one; `HostPhoneToolbarTest` opens the real sheets and presses them. The screen is tall
+ * enough for all of them.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w400dp-h1800dp")
