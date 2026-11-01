@@ -1,6 +1,8 @@
 package com.hienlh.ppm.app.ui.files
 
 import android.app.Application
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -31,6 +33,7 @@ import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -103,6 +106,40 @@ class FileBodyNotesTest {
     }
 
     private fun waitForText(text: String) = compose.waitUntil(10_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+
+    private fun htmlTab(path: String, view: String? = null) = WorkspaceTab("editor:$path", "editor", path.substringAfterLast('/'), "app", buildJsonObject {
+        put("filePath", path)
+        put("projectName", "app")
+        if (view != null) put("aiView", view)
+    })
+
+    private fun hasClickLabel(label: String) = SemanticsMatcher("has click label $label") {
+        it.config.contains(SemanticsActions.OnClick) && it.config[SemanticsActions.OnClick].label == label
+    }
+
+    private fun htmlToolbarIsShown() = compose.onAllNodes(hasClickLabel("More HTML actions")).fetchSemanticsNodes().isNotEmpty()
+
+    /** The toolbar the HTML tab draws once its page is read, and the preview under it: none of it is on screen. */
+    private fun assertNoHtmlToolbar() {
+        assertEquals("the toolbar is on screen", false, htmlToolbarIsShown())
+        for (label in listOf("Code", "Preview", "Loading preview…")) {
+            assertEquals("$label is on screen", 0, compose.onAllNodesWithText(label).fetchSemanticsNodes().size)
+        }
+    }
+
+    /** Answers by what is asked: the file's read with [content], any other call (the page's preview) with an error. */
+    private class HtmlServer(private val content: String) : Dispatcher() {
+        val paths = CopyOnWriteArrayList<String>()
+        fun reads() = paths.count { it.endsWith("/files/read") }
+
+        override fun dispatch(request: RecordedRequest): MockResponse {
+            val path = request.url.encodedPath
+            paths += path
+            val (code, body) = if (path.endsWith("/files/read")) 200 to """{"ok":true,"data":{"content":"$content","encoding":"utf-8"}}"""
+            else 500 to """{"ok":false,"error":"Preview unavailable"}"""
+            return MockResponse.Builder().code(code).addHeader("Content-Type", "application/json").body(body).build()
+        }
+    }
 
     /** What the tab's toolbar and the old error row carried: none of it is on screen. */
     private fun assertNothingAround(path: String) {
@@ -186,6 +223,103 @@ class FileBodyNotesTest {
 
         compose.onNodeWithText("Failed to convert docx").assertIsDisplayed()
         assertNothingAround("/tmp/a.docx")
+    }
+
+    @Test
+    fun `an HTML page that is not there is the server's line alone, with no toolbar and no preview`() {
+        server.enqueue(json(404, """{"ok":false,"error":"File not found: preview/check-page.html"}"""))
+        val tab = htmlTab("preview/check-page.html")
+        compose.setContent { FileBody(model, tab) }
+
+        waitForText("File not found: preview/check-page.html")
+
+        compose.onNodeWithText("File not found: preview/check-page.html").assertIsDisplayed()
+        assertNoHtmlToolbar()
+        assertEquals("only the file was read", 1, server.requestCount)
+        assertTrue(server.takeRequest().url.encodedPath.endsWith("/files/read"))
+    }
+
+    @Test
+    fun `an HTML page on its way says Loading file with no toolbar and asks for no preview, and the answer replaces it`() {
+        val release = CountDownLatch(1)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                check(release.await(10, TimeUnit.SECONDS))
+                return json(404, """{"ok":false,"error":"File not found: preview/check-page.html"}""")
+            }
+        }
+        val tab = htmlTab("preview/check-page.html")
+        compose.setContent { FileBody(model, tab) }
+
+        waitForText("Loading file...")
+        assertNoHtmlToolbar()
+        release.countDown()
+
+        waitForText("File not found: preview/check-page.html")
+        assertEquals(0, compose.onAllNodesWithText("Loading file...").fetchSemanticsNodes().size)
+        assertNoHtmlToolbar()
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `an HTML page that was read shows its toolbar over the source, after one read`() {
+        val html = HtmlServer("<p>hi</p>")
+        server.dispatcher = html
+        val tab = htmlTab("preview/check-page.html", view = "code")
+        compose.setContent { FileBody(model, tab) }
+
+        compose.waitUntil(10_000) { htmlToolbarIsShown() }
+
+        compose.onNodeWithText("Code").assertIsDisplayed()
+        compose.onNodeWithText("Preview").assertIsDisplayed()
+        assertEquals(0, compose.onAllNodesWithText("Loading file...").fetchSemanticsNodes().size)
+        assertEquals(listOf("/api/project/app/files/read"), html.paths.toList())
+    }
+
+    @Test
+    fun `an HTML page's views leave its file shown, so after the preview and back a change on disk is still read`() {
+        val html = HtmlServer("<p>hi</p>")
+        server.dispatcher = html
+        val tab = htmlTab("preview/check-page.html", view = "code")
+        compose.setContent { FileBody(model, tab) }
+        compose.waitUntil(10_000) { htmlToolbarIsShown() }
+        val controller = model.fileDocument(tab)!!
+
+        compose.onNodeWithText("Preview").performClick()
+        waitForText("Preview unavailable. Use Refresh to retry.")
+        compose.runOnUiThread { controller.fileChanged("app", "preview/check-page.html") }
+
+        compose.waitUntil(10_000) { compose.waitForIdle(); html.reads() == 2 }
+        compose.waitUntil(10_000) { compose.waitForIdle(); !controller.state.value.loading }
+        assertEquals(2, html.reads())
+        compose.onNodeWithText("Code").performClick()
+        compose.waitForIdle()
+        assertEquals("going back to the source asks for nothing", 2, html.reads())
+    }
+
+    @Test
+    fun `the source view neither shows nor hides a file its caller shows, and one that is alone does`() {
+        val html = HtmlServer("<p>hi</p>")
+        server.dispatcher = html
+        val tab = htmlTab("preview/check-page.html")
+        compose.setContent { ReadOnlyFileBody(model, tab, ownsController = false) }
+        compose.waitForIdle()
+        Thread.sleep(300)
+        compose.waitForIdle()
+        assertEquals("a view that does not own the file read it", 0, html.reads())
+        compose.runOnUiThread { model.fileDocument(tab)!!.show(readAsText = true) }
+
+        compose.waitUntil(10_000) { compose.waitForIdle(); html.reads() == 1 }
+    }
+
+    @Test
+    fun `the source view alone shows its file`() {
+        val html = HtmlServer("<p>hi</p>")
+        server.dispatcher = html
+        val tab = htmlTab("preview/check-page.html")
+        compose.setContent { ReadOnlyFileBody(model, tab) }
+
+        compose.waitUntil(10_000) { compose.waitForIdle(); html.reads() == 1 }
     }
 
     @Test

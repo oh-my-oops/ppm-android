@@ -57,10 +57,15 @@ fun FileBody(model: AppModel, tab: WorkspaceTab) {
     else key(tab.id) { DocumentBody(model, tab, forceCode = false) }
 }
 
-/** Source-only view. HTML owns the toolbar by default; standalone callers can opt into one. */
+/**
+ * Source-only view. HTML owns the toolbar by default; standalone callers can opt into one.
+ * A caller that shows the tab's file itself (the HTML tab reads it before it draws anything, in
+ * either of its views) passes `ownsController = false`: `show` and `hide` are not counted, so a
+ * view that hid the file as it left would hide it from the caller too.
+ */
 @Composable
-fun ReadOnlyFileBody(model: AppModel, tab: WorkspaceTab, showToolbar: Boolean = false) {
-    key(tab.id) { DocumentBody(model, tab, forceCode = true, showToolbar = showToolbar) }
+fun ReadOnlyFileBody(model: AppModel, tab: WorkspaceTab, showToolbar: Boolean = false, ownsController: Boolean = true) {
+    key(tab.id) { DocumentBody(model, tab, forceCode = true, showToolbar = showToolbar, ownsController = ownsController) }
 }
 
 /** Empty inline content is still a buffer; an untitled buffer never reads a metadata path. */
@@ -68,7 +73,7 @@ internal fun fileBufferContent(tab: WorkspaceTab): String? = tab.metadata["inlin
     ?: if (tab.metadata["isUntitled"].bool == true) tab.metadata["unsavedContent"].string.orEmpty() else null
 
 @Composable
-private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean, showToolbar: Boolean = true) {
+private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean, showToolbar: Boolean = true, ownsController: Boolean = true) {
     val path = tab.metaString("filePath")
     val buffer = fileBufferContent(tab)
     val viewer = if (buffer != null || forceCode) FileDocumentViewer.TEXT else FileDocumentClassifier.classify(path.orEmpty())
@@ -87,7 +92,7 @@ private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean,
         return
     }
     val visible = com.hienlh.ppm.app.ui.LocalWindowContentVisible.current
-    if (controller != null) DisposableEffect(controller, forceCode, visible) {
+    if (controller != null && ownsController) DisposableEffect(controller, forceCode, visible) {
         if (visible) controller.show(readAsText = forceCode) else controller.hide()
         onDispose { controller.hide() }
     }

@@ -17,7 +17,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -33,7 +35,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.app.ui.files.FileNoteView
 import com.hienlh.ppm.app.ui.files.ReadOnlyFileBody
+import com.hienlh.ppm.app.ui.files.fileNote
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -44,6 +48,7 @@ import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.vector
+import com.hienlh.ppm.state.files.FileDocumentViewer
 import com.hienlh.ppm.state.preview.isHtmlFile
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.web.HtmlPreview
@@ -92,6 +97,19 @@ fun HtmlEditorBody(model: AppModel, tab: WorkspaceTab) {
             }
         }
     }
+    // As code-editor.tsx does for every file it opens, the page is read first: until that answers, or when
+    // it fails, the tab is one line, with no toolbar and no preview. The file stays shown for both views.
+    val controller = remember(model, api, tab.id, filePath, projectName) { model.fileDocument(tab) }
+    val visible = LocalWindowContentVisible.current
+    if (controller != null) DisposableEffect(controller, visible) {
+        if (visible) controller.show(readAsText = true) else controller.hide()
+        onDispose { controller.hide() }
+    }
+    val note = controller?.state?.collectAsState()?.value?.let { fileNote(FileDocumentViewer.TEXT, it) }
+    if (note != null) {
+        FileNoteView(note, Modifier.fillMaxSize().background(LocalPpmTokens.current.bgSolid.color))
+        return
+    }
     Column(Modifier.fillMaxSize()) {
         HtmlPreviewToolbar(
             model = model,
@@ -108,7 +126,7 @@ fun HtmlEditorBody(model: AppModel, tab: WorkspaceTab) {
             HtmlPreview(filePath, projectName, revision, api, model.previews, Modifier.weight(1f))
         } else {
             Box(Modifier.weight(1f)) {
-                ReadOnlyFileBody(model, tab)
+                ReadOnlyFileBody(model, tab, ownsController = false)
             }
         }
     }
