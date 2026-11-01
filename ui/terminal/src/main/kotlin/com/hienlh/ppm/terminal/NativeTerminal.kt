@@ -44,22 +44,26 @@ class NativeTerminal(
         onOutput = { bytes -> if (!closed) emulator.writeInput(bytes) },
         // Clear screen alone leaves scrollback behind. A new parser also resets alternate
         // screen/cursor modes before the server's replay, without creating another PTY.
-        onReset = ::replaceEmulator,
+        onReset = { replaceEmulator() },
         // The replay is shown but never answered: the engine drops what it asks (cursor position, device
         // attributes, window size), which would otherwise be typed at the prompt it comes back to.
         onReplay = { bytes -> if (!closed) emulator.writeReplay(bytes) },
     )
 
     /**
-     * What a reconnect asks for, ahead of the server replaying the shell's buffer into the new emulator. The command
-     * boundary is kept, as the web keeps its refs: it is a row number, and the replay builds the same rows again. Dropped
-     * here, a Send to Chat or a Copy with nothing selected had no command to start from and took the whole scrollback.
-     * [restart] drops it, for a shell that is another one.
+     * What a reconnect asks for, ahead of the server replaying the shell's buffer into the new emulator. The last
+     * command is carried over as its text, read from [bufferOf] the emulator being replaced before it closes (its row as
+     * the shell finally left it, which is what the replay draws), and looked for in the replay: a row number of the old
+     * buffer says nothing about the new one, which has more rows above the command or fewer. With fewer the old number
+     * is past the replay's cursor and Send to Chat and Copy answered nothing, as on a themed zsh; with more it points at
+     * other rows. Dropped, they had no command to start from and took the screen. [restart] drops it, for a shell that
+     * is another one.
      */
-    internal fun replaceEmulator() {
+    internal fun replaceEmulator(bufferOf: (TerminalEmulator) -> TerminalBufferSnapshot = TerminalEmulator::getBufferSnapshot) {
         if (closed) return
         val previous = emulator
         val dimensions = previous.dimensions
+        history.replaced(bufferOf(previous))
         // Invalidate posted callbacks before draining/closing the old parser's work queue.
         generation++
         previous.close()
@@ -111,7 +115,10 @@ class NativeTerminal(
     /** The prompt row where Enter was last sent. Works without shell OSC integration. */
     fun lastCommand(): String = if (closed) "" else history.lastCommand(emulator.getBufferSnapshot())
 
-    /** Rows after that Enter through the cursor; before any Enter, the screen to the cursor, not the scrollback above it. */
+    /**
+     * Rows after that Enter through the cursor; with no command known (no Enter yet, or one a reconnect's replay does not
+     * hold), the screen to the cursor, not the scrollback above it.
+     */
     fun lastOutput(): String = if (closed) "" else history.lastOutput(emulator.getBufferSnapshot())
 
     /** The web's physical-row scan, with native soft-wrap flags translated to xterm's direction. */
@@ -172,11 +179,18 @@ internal fun engineKey(keystroke: Keystroke): EngineKey {
 /** Pure row accounting from use-terminal.ts; no OSC markers or Android/JNI needed. */
 internal class NativeTerminalHistory {
     private var commandRow = -1
-    private var outputStartRow = 0
+
+    /**
+     * What the last command's row said when its emulator was replaced ([replaced]). The row number is of a buffer that
+     * is gone, so while this is set the row is looked for by this text, above the cursor, on every read, and it is
+     * never taken for found: a read while the replay is still arriving can match an earlier row of the same text.
+     * A new Enter or a [reset] ends it.
+     */
+    private var carried: String? = null
 
     fun reset() {
         commandRow = -1
-        outputStartRow = 0
+        carried = null
     }
 
     fun send(text: String, snapshot: () -> TerminalBufferSnapshot, transmit: (String) -> Boolean): Boolean {
@@ -185,21 +199,43 @@ internal class NativeTerminalHistory {
         if (!transmit(text)) return false
         if (row != null) {
             commandRow = row
-            outputStartRow = row + 1
+            carried = null
         }
         return true
     }
 
+    /**
+     * The emulator holding [old] is being replaced by one the server's replay will fill. Its row of the last command is
+     * read now, as the shell left it. A command whose row has no text cannot be told from the blank rows of a replay, and
+     * one already carried over an earlier replacement is kept: [commandRow] is of a buffer that is already gone.
+     */
+    fun replaced(old: TerminalBufferSnapshot) {
+        if (carried != null) return
+        carried = old.lines.getOrNull(commandRow)?.text?.trimEnd(::isJsSpace)?.takeUnless { it.all(::isJsSpace) }
+        commandRow = -1
+    }
+
+    /** The row of the last command in [snapshot], looked for above its cursor when it was carried over a replacement; -1 for none. */
+    private fun commandRowIn(snapshot: TerminalBufferSnapshot): Int {
+        val text = carried ?: return commandRow
+        for (row in minOf(snapshot.cursorRow, snapshot.lines.size) - 1 downTo 0) {
+            if (snapshot.lines[row].text.trimEnd(::isJsSpace) == text) return row
+        }
+        return -1
+    }
+
     fun lastCommand(snapshot: TerminalBufferSnapshot): String =
-        snapshot.lines.getOrNull(commandRow)?.text?.trimEnd(::isJsSpace).orEmpty()
+        snapshot.lines.getOrNull(commandRowIn(snapshot))?.text?.trimEnd(::isJsSpace).orEmpty()
 
     /**
-     * The rows after the last Enter through the cursor. With no Enter seen there is no command to start from: the web
+     * The rows after the last command through the cursor. With no command known there is nothing to start from: the web
      * starts at row 0, which sends whatever the server replayed (up to 1 MB) into a chat chip, so here it is the
-     * screen, from its top row.
+     * screen, from its top row. That is a shell no Enter was sent to, and a command carried over a reconnect that the
+     * replay, so far, does not hold.
      */
     fun lastOutput(snapshot: TerminalBufferSnapshot): String {
-        val start = if (commandRow < 0) snapshot.screenStartRow else outputStartRow
+        val row = commandRowIn(snapshot)
+        val start = if (row < 0) snapshot.screenStartRow else row + 1
         val end = snapshot.cursorRow.coerceAtMost(snapshot.lines.lastIndex)
         if (end < start) return ""
         val rows = (start..end).map { snapshot.lines[it].text.trimEnd(::isJsSpace) }.toMutableList()

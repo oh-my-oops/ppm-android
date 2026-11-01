@@ -107,6 +107,153 @@ class NativeTerminalHistoryTest {
         assertEquals("replayed history\n$ new prompt", history.lastOutput(replay))
     }
 
+    /**
+     * The shell's buffer as its emulator held it when a reconnect replaced it: `seq 1 3` entered on row 2, its output
+     * below and a prompt after. The server's replay rebuilds a buffer, and its rows need not be these.
+     */
+    private val before = snapshot("$ echo old", "old", "$ seq 1 3  ", "1", "2", "3", "$ ")
+
+    private fun afterEnter(): NativeTerminalHistory = NativeTerminalHistory().also {
+        it.send("\r", { snapshot("$ echo old", "old", "$ seq 1 3", cursor = 2) }) { true }
+    }
+
+    @Test
+    fun `a replay with the same rows has the command and its output, whatever trailing spaces its rows end in`() {
+        val history = afterEnter()
+        history.replaced(before)
+        val replay = snapshot("$ echo old", "old", "$ seq 1 3   ", "1", "2", "3", "$ ")
+        assertEquals("$ seq 1 3", history.lastCommand(replay))
+        assertEquals("1\n2\n3\n$", history.lastOutput(replay))
+    }
+
+    @Test
+    fun `a replay with fewer rows above the command still has it, where the old row number is past its cursor`() {
+        // The old buffer has six rows above the command that the replay does not draw. Row 8 of it is past the replay's
+        // cursor on row 6, which read as nothing at all.
+        val history = NativeTerminalHistory()
+        val old = snapshot("%", "% ", "%  ", "%", "% ", "%  ", "$ echo old", "old", "$ seq 1 3", "1", "2", "3", "$ ")
+        history.send("\r", { old.copy(cursorRow = 8) }) { true }
+        history.replaced(old)
+        assertEquals("$ seq 1 3", history.lastCommand(before))
+        assertEquals("1\n2\n3\n$", history.lastOutput(before))
+    }
+
+    @Test
+    fun `a replay with more rows above the command does not take the rows the old number points at for it`() {
+        val history = afterEnter()
+        history.replaced(before)
+        val replay = snapshot("banner", "message of the day", "$ echo old", "old", "$ seq 1 3", "1", "2", "3", "$ ")
+        assertEquals("$ seq 1 3", history.lastCommand(replay))
+        assertEquals("1\n2\n3\n$", history.lastOutput(replay))
+    }
+
+    @Test
+    fun `a command the replay does not hold is the screen, and the same command is found on a later read`() {
+        val history = afterEnter()
+        history.replaced(before)
+        // The replay is still arriving: its rows so far stop before the command.
+        val partial = snapshot("$ echo old", "old", "$ ", cursor = 2, screenStart = 1)
+        assertEquals("", history.lastCommand(partial))
+        assertEquals("old\n$", history.lastOutput(partial))
+        // The rest of it has come.
+        assertEquals("$ seq 1 3", history.lastCommand(before))
+        assertEquals("1\n2\n3\n$", history.lastOutput(before))
+    }
+
+    @Test
+    fun `of equal rows above the cursor the nearest is the command`() {
+        val history = NativeTerminalHistory()
+        history.send("\r", { snapshot("$ ls", "a b", "$ ls", cursor = 2) }) { true }
+        history.replaced(snapshot("$ ls", "a b", "$ ls", "c d", "$ "))
+        // A nearer row holding the command's text and more is another command.
+        val replay = snapshot("banner", "$ ls", "a b", "$ ls", "c d", "$ ls -la", "e f", "$ ")
+        assertEquals("$ ls", history.lastCommand(replay))
+        assertEquals("c d\n$ ls -la\ne f\n$", history.lastOutput(replay))
+    }
+
+    @Test
+    fun `a read while the replay is still arriving does not fix the command on an earlier row of the same text`() {
+        val history = NativeTerminalHistory()
+        history.send("\r", { snapshot("$ ls", "a b", "$ ls", cursor = 2) }) { true }
+        history.replaced(snapshot("$ ls", "a b", "$ ls", "c d", "$ "))
+        // The replay so far holds the first `ls` only.
+        val partial = snapshot("$ ls", "a b", "$ ")
+        assertEquals("a b\n$", history.lastOutput(partial))
+        val replay = snapshot("$ ls", "a b", "$ ls", "c d", "$ ")
+        assertEquals("c d\n$", history.lastOutput(replay))
+    }
+
+    @Test
+    fun `a command with no output, on the row just above the prompt, is found`() {
+        val history = NativeTerminalHistory()
+        history.send("\r", { snapshot("$ cd /tmp", cursor = 0) }) { true }
+        history.replaced(snapshot("$ cd /tmp", "$ "))
+        val replay = snapshot("banner", "$ cd /tmp", "$ ")
+        assertEquals("$ cd /tmp", history.lastCommand(replay))
+        assertEquals("$", history.lastOutput(replay))
+    }
+
+    @Test
+    fun `the cursor's own row is not the command, though it holds the same text`() {
+        // The last command recalled to the prompt with the up arrow and not yet entered.
+        val history = NativeTerminalHistory()
+        history.send("\r", { snapshot("$ ls", cursor = 0) }) { true }
+        history.replaced(snapshot("$ ls", "a b", "$ "))
+        val replay = snapshot("$ ls", "a b", "$ ls")
+        assertEquals("$ ls", history.lastCommand(replay))
+        assertEquals("a b\n$ ls", history.lastOutput(replay))
+    }
+
+    @Test
+    fun `an Enter after the reconnect is the command, not the text carried over it`() {
+        val history = afterEnter()
+        history.replaced(before)
+        val replay = snapshot("$ echo old", "old", "$ seq 1 3", "1", "2", "3", "$ date", cursor = 6)
+        history.send("\r", { replay }) { true }
+        val after = snapshot("$ echo old", "old", "$ seq 1 3", "1", "2", "3", "$ date", "Sun", "$ ")
+        assertEquals("$ date", history.lastCommand(after))
+        assertEquals("Sun\n$", history.lastOutput(after))
+    }
+
+    @Test
+    fun `a command row with no text is not searched for`() {
+        // Every blank row of the replay would be it.
+        val history = NativeTerminalHistory()
+        history.send("\r", { snapshot("   ", cursor = 0) }) { true }
+        history.replaced(snapshot("   ", "x", "$ "))
+        val replay = snapshot("a", "", "b", "c")
+        assertEquals("", history.lastCommand(replay))
+        assertEquals("a\n\nb\nc", history.lastOutput(replay))
+    }
+
+    @Test
+    fun `a reconnect before any Enter has no command to carry over, so the screen is read`() {
+        val history = NativeTerminalHistory()
+        history.replaced(snapshot("$ echo old", "old", "$ "))
+        val replay = snapshot("banner", "$ echo old", "old", "$ ", screenStart = 2)
+        assertEquals("", history.lastCommand(replay))
+        assertEquals("old\n$", history.lastOutput(replay))
+    }
+
+    @Test
+    fun `a second replacement before any read keeps what the first one took`() {
+        val history = afterEnter()
+        history.replaced(before)
+        // The replay was cut short and a reconnect replaced that emulator too.
+        history.replaced(snapshot("$ echo old", "old"))
+        assertEquals("$ seq 1 3", history.lastCommand(before))
+        assertEquals("1\n2\n3\n$", history.lastOutput(before))
+    }
+
+    @Test
+    fun `reset drops the text carried over a replacement`() {
+        val history = afterEnter()
+        history.replaced(before)
+        history.reset()
+        assertEquals("", history.lastCommand(before))
+        assertEquals("$ echo old\nold\n$ seq 1 3\n1\n2\n3\n$", history.lastOutput(before))
+    }
+
     @Test
     fun `native next-row wrap flags convert to previous-row flags for web URL scanning`() {
         val history = NativeTerminalHistory()
