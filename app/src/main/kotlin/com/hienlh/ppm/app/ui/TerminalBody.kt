@@ -179,7 +179,7 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
             val color = when { state.exited -> tokens.error; state.connected -> tokens.success; state.reconnecting -> tokens.warning; else -> tokens.error }
             Box(Modifier.size(8.dp).background(color.color, CircleShape))
             BasicText(when { state.exited -> "Process exited"; state.connected -> "Connected"; state.reconnecting -> "Reconnecting..."; else -> "Disconnected" }, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color))
-            if (state.exited) TerminalAction("Restart", ProductIcon.RotateCcw, compact = true) { session.controller.restart() }
+            if (state.exited) TerminalAction("Restart", ProductIcon.RotateCcw, compact = true) { session.restart() }
             Spacer(Modifier.weight(1f))
             TerminalAction("Chat", ProductIcon.MessageSquare, compact = true, action = ::chat)
             state.sessionId?.let {

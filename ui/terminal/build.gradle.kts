@@ -12,6 +12,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { compose = true }
+    testOptions.unitTests.isIncludeAndroidResources = true
 }
 
 dependencies {
@@ -20,6 +21,7 @@ dependencies {
     api(project(":ui:terminal-engine"))
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
 }
 
 abstract class BuildTerminalFonts : DefaultTask() {

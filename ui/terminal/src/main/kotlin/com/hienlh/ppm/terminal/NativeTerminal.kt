@@ -33,7 +33,7 @@ class NativeTerminal(
     private var theme: PpmTheme? = null
     private var generation = 0
     private var closed = false
-    private val history = NativeTerminalHistory()
+    internal val history = NativeTerminalHistory()
     var pendingCommand by mutableStateOf<String?>(null)
     var emulator by mutableStateOf(newEmulator())
         private set
@@ -50,15 +50,26 @@ class NativeTerminal(
         onReplay = { bytes -> if (!closed) emulator.writeReplay(bytes) },
     )
 
-    private fun replaceEmulator() {
+    /**
+     * What a reconnect asks for, ahead of the server replaying the shell's buffer into the new emulator. The command
+     * boundary is kept, as the web keeps its refs: it is a row number, and the replay builds the same rows again. Dropped
+     * here, a Send to Chat or a Copy with nothing selected had no command to start from and took the whole scrollback.
+     * [restart] drops it, for a shell that is another one.
+     */
+    internal fun replaceEmulator() {
         if (closed) return
         val previous = emulator
         val dimensions = previous.dimensions
         // Invalidate posted callbacks before draining/closing the old parser's work queue.
         generation++
         previous.close()
-        history.reset()
         emulator = newEmulator(dimensions.rows, dimensions.columns).also { applyTheme(it) }
+    }
+
+    /** A fresh shell, which the old one's rows say nothing about: its command boundary goes too. */
+    fun restart() {
+        history.reset()
+        controller.restart()
     }
 
     private fun newEmulator(rows: Int = 24, columns: Int = 80): TerminalEmulator {
