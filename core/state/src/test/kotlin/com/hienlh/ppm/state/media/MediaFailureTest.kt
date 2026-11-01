@@ -8,6 +8,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -123,6 +124,8 @@ class MediaFailureTest {
             media.onPlayerError(playback.id, httpStatus = status)
 
             assertEquals("status $status", MediaFailure.TranscodeStopped(words), mediaFailure(media.state.value))
+            // The web keeps its spinner off an error by testing for one; the app's follows the controller, whose error is never waiting.
+            assertFalse("a stopped transcode is waiting for nothing", media.state.value.waiting)
             media.retry()
             assertNull("Retry clears it", mediaFailure(media.state.value))
             assertEquals(playback.id + 1, media.state.value.playback!!.id)

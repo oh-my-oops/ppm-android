@@ -200,7 +200,9 @@ private fun MediaContent(
                 BasicText(native.title ?: source.path.substringAfterLast('/').substringAfterLast('\\'), style = ppmText(14f).copy(color = colors.text.color))
                 native.artist?.let { BasicText(it, style = ppmText(12f).copy(color = colors.text2.color)) }
             }
-            if (waiting && state.error == null) PpmIcon(ProductIcon.Loader2, 28.dp, if (video) Color.White else colors.text2.color, spinning = true)
+            // A video has the web's spinner, which times its own fade; audio, which the web leaves to the browser's controls, the app's after 300 ms.
+            if (video) { if (state.waiting && state.error == null) VideoWaitingSpinner() }
+            else if (waiting && state.error == null) PpmIcon(ProductIcon.Loader2, 28.dp, colors.text2.color, spinning = true)
             if (failed is MediaFailure.TranscodeStopped) failure(failed, onRetry)
         }
         MediaPlayerControls(state, scrub ?: state.positionSeconds, video, speed, volume, transform, fullscreen,
