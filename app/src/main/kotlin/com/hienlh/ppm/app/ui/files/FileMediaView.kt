@@ -57,11 +57,13 @@ fun FileMediaView(model: AppModel, tab: WorkspaceTab) {
             } finally { downloading = false }
         }
     }
-    MediaFilePlayer(api, source, Modifier.fillMaxSize(), visible = LocalWindowContentVisible.current,
-        onDownload = if (downloading || pending != null) null else ({
+    val download: (() -> Unit)? = if (downloading || pending != null) null else ({
         pending = api to source
         val filename = path.substringAfterLast('/').substringAfterLast('\\').replace(Regex("[\\x00-\\x1f]"), "_")
         try { picker.launch(filename.ifBlank { "media" }) }
         catch (_: Exception) { pending = null; model.toast(ErrorToastMessage("The system file picker is unavailable.")) }
-    }))
+    })
+    MediaFilePlayer(api, source, Modifier.fillMaxSize(), visible = LocalWindowContentVisible.current, onDownload = download) { failure ->
+        MediaFailureView(failure, download)
+    }
 }

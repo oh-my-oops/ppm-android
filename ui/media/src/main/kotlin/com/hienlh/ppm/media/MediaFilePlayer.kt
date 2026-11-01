@@ -37,7 +37,10 @@ import com.hienlh.ppm.design.*
 import com.hienlh.ppm.state.media.*
 import kotlinx.coroutines.delay
 
-/** One visible file owner. No media is opened until visible AND the host lifecycle is started. */
+/**
+ * One visible file owner. No media is opened until visible AND the host lifecycle is started.
+ * A file that cannot be played ([mediaFailure]) is drawn by [failure] instead of the player.
+ */
 @Composable
 fun MediaFilePlayer(
     api: ApiClient,
@@ -45,12 +48,16 @@ fun MediaFilePlayer(
     modifier: Modifier = Modifier,
     visible: Boolean = true,
     onDownload: (() -> Unit)? = null,
+    failure: @Composable (MediaFailure) -> Unit,
 ) {
-    key(api, source) { MediaOwner(api, source, modifier, visible, onDownload) }
+    key(api, source) { MediaOwner(api, source, modifier, visible, onDownload, failure) }
 }
 
 @Composable
-private fun MediaOwner(api: ApiClient, source: MediaSource, modifier: Modifier, visible: Boolean, onDownload: (() -> Unit)?) {
+private fun MediaOwner(
+    api: ApiClient, source: MediaSource, modifier: Modifier, visible: Boolean, onDownload: (() -> Unit)?,
+    failure: @Composable (MediaFailure) -> Unit,
+) {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -118,7 +125,7 @@ private fun MediaOwner(api: ApiClient, source: MediaSource, modifier: Modifier, 
     val content: @Composable (Modifier) -> Unit = { area ->
         MediaContent(source, native, state, area, video, speed, volume, transform, fullscreen, scrub,
             action, { volume = volume.slider(it) }, { speed = it }, { transform = it }, onScrub, onSeek,
-            { controller.retry() }, onDownload)
+            { controller.retry() }, onDownload, failure)
     }
     Box(modifier) {
         if (!fullscreen) content(Modifier.fillMaxSize())
@@ -154,7 +161,9 @@ private fun MediaContent(
     video: Boolean, speed: Float, volume: MediaVolume, transform: VideoTransform, fullscreen: Boolean, scrub: Double?,
     onAction: (MediaAction) -> Unit, onVolume: (Float) -> Unit, onSpeed: (Float) -> Unit, onTransform: (VideoTransform) -> Unit,
     onScrub: (Double) -> Unit, onSeek: () -> Unit, onRetry: () -> Unit, onDownload: (() -> Unit)?,
+    failure: @Composable (MediaFailure) -> Unit,
 ) {
+    mediaFailure(state)?.let { failed -> failure(failed); return }
     val colors = LocalPpmTokens.current
     val focus = remember { FocusRequester() }
     val action by rememberUpdatedState(onAction)
