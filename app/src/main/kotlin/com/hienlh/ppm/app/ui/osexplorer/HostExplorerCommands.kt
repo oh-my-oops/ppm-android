@@ -15,7 +15,6 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.TextInputFocus
 import com.hienlh.ppm.app.ui.PpmTextField
-import com.hienlh.ppm.app.ui.files.ExplorerTreeAction
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.design.*
 import com.hienlh.ppm.protocol.HostFileEntry
@@ -134,20 +133,6 @@ internal class HostExplorerCommands(private val model: AppModel, val api: ApiCli
         val failures = result.report.failures.filterNot { omitNoTrash && it.code == "NO_TRASH" }
         if (failures.isNotEmpty()) model.toast(ErrorToastMessage("File operation failed", failures.joinToString("\n") { it.error ?: it.path }))
         if (result.succeeded > 0) model.toast(ErrorToastMessage("$verb ${result.succeeded} item${if (result.succeeded == 1) "" else "s"}", kind = ErrorToastMessage.Kind.SUCCESS))
-    }
-    fun menu(entries: List<HostFileEntry>, hasClipboard: Boolean, directory: String = session.state.value.currentDirectory): List<ExplorerTreeAction> = buildList {
-        if (entries.isEmpty()) {
-            add(ExplorerTreeAction("New File", ProductIcon.FilePlus) { create(false, directory) })
-            add(ExplorerTreeAction("New Folder", ProductIcon.FolderPlus) { create(true, directory) })
-        } else {
-            if (entries.size == 1) add(ExplorerTreeAction("Rename", ProductIcon.Pencil) { rename(entries.single()) })
-            add(ExplorerTreeAction("Move to Trash", ProductIcon.Trash2) { trash(entries) })
-            add(ExplorerTreeAction("Delete permanently", ProductIcon.Trash2, destructive = true) { permanentlyDelete(entries) })
-        }
-        if (hasClipboard && (entries.isEmpty() || entries.singleOrNull()?.isDirectory == true)) {
-            add(ExplorerTreeAction("Paste", ProductIcon.ClipboardPaste) { paste(entries.singleOrNull()?.path ?: directory) })
-        }
-        if (entries.size == 1) add(ExplorerTreeAction("Properties", ProductIcon.Info) { property = entries.single() })
     }
 
     @Composable

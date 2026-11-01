@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -110,7 +111,9 @@ private val LocalMenuMouse = compositionLocalOf<MenuMouse?> { null }
  * own popover rows are (window-dock-list.tsx). The web's icons carry `mr-2` on top of the gap
  * ([iconEnd], 0 for a menu whose icons do not); [vertical] is 12 where the web asks for
  * `max-md:py-3`; [lit] holds the highlight, as an open submenu's trigger keeps it. A destructive
- * item lights in its own [highlight] (`focus:bg-destructive/10`).
+ * item lights in its own [highlight] (`focus:bg-destructive/10`). A row that is not [enabled] is
+ * half faded and takes no press and no light (`data-[disabled]:pointer-events-none opacity-50`).
+ * [modifier] is the row's own, outermost: its semantics are the row's, merged with the press's.
  */
 @Composable
 fun MenuItem(
@@ -124,6 +127,8 @@ fun MenuItem(
     lit: Boolean = false,
     source: MutableInteractionSource? = null,
     highlight: Rgba? = null,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(6.dp)
@@ -134,11 +139,12 @@ fun MenuItem(
     LaunchedEffect(hovered, mouse) { if (hovered) mouse?.on = interactions }
     val fill = (highlight ?: tokens.surfaceHover).color
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
+            .alpha(if (enabled) 1f else 0.5f)
             .clip(shape)
             .background(if (lit) fill else Color.Transparent)
-            .ppmClickable(pressedColor = fill, hoverColor = fill, fade = false, shape = shape, source = interactions, onClick = onClick)
+            .ppmClickable(enabled = enabled, pressedColor = fill, hoverColor = fill, fade = false, shape = shape, source = interactions, onClick = onClick)
             .padding(horizontal = 8.dp, vertical = vertical),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -308,21 +314,28 @@ private fun IntSize.fitY(y: Int, box: IntSize) = y.coerceIn(0, maxOf(0, height -
 /**
  * A context menu where the finger was held (Radix's `ContextMenu` on touch): [at] is the press
  * within the parent; it opens to the right of it and below, flipping or shifting to stay on
- * screen. A tap anywhere else closes it.
+ * screen. A tap anywhere else closes it. With [inWindow] [at] is the press in the window instead
+ * (`positionInWindow()` and the pointer in it, which is all a row far down in a window knows), and
+ * the parent's own place in the window is not added to it a second time.
  */
 @Composable
-fun ContextMenuPopup(at: Offset, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+fun ContextMenuPopup(at: Offset, onDismiss: () -> Unit, inWindow: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     val gap = with(LocalDensity.current) { 2.dp.roundToPx() }
-    val place = remember(at, gap) {
+    val place = remember(at, gap, inWindow) {
         { anchor: IntRect, window: IntSize, box: IntSize ->
-            val px = anchor.left + at.x.roundToInt()
-            val py = anchor.top + at.y.roundToInt()
-            var x = px + gap
-            if (x + box.width > window.width) x = px - gap - box.width
-            IntOffset(window.fitX(x, box), window.fitY(py, box))
+            contextMenuOffset(at, if (inWindow) IntOffset.Zero else anchor.topLeft, window, box, gap)
         }
     }
     MenuPopup(place, onDismiss, content = content)
+}
+
+/** Where a context menu's box goes for a press at [at] from [origin]: right of it and below, left of it when there is no room, on screen. */
+internal fun contextMenuOffset(at: Offset, origin: IntOffset, window: IntSize, box: IntSize, gap: Int): IntOffset {
+    val px = origin.x + at.x.roundToInt()
+    val py = origin.y + at.y.roundToInt()
+    var x = px + gap
+    if (x + box.width > window.width) x = px - gap - box.width
+    return IntOffset(window.fitX(x, box), window.fitY(py, box))
 }
 
 /** A dropdown opened above its trigger, its right edge on the trigger's (`side="top" align="end"`). */
