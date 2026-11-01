@@ -60,6 +60,8 @@ systemd-run --user --scope --quiet ./gradlew :core:protocol:test :core:client:te
 
 The build needs bun and the repository's `node_modules` (`bun install` at the root): `ui/design`'s `buildHighlighter` makes the code highlighting's assets from them — the web's Shiki as one script for WebView's JavaScript sandbox (`SyntaxHighlighter`), and every grammar — into `build/`, so nothing generated is in git. After touching Shiki or `scripts/highlighter/`, `node scripts/check-highlighter.mjs <dir>` (header says how) checks every sample block's colours against the web's Shiki, on V8 as the sandbox runs it.
 
+`ui/terminal-engine`'s unit tests run the real `InputConnection`, `Editable` and `KeyEvent` on the JVM under Robolectric 4.17 (`@Config(sdk = [34])`; the first run fetches Robolectric's android-all jar into `~/.m2`), and the real `ImeInputView` and `KeyboardHandler` over a mocked `TerminalEmulatorImpl`: its JNI (`libjni_cb_term.so`) is built for Android and cannot load on the host. `ImeRig`'s `FakePty` turns the emulator's dispatches into the bytes libvterm writes, and `CommittedImeInstrumentation` asserts the same literals against the real JNI on a device, so a change to either side shows up on the other.
+
 End-to-end tests (`EndToEndTest`) run only when a scratch server is named. `scripts/scratch-server.sh start [port]` runs this checkout's server with its own `PPM_HOME` under `/tmp` (never the real `~/.ppm`), a random password and a `demo` project, on `127.0.0.1` — which the emulator reaches as `10.0.2.2`:
 
 ```bash

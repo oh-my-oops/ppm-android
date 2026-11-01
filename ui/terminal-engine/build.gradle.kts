@@ -27,6 +27,10 @@ dependencies {
     api("androidx.compose.runtime:runtime:1.11.4")
     implementation("androidx.compose.foundation:foundation:1.11.2")
     testImplementation(libs.junit)
+    // The IME tests run the real InputConnection, Editable and KeyEvent on the JVM (Robolectric),
+    // and the real KeyboardHandler over a mocked emulator, whose JNI cannot load on this machine.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.mockito.core)
 }
 
 abstract class PatchTerminalEngine : DefaultTask() {
@@ -92,6 +96,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { compose = true }
+    testOptions.unitTests.isIncludeAndroidResources = true
     // Preserve the pinned JNI bytes even on hosts with an NDK available for stripping.
     packaging.jniLibs.keepDebugSymbols += "**/libjni_cb_term.so"
 }
