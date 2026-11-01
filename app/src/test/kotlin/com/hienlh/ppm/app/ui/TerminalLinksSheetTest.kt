@@ -114,6 +114,8 @@ class TerminalLinksSheetTest {
     fun `the Copy button is a 44 dp square, 4 dp from the link it belongs to`() {
         show(plain)
         // The link's own height is not asserted: the text of a Robolectric test is laid out with font metrics that are not a device's.
+        // These are layout bounds. The accessibility bounds a device reports for the button are 48 dp wide: Compose widens the touch
+        // area of anything smaller than that (measured here: 44 dp layout, 48 dp touch bounds), and the web's button has no such area.
         val link = compose.onNodeWithText(plain).getBoundsInRoot()
         val copy = compose.onNodeWithContentDescription("Copy $plain").getBoundsInRoot()
         assertEquals("Copy width", 44.dp, copy.width)

@@ -2,6 +2,7 @@ package org.connectbot.terminal
 
 import java.nio.ByteBuffer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito.doAnswer
@@ -44,10 +45,16 @@ class SegmentScrollTest {
         return buffer
     }
 
-    /** `ESC ] 8 ; ; url BEL text ESC ] 8 ; ; BEL` with the cursor at [row] and [col] where the text starts. */
-    private fun link(row: Int, col: Int, text: String, url: String) {
+    /** `ESC ] 8 ; ; url BEL text ESC ] 8 ; ; BEL` with the cursor at [row] and [col] where the text starts, and the link not yet put on the screen. */
+    private fun linkWaiting(row: Int, col: Int, text: String, url: String) {
         emulator.onTextFragment(TerminalTextDecoder.OSC, 8, ";$url".toByteArray(), true, true, row, col)
         emulator.onTextFragment(TerminalTextDecoder.OSC, 8, ";".toByteArray(), true, true, row, col + text.length)
+    }
+
+    /** The same, and the piece of the write that ended with the link is over: the link is on the screen, over [text]. */
+    private fun link(row: Int, col: Int, text: String, url: String) {
+        linkWaiting(row, col, text, url)
+        emulator.placeLinks { _, _, _ -> text }
     }
 
     /** libvterm's `moverect_internal` for one row scrolled off the top: the row's cells go to the history. */
@@ -154,17 +161,47 @@ class SegmentScrollTest {
         assertEquals(listOf(none, none, none, listOf("https://one.test/"), listOf("https://two.test/"), listOf("https://three.test/")), screen())
     }
 
-    private fun pendingRows(): List<Int> = field<List<Any>>("pendingSemanticSegments").map { item ->
+    private fun waitingRows(): List<Int> = field<List<Any>>("unrecordedLinks").map { item ->
         item.javaClass.getDeclaredMethod("getRow").apply { isAccessible = true }.invoke(item) as Int
     }
 
-    @Test fun `a link still waiting for its text is on the row its text moved to, and one whose row scrolled off is not waiting any more`() {
-        link(0, 0, "top", "https://top.test/")
-        link(5, 0, "bottom", "https://bottom.test/")
-        assertEquals(listOf(0, 5), pendingRows())
+    @Test fun `a link still waiting to be put on the screen is on the row its text moved to, and one whose row scrolled off is not waiting any more`() {
+        // Only a link the writes were not cut after waits across a scroll: the safety net, which puts it on the screen at the next snapshot.
+        linkWaiting(0, 0, "top", "https://top.test/")
+        linkWaiting(5, 0, "bottom", "https://bottom.test/")
+        assertEquals(listOf(0, 5), waitingRows())
         push("top")
         push("row1")
-        assertEquals(listOf(3), pendingRows())
+        assertEquals(listOf(3), waitingRows())
+    }
+
+    @Test fun `a link made by the end of a write piece is put on the screen after the flush that dropped the screen's links, because it came after what was dropped`() {
+        link(1, 0, "old", "https://old.test/")
+        // The piece scrolled a region that stops above the last row (libvterm merges it into the flush), and then made a link.
+        push("row0")
+        linkWaiting(4, 0, "new", "https://new.test/")
+        emulator.moverect(TermRect(0, 4, 0, columns), TermRect(1, 5, 0, columns))
+        assertEquals("the flush does not guess at the rows it moved", List(rows) { none }, screen())
+        emulator.placeLinks { _, _, _ -> "new" }
+        assertEquals(List(4) { none } + listOf(listOf("https://new.test/"), none), screen())
+    }
+
+    @Test fun `a redraw of the whole screen ends the links on it and the text remembered for them, and takes no other segment with them`() {
+        // The prompt shares the row with a link: the row is rewritten for its links alone.
+        link(1, 10, "link", "https://l.test/")
+        assertEquals(1, field<Map<Any, String>>("semanticSegmentTexts").size)
+        emulator.onTextFragment(TerminalTextDecoder.OSC, 133, "A".toByteArray(), true, true, 1, 0)
+        emulator.onTextFragment(TerminalTextDecoder.OSC, 133, "B".toByteArray(), true, true, 1, 2)
+        val inWrite = TerminalEmulatorImpl::class.java.getDeclaredField("inWrite").apply { isAccessible = true }
+        inWrite.setBoolean(emulator, true)
+        try {
+            emulator.damage(0, rows, 0, columns)
+        } finally {
+            inWrite.setBoolean(emulator, false)
+        }
+        val types = field<List<TerminalLine>>("currentLines").map { line -> line.semanticSegments.map { it.semanticType } }
+        assertEquals(List(rows) { row -> if (row == 1) listOf(SemanticType.PROMPT, SemanticType.COMMAND_INPUT) else emptyList() }, types)
+        assertTrue(field<Map<Any, String>>("semanticSegmentTexts").isEmpty())
     }
 
     @Test fun `a link whose text is no longer on the row that scrolled off is not carried into the history`() {

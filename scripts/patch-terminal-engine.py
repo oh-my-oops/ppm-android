@@ -74,15 +74,18 @@ def emulator(text):
     text = replace(text, "\n    inlineImages: InlineImages = InlineImages.Off,", "\n    inlineImages: InlineImages = InlineImages.Off,\n    private val maxScrollbackLines: Int = 50_000,")
     text = replace(text, "    // Handler for escaping native mutex", "    init { require(maxScrollbackLines >= 0) { \"maxScrollbackLines must be non-negative\" } }\n\n    // Handler for escaping native mutex")
     text = replace(text, "    private val maxScrollbackLines = 1000\n", "")
+    # The JNI is reached through ScreenNative, so the unit tests can stand a model of libvterm in for it (the library cannot load on the JVM).
+    text = replace(text, "    private val maxScrollbackLines: Int = 50_000,\n) : TerminalEmulator,",
+                   "    private val maxScrollbackLines: Int = 50_000,\n    private val nativeFactory: (TerminalCallbacks) -> ScreenNative = { TerminalNativeAdapter(TerminalNative(it)) },\n) : TerminalEmulator,")
     text = replace(text, "    private val damageLock = Any()", "    private val damageLock = Any()\n    @Volatile override var isClosed = false\n        private set\n    private var currentAnsiPalette: IntArray? = null\n    /** True only while [writeReplay] parses. Set and read under [damageLock]: libvterm calls back from inside the parse, on its thread. */\n    private var replaying = false")
     start = text.index("    private val terminalNative by lazy {")
     end = text.index("    // Parser for OSC sequences", start)
     text = text[:start] + dedent('''
-        private var nativeInstance: TerminalNative? = null
-        private val terminalNative: TerminalNative
+        private var nativeInstance: ScreenNative? = null
+        private val terminalNative: ScreenNative
             get() {
                 check(!isClosed) { "Terminal is closed" }
-                return nativeInstance ?: TerminalNative(this).also { native ->
+                return nativeInstance ?: nativeFactory(this).also { native ->
                     nativeInstance = native
                     native.resize(rows, cols)
                     native.setBoldHighbright(boldAsBright)
@@ -158,6 +161,8 @@ def emulator(text):
             semanticSegmentTexts.clear()
             segmentRowsShifted = 0
             resizePushes = -1
+            hyperlinkCuts.reset()
+            unrecordedLinks.clear()
             damagePosted = false
             nextSnapshotNanos = System.nanoTime()
             cursorMoved = false
@@ -235,7 +240,7 @@ def emulator(text):
         private fun shiftSegmentsUp() {
             if (resizePushes >= 0) return
             segmentRowsShifted++
-            if (pendingSemanticSegments.isEmpty() && semanticSegmentTexts.isEmpty() && currentLines.none { it.semanticSegments.isNotEmpty() }) return
+            if (pendingSemanticSegments.isEmpty() && unrecordedLinks.isEmpty() && semanticSegmentTexts.isEmpty() && currentLines.none { it.semanticSegments.isNotEmpty() }) return
             val before = currentLines
             currentLines = before.mapIndexedTo(ArrayList(before.size)) { row, line ->
                 val below = before.getOrNull(row + 1)?.semanticSegments.orEmpty()
@@ -244,6 +249,9 @@ def emulator(text):
             val pending = pendingSemanticSegments.filter { it.row > 0 }.map { it.copy(row = it.row - 1) }
             pendingSemanticSegments.clear()
             pendingSemanticSegments.addAll(pending)
+            val waiting = unrecordedLinks.filter { it.row > 0 }.map { it.copy(row = it.row - 1) }
+            unrecordedLinks.clear()
+            unrecordedLinks.addAll(waiting)
             val texts = semanticSegmentTexts.entries.filter { it.key.row > 0 }.map { it.key.copy(row = it.key.row - 1) to it.value }
             semanticSegmentTexts.clear()
             semanticSegmentTexts.putAll(texts)
@@ -272,7 +280,112 @@ def emulator(text):
         }
 
         /** The end of a write. A scroll of more rows than the screen has is flushed with no moverect, so the count must not outlive the write. */
-        internal fun endScrollBatch() = synchronized(damageLock) { segmentRowsShifted = 0 }
+        internal fun endScrollBatch() = synchronized(damageLock) {
+            segmentRowsShifted = 0
+            scrolledInFlush = false
+        }
+
+        /** The flush of the write in progress moved rows: the rectangle it reports as damaged covers them, which is not a redraw. */
+        private var scrolledInFlush = false
+
+        /** True while a write is handed to the library: what it reports as damaged is the output's. */
+        private var inWrite = false
+
+        /**
+         * Whether a link still stands over its cells: while the text it was made over is there. libvterm reports what a flush changed as one
+         * rectangle, which also covers the cells between two that changed, so damage alone says nothing about a link; what the cells hold now
+         * does. (A link made again over the same text, or the same text written over it, is not told apart. A redraw of the whole
+         * screen is: see [dropScreenLinks].)
+         */
+        private fun linkTextIntact(row: Int, segment: SemanticSegment, cells: PackedCells): Boolean {
+            val text = semanticSegmentTexts[SemanticSegmentKey(row, segment)] ?: return false
+            return isValidCellRange(segment.startCol, segment.endCol, cells.size) && cellText(cells, segment.startCol, segment.endCol) == text
+        }
+
+        /** The whole screen was redrawn (`clear`, a reset, the other screen): no link on it stands, the text drawn being the same as before or not. */
+        private fun dropScreenLinks() {
+            if (currentLines.none { line -> line.semanticSegments.any { it.semanticType == SemanticType.HYPERLINK } }) return
+            currentLines = currentLines.mapTo(ArrayList(currentLines.size)) { line ->
+                if (line.semanticSegments.none { it.semanticType == SemanticType.HYPERLINK }) line
+                else line.copy(semanticSegments = line.semanticSegments.filter { it.semanticType != SemanticType.HYPERLINK })
+            }
+            semanticSegmentTexts.keys.removeAll { it.semanticType == SemanticType.HYPERLINK }
+        }
+
+        /** The cells of a row carry one link: a link made over cells that are another's replaces it. */
+        private fun withoutOverlappedLinks(segments: List<SemanticSegment>, added: SemanticSegment): List<SemanticSegment> =
+            if (added.semanticType != SemanticType.HYPERLINK) segments
+            else segments.filterNot { it.semanticType == SemanticType.HYPERLINK && it != added && it.overlaps(added.startCol, added.endCol) }
+
+        /** Where the OSC 8 sequences of what is written end (see [HyperlinkCuts]). */
+        private val hyperlinkCuts = HyperlinkCuts()
+
+        /** The links the piece just written made: they are on the screen, with their text recorded, once the piece is over. */
+        private val unrecordedLinks = mutableListOf<PendingSemanticSegment>()
+
+        /**
+         * Hands the library a write in pieces that each end right after an OSC 8, and puts the links the piece made on the screen with the
+         * text under them. libvterm says where a link is when it ends, but what is under it the emulator can only read from the library's
+         * screen, and the rest of the write may already have replaced those cells: the link was then shown over the text that is there now
+         * (a replay is one write, and live output arrives in writes the snapshot has not caught up with). [write] must hand on exactly the
+         * bytes from [from] until [to].
+         */
+        private inline fun writeInPieces(start: Int, end: Int, next: (from: Int) -> Int, write: (from: Int, to: Int) -> Unit) {
+            var from = start
+            while (true) {
+                val cut = next(from)
+                val to = if (cut < 0) end else cut
+                inWrite = true
+                try {
+                    write(from, to)
+                } finally {
+                    inWrite = false
+                }
+                endScrollBatch()
+                if (cut >= 0) recordLinkTexts()
+                if (to >= end) return
+                from = to
+            }
+        }
+
+        /**
+         * Puts each link the piece just handed to the library made on the screen, with the text [readText] says is under it, read from
+         * the library's screen while that is still what the link was written over: a link stands for as long as that text is there (see
+         * [linkTextIntact]). The piece ended with the link, so the row it was made on is the row the screen has it on, and everything the
+         * piece reported as damaged or scrolled came before the link: it is not the link's, which is why the link is only put on the
+         * screen now.
+         */
+        internal fun placeLinks(readText: (row: Int, startCol: Int, endCol: Int) -> String) {
+            if (unrecordedLinks.isEmpty()) return
+            val links = unrecordedLinks.toList()
+            unrecordedLinks.clear()
+            for (link in links) {
+                if (link.row !in 0 until rows || link.startCol < 0 || link.startCol >= link.endCol || link.endCol > cols) continue
+                val segment = SemanticSegment(link.startCol, link.endCol, link.semanticType, link.metadata, link.promptId)
+                val line = currentLines[link.row]
+                currentLines = currentLines.toMutableList().apply {
+                    this[link.row] = line.copy(semanticSegments = (withoutOverlappedLinks(line.semanticSegments, segment) + segment).sortedBy { it.startCol })
+                }
+                semanticSegmentTexts[SemanticSegmentKey(link.row, segment)] = readText(link.row, link.startCol, link.endCol)
+            }
+        }
+
+        private fun recordLinkTexts() = placeLinks { row, startCol, endCol -> screenText(row, startCol, endCol) }
+
+        /** What the library's screen holds in [startCol] until [endCol] of [row]: one small read. */
+        private fun screenText(row: Int, startCol: Int, endCol: Int): String {
+            for (r in 0 until rows) {
+                transferRanges[r * 2] = cols
+                transferRanges[r * 2 + 1] = 0
+            }
+            transferRanges[row * 2] = startCol
+            transferRanges[row * 2 + 1] = endCol
+            val text = StringBuilder()
+            screenTransfer.fetch(terminalNative, transferRanges) { _, _, count, buffer, offset, _ ->
+                text.append(PackedCells.Builder(count).apply { read(buffer, offset, count) }.build().text())
+            }
+            return text.toString()
+        }
     '''), "    "))
     text = replace(text,
                    "            // FIRST: Preserve semantic segments from line 0 (the line being scrolled out)\n"
@@ -293,8 +406,61 @@ def emulator(text):
                    "                    if (segmentsMoved || key.row !in src.startRow until src.endRow) return@mapNotNull null\n")
     text = replace(text, "                semanticSegmentTexts.keys.removeAll { it.row in dest.startRow until dest.endRow }\n                semanticSegmentTexts.putAll(movedTexts)",
                    "                if (!segmentsMoved) semanticSegmentTexts.keys.removeAll { it.row in dest.startRow until dest.endRow }\n                semanticSegmentTexts.putAll(movedTexts)")
-    text = replace(text, "        terminalNative.writeInput(data, offset, length)\n", "        terminalNative.writeInput(data, offset, length)\n        endScrollBatch()\n")
-    text = replace(text, "        terminalNative.writeInput(buffer, length)\n", "        terminalNative.writeInput(buffer, length)\n        endScrollBatch()\n")
+    # A write reaches the library in pieces, each ending after an OSC 8, and the text under a link is recorded as it ends (see writeInPieces).
+    text = replace(text, "        terminalNative.writeInput(data, offset, length)\n", indent(dedent('''\
+        val end = offset + length
+        writeInPieces(offset, end, { hyperlinkCuts.next(data, it, end) }) { from, to ->
+            // The library copies the whole array on every call, so a piece is an array of its own.
+            if (from == offset && to == end) {
+                terminalNative.writeInput(data, offset, length)
+            } else {
+                val piece = data.copyOfRange(from, to)
+                terminalNative.writeInput(piece, 0, piece.size)
+            }
+        }
+    '''), "        "))
+    text = replace(text, "        terminalNative.writeInput(buffer, length)\n", indent(dedent('''\
+        if (length !in 0..buffer.capacity()) {
+            // The library refuses it, whichever way it is wrong.
+            terminalNative.writeInput(buffer, length)
+            return@synchronized
+        }
+        // The library reads a direct buffer from its start up to the length given, whatever its position and limit are.
+        val bytes = buffer.duplicate().apply { clear() }
+        writeInPieces(0, length, { hyperlinkCuts.next(bytes, it, length) }) { from, to ->
+            if (from == 0 && to == length) {
+                terminalNative.writeInput(buffer, length)
+            } else {
+                terminalNative.writeInput(bytes.duplicate().apply { limit(to); position(from) }.slice(), to - from)
+            }
+        }
+    '''), "        "))
+    # A link is the link of its text for as long as the text is there, whatever else the rectangle libvterm reports as damaged covers.
+    text = replace(text, "                        segment.endCol <= cells.size &&\n                            damageRegions.none { region ->\n                                !region.preserveSegments && row >= region.startRow && row < region.endRow &&\n                                    segment.overlaps(region.startCol, region.endCol)\n                            }\n",
+                   "                        segment.endCol <= cells.size &&\n                            (if (segment.semanticType == SemanticType.HYPERLINK) linkTextIntact(row, segment, cells) else damageRegions.none { region ->\n                                !region.preserveSegments && row >= region.startRow && row < region.endRow &&\n                                    segment.overlaps(region.startCol, region.endCol)\n                            })\n")
+    # A redraw of the whole screen ends every link on it. Rows that moved are told by their text alone, so a flush that scrolled is not a redraw.
+    text = replace(text, "        synchronized(damageLock) {\n            addDamageRegion(startRow, endRow, startCol, endCol)\n",
+                   "        synchronized(damageLock) {\n            if (inWrite && !scrolledInFlush && startRow <= 0 && endRow >= rows && startCol <= 0 && endCol >= cols) dropScreenLinks()\n            addDamageRegion(startRow, endRow, startCol, endCol)\n")
+    text = replace(text, "            val segmentsMoved = segmentsMovedByPushes(dest, src)\n            if (\n",
+                   "            val segmentsMoved = segmentsMovedByPushes(dest, src)\n            scrolledInFlush = true\n            if (\n")
+    text = replace(text, "        val updatedSegments = (line.semanticSegments + newSegment)\n            .sortedBy { it.startCol }\n",
+                   "        val updatedSegments = (withoutOverlappedLinks(line.semanticSegments, newSegment) + newSegment)\n            .sortedBy { it.startCol }\n")
+    # A link is put on the screen when the piece that made it is over, with its text (see writeInPieces), so it is not one of the pending
+    # segments that are applied blindly at the next snapshot. A link no piece recorded (none, unless libvterm ends an OSC 8 where
+    # HyperlinkCuts sees no end) still is.
+    text = replace(text, "            val updatedSegments = (line.semanticSegments + newSegment).sortedBy { it.startCol }\n", indent(dedent('''\
+        if (semanticType == SemanticType.HYPERLINK) {
+            unrecordedLinks.add(PendingSemanticSegment(row, startCol, endCol, semanticType, metadata, promptId))
+            propertyChanged = true
+            requestProcessPendingUpdatesLocked()
+            return
+        }
+        val updatedSegments = (line.semanticSegments + newSegment).sortedBy { it.startCol }
+    '''), "            "))
+    text = replace(text, "    fun processPendingUpdates(): Unit = synchronized(damageLock) {\n        if (isClosed) return@synchronized\n        // Collect pending changes\n",
+                   "    fun processPendingUpdates(): Unit = synchronized(damageLock) {\n        if (isClosed) return@synchronized\n"
+                   "        recordLinkTexts()\n"
+                   "        // Collect pending changes\n")
     text = replace(text, "            terminalNative.resize(newRows, newCols)\n            rows = newRows\n",
                    "            resizePushes = 0\n            try {\n                terminalNative.resize(newRows, newCols)\n            } finally {\n                resizePushes = -1\n            }\n            rows = newRows\n")
     # A screen row's flag is set when text reaches the row below it and is read only with a cell of its own row, so a
@@ -664,7 +830,11 @@ def selection_actions(text):
     return replace(text, text[start:legacy_end], prefix + legacy_row + "                    }\n")
 
 
-PATCHES = {"TerminalEmulator.kt": emulator, "SelectionManager.kt": selection, "Terminal.kt": terminal, "TerminalTextPaint.kt": text_paint}
+def screen_transfer(text):
+    return replace(text, "    fun fetch(native: TerminalNative, ranges: IntArray,", "    fun fetch(native: ScreenNative, ranges: IntArray,")
+
+
+PATCHES = {"TerminalEmulator.kt": emulator, "SelectionManager.kt": selection, "Terminal.kt": terminal, "TerminalTextPaint.kt": text_paint, "ScreenTransfer.kt": screen_transfer}
 
 
 def files(archive):

@@ -114,6 +114,27 @@ The added APIs are:
   the other way. A resize is not a scroll: the rows it pushes get their own links, the screen's segments stay where they
   were, as before. `SegmentScrollTest` feeds the emulator libvterm's order of callbacks; `verifyLinksAcrossScrolls` runs it
   through the real JNI.
+- An OSC 8 link goes away with the cells it was written over. libvterm says where a link is when it ends, but what text is
+  there the emulator can only read from the library's screen, which it did when it caught up with the write (a frame later, or
+  once at the end of a whole replay) before applying the link blindly: a link whose cells had been erased or written over by
+  then showed up over whatever they held (`ls --hyperlink`, `clear`, a plain listing, reached through a reconnect, which
+  replays the shell's buffer as one write: a click on `https:` of a plain line opened the address of a line that had scrolled
+  away). `HyperlinkCuts` follows libvterm's parser over what is written, in UTF-8 mode as the JNI sets it, and the emulator hands
+  the library the bytes in pieces that each end right after an OSC 8 (`writeInPieces`), so the link, its row and the text under it
+  are read the moment the link ends (`placeLinks`, one small read of the screen per link). Measured on an emulator, a 1 MB replay
+  takes the same with no link, 0.58 s instead of 0.48 s with 3,000 links, and 0.92 s instead of 0.65 s with one on every line. A
+  link stands for as long as that text is under it when the emulator catches up (`linkTextIntact`), whatever else the rectangle
+  libvterm reports as damaged covers (one rectangle for a whole flush, so it covers unchanged cells between two that changed), and
+  a redraw of the whole screen ends every link on it (`dropScreenLinks`: a flush whose rectangle covers the screen and that
+  scrolled nothing; a resize is not a redraw). A link made over the cells of another replaces it. A link that no piece
+  ended at (an OSC 8 whose end the scan does not see and libvterm does) is read when the emulator catches up, as before.
+  Limits: a link made again over the same text, or the same text written over it, is not told from the first; a redraw of the whole
+  screen in the same flush as a scroll (Enter on the last row, then `clear`, in one write) looks like the scroll to the emulator, so a
+  link over text that came back identical stays; leaving the alternate screen loses the primary screen's links, as before; and an OSC 8
+  that is written over before it closes is linked where it ended, as upstream. The JVM tests (`StaleLinksTest`, `HyperlinkCutsTest`)
+  run the real emulator over `FakeVterm`, a model of libvterm's parse and screen (`ScreenNative` is the one place they stand in for
+  the JNI); `verifyStaleLinks` and `verifyHyperlinkCuts` run the same bytes through the real library (22 operations, three ways of
+  writing each, a replay, a resize, random streams for where the writes are cut), so the model cannot drift from it unnoticed.
 - With `imeMode = CommittedText`, a view that lost the focus tells the IME it is no editor once nothing else took the
   focus (`onCreateInputConnection` answers `null` with `TYPE_NULL`, as Chrome does for a blurred textarea), and asks for a
   new editor, then reports the caret moved and came back, when the focus returns.
@@ -135,7 +156,8 @@ adb -s emulator-5582 shell am instrument -w org.connectbot.terminal.test/org.con
 
 The instrumentation launches no app activity and uses its own package. It tests JNI linkage,
 scrollback limits, wrapped lines and wrap flags in the history and across writes, links (OSC 8, plain, wrapped, in the
-history and on their own rows while the screen scrolls), read-only text/cursor access, alternate screens, reset from an
+history, on their own rows while the screen scrolls, and none left over text that is not theirs after any write that erases
+or overwrites them, a replay or a resize), where a write is cut for them, the cursor after a replay, read-only text/cursor access, alternate screens, reset from an
 unfinished OSC, palette retention, close/late work, actual truecolor/inverse painting and all three cursor shapes.
 Unit tests cover 556 fixtures generated from the web's xterm colour functions, range/wrap handling,
 decorative-glyph exclusions, cache separation, non-mutating selection reads, measured action
