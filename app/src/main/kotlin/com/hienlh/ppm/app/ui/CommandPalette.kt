@@ -120,13 +120,14 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
             onDismiss()
             action()
         }
+        // The web's `builtIn` in its order, less the actions of features this app does not have yet; Add Project is not the web's.
         listOf(
             PaletteCommand("New AI Chat", ProductIcon.MessageSquare, "ai assistant claude", formatShortcut(bindings.binding("open-chat")), run { model.newChat() }),
             PaletteCommand("Add Project", ProductIcon.FolderPlus, "project folder clone git", null, run { model.addingProject = true }),
-            PaletteCommand("File Explorer", ProductIcon.FolderOpen, "files folders host browse", null, run { model.openExplorer() }),
-            PaletteCommand("New Terminal", ProductIcon.Terminal, "shell console command", formatShortcut(bindings.binding("open-terminal")), run { model.openTerminal(inDock = true) }),
+            PaletteCommand("New Terminal", ProductIcon.Terminal, "bash shell console", formatShortcut(bindings.binding("open-terminal")), run { model.openTerminal(inDock = true) }),
             PaletteCommand("Voice Input", ProductIcon.Mic, "speech microphone dictate voice", formatShortcut(bindings.binding("voice-input")), run { model.toggleVoiceInput() }),
             PaletteCommand("Settings", ProductIcon.Settings, "config preferences theme", formatShortcut(bindings.binding("open-settings")), run { model.openSettings() }),
+            PaletteCommand("Open File Explorer", ProductIcon.AppWindow, "open file explorer finder browse files folders disk drive window", null, run { model.openExplorer() }),
         )
     }
     val text = query.text.toString()
