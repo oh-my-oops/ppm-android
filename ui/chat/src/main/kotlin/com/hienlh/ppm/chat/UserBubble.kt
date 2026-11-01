@@ -353,7 +353,7 @@ private fun BubbleText(text: String, system: Boolean, linked: AnnotatedString?) 
     WithoutOnCopy(if (system) "" else userTextMarks(text)) {
         // Counted at its lines, 52.5 px each at 2.625x where Compose makes 53, and at most half the window.
         SelectionContainer(Modifier.cssLines(20f, max = if (expanded) expandedLimit else Dp.Unspecified)) {
-            // `select-text`: the I-beam over the glyphs, the arrow after a short line and over a chip.
+            // `select-text`: the I-beam over the glyphs, the arrow after a short line, and the chip's own hand.
             TextCursorRegion {
                 if (expanded) {
                     CursorText(annotated, slack.heightIn(max = expandedLimit).cssScrollY(), style, inlineContent = inline)
@@ -437,7 +437,8 @@ private fun FilePathChip(path: String, lineHeight: Float, modifier: Modifier = M
         modifier
             .clip(shape)
             .background(tokens.panel.mix(tokens.panel.opacity(0.5), lit).color)
-            .pointerHoverIcon(WebCursor.Pointer)
+            // In a line of text the name sits inside a selectable container, which gives its glyphs an I-beam: the hand wins.
+            .pointerHoverIcon(WebCursor.Pointer, overrideDescendants = true)
             .ppmClickable(pressedColor = Color.Transparent, source = hover.source) { tabs?.openFilePath(path) }
             .cssBorder(tokens.border.opacity(0.5).color, shape)
             .padding(horizontal = 6.dp, vertical = 2.dp),
