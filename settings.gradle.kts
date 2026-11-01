@@ -25,3 +25,6 @@ include(":ui:media")
 // Runs the app on a device to write its Baseline Profile, and measures its start and a scrolled chat
 // with and without it.
 include(":baselineprofile")
+
+// Opt-in, separately installed editor evaluation; never a production app dependency.
+if (providers.gradleProperty("editorSpike").orNull == "true") include(":editor-spike")

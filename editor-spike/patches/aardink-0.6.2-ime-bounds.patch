@@ -1,0 +1,146 @@
+--- a/editor/src/androidMain/kotlin/com/aardarch/aardink/platform/EditorTextInput.android.kt
++++ b/editor/src/androidMain/kotlin/com/aardarch/aardink/platform/EditorTextInput.android.kt
+@@ -89,11 +89,11 @@
+     val selection = adapter.documentSelection
+     outAttributes.initialSelStart = selection.min
+     outAttributes.initialSelEnd = selection.max
+-    if (Build.VERSION.SDK_INT >= 30) {
++    if (Build.VERSION.SDK_INT >= 30 && selection.max - selection.min <= SURROUNDING_CHARS) {
+         // A slice around the selection, not the document: it travels to the input method in a Binder call.
+         val text = adapter.text
+-        val start = max(0, selection.min - SURROUNDING_CHARS)
+-        val end = min(text.length, selection.max + SURROUNDING_CHARS)
++        val start = contextStart(text, selection.min)
++        val end = contextEnd(text, selection.max)
+         outAttributes.setInitialSurroundingSubText(text.subSequence(start, end), start)
+     }
+ }
+@@ -163,24 +163,41 @@
+         return true
+     }
+ 
+-    override fun getTextBeforeCursor(n: Int, flags: Int): CharSequence = adapter.textBeforeSelection(n).toString()
+-
+-    override fun getTextAfterCursor(n: Int, flags: Int): CharSequence = adapter.textAfterSelection(n).toString()
+-
+-    override fun getSelectedText(flags: Int): CharSequence? = adapter.selectedText()?.toString()
++    override fun getTextBeforeCursor(n: Int, flags: Int): CharSequence {
++        if (n <= SURROUNDING_CHARS) return adapter.textBeforeSelection(n.coerceAtLeast(0)).toString()
++        val text = adapter.text
++        val end = adapter.documentSelection.min
++        return text.subSequence(contextStart(text, end), end).toString()
++    }
++
++    override fun getTextAfterCursor(n: Int, flags: Int): CharSequence {
++        if (n <= SURROUNDING_CHARS) return adapter.textAfterSelection(n.coerceAtLeast(0)).toString()
++        val text = adapter.text
++        val start = adapter.documentSelection.max
++        return text.subSequence(start, contextEnd(text, start)).toString()
++    }
++
++    override fun getSelectedText(flags: Int): CharSequence? {
++        val selection = adapter.documentSelection
++        // The selection stays intact in the editor. Decline a large IPC payload instead of
++        // truncating it and misleading the keyboard about what text it would replace.
++        if (selection.max - selection.min > SURROUNDING_CHARS) return null
++        return adapter.selectedText()?.toString()
++    }
+ 
+     override fun getCursorCapsMode(reqModes: Int): Int {
+         val selection = adapter.documentSelection
+         val text = adapter.text
+-        val start = max(0, selection.min - SURROUNDING_CHARS)
++        val start = contextStart(text, selection.min)
+         return TextUtils.getCapsMode(text.subSequence(start, selection.min), selection.min - start, reqModes)
+     }
+ 
+-    override fun getExtractedText(request: ExtractedTextRequest?, flags: Int): ExtractedText {
++    override fun getExtractedText(request: ExtractedTextRequest?, flags: Int): ExtractedText? {
+         val selection = adapter.documentSelection
+-        val text = adapter.text
+-        val start = max(0, selection.min - SURROUNDING_CHARS)
+-        val end = min(text.length, selection.max + SURROUNDING_CHARS)
++        if (selection.max - selection.min > SURROUNDING_CHARS) return null
++        val text = adapter.text
++        val start = contextStart(text, selection.min)
++        val end = contextEnd(text, selection.max)
+         return ExtractedText().apply {
+             this.text = text.subSequence(start, end).toString()
+             startOffset = start
+@@ -315,6 +332,17 @@
+     }
+ }
+ 
++// Only trim the artificial context boundary, never the actual selection/caret boundary.
++private fun contextStart(text: CharSequence, end: Int): Int {
++    val start = max(0, end - SURROUNDING_CHARS)
++    return if (start > 0 && start < end && text[start].isLowSurrogate() && text[start - 1].isHighSurrogate()) start + 1 else start
++}
++
++private fun contextEnd(text: CharSequence, start: Int): Int {
++    val end = start + min(SURROUNDING_CHARS, text.length - start)
++    return if (end < text.length && end > start && text[end - 1].isHighSurrogate() && text[end].isLowSurrogate()) end - 1 else end
++}
++
+ /** Characters on each side of the selection handed to the input method in one read. */
+ private const val SURROUNDING_CHARS = 2048
+ 
+--- a/sample/src/test/java/com/aardarch/aardink/sample/EditorInputConnectionTest.kt
++++ b/sample/src/test/java/com/aardarch/aardink/sample/EditorInputConnectionTest.kt
+@@ -139,6 +139,56 @@
+     }
+ 
+     @Test
++    fun `oversized cursor reads stay bounded even with Int MAX_VALUE`() {
++        val state = stateOf("x".repeat(10_000))
++        val ic = connect(state, caret = 5_000)
++        rule.runOnIdle {
++            assertEquals(2048, ic.getTextBeforeCursor(Int.MAX_VALUE, 0)?.length)
++            assertEquals(2048, ic.getTextAfterCursor(Int.MAX_VALUE, 0)?.length)
++            assertEquals(0, ic.getTextBeforeCursor(-1, 0)?.length)
++            assertEquals(0, ic.getTextAfterCursor(-1, 0)?.length)
++        }
++    }
++
++    @Test
++    fun `select all declines oversized IPC reads without losing selection or replacement`() {
++        val state = stateOf("x\n".repeat(10_000))
++        val ic = connect(state)
++        ic.run { setSelection(0, state.document.length) }
++        rule.runOnIdle {
++            assertNull(ic.getSelectedText(0))
++            assertNull(ic.getExtractedText(ExtractedTextRequest(), 0))
++            val view = requireNotNull(rule.activity.window.decorView.findFocus())
++            val info = EditorInfo()
++            requireNotNull(view.onCreateInputConnection(info))
++            assertEquals(0, info.initialSelStart)
++            assertEquals(20_000, info.initialSelEnd)
++            assertNull(info.getInitialSelectedText(0))
++        }
++        ic.run { commitText("replacement", 1) }
++        assertEquals("replacement", state.document.text)
++        rule.runOnIdle { state.undo() }
++        assertEquals(20_000, state.document.length)
++    }
++
++    @Test
++    fun `artificial context limits never split an emoji surrogate pair`() {
++        val before = "x".repeat(2047)
++        val after = "y".repeat(2047)
++        val state = stateOf("a\uD83D\uDE00" + before + after + "\uD83D\uDE00z")
++        val ic = connect(state, caret = 2050)
++        rule.runOnIdle {
++            assertEquals(before, ic.getTextBeforeCursor(Int.MAX_VALUE, 0).toString())
++            assertEquals(after, ic.getTextAfterCursor(Int.MAX_VALUE, 0).toString())
++            val extracted = requireNotNull(ic.getExtractedText(ExtractedTextRequest(), 0))
++            assertEquals(before + after, extracted.text.toString())
++            assertEquals(3, extracted.startOffset)
++            assertEquals(2050, extracted.startOffset + extracted.selectionStart)
++            assertEquals(extracted.selectionStart, extracted.selectionEnd)
++        }
++    }
++
++    @Test
+     fun `a key event from the keyboard goes through the editor's keys`() {
+         val state = stateOf("abc")
+         val ic = connect(state)

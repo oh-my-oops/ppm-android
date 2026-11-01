@@ -1,0 +1,45 @@
+--- a/editor/src/androidMain/kotlin/com/aardarch/aardink/platform/EditorTextInput.android.kt
++++ b/editor/src/androidMain/kotlin/com/aardarch/aardink/platform/EditorTextInput.android.kt
+@@ -82,9 +82,9 @@
+     }
+ }
+ 
+-/** A multi-line text editor to the input method: corrections on, no fullscreen, Enter types a line break. */
++/** A multi-line text editor to the input method: corrections off for code, no fullscreen, Enter types a line break. */
+ private fun configure(outAttributes: EditorInfo, adapter: EditorImeAdapter) {
+-    outAttributes.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
++    outAttributes.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+     outAttributes.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_FLAG_NO_ENTER_ACTION or EditorInfo.IME_ACTION_NONE
+     val selection = adapter.documentSelection
+     outAttributes.initialSelStart = selection.min
+--- a/sample/src/test/java/com/aardarch/aardink/sample/EditorInputConnectionTest.kt
++++ b/sample/src/test/java/com/aardarch/aardink/sample/EditorInputConnectionTest.kt
+@@ -15,6 +15,7 @@
+  */
+ package com.aardarch.aardink.sample
+ 
++import android.text.InputType
+ import android.view.KeyEvent
+ import android.view.inputmethod.EditorInfo
+ import android.view.inputmethod.ExtractedTextRequest
+@@ -189,6 +190,20 @@
+     }
+ 
+     @Test
++    fun `code input keeps multiline composition without automatic spelling replacement`() {
++        val state = stateOf("fun ")
++        connect(state)
++        rule.runOnIdle {
++            val view = requireNotNull(rule.activity.window.decorView.findFocus())
++            val info = EditorInfo()
++            requireNotNull(view.onCreateInputConnection(info))
++            assertEquals(0, info.inputType and InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
++            assertTrue(info.inputType and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS != 0)
++            assertTrue(info.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0)
++        }
++    }
++
++    @Test
+     fun `a key event from the keyboard goes through the editor's keys`() {
+         val state = stateOf("abc")
+         val ic = connect(state)
