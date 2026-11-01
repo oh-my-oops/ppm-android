@@ -39,9 +39,10 @@ import kotlinx.serialization.json.JsonNull
  * that Enter then runs.
  *
  * What the shell prints before the owner has reported a usable size through [resize] is held back, in
- * order and each piece as the replay or the live output it is, and written the moment the first size
- * arrives. The socket itself opens at [start], so a shell stays attached whether or not its view is ever
- * laid out. But the server replays its buffer as soon as a socket attaches, the shell made it for the size
+ * order, and written the moment the first size arrives, all of it through [onReplay]: held output is
+ * history by then, live output too, and for a view nobody opens (a collapsed dock, a minimized window) it
+ * can be minutes old, when the answer to a query inside it would land at whatever is running. The socket
+ * itself opens at [start], so a shell stays attached whether or not its view is ever laid out. But the server replays its buffer as soon as a socket attaches, the shell made it for the size
  * it was last given, and an emulator wraps whatever it is written at the width it has *then*: one that has
  * not been laid out has its default, so a typed line that took three rows came back cut, a prompt's redraws
  * landed on the wrong rows, and nothing reflowed once the real width was known. The web fits its terminal
@@ -311,15 +312,15 @@ class TerminalController internal constructor(
 
     /** To the owner's emulator, or held until the owner has a size to lay it out at. */
     private fun deliver(bytes: ByteArray, replay: Boolean) {
-        if (size != null) write(bytes, replay) else hold(bytes, replay)
+        if (size != null) write(bytes, replay) else hold(bytes)
     }
 
     private fun write(bytes: ByteArray, replay: Boolean) {
         if (replay && onReplay != null) onReplay.invoke(bytes) else onOutput(bytes)
     }
 
-    private fun hold(bytes: ByteArray, replay: Boolean) {
-        held.addLast(Held(bytes, replay))
+    private fun hold(bytes: ByteArray) {
+        held.addLast(Held(bytes))
         heldBytes += bytes.size
         // Keep the newest [MAX_HELD_BYTES]: whole pieces off the front, then the front of the oldest left, never inside a character.
         while (heldBytes > MAX_HELD_BYTES) {
@@ -337,13 +338,16 @@ class TerminalController internal constructor(
         }
     }
 
-    /** The first size is known: what was held goes to the emulator it was waiting for, in the order it arrived. */
+    /**
+     * The first size is known: what was held goes to the emulator it was waiting for, in the order it arrived, all of it as a
+     * replay: a live piece that was held is no longer live, and nobody was there to answer what it asked.
+     */
     private fun release() {
         val pieces = held.toList()
         discardHeld()
         for (piece in pieces) {
             if (closed) return
-            if (piece.size > 0) write(if (piece.from == 0) piece.bytes else piece.bytes.copyOfRange(piece.from, piece.bytes.size), piece.replay)
+            if (piece.size > 0) write(if (piece.from == 0) piece.bytes else piece.bytes.copyOfRange(piece.from, piece.bytes.size), replay = true)
         }
     }
 
@@ -444,7 +448,7 @@ class TerminalController internal constructor(
 internal const val MAX_HELD_BYTES = 1024 * 1024
 
 /** One frame held back. [from] moves up when the front of the oldest piece is cut to keep within [MAX_HELD_BYTES]. */
-private class Held(val bytes: ByteArray, val replay: Boolean) {
+private class Held(val bytes: ByteArray) {
     var from = 0
     val size get() = bytes.size - from
 }

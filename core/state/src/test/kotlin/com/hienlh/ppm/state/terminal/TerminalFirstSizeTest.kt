@@ -93,7 +93,7 @@ class TerminalFirstSizeTest {
     }
 
     @Test
-    fun `the first usable size writes what was held into an emulator of that size, in order, the replay apart from the live output`() = runTest {
+    fun `the first usable size writes what was held into an emulator of that size, in order, all of it as a replay, and what comes after as live output`() = runTest {
         TerminalFixture(this, disk(), measured = false, separateReplay = true).use { f ->
             f.controller.setVisible(true)
             f.controller.start()
@@ -106,15 +106,20 @@ class TerminalFirstSizeTest {
             f.delivery += "the emulator is laid out at 105 columns"
             f.controller.resize(105, 30)
             assertEquals(
-                listOf("the emulator is laid out at 105 columns", "REPLAY:the buffer the shell made for 105 columns", "live one", "live two"),
+                listOf(
+                    "the emulator is laid out at 105 columns", "REPLAY:the buffer the shell made for 105 columns",
+                    "REPLAY:live one", "REPLAY:live two",
+                ),
                 f.delivery,
             )
-            assertEquals(1, f.replays.size)
+            assertEquals(3, f.replays.size)
+            assertTrue(f.output.isEmpty())
             assertEquals("nothing is kept once it is written", 0, f.controller.heldBytes)
             // The shell hears the size at once, with no debounce to wait out, and from then on output is written as it comes.
             assertEquals(listOf("\u0001RESIZE:105,30"), f.socket.sent)
             f.text("live three")
             assertEquals("live three", f.delivery.last())
+            assertEquals(1, f.output.size)
             // Said once: the view reporting the same size again, or a heartbeat, adds nothing.
             f.controller.resize(105, 30)
             advanceTimeBy(500)
@@ -124,7 +129,7 @@ class TerminalFirstSizeTest {
     }
 
     @Test
-    fun `the replay's queries are still not answered once released, and a new shell's first output is still live`() = runTest {
+    fun `no query in what was held is answered once it is released, whether it came as the replay or as live output`() = runTest {
         TerminalFixture(this, disk(), measured = false, separateReplay = true).use { f ->
             f.controller.start()
             f.open()
@@ -133,17 +138,37 @@ class TerminalFirstSizeTest {
             f.text(queries)
             assertEquals(emptyList<String>(), f.delivery)
             f.controller.resize(105, 30)
-            // The first piece reached the owner as a replay, which it shows and never answers; the second as live output.
-            assertEquals(listOf("REPLAY:prompt$ $queries", queries), f.delivery)
-            assertEquals(1, f.replays.size)
+            // Both reached the owner as a replay, which it shows and never answers: a terminal nobody had opened can hold
+            // them for minutes, and an answer then would be typed at whatever is running.
+            assertEquals(listOf("REPLAY:prompt$ $queries", "REPLAY:$queries"), f.delivery)
+            assertEquals(2, f.replays.size)
+            assertTrue(f.output.isEmpty())
+            // What the shell prints once there is a size is live, and its queries are answered.
+            f.text(queries)
+            assertEquals(queries, f.delivery.last())
             assertEquals(1, f.output.size)
         }
+    }
+
+    @Test
+    fun `a new shell's first output is a replay when it was held and live when the view was laid out first`() = runTest {
+        // A shell the server made for this socket has no buffer, so what it prints is live; held, it is history all the same.
         TerminalFixture(this, measured = false, separateReplay = true).use { f ->
             f.controller.start()
             f.open()
             f.text(session.replace("s1", "fresh"))
             f.text(queries)
             f.controller.resize(105, 30)
+            assertEquals(listOf("REPLAY:$queries"), f.delivery)
+            assertTrue(f.output.isEmpty())
+            f.text(queries)
+            assertEquals(listOf("REPLAY:$queries", queries), f.delivery)
+        }
+        TerminalFixture(this, separateReplay = true).use { f ->
+            f.controller.start()
+            f.open()
+            f.text(session.replace("s1", "fresh"))
+            f.text(queries)
             assertEquals(listOf(queries), f.delivery)
             assertTrue(f.replays.isEmpty())
         }
@@ -258,10 +283,12 @@ class TerminalFirstSizeTest {
             f.text("b".repeat(700_000))
             assertEquals(MAX_HELD_BYTES, f.controller.heldBytes)
             f.controller.resize(105, 30)
-            assertEquals(MAX_HELD_BYTES - 700_000, f.replays.single().size)
-            assertTrue(f.replays.single().all { it == 'a'.code.toByte() })
-            assertEquals(700_000, f.output.single().size)
-            assertTrue(f.output.single().all { it == 'b'.code.toByte() })
+            assertEquals(2, f.replays.size)
+            assertEquals(MAX_HELD_BYTES - 700_000, f.replays[0].size)
+            assertTrue(f.replays[0].all { it == 'a'.code.toByte() })
+            assertEquals(700_000, f.replays[1].size)
+            assertTrue(f.replays[1].all { it == 'b'.code.toByte() })
+            assertTrue(f.output.isEmpty())
         }
         // One piece that is over on its own: its tail.
         TerminalFixture(this, disk(), measured = false, separateReplay = true).use { f ->
