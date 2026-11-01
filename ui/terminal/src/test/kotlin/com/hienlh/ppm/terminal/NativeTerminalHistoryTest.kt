@@ -45,9 +45,10 @@ class NativeTerminalHistoryTest {
     }
 
     @Test
-    fun `ordinary input needs no snapshot and a rejected Enter does not replace the command boundary`() {
+    fun `only the first input after an Enter looks at the buffer, and a rejected Enter does not replace the command boundary`() {
         val history = NativeTerminalHistory()
-        assertTrue(history.send("typed", { error("Non-Enter input must not copy the buffer") }) { true })
+        assertTrue(history.send("t", { snapshot("$ ") }) { true })
+        assertTrue(history.send("yped", { error("Ordinary input after the first must not copy the buffer") }) { true })
         history.send("\r", { snapshot("$ first", cursor = 0) }) { true }
         val buffer = snapshot("$ first", "result", "$ rejected", cursor = 2)
         assertFalse(history.send("\r", { buffer }) { false })
@@ -99,8 +100,9 @@ class NativeTerminalHistoryTest {
     fun `reset discards old row markers before replay and shorter buffers stay safe`() {
         val history = NativeTerminalHistory()
         history.send("\r", { snapshot("history", "$ old", cursor = 1) }) { true }
+        // The row Enter was sent on is not in the buffer any more, so there is no command to start from: the screen.
         assertEquals("", history.lastCommand(snapshot("shorter")))
-        assertEquals("", history.lastOutput(snapshot("shorter")))
+        assertEquals("shorter", history.lastOutput(snapshot("shorter")))
         history.reset()
         val replay = snapshot("replayed history", "$ new prompt")
         assertEquals("", history.lastCommand(replay))

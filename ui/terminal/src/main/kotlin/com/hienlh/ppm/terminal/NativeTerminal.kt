@@ -116,12 +116,15 @@ class NativeTerminal(
         return true
     }
 
-    /** The prompt row where Enter was last sent. Works without shell OSC integration. */
+    /**
+     * The prompt row where Enter was last sent; where the text typed is now, when the shell redrew its prompt after it
+     * (a themed zsh collapses it to one row). Works without shell OSC integration.
+     */
     fun lastCommand(): String = if (closed) "" else history.lastCommand(emulator.getBufferSnapshot())
 
     /**
-     * Rows after that Enter through the cursor; with no command known (no Enter yet, or one a reconnect's replay does not
-     * hold), the screen to the cursor, not the scrollback above it.
+     * Rows after that command through the cursor; with no command known (no Enter yet, or one the buffer does not hold any
+     * more, as after a reconnect's replay), the screen to the cursor, not the scrollback above it.
      */
     fun lastOutput(): String = if (closed) "" else history.lastOutput(emulator.getBufferSnapshot())
 
@@ -180,9 +183,34 @@ internal fun engineKey(keystroke: Keystroke): EngineKey {
     }
 }
 
-/** Pure row accounting from use-terminal.ts; no OSC markers or Android/JNI needed. */
+/**
+ * Pure row accounting from use-terminal.ts; no OSC markers or Android/JNI needed.
+ *
+ * The web takes the row the cursor is on when Enter is sent for the command's, and so does the first rule here. A shell that
+ * redraws its prompt after Enter leaves that row holding something else: a themed zsh collapses its four-row prompt to
+ * `❯ seq 1 3` and moves everything below it up three, so the row holds the last row of the output, or the next prompt's
+ * banner when the output is one row. So what was typed is remembered too, and looked for once the row no longer starts as it did.
+ */
 internal class NativeTerminalHistory {
     private var commandRow = -1
+
+    /**
+     * What [commandRow] held up to the cursor when Enter was sent: the prompt, and what had been typed after it. The row is
+     * the command's for as long as it still starts with this. Only the start is compared, because the rest of the row can
+     * change without the row moving: the echo of what was typed may not have come back when Enter was pressed, and a
+     * suggestion shown after the cursor is gone once it has.
+     */
+    private var enterText = ""
+
+    /** What was typed for that command, from the end of the prompt to the cursor; empty when the buffer could not say. */
+    private var commandText = ""
+
+    /**
+     * What the cursor's line held, up to the cursor, at the first input after the last Enter (or Ctrl-C or Ctrl-Z): the
+     * prompt. It is text, not a position, because the rows move when the shell redraws the prompt. Null until that input
+     * comes; only that input looks at the buffer, the rest is typed after the prompt.
+     */
+    private var prompt: String? = null
 
     /**
      * What the last command's row said when its emulator was replaced ([replaced]). The row number is of a buffer that
@@ -194,38 +222,103 @@ internal class NativeTerminalHistory {
 
     fun reset() {
         commandRow = -1
+        enterText = ""
+        commandText = ""
+        prompt = null
         carried = null
     }
 
     fun send(text: String, snapshot: () -> TerminalBufferSnapshot, transmit: (String) -> Boolean): Boolean {
+        val enter = '\r' in text || '\n' in text
+        // A stopped command gives way to a new prompt, as an Enter does.
+        val interrupt = text.any { it == '\u0003' || it == '\u001a' }
         // Read before sending: a later echo may already have moved the cursor to another row.
-        val row = if ('\r' in text || '\n' in text) snapshot().cursorRow else null
+        val buffer = if (enter || (prompt == null && !interrupt)) snapshot() else null
         if (!transmit(text)) return false
-        if (row != null) {
-            commandRow = row
-            carried = null
+        if (buffer != null) {
+            val line = lineToCursor(buffer)
+            if (enter) {
+                commandRow = buffer.cursorRow
+                enterText = buffer.lines.getOrNull(commandRow)?.text?.take(buffer.cursorColumn)?.trimEnd(::isJsSpace).orEmpty()
+                commandText = prompt?.takeIf(line::startsWith)?.let { line.substring(it.length).trim(::isJsSpace) }.orEmpty()
+                carried = null
+            } else if (!buffer.alternateScreen) {
+                // In the alternate screen the keys are an editor's, not typed at a prompt.
+                prompt = line
+            }
         }
+        if (enter || interrupt) prompt = null
         return true
     }
 
     /**
      * The emulator holding [old] is being replaced by one the server's replay will fill. Its row of the last command is
-     * read now, as the shell left it. A command whose row has no text cannot be told from the blank rows of a replay, and
-     * one already carried over an earlier replacement is kept: [commandRow] is of a buffer that is already gone.
+     * read now, as the shell left it: a collapsed prompt's row is the collapsed one, found as [commandRowIn] finds it. A
+     * command whose row has no text cannot be told from the blank rows of a replay, and one already carried over an
+     * earlier replacement is kept: [commandRow] is of a buffer that is already gone.
      */
     fun replaced(old: TerminalBufferSnapshot) {
         if (carried != null) return
-        carried = old.lines.getOrNull(commandRow)?.text?.trimEnd(::isJsSpace)?.takeUnless { it.all(::isJsSpace) }
+        carried = old.lines.getOrNull(commandRowIn(old))?.text?.trimEnd(::isJsSpace)?.takeUnless { it.all(::isJsSpace) }
         commandRow = -1
     }
 
-    /** The row of the last command in [snapshot], looked for above its cursor when it was carried over a replacement; -1 for none. */
+    /**
+     * The row of the last command in [snapshot]; -1 for none. The row Enter was sent on, while it still starts as it did
+     * then. Or, once a replacement carried the command's text over, the nearest row above the cursor with that text. Failing
+     * either, the last row of the nearest line that ends with what was typed ([rowEndingWith]).
+     */
     private fun commandRowIn(snapshot: TerminalBufferSnapshot): Int {
-        val text = carried ?: return commandRow
-        for (row in minOf(snapshot.cursorRow, snapshot.lines.size) - 1 downTo 0) {
-            if (snapshot.lines[row].text.trimEnd(::isJsSpace) == text) return row
+        val lines = snapshot.lines
+        val carried = carried
+        if (carried != null) {
+            for (row in minOf(snapshot.cursorRow, lines.size) - 1 downTo 0) {
+                if (lines[row].text.trimEnd(::isJsSpace) == carried) return row
+            }
+        } else if (lines.getOrNull(commandRow)?.text?.startsWith(enterText) == true) {
+            return commandRow
+        }
+        return rowEndingWith(snapshot)
+    }
+
+    /**
+     * The last row of the nearest line above the cursor that ends with what was typed; -1 for none. A line is a row and the
+     * rows that wrap into it, so a command that wrapped, and wraps elsewhere after a redraw, is still one line. Its last row
+     * is the command row, as the web's is, and the output starts under it. The cursor's own row is the prompt being typed at,
+     * which may hold the same text (the last command recalled with Up). The text must have something before it that is not a
+     * letter or a digit, a prompt: `tools` is not an `ls`, and a row of the output that is only `ls` is not the command.
+     */
+    private fun rowEndingWith(snapshot: TerminalBufferSnapshot): Int {
+        if (commandText.isEmpty()) return -1
+        val lines = snapshot.lines
+        var end = minOf(snapshot.cursorRow, lines.size) - 1
+        while (end >= 0) {
+            var first = end
+            while (first > 0 && lines[first - 1].isWrapped) first--
+            val line = buildString { for (row in first..end) append(lines[row].text) }.trimEnd(::isJsSpace)
+            val before = line.length - commandText.length - 1
+            if (before >= 0 && line.endsWith(commandText) && !line[before].isLetterOrDigit()) return end
+            end = first - 1
         }
         return -1
+    }
+
+    /**
+     * The cursor's line, from its first row with the soft-wrapped rows joined, up to the cursor: the prompt and what is typed
+     * after it, without a suggestion or a right prompt further along the row. Empty in the alternate screen. A character is a
+     * column only when it is narrow, so a wide one before the cursor puts the cut later than the cursor; what that takes in
+     * is blanks, unless a suggestion starts right there.
+     */
+    private fun lineToCursor(buffer: TerminalBufferSnapshot): String {
+        val lines = buffer.lines
+        val cursor = buffer.cursorRow
+        if (buffer.alternateScreen || cursor !in lines.indices) return ""
+        var first = cursor
+        while (first > 0 && lines[first - 1].isWrapped) first--
+        return buildString {
+            for (row in first until cursor) append(lines[row].text)
+            append(lines[cursor].text.take(buffer.cursorColumn))
+        }.trimEnd(::isJsSpace)
     }
 
     fun lastCommand(snapshot: TerminalBufferSnapshot): String =
