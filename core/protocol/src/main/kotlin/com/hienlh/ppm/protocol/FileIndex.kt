@@ -2,18 +2,20 @@ package com.hienlh.ppm.protocol
 
 import kotlinx.serialization.json.JsonElement
 
-/** One entry of a project's flat file list (`FileEntry`), what the `@` picker searches. */
+/** One entry of a project's flat file list (`FileEntry`), what the `@` picker and the command palette search. */
 data class FileEntry(
     /** From the project's folder, `/`-separated. */
     val path: String,
     val name: String,
     val isDirectory: Boolean = false,
+    /** Excluded by `.gitignore` but still listed for discoverability (a `.env`); the palette draws it dimmed. */
+    val isIgnored: Boolean = false,
 ) {
     companion object {
         fun from(value: JsonElement?): FileEntry? {
             val path = value["path"].string ?: return null
             val name = value["name"].string ?: return null
-            return FileEntry(path, name, value["type"].string == "directory")
+            return FileEntry(path, name, value["type"].string == "directory", value["isIgnored"].bool == true)
         }
     }
 }

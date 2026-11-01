@@ -1,5 +1,6 @@
 package com.hienlh.ppm.client
 
+import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.string
 import kotlinx.coroutines.Dispatchers
@@ -90,6 +91,14 @@ suspend fun ApiClient.fsStat(path: String): FsStat {
     val resolved = data["path"].string ?: throw PpmError.BadResponse(ApiClient.NOT_PPM)
     return FsStat(resolved, data["name"].string ?: "", data["kind"].string ?: "", data["target"].string)
 }
+
+/**
+ * `GET /api/fs/list?dir=`: the files below [dir] on the host as absolute paths, breadth first, at
+ * most 200 and four levels down (the command palette's filesystem mode). [dir] is read as the
+ * host reads it, `~` and all.
+ */
+suspend fun ApiClient.fsList(dir: String): List<String> =
+    call("GET", "/api/fs/list", listOf("dir" to dir)).array.orEmpty().mapNotNull { it.string }
 
 /** `GET /api/fs/read`: a text file anywhere on the host, as the background output panel reads a command's `.output`. */
 suspend fun ApiClient.fsRead(path: String): String = call("GET", "/api/fs/read", listOf("path" to path))["content"].string.orEmpty()

@@ -9,7 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.fail
 import org.junit.Test
 
-/** `GET /api/fs/raw` and `GET /api/project/:name/files/raw`, as `useBlobUrl` reads them. */
+/** `GET /api/fs/raw` and `GET /api/project/:name/files/raw`, as `useBlobUrl` reads them, and `GET /api/fs/list`, as the palette does. */
 class FilesTest {
     private fun <T> withServer(vararg responses: MockResponse, block: suspend (MockWebServer, ApiClient) -> T): T = runBlocking {
         val server = MockWebServer()
@@ -45,6 +45,20 @@ class FilesTest {
         assertEquals("/api/project/my%20app/files/raw?path=docs%2Fa.png", server.takeRequest().target)
         api.rawFile("my app", "C:\\shots\\a.png")
         assertEquals("/api/fs/raw?path=C%3A%5Cshots%5Ca.png", server.takeRequest().target)
+    }
+
+    @Test
+    fun `a folder is listed on the host by the path as typed, and what comes back is the files' paths`() = withServer(
+        MockResponse.Builder().addHeader("Content-Type", "application/json")
+            .body("""{"ok":true,"data":["/home/me/Projects/a.ts","/home/me/Projects/b/c.ts",7,null]}""").build(),
+        MockResponse.Builder().addHeader("Content-Type", "application/json").body("""{"ok":true,"data":[]}""").build(),
+    ) { server, api ->
+        assertEquals(listOf("/home/me/Projects/a.ts", "/home/me/Projects/b/c.ts"), api.fsList("~/Projects/"))
+        val request = server.takeRequest()
+        assertEquals("/api/fs/list?dir=~%2FProjects%2F", request.target)
+        assertEquals("Bearer t", request.headers["Authorization"])
+        assertEquals(emptyList<String>(), api.fsList("D:/repo/src/"))
+        assertEquals("/api/fs/list?dir=D%3A%2Frepo%2Fsrc%2F", server.takeRequest().target)
     }
 
     @Test

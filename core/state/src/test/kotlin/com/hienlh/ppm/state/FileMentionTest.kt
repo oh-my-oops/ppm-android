@@ -79,6 +79,17 @@ class FileMentionTest {
     }
 
     @Test
+    fun `an entry the server flags as ignored keeps the flag, and no other does`() {
+        val answer = FileIndexAnswer.from(
+            WireJson.parse("""[{"path":".env","name":".env","type":"file","isIgnored":true},{"path":"a.ts","name":"a.ts","type":"file"},{"path":"b.ts","name":"b.ts","type":"file","isIgnored":"yes"}]"""),
+        )
+        assertEquals(
+            FileIndexAnswer.Entries(listOf(FileEntry(".env", ".env", isIgnored = true), FileEntry("a.ts", "a.ts"), FileEntry("b.ts", "b.ts"))),
+            answer,
+        )
+    }
+
+    @Test
     fun `a change marks the list stale without reading it, and a reset drops it all`() = runBlocking {
         val store = FileIndexStore(ApiClient("http://127.0.0.1:9".toHttpUrl(), ""), this)
         assertEquals(FileIndexStore.Status.IDLE, store.state.value.status)
@@ -179,5 +190,17 @@ class FileMentionTest {
         assertEquals(emptyList<FileEntry>(), store.state.value.entries)
         assertEquals(listOf(FileEntry("src", "src", isDirectory = true)), store.searchRemote("s rc"))
         assertEquals("/api/project/p/files/index/search?q=s%20rc&kind=all&limit=100", server.takeRequest().target)
+    }
+
+    @Test
+    fun `the palette asks the server for files only, the picker for folders as well`() = withServer(
+        MockResponse.Builder().body("""{"ok":true,"data":{"tooLarge":true,"count":175000}}""").build(),
+        MockResponse.Builder().body("""{"ok":true,"data":[{"path":"src/a.ts","name":"a.ts","type":"file","isIgnored":true}]}""").build(),
+    ) { server, api ->
+        val store = FileIndexStore(api, this)
+        store.load("p").join()
+        server.takeRequest()
+        assertEquals(listOf(FileEntry("src/a.ts", "a.ts", isIgnored = true)), store.searchRemote("a", directories = false))
+        assertEquals("/api/project/p/files/index/search?q=a&kind=file&limit=100", server.takeRequest().target)
     }
 }

@@ -161,13 +161,16 @@ class FileIndexStore(private val api: ApiClient, private val scope: CoroutineSco
         _state.value = State(revision = _state.value.revision)
     }
 
-    /** The best entries for [query] from the server, for a list too long to hold; null when the search failed, so what is shown stays. */
-    suspend fun searchRemote(query: String): List<FileEntry>? {
+    /**
+     * The best entries for [query] from the server, for a list too long to hold; null when the search failed, so what is shown stays.
+     * The `@` picker lists folders too ([directories], `kind=all`); the command palette's files do not.
+     */
+    suspend fun searchRemote(query: String, directories: Boolean = true): List<FileEntry>? {
         val state = _state.value
         val project = state.project ?: return null
         if (!state.remote) return null
         return try {
-            api.searchFileIndex(project, query, directories = true, limit = REMOTE_LIMIT)
+            api.searchFileIndex(project, query, directories = directories, limit = REMOTE_LIMIT)
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
