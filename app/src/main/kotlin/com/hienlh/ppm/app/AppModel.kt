@@ -230,10 +230,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     fun terminal(tab: WorkspaceTab): com.hienlh.ppm.terminal.NativeTerminal? {
         terminals[tab.id]?.let { return it }
         val client = api ?: return null
-        // No project at all is named "", as the web names it (`projectName ?? ""`): the server starts that shell in the host's home folder.
-        val project = tab.projectId ?: tab.metaString("projectName") ?: selectedProject ?: ""
         return com.hienlh.ppm.terminal.NativeTerminal(
-            client, project, tab.id, scope, prefs, "terminal.$serverKey.", tab.metaString("cwd"),
+            client, terminalProject(tab), tab.id, scope, prefs, "terminal.$serverKey.", tab.metaString("cwd"),
             initialSessionId = tab.metaString("sessionId") ?: "new",
             copyToClipboard = { text -> terminalClipboard.setPrimaryClip(android.content.ClipData.newPlainText("Terminal", text)) },
         ).also { terminals[tab.id] = it }
@@ -279,7 +277,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             if (state.dock.visible) state.dockPanel?.let { p -> p.tabs.firstOrNull { it.id == p.activeTabId }?.let(::add) }
             for (id in state.gridPanelIds) state.panels[id]?.let { p -> p.tabs.firstOrNull { it.id == p.activeTabId }?.let(::add) }
         }
-        val shown = candidates.firstOrNull { it.type == "terminal" && (it.projectId ?: it.metaString("projectName")) == project }
+        val shown = shownTerminalOf(candidates, project)
         if (shown != null) terminal(shown)?.pendingCommand = command else withWorkspace { store ->
             store.openInDock(NewTab(type = "terminal", title = "Terminal", projectId = project, metadata = buildJsonObject {
                 put("projectName", project)
@@ -3099,6 +3097,18 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     }
 
 }
+
+/**
+ * The project a terminal tab's shell is started for, as `terminal-tab.tsx` reads it
+ * (`metadata.projectName`) and `useTerminal` names it (`projectName ?? ""`): not the tab's own
+ * `projectId`, and not whichever project is open when the tab is first shown. A shell with no
+ * project is named "", which the server starts in the host's home folder, or in the tab's `cwd`.
+ */
+internal fun terminalProject(tab: WorkspaceTab): String = tab.metaString("projectName") ?: ""
+
+/** The terminal among [tabs], the ones on screen, that is [project]'s: a command run for the project is typed there. */
+internal fun shownTerminalOf(tabs: List<WorkspaceTab>, project: String): WorkspaceTab? =
+    tabs.firstOrNull { it.type == "terminal" && terminalProject(it) == project }
 
 /**
  * A terminal tab as the web opens one (`openTab`): the project it belongs to on the tab and in its

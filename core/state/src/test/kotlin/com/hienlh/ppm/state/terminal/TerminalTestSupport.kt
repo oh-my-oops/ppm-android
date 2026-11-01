@@ -48,6 +48,7 @@ internal class TerminalFixture(
     values: TerminalValues = TerminalValues(),
     prefix: String = "server-a:",
     tabId: String = "tab-1",
+    project: String = "p /+ 雪",
     initialSessionId: String = "new",
     scope: CoroutineScope = test,
     onReset: (() -> Unit)? = null,
@@ -62,7 +63,7 @@ internal class TerminalFixture(
     val delivery = mutableListOf<String>()
     val controller = TerminalController(
         api = ApiClient("https://ppm.test/base/?obsolete=1#old".toHttpUrl(), "t +/&?#"),
-        project = "p /+ 雪",
+        project = project,
         tabId = tabId,
         scope = scope,
         store = values,

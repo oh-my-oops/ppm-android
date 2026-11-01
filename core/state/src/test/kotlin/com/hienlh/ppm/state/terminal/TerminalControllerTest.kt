@@ -85,6 +85,17 @@ class TerminalControllerTest {
     }
 
     @Test
+    fun `a shell with no project is named by an empty segment, as the web names it, and starts where its tab says`() = runTest {
+        TerminalFixture(this, project = "").use { f ->
+            f.controller.start()
+            val url = f.urls.single().replaceFirst("wss:", "https:").toHttpUrl()
+            assertEquals(listOf("base", "ws", "project", "", "terminal", "new"), url.pathSegments)
+            assertTrue(f.urls.single().contains("/ws/project//terminal/new?"))
+            assertEquals("/work/a +& 雪", url.queryParameter("cwd"))
+        }
+    }
+
+    @Test
     fun `storage failures do not interrupt output or in-memory reconnect`() = runTest {
         val values = TerminalValues().apply { fail = true }
         TerminalFixture(this, values, initialSessionId = "metadata").use { f ->
