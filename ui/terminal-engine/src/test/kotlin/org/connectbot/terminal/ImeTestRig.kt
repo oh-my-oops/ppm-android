@@ -67,15 +67,40 @@ internal class FakePty {
 
     private fun write(codepoint: Int) = sent.write(String(Character.toChars(codepoint)).toByteArray(Charsets.UTF_8))
 
+    /**
+     * `vterm_keyboard_key`, as its machine code and key table in the shipped libjni_cb_term.so do it. Enter,
+     * Backspace and Escape are "literal" keys, and so is Tab unless Shift is held: with Shift or Ctrl they are CSI u
+     * (`ESC [ literal ; modifiers+1 u`), with Alt alone they have an ESC in front. Tab with Shift is `ESC [ Z`, or
+     * `ESC [ 1 ; modifiers+1 Z` with more held. An arrow is `ESC [ letter`, or `ESC [ 1 ; modifiers+1 letter` with
+     * a modifier held (application cursor keys are off). Enter is CR only: newline mode is off.
+     */
     fun key(modifiers: Int, key: Int) {
-        check(modifiers == 0) { "modifiers $modifiers on key $key is not modelled" }
-        sent.write(when (key) {
+        val arrow = when (key) {
+            VTermKey.UP -> 'A'
+            VTermKey.DOWN -> 'B'
+            VTermKey.RIGHT -> 'C'
+            VTermKey.LEFT -> 'D'
+            else -> null
+        }
+        if (arrow != null) {
+            sent.write((if (modifiers == 0) "\u001b[$arrow" else "\u001b[1;${modifiers + 1}$arrow").toByteArray())
+            return
+        }
+        val literal = when (key) {
             VTermKey.ENTER -> '\r'.code
             VTermKey.BACKSPACE -> 0x7f
             VTermKey.TAB -> '\t'.code
             VTermKey.ESCAPE -> 0x1b
             else -> error("key $key is not modelled")
-        })
+        }
+        if (key == VTermKey.TAB && modifiers and SHIFT != 0) {
+            sent.write((if (modifiers == SHIFT) "\u001b[Z" else "\u001b[1;${modifiers + 1}Z").toByteArray())
+        } else if (modifiers and (SHIFT or CTRL) != 0) {
+            sent.write("\u001b[$literal;${modifiers + 1}u".toByteArray())
+        } else {
+            if (modifiers and ALT != 0) sent.write(0x1b)
+            sent.write(literal)
+        }
     }
 
     companion object {
@@ -179,6 +204,10 @@ internal class ImeRig {
     /** A key pressed with Ctrl held on a physical keyboard, which the view routes to the terminal's key path. */
     fun ctrlKey(keyCode: Int, meta: Int = 0): Boolean =
         view.handleRawKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, keyCode, 0, meta or KeyEvent.META_CTRL_ON))
+
+    /** A key as the terminal's key path receives it, with exactly the modifiers of [meta] held. */
+    fun rawKey(keyCode: Int, meta: Int = 0): Boolean =
+        view.handleRawKeyEvent(KeyEvent(0, 0, KeyEvent.ACTION_DOWN, keyCode, 0, meta))
 }
 
 /** A US keyboard's symbol keys, unshifted and shifted. */

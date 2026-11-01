@@ -144,15 +144,24 @@ def keyboard(text):
     text = replace(text, old, new)
     # Ctrl+character as xterm.js writes it (ControlKeys), not as libvterm does: for a key event here and
     # for committed text in dispatchText.
-    return replace(
+    text = replace(
         text,
         "            dispatchCodePoint(codepoint) { cp -> terminalEmulator.dispatchCharacter(modifiers, cp) }",
         "            dispatchCodePoint(codepoint) { cp -> terminalEmulator.dispatchCharacterLikeXterm(modifiers, cp) }",
     )
+    # Enter, Tab, Backspace and Escape with Ctrl, Shift or Alt held as xterm.js writes them, not as the CSI u
+    # libvterm writes. The compose-mode branches above this one are the legacy buffering PPM never turns on.
+    return replace(
+        text,
+        "            terminalEmulator.dispatchKey(modifiers, vtermKey)\n",
+        "            terminalEmulator.dispatchKeyLikeXterm(modifiers, vtermKey)\n",
+    )
 
 
 def dispatcher(text):
-    return replace(text, "            terminal.dispatchCharacter(modifiers, cp)\n", "            terminal.dispatchCharacterLikeXterm(modifiers, cp)\n")
+    text = replace(text, "            terminal.dispatchCharacter(modifiers, cp)\n", "            terminal.dispatchCharacterLikeXterm(modifiers, cp)\n")
+    # An Enter the soft keyboard commits while the toolbar's Ctrl is armed.
+    return replace(text, "            terminal.dispatchKey(modifiers, VTermKey.ENTER)\n", "            terminal.dispatchKeyLikeXterm(modifiers, VTermKey.ENTER)\n")
 
 
 def patch_terminal_ime(filename, text):

@@ -53,3 +53,34 @@ internal fun TerminalEmulator.dispatchCharacterLikeXterm(modifiers: Int, codepoi
     val code = ControlKeys.code(codepoint, shift = modifiers and ControlKeys.SHIFT != 0) ?: return
     dispatchCharacter(modifiers and ControlKeys.ALT, code)
 }
+
+/**
+ * Presses [key] with [modifiers] held. For Enter, Tab, Backspace and Escape that is what xterm.js sends
+ * (`Keyboard.ts`, `case 13`, `9`, `8` and `27`), which ignores the modifiers it has no use for, where
+ * libvterm writes CSI u as soon as Ctrl or Shift is held (`ESC[13;5u` for Ctrl+Enter, `ESC[9;5u` for
+ * Ctrl+Tab, `ESC[127;5u` for Ctrl+Backspace, `ESC[27;5u` for Ctrl+Esc, `ESC[127;2u` for Shift+Backspace;
+ * read from `vterm_keyboard_key` and its key table in the shipped `libjni_cb_term.so`) and an ESC before
+ * Tab for Alt. A shell prints all of that as text. Every other key keeps libvterm's own encoding, the
+ * arrows' `ESC[1;5D` included.
+ *
+ * - Enter: CR, and ESC CR with Alt. Ctrl and Shift change nothing.
+ * - Escape: ESC, and ESC ESC with Alt. Ctrl and Shift change nothing.
+ * - Tab: HT, and `ESC [ Z` with Shift, whatever else is held; Ctrl and Alt change nothing.
+ * - Backspace: DEL, and ^H with Ctrl, either behind an ESC with Alt. Shift changes nothing.
+ *
+ * What is left of each combination is a call libvterm writes as xterm.js does: Alt alone prefixes ESC
+ * to Enter, Escape and Backspace, Shift alone is `ESC [ Z` for Tab, and ^H goes as the plain character.
+ */
+internal fun TerminalEmulator.dispatchKeyLikeXterm(modifiers: Int, key: Int) {
+    val alt = modifiers and ControlKeys.ALT
+    when (key) {
+        VTermKey.ENTER, VTermKey.ESCAPE -> dispatchKey(alt, key)
+        VTermKey.TAB -> dispatchKey(modifiers and ControlKeys.SHIFT, key)
+        VTermKey.BACKSPACE ->
+            if (modifiers and ControlKeys.CTRL != 0) dispatchCharacter(alt, BACKSPACE_CONTROL_CODE) else dispatchKey(alt, key)
+        else -> dispatchKey(modifiers, key)
+    }
+}
+
+/** ^H, which xterm.js sends for Ctrl+Backspace where a bare Backspace is DEL. */
+private const val BACKSPACE_CONTROL_CODE = 0x08

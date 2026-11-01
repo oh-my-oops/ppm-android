@@ -371,6 +371,50 @@ class CommittedImeInstrumentation : Instrumentation() {
             check(drain() == "\u001b\t\r\u0003\u001e") { "Physical Ctrl keys: ${drain().toList()}" }
             passed += "PASS: Ctrl+character as xterm.js writes it through real libvterm: [ i j m, capitals, digits, / and ^, nothing for Ctrl+Shift+letter"
 
+            // Enter, Tab, Backspace and Escape with every combination of Shift, Alt and Ctrl, as xterm.js's Keyboard.ts
+            // writes them (SpecialKeysImeTest models these bytes), through the real handler and libvterm. The control
+            // first: libvterm itself writes CSI u for Ctrl and Shift (and an ESC before Tab for Alt), which is why the
+            // handler does not hand these keys over as they are.
+            main {
+                bytes.reset()
+                for ((mods, key) in listOf(
+                    4 to VTermKey.ENTER, 4 to VTermKey.TAB, 4 to VTermKey.BACKSPACE, 4 to VTermKey.ESCAPE,
+                    1 to VTermKey.BACKSPACE, 2 to VTermKey.TAB,
+                )) emulator.dispatchKey(mods, key)
+            }
+            check(drain() == "\u001b[13;5u\u001b[9;5u\u001b[127;5u\u001b[27;5u\u001b[127;2u\u001b\t") { "libvterm's own Ctrl/Shift/Alt keys: ${drain().toList()}" }
+            for ((name, code) in listOf(
+                "Enter" to KeyEvent.KEYCODE_ENTER, "Tab" to KeyEvent.KEYCODE_TAB,
+                "Backspace" to KeyEvent.KEYCODE_DEL, "Escape" to KeyEvent.KEYCODE_ESCAPE,
+            )) for (mask in 0..7) {
+                val shift = mask and 1 != 0
+                val alt = mask and 2 != 0
+                val ctrl = mask and 4 != 0
+                val expected = when (name) {
+                    "Enter" -> if (alt) "\u001b\r" else "\r"
+                    "Tab" -> if (shift) "\u001b[Z" else "\t"
+                    "Backspace" -> (if (alt) "\u001b" else "") + (if (ctrl) "\b" else "\u007f")
+                    else -> if (alt) "\u001b\u001b" else "\u001b"
+                }
+                main {
+                    bytes.reset()
+                    view.handleRawKeyEvent(KeyEvent(
+                        0, 0, KeyEvent.ACTION_DOWN, code, 0,
+                        (if (shift) KeyEvent.META_SHIFT_ON else 0) or
+                            (if (alt) KeyEvent.META_ALT_ON or KeyEvent.META_ALT_LEFT_ON else 0) or
+                            (if (ctrl) KeyEvent.META_CTRL_ON else 0),
+                    ))
+                }
+                check(drain() == expected) { "$name shift=$shift alt=$alt ctrl=$ctrl: ${drain().toList()}, xterm.js sends ${expected.toList()}" }
+            }
+            main {
+                bytes.reset()
+                modifiers.ctrl = true
+                keyboard.onCommittedText("\n")
+            }
+            check(drain() == "\r") { "Enter committed with Ctrl armed: ${drain().toList()}" }
+            passed += "PASS: Enter, Tab, Backspace, Escape with Shift/Alt/Ctrl as xterm.js writes them through real libvterm (which writes CSI u for Ctrl and Shift itself); sticky Ctrl + Enter text is CR"
+
             main {
                 bytes.reset()
                 connection = create()
