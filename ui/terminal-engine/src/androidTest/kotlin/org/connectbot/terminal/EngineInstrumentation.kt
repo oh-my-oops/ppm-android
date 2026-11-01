@@ -22,9 +22,9 @@ class EngineInstrumentation : Instrumentation() {
     override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
 
     override fun onStart() {
-        val result = runCatching { verifyEngine(); verifyScrollbackWraps(); verifyWrapFlagsAcrossWrites(); verifyLinks(); verifyLinksAcrossScrolls(); verifyStaleLinks(); verifyHyperlinkCuts(); verifyReplayCursor(); verifyRenderer() }
+        val result = runCatching { verifyEngine(); verifyScrollbackWraps(); verifyWrapFlagsAcrossWrites(); verifyLinks(); verifyLinksAcrossScrolls(); verifyStaleLinks(); ResizeChecks.verifyResizeModel(); ResizeChecks.verifyResize(); verifyHyperlinkCuts(); verifyReplayCursor(); verifyRenderer() }
         finish(if (result.isSuccess) Activity.RESULT_OK else Activity.RESULT_CANCELED, Bundle().apply {
-            putString("stream", if (result.isSuccess) "PASS: pinned JNI, scrollback, wrapped lines in it, wrap flags across writes, links (OSC 8, plain, wrapped, in the history, on their own rows while the screen scrolls, none left over text that is not theirs: 22 operations in 3 ways of writing, a replay, a resize), a prompt beside them, where writes are cut for them, the cursor after a replay, text/cursor, reset, close, late work, truecolor/inverse contrast, cursor colours\n"
+            putString("stream", if (result.isSuccess) "PASS: pinned JNI, scrollback, wrapped lines in it, wrap flags across writes, links (OSC 8, plain, wrapped, in the history, on their own rows while the screen scrolls, none left over text that is not theirs: 22 operations in 3 ways of writing, a replay, a resize), a prompt beside them, a resize (the model of the library's resize held to its traces in 52 scripted scenarios, the wraps and links of the rows through a shrink and a grow, the alternate screen), where writes are cut for them, the cursor after a replay, text/cursor, reset, close, late work, truecolor/inverse contrast, cursor colours\n"
                 else result.exceptionOrNull()!!.stackTraceToString())
         })
     }
@@ -181,12 +181,11 @@ class EngineInstrumentation : Instrumentation() {
             return (snapshot.scrollback + snapshot.lines).map { line -> line.text.replace('\u0000', ' ').trimEnd() to line.semanticSegments.map { it.metadata } }
         }
 
-        // [mayLose]: a row may have lost its link (a resize does not move them yet), but never has another row's.
-        fun check(emulator: TerminalEmulator, links: Int, where: String, mayLose: Boolean = false) {
+        fun check(emulator: TerminalEmulator, links: Int, where: String) {
             val rows = rows(emulator)
             for ((index, row) in rows.withIndex()) {
                 val expected = if (row.first.startsWith("link")) listOf("https://l${row.first.removePrefix("link")}.test/") else emptyList()
-                check(row.second == expected || (mayLose && row.second.isEmpty())) { "Links of row $index '${row.first}' $where: ${row.second}, not $expected; rows $rows" }
+                check(row.second == expected) { "Links of row $index '${row.first}' $where: ${row.second}, not $expected; rows $rows" }
             }
             check(rows.count { it.first.startsWith("link") } == links) { "Link rows $where: ${rows.map { it.first }}" }
         }
@@ -234,11 +233,12 @@ class EngineInstrumentation : Instrumentation() {
         TerminalEmulatorFactory.create(initialRows = 6, initialCols = 40).use { emulator ->
             emulator.writeInput((clear + (0..4).joinToString("") { link(it) + "\r\n" } + "tail").toByteArray())
             check(emulator, 5, "before the screen shrank")
-            // The soft keyboard comes up and goes away again: the rows above the cursor go to the history and come back from it.
-            // The links of the rows that stayed are lost, as before (a resize does not move segments); none is on another row.
+            // The soft keyboard comes up and goes away again: the rows above the cursor go to the history and come back from it,
+            // and every link goes with its row there and back.
             emulator.resize(3, 40)
+            check(emulator, 5, "after the screen shrank")
             emulator.resize(6, 40)
-            check(emulator, 5, "after the screen shrank and grew back", mayLose = true)
+            check(emulator, 5, "after the screen shrank and grew back")
         }
     }
 

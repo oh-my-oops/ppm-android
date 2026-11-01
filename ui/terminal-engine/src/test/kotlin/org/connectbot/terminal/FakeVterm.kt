@@ -11,7 +11,8 @@ import java.nio.ByteBuffer
  * that changed only when the write is flushed, which is the end of each [write] (the JNI flushes after every write).
  *
  * The emulator is given this through `TerminalEmulatorImpl`'s `nativeFactory`. Only what the engine's tests need is modelled: ASCII text with auto-wrap, CR, LF, BS, the cursor movements, ED / EL / ECH, ICH /
- * DCH, IL / DL, SU / SD, DECSTBM, RI, RIS, the alternate screen (`?1049`) and OSC. Anything else in the input is ignored,
+ * DCH, IL / DL, SU / SD, DECSTBM, RI, RIS, the alternate screen (`?1049`), OSC and a resize in rows and columns (rows pushed into
+ * the history and popped back, as `resize_buffer` does them with reflow off) and the colours a default cell resolves to. Anything else in the input is ignored,
  * and the model refuses wide characters rather than guess. `EngineInstrumentation` runs the same bytes through the real library on
  * a device, so the model cannot drift from it unnoticed.
  */
@@ -48,6 +49,10 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
     private var continuation = primaryContinuation
     private var onAlternate = false
 
+    /** The colours the library resolves a default cell to (`setDefaultColors`): every cell it reports carries them, so a new scheme changes what is read. */
+    private var defaultForeground = 0
+    private var defaultBackground = 0
+
     private var row = 0
     private var col = 0
     private var atPhantom = false
@@ -55,6 +60,9 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
     private var savedCol = 0
     private var regionTop = 0
     private var regionBottom = rows
+
+    /** `scrollregion_bottom == -1`: the region reaches the last row, whatever the screen's height becomes. */
+    private var regionBottomUnset = true
 
     // The screen layer.
     private var damaged: Rect? = null
@@ -67,13 +75,16 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
 
     private fun blankScreen() = Array(rows) { CharArray(cols) { BLANK } }
 
-    private lateinit var emulator: TerminalEmulatorImpl
+    private lateinit var emulator: TerminalCallbacks
 
     /** The emulator this is the native of: handed over when it first asks for its native, as the JNI is given its callbacks. */
     fun attach(callbacks: TerminalCallbacks): FakeVterm {
-        emulator = callbacks as TerminalEmulatorImpl
+        emulator = callbacks
         return this
     }
+
+    /** Where the library's cursor is: its row and column. */
+    val cursor: Pair<Int, Int> get() = row to col
 
     override fun writeInput(buffer: ByteBuffer, length: Int): Int {
         val bytes = ByteArray(length)
@@ -89,26 +100,142 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
 
     override fun getCells(buffer: ByteBuffer, requests: Int): Int = cellsFor(buffer, requests)
     /**
-     * `vterm_set_size`, for the columns only: the cells stay where they are, the whole screen is reported as damaged and the JNI
-     * flushes at once. A change of rows pushes rows into the history and pops them back, which the model does not do.
+     * `vterm_set_size`: `on_resize` of state.c has `resize()` of screen.c rebuild both screens with `resize_buffer`, then the whole
+     * screen is damaged and the JNI flushes at once. The JNI turns reflow off, so each row stays one row, from the bottom up: rows
+     * that are blank at the bottom are let go before anything is pushed, the rows that no longer fit at the top go to the history,
+     * the rows a taller screen has room for at the top come back from it, and every line info of the new screens is clear, so
+     * nothing is a continuation any more. The rows are pushed while the old line infos are still there, which is all
+     * `Terminal::termSbPushline` reads, so every push of the batch carries the flag of row 1 as it was. The cells pushed are those of
+     * the screen in use (`sb_pushline_from_row` reads `screen->buffer`), the alternate one when that is: its rows go to the history
+     * as the primary screen's would.
      */
     override fun resize(rows: Int, cols: Int): Int {
-        check(rows == this.rows) { "the model resizes columns only" }
-        fun refit(old: Array<CharArray>) = Array(rows) { r -> CharArray(cols) { c -> if (c < old[r].size) old[r][c] else BLANK } }
-        primary = refit(primary)
-        alternate = alternate?.let(::refit)
-        screen = if (onAlternate) alternate!! else primary
+        val onAlternateNow = onAlternate
+        val rebuiltPrimary = resizeBuffer(primary, true, rows, cols, active = !onAlternateNow)
+        val rebuiltAlternate = alternate?.let { resizeBuffer(it, false, rows, cols, active = onAlternateNow) }
+        val rebuilt = if (onAlternateNow) rebuiltAlternate!! else rebuiltPrimary
+        primary = rebuiltPrimary.cells
+        primaryContinuation = rebuiltPrimary.continuation
+        alternate = rebuiltAlternate?.cells
+        alternateContinuation = rebuiltAlternate?.continuation ?: BooleanArray(rows)
+        screen = if (onAlternateNow) alternate!! else primary
+        continuation = if (onAlternateNow) alternateContinuation else primaryContinuation
+        this.rows = rows
         this.cols = cols
-        col = minOf(col, cols - 1)
+        regionBottom = if (regionBottomUnset) rows else minOf(regionBottom, rows)
+        row = rebuilt.cursorRow
+        col = rebuilt.cursorCol
+        if (atPhantom && col < cols - 1) { atPhantom = false; col++ }
+        row = row.coerceIn(0, rows - 1)
+        col = col.coerceIn(0, cols - 1)
         damagerect(Rect(0, rows, 0, cols))
         flush()
         return 0
     }
 
+    /** One screen as `resize_buffer` leaves it: its cells, its line infos, and where the cursor is on it. */
+    private class Rebuilt(val cells: Array<CharArray>, val continuation: BooleanArray, val cursorRow: Int, val cursorCol: Int)
+
+    /** `resize_buffer` of screen.c with reflow off, over the screen [old] of the old size; the model's own size is still the old one. */
+    private fun resizeBuffer(old: Array<CharArray>, primaryScreen: Boolean, newRows: Int, newCols: Int, active: Boolean): Rebuilt {
+        val oldRows = rows
+        val oldCols = cols
+        val cells = Array(newRows) { CharArray(newCols) { BLANK } }
+        val lineInfo = BooleanArray(newRows)
+        var oldRow = oldRows - 1
+        var newRow = newRows - 1
+        val oldCursorRow = row
+        val oldCursorCol = col
+        var newCursorRow = -1
+        var newCursorCol = -1
+        // The topmost row of the blank rows at the bottom, which are what a shrinking screen scrolls into before it pushes anything.
+        var finalBlankRow = newRows
+
+        while (oldRow >= 0) {
+            val oldRowStart = oldRow
+            var width = oldCols - 1
+            while (width >= 0 && old[oldRowStart][width] == BLANK) width--
+            width++
+            if (finalBlankRow == newRow + 1 && width == 0) finalBlankRow = newRow
+            var newRowStart = newRow
+            val spareRows = newRows - finalBlankRow
+            if (newRowStart < 0 && spareRows >= 0 && (!active || newCursorRow == -1 || (newCursorRow - newRowStart) < newRows)) {
+                // Scroll what is placed down into the blank rows at the bottom to make this one fit.
+                var downwards = -newRowStart
+                if (downwards > spareRows) downwards = spareRows
+                val rowCount = newRows - downwards
+                for (i in rowCount - 1 downTo 0) { cells[downwards + i] = cells[i]; lineInfo[downwards + i] = lineInfo[i] }
+                for (r in 0 until downwards) cells[r] = CharArray(newCols) { BLANK }
+                newRow += downwards
+                newRowStart += downwards
+                if (newCursorRow >= 0) newCursorRow += downwards
+                finalBlankRow += downwards
+            }
+            if (newRowStart < 0) break
+
+            var takenRow = oldRowStart
+            var oldCol = 0
+            var count = if (width >= newCols) newCols else width
+            var newCol = 0
+            while (count > 0) {
+                cells[newRowStart][newCol] = old[takenRow][oldCol]
+                if (oldCursorRow == takenRow && oldCursorCol == oldCol) { newCursorRow = newRowStart; newCursorCol = newCol }
+                oldCol++
+                if (oldCol == oldCols) { takenRow++; newCol++; break }
+                newCol++
+                count--
+            }
+            if (oldCursorRow == takenRow && oldCursorCol >= oldCol) {
+                newCursorRow = newRowStart
+                newCursorCol = minOf(oldCursorCol - oldCol + newCol, newCols - 1)
+            }
+            lineInfo[newRowStart] = false
+            oldRow = oldRowStart - 1
+            newRow = newRowStart - 1
+        }
+        if (oldCursorRow <= oldRow) {
+            newCursorRow = 0
+            newCursorCol = minOf(oldCursorCol, newCols - 1)
+        }
+        check(!active || (newCursorRow != -1 && newCursorCol != -1)) { "screen_resize failed to update cursor position" }
+
+        if (oldRow >= 0 && primaryScreen) {
+            for (r in 0..oldRow) pushRow(r)
+        }
+        if (newRow >= 0 && primaryScreen) {
+            while (newRow >= 0) {
+                if (!popRow(cells[newRow], oldCols, newCols)) break
+                newRow--
+            }
+        }
+        if (newRow >= 0) {
+            // Scroll the rows that were placed back up to the top, and leave blanks at the bottom.
+            val moveRows = newRows - newRow - 1
+            for (i in 0 until moveRows) { cells[i] = cells[newRow + 1 + i]; lineInfo[i] = lineInfo[newRow + 1 + i] }
+            newCursorRow -= newRow + 1
+            for (r in moveRows until newRows) { cells[r] = CharArray(newCols) { BLANK }; lineInfo[r] = false }
+        }
+        return Rebuilt(cells, lineInfo, newCursorRow, newCursorCol)
+    }
+
+    /** `sb_popline` and the copy that follows it: the row comes back with the cells both widths hold, and the rest of the new row blank. */
+    private fun popRow(into: CharArray, oldCols: Int, newCols: Int): Boolean {
+        val buffer = CellData.buffer()
+        if (emulator.popScrollbackLine(oldCols, 0, oldCols, buffer) == 0) return false
+        for (c in 0 until newCols) {
+            into[c] = if (c < oldCols) buffer.getInt(c * CellData.BYTES).let { if (it == 0) BLANK else it.toChar() } else BLANK
+        }
+        return true
+    }
+
     override fun dispatchKey(modifiers: Int, key: Int): Boolean = false
     override fun dispatchCharacter(modifiers: Int, character: Int): Boolean = false
     override fun setPaletteColors(colors: IntArray, count: Int): Int = count
-    override fun setDefaultColors(foreground: Int, background: Int): Int = 0
+    override fun setDefaultColors(foreground: Int, background: Int): Int {
+        defaultForeground = foreground
+        defaultBackground = background
+        return 0
+    }
     override fun setBoldHighbright(enabled: Boolean): Int = 0
     override fun pasteText(data: ByteArray) = Unit
     override fun close() = Unit
@@ -129,6 +256,8 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
                 for (slot in 0 until CellData.STRIDE) buffer.putInt(offset + slot * 4, 0)
                 buffer.putInt(offset, screen[r][c].code)
                 buffer.putInt(offset + CellData.WIDTH, 1)
+                buffer.putInt(offset + CellData.FOREGROUND, defaultForeground)
+                buffer.putInt(offset + CellData.BACKGROUND, defaultBackground)
                 offset += CellData.BYTES
             }
             total += count
@@ -275,6 +404,7 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
                 var bottom = arg(1, rows).coerceIn(0, rows)
                 if (bottom <= top) { top = 0; bottom = rows }
                 regionTop = top; regionBottom = bottom
+                regionBottomUnset = top == 0 && bottom == rows
                 // Setting the region puts the cursor home.
                 row = 0; col = 0; atPhantom = false
             }
@@ -322,7 +452,7 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
     private fun reset() {
         primary = blankScreen(); screen = primary; alternate = null; onAlternate = false
         primaryContinuation = BooleanArray(rows); alternateContinuation = BooleanArray(rows); continuation = primaryContinuation
-        row = 0; col = 0; atPhantom = false; regionTop = 0; regionBottom = rows
+        row = 0; col = 0; atPhantom = false; regionTop = 0; regionBottom = rows; regionBottomUnset = true
         damagerect(Rect(0, rows, 0, cols))
     }
 
@@ -452,6 +582,8 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
             for (slot in 0 until CellData.STRIDE) buffer.putInt(base + slot * 4, 0)
             buffer.putInt(base, screen[r][c].code)
             buffer.putInt(base + CellData.WIDTH, 1)
+            buffer.putInt(base + CellData.FOREGROUND, defaultForeground)
+            buffer.putInt(base + CellData.BACKGROUND, defaultBackground)
         }
         emulator.pushScrollbackLine(cols, 0, cols, buffer, rows > 1 && continuation[1])
     }

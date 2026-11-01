@@ -104,6 +104,15 @@ class ScrollbackWrapTest {
         assertEquals(listOf(false, true, false, false), flags())
     }
 
+    @Test fun `a wrapped row that comes back from the history is pushed again wrapped`() {
+        push("one", true)
+        push("two", false)
+        // "two" took the flag that came with "one"; it comes back with it, and what libvterm sends when it scrolls off again is the row below's.
+        pop()
+        push("two", false)
+        assertEquals(listOf(false, true), flags())
+    }
+
     @Test fun `pulling back from an empty history leaves the waiting flag alone`() {
         push("one", true)
         pop()
@@ -125,6 +134,43 @@ class ScrollbackWrapTest {
         emulator.reset()
         push("two", false)
         assertEquals(listOf(false), flags())
+    }
+
+    @Test fun `the chain gives a pushed row the flag that arrived before it and waits with the one that came with it`() {
+        val chain = ScrollbackWrap()
+        assertEquals(false, chain.push(sent = true))
+        assertEquals(true, chain.push(sent = false))
+        assertEquals(false, chain.push(sent = false))
+    }
+
+    @Test fun `a flag the library no longer holds, because a resize cleared it, is the screen's to say`() {
+        val chain = ScrollbackWrap()
+        // What came with this push was read from line infos the resize had cleared: the row below it wraps, whatever it says.
+        assertEquals(false, chain.push(sent = false, keptBelow = true))
+        assertEquals(true, chain.push(sent = false))
+        assertEquals(false, chain.push(sent = false))
+    }
+
+    @Test fun `a row left on top by a resize is pushed with the flag it had`() {
+        val chain = ScrollbackWrap()
+        chain.push(sent = false)
+        chain.top(true)
+        assertEquals(true, chain.push(sent = false))
+    }
+
+    @Test fun `a row taken back is waiting with its own flag`() {
+        val chain = ScrollbackWrap()
+        chain.pop(own = true)
+        assertEquals(true, chain.push(sent = false))
+        chain.pop(own = false)
+        assertEquals(false, chain.push(sent = true))
+    }
+
+    @Test fun `a reset forgets what the chain was waiting with`() {
+        val chain = ScrollbackWrap()
+        chain.top(true)
+        chain.reset()
+        assertEquals(false, chain.push(sent = false))
     }
 
     @Test fun `a row split over several callbacks is pushed once and takes one flag`() {

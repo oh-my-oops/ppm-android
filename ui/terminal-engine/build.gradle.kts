@@ -110,5 +110,8 @@ androidComponents {
         variant.sources.resources?.addGeneratedSourceDirectory(patchTerminalEngine, PatchTerminalEngine::resourcesDir)
         variant.sources.manifests.addGeneratedManifestFile(patchTerminalEngine, PatchTerminalEngine::manifest)
         variant.consumerProguardFiles.add(generated.map { it.file("proguard.txt") })
+        // What the JVM tests and the instrumentation both run (ResizeDiff): one copy, compiled by each, so the two cannot differ.
+        (variant as? com.android.build.api.variant.HasUnitTest)?.unitTest?.sources?.kotlin?.addStaticSourceDirectory("src/sharedTest/kotlin")
+        (variant as? com.android.build.api.variant.HasAndroidTest)?.androidTest?.sources?.kotlin?.addStaticSourceDirectory("src/sharedTest/kotlin")
     }
 }

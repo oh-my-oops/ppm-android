@@ -210,9 +210,10 @@ def emulator(text):
     # so the history stored every row with its neighbour's flag: URLs wrapped across rows came out glued or cut.
     text = replace(text, "    private val scrollback = ArrayDeque<TerminalLine>()\n",
                    "    private val scrollback = ArrayDeque<TerminalLine>()\n    private val scrollbackWrap = ScrollbackWrap()\n")
-    text = replace(text, "softWrapped = softWrapped, semanticSegments = line0Segments)", "softWrapped = scrollbackWrap.push(softWrapped), semanticSegments = line0Segments)")
+    text = replace(text, "softWrapped = softWrapped, semanticSegments = line0Segments)", "softWrapped = wrapped, semanticSegments = line0Segments)")
     text = replace(text, "            imageStore.trimHistory(0)\n            scrollback.clear()\n", "            imageStore.trimHistory(0)\n            scrollback.clear()\n            scrollbackWrap.reset()\n")
-    text = replace(text, "            scrollback.removeLast()\n            scrollbackDirty = true", "            scrollbackWrap.pop(scrollback.removeLast().softWrapped)\n            scrollbackDirty = true")
+    text = replace(text, "            scrollback.removeLast()\n            scrollbackDirty = true",
+                   "            val restored = scrollback.removeLast()\n            scrollbackWrap.pop(restored.softWrapped)\n            if (resizePushes >= 0) resizeRestored.add(restored)\n            scrollbackDirty = true")
     # libvterm merges the scrolls of one write (VTERM_DAMAGE_SCROLL): it sends each row it pushes into the history, and every OSC
     # with the cursor's row, as they happen, but the one moverect for all of them only when the write is flushed. Segments stayed
     # on the rows the screen had before the write, so every pushed row got the top row's links and a link written after a scroll
@@ -226,6 +227,20 @@ def emulator(text):
         /** -1 outside a resize; during one, how many rows it has pushed (its rows are not scrolls, and the screen's segments stay where they are). */
         private var resizePushes = -1
 
+        /** What the resize in progress took back from the history so far, in the order it took it: [remapScreen] puts the lines on the screen. */
+        private val resizeRestored = mutableListOf<TerminalLine>()
+
+        /**
+         * Whether the row that scrolls off was soft-wrapped. Outside a resize that is the chain of [ScrollbackWrap], with the one thing the library
+         * cannot tell it: the row after this one may have a wrap the library lost in a resize, and the flag that comes with the push is read from
+         * line infos it cleared (see [TerminalLine.wrapKept]). Flags do not move until the moverect, so the row after is [segmentRowsShifted] + 1.
+         * During a resize the library sends one flag for the whole batch, the first row's: the screen's own flag is the row's, as the mirror had it
+         * when the resize began (it is caught up with the library first).
+         */
+        private fun pushedRowWrapped(sent: Boolean): Boolean =
+            if (resizePushes >= 0) currentLines.getOrNull(resizePushes)?.softWrapped == true
+            else scrollbackWrap.push(sent, currentLines.getOrNull(segmentRowsShifted + 1)?.wrapKept == true)
+
         /** The segments of the row that scrolls off the top, as long as the cells pushed are still what they were made for. */
         private fun scrolledOutSegments(pushed: PackedCells): List<SemanticSegment> {
             val top = if (resizePushes >= 0) resizePushes++ else 0
@@ -234,6 +249,30 @@ def emulator(text):
                     segmentTextStillMatches(top, segment, pushed) &&
                     (segment.semanticType != SemanticType.HYPERLINK || cellText(pushed, segment.startCol, segment.endCol).any { it != '\\u0000' && !it.isWhitespace() })
             }
+        }
+
+        /**
+         * The screen as the library laid it out when it resized it (see [ResizedRows]); called once [rows] and [cols] are the new size, with the
+         * mirror still the old screen. Each row goes with the line it is, with its links, their texts, its prompt and its wrap, and a row that came
+         * back from the history with what that line was pushed with. The alternate screen is another case: what the library keeps of it is not told
+         * (the rows it pushes are the screen shown, which is not the shell's), so nothing moves there when it grows or stays as tall, and nothing is
+         * carried when it shrinks.
+         */
+        private fun remapScreen(oldRows: Int, oldCols: Int, pushed: Int, restored: List<TerminalLine>) {
+            val alternate = isAltScreenActive
+            val moved = if (alternate) ResizedRows(oldRows, rows, 0, 0) else ResizedRows(oldRows, rows, pushed, restored.size)
+            val known = !alternate || rows >= oldRows
+            val laidOut = moved.remap(currentLines, restored, keepFlags = !alternate && cols == oldCols)
+            currentLines = if (known) laidOut.toMutableList() else laidOut.mapTo(ArrayList(rows)) { it.copy(semanticSegments = emptyList()) }
+            val texts = semanticSegmentTexts.entries.mapNotNull { (key, text) ->
+                val row = moved.newRowOf(key.row)
+                if (known && row in 0 until rows) key.copy(row = row) to text else null
+            }
+            semanticSegmentTexts.clear()
+            semanticSegmentTexts.putAll(texts)
+            // The rows that came back have the segments they were pushed with, over the text their cells hold now.
+            for (row in 0 until moved.popped) currentLines[row].let { line -> line.semanticSegments.forEach { storeSegmentText(row, it, line) } }
+            if (!alternate) scrollbackWrap.top(currentLines[0].softWrapped)
         }
 
         /** What a push does to the rows: every row's segments move up one, and the bottom row has none. */
@@ -395,7 +434,8 @@ def emulator(text):
                    "            } else {\n"
                    "                emptyList()\n"
                    "            }\n",
-                   "            // The row on top is the one that scrolls off: its own links, whatever the rows below are about to become.\n"
+                   "            // The row on top is the one that scrolls off: its own wrap and links, whatever the rows below are about to become.\n"
+                   "            val wrapped = pushedRowWrapped(softWrapped)\n"
                    "            val line0Segments = scrolledOutSegments(cellList)\n"
                    "            shiftSegmentsUp()\n")
     text = replace(text, "        synchronized(damageLock) {\n            if (\n                dest.startCol == 0 && src.startCol == 0 &&",
@@ -461,8 +501,38 @@ def emulator(text):
                    "    fun processPendingUpdates(): Unit = synchronized(damageLock) {\n        if (isClosed) return@synchronized\n"
                    "        recordLinkTexts()\n"
                    "        // Collect pending changes\n")
-    text = replace(text, "            terminalNative.resize(newRows, newCols)\n            rows = newRows\n",
-                   "            resizePushes = 0\n            try {\n                terminalNative.resize(newRows, newCols)\n            } finally {\n                resizePushes = -1\n            }\n            rows = newRows\n")
+    # The library clears every row's wrap flag and moves rows to and from the history (see ResizedRows): the mirror is caught up with it first,
+    # for the flags of the rows about to be pushed, and the screen is laid out as the library laid it out, with what the rows carry.
+    text = replace(text, "            terminalNative.resize(newRows, newCols)\n            rows = newRows\n", indent(dedent('''\
+        processPendingUpdates()
+        val oldRows = rows
+        val oldCols = cols
+        var pushed = 0
+        var restored = emptyList<TerminalLine>()
+        resizePushes = 0
+        try {
+            terminalNative.resize(newRows, newCols)
+        } finally {
+            pushed = resizePushes
+            resizePushes = -1
+            restored = resizeRestored.toList()
+            resizeRestored.clear()
+        }
+        rows = newRows
+    '''), "            "))
+    text = replace(text, "            currentLines = MutableList(newRows) { row ->\n                currentLines.getOrNull(row) ?: TerminalLine.empty(row, 0)\n            }\n"
+                         "            transferRanges = IntArray(newRows * 2)\n"
+                         "            semanticSegmentTexts.keys.removeAll { it.row >= newRows }\n",
+                   "            remapScreen(oldRows, oldCols, pushed, restored)\n            transferRanges = IntArray(newRows * 2)\n")
+    # A wrap the library lost in a resize (TerminalLine.wrapKept) stays on its row until a write changes the row, and then the library says what is true. A
+    # row the damage only covers, as a scroll's moverect or the one rectangle a flush reports for everything it touched does, keeps it while its cells are the same.
+    text = replace(text, "                if (cells !== previousLine.cells || softWrapped != previousLine.softWrapped || preservedSegments != existingSegments) {\n"
+                         "                    currentLines[row] = TerminalLine(row, cells, softWrapped = softWrapped, semanticSegments = preservedSegments)\n",
+                   "                val kept = previousLine.wrapKept && !softWrapped && (cells === previousLine.cells ||\n"
+                   "                    damageRegions.none { region -> !region.preserveSegments && row >= region.startRow && row < region.endRow })\n"
+                   "                val wrapped = softWrapped || kept\n"
+                   "                if (cells !== previousLine.cells || wrapped != previousLine.softWrapped || kept != previousLine.wrapKept || preservedSegments != existingSegments) {\n"
+                   "                    currentLines[row] = TerminalLine(row, cells, softWrapped = wrapped, semanticSegments = preservedSegments, wrapKept = kept)\n")
     # A screen row's flag is set when text reaches the row below it and is read only with a cell of its own row, so a
     # line that wraps in a later write than its first row kept the flag of the first (see refreshRowsAbove).
     text = replace(text, "        var builder: PackedCells.Builder? = null\n        screenTransfer.fetch(",
@@ -834,7 +904,21 @@ def screen_transfer(text):
     return replace(text, "    fun fetch(native: TerminalNative, ranges: IntArray,", "    fun fetch(native: ScreenNative, ranges: IntArray,")
 
 
-PATCHES = {"TerminalEmulator.kt": emulator, "SelectionManager.kt": selection, "Terminal.kt": terminal, "TerminalTextPaint.kt": text_paint, "ScreenTransfer.kt": screen_transfer}
+def terminal_line(text):
+    # The library clears every row's wrap flag when the screen is resized. The flag the emulator carried across is told apart from one the library reads,
+    # so that the row keeps it until the row is rewritten (see ResizedRows and updateLine).
+    return replace(text, "    val softWrapped: Boolean = false,\n    val images: List<ImageSlice> = emptyList(),\n) {\n",
+                   "    val softWrapped: Boolean = false,\n"
+                   "    val images: List<ImageSlice> = emptyList(),\n"
+                   "    /**\n"
+                   "     * True if [softWrapped] was carried over a resize and is not what the library holds: libvterm clears the continuation flag of every\n"
+                   "     * row when the screen is resized, so a line that wrapped would read as two. The flag stays until a write rewrites the row.\n"
+                   "     */\n"
+                   "    val wrapKept: Boolean = false,\n"
+                   ") {\n")
+
+
+PATCHES = {"TerminalEmulator.kt": emulator, "SelectionManager.kt": selection, "Terminal.kt": terminal, "TerminalTextPaint.kt": text_paint, "ScreenTransfer.kt": screen_transfer, "TerminalLine.kt": terminal_line}
 
 
 def files(archive):

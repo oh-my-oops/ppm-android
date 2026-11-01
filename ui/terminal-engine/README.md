@@ -31,11 +31,22 @@ The added APIs are:
   A row that scrolled into the history keeps the flag it had on the screen: the shipped JNI sends
   the flag of the row *after* the one it pushes (libvterm shifts its line infos before it calls the
   screen back, and `termSbPushline` reads index 1 after that), so `ScrollbackWrap` hands each pushed
-  row the flag that came with the push before it. Rows pushed by a resize, in one batch, still share
-  one flag, as upstream. On the screen, libvterm sets a row's flag when text reaches the row below it and
+  row the flag that came with the push before it. On the screen, libvterm sets a row's flag when text reaches the row below it and
   the JNI hands it over only with a read of a cell of *that* row, so a line that went on in a later write
   than its first row (a prompt that wraps while it is typed) kept "not wrapped" until `refreshRowsAbove`
   (`WrapFlagRefresh.kt`) made each update read the row above the ones it damaged as well.
+  A resize needs more, because libvterm (reflow is off in the shipped JNI) clears the flag of every row when it
+  resizes the screen, and the JNI reads one flag for the whole batch of rows a shrink pushes, from the line infos about to
+  be cleared. A wrapped line came back from a keyboard that opened and closed as two lines, and every row the shrink pushed
+  took the flag of the first. The emulator now carries the screen's own flags through the resize (`ResizedRows`,
+  `TerminalLine.wrapKept`): each pushed row takes the flag the screen had for it, the rows that stay or come back from the
+  history keep theirs, and a kept flag lasts until a write changes that row, or the library reports the row as wrapped itself
+  (a scroll, a new colour scheme, after which the library gives every cell in the new colours, or one rectangle that only
+  covers the row does not end it). Limits: a resize in columns drops the flags of the
+  screen, since the rows are cut or padded and no longer break where they did (porting xterm's reflow, which joins them again,
+  is a later commit); with the alternate screen up, a resize pushes the alternate screen's rows into the history, each with
+  its own flag, as the library does, and the shell's rows under it are not kept, so a visit to the alternate screen forgets
+  the wraps kept through an earlier resize (the mirror holds one screen).
 - `emulator.getTextBetweenRows(start, endExclusive)` and `emulator.getScreenText()`:
   non-mutating reads that join soft wraps, preserve indentation and strip blank line tails.
   Range indices refer to currently retained history, so eviction/reset invalidates saved
@@ -111,9 +122,12 @@ The added APIs are:
   one row with each push, as the rows do, and the `moverect` moves the cells only (`shiftSegmentsUp`,
   `segmentsMovedByPushes`); a pushed row keeps only a link whose text is still under it. What cannot be told from the pushes
   is dropped rather than left on a wrong row: a scroll region that stops above the last row, or a write that also scrolled
-  the other way. A resize is not a scroll: the rows it pushes get their own links, the screen's segments stay where they
-  were, as before. `SegmentScrollTest` feeds the emulator libvterm's order of callbacks; `verifyLinksAcrossScrolls` runs it
-  through the real JNI.
+  the other way. A resize moves rows too, and the links go with them: a shrink's pushed rows take their links into the history,
+  the rest of the screen's segments shift up as the rows do (`ResizedRows.newRowOf`), and a taller screen brings back the
+  links of the rows it takes from the history (`resizeRestored`, `storeSegmentText`). A resize in columns cuts a link at the new
+  width, as before; with the alternate screen up a grow keeps its links where they are and a shrink keeps none, since what the
+  library discarded there is not told by the pushes. `SegmentScrollTest` feeds the emulator libvterm's order of callbacks;
+  `verifyLinksAcrossScrolls` runs it through the real JNI.
 - An OSC 8 link goes away with the cells it was written over. libvterm says where a link is when it ends, but what text is
   there the emulator can only read from the library's screen, which it did when it caught up with the write (a frame later, or
   once at the end of a whole replay) before applying the link blindly: a link whose cells had been erased or written over by
@@ -131,10 +145,16 @@ The added APIs are:
   Limits: a link made again over the same text, or the same text written over it, is not told from the first; a redraw of the whole
   screen in the same flush as a scroll (Enter on the last row, then `clear`, in one write) looks like the scroll to the emulator, so a
   link over text that came back identical stays; leaving the alternate screen loses the primary screen's links, as before; and an OSC 8
-  that is written over before it closes is linked where it ended, as upstream. The JVM tests (`StaleLinksTest`, `HyperlinkCutsTest`)
-  run the real emulator over `FakeVterm`, a model of libvterm's parse and screen (`ScreenNative` is the one place they stand in for
-  the JNI); `verifyStaleLinks` and `verifyHyperlinkCuts` run the same bytes through the real library (22 operations, three ways of
-  writing each, a replay, a resize, random streams for where the writes are cut), so the model cannot drift from it unnoticed.
+  that is written over before it closes is linked where it ended, as upstream. The JVM tests (`StaleLinksTest`, `HyperlinkCutsTest`,
+  `ResizeWrapTest`) run the real emulator over `FakeVterm`, a model of libvterm's parse, screen and resize (`ScreenNative` is the one
+  place they stand in for the JNI); `verifyStaleLinks`, `verifyHyperlinkCuts` and `verifyResize` run the same bytes through the real
+  library (22 operations, three ways of writing each, a replay, a resize, random streams for where the writes are cut), so the model
+  cannot drift from it unnoticed. For the resize that is also a differential: `src/sharedTest/kotlin/.../ResizeDiff.kt`, compiled by
+  both the unit tests and the instrumentation, scripts 52 fixed-seed scenarios (writes of every kind, resizes in rows and columns, the
+  alternate screen, soft wraps) and traces what the library says to its callbacks and holds after every step; `ResizeModelTest` and
+  `verifyResizeModel` hold the model and the library to the same list of CRCs (`ResizeDiff.GOLDEN`, taken from the library), so a model
+  that drifts fails on the JVM and a library that stops doing what the model does fails on the device. Change a script or the trace and
+  `GOLDEN` must be taken again: run the instrumentation with it empty and it prints what the library gave.
 - With `imeMode = CommittedText`, a view that lost the focus tells the IME it is no editor once nothing else took the
   focus (`onCreateInputConnection` answers `null` with `TYPE_NULL`, as Chrome does for a blurred textarea), and asks for a
   new editor, then reports the caret moved and came back, when the focus returns.
@@ -157,7 +177,8 @@ adb -s emulator-5582 shell am instrument -w org.connectbot.terminal.test/org.con
 The instrumentation launches no app activity and uses its own package. It tests JNI linkage,
 scrollback limits, wrapped lines and wrap flags in the history and across writes, links (OSC 8, plain, wrapped, in the
 history, on their own rows while the screen scrolls, and none left over text that is not theirs after any write that erases
-or overwrites them, a replay or a resize), where a write is cut for them, the cursor after a replay, read-only text/cursor access, alternate screens, reset from an
+or overwrites them, a replay or a resize), a resize (the model of the library's resize held to its traces in 52 scripted scenarios, the wraps
+and links of the rows through a shrink and a grow, the alternate screen), where a write is cut for them, the cursor after a replay, read-only text/cursor access, alternate screens, reset from an
 unfinished OSC, palette retention, close/late work, actual truecolor/inverse painting and all three cursor shapes.
 Unit tests cover 556 fixtures generated from the web's xterm colour functions, range/wrap handling,
 decorative-glyph exclusions, cache separation, non-mutating selection reads, measured action
