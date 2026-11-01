@@ -620,12 +620,12 @@ private fun ChipsRow(model: AppModel, tab: ChatTab, chat: ChatController, state:
         val mode = tab.permissionMode ?: PermissionMode.FALLBACK
         // While the provider resolves, nothing to pick a mode or a model for yet; while the first
         // message goes, the model is fixed and a mode picked changes nothing.
-        if (!tab.providerPending) NeutralChip(mode.icon, if (narrow) null else mode.label, narrow, labelMax = 100.dp, onClick = onMode)
+        if (!tab.providerPending) ModeChip(mode, narrow, onMode)
         if (choosesProvider(tab)) ProviderChip(model, tab)
         if (!tab.providerPending && !tab.firstSendPending) {
             // `relative min-w-0`: a block around the chip, as tall as the line the chip stands on.
             CssColumn(bottom = chipStrut(14.dp)) {
-                ModelChip(ModelNames.chipLabel(name, state.effort ?: Effort.DEFAULT.value), state.thinking, disabled = running, onClick = onModel)
+                ComposerModelChip(name, state, onModel)
             }
         }
         if (running) {
@@ -677,7 +677,7 @@ private fun DesktopChipsRow(
     CssRow(Modifier.fillMaxWidth(), gap = 6.dp, start = 10.dp, end = 10.dp, top = 10.dp, wrap = !narrow) {
         if (!tab.providerPending) {
             CssColumn(bottom = chipStrut(12.dp, labelled = !narrow)) {
-                NeutralChip(mode.icon, if (narrow) null else mode.label, narrow, labelMax = 100.dp, onClick = onMode)
+                ModeChip(mode, narrow, onMode)
                 if (modeOpen) ModePopover(mode, onDismiss = onModeDismiss, pick = pickMode)
             }
         }
@@ -685,7 +685,7 @@ private fun DesktopChipsRow(
         if (!tab.providerPending && !tab.firstSendPending) {
             // On one line, the chip that gives way.
             CssColumn(Modifier.cssShrink(), bottom = chipStrut(14.dp)) {
-                ModelChip(ModelNames.chipLabel(name, state.effort ?: Effort.DEFAULT.value), state.thinking, disabled = running, onClick = onModel)
+                ComposerModelChip(name, state, onModel)
                 if (modelOpen) ModelPopover(model, chat, state, onDismiss = onModelDismiss)
             }
         }
@@ -756,6 +756,56 @@ private fun NeutralChip(label: String?, narrow: Boolean, labelMax: Dp, onClick: 
 }
 
 /**
+ * `ModeChip`, in both rows: the permission mode the next turn runs under. Its `title`, the mouse's
+ * tooltip, and its `aria-label`, the name a screen reader gives it, are the same text.
+ */
+@Composable
+private fun ModeChip(mode: PermissionMode, narrow: Boolean, onClick: () -> Unit) {
+    val name = modeChipName(mode)
+    NeutralChip(
+        mode.icon,
+        if (narrow) null else mode.label,
+        narrow,
+        Modifier.webTitle(name).semantics { contentDescription = name },
+        labelMax = 100.dp,
+        onClick = onClick,
+    )
+}
+
+/** `ModeChip`'s `title` and `aria-label`. */
+internal fun modeChipName(mode: PermissionMode) = "Permission mode: ${mode.label}"
+
+/**
+ * The chip of `ModelThinkingSelector`, in both rows: its `title` ([modelChipTitle]) and its
+ * `aria-label` ([modelChipName]).
+ */
+@Composable
+private fun ComposerModelChip(name: String, state: ChatState, onClick: () -> Unit) {
+    val effort = state.effort ?: Effort.DEFAULT.value
+    val text = ModelNames.chipLabel(name, effort)
+    val running = state.isRunning
+    ModelChip(
+        text,
+        state.thinking,
+        disabled = running,
+        modifier = Modifier
+            .webTitle(modelChipTitle(running, text))
+            .semantics { contentDescription = modelChipName(name, effort, state.thinking) },
+        onClick = onClick,
+    )
+}
+
+/** The model chip's `title`: its own text, or while a turn runs why a press does nothing. */
+internal fun modelChipTitle(running: Boolean, text: String) = if (running) "Can't change while running" else text
+
+/**
+ * The model chip's `aria-label`: the model, the effort by the value the server knows it by
+ * ("xhigh", where the chip says "Extra") and, when it is on, thinking.
+ */
+internal fun modelChipName(model: String, effort: String, thinking: Boolean) =
+    "Model $model, effort $effort${if (thinking) ", thinking on" else ""}"
+
+/**
  * `PriorityToggle`, in both rows: how a message sent during the turn is handled, one step on
  * (Queue, Later, Interrupt) with each press. Its `title` is the mouse's tooltip and its
  * `aria-label` the name a screen reader gives it, which a narrow chat's icon alone does not.
@@ -777,7 +827,7 @@ private fun PriorityChip(tab: ChatTab, narrow: Boolean) {
  * brightens it, as CSS `:hover` matches a disabled button. [labelMax] is the name's `max-w-[…]`.
  */
 @Composable
-internal fun ModelChip(text: String, thinking: Boolean, disabled: Boolean, labelMax: Dp = 140.dp, onClick: () -> Unit) {
+internal fun ModelChip(text: String, thinking: Boolean, disabled: Boolean, modifier: Modifier = Modifier, labelMax: Dp = 140.dp, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -785,7 +835,7 @@ internal fun ModelChip(text: String, thinking: Boolean, disabled: Boolean, label
     val fade = colorsFade(hovered)
     val lit = if (pressed) 1f else fade
     CssRow(
-        Modifier
+        modifier
             .alpha(if (disabled) 0.5f else 1f)
             .brightness(1f + 0.1f * lit)
             .clip(CircleShape)
@@ -943,7 +993,9 @@ private fun SquareButton(
             // Send's `disabled:cursor-not-allowed`.
             .pointerHoverIcon(if (enabled) WebCursor.Default else WebCursor.NotAllowed)
             .hoverable(source)
-            .clickable(source, indication = null, enabled = enabled, onClickLabel = label, onClick = onClick),
+            .clickable(source, indication = null, enabled = enabled, onClickLabel = label, onClick = onClick)
+            // The `aria-label`: Stop and Send hold an icon only.
+            .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
         PpmIcon(icon, iconSize, tint, spinning = spinning)
