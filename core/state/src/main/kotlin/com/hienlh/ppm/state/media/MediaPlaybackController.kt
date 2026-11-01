@@ -110,17 +110,22 @@ class MediaPlaybackController internal constructor(
         if (accepts(id)) mutable.value = current.copy(playWhenReady = false, playing = false, waiting = false)
     }
 
-    /** Pass HTTP status from Media3's data-source exception; do not issue another stream GET to discover it. */
+    /**
+     * Pass HTTP status from Media3's data-source exception; do not issue another stream GET to discover it. The status only
+     * tells apart a transcode that stopped: its 501 and 503 get words of their own, which belong to that stream and to no
+     * other. Audio says [AUDIO_FAILURE_LINE] whatever the status, and a native video goes on to the probe whatever it was.
+     */
     fun onPlayerError(id: Long, httpStatus: Int? = null, message: String? = null) {
         if (!accepts(id)) return
         if (current.mode == MediaMode.NATIVE && current.source?.kind == MediaKind.VIDEO) {
             startProbe()
         } else {
             stopSession()
-            val fallback = when (httpStatus) {
-                501 -> "ffmpeg is not installed or has no working H.264 encoder. Install ffmpeg on the PPM server and restart PPM."
-                503 -> "The PPM server is busy transcoding other videos. Try again shortly."
-                else -> if (current.mode == MediaMode.TRANSCODE) TRANSCODE_FAILURE_LINE else "Failed to load audio."
+            val fallback = when {
+                current.mode != MediaMode.TRANSCODE -> AUDIO_FAILURE_LINE
+                httpStatus == 501 -> "ffmpeg is not installed or has no working H.264 encoder. Install ffmpeg on the PPM server and restart PPM."
+                httpStatus == 503 -> "The PPM server is busy transcoding other videos. Try again shortly."
+                else -> TRANSCODE_FAILURE_LINE
             }
             mutable.value = current.copy(playback = null, playing = false, waiting = false,
                 error = MediaPlaybackError(message?.takeIf { it.isNotBlank() } ?: fallback, httpStatus))

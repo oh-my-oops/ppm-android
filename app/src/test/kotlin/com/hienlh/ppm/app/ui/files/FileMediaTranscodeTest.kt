@@ -63,6 +63,8 @@ class FileMediaTranscodeTest {
     private lateinit var model: AppModel
 
     private val stoppedLine = "Transcoding failed. ffmpeg may have stopped or the file is corrupt."
+    private val busyWords = "The PPM server is busy transcoding other videos. Try again shortly."
+    private val encoderWords = "ffmpeg is not installed or has no working H.264 encoder. Install ffmpeg on the PPM server and restart PPM."
 
     @Before
     fun setUp() {
@@ -92,6 +94,8 @@ class FileMediaTranscodeTest {
         val probeArrived = CountDownLatch(1)
         val probeRelease = CountDownLatch(1)
         val streams = CopyOnWriteArrayList<HttpUrl>()
+        /** The requests for the file itself, which a native container is played from first; the server refuses them. */
+        val raws = CopyOnWriteArrayList<HttpUrl>()
         @Volatile var streamHold: CountDownLatch? = null
         @Volatile var stream: () -> MockResponse = { MockResponse.Builder().code(200).addHeader("Content-Type", "video/mp4").body("this is not a video").build() }
 
@@ -103,6 +107,10 @@ class FileMediaTranscodeTest {
                     check(probeRelease.await(10, TimeUnit.SECONDS)) { "the probe was never released" }
                     json(200, """{"ok":true,"data":{"transcodable":true,"duration":60,"video":{"codec":"hevc"},"audio":{"codec":"aac"}}}""")
                 }
+                path.endsWith("/raw") -> {
+                    raws += request.url
+                    json(503, """{"ok":false,"error":"Too many transcodes"}""")
+                }
                 path.endsWith("/transcode") && request.method == "GET" -> {
                     streams += request.url
                     streamHold?.let { check(it.await(10, TimeUnit.SECONDS)) { "the stream was never released" } }
@@ -113,10 +121,10 @@ class FileMediaTranscodeTest {
         }
     }
 
-    private fun show(transcode: TranscodeServer) {
+    private fun show(transcode: TranscodeServer, name: String = "clip.mkv") {
         server.dispatcher = transcode
-        val path = "/tmp/clip.mkv"
-        val tab = WorkspaceTab("editor:$path", "editor", "clip.mkv", "app", buildJsonObject {
+        val path = "/tmp/$name"
+        val tab = WorkspaceTab("editor:$path", "editor", name, "app", buildJsonObject {
             put("filePath", path)
             put("projectName", "app")
         })
@@ -193,6 +201,32 @@ class FileMediaTranscodeTest {
 
         compose.onNodeWithText("Retry").assertIsDisplayed()
         assertEquals("the web's sentence is for what the web cannot tell apart", 0, count(stoppedLine))
+    }
+
+    @Test
+    fun `a server with no encoder says so in the overlay, in its own words`() {
+        val transcode = TranscodeServer()
+        transcode.probeRelease.countDown()
+        transcode.stream = { json(501, """{"ok":false,"error":"no encoder"}""") }
+        show(transcode)
+
+        waitForText(encoderWords)
+
+        compose.onNodeWithText("Retry").assertIsDisplayed()
+        assertEquals("the web's sentence is for what the web cannot tell apart", 0, count(stoppedLine))
+    }
+
+    @Test
+    fun `a native video whose own request answers 503 goes to the probe and the transcode, as the web does, and says no busy server's words for it`() {
+        val transcode = TranscodeServer()
+        transcode.probeRelease.countDown()
+        show(transcode, "clip.mp4")
+
+        waitForText(stoppedLine)
+
+        assertEquals("the file is asked for once, and the refusal is final", 1, transcode.raws.size)
+        assertTrue("then the stream, once the probe has said ffmpeg can", transcode.streams.isNotEmpty())
+        assertEquals("a refusal of the file is not a busy transcode", 0, count(busyWords))
     }
 
     @Test

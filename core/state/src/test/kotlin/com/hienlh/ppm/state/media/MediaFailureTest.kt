@@ -17,6 +17,7 @@ import org.junit.Test
 class MediaFailureTest {
     private val audio = MediaSource("p", "a.mp3", MediaKind.AUDIO)
     private val video = MediaSource("p", "clip.mkv", MediaKind.VIDEO)
+    private val nativeVideo = MediaSource("p", "clip.mp4", MediaKind.VIDEO)
     private val probe = MediaProbeInfo(transcodable = false, video = MediaVideoInfo("hevc"), audio = MediaAudioInfo("aac"))
 
     @Test fun `the codecs are the video's and the audio's joined by a plus, as the web joins them`() {
@@ -129,6 +130,56 @@ class MediaFailureTest {
             media.retry()
             assertNull("Retry clears it", mediaFailure(media.state.value))
             assertEquals(playback.id + 1, media.state.value.playback!!.id)
+            media.close(); runCurrent()
+        }
+    }
+
+    @Test fun `an audio file's player error says Failed to load audio whatever the status, the transcode's words being for a transcode that stopped`() = runTest {
+        for (status in listOf(null, 404, 500, 501, 503)) {
+            val media = MediaPlaybackController(Backend { probe }, backgroundScope) { "session" }
+            media.setSource(audio)
+            media.show()
+
+            media.onPlayerError(media.state.value.playback!!.id, httpStatus = status)
+
+            assertEquals("status $status", AUDIO_FAILURE_LINE, media.state.value.error!!.message)
+            assertEquals("status $status", MediaFailure.Audio, mediaFailure(media.state.value))
+            media.close(); runCurrent()
+        }
+    }
+
+    @Test fun `a native video's player error goes to the probe whatever the status, and on to the transcode, never saying a transcode's words`() = runTest {
+        for (status in listOf(null, 404, 500, 501, 503)) {
+            var probes = 0
+            val media = MediaPlaybackController(Backend { probes++; transcodable }, backgroundScope) { "session" }
+            media.setSource(nativeVideo)
+            media.show()
+            val native = media.state.value.playback!!
+            assertEquals(MediaMode.NATIVE, native.mode)
+
+            media.onPlayerError(native.id, httpStatus = status)
+
+            assertEquals("status $status", MediaMode.PROBING, media.state.value.mode)
+            assertNull("status $status", media.state.value.error)
+            runCurrent()
+            assertEquals("status $status", 1, probes)
+            assertEquals("status $status", MediaMode.TRANSCODE, media.state.value.mode)
+            assertNull("status $status", media.state.value.error)
+            assertNull("status $status", mediaFailure(media.state.value))
+            media.close(); runCurrent()
+        }
+    }
+
+    @Test fun `a native video the probe cannot transcode is the unsupported screen whatever the status of its own request`() = runTest {
+        for (status in listOf(404, 501, 503)) {
+            val media = MediaPlaybackController(Backend { probe }, backgroundScope) { "session" }
+            media.setSource(nativeVideo)
+            media.show()
+
+            media.onPlayerError(media.state.value.playback!!.id, httpStatus = status)
+            runCurrent()
+
+            assertEquals("status $status", MediaFailure.UnsupportedVideo("hevc + aac"), mediaFailure(media.state.value))
             media.close(); runCurrent()
         }
     }

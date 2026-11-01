@@ -3,6 +3,7 @@ package com.hienlh.ppm.app.ui.files
 import android.app.Application
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.withComposeActivity
@@ -114,6 +115,23 @@ class FileMediaLoadErrorTest {
     fun `a server that fails with a 500 is asked once too, and says Failed to load audio at once`() {
         failsWith(500)
         assertEquals(1, asked.size)
+    }
+
+    private val busyWords = "The PPM server is busy transcoding other videos. Try again shortly."
+    private val encoderWords = "ffmpeg is not installed or has no working H.264 encoder. Install ffmpeg on the PPM server and restart PPM."
+
+    @Test
+    fun `a 503 is no different for audio, as the busy words are for a transcode that stopped`() {
+        failsWith(503)
+        assertEquals(1, asked.size)
+        compose.onNodeWithText(busyWords).assertDoesNotExist()
+    }
+
+    @Test
+    fun `nor is a 501, as the words about the encoder are for a transcode that stopped`() {
+        failsWith(501)
+        assertEquals(1, asked.size)
+        compose.onNodeWithText(encoderWords).assertDoesNotExist()
     }
 
     @Test
