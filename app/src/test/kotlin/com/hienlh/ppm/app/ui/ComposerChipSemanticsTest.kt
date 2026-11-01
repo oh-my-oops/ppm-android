@@ -1,11 +1,8 @@
 package com.hienlh.ppm.app.ui
 
-import android.app.Application
-import android.content.ComponentName
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeProvider
-import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
@@ -16,7 +13,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.pressKey
-import androidx.test.core.app.ApplicationProvider
+import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.state.PermissionMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -24,11 +21,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
-import org.junit.rules.TestRule
 import org.junit.runner.RunWith
-import org.junit.runners.model.Statement
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
@@ -46,22 +40,8 @@ import org.robolectric.annotation.Config
 class ComposerChipSemanticsTest {
     private val compose = createComposeRule()
 
-    // The compose rule starts a `ComponentActivity`, which this module's manifest does not declare,
-    // and starts it before a `@Before` runs.
     @get:Rule
-    val rules: RuleChain = RuleChain
-        .outerRule(
-            TestRule { base, _ ->
-                object : Statement() {
-                    override fun evaluate() {
-                        val app = ApplicationProvider.getApplicationContext<Application>()
-                        shadowOf(app.packageManager).addActivityIfNotPresent(ComponentName(app, ComponentActivity::class.java))
-                        base.evaluate()
-                    }
-                }
-            },
-        )
-        .around(compose)
+    val rules: RuleChain = withComposeActivity(compose)
 
     /** A node as a service is given it, and what is under it. */
     private class Node(val info: AccessibilityNodeInfo, val children: List<Node>) {
