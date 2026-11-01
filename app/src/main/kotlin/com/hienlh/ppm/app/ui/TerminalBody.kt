@@ -190,7 +190,12 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(4.dp)
                     .onGloballyPositioned { placed[0] = it }
                     .onFocusChanged { focusState ->
-                        if (focusState.hasFocus) TextInputFocus.takeNative(session, focusManager) { page ->
+                        // A tap on nothing blurs the terminal as it does xterm's textarea: the keyboard goes with the
+                        // focus, and the next tap on the terminal asks for it again like the first one did.
+                        if (focusState.hasFocus) TextInputFocus.takeNative(session, focusManager, onBlur = {
+                            keyboardRequested = false
+                            imeController?.hideKeyboard()
+                        }) { page ->
                             val field = placed[0]
                             val caret = cursor[0]
                             if (field == null || caret == null || !field.isAttached || !page.isAttached || field.findRootCoordinates() != page.findRootCoordinates()) null

@@ -188,6 +188,63 @@ class TextInputFocusTest {
         assertEquals(0, page.cleared)
     }
 
+    @Test
+    fun `a tap on nothing lets the focused native editor hide its keyboard`() {
+        val page = Window()
+        var hidden = 0
+        TextInputFocus.takeNative(terminal, page, onBlur = { hidden++ }) { null }
+
+        TextInputFocus.blurNative(page)
+
+        assertEquals(1, hidden)
+    }
+
+    @Test
+    fun `a tap in another window leaves the keyboard of the native editor in this one`() {
+        var hidden = 0
+        TextInputFocus.takeNative(terminal, Window(), onBlur = { hidden++ }) { null }
+
+        TextInputFocus.blurNative(Window())
+
+        assertEquals(0, hidden)
+    }
+
+    @Test
+    fun `a native editor that let go of the focus is not told of the next tap`() {
+        val page = Window()
+        var hidden = 0
+        TextInputFocus.takeNative(terminal, page, onBlur = { hidden++ }) { null }
+        TextInputFocus.releaseNative(terminal)
+
+        TextInputFocus.blurNative(page)
+
+        assertEquals(0, hidden)
+    }
+
+    @Test
+    fun `a Compose field that took the focus from a native editor is not a native editor to blur`() {
+        val page = Window()
+        var hidden = 0
+        TextInputFocus.takeNative(terminal, page, onBlur = { hidden++ }) { null }
+        TextInputFocus.take(composer, window = page)
+
+        TextInputFocus.blurNative(page)
+
+        assertEquals(0, hidden)
+    }
+
+    @Test
+    fun `only the native editor that holds the focus is told`() {
+        val page = Window()
+        val told = mutableListOf<String>()
+        TextInputFocus.takeNative(terminal, page, onBlur = { told += "first" }) { null }
+        TextInputFocus.takeNative(otherTerminal, page, onBlur = { told += "second" }) { null }
+
+        TextInputFocus.blurNative(page)
+
+        assertEquals(listOf("second"), told)
+    }
+
     private class Window(private val onClear: () -> Unit = {}) : FocusManager {
         var cleared = 0
 

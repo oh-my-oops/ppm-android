@@ -39,6 +39,7 @@ object TextInputFocus {
     private var state by mutableStateOf<TextFieldState?>(null)
     private var nativeOwner by mutableStateOf<Any?>(null)
     private var nativeBounds: ((LayoutCoordinates) -> Rect?)? = null
+    private var nativeBlur: (() -> Unit)? = null
 
     /** Where the focused field is laid out, once it has been. */
     private var placed: LayoutCoordinates? = null
@@ -92,18 +93,23 @@ object TextInputFocus {
         this.state = state
         nativeOwner = null
         nativeBounds = null
+        nativeBlur = null
         this.placed = placed
         this.window = window
     }
 
-    /** A native terminal editor participates in the same focus/keyboard-pan rules as Compose fields. */
-    internal fun takeNative(owner: Any, window: FocusManager, bounds: (LayoutCoordinates) -> Rect?) {
+    /**
+     * A native terminal editor participates in the same focus/keyboard-pan rules as Compose fields.
+     * [onBlur] is what it does as a tap on nothing is about to take the focus from it ([blurNative]).
+     */
+    internal fun takeNative(owner: Any, window: FocusManager, onBlur: () -> Unit = {}, bounds: (LayoutCoordinates) -> Rect?) {
         val before = this.window
         if (field !== owner && before != null && before !== window) before.clearFocus()
         state = null
         placed = null
         nativeOwner = owner
         nativeBounds = bounds
+        nativeBlur = onBlur
         this.window = window
     }
 
@@ -111,7 +117,17 @@ object TextInputFocus {
         if (nativeOwner !== owner) return
         nativeOwner = null
         nativeBounds = null
+        nativeBlur = null
         window = null
+    }
+
+    /**
+     * A tap in [window] is about to clear the focus, which a browser's press on nothing does to an input and
+     * which hides its keyboard. Compose hides a text field's own as the focus goes; a native editor is told
+     * here, because only a view that still holds the focus can hide the keyboard.
+     */
+    internal fun blurNative(window: FocusManager) {
+        if (nativeOwner != null && this.window === window) nativeBlur?.invoke()
     }
 
     /** Where the focused [state] is laid out now. */
@@ -155,7 +171,8 @@ object TextInputFocus {
  * lands in the field, moves it to another field, or has its handler ask for it back
  * ([TextInputFocus.asked]) — Chrome does not hide the keyboard for a focus lost and given back in
  * the same click. A finger decides as it lifts, Chrome's tap; a mouse as it presses, its
- * `mousedown`. A drag or a long press leaves the focus where it is.
+ * `mousedown`. A drag or a long press leaves the focus where it is. The keyboard goes with the
+ * focus, a native editor's too ([TextInputFocus.blurNative]).
  */
 fun Modifier.leavesTextOnTap(focusManager: FocusManager): Modifier = pointerInput(focusManager) {
     awaitEachGesture {
@@ -168,7 +185,10 @@ fun Modifier.leavesTextOnTap(focusManager: FocusManager): Modifier = pointerInpu
         } else {
             liftsAsTap(down, PointerEventPass.Final)
         }
-        if (taps && TextInputFocus.tapLeaves(start)) focusManager.clearFocus()
+        if (taps && TextInputFocus.tapLeaves(start)) {
+            TextInputFocus.blurNative(focusManager)
+            focusManager.clearFocus()
+        }
     }
 }
 

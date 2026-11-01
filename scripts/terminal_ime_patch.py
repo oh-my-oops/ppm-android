@@ -38,7 +38,10 @@ def terminal(text):
         val currentImeMode by rememberUpdatedState(imeMode)
         var requestedImeShortcutMode by remember(terminalEmulator) { mutableStateOf(ImeShortcutInputMode.DISABLED) }
         val imeController = remember(terminalEmulator) {
-            TerminalImeController { imeInputView?.finishBeforeExternalInput() }
+            object : TerminalImeController {
+                override fun finishBeforeExternalInput() { imeInputView?.finishBeforeExternalInput() }
+                override fun hideKeyboard() { imeInputView?.hideIme() }
+            }
         }
         LaunchedEffect(imeController, onImeControllerAvailable) { onImeControllerAvailable?.invoke(imeController) }
         fun handleTerminalKey(event: ComposeKeyEvent): Boolean =
@@ -76,6 +79,16 @@ def ime_input(text):
         var onImePreeditChanged: (String) -> Unit = {}
         private var committedConnection: CommittedImeConnection? = null
         fun finishBeforeExternalInput() { committedConnection?.finishBeforeExternalInput() }
+
+        /**
+         * The editor ends with the view's focus ([onFocusChanged]), but Android leaves the IME attached to a view
+         * whose focus a tap on nothing took: it starts a new connection only for a view that gains the focus when
+         * another one is served, so the IME keeps typing into the ended editor and nothing is sent. When the focus
+         * comes back, the IME has to be told to ask for a new editor.
+         */
+        private fun restartIfEditorEnded() {
+            if (imeMode == TerminalImeMode.CommittedText && committedConnection?.isActive == false) restartInputSoon()
+        }
 
     ''') + marker)
     marker = "        val useFullEditor = isComposeModeActive && shortcutInputMode != ImeShortcutInputMode.TYPE_NULL"
@@ -129,7 +142,7 @@ def ime_input(text):
     text = replace(text, "            isComposeModeActive &&\n            keyboardHandler.hasTerminalShortcutModifiers()", "            (isComposeModeActive || imeMode == TerminalImeMode.CommittedText) &&\n            keyboardHandler.hasTerminalShortcutModifiers()")
     text = replace(text, "        resetImeBuffer()\n        shortcutInputMode = nextMode", "        committedConnection?.flushPending()\n        resetImeBuffer()\n        shortcutInputMode = nextMode")
     text = replace(text, "    fun resetImeBuffer() {", "    fun resetImeBuffer() {\n        committedConnection?.closeConnection()\n        committedConnection = null")
-    text = replace(text, "        if (!gainFocus) {", "        if (!gainFocus) {\n            committedConnection?.closeConnection()")
+    text = replace(text, "        if (!gainFocus) {", "        if (gainFocus) restartIfEditorEnded()\n        if (!gainFocus) {\n            committedConnection?.closeConnection()")
     return replace(text, "    override fun onDetachedFromWindow() {", "    override fun onDetachedFromWindow() {\n        committedConnection?.closeConnection()")
 
 
