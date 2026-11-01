@@ -83,9 +83,9 @@ def ime_input(text):
         if (imeMode == TerminalImeMode.CommittedText) {
             activeConnection = null
             val raw = shortcutInputMode != ImeShortcutInputMode.DISABLED
-            outAttrs.inputType = if (raw) EditorInfo.TYPE_NULL else
-                EditorInfo.TYPE_CLASS_TEXT or EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE or EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            outAttrs.imeOptions = outAttrs.imeOptions or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+            // The same editor Chrome describes for xterm.js's textarea: no keyboard autocorrects it.
+            outAttrs.inputType = if (raw) EditorInfo.TYPE_NULL else TerminalEditorInfo.inputType()
+            outAttrs.imeOptions = TerminalEditorInfo.IME_OPTIONS
             // Creation can be speculative: Android may keep the preceding handle served.
             // Reuse its editor, and let closing a handle retire only that handle.
             val editor = committedConnection?.takeIf { it.isActive } ?: CommittedImeConnection(

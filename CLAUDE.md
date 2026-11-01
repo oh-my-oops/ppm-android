@@ -64,6 +64,8 @@ The build needs bun and the repository's `node_modules` (`bun install` at the ro
 
 The toolbar row's keys (`TerminalMobileToolbar`) reach the shell through `NativeTerminal.sendKey`, the emulator's own key encoder, and never as bytes written to the socket. Its queue is the one the soft keyboard commits through, so a key lands after the word `finishBeforeExternalInput` has just flushed (a direct write overtakes it), and only libvterm knows whether a program turned on application cursor keys (`ESC O A`, which htop reads and the web's fixed `ESC [ A` it does not). `EngineKeyTest` models libvterm's bytes for these keys and `CommittedImeInstrumentation` holds the model to the real JNI.
 
+The soft keyboard is told the editor Chrome describes for xterm.js's textarea (`TerminalEditorInfo`: inputType 0x2200a1 on Android 17 and 0x200a1 before it, imeOptions 0x12000001), not `TYPE_TEXT_FLAG_NO_SUGGESTIONS`: Gboard ignores that flag on a plain text field and autocorrected "ech " to "echo " with it set, which a terminal must never do. Whether Gboard then composes a word or commits each key is its own call and the connection takes both, so a change here is measured on a device (`dumpsys input_method` for the numbers, the bytes the PTY reads for the typing), not by the JVM tests, which only pin the numbers.
+
 End-to-end tests (`EndToEndTest`) run only when a scratch server is named. `scripts/scratch-server.sh start [port]` runs this checkout's server with its own `PPM_HOME` under `/tmp` (never the real `~/.ppm`), a random password and a `demo` project, on `127.0.0.1` — which the emulator reaches as `10.0.2.2`:
 
 ```bash

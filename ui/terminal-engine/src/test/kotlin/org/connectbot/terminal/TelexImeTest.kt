@@ -1,8 +1,6 @@
 package org.connectbot.terminal
 
-import android.text.InputType
 import android.view.KeyEvent
-import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.TextAttribute
 import java.text.Normalizer
 import org.junit.Assert.assertArrayEquals
@@ -210,20 +208,11 @@ class TelexImeTest {
         assertSent("tiee")
     }
 
-    @Test fun `the editor asks for no suggestions and no autocorrect`() {
-        val type = rig.info.inputType
-        assertEquals(InputType.TYPE_CLASS_TEXT, type and InputType.TYPE_MASK_CLASS)
-        assertTrue(type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS != 0)
-        assertEquals(0, type and InputType.TYPE_TEXT_FLAG_AUTO_CORRECT)
-        assertEquals(0, type and InputType.TYPE_TEXT_FLAG_AUTO_COMPLETE)
-        // A password variation would take Telex and every other composing keyboard away.
-        assertEquals(InputType.TYPE_TEXT_VARIATION_NORMAL, type and InputType.TYPE_MASK_VARIATION)
-        val options = rig.info.imeOptions
-        assertTrue(options and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING != 0)
-        assertTrue(options and EditorInfo.IME_FLAG_NO_EXTRACT_UI != 0)
-        // Enter is a key, never an editor action that could end a word.
-        assertTrue(options and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0)
-        assertEquals(EditorInfo.IME_ACTION_NONE, options and EditorInfo.IME_MASK_ACTION)
+    @Test fun `the editor is the one Chrome describes for xterm, which Gboard does not autocorrect`() {
+        // The numbers `dumpsys input_method` shows for the web terminal's textarea. Chrome adds 0x200000
+        // from Android 17, which this runs below; TerminalEditorInfoTest pins that half.
+        assertEquals(0x200a1, rig.info.inputType)
+        assertEquals(0x12000001, rig.info.imeOptions)
     }
 
     @Test fun `physical keys go straight through, in order with a word the soft keyboard was composing`() {
