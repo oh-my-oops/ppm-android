@@ -68,6 +68,14 @@ fun ReadOnlyFileBody(model: AppModel, tab: WorkspaceTab, showToolbar: Boolean = 
     key(tab.id) { DocumentBody(model, tab, forceCode = true, showToolbar = showToolbar, ownsController = ownsController) }
 }
 
+/**
+ * Whether the tab's own toolbar (the file's path, Wrap, Refresh) sits above [viewer]'s view. The web's editor returns an
+ * image, a PDF and a document as their previews alone (code-editor.tsx), so none of them has it, not even for the line a
+ * preview says when it cannot show its file; the PDF has a row of its own, with the path and Open in new tab.
+ */
+internal fun fileHasToolbar(viewer: FileDocumentViewer): Boolean =
+    viewer != FileDocumentViewer.IMAGE && viewer != FileDocumentViewer.PDF && viewer != FileDocumentViewer.DOCX
+
 /** Empty inline content is still a buffer; an untitled buffer never reads a metadata path. */
 internal fun fileBufferContent(tab: WorkspaceTab): String? = tab.metadata["inlineContent"].string
     ?: if (tab.metadata["isUntitled"].bool == true) tab.metadata["unsavedContent"].string.orEmpty() else null
@@ -127,7 +135,7 @@ private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean,
         return
     }
     Column(Modifier.fillMaxSize().background(colors.bgSolid.color)) {
-        if (showToolbar) Row(
+        if (showToolbar && fileHasToolbar(viewer)) Row(
             Modifier.fillMaxWidth().heightIn(min = if (mobile) 48.dp else 32.dp)
                 .cssBorder(colors.border.color, sides = CssSides.Bottom).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,

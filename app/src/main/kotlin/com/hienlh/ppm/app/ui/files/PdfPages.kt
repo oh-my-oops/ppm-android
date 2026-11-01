@@ -8,15 +8,23 @@ import java.io.File
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
+/** What the PDF view draws its pages from: the size of each, and a bitmap of one at a width. [PdfPages] is the real one. */
+internal interface PdfPageSource {
+    val sizes: List<PdfPages.Size>
+
+    /** Call on IO. Null once the source is closed. */
+    fun render(index: Int, requestedWidth: Int): Bitmap?
+}
+
 /** PdfRenderer owns its descriptor; at most one page may be open, including while closing. */
-internal class PdfPages private constructor(private val file: File, private val renderer: PdfRenderer) : AutoCloseable {
+internal class PdfPages private constructor(private val file: File, private val renderer: PdfRenderer) : AutoCloseable, PdfPageSource {
     data class Size(val width: Int, val height: Int)
-    val sizes: List<Size> = List(renderer.pageCount) { index -> renderer.openPage(index).use { Size(it.width, it.height) } }
+    override val sizes: List<Size> = List(renderer.pageCount) { index -> renderer.openPage(index).use { Size(it.width, it.height) } }
     private var closed = false
 
     /** Call on IO. Only visible pages have bitmaps; cap each allocation at 16MiB. */
     @Synchronized
-    fun render(index: Int, requestedWidth: Int): Bitmap? {
+    override fun render(index: Int, requestedWidth: Int): Bitmap? {
         if (closed) return null
         val size = sizes[index]
         val factor = minOf(requestedWidth.toDouble() / size.width, 4096.0 / maxOf(size.width, size.height),

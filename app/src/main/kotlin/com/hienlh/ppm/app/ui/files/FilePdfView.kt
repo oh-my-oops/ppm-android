@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
@@ -38,16 +39,22 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.client.RawFile
+import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.chromeScrollbar
+import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssScrollbar
+import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -62,7 +69,6 @@ import kotlin.math.roundToInt
 @Composable
 internal fun FilePdfView(model: AppModel, raw: RawFile, path: String) {
     val context = LocalContext.current
-    val colors = LocalPpmTokens.current
     val scope = rememberCoroutineScope()
     var reader by remember(raw) { mutableStateOf<PdfPages?>(null) }
     var error by remember(raw) { mutableStateOf<String?>(null) }
@@ -88,40 +94,56 @@ internal fun FilePdfView(model: AppModel, raw: RawFile, path: String) {
     // As the web's: a failed or empty PDF, or one still opening, is a line of its own, with no page controls around it.
     pdfRenderNote(error != null, pages?.sizes?.size)?.let { note -> FileNoteView(note); return }
     if (pages == null) return // the spinner above answered for it; this narrows the type
+    PdfPagesView(pages, path, zoom, { zoom = it }, list, opening = exporting) {
+        exporting = true
+        scope.launch {
+            try {
+                val uri = withContext(Dispatchers.IO) {
+                    val directory = File(context.cacheDir, "documents").apply { mkdirs() }
+                    val cutoff = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
+                    directory.listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.deleteRecursively() }
+                    val target = File(File(directory, UUID.randomUUID().toString()).apply { mkdirs() },
+                        path.substringAfterLast('/').substringAfterLast('\\').takeIf { it.isNotEmpty() } ?: "document.pdf")
+                    target.writeBytes(raw.bytes)
+                    FileProvider.getUriForFile(context, "${context.packageName}.images", target)
+                }
+                val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/pdf")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                intent.clipData = ClipData.newRawUri("PDF", uri)
+                context.startActivity(Intent.createChooser(intent, "Open with…"))
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: ActivityNotFoundException) { model.toast(ErrorToastMessage("No PDF app is available.")) }
+            catch (failure: Exception) { model.toast(ErrorToastMessage("Could not open PDF", failure.message)) }
+            finally { exporting = false }
+        }
+    }
+}
+
+/**
+ * A PDF whose pages are open: the web's row with its path and Open in new tab (pdf-preview.tsx draws it once its iframe has
+ * loaded), then the page controls the app has where Chrome has the PDF viewer's own toolbar, then the pages. [zoom] and
+ * [list] are the caller's, so the page the reader is on and the zoom survive the file being read again; [onOpenInNewTab]
+ * hands the file to another app, and [opening] is that being under way.
+ */
+@Composable
+internal fun PdfPagesView(
+    pages: PdfPageSource, path: String, zoom: Float, onZoom: (Float) -> Unit, list: LazyListState, opening: Boolean,
+    onOpenInNewTab: () -> Unit,
+) {
+    val colors = LocalPpmTokens.current
+    val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize()) {
+        PdfPathRow(path, enabled = !opening, onOpen = onOpenInNewTab)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             val count = pages.sizes.size
             val current = if (count == 0) 0 else (list.firstVisibleItemIndex + 1).coerceAtMost(count)
             FileAction(ProductIcon.ChevronLeft, "Previous page", enabled = current > 1) { scope.launch { list.scrollToItem(current - 2) } }
             BasicText("$current / $count", style = ppmText(12f).copy(color = colors.text2.color))
             FileAction(ProductIcon.ChevronRight, "Next page", enabled = current in 1 until count) { scope.launch { list.scrollToItem(current) } }
-            FileAction(ProductIcon.Minus, "Zoom out", enabled = zoom > 0.5f) { zoom = (zoom / 1.25f).coerceAtLeast(0.5f) }
+            FileAction(ProductIcon.Minus, "Zoom out", enabled = zoom > 0.5f) { onZoom((zoom / 1.25f).coerceAtLeast(0.5f)) }
             BasicText("${(zoom * 100).roundToInt()}%", style = ppmText(12f).copy(color = colors.text2.color))
-            FileAction(ProductIcon.Plus, "Zoom in", enabled = zoom < 3f) { zoom = (zoom * 1.25f).coerceAtMost(3f) }
-            FileAction(ProductIcon.Maximize2, "Fit width") { zoom = 1f }
-            FileAction(ProductIcon.ExternalLink, "Open with…", enabled = !exporting) {
-                exporting = true
-                scope.launch {
-                    try {
-                        val uri = withContext(Dispatchers.IO) {
-                            val directory = File(context.cacheDir, "documents").apply { mkdirs() }
-                            val cutoff = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
-                            directory.listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.deleteRecursively() }
-                            val target = File(File(directory, UUID.randomUUID().toString()).apply { mkdirs() },
-                                path.substringAfterLast('/').substringAfterLast('\\').takeIf { it.isNotEmpty() } ?: "document.pdf")
-                            target.writeBytes(raw.bytes)
-                            FileProvider.getUriForFile(context, "${context.packageName}.images", target)
-                        }
-                        val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/pdf")
-                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        intent.clipData = ClipData.newRawUri("PDF", uri)
-                        context.startActivity(Intent.createChooser(intent, "Open with…"))
-                    } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (_: ActivityNotFoundException) { model.toast(ErrorToastMessage("No PDF app is available.")) }
-                    catch (failure: Exception) { model.toast(ErrorToastMessage("Could not open PDF", failure.message)) }
-                    finally { exporting = false }
-                }
-            }
+            FileAction(ProductIcon.Plus, "Zoom in", enabled = zoom < 3f) { onZoom((zoom * 1.25f).coerceAtMost(3f)) }
+            FileAction(ProductIcon.Maximize2, "Fit width") { onZoom(1f) }
         }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
             val density = LocalDensity.current
@@ -142,8 +164,41 @@ internal fun FilePdfView(model: AppModel, raw: RawFile, path: String) {
     }
 }
 
+/**
+ * `flex items-center justify-between px-3 py-1.5 border-b border-border bg-background` (pdf-preview.tsx): the file's path,
+ * `text-xs text-text-secondary truncate`, and Open in new tab, `flex items-center gap-1 text-xs text-text-secondary
+ * hover:text-text-primary` with a 12 px ExternalLink in front. The button's colour fades to the primary text under a
+ * mouse, as `transition-colors` fades it.
+ */
 @Composable
-private fun PdfPage(reader: PdfPages, index: Int, width: Int, modifier: Modifier) {
+internal fun PdfPathRow(path: String, enabled: Boolean, onOpen: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val xs = ppmText(12f, lineHeight = 16f)
+    val hover = rememberHover()
+    val color = tokens.text.mix(tokens.text2, hover.lit.toDouble()).color
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(tokens.bgSolid.color)
+            .cssBorder(tokens.border.color, sides = CssSides.Bottom)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BasicText(path, Modifier.weight(1f), style = xs.copy(color = tokens.text2.color), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+        Row(
+            Modifier.ppmClickable(enabled = enabled, pressedColor = Color.Transparent, source = hover.source, onClick = onOpen),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PpmIcon(ProductIcon.ExternalLink, 12.dp, color)
+            BasicText("Open in new tab", style = xs.copy(color = color), maxLines = 1, softWrap = false)
+        }
+    }
+}
+
+@Composable
+private fun PdfPage(reader: PdfPageSource, index: Int, width: Int, modifier: Modifier) {
     var image by remember(reader, index, width) { mutableStateOf<Bitmap?>(null) }
     var failed by remember(reader, index, width) { mutableStateOf(false) }
     LaunchedEffect(reader, index, width) {
