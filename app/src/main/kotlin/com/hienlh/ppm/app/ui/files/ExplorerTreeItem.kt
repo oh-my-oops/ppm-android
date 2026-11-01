@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,6 +26,7 @@ internal fun ExplorerTreeItem(
     actionsForNode: (FileTreeNode) -> List<ExplorerTreeAction>,
     mutations: ExplorerMutationCallbacks?, session: ExplorerMutationSession, busy: Boolean,
     onCreate: (String, Boolean) -> Unit,
+    dragOver: ExplorerDragOver,
     dropModifier: @Composable (String) -> Modifier = { Modifier },
 ) {
     val node = row.node
@@ -35,6 +37,7 @@ internal fun ExplorerTreeItem(
         tree.clearSelection()
         if (node.isDirectory) tree.toggleExpand(node.path) else onOpenFile(node)
     }
+    val dropOver by remember(dragOver, node.path) { derivedStateOf { dragOver.site?.key == node.path } }
     Box(dropModifier(if (node.isDirectory) node.path else node.path.substringBeforeLast('/', ""))) {
         Column {
             ExplorerTreeRow(
@@ -50,6 +53,8 @@ internal fun ExplorerTreeItem(
                     }
                 },
                 onMenu = { menuAt = it },
+                dropOver = dropOver,
+                dragSource = Modifier.explorerRowDragSource(ExplorerRowDrag(state.project.orEmpty(), node.path, node.isDirectory), mutations != null && !busy),
             )
             val error = state.errors[node.path]
             if (node.isDirectory && error != null) ExplorerError(error, Modifier.padding(start = (row.depth * 16 + 28).dp)) {

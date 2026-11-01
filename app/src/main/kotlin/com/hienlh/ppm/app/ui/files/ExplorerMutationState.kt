@@ -1,6 +1,7 @@
 package com.hienlh.ppm.app.ui.files
 
 import com.hienlh.ppm.state.files.FileTreeNode
+import com.hienlh.ppm.state.files.fileDropDestination
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -86,6 +87,19 @@ internal class ExplorerMutationSession(val project: String?, parent: CoroutineSc
             catch (error: CancellationException) { throw error }
             catch (error: Exception) { if (!closed) mutable.value = mutable.value.copy(error = error.message ?: "Could not paste files") }
             finally { if (!closed) mutable.value = mutable.value.copy(busy = false, pasting = false) }
+        }
+    }
+
+    /** A dragged row dropped on [directory] ("" is the root): null, and nothing sent, for the drops the web refuses (itself, a child of its own, its own folder). */
+    fun move(source: String, directory: String, callbacks: ExplorerMutationCallbacks): Job? {
+        val destination = fileDropDestination(source, directory) ?: return null
+        if (!available(callbacks)) return null
+        mutable.value = mutable.value.copy(busy = true, error = null)
+        return scope.launch {
+            try { callbacks.move(source, destination) }
+            catch (error: CancellationException) { throw error }
+            catch (error: Exception) { if (!closed) mutable.value = mutable.value.copy(error = error.message ?: "Could not move ${source.substringAfterLast('/')}") }
+            finally { if (!closed) mutable.value = mutable.value.copy(busy = false) }
         }
     }
 

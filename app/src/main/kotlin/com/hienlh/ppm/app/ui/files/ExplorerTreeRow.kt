@@ -1,6 +1,7 @@
 package com.hienlh.ppm.app.ui.files
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -42,6 +43,7 @@ private class ClickKeys { var toggle = false; var range = false }
 internal fun ExplorerTreeRow(
     row: FileTreeRow, expanded: Boolean, loading: Boolean, selected: Boolean, focused: Boolean, cut: Boolean = false,
     onClick: (toggle: Boolean, range: Boolean) -> Unit, onMenu: (Offset) -> Unit,
+    dropOver: Boolean = false, dragSource: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
     val node = row.node
@@ -59,6 +61,8 @@ internal fun ExplorerTreeRow(
             .height(if (LocalPpmMobile.current) 32.dp else 26.dp)
             .alpha(if (cut) 0.4f else 1f)
             .background(when { selected -> tokens.accentWash.color; focused -> tokens.panel2.color; else -> Color.Transparent })
+            // `ring-1 ring-primary bg-primary/10` (DROP_TARGET_CLASS) of a row a drag is over.
+            .then(if (dropOver) Modifier.background(tokens.accent.opacity(0.1).color).border(1.dp, tokens.accent.color) else Modifier)
             .semantics {
                 this.selected = selected
                 if (node.isDirectory) stateDescription = if (loading) "Loading" else if (expanded) "Expanded" else "Collapsed"
@@ -75,6 +79,7 @@ internal fun ExplorerTreeRow(
                 keys.range = false
                 onClick(toggle, range)
             }
+            .then(dragSource)
             .padding(start = (row.depth * 16 + 8).dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),

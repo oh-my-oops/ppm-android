@@ -12,7 +12,8 @@ class ExplorerMutationSessionTest {
     private val file = FileTreeNode("app.kt", "src/app.kt", false, false)
     private fun callbacks() = ExplorerMutationCallbacks("p", create = { _, _, _ -> error("unexpected create") },
         rename = { _, _ -> error("unexpected rename") }, delete = { error("unexpected delete") },
-        cut = { error("unexpected cut") }, copy = { error("unexpected copy") }, paste = { error("unexpected paste") })
+        cut = { error("unexpected cut") }, copy = { error("unexpected copy") }, paste = { error("unexpected paste") },
+        move = { _, _ -> error("unexpected move") })
 
     @Test fun emptyCreateAndUnchangedRenameDoNotWrite() = runBlocking {
         val session = ExplorerMutationSession("p", this)
@@ -119,6 +120,100 @@ class ExplorerMutationSessionTest {
             assertFalse(session.state.value.pasting)
             assertFalse(session.state.value.busy)
         } finally { session.close() }
+    }
+
+    @Test fun movingARowSendsTheDestinationWithItsNameInIt() = runBlocking {
+        val session = ExplorerMutationSession("p", this)
+        val calls = mutableListOf<Pair<String, String>>()
+        val actions = callbacks().copy(move = { source, destination -> calls += source to destination })
+        try {
+            session.move("src/app.kt", "docs", actions)!!.join()
+            session.move("src/util", "docs/deep", actions)!!.join()
+            session.move("src/app.kt", "", actions)!!.join()
+            assertEquals(listOf("src/app.kt" to "docs/app.kt", "src/util" to "docs/deep/util", "src/app.kt" to "app.kt"), calls)
+            assertFalse(session.state.value.busy)
+            assertNull(session.state.value.error)
+        } finally { session.close() }
+    }
+
+    @Test fun dropsTheWebRefusesSendNothingAndStayQuiet() = runBlocking {
+        val session = ExplorerMutationSession("p", this)
+        val actions = callbacks().copy(move = { source, destination -> error("sent $source to $destination") })
+        try {
+            val refused = listOf(
+                "src" to "src", // onto itself
+                "src" to "src/util", // into a folder of its own
+                "src/app.kt" to "src", // where it already is
+                "README.md" to "", // already in the root
+                "/etc/passwd" to "docs", // not a project path
+                "a/../b" to "docs",
+            )
+            for ((source, directory) in refused) assertNull("$source onto $directory", session.move(source, directory, actions))
+            assertEquals(ExplorerMutationState(), session.state.value)
+        } finally { session.close() }
+    }
+
+    @Test fun movesAreRefusedForAnotherProjectABusyViewAndWhileOneRuns() = runBlocking {
+        val session = ExplorerMutationSession("p", this)
+        val started = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val calls = mutableListOf<String>()
+        val actions = callbacks().copy(move = { source, _ ->
+            calls += source
+            started.complete(Unit)
+            finish.await()
+        })
+        try {
+            assertNull(session.move("src/app.kt", "docs", actions.copy(project = "other")))
+            assertNull(session.move("src/app.kt", "docs", actions.copy(busy = true)))
+            val first = session.move("src/app.kt", "docs", actions)!!
+            started.await()
+            assertTrue(session.state.value.busy)
+            assertNull(session.move("README.md", "docs", actions))
+            finish.complete(Unit)
+            first.join()
+            assertEquals(listOf("src/app.kt"), calls)
+            assertFalse(session.state.value.busy)
+        } finally { session.close() }
+    }
+
+    @Test fun aFailedMoveShowsItsMessageAndTheNextOneClearsIt() = runBlocking {
+        val session = ExplorerMutationSession("p", this)
+        var fail = true
+        val actions = callbacks().copy(move = { _, _ -> if (fail) error("docs/app.kt already exists") })
+        try {
+            session.move("src/app.kt", "docs", actions)!!.join()
+            assertEquals("docs/app.kt already exists", session.state.value.error)
+            assertFalse(session.state.value.busy)
+            fail = false
+            session.move("src/app.kt", "docs", actions)!!.join()
+            assertNull(session.state.value.error)
+        } finally { session.close() }
+    }
+
+    @Test fun aFailedMoveWithoutAMessageNamesTheRow() = runBlocking {
+        val session = ExplorerMutationSession("p", this)
+        val actions = callbacks().copy(move = { _, _ -> throw RuntimeException() })
+        try {
+            session.move("src/app.kt", "docs", actions)!!.join()
+            assertEquals("Could not move app.kt", session.state.value.error)
+        } finally { session.close() }
+    }
+
+    @Test fun closeRejectsALateFailedMove() = runBlocking {
+        val session = ExplorerMutationSession("p", this)
+        val started = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val actions = callbacks().copy(move = { _, _ ->
+            withContext(NonCancellable) { started.complete(Unit); finish.await() }
+            error("too late")
+        })
+        val job = session.move("src/app.kt", "docs", actions)!!
+        started.await()
+        session.close()
+        finish.complete(Unit)
+        job.join()
+        assertEquals(ExplorerMutationState(), session.state.value)
     }
 
     @Test fun clipboardActionsReceiveFullRelativeSelection() = runBlocking {

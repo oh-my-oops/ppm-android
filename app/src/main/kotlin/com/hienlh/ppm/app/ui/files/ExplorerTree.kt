@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -28,6 +30,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
@@ -82,6 +87,22 @@ fun ExplorerTree(
         TextFieldState(name, TextRange(0, explorerRenameSelectionEnd(name)))
     }
     var rootMenu by remember(tree, state.project) { mutableStateOf<Offset?>(null) }
+    val dragOver = remember(tree, state.project) { ExplorerDragOver() }
+    val listArea = remember { mutableStateOf<Rect?>(null) }
+    // What a dragged row is over at [at] (root pixels), asked of the list's own layout each time because the rows scroll under a held pointer.
+    fun siteAt(drag: ExplorerRowDrag, at: Offset): ExplorerDropSite {
+        val y = at.y - (listArea.value?.top ?: 0f)
+        val item = list.layoutInfo.visibleItemsInfo.firstOrNull { y >= it.offset && y < it.offset + it.size }
+        val node = (item?.let { displayRows.getOrNull(it.index) } as? ExplorerDisplayRow.Node)?.row?.node
+            ?: return ExplorerDropSite(drag, ROOT_DROP_KEY, "", collapsedFolder = false)
+        return ExplorerDropSite(
+            drag, node.path, if (node.isDirectory) node.path else node.path.substringBeforeLast('/', ""),
+            collapsedFolder = node.isDirectory && node.path !in state.expandedPaths,
+        )
+    }
+    ExplorerDragAutoScroll(dragOver, list, { listArea.value }) { dragOver.site?.let { dragOver.site = siteAt(it.drag, dragOver.pointer) } }
+    ExplorerDragSpringLoad(dragOver) { path -> tree.setExpanded(path, true) }
+    val rootOver by remember(dragOver) { derivedStateOf { dragOver.site?.let { it.key == ROOT_DROP_KEY && it.lit } == true } }
     DisposableEffect(session) { onDispose { session.close() } }
     LaunchedEffect(edit?.id) {
         if (edit != null) {
@@ -109,6 +130,7 @@ fun ExplorerTree(
         if (parent.isNotEmpty()) tree.setExpanded(parent, true)
         session.create(parent, directory)
     }
+    fun move(drag: ExplorerRowDrag, directory: String) = commands?.let { session.move(drag.path, directory, it) } != null
     Column(modifier.fillMaxSize().explorerMutationKeys(tree, session, commands)) {
         ExplorerMutationToolbar(
             hasProject = state.project != null,
@@ -142,7 +164,12 @@ fun ExplorerTree(
         revealError?.let { ExplorerNote(it) }
         if (mutationState.pasting) ExplorerNote("Pasting files…")
         mutationState.error?.let { error -> ExplorerError(error, retryLabel = "Dismiss", onRetry = session::clearError) }
-        Box(Modifier.weight(1f).fillMaxWidth().then(dropModifier("")).explorerContextGesture(
+        Box(Modifier.weight(1f).fillMaxWidth().then(dropModifier(""))
+            .explorerMoveTarget(dragOver, state.project.orEmpty(), commands != null && !busy, ::siteAt, ::move)
+            .onGloballyPositioned { listArea.value = it.boundsInRoot() }
+            // `bg-primary/5` over the tree while a drag is over its blank area.
+            .then(if (rootOver) Modifier.background(LocalPpmTokens.current.accent.opacity(0.05).color) else Modifier)
+            .explorerContextGesture(
             onMenu = { rootMenu = it },
             eligible = { at -> list.layoutInfo.visibleItemsInfo.none { item ->
                 item.key != "empty" && at.y >= item.offset && at.y < item.offset + item.size
@@ -158,7 +185,7 @@ fun ExplorerTree(
                         onSubmit = { if (tree.state.value.project == commands?.project) commands?.let { session.submit(display.edit, field.text.toString(), it) } },
                         onCancel = session::cancelEdit, onEdit = session::edited)
                     is ExplorerDisplayRow.Node -> ExplorerTreeItem(display.row, tree, state, visiblePaths, selected,
-                        onOpenFile, onOpenTerminal, onOpenExplorer, actionsForNode, commands, session, busy, ::create, dropModifier)
+                        onOpenFile, onOpenTerminal, onOpenExplorer, actionsForNode, commands, session, busy, ::create, dragOver, dropModifier)
                 }
             }
             }

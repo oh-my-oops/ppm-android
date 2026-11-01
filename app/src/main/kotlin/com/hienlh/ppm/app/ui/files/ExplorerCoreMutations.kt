@@ -41,6 +41,7 @@ fun rememberExplorerMutationCallbacks(
         cut = { paths -> mutations.setProjectClipboard(project, paths, FileClipboardOperation.CUT) },
         copy = { paths -> mutations.setProjectClipboard(project, paths, FileClipboardOperation.COPY) },
         paste = { directory -> run { mutations.paste(project, directory) } },
+        move = { source, destination -> run { mutations.move(project, source, destination) } },
         cutPaths = state.clipboard?.takeIf { it.operation == FileClipboardOperation.CUT }?.paths
             ?.mapNotNull { relativeProjectPath(project.path, it) }?.toSet().orEmpty(),
         canPaste = state.clipboard?.paths?.isNotEmpty() == true,
