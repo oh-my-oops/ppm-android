@@ -100,4 +100,9 @@ class MediaRequestsTest {
             assertTrue(job.isCancelled)
         } finally { release.countDown(); server.stop(0) }
     }
+
+    @Test fun `only the server's own refusals, the 4xx, are final`() {
+        for (status in listOf(400, 401, 403, 404, 410, 416, 429, 499)) assertTrue("status " + status, isClientError(status))
+        for (status in listOf(null, 200, 206, 301, 399, 500, 502, 503, 504)) assertFalse("status " + status, isClientError(status))
+    }
 }

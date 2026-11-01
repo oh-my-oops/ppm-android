@@ -78,4 +78,30 @@ class MediaControlsTest {
         val video = MetadataPreload(false).apply { ready = true }
         assertTrue(video.allowLoading())
     }
+
+    @Test fun `a duration is seconds to the nearest millisecond, so a gapless mp3 that is a sample short is the whole second it is`() {
+        // What Media3 reported for ffmpeg's 4.000 s tones at 44.1 and 48 kHz (ffprobe and Chrome: 4.000000), and for one with no gapless tag.
+        assertEquals(4.0, mediaDurationSeconds(3_999_977)!!, 0.0)
+        assertEquals(4.0, mediaDurationSeconds(3_999_979)!!, 0.0)
+        assertEquals(4.049, mediaDurationSeconds(4_048_937)!!, 0.0)
+        assertEquals(4.6, mediaDurationSeconds(4_600_000)!!, 0.0)
+        // To the nearest, not up: a file that really is 0.6 ms short of 4 s is 3.9994 s.
+        assertEquals(3.999, mediaDurationSeconds(3_999_400)!!, 0.0)
+        assertNull(mediaDurationSeconds(0))
+        assertNull(mediaDurationSeconds(-9_223_372_036_854_775_807)) // C.TIME_UNSET
+    }
+
+    @Test fun `the clock floors a duration as Chrome's controls do`() {
+        assertEquals("0:04", mediaClock(mediaDurationSeconds(3_999_977)!!))
+        assertEquals("0:04", mediaClock(mediaDurationSeconds(4_600_000)!!))
+        assertEquals("0:04", mediaClock(mediaDurationSeconds(4_048_937)!!))
+        assertEquals("0:03", mediaClock(mediaDurationSeconds(3_999_400)!!))
+    }
+
+    @Test fun `an ended player is at the end of the file, as an HTML media element is, and else where it is`() {
+        assertEquals(4.0, mediaElapsedSeconds(3999, ended = true, duration = 4.0), 0.0)
+        assertEquals(3.999, mediaElapsedSeconds(3999, ended = false, duration = 4.0), 0.0)
+        assertEquals(3.999, mediaElapsedSeconds(3999, ended = true, duration = null), 0.0)
+        assertEquals(0.0, mediaElapsedSeconds(0, ended = false, duration = null), 0.0)
+    }
 }

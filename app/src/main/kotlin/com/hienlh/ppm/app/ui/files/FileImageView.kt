@@ -3,6 +3,7 @@ package com.hienlh.ppm.app.ui.files
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -31,6 +33,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import com.caverock.androidsvg.RenderOptions
 import com.caverock.androidsvg.SVG
 import com.hienlh.ppm.app.ui.StageLayout
@@ -87,30 +90,33 @@ internal fun FileImageView(raw: RawFile, path: String) {
                 viewer.show(listOf(GalleryImage("file:$path", name) { ViewerImage(name, raw.bytes, raw.contentType) }), 0)
             }
         }
-        Box(
-            Modifier.weight(1f).fillMaxWidth().clipToBounds().onSizeChanged { size = it }
-                .pointerInput(raw) {
-                    detectTransformGestures { centroid, pan, zoom, _ ->
-                        val layout = latestStage
-                        if (layout.width > 0 && layout.height > 0) transform = transform
-                            .zoomedTo(transform.scale * zoom, layout, centroid.x - layout.stageWidth / 2, centroid.y - layout.stageHeight / 2)
-                            .panned(pan.x, pan.y, layout)
+        // image-preview.tsx: `p-4 bg-surface` around the picture, which is fitted to what the padding leaves.
+        Box(Modifier.weight(1f).fillMaxWidth().background(colors.panel.color).padding(16.dp)) {
+            Box(
+                Modifier.fillMaxSize().clipToBounds().onSizeChanged { size = it }
+                    .pointerInput(raw) {
+                        detectTransformGestures { centroid, pan, zoom, _ ->
+                            val layout = latestStage
+                            if (layout.width > 0 && layout.height > 0) transform = transform
+                                .zoomedTo(transform.scale * zoom, layout, centroid.x - layout.stageWidth / 2, centroid.y - layout.stageHeight / 2)
+                                .panned(pan.x, pan.y, layout)
+                        }
                     }
-                }
-                .pointerInput(raw) {
-                    detectTapGestures(onDoubleTap = { at ->
-                        val layout = latestStage
-                        if (layout.width > 0 && layout.height > 0) transform = transform.doubleTapped(layout,
-                            at.x - layout.stageWidth / 2, at.y - layout.stageHeight / 2)
-                    })
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            if (stage.width > 0 && stage.height > 0) Image(shown.preview, name,
-                Modifier.size(with(density) { stage.width.toDp() }, with(density) { stage.height.toDp() }).graphicsLayer {
-                    scaleX = transform.scale; scaleY = transform.scale
-                    translationX = transform.x; translationY = transform.y
-                }, contentScale = ContentScale.FillBounds, filterQuality = FilterQuality.High)
+                    .pointerInput(raw) {
+                        detectTapGestures(onDoubleTap = { at ->
+                            val layout = latestStage
+                            if (layout.width > 0 && layout.height > 0) transform = transform.doubleTapped(layout,
+                                at.x - layout.stageWidth / 2, at.y - layout.stageHeight / 2)
+                        })
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (stage.width > 0 && stage.height > 0) Image(shown.preview, name,
+                    Modifier.size(with(density) { stage.width.toDp() }, with(density) { stage.height.toDp() }).graphicsLayer {
+                        scaleX = transform.scale; scaleY = transform.scale
+                        translationX = transform.x; translationY = transform.y
+                    }, contentScale = ContentScale.FillBounds, filterQuality = FilterQuality.High)
+            }
         }
     }
 }

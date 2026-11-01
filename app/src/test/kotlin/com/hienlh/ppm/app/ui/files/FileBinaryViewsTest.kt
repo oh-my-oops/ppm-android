@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PixelMap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.captureToImage
@@ -48,6 +49,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.ByteArrayOutputStream
+import kotlin.math.abs
 
 /**
  * An image, a PDF and a document as the web's editor shows them (code-editor.tsx returns each preview alone): no row of the
@@ -87,7 +89,10 @@ class FileBinaryViewsTest {
             put("filePath", path)
             put("projectName", "app")
         })
-        compose.setContent { FileBody(model, tab) }
+        compose.setContent {
+            tokens = LocalPpmTokens.current
+            FileBody(model, tab)
+        }
     }
 
     private fun waitForText(text: String) = compose.waitUntil(10_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
@@ -105,8 +110,8 @@ class FileBinaryViewsTest {
         assertEquals("the path row is on screen", 0, compose.onAllNodesWithText(path).fetchSemanticsNodes().size)
     }
 
-    private fun png(): ByteArray {
-        val bitmap = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { eraseColor(0xFF3366CC.toInt()) }
+    private fun png(width: Int = 8, height: Int = 8): ByteArray {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply { eraseColor(PICTURE.toInt()) }
         return ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
     }
 
@@ -285,5 +290,62 @@ class FileBinaryViewsTest {
         showPages(opening = true)
         compose.onNodeWithText("Open in new tab").performClick()
         assertEquals(0, opened)
+    }
+
+    // The picture's stage, as image-preview.tsx has it: `p-4 bg-surface`, the picture fitted to what the padding leaves.
+
+    private fun pixels(path: String, width: Int, height: Int): PixelMap {
+        server.enqueue(file("image/png", png(width, height)))
+        show(path)
+        waitForDescription("Fit image")
+        compose.waitForIdle()
+        return compose.onRoot().captureToImage().toPixelMap()
+    }
+
+    private fun closeTo(a: Color, b: Color) = abs(a.red - b.red) < 0.03f && abs(a.green - b.green) < 0.03f && abs(a.blue - b.blue) < 0.03f
+
+    private fun assertColor(message: String, expected: Color, actual: Color) {
+        assertTrue(message + ": expected " + expected + " but was " + actual, closeTo(expected, actual))
+    }
+
+    @Test
+    fun `a picture too wide for the stage is fitted 16 dp in from its sides, on the panel colour`() {
+        val image = pixels("/tmp/wide.png", 1000, 400)
+        val t = tokens!!
+        val picture = Color(PICTURE)
+        // The stage starts where the panel colour does, in a corner the picture cannot reach; the zoom row above it is the page's.
+        val stageTop = (0 until image.height).first { closeTo(t.panel.color, image[5, it]) }
+        val centre = (0 until image.height).filter { closeTo(picture, image[600, it]) }.let { (it.first() + it.last()) / 2 }
+
+        assertColor("the stage's corner", t.panel.color, image[5, image.height - 6])
+        assertColor("the margin at the start, 24 px in", t.panel.color, image[24, centre])
+        assertColor("the picture's first pixels, 60 px in", picture, image[60, centre])
+        assertColor("the picture's last pixels", picture, image[image.width - 61, centre])
+        assertColor("the margin at the end", t.panel.color, image[image.width - 25, centre])
+        assertTrue("the stage is under the zoom row", stageTop > 0)
+        // Fitted to the 1104 px the padding leaves, not to the 1200 of the stage: the whole picture is there, in its own shape.
+        val rows = (0 until image.height).filter { closeTo(picture, image[600, it]) }
+        assertEquals("the picture's height", 1104f * 400 / 1000, (rows.last() - rows.first() + 1).toFloat(), 2f)
+    }
+
+    @Test
+    fun `a picture too tall for it is fitted 16 dp in from the top and bottom`() {
+        val image = pixels("/tmp/tall.png", 300, 2000)
+        val t = tokens!!
+        val picture = Color(PICTURE)
+        val stageTop = (0 until image.height).first { closeTo(t.panel.color, image[5, it]) }
+
+        assertColor("the margin above, 24 px in", t.panel.color, image[600, stageTop + 24])
+        assertColor("the picture's first rows, 60 px in", picture, image[600, stageTop + 60])
+        assertColor("the picture's last rows", picture, image[600, image.height - 61])
+        assertColor("the margin below", t.panel.color, image[600, image.height - 25])
+        // Fitted to the height the padding leaves, not to the stage's: the whole picture is there, in its own shape.
+        val middle = (stageTop + image.height) / 2
+        val columns = (0 until image.width).filter { closeTo(picture, image[it, middle]) }
+        assertEquals("the picture's width", (image.height - stageTop - 96f) * 300 / 2000, (columns.last() - columns.first() + 1).toFloat(), 2f)
+    }
+
+    private companion object {
+        const val PICTURE = 0xFF3366CCL
     }
 }

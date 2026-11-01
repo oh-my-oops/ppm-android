@@ -26,6 +26,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -195,10 +196,11 @@ private fun MediaContent(
                     detectTapGestures(onTap = { focus.requestFocus(); action(MediaAction.Play) },
                         onDoubleTap = { focus.requestFocus(); action(MediaAction.Fullscreen) })
                 })
-            } else Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                PpmIcon(ProductIcon.Music, 48.dp, colors.text3.color)
-                BasicText(native.title ?: source.path.substringAfterLast('/').substringAfterLast('\\'), style = ppmText(14f).copy(color = colors.text.color))
-                native.artist?.let { BasicText(it, style = ppmText(12f).copy(color = colors.text2.color)) }
+            } else Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                // audio-preview.tsx: `flex flex-col items-center gap-4 p-4`, a `size-16 text-text-subtle` note over the file's name, never its tags.
+                PpmIcon(ProductIcon.Music, 64.dp, colors.text3.color)
+                BasicText(source.path.substringAfterLast('/').substringAfterLast('\\'), Modifier.widthIn(max = 320.dp),
+                    style = ppmText(14f, lineHeight = 20f).copy(color = colors.text2.color), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
             // A video has the web's spinner, which times its own fade; audio, which the web leaves to the browser's controls, the app's after 300 ms.
             if (video) { if (state.waiting && state.error == null) VideoWaitingSpinner() }

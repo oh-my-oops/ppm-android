@@ -8,9 +8,9 @@ import androidx.compose.runtime.setValue
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.VideoSize
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -40,11 +40,8 @@ internal class NativeMediaPlayer(
     private var preload: MetadataPreload? = null
     private var speed = 1f
     private var volume = 1f
+    private val window = Timeline.Window()
     var aspect by mutableStateOf(16f / 9f)
-        private set
-    var title by mutableStateOf<String?>(null)
-        private set
-    var artist by mutableStateOf<String?>(null)
         private set
     private val ticker = scope.launch {
         while (isActive) { progress(); delay(200) }
@@ -92,9 +89,6 @@ internal class NativeMediaPlayer(
                     if (current() && videoSize.width > 0 && videoSize.height > 0)
                         aspect = videoSize.width.toFloat() * videoSize.pixelWidthHeightRatio / videoSize.height
                 }
-                override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
-                    if (current()) { title = mediaMetadata.title?.toString(); artist = mediaMetadata.artist?.toString() }
-                }
                 override fun onPlayerError(error: PlaybackException) {
                     if (current()) controller.onPlayerError(playback.id, mediaStatus(error))
                 }
@@ -106,7 +100,7 @@ internal class NativeMediaPlayer(
             next.volume = volume
             texture?.let(next::setVideoTextureView)
             val factory = OkHttpDataSource.Factory(mediaHttp).setDefaultRequestProperties(request.headers.toMap())
-            val media = ProgressiveMediaSource.Factory(factory)
+            val media = ProgressiveMediaSource.Factory(factory).setLoadErrorHandlingPolicy(NoRetryOnClientError())
                 .createMediaSource(MediaItem.fromUri(request.url.toString()))
             next.setMediaSource(media, (playback.initialPositionSeconds * 1000).toLong())
             next.playWhenReady = state.playWhenReady
@@ -144,8 +138,10 @@ internal class NativeMediaPlayer(
     fun progress() {
         val current = player ?: return
         val token = id ?: return
-        controller.onProgress(token, current.currentPosition / 1000.0,
-            current.duration.takeIf { it != C.TIME_UNSET && it > 0 }?.div(1000.0),
+        // The timeline's microseconds, not ExoPlayer.duration's truncated milliseconds: see mediaDurationSeconds.
+        val timeline = current.currentTimeline
+        val duration = if (timeline.isEmpty) null else mediaDurationSeconds(timeline.getWindow(current.currentMediaItemIndex, window).durationUs)
+        controller.onProgress(token, mediaElapsedSeconds(current.currentPosition, current.playbackState == Player.STATE_ENDED, duration), duration,
             current.bufferedPosition / 1000.0, current.isPlaying, current.playbackState == Player.STATE_BUFFERING)
     }
 

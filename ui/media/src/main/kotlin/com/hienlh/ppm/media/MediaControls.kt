@@ -40,6 +40,17 @@ internal fun mediaClock(seconds: Double): String {
 
 internal fun mediaSeekBar(position: Double, duration: Double): Double = floor(position.coerceIn(0.0, duration) * 10) / 10
 
+/**
+ * A duration Media3 reports in microseconds, as seconds to the nearest millisecond; null while it is not known (a negative value,
+ * `C.TIME_UNSET`). A gapless MP3 comes out a sample short, 3,999,977 µs for what ffprobe and Chrome say is 4.000000 s, and the
+ * millisecond `ExoPlayer.duration` truncates that to 3999, which [mediaClock] floors to 0:03 where Chrome's controls show 0:04.
+ */
+internal fun mediaDurationSeconds(durationUs: Long): Double? = durationUs.takeIf { it > 0 }?.let { round(it / 1000.0) / 1000.0 }
+
+/** Where the player is, in seconds: the end of the file, as an HTML media element's `currentTime` is, once it has ended, else [positionMs]. */
+internal fun mediaElapsedSeconds(positionMs: Long, ended: Boolean, duration: Double?): Double =
+    if (ended && duration != null) duration else positionMs / 1000.0
+
 internal sealed interface MediaAction {
     data object Play : MediaAction
     data object Mute : MediaAction

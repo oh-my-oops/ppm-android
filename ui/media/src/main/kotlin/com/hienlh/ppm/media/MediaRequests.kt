@@ -1,5 +1,8 @@
 package com.hienlh.ppm.media
 
+import androidx.media3.common.C
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import com.hienlh.ppm.client.ApiClient
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
@@ -41,4 +44,17 @@ internal fun mediaStatus(error: Throwable): Int? {
         cause = cause.cause
     }
     return null
+}
+
+/** Whether [status] is the server refusing the request itself, a 4xx, which asking again will not change. */
+internal fun isClientError(status: Int?): Boolean = status != null && status in 400..499
+
+/**
+ * Media3 asks again after a failed load, three times, 0, 1 and 2 seconds apart, whatever the failure was, so a file the server
+ * answered 404 for showed no error for three seconds. A 4xx will be answered the same each time, so the first is the last, as
+ * `<audio onError>` is; every other failure keeps the default's retries.
+ */
+internal class NoRetryOnClientError : DefaultLoadErrorHandlingPolicy() {
+    override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long =
+        if (isClientError(mediaStatus(loadErrorInfo.exception))) C.TIME_UNSET else super.getRetryDelayMsFor(loadErrorInfo)
 }
