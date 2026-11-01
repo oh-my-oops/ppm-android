@@ -4,7 +4,10 @@ import com.hienlh.ppm.state.PermissionMode
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** The words a chip's `title` and `aria-label` carry in message-input.tsx and model-thinking-selector.tsx. */
+/**
+ * The words a chip's `title` and `aria-label` carry in message-input.tsx, model-thinking-selector.tsx,
+ * provider-selector.tsx and model-selector.tsx.
+ */
 class ComposerChipNamesTest {
     @Test
     fun `the mode chip names the mode it shows, in every mode`() {
@@ -25,5 +28,17 @@ class ComposerChipNamesTest {
         assertEquals("Model Opus 4.7, effort high", modelChipName("Opus 4.7", "high", thinking = false))
         // The chip's text says "Extra"; the name keeps the SDK's value.
         assertEquals("Model Sonnet, effort xhigh, thinking on", modelChipName("Sonnet", "xhigh", thinking = true))
+    }
+
+    @Test
+    fun `the provider chip names the provider as given, which its capitalize only draws differently`() {
+        assertEquals("AI Provider: claude", providerChipName("claude"))
+    }
+
+    @Test
+    fun `a form's model chip is named by the catalog's whole label, else the id, else default`() {
+        assertEquals("Model: Claude Opus 4.7", formModelChipName("Claude Opus 4.7", "claude-opus-4-7"))
+        assertEquals("Model: claude-opus-4-7", formModelChipName(null, "claude-opus-4-7"))
+        assertEquals("Model: default", formModelChipName(null, null))
     }
 }

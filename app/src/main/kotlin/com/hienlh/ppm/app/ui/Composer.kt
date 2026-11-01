@@ -1113,7 +1113,13 @@ private fun ProviderChip(model: AppModel, tab: ChatTab) {
     val name = providers.firstOrNull { it.id == current }?.name ?: current
     // `relative`: a block around the chip, as tall as the line the chip stands on.
     CssColumn(bottom = chipStrut(14.dp)) {
-        NeutralChip(cssCapitalized(name), narrow = false, labelMax = 80.dp, onClick = { open = !open }) { ProviderBadge(current, 14.dp) }
+        NeutralChip(
+            cssCapitalized(name),
+            narrow = false,
+            labelMax = 80.dp,
+            onClick = { open = !open },
+            modifier = Modifier.semantics { contentDescription = providerChipName(name) },
+        ) { ProviderBadge(current, 14.dp) }
         if (open) {
             val status = when {
                 read?.failed == true -> "Unable to load providers"
@@ -1127,6 +1133,9 @@ private fun ProviderChip(model: AppModel, tab: ChatTab) {
         }
     }
 }
+
+/** The provider chip's `aria-label`: the name as the server gives it, not as the chip's `capitalize` draws it. */
+internal fun providerChipName(name: String) = "AI Provider: $name"
 
 /**
  * The providers (`w-56 rounded-lg border popover-solid shadow-panel`), over the chip with its left

@@ -28,6 +28,8 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
@@ -38,6 +40,7 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.state.ModelNames
 
@@ -58,8 +61,18 @@ internal fun ModelSelector(model: AppModel, value: String?, providerId: String, 
     var open by remember { mutableStateOf(false) }
     if (models.size <= 1) return
     val current = models.firstOrNull { it.value == value }
+    val title = current?.label
     Box {
-        ModelChip(current?.let { ModelNames.shortLabel(it.label) } ?: value ?: "Model", thinking = false, disabled = false, labelMax = 90.dp) { open = !open }
+        ModelChip(
+            current?.let { ModelNames.shortLabel(it.label) } ?: value ?: "Model",
+            thinking = false,
+            disabled = false,
+            modifier = Modifier
+                // No `title` for a model the provider does not list, as `title={undefined}`.
+                .then(if (title != null) Modifier.webTitle(title) else Modifier)
+                .semantics { contentDescription = formModelChipName(title, value) },
+            labelMax = 90.dp,
+        ) { open = !open }
         if (open) {
             ModelPopover(models, value, clip, onDismiss = { open = false }) {
                 onChange(it)
@@ -68,6 +81,13 @@ internal fun ModelSelector(model: AppModel, value: String?, providerId: String, 
         }
     }
 }
+
+/**
+ * The form chip's `aria-label`, and its `title` too while it has a [label]: the catalog's whole label
+ * ("Claude Opus 4.7"), where the chip's text drops the "Claude ". [value] is the id when the
+ * provider does not list the model.
+ */
+internal fun formModelChipName(label: String?, value: String?) = "Model: ${label ?: value ?: "default"}"
 
 /**
  * The models (`w-56 rounded-lg border popover-solid shadow-panel`) over the chip, its left edge on
