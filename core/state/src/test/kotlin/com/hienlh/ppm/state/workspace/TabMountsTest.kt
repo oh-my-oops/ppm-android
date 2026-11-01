@@ -8,7 +8,8 @@ import org.junit.Test
  * Which tabs the web's tab pool mounts when it first sees them (tab-pool.tsx): the front tab of every panel, on screen or not.
  * The cases a terminal depends on are the ones where "in front" and "on screen" part: a dock that is collapsed on a phone or
  * hidden on a tablet, a minimized window, a tab behind another, another project's grid. A shell whose tab is not mounted is not
- * attached, and the server ends one that nothing has been attached to for 30 minutes.
+ * attached, and the server ends one that nothing has been attached to for 30 minutes. The app holds more than the web mounts, the
+ * tabs behind another tab as well (`heldTabs`), for that reason: the web's front-only rule leaves them with no socket after a reload.
  */
 class TabMountsTest {
     private fun terminal(id: String, project: String? = "app") = WorkspaceTab(id, "terminal", "Terminal", project)
@@ -37,6 +38,8 @@ class TabMountsTest {
     )
 
     private fun front(state: WorkspaceState) = frontTabs(state).map { it.id }
+
+    private fun held(state: WorkspaceState) = heldTabs(state).map { it.id }
 
     @Test
     fun `the front tab of every panel of the open project, and not a tab behind one`() {
@@ -148,5 +151,74 @@ class TabMountsTest {
         val shown = state(listOf(panel("p1", terminal("terminal:1"))))
         assertEquals(listOf("terminal:1"), front(shown))
         assertEquals(emptyList<String>(), front(shown.copy(grid = listOf(listOf("gone")))))
+        assertEquals(listOf("terminal:1"), held(shown))
+        assertEquals(emptyList<String>(), held(shown.copy(grid = listOf(listOf("gone")))))
+    }
+
+    @Test
+    fun `every tab of every panel is held, the ones behind another tab too, in the order the panels are read`() {
+        val shown = state(
+            listOf(
+                panel("p1", terminal("terminal:1"), editor("editor:x"), terminal("terminal:2")),
+                panel("p2", editor("editor:y"), terminal("terminal:3")),
+            ),
+            dock = panel("d", terminal("terminal:4"), terminal("terminal:5"), terminal("terminal:6")),
+            windows = mapOf("w1" to panel("w", terminal("terminal:7"), terminal("terminal:8"))),
+            kept = mapOf("other" to listOf(panel("x", terminal("terminal:9", "other"), terminal("terminal:10", "other")))),
+        )
+        // The open project's grid, the grid kept for the project seen earlier, the window, the dock; a panel's tabs as they are in it.
+        assertEquals(
+            listOf(
+                "terminal:1", "editor:x", "terminal:2", "editor:y", "terminal:3",
+                "terminal:9", "terminal:10",
+                "terminal:7", "terminal:8",
+                "terminal:4", "terminal:5", "terminal:6",
+            ),
+            held(shown),
+        )
+        // The ones in front are among them, in the same order: the web mounts those and the app holds the rest as well.
+        assertEquals(listOf("terminal:1", "editor:y", "terminal:9", "terminal:7", "terminal:4"), front(shown))
+    }
+
+    @Test
+    fun `a dock with three terminals and the third in front holds all three, hidden or collapsed`() {
+        val third = terminal("terminal:3")
+        for (visible in listOf(false, true)) {
+            val shown = state(
+                listOf(panel("p1", editor("editor:x"))),
+                dock = panel("d", terminal("terminal:1"), terminal("terminal:2"), third, front = third),
+                dockVisible = visible,
+            )
+            assertEquals(listOf("editor:x", "terminal:1", "terminal:2", "terminal:3"), held(shown))
+            assertEquals(listOf("editor:x", "terminal:3"), front(shown))
+        }
+    }
+
+    @Test
+    fun `a panel with no tab in front holds all its tabs, and none of them is in front`() {
+        val shown = state(listOf(panel("p1", terminal("terminal:1"), terminal("terminal:2"), front = null)))
+        assertEquals(listOf("terminal:1", "terminal:2"), held(shown))
+        assertEquals(emptyList<String>(), front(shown))
+    }
+
+    @Test
+    fun `the tabs held are read with the guard and the order of the front ones, a tab in two panels once`() {
+        val tab = terminal("terminal:1")
+        val other = terminal("terminal:2")
+        // In two panels at once: the first holds it, and the dock's copy is not another tab, nor does it hide the dock's next one.
+        assertEquals(
+            listOf("terminal:2", "terminal:1", "terminal:6"),
+            held(state(listOf(panel("p1", other, tab, front = other)), dock = panel("d", tab, terminal("terminal:6")))),
+        )
+        // The open project's grid does not hold another project's tab, and the dock and the windows hold any project's.
+        val foreign = terminal("terminal:3", "other")
+        assertEquals(emptyList<String>(), held(state(listOf(panel("p1", foreign)))))
+        assertEquals(
+            listOf("editor:x", "terminal:4", "terminal:3"),
+            held(state(listOf(panel("p1", editor("editor:x"))), dock = panel("d", foreign), windows = mapOf("w1" to panel("w", terminal("terminal:4", "third"))))),
+        )
+        // A tab of no project is any project's, and nothing is guarded when no project is open.
+        assertEquals(listOf("terminal:5"), held(state(listOf(panel("p1", terminal("terminal:5", null))))))
+        assertEquals(listOf("terminal:3"), held(state(listOf(panel("p1", foreign)), project = null)))
     }
 }

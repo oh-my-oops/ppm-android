@@ -36,8 +36,10 @@ import java.util.concurrent.atomic.AtomicInteger
  * front tab of every panel whether its panel is on screen or not (tab-pool.tsx): a dock that is collapsed on a phone or hidden on a
  * tablet, a minimized window, another project's grid. The app used to make a terminal only when its view was composed, so a shell in
  * any of those was never attached after the app started, and the server ended it once the 30 minutes it keeps a shell with no socket
- * had run out. A shell that is attached stays so while its tab is behind another, in another panel or in another project, as the
- * web's keep-alive holds it, and goes with its tab.
+ * had run out. The web's rule has the same hole one step further: a tab behind another is not mounted until it is first in front, so
+ * after a reload it has no socket either, is ended by the same 30 minutes, and the next visit opens a new shell in its place. The app
+ * attaches the shell of every terminal tab the panels hold, behind another tab or not. A shell that is attached stays so while its tab
+ * is behind another, in another panel or in another project, as the web's keep-alive holds it, and goes with its tab.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -116,17 +118,18 @@ class TerminalMountTest {
     }
 
     @Test
-    fun `a collapsed phone dock's terminal is attached when the workspace loads, and a terminal behind it is not`() {
+    fun `a collapsed phone dock with three terminals attaches all three when the workspace loads, the one in front and the two behind it`() {
+        val third = terminal("terminal:3")
         model.syncTerminals(
             state(
                 listOf(panel("p1", editor("editor:x"))),
-                dock = panel("d", terminal("terminal:1"), terminal("terminal:2")),
+                dock = panel("d", terminal("terminal:1"), terminal("terminal:2"), third, front = third),
                 dockVisible = false,
             ),
         )
-        assertEquals(listOf("shell-of-terminal:1"), attached(1))
-        assertNoMoreThan(1)
-        // Attached, not shown: it says nothing of a size or anything else to the shell.
+        assertEquals(listOf("shell-of-terminal:1", "shell-of-terminal:2", "shell-of-terminal:3"), attached(3))
+        assertNoMoreThan(3)
+        // Attached, not shown: not one of them says anything of a size or anything else to its shell.
         assertTrue(peer.received.isEmpty())
     }
 
@@ -147,27 +150,71 @@ class TerminalMountTest {
     }
 
     @Test
-    fun `the front terminal of every panel is attached, those of a project seen earlier included`() {
+    fun `every terminal of every panel is attached, in front or behind another tab, in a project seen earlier, a window and the dock`() {
         model.syncTerminals(
             state(
-                listOf(panel("p1", terminal("terminal:1"), editor("editor:x")), panel("p2", editor("editor:y"), terminal("terminal:2"))),
-                kept = mapOf("other" to listOf(panel("x", terminal("terminal:3", "other"), terminal("terminal:4", "other")))),
+                listOf(
+                    panel("p1", terminal("terminal:1"), editor("editor:x"), terminal("terminal:2")),
+                    panel("p2", editor("editor:y"), terminal("terminal:3")),
+                ),
+                dock = panel("d", terminal("terminal:4"), terminal("terminal:5")),
+                windows = mapOf("w1" to panel("w", terminal("terminal:6"), terminal("terminal:7"))),
+                kept = mapOf("other" to listOf(panel("x", terminal("terminal:8", "other"), terminal("terminal:9", "other")))),
             ),
         )
-        assertEquals(listOf("shell-of-terminal:1", "shell-of-terminal:3"), attached(2))
-        assertNoMoreThan(2)
+        assertEquals((1..9).map { "shell-of-terminal:$it" }, attached(9))
+        assertNoMoreThan(9)
     }
 
     @Test
-    fun `a terminal that has not yet been in front is not attached until it is`() {
+    fun `a terminal behind another tab is attached at load, and coming to the front attaches nothing again`() {
         val behind = terminal("terminal:1")
         model.syncTerminals(state(listOf(panel("p1", editor("editor:x"), behind))))
+        assertEquals(listOf("shell-of-terminal:1"), attached(1))
+        val first = model.terminalOf("terminal:1")
+        assertNotNull(first)
+        // It comes to the front: the same shell, and no second socket.
+        model.syncTerminals(state(listOf(panel("p1", editor("editor:x"), behind, front = behind))))
+        assertSame(first, model.terminalOf("terminal:1"))
+        assertNoMoreThan(1)
+        assertEquals(0, peer.closing.get())
+    }
+
+    @Test
+    fun `a terminal of another project in the open project's grid is not attached, as the web's grid does not hold it`() {
+        model.syncTerminals(state(listOf(panel("p1", terminal("terminal:1", "other"), editor("editor:x")))))
         assertNoMoreThan(0)
         assertNull(model.terminalOf("terminal:1"))
-        // It comes to the front.
-        model.syncTerminals(state(listOf(panel("p1", editor("editor:x"), behind, front = behind))))
-        assertEquals(listOf("shell-of-terminal:1"), attached(1))
+    }
+
+    @Test
+    fun `the same layout synced again attaches nothing twice`() {
+        val layout = state(listOf(panel("p1", terminal("terminal:1"), terminal("terminal:2"))), dock = panel("d", terminal("terminal:3")))
+        model.syncTerminals(layout)
+        assertEquals(listOf("shell-of-terminal:1", "shell-of-terminal:2", "shell-of-terminal:3"), attached(3))
+        val shells = (1..3).map { model.terminalOf("terminal:$it") }
+        repeat(3) { model.syncTerminals(layout) }
+        assertEquals(shells, (1..3).map { model.terminalOf("terminal:$it") })
+        assertNoMoreThan(3)
+        assertEquals(0, peer.closing.get())
+    }
+
+    @Test
+    fun `the shell of a terminal behind another tab ends with its tab, and the other shell stays`() {
+        val front = terminal("terminal:1")
+        val behind = terminal("terminal:2")
+        model.syncTerminals(state(listOf(panel("p1", front, behind))))
+        assertEquals(listOf("shell-of-terminal:1", "shell-of-terminal:2"), attached(2))
+        // The tab behind closes.
+        model.syncTerminals(state(listOf(panel("p1", front))))
+        assertNull(model.terminalOf("terminal:2"))
         assertNotNull(model.terminalOf("terminal:1"))
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (peer.closing.get() == 0 && System.nanoTime() < deadline) Thread.sleep(10)
+        assertEquals(1, peer.closing.get())
+        // The one that stays is not given a second socket, and it is not the one that was closed.
+        assertNoMoreThan(2)
+        assertEquals(1, peer.closing.get())
     }
 
     @Test

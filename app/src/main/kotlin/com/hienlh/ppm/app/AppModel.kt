@@ -148,6 +148,7 @@ import com.hienlh.ppm.state.workspace.resolveToolCallTarget
 import com.hienlh.ppm.state.workspace.buildMetadataFromUrl
 import com.hienlh.ppm.state.workspace.buildTitleFromUrl
 import com.hienlh.ppm.state.workspace.frontTabs
+import com.hienlh.ppm.state.workspace.heldTabs
 import com.hienlh.ppm.state.workspace.isWindowPanelId
 import com.hienlh.ppm.state.workspace.parsePpmLink
 import com.hienlh.ppm.state.workspace.reopenedTab
@@ -242,12 +243,15 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     }
 
     /**
-     * Ends the shells of tabs that went and attaches those of tabs the web would mount ([frontTabs]): the front tab of every
-     * panel, a collapsed phone dock's, a hidden tablet dock's and a minimized window's included. Attached, not shown: a view that
-     * is never laid out holds what its shell prints and says nothing of a size, but its socket is open, so the server does not
-     * end the shell 30 minutes after the last socket went (`RECONNECT_GRACE_MS`). A shell that was attached stays so while its
-     * tab is behind another, in another panel or in another project, until the tab closes: it is in [terminals] and only a tab
-     * that is gone takes it out, which is the web's keep-alive.
+     * Ends the shells of tabs that went and attaches the shell of every terminal tab the panels hold ([heldTabs]): the one in
+     * front or behind another tab, in the open project's grid or one seen earlier, in a window (a minimized one's too) or in the
+     * dock (collapsed on a phone, hidden on a tablet). Attached, not shown: a view that is never laid out holds what its shell
+     * prints and says nothing of a size, but its socket is open, so the server does not end the shell 30 minutes after the last
+     * socket went (`RECONNECT_GRACE_MS`). This is more than the web mounts, which is only a panel's front tab ([frontTabs]): there
+     * a tab behind another has no socket after a reload, is ended by that grace, and the next visit starts a new shell without a
+     * word. A shell stays attached while its tab is behind another, in another panel or in another project, until the tab
+     * closes: it is in [terminals] and only a tab that is gone takes it out, which is the web's keep-alive. A tab of a project
+     * whose layout is not loaded yet is in no panel here, so it is attached once it is, as in the web.
      */
     internal fun syncTerminals(state: WorkspaceState) {
         val live = state.panels.values.flatMap { it.tabs }.filter { it.type == "terminal" }.map { it.id }.toSet()
@@ -256,7 +260,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             prefs.put("terminal.$serverKey.ppm:terminal-session:$id", null)
         }
         knownTerminalIds = live
-        for (tab in frontTabs(state)) {
+        for (tab in heldTabs(state)) {
             if (tab.type == "terminal" && tab.id !in terminals) terminal(tab)?.controller?.start()
         }
     }

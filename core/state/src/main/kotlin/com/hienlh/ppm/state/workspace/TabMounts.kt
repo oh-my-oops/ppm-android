@@ -16,16 +16,30 @@ package com.hienlh.ppm.state.workspace
  * (the web guards a race in `openTab` while a project is switched); the windows and the dock are shared by every project and hold
  * whatever is put in them. Extension tabs, which the web leaves unmounted outside the open project, do not exist here.
  */
-fun frontTabs(state: WorkspaceState): List<WorkspaceTab> {
+fun frontTabs(state: WorkspaceState): List<WorkspaceTab> = panelTabs(state).filter { it.inFront }.map { it.tab }
+
+/**
+ * Every tab of those same panels, the ones behind another tab included, read the same way: the same panels in the same order,
+ * the same guard, a tab that is in two panels once. This is deliberately more than the web mounts. The web mounts only
+ * [frontTabs] and a tab behind another stays unmounted until it first comes to the front, so after a reload its shell has no
+ * socket, the server ends it once its 30 minutes for a shell with no socket are up (`RECONNECT_GRACE_MS`), and the next visit to
+ * the tab opens a new shell without a word. Whoever keeps something alive for a tab asks for these.
+ */
+fun heldTabs(state: WorkspaceState): List<WorkspaceTab> = panelTabs(state).map { it.tab }
+
+private class PanelTab(val tab: WorkspaceTab, val inFront: Boolean)
+
+/** Each tab of the panels there are, once, with whether its panel has it in front. */
+private fun panelTabs(state: WorkspaceState): List<PanelTab> {
     val seen = HashSet<String>()
-    val front = ArrayList<WorkspaceTab>()
+    val tabs = ArrayList<PanelTab>()
 
     fun collect(panel: WorkspacePanel, project: String? = null) {
         for (tab in panel.tabs) {
             if (tab.id in seen) continue
             if (!tab.projectId.isNullOrEmpty() && !project.isNullOrEmpty() && tab.projectId != project) continue
             seen += tab.id
-            if (tab.id == panel.activeTabId) front += tab
+            tabs += PanelTab(tab, tab.id == panel.activeTabId)
         }
     }
 
@@ -37,5 +51,5 @@ fun frontTabs(state: WorkspaceState): List<WorkspaceTab> {
     for ((project, rows) in state.projectGrids) if (project != state.currentProject) grid(rows, project)
     for ((panelId, panel) in state.panels) if (isWindowPanelId(panelId)) collect(panel)
     state.dockPanel?.let { collect(it) }
-    return front
+    return tabs
 }
