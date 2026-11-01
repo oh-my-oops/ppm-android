@@ -8,7 +8,6 @@ import android.content.Intent
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,9 +15,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -42,11 +39,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -69,6 +63,7 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.state.terminal.MobileKey
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.state.terminal.TerminalText
 import com.hienlh.ppm.terminal.TerminalFonts
@@ -80,6 +75,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.connectbot.terminal.ModifierManager
 import org.connectbot.terminal.ComposeController
 import org.connectbot.terminal.ImeShortcutInputMode
+import org.connectbot.terminal.TerminalImeController
 import org.connectbot.terminal.TerminalImeMode
 import org.connectbot.terminal.SelectionController
 import org.connectbot.terminal.Terminal
@@ -97,6 +93,7 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     val emulator = session.emulator
     var selection by remember(emulator) { mutableStateOf<SelectionController?>(null) }
     var inputControl by remember(emulator) { mutableStateOf<ComposeController?>(null) }
+    var imeController by remember(emulator) { mutableStateOf<TerminalImeController?>(null) }
     var selecting by remember(emulator) { mutableStateOf(false) }
     var keyboardRequested by remember { mutableStateOf(false) }
     var links by remember { mutableStateOf<List<String>?>(null) }
@@ -121,10 +118,14 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     }
     LaunchedEffect(state.shellReady, state.connected, session.pendingCommand) {
         val command = session.pendingCommand
-        if (command != null && state.shellReady && state.connected && session.send(command)) {
-            session.pendingCommand = null
-            // Like the web, type it without Enter; the user decides when to execute it.
-            runCatching { focus.requestFocus() }
+        if (command != null && state.shellReady && state.connected) {
+            // End the soft keyboard's editor first: a Telex revision must not rewrite into the command's line.
+            imeController?.finishBeforeExternalInput()
+            if (session.send(command)) {
+                session.pendingCommand = null
+                // Like the web, type it without Enter; the user decides when to execute it.
+                runCatching { focus.requestFocus() }
+            }
         }
     }
     LaunchedEffect(inputReady, keyboardRequested, emulator) {
@@ -148,7 +149,17 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
         }
     }
     fun paste() {
-        if (inputReady) clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()?.let(emulator::pasteText)
+        if (inputReady) clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()?.let {
+            imeController?.finishBeforeExternalInput()
+            emulator.pasteText(it)
+        }
+    }
+    // The web's focusTerminal(): a key of the row keeps the terminal focused, so the soft keyboard stays up
+    // (and comes up when the terminal had lost the focus), rather than taking it as a tap elsewhere does.
+    fun focusTerminal() {
+        TextInputFocus.asked()
+        keyboardRequested = true
+        runCatching { focus.requestFocus() }
     }
     fun chat() {
         val draft = TerminalText.chatDraft(selection = selection?.getSelectionText().orEmpty(), command = session.lastCommand(), output = session.lastOutput()) ?: return
@@ -193,6 +204,7 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
                 keyboardEnabled = inputReady && !selecting, showSoftKeyboard = keyboardRequested && !selecting, focusRequester = focus,
                 imeMode = TerminalImeMode.CommittedText,
                 onComposeControllerAvailable = { inputControl = it },
+                onImeControllerAvailable = { imeController = it },
                 onTerminalTap = { TextInputFocus.asked(); keyboardRequested = true },
                 onCursorBoundsChanged = { cursor[0] = it },
                 modifierManager = modifiers,
@@ -225,37 +237,31 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
                 onHyperlinkClick = ::openLink,
             )
         }
-        // Chrome Android offers this row on touch tablets too, not only below 768dp.
-        Box(Modifier.fillMaxWidth().background(tokens.panel.color).cssBorder(tokens.border.color, sides = CssSides.Top)) {
-          Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TerminalAction("Select text", ProductIcon.TextSelect, active = selecting) {
+        TerminalMobileToolbar(
+            ctrlMode = modifiers.ctrl,
+            onToggleCtrl = {
+                focusTerminal()
+                modifiers.ctrl = MobileKey.Ctrl.press(modifiers.ctrl).ctrlArmed
+            },
+            selectMode = selecting,
+            onToggleSelect = {
                 selecting = !selecting
                 if (selecting) selection?.startSelection() else selection?.clearSelection()
-            }
-            TerminalAction("Copy", ProductIcon.Copy, action = ::copy)
-            TerminalAction("Paste", ProductIcon.ClipboardPaste, enabled = inputReady, action = ::paste)
-            TerminalAction("Links", ProductIcon.Link) { links = session.bufferUrls() }
-            TerminalAction("Send to Chat", ProductIcon.MessageSquare, action = ::chat)
-            Box(Modifier.padding(horizontal = 2.dp).width(1.dp).height(24.dp).background(tokens.border.color))
-            for ((label, value) in listOf("Tab" to "\t", "Esc" to "\u001b", "Ctrl" to null, "↑" to "\u001b[A", "↓" to "\u001b[B", "←" to "\u001b[D", "→" to "\u001b[C", "^C" to "\u0003")) {
-                TerminalAction(label, active = value == null && modifiers.ctrl, enabled = inputReady) {
-                    if (value == null) modifiers.ctrl = !modifiers.ctrl else {
-                        val key = TerminalText.mobileKey(value, modifiers.ctrl)
-                        modifiers.ctrl = key.ctrlMode
-                        key.data?.let { session.send(it) }
-                    }
+            },
+            onKey = { key, repeated ->
+                if (!repeated) {
+                    focusTerminal()
+                    imeController?.finishBeforeExternalInput()
                 }
-            }
-            Spacer(Modifier.width(24.dp))
-          }
-          Box(Modifier.matchParentSize()) {
-              Box(Modifier.align(Alignment.CenterEnd).width(32.dp).fillMaxHeight()
-                  .background(Brush.horizontalGradient(listOf(Color.Transparent, tokens.panel.color))))
-          }
-        }
+                val press = key.press(modifiers.ctrl)
+                modifiers.ctrl = press.ctrlArmed
+                press.keystroke?.let(session::sendKey)
+            },
+            onCopy = ::copy,
+            onPaste = ::paste,
+            onSendToChat = ::chat,
+            onOpenLinks = { links = session.bufferUrls() },
+        )
     }
     links?.let { urls -> TerminalLinks(model, urls, onClose = { links = null }) }
 }
@@ -272,19 +278,18 @@ private class TerminalModifiers : ModifierManager {
 }
 
 @Composable
-private fun TerminalAction(label: String, icon: ProductIcon? = null, compact: Boolean = false, active: Boolean = false, enabled: Boolean = true, action: () -> Unit) {
+private fun TerminalAction(label: String, icon: ProductIcon? = null, compact: Boolean = false, action: () -> Unit) {
     val tokens = LocalPpmTokens.current
     Row(
         Modifier.heightIn(min = if (compact) 20.dp else 44.dp)
             .then(if (compact) Modifier else Modifier.width(44.dp))
             .clip(RoundedCornerShape(4.dp))
-            .alpha(if (enabled) 1f else 0.5f)
-            .background(if (active) tokens.accent.color else tokens.panel2.color)
-            .ppmClickable(enabled = enabled, onClickLabel = label, pressedColor = tokens.accent.color, onClick = action)
+            .background(tokens.panel2.color)
+            .ppmClickable(onClickLabel = label, pressedColor = tokens.accent.color, onClick = action)
             .padding(horizontal = if (compact) 6.dp else 0.dp, vertical = if (compact) 2.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
     ) {
-        val color = if (active) tokens.accentFg.color else tokens.text.color
+        val color = tokens.text.color
         if (icon != null) PpmIcon(icon, if (compact) 10.dp else 16.dp, color)
         if (icon == null || compact) BasicText(label, Modifier.then(if (icon != null) Modifier.padding(start = 4.dp) else Modifier), style = ppmText(12f, kind = if (icon == null) FontKind.MONO else FontKind.SANS, lineHeight = 16f).copy(color = color))
     }

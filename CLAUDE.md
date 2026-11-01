@@ -62,6 +62,8 @@ The build needs bun and the repository's `node_modules` (`bun install` at the ro
 
 `ui/terminal-engine`'s unit tests run the real `InputConnection`, `Editable` and `KeyEvent` on the JVM under Robolectric 4.17 (`@Config(sdk = [34])`; the first run fetches Robolectric's android-all jar into `~/.m2`), and the real `ImeInputView` and `KeyboardHandler` over a mocked `TerminalEmulatorImpl`: its JNI (`libjni_cb_term.so`) is built for Android and cannot load on the host. `ImeRig`'s `FakePty` turns the emulator's dispatches into the bytes libvterm writes, and `CommittedImeInstrumentation` asserts the same literals against the real JNI on a device, so a change to either side shows up on the other.
 
+The toolbar row's keys (`TerminalMobileToolbar`) reach the shell through `NativeTerminal.sendKey`, the emulator's own key encoder, and never as bytes written to the socket. Its queue is the one the soft keyboard commits through, so a key lands after the word `finishBeforeExternalInput` has just flushed (a direct write overtakes it), and only libvterm knows whether a program turned on application cursor keys (`ESC O A`, which htop reads and the web's fixed `ESC [ A` it does not). `EngineKeyTest` models libvterm's bytes for these keys and `CommittedImeInstrumentation` holds the model to the real JNI.
+
 End-to-end tests (`EndToEndTest`) run only when a scratch server is named. `scripts/scratch-server.sh start [port]` runs this checkout's server with its own `PPM_HOME` under `/tmp` (never the real `~/.ppm`), a random password and a `demo` project, on `127.0.0.1` — which the emulator reaches as `10.0.2.2`:
 
 ```bash

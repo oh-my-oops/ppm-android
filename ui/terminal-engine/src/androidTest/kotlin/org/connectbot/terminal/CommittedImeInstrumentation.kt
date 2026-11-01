@@ -324,6 +324,26 @@ class CommittedImeInstrumentation : Instrumentation() {
             check(drain() == "ijkl\u0003")
             passed += "PASS: physical vim keys and Ctrl+C emit immediately without Enter"
 
+            // The toolbar's keys, as NativeTerminal.sendKey hands them to the emulator (EngineKeyTest models these bytes).
+            main {
+                bytes.reset()
+                emulator.dispatchKey(0, VTermKey.TAB)
+                emulator.dispatchKey(0, VTermKey.ESCAPE)
+                emulator.dispatchCharacter(4, 'c'.code)
+                for (key in listOf(VTermKey.UP, VTermKey.DOWN, VTermKey.RIGHT, VTermKey.LEFT)) emulator.dispatchKey(0, key)
+                emulator.dispatchKey(4, VTermKey.LEFT)
+            }
+            check(drain() == "\t\u001b\u0003\u001b[A\u001b[B\u001b[C\u001b[D\u001b[1;5D") { "Toolbar keys at a prompt: ${drain().toList()}" }
+            main {
+                bytes.reset()
+                emulator.writeInput("\u001b[?1h".toByteArray())
+                for (key in listOf(VTermKey.UP, VTermKey.DOWN, VTermKey.RIGHT, VTermKey.LEFT)) emulator.dispatchKey(0, key)
+                emulator.dispatchKey(4, VTermKey.UP)
+                emulator.writeInput("\u001b[?1l".toByteArray())
+            }
+            check(drain() == "\u001bOA\u001bOB\u001bOC\u001bOD\u001b[1;5A") { "Toolbar arrows in application cursor mode: ${drain().toList()}" }
+            passed += "PASS: toolbar keys through real libvterm: Tab, Esc, ^C, arrows in both cursor modes, Ctrl+arrow"
+
             main {
                 bytes.reset()
                 connection = create()

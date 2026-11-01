@@ -8,12 +8,15 @@ import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.KeyValueStore
 import com.hienlh.ppm.design.PpmTheme
 import com.hienlh.ppm.protocol.isJsSpace
+import com.hienlh.ppm.state.terminal.Keystroke
+import com.hienlh.ppm.state.terminal.NamedKey
 import com.hienlh.ppm.state.terminal.TerminalController
 import com.hienlh.ppm.state.terminal.TerminalText
 import kotlinx.coroutines.CoroutineScope
 import org.connectbot.terminal.TerminalBufferSnapshot
 import org.connectbot.terminal.TerminalEmulator
 import org.connectbot.terminal.TerminalEmulatorFactory
+import org.connectbot.terminal.VTermKey
 
 /** Kept by the workspace, not by a composable: hiding a tab must not end its shell. */
 class NativeTerminal(
@@ -73,6 +76,24 @@ class NativeTerminal(
     /** A complete UTF-8 input chunk, as emitted by the native keyboard callback. */
     fun sendBytes(bytes: ByteArray): Boolean = send(bytes.toString(Charsets.UTF_8))
 
+    /**
+     * A key of the toolbar's row, handed to the emulator to encode as a keyboard's would be. Two
+     * things need that over writing bytes to the shell. The emulator's queue is the one the soft
+     * keyboard commits through, so the key lands after the text the IME was just made to flush
+     * (`finishBeforeExternalInput`), which a direct write would overtake. And only libvterm knows
+     * whether the program running asked for application cursor keys, so an arrow is `ESC O A` in vim
+     * and htop and `ESC [ A` at a prompt, where the web sent `ESC [ A` always. The bytes come back
+     * through `onKeyboardInput` like any typed key's. False when the terminal is closed.
+     */
+    fun sendKey(keystroke: Keystroke): Boolean {
+        if (closed) return false
+        when (val key = engineKey(keystroke)) {
+            is EngineKey.Special -> emulator.dispatchKey(key.modifiers, key.code)
+            is EngineKey.Text -> emulator.dispatchCharacter(key.modifiers, key.codepoint)
+        }
+        return true
+    }
+
     /** The prompt row where Enter was last sent. Works without shell OSC integration. */
     fun lastCommand(): String = if (closed) "" else history.lastCommand(emulator.getBufferSnapshot())
 
@@ -101,6 +122,36 @@ class NativeTerminal(
         pendingCommand = null
         history.reset()
         emulator.close()
+    }
+}
+
+/** libvterm's `VTERM_MOD_CTRL`. The engine keeps its own copy of the modifier bits private. */
+private const val VTERM_MOD_CTRL = 4
+
+/** A [Keystroke] as one of the two calls the emulator takes: a `VTermKey` or a character, and libvterm's modifier bits. */
+internal sealed interface EngineKey {
+    val modifiers: Int
+
+    data class Special(override val modifiers: Int, val code: Int) : EngineKey
+
+    data class Text(override val modifiers: Int, val codepoint: Int) : EngineKey
+}
+
+internal fun engineKey(keystroke: Keystroke): EngineKey {
+    val modifiers = if (keystroke.ctrl) VTERM_MOD_CTRL else 0
+    return when (keystroke) {
+        is Keystroke.Character -> EngineKey.Text(modifiers, keystroke.char.code)
+        is Keystroke.Named -> EngineKey.Special(
+            modifiers,
+            when (keystroke.key) {
+                NamedKey.Tab -> VTermKey.TAB
+                NamedKey.Escape -> VTermKey.ESCAPE
+                NamedKey.Up -> VTermKey.UP
+                NamedKey.Down -> VTermKey.DOWN
+                NamedKey.Left -> VTermKey.LEFT
+                NamedKey.Right -> VTermKey.RIGHT
+            },
+        )
     }
 }
 

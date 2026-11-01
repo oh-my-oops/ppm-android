@@ -10,8 +10,6 @@ object TerminalText {
     /** Text already translated from terminal cells, without unused right-hand padding. */
     data class BufferLine(val text: String, val isWrapped: Boolean = false)
     data class ChatText(val label: String, val text: String)
-    /** Null [data] means send nothing; [ctrlMode] is the next sticky-Ctrl state. */
-    data class KeyInput(val data: String?, val ctrlMode: Boolean)
 
     // The web includes the cursor row and the 5,000 rows preceding it.
     private const val URL_SCAN_MAX_ROWS = 5000
@@ -80,19 +78,6 @@ object TerminalText {
         if (body.all(::isJsSpace)) return null
         val transcript = if (selection.isEmpty() && command.isNotEmpty()) "$command\n$body" else body
         return ChatText(if (selection.isNotEmpty()) "Terminal selection" else "Terminal output", "```bash\n$transcript\n```")
-    }
-
-    /**
-     * terminal-tab.tsx's sendKey: one UTF-16 unit consumes Ctrl, even when unmappable (no send).
-     * Multi-unit input passes through with Ctrl still armed. Lowercase the STRING, as JS does:
-     * e.g. capital dotted I becomes `i` + a combining dot, and maps from that first unit to ^I.
-     */
-    fun mobileKey(value: String, ctrlMode: Boolean): KeyInput {
-        if (ctrlMode && value.length == 1) {
-            val code = value.lowercase()[0].code - 96
-            return KeyInput(if (code in 1..26) code.toChar().toString() else null, false)
-        }
-        return KeyInput(value, ctrlMode)
     }
 
     /** oauth-loopback-url.ts: hostname-only check; parsing/validating an address is separate. */

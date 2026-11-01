@@ -2,7 +2,6 @@ package com.hienlh.ppm.state.terminal
 
 import com.hienlh.ppm.state.terminal.TerminalText.BufferLine
 import com.hienlh.ppm.state.terminal.TerminalText.ChatText
-import com.hienlh.ppm.state.terminal.TerminalText.KeyInput
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -101,29 +100,6 @@ class TerminalTextTest {
         assertNull(TerminalText.chatDraft(command = "$ bun test"))
         assertNull(TerminalText.chatDraft(output = "\u00a0\ufeff\u2029"))
         assertEquals("```bash\n\u001c\n```", TerminalText.chatDraft(output = "\u001c")?.text)
-    }
-
-    @Test
-    fun `Ctrl maps both letter cases to all 26 control codes then disarms`() {
-        for (letter in 'a'..'z') {
-            val expected = KeyInput((letter.code - 'a'.code + 1).toChar().toString(), false)
-            assertEquals(expected, TerminalText.mobileKey(letter.toString(), true))
-            assertEquals(expected, TerminalText.mobileKey(letter.uppercase(), true))
-        }
-        assertEquals(KeyInput("C", false), TerminalText.mobileKey("C", false))
-    }
-
-    @Test
-    fun `Ctrl swallows unsupported single units and keeps armed on multi-unit input`() {
-        for (single in listOf("1", "@", " ", "é", "道", "\t", "\u001b", "\u0003", "\u0000")) {
-            assertEquals(single, KeyInput(null, false), TerminalText.mobileKey(single, true))
-            assertEquals(single, KeyInput(single, false), TerminalText.mobileKey(single, false))
-        }
-        for (multiple in listOf("", "\u001b[A", "\u001b[B", "\u001b[D", "\u001b[C", "paste", "😀", "e\u0301")) {
-            assertEquals(KeyInput(multiple, true), TerminalText.mobileKey(multiple, true))
-        }
-        assertEquals(KeyInput("\u000b", false), TerminalText.mobileKey("K", true))
-        assertEquals(KeyInput("\t", false), TerminalText.mobileKey("İ", true))
     }
 
     @Test
