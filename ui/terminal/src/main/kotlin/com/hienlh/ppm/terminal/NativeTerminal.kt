@@ -92,8 +92,11 @@ class NativeTerminal(
         )
     }
 
-    /** Shared by the native keyboard, toolbar and injected commands; never queues rejected input. */
-    fun send(text: String): Boolean = !closed && history.send(text, emulator::getBufferSnapshot, controller::send)
+    /**
+     * Shared by the native keyboard, toolbar and injected commands; never queues rejected input. The rows it reads before a key
+     * are the screen's, not the history's: a read of 50,000 lines of history, under the parser's lock, held a first key back.
+     */
+    fun send(text: String): Boolean = !closed && history.send(text, emulator::getScreenSnapshot, controller::send)
 
     /** A complete UTF-8 input chunk, as emitted by the native keyboard callback. */
     fun sendBytes(bytes: ByteArray): Boolean = send(bytes.toString(Charsets.UTF_8))
@@ -202,7 +205,10 @@ internal class NativeTerminalHistory {
      */
     private var enterText = ""
 
-    /** What was typed for that command, from the end of the prompt to the cursor; empty when the buffer could not say. */
+    /**
+     * What was typed for that command: the keys, when the line ends with them ([typed]), else what the line holds from the end of the
+     * prompt to the cursor. Empty when neither could say.
+     */
     private var commandText = ""
 
     /**
@@ -211,6 +217,22 @@ internal class NativeTerminalHistory {
      * comes; only that input looks at the buffer, the rest is typed after the prompt.
      */
     private var prompt: String? = null
+
+    /**
+     * The prompt of the line a Ctrl-C or a Ctrl-Z was pressed on. Ctrl-C draws a new prompt, and so does a Ctrl-Z that stops a job,
+     * but a Ctrl-Z at an idle prompt draws nothing: the line stays as it was, with what was typed on it. Nothing is drawn yet when the
+     * key is sent, so the next input decides: a line that starts with this is still that line, and its prompt is this, not whatever
+     * the line holds now. A blank prompt is not kept, it says nothing about the one that follows.
+     */
+    private var kept: String? = null
+
+    /**
+     * What the keys sent since the last Enter spell: text, less what Backspace and Ctrl-U took off. Any other key stays in it as the
+     * character it sent, which no row holds, so a line the keys did more to than type on (Tab, an arrow, Ctrl-W, a paste) is not
+     * guessed at. A key typed while a command runs reads the row where the tty echoes it, which holds no prompt for [prompt] to be, and
+     * the shell takes what was typed ahead into its next line: that line ends with this, and is the command when it does.
+     */
+    private var typed = ""
 
     /**
      * What the last command's row said when its emulator was replaced ([replaced]). The row number is of a buffer that
@@ -225,12 +247,14 @@ internal class NativeTerminalHistory {
         enterText = ""
         commandText = ""
         prompt = null
+        kept = null
+        typed = ""
         carried = null
     }
 
     fun send(text: String, snapshot: () -> TerminalBufferSnapshot, transmit: (String) -> Boolean): Boolean {
         val enter = '\r' in text || '\n' in text
-        // A stopped command gives way to a new prompt, as an Enter does.
+        // A stopped command usually gives way to a new prompt, as an Enter does, but a Ctrl-Z at an idle prompt does not ([kept]).
         val interrupt = text.any { it == '\u0003' || it == '\u001a' }
         // Read before sending: a later echo may already have moved the cursor to another row.
         val buffer = if (enter || (prompt == null && !interrupt)) snapshot() else null
@@ -238,17 +262,50 @@ internal class NativeTerminalHistory {
         if (buffer != null) {
             val line = lineToCursor(buffer)
             if (enter) {
-                commandRow = buffer.cursorRow
-                enterText = buffer.lines.getOrNull(commandRow)?.text?.take(buffer.cursorColumn)?.trimEnd(::isJsSpace).orEmpty()
-                commandText = prompt?.takeIf(line::startsWith)?.let { line.substring(it.length).trim(::isJsSpace) }.orEmpty()
+                // The read may be the screen alone ([TerminalBufferSnapshot.firstRow]): the row is kept as the whole buffer numbers it.
+                commandRow = buffer.firstRow + buffer.cursorRow
+                enterText = buffer.lines.getOrNull(buffer.cursorRow)?.text?.take(buffer.cursorColumn)?.trimEnd(::isJsSpace).orEmpty()
+                commandText = commandIn(line)
                 carried = null
             } else if (!buffer.alternateScreen) {
                 // In the alternate screen the keys are an editor's, not typed at a prompt.
-                prompt = line
+                prompt = kept?.takeIf(line::startsWith) ?: line
             }
         }
-        if (enter || interrupt) prompt = null
+        typed = typedAfter(text)
+        if (enter) {
+            prompt = null
+            kept = null
+        } else if (interrupt) {
+            prompt?.let { kept = it.takeUnless { word -> word.all(::isJsSpace) } }
+            prompt = null
+        }
         return true
+    }
+
+    /**
+     * What was typed for the command whose Enter is being sent, from the cursor's [line]. What the keys spelled, when the line ends
+     * with it ([endsWithCommand]); that is the one that holds when the keys were typed before the prompt was there. Otherwise what
+     * follows the prompt.
+     */
+    private fun commandIn(line: String): String {
+        val spelled = typed.trim(::isJsSpace)
+        if (spelled.isNotEmpty() && endsWithCommand(line, spelled)) return spelled
+        return (prompt ?: kept)?.takeIf(line::startsWith)?.let { line.substring(it.length).trim(::isJsSpace) }.orEmpty()
+    }
+
+    /** What [typed] is once [text] has been sent. An Enter starts the next line, so only what follows the last one is on it. */
+    private fun typedAfter(text: String): String {
+        val enter = text.lastIndexOfAny(charArrayOf('\r', '\n'))
+        var line = if (enter >= 0) "" else typed
+        for (char in text.substring(enter + 1)) {
+            line = when (char) {
+                '\u007f', '\b' -> if (line.isEmpty()) line else line.dropLast(Character.charCount(line.codePointBefore(line.length)))
+                '\u0015' -> ""
+                else -> line + char
+            }
+        }
+        return line
     }
 
     /**
@@ -296,11 +353,19 @@ internal class NativeTerminalHistory {
             var first = end
             while (first > 0 && lines[first - 1].isWrapped) first--
             val line = buildString { for (row in first..end) append(lines[row].text) }.trimEnd(::isJsSpace)
-            val before = line.length - commandText.length - 1
-            if (before >= 0 && line.endsWith(commandText) && !line[before].isLetterOrDigit()) return end
+            if (endsWithCommand(line, commandText)) return end
             end = first - 1
         }
         return -1
+    }
+
+    /**
+     * Whether [line] ends with [text] as a command does: with a prompt before it, and not in the middle of a word. `tools` is not an
+     * `ls`, and a row that is only the command is not a prompt followed by it.
+     */
+    private fun endsWithCommand(line: String, text: String): Boolean {
+        val before = line.length - text.length - 1
+        return before >= 0 && line.endsWith(text) && !line[before].isLetterOrDigit()
     }
 
     /**

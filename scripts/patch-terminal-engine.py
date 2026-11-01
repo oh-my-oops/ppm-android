@@ -61,6 +61,12 @@ def emulator(text):
         fun getCursorPosition(): Pair<Int, Int>
         /** Atomic history + screen read, with an absolute cursor row and screenStartRow. */
         fun getBufferSnapshot(): TerminalBufferSnapshot
+        /**
+         * [getBufferSnapshot] without the history, for a read made on every key: the screen's rows, and the history rows the screen's
+         * first line wraps on from (none unless that line began there). A full read copies every row the history holds, up to
+         * 50,000, under the lock the parser writes through. [TerminalBufferSnapshot.firstRow] is where its first row is in the whole buffer.
+         */
+        fun getScreenSnapshot(): TerminalBufferSnapshot
         fun getBufferLines(): List<TerminalBufferLine> = getBufferSnapshot().lines
         /** Start inclusive, end exclusive, relative to retained history. */
         fun getTextBetweenRows(start: Int, endExclusive: Int): String = getBufferSnapshot().getTextBetweenRows(start, endExclusive)
@@ -119,6 +125,19 @@ def emulator(text):
             TerminalBufferSnapshot(
                 (history + value.lines).map { TerminalBufferLine(it.text.replace('\\u0000', ' '), it.softWrapped) },
                 history.size + value.cursorRow, value.cursorCol, history.size, value.alternateScreen,
+            )
+        }
+
+        override fun getScreenSnapshot(): TerminalBufferSnapshot = synchronized(damageLock) {
+            if (!isClosed) processPendingUpdates()
+            val value = _snapshot.value
+            val history = if (value.alternateScreen) emptyList() else value.scrollback
+            // Each row of the history that wraps on into the next one belongs to the screen's first line.
+            var above = 0
+            while (above < history.size && history[history.size - 1 - above].softWrapped) above++
+            TerminalBufferSnapshot(
+                (history.subList(history.size - above, history.size) + value.lines).map { TerminalBufferLine(it.text.replace('\\u0000', ' '), it.softWrapped) },
+                above + value.cursorRow, value.cursorCol, above, value.alternateScreen, history.size - above,
             )
         }
 

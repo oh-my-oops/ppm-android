@@ -25,6 +25,11 @@ The added APIs are:
 - `emulator.getBufferSnapshot()`: one coherent read with `lines`, absolute `cursorRow`,
   `cursorColumn`, `screenStartRow`, and `alternateScreen`. Physical rows include retained
   history before the active screen. Alternate-screen reads exclude primary-screen history.
+- `emulator.getScreenSnapshot()`: the same read without the history, for what is read on every key. It holds the
+  screen's rows and, above them, only the history rows the screen's first line wraps on from, so the cursor's line is
+  whole in it and its cost does not grow with the scrollback (a full read copies up to 50,000 rows while the
+  parser's lock is held). `firstRow` says where its first row is in the whole buffer, so `firstRow + cursorRow` is
+  the cursor's row in a full read taken at the same moment.
 - `emulator.getBufferLines()`: `TerminalBufferLine(text, isWrapped)` values. `isWrapped`
   means this row continues onto the next row, matching libvterm's outgoing soft-wrap flag;
   this is the opposite row convention from xterm's incoming `IBufferLine.isWrapped`.

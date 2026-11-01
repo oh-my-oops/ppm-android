@@ -3,13 +3,18 @@ package org.connectbot.terminal
 /** [isWrapped] means this physical row continues on the next row (libvterm soft-wrap flag). */
 data class TerminalBufferLine(val text: String, val isWrapped: Boolean)
 
-/** One coherent read. All row indices refer to [lines], including retained history. */
+/**
+ * One coherent read. All row indices refer to [lines], including retained history. [firstRow] is where [lines] begins in the whole
+ * buffer: 0 for `getBufferSnapshot()`, more for `getScreenSnapshot()`, which leaves the history out, so `firstRow + cursorRow` is
+ * the cursor's row in the whole buffer whichever of the two was read.
+ */
 data class TerminalBufferSnapshot(
     val lines: List<TerminalBufferLine>,
     val cursorRow: Int,
     val cursorColumn: Int,
     val screenStartRow: Int,
     val alternateScreen: Boolean,
+    val firstRow: Int = 0,
 ) {
     /** Start inclusive, end exclusive; indices are bounded to this snapshot. */
     fun getTextBetweenRows(start: Int, endExclusive: Int): String {

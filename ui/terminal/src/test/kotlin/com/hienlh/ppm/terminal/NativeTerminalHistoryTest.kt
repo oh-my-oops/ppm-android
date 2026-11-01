@@ -35,6 +35,22 @@ class NativeTerminalHistoryTest {
     }
 
     @Test
+    fun `an Enter read from the screen alone keeps its row as the whole buffer numbers it`() {
+        val history = NativeTerminalHistory()
+        // The keys read the screen, whose first row is row 5000 of the buffer: the cursor is the 4th row of it.
+        val screen = TerminalBufferSnapshot(
+            listOf("a", "b", "c", "$ seq 1 3", "").map { TerminalBufferLine(it, false) }, cursorRow = 3, cursorColumn = 9, screenStartRow = 0,
+            alternateScreen = false, firstRow = 5_000,
+        )
+        history.send("\r", { screen }) { true }
+        // What the whole buffer holds later, the history above 5000 rows of it.
+        val rows = List(5_003) { TerminalBufferLine("old $it", false) } + listOf("$ seq 1 3", "1", "2", "3", "$ ").map { TerminalBufferLine(it, false) }
+        val after = TerminalBufferSnapshot(rows, cursorRow = 5_007, cursorColumn = 2, screenStartRow = 5_000, alternateScreen = false)
+        assertEquals("$ seq 1 3", history.lastCommand(after))
+        assertEquals("1\n2\n3\n$", history.lastOutput(after))
+    }
+
+    @Test
     fun `a known command keeps all of its output, however far up into the scrollback it has gone`() {
         val history = NativeTerminalHistory()
         history.send("\r", { snapshot("$ seq 1 6", cursor = 0) }) { true }
