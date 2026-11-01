@@ -32,7 +32,10 @@ The added APIs are:
   the flag of the row *after* the one it pushes (libvterm shifts its line infos before it calls the
   screen back, and `termSbPushline` reads index 1 after that), so `ScrollbackWrap` hands each pushed
   row the flag that came with the push before it. Rows pushed by a resize, in one batch, still share
-  one flag, as upstream.
+  one flag, as upstream. On the screen, libvterm sets a row's flag when text reaches the row below it and
+  the JNI hands it over only with a read of a cell of *that* row, so a line that went on in a later write
+  than its first row (a prompt that wraps while it is typed) kept "not wrapped" until `refreshRowsAbove`
+  (`WrapFlagRefresh.kt`) made each update read the row above the ones it damaged as well.
 - `emulator.getTextBetweenRows(start, endExclusive)` and `emulator.getScreenText()`:
   non-mutating reads that join soft wraps, preserve indentation and strip blank line tails.
   Range indices refer to currently retained history, so eviction/reset invalidates saved
@@ -86,6 +89,31 @@ The added APIs are:
   the handles of a finished selection still adjust it. Entering the mode selects nothing and leaving it clears nothing,
   as the web does. `dragSelects` and `SelectionManager.beginDragSelection` (`TerminalTouchSelection.kt`) are the
   testable half; the gesture itself is `touch_select` in `patch-terminal-engine.py` (guarded replaces).
+- Links, as the web's xterm has them (`web_links` in `patch-terminal-engine.py`; the rules are `TerminalWebLinks.kt`,
+  `WebUrl.kt` and `TerminalLinkInput.kt`, measured against xterm's `WebLinksAddon` and Chrome by
+  `scripts/gen-terminal-link-cases.ts` and `gen-terminal-dash-cases.py`). A link is a plain `http(s)` URL found by the
+  addon's regex, joined across soft-wrapped rows, or an OSC 8 hyperlink (`http(s)` only, as xterm's `OscLinkProvider`);
+  where both claim a cell the OSC 8 link wins and the plain one is dropped whole. Nothing is underlined until a *mouse*
+  is over a link, which then gets a solid underline and the hand pointer; an OSC 8 cell is dashed all the time. A link opens
+  for a mouse click that went down and came up on it, and never for a touch or a stylus (the web's `touchend` handler
+  answers every tap, so no click follows it). A plain URL goes to `onHyperlinkClick`; an OSC 8 one goes to
+  `onOsc8HyperlinkClick` (falling back to `onHyperlinkClick`) so the caller can ask first, as the web's default does with
+  `confirm(...)`. A hovered link's underline and an OSC 8 cell's dashes have Chrome's thickness and distance under the
+  baseline; the underline an SGR style asks for (1 to 3) is still upstream's one-pixel line.
+  `TerminalEmulator.autoDetectUrls` is no longer read by drawing or tapping and stays `false`. Limits: an OSC 8 link is
+  on one row only (`OscParser` drops one that wraps, upstream), and a different Unicode version in ICU than in the
+  browser can split a URL at a character one of them does not know.
+- OSC 8 links stay on their rows while the screen scrolls. libvterm merges the scrolls of a write: each row it pushes
+  into the history, and each OSC with the cursor's row, reaches Kotlin as it happens, but the one `moverect` only when the
+  write is flushed. Upstream kept segments on the rows the screen had before the write, so a write that scrolled gave
+  every pushed row the top row's links and put a link written after a scroll on a row about to move (a screenful of `ls
+  --hyperlink`, or lines arriving faster than the 16 ms between snapshots). The segments now move up
+  one row with each push, as the rows do, and the `moverect` moves the cells only (`shiftSegmentsUp`,
+  `segmentsMovedByPushes`); a pushed row keeps only a link whose text is still under it. What cannot be told from the pushes
+  is dropped rather than left on a wrong row: a scroll region that stops above the last row, or a write that also scrolled
+  the other way. A resize is not a scroll: the rows it pushes get their own links, the screen's segments stay where they
+  were, as before. `SegmentScrollTest` feeds the emulator libvterm's order of callbacks; `verifyLinksAcrossScrolls` runs it
+  through the real JNI.
 - With `imeMode = CommittedText`, a view that lost the focus tells the IME it is no editor once nothing else took the
   focus (`onCreateInputConnection` answers `null` with `TYPE_NULL`, as Chrome does for a blurred textarea), and asks for a
   new editor, then reports the caret moved and came back, when the focus returns.
@@ -106,8 +134,9 @@ adb -s emulator-5582 shell am instrument -w org.connectbot.terminal.test/org.con
 ```
 
 The instrumentation launches no app activity and uses its own package. It tests JNI linkage,
-scrollback limits, read-only text/cursor access, alternate screens, reset from an unfinished OSC,
-palette retention, close/late work, actual truecolor/inverse painting and all three cursor shapes.
+scrollback limits, wrapped lines and wrap flags in the history and across writes, links (OSC 8, plain, wrapped, in the
+history and on their own rows while the screen scrolls), read-only text/cursor access, alternate screens, reset from an
+unfinished OSC, palette retention, close/late work, actual truecolor/inverse painting and all three cursor shapes.
 Unit tests cover 556 fixtures generated from the web's xterm colour functions, range/wrap handling,
 decorative-glyph exclusions, cache separation, non-mutating selection reads, measured action
 geometry, viewport clipping, and fully/partially offscreen selections.

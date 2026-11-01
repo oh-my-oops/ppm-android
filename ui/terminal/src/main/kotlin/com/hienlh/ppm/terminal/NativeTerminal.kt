@@ -83,7 +83,8 @@ class NativeTerminal(
             onKeyboardInput = { if (!closed && ownGeneration == generation) sendBytes(it) },
             onResize = { if (!closed && ownGeneration == generation) controller.resize(it.columns, it.rows) },
             onClipboardCopy = { if (!closed && ownGeneration == generation) copyToClipboard(it) },
-            autoDetectUrls = true,
+            // The engine's own scan underlined every URL and opened one on any tap. A link is found where the web finds one, for a mouse.
+            autoDetectUrls = false,
             maxScrollbackLines = 50_000,
         )
     }

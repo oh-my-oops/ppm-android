@@ -1,12 +1,8 @@
 package com.hienlh.ppm.app.ui
 
 import android.content.ClipData
-import android.content.ActivityNotFoundException
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,12 +16,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.input.rememberTextFieldState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -67,11 +60,8 @@ import com.hienlh.ppm.state.terminal.MobileKey
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.state.terminal.TerminalText
 import com.hienlh.ppm.terminal.TerminalFonts
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.connectbot.terminal.ModifierManager
 import org.connectbot.terminal.ComposeController
 import org.connectbot.terminal.ImeShortcutInputMode
@@ -97,6 +87,7 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     var selecting by remember(emulator) { mutableStateOf(false) }
     var keyboardRequested by remember { mutableStateOf(false) }
     var links by remember { mutableStateOf<List<String>?>(null) }
+    var oscLink by remember { mutableStateOf<String?>(null) }
     val modifiers = remember(emulator) { TerminalModifiers() }
     val focus = remember { FocusRequester() }
     val visible = LocalWindowContentVisible.current
@@ -168,7 +159,7 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
         model.terminalToChat(draft.text, draft.label, session.project)
         model.toast(ErrorToastMessage("Sent to chat", kind = ErrorToastMessage.Kind.SUCCESS, durationMillis = TERMINAL_TOAST_MS))
     }
-    fun openLink(value: String) = openTerminalLink(context, value) {
+    fun openLink(value: String) = openInBrowser(context, value) {
         model.toast(ErrorToastMessage("No browser is available to open this link"))
     }
     Column(Modifier.fillMaxSize().background(tokens.bgSolid.color)) {
@@ -244,7 +235,9 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
                     }
                 },
                 onPasteRequest = ::paste,
+                // A plain address opens at once, as the web's `WebLinksAddon` does; an OSC 8 one asks first, as xterm's own handler does.
                 onHyperlinkClick = ::openLink,
+                onOsc8HyperlinkClick = { oscLink = it },
             )
         }
         TerminalMobileToolbar(
@@ -271,7 +264,21 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
             onOpenLinks = { links = session.bufferUrls() },
         )
     }
-    links?.let { urls -> TerminalLinks(model, urls, onClose = { links = null }) }
+    oscLink?.let { uri -> Osc8LinkConfirm(uri, open = ::openLink, onDismiss = { oscLink = null }) }
+    links?.let { urls ->
+        TerminalLinksSheet(
+            urls = urls,
+            scope = model.scope,
+            onClose = { links = null },
+            open = ::openLink,
+            copy = { url -> runCatching { clipboard.setPrimaryClip(ClipData.newPlainText("Link", url)) }.isSuccess },
+            toast = model::toast,
+            deliver = { url ->
+                val api = model.api ?: throw IllegalStateException("Not connected")
+                api.call("POST", "/api/loopback/callback", body = buildJsonObject { put("url", url) })
+            },
+        )
+    }
 }
 
 /** How long terminal-tab.tsx's toasts stay (`duration: 1500`). */
@@ -300,58 +307,5 @@ private fun TerminalAction(label: String, icon: ProductIcon? = null, compact: Bo
         val color = tokens.text.color
         if (icon != null) PpmIcon(icon, if (compact) 10.dp else 16.dp, color)
         if (icon == null || compact) BasicText(label, Modifier.then(if (icon != null) Modifier.padding(start = 4.dp) else Modifier), style = ppmText(12f, kind = if (icon == null) FontKind.MONO else FontKind.SANS, lineHeight = 16f).copy(color = color))
-    }
-}
-
-private fun openTerminalLink(context: Context, value: String, unavailable: () -> Unit) {
-    val url = value.toHttpUrlOrNull() ?: return
-    try {
-        CustomTabsIntent.Builder().setShowTitle(true).build().apply {
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }.launchUrl(context, Uri.parse(url.toString()))
-    } catch (_: ActivityNotFoundException) { unavailable() }
-}
-
-@Composable
-private fun TerminalLinks(model: AppModel, urls: List<String>, onClose: () -> Unit) {
-    val context = LocalContext.current
-    val tokens = LocalPpmTokens.current
-    val callback = rememberTextFieldState()
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val loopback = urls.any { TerminalText.loopbackRedirectPort(it) != null }
-    BottomSheet(onClose, Modifier.heightIn(max = 560.dp)) {
-        BasicText(if (urls.isEmpty()) "Links in terminal" else "Links in terminal (${urls.size})", Modifier.padding(16.dp), style = ppmText(12f).copy(color = tokens.text2.color))
-        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(8.dp)) {
-            if (urls.isEmpty()) BasicText("No links found in the visible scrollback.", Modifier.padding(24.dp), style = ppmText(14f).copy(color = tokens.text2.color))
-            for (url in urls) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                BasicText(url, Modifier.weight(1f).ppmClickable {
-                    openTerminalLink(context, url) { model.toast(ErrorToastMessage("No browser is available to open this link")) }
-                    onClose()
-                }.padding(12.dp), style = ppmText(12f, kind = FontKind.MONO).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                TerminalAction("Copy link", ProductIcon.Copy) {
-                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Link", url))
-                    onClose()
-                }
-            }
-        }
-        if (loopback) Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            BasicText("After signing in, paste the localhost callback address here to finish the waiting command on your machine.", style = ppmText(12f).copy(color = tokens.text2.color))
-            FormInput(callback, "http://127.0.0.1:54132/oauth/callback?code=…", Modifier.fillMaxWidth(), height = 44.dp)
-            error?.let { BasicText(it, style = ppmText(12f).copy(color = tokens.error.color)) }
-            PrimaryButton("Finish login", enabled = !busy && TerminalText.isDeliverableCallback(callback.text.toString())) {
-                val api = model.api ?: return@PrimaryButton
-                busy = true
-                model.scope.launch {
-                    try {
-                        api.call("POST", "/api/loopback/callback", body = buildJsonObject { put("url", callback.text.toString().trim()) })
-                        model.toast(ErrorToastMessage("Sent to the waiting command", kind = ErrorToastMessage.Kind.SUCCESS))
-                        onClose()
-                    } catch (e: CancellationException) { throw e
-                    } catch (e: Exception) { error = e.message
-                    } finally { busy = false }
-                }
-            }
-        }
     }
 }

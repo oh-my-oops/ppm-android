@@ -156,6 +156,8 @@ def emulator(text):
             pendingSemanticSegments.clear()
             movedSegmentRows.clear()
             semanticSegmentTexts.clear()
+            segmentRowsShifted = 0
+            resizePushes = -1
             damagePosted = false
             nextSnapshotNanos = System.nanoTime()
             cursorMoved = false
@@ -206,6 +208,99 @@ def emulator(text):
     text = replace(text, "softWrapped = softWrapped, semanticSegments = line0Segments)", "softWrapped = scrollbackWrap.push(softWrapped), semanticSegments = line0Segments)")
     text = replace(text, "            imageStore.trimHistory(0)\n            scrollback.clear()\n", "            imageStore.trimHistory(0)\n            scrollback.clear()\n            scrollbackWrap.reset()\n")
     text = replace(text, "            scrollback.removeLast()\n            scrollbackDirty = true", "            scrollbackWrap.pop(scrollback.removeLast().softWrapped)\n            scrollbackDirty = true")
+    # libvterm merges the scrolls of one write (VTERM_DAMAGE_SCROLL): it sends each row it pushes into the history, and every OSC
+    # with the cursor's row, as they happen, but the one moverect for all of them only when the write is flushed. Segments stayed
+    # on the rows the screen had before the write, so every pushed row got the top row's links and a link written after a scroll
+    # landed on a row that was about to move. They now move up one row with every row pushed, as the rows themselves do; the
+    # moverect then moves the cells only (see SegmentScrollTest).
+    text = replace(text, "    private val pendingSemanticSegments = mutableListOf<PendingSemanticSegment>()\n",
+                   "    private val pendingSemanticSegments = mutableListOf<PendingSemanticSegment>()\n" + indent(dedent('''
+        /** Rows by which the pushes of the write in progress already moved [currentLines]' segments; the one moverect must not move them again. */
+        private var segmentRowsShifted = 0
+
+        /** -1 outside a resize; during one, how many rows it has pushed (its rows are not scrolls, and the screen's segments stay where they are). */
+        private var resizePushes = -1
+
+        /** The segments of the row that scrolls off the top, as long as the cells pushed are still what they were made for. */
+        private fun scrolledOutSegments(pushed: PackedCells): List<SemanticSegment> {
+            val top = if (resizePushes >= 0) resizePushes++ else 0
+            return currentLines.getOrNull(top)?.semanticSegments.orEmpty().filter { segment ->
+                isValidCellRange(segment.startCol, segment.endCol, pushed.size) &&
+                    segmentTextStillMatches(top, segment, pushed) &&
+                    (segment.semanticType != SemanticType.HYPERLINK || cellText(pushed, segment.startCol, segment.endCol).any { it != '\\u0000' && !it.isWhitespace() })
+            }
+        }
+
+        /** What a push does to the rows: every row's segments move up one, and the bottom row has none. */
+        private fun shiftSegmentsUp() {
+            if (resizePushes >= 0) return
+            segmentRowsShifted++
+            if (pendingSemanticSegments.isEmpty() && semanticSegmentTexts.isEmpty() && currentLines.none { it.semanticSegments.isNotEmpty() }) return
+            val before = currentLines
+            currentLines = before.mapIndexedTo(ArrayList(before.size)) { row, line ->
+                val below = before.getOrNull(row + 1)?.semanticSegments.orEmpty()
+                if (line.semanticSegments.isEmpty() && below.isEmpty()) line else line.copy(semanticSegments = below)
+            }
+            val pending = pendingSemanticSegments.filter { it.row > 0 }.map { it.copy(row = it.row - 1) }
+            pendingSemanticSegments.clear()
+            pendingSemanticSegments.addAll(pending)
+            val texts = semanticSegmentTexts.entries.filter { it.key.row > 0 }.map { it.key.copy(row = it.key.row - 1) to it.value }
+            semanticSegmentTexts.clear()
+            semanticSegmentTexts.putAll(texts)
+        }
+
+        /** The screen's segments are not guessed at when a scroll cannot be told from the pushes: they are dropped, never left on a wrong row. */
+        private fun dropScreenSegments() {
+            currentLines = currentLines.mapTo(ArrayList(currentLines.size)) { if (it.semanticSegments.isEmpty()) it else it.copy(semanticSegments = emptyList()) }
+            pendingSemanticSegments.clear()
+            semanticSegmentTexts.clear()
+        }
+
+        /**
+         * Whether the pushes already moved the segments as far as this moverect moves the cells. They did when the scroll was
+         * the whole screen's and as long as the pushes: a write that also scrolled the other way, or a region that stops above
+         * the last row, is not.
+         */
+        private fun segmentsMovedByPushes(dest: TermRect, src: TermRect): Boolean {
+            val shifted = segmentRowsShifted
+            segmentRowsShifted = 0
+            if (shifted == 0) return false
+            val wholeScreen = dest.startRow == 0 && src.endRow == rows && dest.startCol == 0 && src.startCol == 0 && dest.endCol == cols && src.endCol == cols
+            if (wholeScreen && src.startRow == shifted) return true
+            dropScreenSegments()
+            return false
+        }
+
+        /** The end of a write. A scroll of more rows than the screen has is flushed with no moverect, so the count must not outlive the write. */
+        internal fun endScrollBatch() = synchronized(damageLock) { segmentRowsShifted = 0 }
+    '''), "    "))
+    text = replace(text,
+                   "            // FIRST: Preserve semantic segments from line 0 (the line being scrolled out)\n"
+                   "            // This must happen BEFORE we shift segments, since moverect was already called\n"
+                   "            val line0Segments = if (currentLines.isNotEmpty()) {\n"
+                   "                currentLines[0].semanticSegments\n"
+                   "            } else {\n"
+                   "                emptyList()\n"
+                   "            }\n",
+                   "            // The row on top is the one that scrolls off: its own links, whatever the rows below are about to become.\n"
+                   "            val line0Segments = scrolledOutSegments(cellList)\n"
+                   "            shiftSegmentsUp()\n")
+    text = replace(text, "        synchronized(damageLock) {\n            if (\n                dest.startCol == 0 && src.startCol == 0 &&",
+                   "        synchronized(damageLock) {\n            val segmentsMoved = segmentsMovedByPushes(dest, src)\n            if (\n                dest.startCol == 0 && src.startCol == 0 &&")
+    text = replace(text, "                        updated[destRow] = previous[srcRow].copy(row = destRow)\n",
+                   "                        updated[destRow] = previous[srcRow].copy(row = destRow, semanticSegments = previous[if (segmentsMoved) destRow else srcRow].semanticSegments)\n")
+    text = replace(text, "                    if (key.row !in src.startRow until src.endRow) return@mapNotNull null\n",
+                   "                    if (segmentsMoved || key.row !in src.startRow until src.endRow) return@mapNotNull null\n")
+    text = replace(text, "                semanticSegmentTexts.keys.removeAll { it.row in dest.startRow until dest.endRow }\n                semanticSegmentTexts.putAll(movedTexts)",
+                   "                if (!segmentsMoved) semanticSegmentTexts.keys.removeAll { it.row in dest.startRow until dest.endRow }\n                semanticSegmentTexts.putAll(movedTexts)")
+    text = replace(text, "        terminalNative.writeInput(data, offset, length)\n", "        terminalNative.writeInput(data, offset, length)\n        endScrollBatch()\n")
+    text = replace(text, "        terminalNative.writeInput(buffer, length)\n", "        terminalNative.writeInput(buffer, length)\n        endScrollBatch()\n")
+    text = replace(text, "            terminalNative.resize(newRows, newCols)\n            rows = newRows\n",
+                   "            resizePushes = 0\n            try {\n                terminalNative.resize(newRows, newCols)\n            } finally {\n                resizePushes = -1\n            }\n            rows = newRows\n")
+    # A screen row's flag is set when text reaches the row below it and is read only with a cell of its own row, so a
+    # line that wraps in a later write than its first row kept the flag of the first (see refreshRowsAbove).
+    text = replace(text, "        var builder: PackedCells.Builder? = null\n        screenTransfer.fetch(",
+                   "        refreshRowsAbove(transferRanges, rows, cols, { currentLines[it].cells.size }) { row, col -> currentLines[row].cells.width(col) }\n        var builder: PackedCells.Builder? = null\n        screenTransfer.fetch(")
     return text
 
 
@@ -303,7 +398,7 @@ def terminal(text):
 """
     text = replace(text, marker, addition + marker)
     text = replace(text, "                selectionBackgroundColor.takeUnless { it == Color.Unspecified } ?: Color(0xFFB3D7FF)", "                (selectionBackgroundColor.takeUnless { it == Color.Unspecified } ?: Color(0xFFB3D7FF))\n                    .compositeOver(if (cells.flags(col) and 32 != 0) cells.foreground(col) else cells.background(col))")
-    return touch_select(tap_asks_for_focus(text))
+    return web_links(touch_select(tap_asks_for_focus(text)))
 
 
 def tap_asks_for_focus(text):
@@ -361,11 +456,165 @@ def touch_select(text):
 """ + marker)
     text = replace(text, "                        val isDoubleTap = (down.uptimeMillis", "                        val isDoubleTap = !currentTouchSelect && (down.uptimeMillis")
     text = replace(text, "                        val longPressJob = if (gestureType == GestureType.Undetermined) {", "                        val longPressJob = if (gestureType == GestureType.Undetermined && !currentTouchSelect) {")
-    text = replace(text, "                                        gestureType = if (pagingCandidate && singleTouch &&", """                                        gestureType = if (dragSelects(currentTouchSelect, singleTouch)) {
+    return replace(text, "                                        gestureType = if (pagingCandidate && singleTouch &&", """                                        gestureType = if (dragSelects(currentTouchSelect, singleTouch)) {
                                             beginTouchSelection()
                                             GestureType.Selection
                                         } else if (pagingCandidate && singleTouch &&""")
-    return replace(text, "                                    if (hyperlinkUrl != null) {", "                                    if (hyperlinkUrl != null && !currentTouchSelect) {")
+
+
+def web_links(text):
+    # Links as the web's terminal has them (TerminalWebLinks and TerminalLinkInput hold the rules; this is where Terminal asks).
+    # xterm finds a plain http(s) URL itself, and an OSC 8 one from the cells. It underlines a link only while a mouse is over it,
+    # opens it only for a mouse click that went down and came up on it, and draws an OSC 8 cell dashed all the time. Upstream
+    # underlines every URL it detects all the time and opens one on any tap, a finger's included, which is what scrolling through
+    # output with a thumb does all day.
+    text = replace(text, "import androidx.compose.ui.input.pointer.PointerType\n", "import androidx.compose.ui.input.pointer.PointerEventType\nimport androidx.compose.ui.input.pointer.PointerIcon\nimport androidx.compose.ui.input.pointer.PointerType\nimport androidx.compose.ui.input.pointer.pointerHoverIcon\n")
+    text = replace(text, "import androidx.compose.ui.unit.TextUnit\n", "import androidx.compose.ui.unit.IntOffset\nimport androidx.compose.ui.unit.TextUnit\n")
+    # An OSC 8 link asks before it opens, as the web's own default does (`confirm(...)`); a plain URL opens at once.
+    text = replace(text, "    touchSelect: Boolean = false,\n) {\n    require(minimumContrastRatio.isFinite() && minimumContrastRatio in 1.0..21.0)", "    touchSelect: Boolean = false,\n    onOsc8HyperlinkClick: ((String) -> Unit)? = null,\n) {\n    require(minimumContrastRatio.isFinite() && minimumContrastRatio in 1.0..21.0)", 2)
+    text = replace(text, "        touchSelect = touchSelect,", "        touchSelect = touchSelect,\n        onOsc8HyperlinkClick = onOsc8HyperlinkClick,")
+    text = replace(text, "    val currentOnHyperlinkClick by rememberUpdatedState(onHyperlinkClick)\n", "    val currentOnHyperlinkClick by rememberUpdatedState(onHyperlinkClick)\n    val currentOnOsc8HyperlinkClick by rememberUpdatedState(onOsc8HyperlinkClick ?: onHyperlinkClick)\n")
+    # The cell a mouse is over, apart from the gesture below: a hover presses nothing, and a finger never sets one.
+    text = replace(text, "    // Scroll animation state\n", """    // xterm's Linkifier asks for the link under the mouse on every move, underlines it and gives it the hand pointer.
+    var hoverCell by remember(terminalEmulator) { mutableStateOf<IntOffset?>(null) }
+    fun cellAt(position: Offset): IntOffset? {
+        val snapshot = screenState.snapshot
+        if (position.x < 0f || position.y < 0f || position.x >= snapshot.cols * baseCharWidth || position.y >= snapshot.rows * baseCharHeight) return null
+        return IntOffset((position.x / baseCharWidth).toInt(), (position.y / baseCharHeight).toInt())
+    }
+    fun linkAtCell(cell: IntOffset): TerminalLink? =
+        screenState.linkAt(cell.y, textPaint.logicalColumn(screenState, cell.y, cell.x, baseCharWidth))
+    val hoverLink by remember(terminalEmulator, screenState) { derivedStateOf { hoverCell?.let(::linkAtCell) } }
+
+    // Scroll animation state
+""")
+    text = replace(text, "                ).pointerInput(terminalEmulator, baseCharWidth, baseCharHeight) {\n                val touchSlopSquared =\n", """                ).pointerHoverIcon(if (hoverLink != null) PointerIcon.Hand else PointerIcon.Text)
+                .pointerInput(terminalEmulator, baseCharWidth, baseCharHeight) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull() ?: continue
+                            if (change.type != PointerType.Mouse) continue
+                            hoverCell = if (event.type == PointerEventType.Exit) null else cellAt(change.position)
+                        }
+                    }
+                }
+                .pointerInput(terminalEmulator, baseCharWidth, baseCharHeight) {
+                val touchSlopSquared =
+""")
+    text = replace(text, "                        val isFinger = down.type == PointerType.Touch\n", "                        val isFinger = down.type == PointerType.Touch\n                        val downLink = if (down.type == PointerType.Mouse) cellAt(down.position)?.let(::linkAtCell) else null\n")
+    text = replace(text, """                                // Otherwise, check for hyperlink or forward the tap.
+                                if (selectionManager.mode != SelectionMode.NONE) {
+                                    selectionManager.clearSelection()
+                                } else {
+                                    // Check if tap is on a hyperlink
+                                    val tapCol = (down.position.x / baseCharWidth).toInt()
+                                        .coerceIn(0, screenState.snapshot.cols - 1)
+                                    val tapRow = (down.position.y / baseCharHeight).toInt()
+                                        .coerceIn(0, screenState.snapshot.rows - 1)
+                                    val hyperlinkUrl = screenState.getHyperlinkUrlAt(
+                                        tapRow,
+                                        textPaint.logicalColumn(screenState, tapRow, tapCol, baseCharWidth),
+                                        terminalEmulator.autoDetectUrls,
+                                    )
+
+                                    if (hyperlinkUrl != null) {
+                                        // User tapped on a hyperlink
+                                        currentOnHyperlinkClick(hyperlinkUrl)
+                                    }
+                                }
+                                // Every tap asks for the focus: one that cleared a selection or opened a link too.
+""", """                                if (selectionManager.mode != SelectionMode.NONE) {
+                                    selectionManager.clearSelection()
+                                }
+                                // A link opens for a mouse click that went down and came up on it, and never for a finger: the page's
+                                // touchend handler answers every tap itself, so the browser sends no click after it.
+                                linkToOpen(down.type == PointerType.Mouse, downLink, cellAt(autoScrollPointer)?.let(::linkAtCell))?.let { link ->
+                                    if (link.osc8) currentOnOsc8HyperlinkClick(link.url) else currentOnHyperlinkClick(link.url)
+                                }
+                                // Every tap asks for the focus, one that cleared a selection too.
+""")
+    # The hovered link's cells reach drawLine as its mask, as the detected ones did.
+    text = replace(text, "    autoDetectUrls: Boolean,\n    selectionManager: SelectionManager,\n", "    autoDetectUrls: Boolean,\n    hoverLink: TerminalLink?,\n    selectionManager: SelectionManager,\n")
+    text = replace(text, "                        autoDetectUrls = terminalEmulator.autoDetectUrls,\n                        selectionManager = selectionManager,\n", "                        autoDetectUrls = terminalEmulator.autoDetectUrls,\n                        hoverLink = hoverLink,\n                        selectionManager = selectionManager,\n")
+    text = replace(text, """    // Cross-row URL detection depends on visible contents, not cursor/sequence updates.
+    val hyperlinkMasks = remember(screenState, autoDetectUrls) {
+        derivedStateOf {
+            if (!autoDetectUrls) {
+                emptyList()
+            } else {
+                List(screenState.snapshot.rows) { row ->
+                    BooleanArray(screenState.snapshot.cols) { col -> screenState.getHyperlinkUrlAt(row, col, autoDetectUrls = true) != null }
+                }
+            }
+        }
+    }
+""", """    // The cells xterm underlines while a link is hovered, row by row; none without a mouse over a link.
+    val hyperlinkMasks = remember(screenState, hoverLink) {
+        derivedStateOf {
+            val link = hoverLink
+            if (link == null) {
+                emptyList<BooleanArray?>()
+            } else {
+                val cols = screenState.snapshot.cols
+                val spans = hoverSpans(link, cols, screenState.snapshot.rows, screenState.visibleLineIndex(0)).associateBy { it.row }
+                List(screenState.snapshot.rows) { row -> spans[row]?.let { span -> BooleanArray(cols) { it >= span.start && it < span.end } } }
+            }
+        }
+    }
+""")
+    text = replace(text, "    var paintedStyle = -1\n    for (col in 0 until cells.size) {\n", "    var paintedStyle = -1\n    val oscRuns = line.semanticSegments.filter { it.semanticType == SemanticType.HYPERLINK && it.metadata != null && it.startCol < it.endCol }\n    for (col in 0 until cells.size) {\n")
+    text = replace(text, "        val hyperlink = hyperlinkMask?.getOrNull(col) ?: (line.getHyperlinkUrlAt(col, autoDetectUrls) != null)\n", "        val hovered = hyperlinkMask?.getOrNull(col) == true\n")
+    text = replace(text, """        if (underline != 0 || hyperlink || flags and 128 != 0) underlinePaint.color = fg.toArgb()
+        if (underline == 1 || hyperlink) {
+            canvas.drawLine(x, y + charBaseline + 2f, x + cellWidth, y + charBaseline + 2f, underlinePaint)
+        }
+        if (flags and 128 != 0) {
+            val strikeY = y + charBaseline + textPaint.fontMetrics.ascent * 0.35f
+            canvas.drawLine(x, strikeY, x + cellWidth, strikeY, underlinePaint)
+        }
+        if (underline == 2) {
+            drawDoubleUnderline(x, y + charBaseline, cellWidth, fg, underlinePaint)
+        }
+        if (underline == 3) {
+            drawCurlyUnderline(x, y + charBaseline, cellWidth, charWidth, fg, underlinePaint)
+        }
+""", """        val osc8 = if (hovered) null else oscRuns.firstOrNull { it.contains(col) }
+        if (underline != 0 || hovered || osc8 != null || flags and 128 != 0) underlinePaint.color = fg.toArgb()
+        if (hovered) {
+            // xterm's DOM renderer gives a hovered link's cells `text-decoration: underline`, over whatever they had: as thick and as
+            // far under the baseline as Chrome draws it (underlineThickness), where the cell's own underline is a hairline.
+            val linkThickness = underlineThickness(textPaint.textSize)
+            val linkY = underlineCenter(y + charBaseline, linkThickness)
+            underlinePaint.strokeWidth = linkThickness
+            canvas.drawLine(x, linkY, x + cellWidth, linkY, underlinePaint)
+            underlinePaint.strokeWidth = 1f
+        } else {
+            if (osc8 != null) {
+                // An OSC 8 cell is dashed whatever underline it asked for (`.xterm-underline-5`), and a link is one line of dashes.
+                if (col == osc8.startCol) {
+                    val last = minOf(osc8.endCol, cells.size) - 1
+                    val from = (shaped?.visualColumn(osc8.startCol) ?: osc8.startCol) * charWidth
+                    val to = ((shaped?.visualColumn(last) ?: last) + cells.width(last).coerceAtLeast(1)) * charWidth
+                    val linkThickness = underlineThickness(textPaint.textSize)
+                    drawDashedUnderline(canvas, underlinePaint, minOf(from, to), maxOf(from, to), underlineCenter(y + charBaseline, linkThickness), linkThickness)
+                }
+            } else if (underline == 1) {
+                canvas.drawLine(x, y + charBaseline + 2f, x + cellWidth, y + charBaseline + 2f, underlinePaint)
+            }
+            if (flags and 128 != 0) {
+                val strikeY = y + charBaseline + textPaint.fontMetrics.ascent * 0.35f
+                canvas.drawLine(x, strikeY, x + cellWidth, strikeY, underlinePaint)
+            }
+            if (osc8 == null && underline == 2) {
+                drawDoubleUnderline(x, y + charBaseline, cellWidth, fg, underlinePaint)
+            }
+            if (osc8 == null && underline == 3) {
+                drawCurlyUnderline(x, y + charBaseline, cellWidth, charWidth, fg, underlinePaint)
+            }
+        }
+""")
+    return text
 
 
 def text_paint(text):
