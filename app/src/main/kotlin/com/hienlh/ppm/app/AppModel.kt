@@ -313,8 +313,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     var tabSortMode by mutableStateOf(prefs.get("tabSortMode") ?: "default")
         private set
 
+    /** Set when a server is opened; `internal` so a test can point a view at a fake one. */
     var api by mutableStateOf<ApiClient?>(null)
-        private set
+        internal set
 
     /** Each project's `/` list per provider (`slash-items-cache.ts`), for the open server. */
     var slashItems by mutableStateOf<SlashItemsStore?>(null)

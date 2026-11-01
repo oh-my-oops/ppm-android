@@ -85,9 +85,12 @@ internal fun FilePdfView(model: AppModel, raw: RawFile, path: String) {
         }
     }
     val pages = reader
+    // As the web's: a failed PDF or one still opening is a line of its own, with no page controls around it.
+    if (error != null) { FileNoteView(FileNote.Warning("Failed to load PDF.")); return }
+    if (pages == null) { FileNoteView(FileNote.Spinner); return }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            val count = pages?.sizes?.size ?: 0
+            val count = pages.sizes.size
             val current = if (count == 0) 0 else (list.firstVisibleItemIndex + 1).coerceAtMost(count)
             FileAction(ProductIcon.ChevronLeft, "Previous page", enabled = current > 1) { scope.launch { list.scrollToItem(current - 2) } }
             BasicText("$current / $count", style = ppmText(12f).copy(color = colors.text2.color))
@@ -121,8 +124,6 @@ internal fun FilePdfView(model: AppModel, raw: RawFile, path: String) {
             }
         }
         when {
-            error != null -> FileMessage("PDF unavailable", error)
-            pages == null -> FileMessage("Loading PDF…")
             pages.sizes.isEmpty() -> FileMessage("Empty PDF file")
             else -> BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
                 val density = LocalDensity.current

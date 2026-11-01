@@ -29,8 +29,8 @@ internal fun FileDocxView(model: AppModel, html: String) {
         catch (failure: Exception) { error = failure.message ?: "Could not prepare the document." }
     }
     when {
-        error != null -> FileMessage("Document unavailable", error)
-        safe == null -> FileMessage("Preparing document…")
+        error != null -> FileNoteView(FileNote.Warning("Failed to load document.", error))
+        safe == null -> FileNoteView(FileNote.Loading("Converting document..."))
         else -> DocxSurface(safe!!, onLink = { url ->
             try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
             catch (_: ActivityNotFoundException) { model.toast(ErrorToastMessage("No app can open this link.")) }

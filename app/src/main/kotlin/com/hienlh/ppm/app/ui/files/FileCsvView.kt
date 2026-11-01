@@ -62,7 +62,7 @@ internal fun FileCsvView(content: String, wrap: Boolean) {
     var document by remember(content) { mutableStateOf<CsvDocument?>(null) }
     LaunchedEffect(content) { document = withContext(Dispatchers.Default) { CsvDocument.parse(content) } }
     val csv = document
-    if (csv == null) { FileMessage("Loading CSV…"); return }
+    if (csv == null) { FileNoteView(FileNote.Spinner); return }
     if (csv.headers.isEmpty()) { FileMessage("Empty CSV file"); return }
     val colors = LocalPpmTokens.current
     val widths = remember(csv.headers.size) { mutableStateListOf<Float>().also { w -> repeat(csv.headers.size) { w.add(150f) } } }

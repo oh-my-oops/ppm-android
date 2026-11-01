@@ -59,8 +59,8 @@ internal fun FileImageView(raw: RawFile, path: String) {
     val decoded = remember(raw) { mutableStateOf<ToolImage?>(null) }
     LaunchedEffect(decoded) { decoded.value = withContext(Dispatchers.Default) { decodeFileImage(raw, path) } }
     val shown = decoded.value
-    if (shown == null) { FileMessage("Loading image…"); return }
-    if (shown !is ToolImage.Loaded) { FileMessage("Image unavailable", "This device could not decode the image."); return }
+    if (shown == null) { FileNoteView(FileNote.Spinner); return }
+    if (shown !is ToolImage.Loaded) { FileNoteView(FileNote.Warning("Failed to load image.")); return }
     val density = LocalDensity.current
     val colors = LocalPpmTokens.current
     val viewer = LocalImageViewer.current

@@ -106,6 +106,12 @@ private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean,
         else if (aiView == "preview") preview = true
     }
     val code = viewer !in setOf(FileDocumentViewer.IMAGE, FileDocumentViewer.PDF, FileDocumentViewer.DOCX) && (viewer != FileDocumentViewer.MARKDOWN || !preview)
+    // Until there is a file to show, or when it cannot be, the web shows one centred line, with no toolbar or path around it.
+    val note = fileNote(viewer, state)
+    if (note != null) {
+        FileNoteView(note, Modifier.fillMaxSize().background(colors.bgSolid.color))
+        return
+    }
     Column(Modifier.fillMaxSize().background(colors.bgSolid.color)) {
         if (showToolbar) Row(
             Modifier.fillMaxWidth().heightIn(min = if (mobile) 48.dp else 32.dp)
@@ -126,17 +132,8 @@ private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean,
             if (code) FileAction(ProductIcon.WrapText, "Wrap lines", active = wrap) { wrap = !wrap }
             if (controller != null) FileAction(ProductIcon.RefreshCw, "Refresh file", enabled = !state.loading) { controller.refresh() }
         }
-        val error = state.error
-        if (error != null) Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            BasicText(error, Modifier.weight(1f), style = ppmText(12f, lineHeight = 16f).copy(color = colors.text2.color))
-            FileAction(ProductIcon.RefreshCw, "Retry", label = "Retry") { controller?.refresh() }
-        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
-                state.cannotDisplay -> FileMessage("Cannot be displayed", "This file is binary or uses an unsupported text encoding.")
                 viewer == FileDocumentViewer.IMAGE && state.raw != null -> FileImageView(state.raw!!, path.orEmpty())
                 viewer == FileDocumentViewer.PDF && state.raw != null -> FilePdfView(model, state.raw!!, path.orEmpty())
                 state.content != null -> {
@@ -147,7 +144,6 @@ private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean,
                         fileCodeLanguage(path, tab.metaString("inlineLanguage") ?: tab.metaString("language")),
                         wrap, line, end, reveal)
                 }
-                state.loading || error == null -> FileMessage("Loading…")
             }
             if (state.loading && (state.content != null || state.raw != null)) {
                 BasicText("Refreshing…", Modifier.align(Alignment.TopEnd).background(colors.bgSolid.color).padding(8.dp),

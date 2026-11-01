@@ -68,7 +68,7 @@ internal fun FileCodeView(
         prepared.value = withContext(Dispatchers.Default) { FileCodeLines(content) }
     }
     val document = prepared.value
-    if (document == null) { FileMessage("Loading code…"); return }
+    if (document == null) { FileNoteView(FileNote.Spinner); return }
     val tokens = remember(document, language, theme) { mutableStateOf<FileCodeTokens?>(null) }
     LaunchedEffect(tokens) {
         val code = highlighter.cached(document.text, language, theme) ?: highlighter.highlight(document.text, language, theme)
