@@ -1,37 +1,41 @@
 package com.hienlh.ppm.app
 
 import android.app.Application
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.ProcessLifecycleOwner
 import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.SyntaxHighlighter
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
- * Holds the [AppModel] for the life of the process, so the chats stay connected while the
- * activity is recreated or the app sits in the background; tells it when the app comes to the
- * front and when it leaves.
+ * Retains the primary model and each document task's model across Activity recreation.
+ * Activities own visibility; finishing a document task releases only that task's model.
  */
 class PpmApplication : Application() {
     private var model: AppModel? = null
+    private val windowModels = mutableMapOf<String, AppModel>()
+    private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    fun windowModel(id: String, launch: DebugLaunch?, serverId: String?, project: String?): AppModel =
+        windowModels.getOrPut(id) {
+            AppModel(this, launch, id, project).also { next ->
+                if (PrefsStore(this).get("window.$id.selectedServer") == null) {
+                    serverId?.let { name -> next.store.servers.value.firstOrNull { it.id == name }?.let(next.store::select) }
+                }
+            }
+        }
+
+    fun releaseWindow(id: String) { windowModels.remove(id)?.disposeWindow(cleanupScope) }
 
     /** The model, made on first use with the [launch] the first activity was started with. */
     fun model(launch: DebugLaunch?): AppModel = model ?: AppModel(this, launch).also { model = it }
 
     override fun onCreate() {
         super.onCreate()
+        // Once per process; creating another window must not remove live attachment copies.
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { clearAttachmentCopies(this@PpmApplication) }
         SyntaxHighlighter.get(this).warm()
         PpmFonts.warm()
-        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) {
-                val model = model ?: return
-                model.windowVisible = true
-                model.becameActive()
-            }
-
-            override fun onStop(owner: LifecycleOwner) {
-                model?.windowVisible = false
-            }
-        })
     }
 }

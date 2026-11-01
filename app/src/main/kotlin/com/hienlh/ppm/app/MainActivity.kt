@@ -11,18 +11,37 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.hienlh.ppm.app.ui.PpmRoot
 
-class MainActivity : ComponentActivity() {
-    private lateinit var model: AppModel
+open class MainActivity : ComponentActivity() {
+    protected lateinit var model: AppModel
     private lateinit var shortcuts: KeyboardShortcuts
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        model = (application as PpmApplication).model(DebugLaunch.from(this, intent))
+        model = createModel(application as PpmApplication)
         shortcuts = KeyboardShortcuts(model)
         enableEdgeToEdge()
         setContent { PpmRoot(model, beforeIme = shortcuts::beforeIme) }
         // Recreated after the process went: its link was opened then.
         if (savedInstanceState == null) openLink(intent)
+    }
+
+    protected open fun createModel(app: PpmApplication): AppModel = app.model(DebugLaunch.from(this, intent))
+
+    override fun onStart() {
+        super.onStart()
+        model.windowVisible = true
+        model.store.refresh()
+        model.becameActive()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && ::model.isInitialized) model.refreshProjectRegistrations()
+    }
+
+    override fun onStop() {
+        model.windowVisible = false
+        super.onStop()
     }
 
     /** A `ppm://` link while the app runs (the activity is single in its task). */
@@ -46,7 +65,7 @@ class MainActivity : ComponentActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN && !event.isSystem && event.keyCode != KeyEvent.KEYCODE_ESCAPE) TextInputFocus.activate()
-        return shortcuts.dispatch(event) || super.dispatchKeyEvent(event)
+        return shortcuts.dispatch(event, nativeEditor = currentFocus?.onCheckIsTextEditor() == true) || super.dispatchKeyEvent(event)
     }
 
     override fun onProvideKeyboardShortcuts(data: MutableList<KeyboardShortcutGroup>, menu: Menu?, deviceId: Int) {

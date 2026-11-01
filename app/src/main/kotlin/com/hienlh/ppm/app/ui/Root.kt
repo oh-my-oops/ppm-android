@@ -144,7 +144,10 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
                 }
                 if (model.showSignIn) ConnectScreen(model, signIn = true, onCancel = { model.showSignIn = false })
                 if (model.addingServer) ConnectScreen(model, signIn = false, onCancel = { model.addingServer = false })
+                model.projectActions?.let { project -> key(model.api, project.name) { com.hienlh.ppm.app.ui.projects.ProjectActionsDialog(model, project) } }
+                if (model.addingProject) key(model.api) { com.hienlh.ppm.app.ui.projects.AddProjectDialog(model) }
                 Dialogs(model)
+                model.explorerSheetPath?.let { com.hienlh.ppm.app.ui.osexplorer.HostExplorerSheet(model, it) }
                 model.agentSheet?.let { AgentSessionSheet(model, it) }
                 model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }
                 model.backgroundOutput?.let { BackgroundOutputPanel(model, it) }

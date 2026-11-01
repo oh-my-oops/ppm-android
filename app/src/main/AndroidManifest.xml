@@ -53,6 +53,13 @@
                 <data android:scheme="ppm" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".ProjectWindowActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode"
+            android:exported="false"
+            android:resizeableActivity="true"
+            android:documentLaunchMode="always"
+            android:windowSoftInputMode="adjustResize" />
         <!-- Hands a picture copied in the lightbox to the app it is pasted into, and the camera the
              file to write a photo for the message box into. -->
         <provider

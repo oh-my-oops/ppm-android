@@ -9,11 +9,18 @@ import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.TabOpenAnswer
 import com.hienlh.ppm.protocol.TabOpenRequest
 import com.hienlh.ppm.protocol.WireJson
+import com.hienlh.ppm.state.preview.PreviewLoads
+import com.hienlh.ppm.state.preview.answerTabOpen
+import com.hienlh.ppm.state.preview.tabOpenRefusal
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -23,6 +30,9 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.fail
 import org.junit.Test
 import java.util.concurrent.LinkedBlockingQueue
@@ -87,6 +97,7 @@ class TabOpenAnswerTest {
     }
 
     private val openFile = """{"type":"tab_open","requestId":"q1","tool":"open_file","filePath":"a.html","projectName":"p"}"""
+    private val terminalRequest = TabOpenRequest.Terminal("terminal-1", "pty-😀", "project", "/tmp/a folder/道")
 
     @Test
     fun `without an opener the request is refused at once`() = withChat { server, socket, _ ->
@@ -133,6 +144,91 @@ class TabOpenAnswerTest {
         checked.complete(TabOpenAnswer(opened = true, error = "the page did not start loading"))
         assertEquals(
             WireJson.parse("""{"type":"tab_open_result","requestId":"q1","opened":true,"error":"the page did not start loading"}"""),
+            server.next()?.let(WireJson::parse),
+        )
+    }
+
+    @Test
+    fun `terminal opener receives the full request and answers only once attached without a preview`() = runTest {
+        assertNull(tabOpenRefusal(terminalRequest))
+        val calls = mutableListOf<TabOpenRequest.Terminal>()
+        val attached = CompletableDeferred<Unit>()
+        val answer = async {
+            answerTabOpen(
+                terminalRequest, PreviewLoads(),
+                openFile = { error("a terminal must not open a file") },
+                openUrl = { error("a terminal must not open a URL") },
+                frame = { error("a terminal has no preview frame") },
+                settle = { error("a terminal must not settle a preview") },
+                openTerminal = { calls += it; attached.await() },
+            )
+        }
+        runCurrent()
+        assertEquals(listOf(terminalRequest), calls)
+        assertFalse(answer.isCompleted)
+        attached.complete(Unit)
+        assertEquals(TabOpenAnswer(opened = true), answer.await())
+        assertEquals("no preview load timeout", 0L, testScheduler.currentTime)
+    }
+
+    @Test
+    fun `terminal opener failures return their reason including exceptions without a message`() = runTest {
+        for (failure in listOf(IllegalStateException("terminal session is gone"), IllegalStateException())) {
+            val answer = answerTabOpen(
+                terminalRequest, PreviewLoads(), { error("not a file") }, { error("not a URL") }, { error("not a preview") },
+                openTerminal = { throw failure },
+            )
+            assertEquals(TabOpenAnswer(opened = false, error = failure.message ?: failure.toString()), answer)
+        }
+        // Existing callers that have no terminal callback still receive the same unsupported answer.
+        assertEquals(
+            TabOpenAnswer(opened = false, error = "the PPM Android app has no terminal yet"),
+            answerTabOpen(terminalRequest, PreviewLoads(), { error("not a file") }, {}, { "Phone" }),
+        )
+    }
+
+    @Test
+    fun `terminal opener cancellation propagates instead of becoming a refusal`() = runTest {
+        val cancelled = CancellationException("terminal owner closed")
+        try {
+            answerTabOpen(
+                terminalRequest, PreviewLoads(), { error("not a file") }, { error("not a URL") }, { error("not a preview") },
+                openTerminal = { throw cancelled },
+            )
+            fail("cancellation must propagate")
+        } catch (caught: CancellationException) {
+            assertSame(cancelled, caught)
+        }
+    }
+
+    @Test
+    fun `AI run in terminal is opened and acknowledged on the chat socket without a preview report`() = withChat { server, socket, chat ->
+        val opened = mutableListOf<TabOpenRequest.Terminal>()
+        chat.tabOpener = { request ->
+            answerTabOpen(
+                request, PreviewLoads(), { error("not a file") }, { error("not a URL") }, { error("not a preview") },
+                openTerminal = { opened += it },
+            )
+        }
+        socket.send("""{"type":"tab_open","requestId":"terminal-1","tool":"run_in_terminal","terminalId":"pty-😀","projectName":"project","cwd":"/tmp/a folder/道"}""")
+        assertEquals(
+            WireJson.parse(ChatClientMessage.TabOpenResult("terminal-1", opened = true, error = null).json.toString()),
+            server.next()?.let(WireJson::parse),
+        )
+        assertEquals(listOf(terminalRequest), opened)
+    }
+
+    @Test
+    fun `AI terminal open failure is acknowledged under the original request id`() = withChat { server, socket, chat ->
+        chat.tabOpener = { request ->
+            answerTabOpen(
+                request, PreviewLoads(), { error("not a file") }, { error("not a URL") }, { error("not a preview") },
+                openTerminal = { throw IllegalStateException("no terminal panel") },
+            )
+        }
+        socket.send("""{"type":"tab_open","requestId":"terminal-2","tool":"run_in_terminal","terminalId":"pty-2","cwd":"/"}""")
+        assertEquals(
+            WireJson.parse(ChatClientMessage.TabOpenResult("terminal-2", opened = false, error = "no terminal panel").json.toString()),
             server.next()?.let(WireJson::parse),
         )
     }

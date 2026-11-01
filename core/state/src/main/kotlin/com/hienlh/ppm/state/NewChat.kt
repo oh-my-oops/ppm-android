@@ -44,6 +44,22 @@ class NewChatCache(private val values: KeyValueStore, private val scope: String)
     fun providers(project: String): List<ProviderInfo>? =
         values.get(providersKey(project))?.let(WireJson::parseOrNull)?.array?.mapNotNull(ProviderInfo::from)
 
+    private fun revisionKey(project: String) = providersKey(project) + ".revision"
+
+    /** Capture before starting a request; shared by cache instances for this server. */
+    fun projectRevision(project: String): Long = values.get(revisionKey(project))?.toLongOrNull() ?: 0L
+
+    fun forgetProject(project: String) {
+        values.put(revisionKey(project), (projectRevision(project) + 1L).toString())
+        values.put(providersKey(project), null)
+    }
+
+    fun writeProvidersIfCurrent(project: String, revision: Long, providers: List<ProviderInfo>): Boolean {
+        if (projectRevision(project) != revision) return false
+        writeProviders(project, providers)
+        return true
+    }
+
     fun writeProviders(project: String, providers: List<ProviderInfo>) {
         val json = JsonArray(providers.map { buildJsonObject { put("id", it.id); put("name", it.name) } })
         values.put(providersKey(project), json.toString())

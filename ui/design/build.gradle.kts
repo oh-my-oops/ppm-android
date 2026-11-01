@@ -50,6 +50,8 @@ val buildHighlighter = tasks.register<BuildHighlighter>("buildHighlighter") {
     val scripts = rootProject.layout.projectDirectory.dir("scripts")
     script.set(scripts.file("build-highlighter.ts"))
     sources.from(scripts.file("build-highlighter.ts"), scripts.dir("highlighter"), rootProject.layout.projectDirectory.file("../node_modules/shiki/package.json"))
+    sources.from(rootProject.layout.projectDirectory.file("../src/web/components/shared/docx-html-sanitize.ts"),
+        rootProject.layout.projectDirectory.file("../bun.lock"))
     outputDir.set(layout.buildDirectory.dir("generated/highlighter"))
 }
 

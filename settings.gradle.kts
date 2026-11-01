@@ -19,6 +19,8 @@ rootProject.name = "ppm-android"
 // Plain Kotlin (JVM): the wire types, the network client and the state logic. Their tests run on
 // this machine in seconds, with no emulator.
 include(":core:protocol", ":core:client", ":core:state", ":ui:design", ":ui:chat", ":ui:web", ":app")
+include(":ui:terminal", ":ui:terminal-engine")
+include(":ui:media")
 
 // Runs the app on a device to write its Baseline Profile, and measures its start and a scrolled chat
 // with and without it.

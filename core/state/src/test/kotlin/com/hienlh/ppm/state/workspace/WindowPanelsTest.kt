@@ -69,6 +69,32 @@ class WindowPanelsTest {
     private val openWindows get() = windows.state.value.windows
 
     @Test
+    fun `forget registration closes its floating windows and keeps unrelated windows`() {
+        val storage = Storage("app" to twoPanels())
+        val store = store(storage)
+        val detached = store.popOutTab("editor:a.kt", "p1")!!
+        val unrelated = windows.open(WindowKind.Explorer)
+        store.forgetProject("app")
+        assertNull(store.state.value.currentProject)
+        assertFalse(windows.state.value.windows.containsKey(detached))
+        assertTrue(windows.state.value.windows.containsKey(unrelated))
+        assertTrue(store.state.value.panels.values.flatMap { it.tabs }.none { it.projectId == "app" })
+    }
+
+    @Test
+    fun `metadata owned window tabs are removed without dropping global tabs`() {
+        val id = windowPanelId("window")
+        val owned = WorkspaceTab("owned", "editor", "Owned", metadata = JsonObject(mapOf("projectName" to JsonPrimitive("app"))))
+        val global = WorkspaceTab("global", "editor", "Global")
+        val panels = mapOf(id to WorkspacePanel(id, listOf(owned, global), owned.id, listOf(global.id, owned.id)))
+        val (remaining, closed) = stripProjectFromWindowPanels(panels, "app")
+        assertTrue(closed.isEmpty())
+        assertEquals(listOf(global), remaining.getValue(id).tabs)
+        assertEquals(global.id, remaining.getValue(id).activeTabId)
+        assertEquals(listOf(global.id), remaining.getValue(id).tabHistory)
+    }
+
+    @Test
     fun `a popped out tab moves into an off-grid window panel and focus stays on the grid`() {
         val storage = Storage("app" to twoPanels())
         val store = store(storage)

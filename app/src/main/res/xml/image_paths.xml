@@ -4,4 +4,5 @@
 <paths>
     <cache-path name="clipboard" path="clipboard/" />
     <cache-path name="camera" path="camera/" />
+    <cache-path name="documents" path="documents/" />
 </paths>

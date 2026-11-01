@@ -27,7 +27,7 @@ class KeyboardShortcuts(private val model: AppModel) {
     /** Keys whose press ran a shortcut: their release is kept from the views too. */
     private val taken = mutableSetOf<Int>()
 
-    fun dispatch(event: KeyEvent): Boolean {
+    fun dispatch(event: KeyEvent, nativeEditor: Boolean = false): Boolean {
         val code = event.keyCode
         val isShift = code == KeyEvent.KEYCODE_SHIFT_LEFT || code == KeyEvent.KEYCODE_SHIFT_RIGHT
         when (event.action) {
@@ -45,7 +45,7 @@ class KeyboardShortcuts(private val model: AppModel) {
         if (isShift || TextInputFocus.composing) return false
         val key = webKey(event) ?: return false
         val press = KeyPress(key, event.isCtrlPressed, event.isMetaPressed, event.isAltPressed, event.isShiftPressed)
-        val ran = if (TextInputFocus.focused) inTextField(press) else anywhere(press)
+        val ran = if (TextInputFocus.focused || nativeEditor) inTextField(press) else anywhere(press)
         if (ran) taken += code
         return ran
     }
@@ -106,6 +106,7 @@ class KeyboardShortcuts(private val model: AppModel) {
             matches(press, "next-tab") -> model.cycleTab(forward = true)
             matches(press, "prev-tab") -> model.cycleTab(forward = false)
             matches(press, "open-chat") -> model.newChat()
+            matches(press, "open-terminal") -> model.openTerminal(inDock = true)
             matches(press, "open-settings") -> model.openSettings()
             matches(press, "voice-input") -> model.toggleVoiceInput()
             jumpInChat(press) -> Unit
@@ -117,11 +118,7 @@ class KeyboardShortcuts(private val model: AppModel) {
     /** Mod+', and Ctrl+` on the desktop layout: shows or hides the terminal panel. */
     private fun toggleDock(press: KeyPress): Boolean {
         if (!matches(press, "toggle-dock") && !(model.wide && DOCK_BACKTICK.matches(press))) return false
-        // A phone's panel is a sheet behind the Terminal button, which comes with the terminal.
-        if (!model.wide) return false
         val visible = model.layout?.dock?.visible == true
-        // The web's opens a terminal in an empty panel; until this app has one, there is nothing to show.
-        if (!visible && model.dockTabs.isEmpty()) return false
         model.setDockVisible(!visible)
         return true
     }

@@ -306,7 +306,11 @@ private fun FloatingWindow(model: AppModel, store: WindowStore, win: WindowRunti
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
                     .background(tokens.panel.color),
-            ) { WindowContent(model, win) }
+            ) {
+                androidx.compose.runtime.CompositionLocalProvider(com.hienlh.ppm.app.ui.LocalWindowContentVisible provides !minimized) {
+                    WindowContent(model, win)
+                }
+            }
         }
         if (floating) {
             var resizeBase by remember { mutableStateOf(target) }
@@ -339,6 +343,7 @@ private fun FloatingWindow(model: AppModel, store: WindowStore, win: WindowRunti
 @Composable
 private fun WindowContent(model: AppModel, win: WindowRuntimeState) {
     when (win.kind) {
+        WindowKind.Explorer -> com.hienlh.ppm.app.ui.osexplorer.HostExplorerWindow(model, win)
         WindowKind.Settings -> SettingsWindowContent(model, win)
         WindowKind.TabHost -> TabHostWindowContent(model, win)
         WindowKind.AgentSession -> {

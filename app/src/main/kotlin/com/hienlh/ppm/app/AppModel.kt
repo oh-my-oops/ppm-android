@@ -19,6 +19,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.hienlh.ppm.app.update.AppUpdater
 import com.hienlh.ppm.chat.ToolImage
+import com.hienlh.ppm.client.renameProject
+import com.hienlh.ppm.client.removeProject
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.GitBranchStatus
 import com.hienlh.ppm.client.PpmError
@@ -190,7 +192,7 @@ import okhttp3.HttpUrl
  * trip to the background keeps every chat connected. Main thread only.
  */
 @Stable
-class AppModel(context: Context, val debug: DebugLaunch? = null) {
+class AppModel(context: Context, val debug: DebugLaunch? = null, private val windowId: String? = null, initialProject: String? = null) {
     sealed interface Load {
         data object Idle : Load
         data object Loading : Load
@@ -200,11 +202,121 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** The main thread: every controller below is driven from it. */
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var initialProject = initialProject
     private val prefs = PrefsStore(context)
+    private val terminalClipboard = context.applicationContext.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    private val terminals = mutableMapOf<String, com.hienlh.ppm.terminal.NativeTerminal>()
+    private var knownTerminalIds = emptySet<String>()
+    private val documents = mutableMapOf<String, com.hienlh.ppm.state.files.FileDocumentController>()
+
+    /** File buffers, like shells, survive switching tabs and are released with their tab. */
+    fun fileDocument(tab: WorkspaceTab): com.hienlh.ppm.state.files.FileDocumentController? {
+        val path = tab.metaString("filePath") ?: return null
+        val client = api ?: return null
+        val project = tab.projectId ?: tab.metaString("projectName")
+        documents[tab.id]?.let { current ->
+            if (current.state.value.path == path && current.state.value.project == project) return current
+            current.close()
+        }
+        return com.hienlh.ppm.state.files.FileDocumentController(client, project, path, scope).also { documents[tab.id] = it }
+    }
+
+    private fun syncDocuments(state: WorkspaceState) {
+        val live = state.panels.values.flatMap { it.tabs }.filter { it.type == "editor" }.map { it.id }.toSet()
+        for (id in documents.keys.toList()) if (id !in live) documents.remove(id)?.close()
+    }
+
+    /** Create only when shown, then keep the parser and socket across tab/dock moves. */
+    fun terminal(tab: WorkspaceTab): com.hienlh.ppm.terminal.NativeTerminal? {
+        terminals[tab.id]?.let { return it }
+        val client = api ?: return null
+        val project = tab.projectId ?: tab.metaString("projectName") ?: selectedProject ?: return null
+        return com.hienlh.ppm.terminal.NativeTerminal(
+            client, project, tab.id, scope, prefs, "terminal.$serverKey.", tab.metaString("cwd"),
+            initialSessionId = tab.metaString("sessionId") ?: "new",
+            copyToClipboard = { text -> terminalClipboard.setPrimaryClip(android.content.ClipData.newPlainText("Terminal", text)) },
+        ).also { terminals[tab.id] = it }
+    }
+
+    private fun syncTerminals(state: WorkspaceState) {
+        val live = state.panels.values.flatMap { it.tabs }.filter { it.type == "terminal" }.map { it.id }.toSet()
+        for (id in knownTerminalIds - live) {
+            terminals.remove(id)?.close()
+            prefs.put("terminal.$serverKey.ppm:terminal-session:$id", null)
+        }
+        knownTerminalIds = live
+    }
+
+    fun openTerminal(cwd: String? = null, inDock: Boolean = wide) {
+        val project = selectedProject ?: return
+        withWorkspace { store ->
+            val tab = NewTab(type = "terminal", title = "Terminal", projectId = project, metadata = buildJsonObject {
+                put("projectName", project)
+                cwd?.let { put("cwd", it) }
+            })
+            if (inDock) store.openInDock(tab) else store.openTab(tab)
+        }
+    }
+
+    internal fun terminalCommandTaken(tabId: String) = patchTabMetadata(tabId, "pendingCommand" to null)
+
+    /** Code-block action: type a command into an on-screen terminal, or open one to hold it. */
+    fun runInTerminal(command: String, projectName: String? = selectedProject) {
+        if (command.isBlank()) return
+        val project = projectName ?: return
+        if (project != selectedProject) {
+            scope.launch { openProject(project) { runInTerminal(command, project) } }
+            return
+        }
+        val state = layout ?: return
+        val candidates = buildList {
+            if (state.dock.visible) state.dockPanel?.let { p -> p.tabs.firstOrNull { it.id == p.activeTabId }?.let(::add) }
+            for (id in state.gridPanelIds) state.panels[id]?.let { p -> p.tabs.firstOrNull { it.id == p.activeTabId }?.let(::add) }
+        }
+        val shown = candidates.firstOrNull { it.type == "terminal" && (it.projectId ?: it.metaString("projectName")) == project }
+        if (shown != null) terminal(shown)?.pendingCommand = command else withWorkspace { store ->
+            store.openInDock(NewTab(type = "terminal", title = "Terminal", projectId = project, metadata = buildJsonObject {
+                put("projectName", project)
+                put("pendingCommand", command)
+            }))
+        }
+    }
+
+    /** Put terminal text into an editable chat draft; never submit it automatically. */
+    fun terminalToChat(text: String, label: String = "Terminal output", project: String? = selectedProject, newTab: Boolean = false, asContext: Boolean = false) {
+        if (project != null && project != selectedProject) {
+            scope.launch { openProject(project) { terminalToChat(text, label, project, newTab, asContext) } }
+            return
+        }
+        val state = layout ?: return
+        val target = if (newTab) null else state.panels.values.flatMap { panel ->
+            panel.tabs.filter { it.type == "chat" && (project == null || it.projectId == project || it.metaString("projectName") == project) }
+                .map { tab ->
+                    val rank = if (panel.activeTabId != tab.id) 0 else if (panel.id == state.focusedPanelId) 2 else 1
+                    Triple(tab, rank, (tab.metadata["lastActiveAt"] as? JsonPrimitive)?.content?.toDoubleOrNull() ?: -1.0)
+                }
+        }.maxWithOrNull(compareBy<Triple<WorkspaceTab, Int, Double>> { it.second }.thenBy { it.third })?.first
+        val chat = target?.let { chats[it.id] }
+        if (chat == null) withWorkspace { store ->
+            store.openTab(NewTab(type = "chat", title = "AI Chat", projectId = project, metadata = buildJsonObject {
+                project?.let { put("projectName", it) }
+                if (asContext) put("pendingContexts", JsonArray(listOf(buildJsonObject { put("text", text); put("label", label) })))
+                else put("pendingMessage", text)
+            }))
+        } else {
+            chat.attachments += ComposerAttachment(
+                id = java.util.UUID.randomUUID().toString(), name = label, isImage = false,
+                status = ComposerAttachment.Status.READY, textContent = text,
+            )
+            activate(chat.tabId)
+            chat.requestFocus()
+        }
+        if (!wide) setDockVisible(false)
+    }
 
     /** Every message box's draft, in a file of its own: it is written on each keystroke. */
     private val draftPrefs = PrefsStore(context, "ppm_drafts")
-    val store = ServerStore(prefs, KeystoreSecrets(context))
+    val store = ServerStore(prefs, KeystoreSecrets(context), windowId?.let { "window.$it.selectedServer" } ?: "selectedServer")
 
     /** The tab switcher's order, `default` or `recent`, kept on this device as the web keeps it. */
     var tabSortMode by mutableStateOf(prefs.get("tabSortMode") ?: "default")
@@ -220,6 +332,72 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     /** The open project's file list, which the `@` picker searches (the web's file-store index). */
     var fileIndex by mutableStateOf<FileIndexStore?>(null)
         private set
+
+    var fileTree by mutableStateOf<com.hienlh.ppm.state.files.ProjectFileTree?>(null)
+        private set
+    var fileMutations by mutableStateOf<com.hienlh.ppm.state.files.FileMutations?>(null)
+        private set
+
+    var hostFilesystem by mutableStateOf<com.hienlh.ppm.state.osexplorer.HostFilesystemStore?>(null)
+        private set
+    var hostPickerPreferences by mutableStateOf<com.hienlh.ppm.state.osexplorer.HostPickerPreferences?>(null)
+        private set
+    var explorerPreferences by mutableStateOf<com.hienlh.ppm.state.osexplorer.ExplorerPreferences?>(null)
+        private set
+    var explorerSheetPath by mutableStateOf<String?>(null)
+        private set
+    private val hostExplorers = mutableMapOf<String, com.hienlh.ppm.state.osexplorer.ExplorerSession>()
+
+    private var hostUploadQueue: com.hienlh.ppm.state.osexplorer.HostUploads? = null
+
+    fun hostUploads(separator: String): com.hienlh.ppm.state.osexplorer.HostUploads? {
+        hostUploadQueue?.let { return it }
+        val client = api ?: return null
+        return com.hienlh.ppm.state.osexplorer.HostUploads(scope, client, separator) { affected ->
+            if (api === client) filesMutated(com.hienlh.ppm.state.files.FileMutationReport(affectedDirectories = affected))
+        }.also { hostUploadQueue = it }
+    }
+
+    fun hostExplorer(id: String, path: String): com.hienlh.ppm.state.osexplorer.ExplorerSession? {
+        hostExplorers[id]?.let { return it }
+        val client = api ?: return null
+        val preferences = explorerPreferences ?: return null
+        return com.hienlh.ppm.state.osexplorer.ExplorerSession(client, preferences, scope, path) { next ->
+            if (id == "phone-explorer") explorerSheetPath = next
+            else windows?.setPayload(id, buildJsonObject { put("path", next) })
+        }.also { hostExplorers[id] = it }
+    }
+
+    fun closeExplorerSheet() {
+        explorerSheetPath = null
+        hostExplorers.remove("phone-explorer")?.close()
+    }
+
+    fun openHostFile(path: String) {
+        withWorkspace { it.openTab(NewTab(type = "editor", title = path.split('/', '\\').last(),
+            metadata = buildJsonObject { put("filePath", path) })) }
+        if (!wide) closeExplorerSheet()
+    }
+
+    /** Refresh explicit mutation results even when the host watcher misses the change. */
+    fun filesMutated(report: com.hienlh.ppm.state.files.FileMutationReport) {
+        val affected = report.affectedDirectories
+        for (explorer in hostExplorers.values) affected.forEach(explorer::directoryChanged)
+        for (project in projects) {
+            val directories = affected.mapNotNull { com.hienlh.ppm.state.workspace.relativeProjectPath(project.path, it) }
+            if (directories.isEmpty()) continue
+            fileIndex?.markStale(project.name)
+            for (directory in directories) fileTree?.invalidateFolder(project.name, directory)
+        }
+        for (document in documents.values) {
+            val state = document.state.value
+            val absolute = if (Regex("""^(/|[A-Za-z]:[/\\])""").containsMatchIn(state.path)) state.path
+                else projects.firstOrNull { it.name == state.project }?.let {
+                    com.hienlh.ppm.state.workspace.absoluteProjectPath(it.path, state.path)
+                } ?: continue
+            if (affected.any { com.hienlh.ppm.state.workspace.relativeProjectPath(it, absolute) != null }) document.refresh()
+        }
+    }
 
     /** The usage readings every chat on the open server shares (use-usage.ts's module cache). */
     var usageCache by mutableStateOf<UsageCache?>(null)
@@ -408,9 +586,6 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     init {
         restoreUiPrefs()
-        // Message boxes start empty, so no copy of a file waiting in one can be wanted again.
-        val appContext = context.applicationContext
-        scope.launch(Dispatchers.IO) { clearAttachmentCopies(appContext) }
     }
 
     /** The theme picked on any device (`/api/settings/theme`). */
@@ -437,6 +612,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             // and so does each draft still waiting out its second.
             if (value) {
                 activeSessionId?.let { events?.seen(it) }
+                terminals.values.forEach { it.controller.foreground() }
             } else {
                 workspaceCache?.flush()
                 for (chat in chats.values) chat.flushDraft()
@@ -640,6 +816,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** Called whenever the selected server changes, and again once its password is given. */
     private suspend fun openSelectedServer() {
+        projectListRevision++
+        projectRefresh?.cancel()
         if (serverKey != historyServer) {
             historyServer = serverKey
             history.clear()
@@ -651,6 +829,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         api = null
         slashItems = null
         fileIndex = null
+        fileTree?.close()
+        fileTree = null
+        fileMutations = null
+        hostFilesystem?.close()
+        hostFilesystem = null
+        explorerPreferences = null
+        hostPickerPreferences = null
         usageCache = null
         info = null
         projects = emptyList()
@@ -681,6 +866,14 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         this.api = api
         slashItems = SlashItemsStore(scope)
         fileIndex = FileIndexStore(api, scope)
+        fileMutations = com.hienlh.ppm.state.files.FileMutations(api)
+        hostFilesystem = com.hienlh.ppm.state.osexplorer.HostFilesystemStore(api, scope)
+        explorerPreferences = com.hienlh.ppm.state.osexplorer.ExplorerPreferences(prefs, "explorer.$serverKey.")
+        hostPickerPreferences = com.hienlh.ppm.state.osexplorer.HostPickerPreferences(prefs, "explorer.$serverKey.ppm-recent-paths")
+        fileTree = com.hienlh.ppm.state.files.ProjectFileTree(
+            com.hienlh.ppm.state.files.FileTreeBackend.api(api), scope,
+            com.hienlh.ppm.state.files.FileTreePersistence(prefs, "files.$serverKey."),
+        )
         usageCache = UsageCache()
         openWorkspace(api)
         startEvents(api)
@@ -770,6 +963,77 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         if (known != null) store.select(known) else store.add("${current.name} (local network)", url, token)
     }
 
+    private var projectListRevision = 0L
+    private var projectRefresh: Job? = null
+
+    var addingProject by mutableStateOf(false)
+    var projectActions by mutableStateOf<ProjectInfo?>(null)
+    var projectActionsCanReorder by mutableStateOf(true)
+    var phoneProjectRename by mutableStateOf<String?>(null)
+
+    fun projectAppearanceUpdated(client: ApiClient, project: ProjectInfo) {
+        if (api !== client) return
+        projectListRevision++
+        projects = projects.map { if (it.name == project.name) project else it }
+        if (projectActions?.name == project.name) projectActions = project
+    }
+
+    suspend fun renameRegisteredProject(client: ApiClient, project: ProjectInfo, name: String) {
+        check(api === client) { "The connected server changed." }
+        val renamed = client.renameProject(project.name, name)
+        if (api !== client) return
+        val wasActive = selectedProject == project.name
+        projectListRevision++
+        projects = projects.map { if (it.name == project.name) renamed else it }
+        forgetProjectRegistration(project.name)
+        projectActions = null
+        if (wasActive) openProject(renamed.name)
+    }
+
+    suspend fun removeRegisteredProject(client: ApiClient, project: ProjectInfo) {
+        check(api === client) { "The connected server changed." }
+        client.removeProject(project.name)
+        if (api !== client) return
+        val wasActive = selectedProject == project.name
+        projectListRevision++
+        projects = projects.filterNot { it.name == project.name }
+        forgetProjectRegistration(project.name)
+        projectActions = null
+        if (wasActive) projects.firstOrNull()?.let { openProject(it.name) }
+    }
+
+    private fun forgetProjectRegistration(name: String) {
+        workspace?.forgetProject(name)
+        workspaceCache?.forget(name)
+        newChats.preparationCache.clear()
+        newChatCache.forgetProject(name)
+        com.hienlh.ppm.state.files.FileTreePersistence(prefs, "files.$serverKey.").forget(name)
+        iconFrameworks.remove("$serverKey\u0000$name")
+        projectOpenedAt = projectOpenedAt - name
+        saveUiPrefs()
+        if (selectedProject == name) {
+            selectedProject = null
+            events?.project = null
+            waitingForWorkspace.clear()
+            resetProjectState()
+            iconFramework = null
+            iconFrameworkFor = null
+            if (debug == null || windowId != null) prefs.put(lastProjectKey, null)
+        }
+    }
+
+    /** A completed registration refreshes only projects, preserving the current layout preferences. */
+    suspend fun projectRegistered(client: ApiClient, project: ProjectInfo) {
+        if (api !== client) return
+        val fresh = client.projects()
+        if (api !== client) return
+        projectListRevision++
+        projects = fresh
+        projectsLoad = Load.Loaded
+        val added = fresh.firstOrNull { it.path == project.path } ?: return
+        openProject(added.name)
+    }
+
     suspend fun loadProjects() {
         val api = api ?: return
         projectsLoad = Load.Loading
@@ -803,7 +1067,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             pendingLink = null
             val linked = link?.projectName?.takeIf { name -> projects.any { it.name == name } }
             link?.projectName?.takeIf { linked == null }?.let { actionError(noSuchProject(it)) }
-            val last = linked ?: debug?.project ?: prefs.get("lastProject.$serverKey")
+            val last = linked ?: (if (windowId != null) prefs.get(lastProjectKey) else null) ?: initialProject ?: debug?.project ?: prefs.get(lastProjectKey)
+            initialProject = null
             when {
                 last != null && projects.any { it.name == last } ->
                     openProject(last, then = link?.takeIf { linked != null }?.let { l -> { store: WorkspaceStore -> openFromLink(store, l, last) } })
@@ -817,6 +1082,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     }
 
     /** Identifies the open server in saved state, so each server keeps its own tabs. */
+    private val lastProjectKey: String get() = "lastProject.$serverKey" + (windowId?.let { ".$it" } ?: "")
+    private val windowStorageKey: String get() = serverKey + (windowId?.let { ".$it" } ?: "")
+
     private val serverKey: String get() = if (debug != null) "debug" else store.selected?.id ?: "none"
 
     /**
@@ -862,11 +1130,18 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             scope.launch { refreshSessions(quiet = true) }
             // Pushes missed while the socket was down, or a server that restarted and keeps no list.
             for (chat in chats.values) chat.sessionChanges?.reconnected()
+            fileTree?.reconnected()
+            hostExplorers.values.forEach { it.refresh() }
+            documents.values.forEach { it.reconnected() }
         }
         events.isShown = { id -> windowVisible && activeSessionId == id }
         events.onGitChanged = { gitChanged.tryEmit(it) }
         // A change only marks the list stale; it is read again when a picker shows it.
-        events.onFileChanged = { fileIndex?.markStale(it) }
+        events.onFileChanged = { project, path ->
+            fileIndex?.markStale(project)
+            fileTree?.onFileChanged(project, path)
+            documents.values.forEach { it.fileChanged(project, path) }
+        }
         events.onIndexChanged = { fileIndex?.rebuilt(it) }
         events.onSessionFileChanges = { push ->
             for (chat in chats.values) {
@@ -886,8 +1161,29 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
      * session list again if it has not been read for a while (the web does both when a page shows),
      * and look for a newer release of the app once a day.
      */
+    /** A second window/browser may have changed registrations while this one was hidden. */
+    internal fun refreshProjectRegistrations() {
+        val client = api ?: return
+        if (projectsLoad != Load.Loaded || projectRefresh?.isActive == true) return
+        val revision = projectListRevision
+        projectRefresh = scope.launch {
+            try {
+                val fresh = client.projects()
+                if (api !== client || projectListRevision != revision) return@launch
+                val changes = com.hienlh.ppm.state.reconcileProjectRegistrations(projects, fresh, selectedProject)
+                projects = fresh
+                projectListRevision++
+                for (name in changes.invalidated) forgetProjectRegistration(name)
+                projectActions = projectActions?.let { old -> fresh.firstOrNull { it.name == old.name && it.path == old.path } }
+                changes.selected?.takeIf { it != selectedProject }?.let { openProject(it) }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Keep the current list on transient connection failure. */ }
+        }
+    }
+
     fun becameActive() {
         resumes++
+        refreshProjectRegistrations()
         for (tab in chats.values) tab.controller?.resumed()
         for (group in groupChats.values) group.chat.wake()
         events?.wake()
@@ -1111,6 +1407,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     /** The Priority order dragged in the project switcher: shown at once, and kept for every device (`reorderProjects`). */
     fun reorderProjects(order: List<String>) {
+        projectListRevision++
         val byName = projects.associateBy { it.name }
         projects = order.mapNotNull { byName[it] } + projects.filter { it.name !in order }
         val api = api ?: return
@@ -1199,9 +1496,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     }
 
     /** A file a chat names, in an editor tab of [project] (`openTab` in a tool card); focused when it is open already. */
-    fun openFileTab(project: String, path: String) {
+    fun openFileTab(project: String, path: String, line: Long? = null, endLine: Long? = null) {
+        if (project != selectedProject) {
+            scope.launch { openProject(project) { openFileTab(project, path, line, endLine) } }
+            return
+        }
         withWorkspace { store ->
-            store.openTab(
+            val id = store.openTab(
                 NewTab(
                     type = "editor",
                     title = path.split('/', '\\').last(),
@@ -1212,6 +1513,12 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                     },
                 ),
             )
+            if (line != null && id.isNotEmpty()) store.updateTab(id) {
+                it.withMetadata(
+                    "lineNumber" to JsonPrimitive(line), "endLine" to endLine?.let(::JsonPrimitive),
+                    "revealAt" to JsonPrimitive(System.currentTimeMillis()),
+                )
+            }
         }
     }
 
@@ -1317,6 +1624,20 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                 }
             },
             openUrl = { url -> inChatProject(chat.project) { store -> store.openAiUrlTab(url, sessionId, api.baseUrl.host) } },
+            openTerminal = { terminal ->
+                inChatProject(chat.project) { store ->
+                    val id = store.openInDock(NewTab(
+                        type = "terminal", title = terminal.cwd.trimEnd('/').substringAfterLast('/').ifEmpty { terminal.cwd },
+                        projectId = terminal.projectName ?: chat.project,
+                        metadata = buildJsonObject {
+                            put("sessionId", terminal.terminalId)
+                            put("cwd", terminal.cwd)
+                            put("projectName", terminal.projectName ?: chat.project)
+                        },
+                    ))
+                    prefs.put("terminal.$serverKey.ppm:terminal-session:$id", terminal.terminalId)
+                }
+            },
             frame = { if (wide) "Desktop" else "Phone" },
         )
     }
@@ -1369,15 +1690,14 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         }
     }
 
-    /** open-explorer.ts: a folder in an explorer window on a tablet. A phone's full-screen explorer is not in the app yet. */
-    private fun openExplorer(path: String) {
+    /** Independent tablet windows; one reusable full-screen sheet on a phone. */
+    fun openExplorer(path: String = hostFilesystem?.state?.value?.host?.home ?: "~") {
         val windows = windows
         when {
-            !wide || windows == null -> toast(ErrorToastMessage(
-                "${path.trimEnd('/', '\\').split('/', '\\').last()} is a folder",
-                "Folders do not open in the Android app yet.",
-                kind = ErrorToastMessage.Kind.PLAIN,
-            ))
+            !wide || windows == null -> {
+                explorerSheetPath = path
+                hostExplorers["phone-explorer"]?.go(path)
+            }
             windows.state.value.windows.size >= MAX_WINDOWS -> actionError(TOO_MANY_WINDOWS)
             else -> windows.open(WindowKind.Explorer, buildJsonObject { put("path", path) })
         }
@@ -1490,6 +1810,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             } catch (_: Exception) {
                 null
             }
+            if (this@AppModel.api !== api || projects.none { it.name == project }) return@launch
             iconFrameworks[key] = framework
             if (iconFrameworkFor == key) iconFramework = framework
         }
@@ -1508,7 +1829,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         then?.let { waitingForWorkspace += it }
         events?.project = name
         resetProjectState()
-        if (debug == null) prefs.put("lastProject.$serverKey", name)
+        if (debug == null || windowId != null) prefs.put(lastProjectKey, name)
         touchProject(name)
         sidebarList = HistoryList(api, name, scope)
         homeList = HistoryList(api, name, scope)
@@ -1547,6 +1868,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 
     private fun resetProjectState() {
         fileIndex?.reset()
+        fileTree?.reset()
         sessions = emptyList()
         sessionsLoad = Load.Idle
         hasMoreSessions = false
@@ -1647,9 +1969,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     // Tabs
 
     private fun openWorkspace(api: ApiClient) {
-        val cache = WorkspaceCache(prefs, "workspace.$serverKey.", api.workspaceRemote(), scope, windowPanelsKey = "windowPanels.$serverKey")
+        val cache = WorkspaceCache(prefs, "workspace.$serverKey.", api.workspaceRemote(), scope, windowPanelsKey = "windowPanels.$windowStorageKey")
         // One set of windows per server, as the web keeps one per origin.
-        val windowStore = WindowStore(prefs, "windows.$serverKey")
+        val windowStore = WindowStore(prefs, "windows.$windowStorageKey")
         // Asked at each change, as the web asks `useIsMobile`: a phone opens every tab in the first panel.
         // A new chat tab is resolved from this device's cache before its first frame, as `openTab` resolves it.
         val chatCache = newChatCache
@@ -1665,6 +1987,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             launch {
                 windowStore.state.collect {
                     windowState = it
+                    val liveExplorers = it.windows.values.filter { window -> window.kind == WindowKind.Explorer }.map { window -> window.id }.toSet()
+                    for (id in hostExplorers.keys.toList()) {
+                        if (id != "phone-explorer" && id !in liveExplorers) hostExplorers.remove(id)?.close()
+                    }
                     reconcileWindowPanels()
                     pruneAgentFallbacks()
                 }
@@ -1673,6 +1999,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                 syncChats(state)
                 syncReviews(state)
                 syncGroups(state)
+                syncTerminals(state)
+                syncDocuments(state)
                 layout = state
                 recordNavigation(state)
                 reconcileWindowPanels()
@@ -1681,8 +2009,21 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     }
 
     /** A server's tabs go when another opens; their last changes still go out to it. */
-    private fun closeWorkspace() {
-        workspaceCache?.flush()
+    private fun closeWorkspace(flush: Boolean = true) {
+        hostUploadQueue?.close()
+        hostUploadQueue = null
+        hostExplorers.values.forEach { it.close() }
+        hostExplorers.clear()
+        explorerSheetPath = null
+        addingProject = false
+        projectActions = null
+        phoneProjectRename = null
+        documents.values.forEach { it.close() }
+        documents.clear()
+        terminals.values.forEach { it.close() }
+        terminals.clear()
+        knownTerminalIds = emptySet()
+        if (flush) workspaceCache?.flush()
         workspaceJob?.cancel()
         workspaceJob = null
         workspace = null
@@ -1699,6 +2040,28 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
         groupChats.clear()
         shownSession = null
         waitingForWorkspace.clear()
+    }
+
+    /** Called only when a separate Android task finishes, not during Activity recreation. */
+    internal fun disposeWindow(cleanupScope: CoroutineScope) {
+        val cache = workspaceCache
+        val closingChats = chats.values.toList()
+        opening?.cancel()
+        events?.stop()
+        events = null
+        fileTree?.close()
+        hostFilesystem?.close()
+        closeWorkspace(flush = false)
+        cleanupScope.launch {
+            try {
+                withTimeoutOrNull(5_000) {
+                    coroutineScope {
+                        launch { cache?.flushPending() }
+                        for (chat in closingChats) launch { chat.finishDraftSync() }
+                    }
+                }
+            } finally { scope.coroutineContext[Job]?.cancel() }
+        }
     }
 
     /**
@@ -1797,6 +2160,16 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
                     val decoded = ChatReply.decode(pending)
                     chat.draft.setTextAndPlaceCursorAtEnd(decoded.content)
                     if (session != null) chat.replyTo = decoded.replyTo?.copy(sessionId = session.id)
+                    chat.tookPendingMessage = true
+                    chat.focusOnShow = true
+                }
+                (tab.metadata["pendingContexts"] as? JsonArray)?.forEach { entry ->
+                    val context = entry as? JsonObject ?: return@forEach
+                    val text = context["text"].string ?: return@forEach
+                    chat.attachments += ComposerAttachment(
+                        id = java.util.UUID.randomUUID().toString(), name = context["label"].string ?: "Context",
+                        isImage = false, status = ComposerAttachment.Status.READY, textContent = text,
+                    )
                     chat.tookPendingMessage = true
                     chat.focusOnShow = true
                 }
@@ -2321,12 +2694,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
             return state.dockPanel?.tabs.orEmpty().filter { it.projectId.isNullOrEmpty() || state.currentProject == null || it.projectId == state.currentProject }
         }
 
-    /**
-     * Shows or hides the dock. The web's toggle opens a terminal in an empty dock; this app has
-     * no terminal yet, so it only shows what another device left there.
-     */
+    /** Showing an empty dock opens the project's first terminal, as on the web. */
     fun setDockVisible(visible: Boolean) {
         workspace?.setDockVisible(visible)
+        if (visible && dockTabs.isEmpty()) openTerminal(inDock = true)
     }
 
     /** The dock's share of the main area. The layout keeps it within 15–85 %: what it kept is returned. */
@@ -2557,7 +2928,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
     fun pendingMessageTaken(tab: ChatTab) {
         if (!tab.tookPendingMessage) return
         tab.tookPendingMessage = false
-        patchTabMetadata(tab.tabId, "pendingMessage" to null)
+        patchTabMetadata(tab.tabId, "pendingMessage" to null, "pendingContexts" to null)
     }
 
     /** The title the server gives a chat goes onto its tab too, so every browser shows it (chat-tab.tsx). */
@@ -2713,7 +3084,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null) {
 private val DOCK_POSITIONS = setOf("bottom", "left", "right")
 
 /** The sidebar sections this app has, in the web's order (`BUILTIN_SIDEBAR_TABS`). */
-private val SIDEBAR_SECTIONS = listOf("history", "teams")
+private val SIDEBAR_SECTIONS = listOf("explorer", "search", "history", "teams")
 
 private val PROJECT_SORT_MODES = setOf("recent", "priority", "name")
 
@@ -3094,6 +3465,8 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     fun flushDraft() {
         drafts?.flush()
     }
+
+    internal suspend fun finishDraftSync() { drafts?.flushAndJoin() }
 
     /**
      * A draft that loaded (`initialValue`, `initialAttachments`, `draft.replyTo`): its text only

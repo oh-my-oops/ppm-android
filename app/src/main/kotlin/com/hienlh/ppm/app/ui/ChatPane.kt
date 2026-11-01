@@ -121,6 +121,7 @@ import com.hienlh.ppm.chat.LocalAsyncQuestions
 import com.hienlh.ppm.chat.LocalChatImages
 import com.hienlh.ppm.chat.LocalChatTabs
 import com.hienlh.ppm.chat.LocalMarkdownImages
+import com.hienlh.ppm.chat.LocalRunInTerminal
 import com.hienlh.ppm.chat.LocalToolImages
 import com.hienlh.ppm.chat.LocalTurnChanges
 import com.hienlh.ppm.chat.MarkdownImages
@@ -339,6 +340,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                 LocalToolImages provides toolImages,
                 LocalMarkdownImages provides markdownImages,
                 LocalChatTabs provides tabs,
+                LocalRunInTerminal provides { command -> model.runInTerminal(command, tab.project) },
                 LocalAgentSessionOpener provides agentOpener,
                 // A Codex question's answer goes out as the composer would send it, in its permission mode.
                 LocalAsyncQuestions provides AsyncQuestions(

@@ -226,6 +226,34 @@ class WorkspaceStore(
         }
     }
 
+    /** Detach a removed/renamed registration without saving its old layout again. */
+    fun forgetProject(projectName: String) {
+        val st = s
+        val active = st.currentProject == projectName
+        val oldIds = (st.projectGrids[projectName].orEmpty().flatten() + if (active) st.grid.flatten() else emptyList()).toSet()
+        val panels = LinkedHashMap(st.panels)
+        for (id in oldIds) if (id != DOCK_PANEL_ID) panels.remove(id)
+        panels[DOCK_PANEL_ID]?.let { dock ->
+            val remaining = dock.tabs.filter { (it.projectId ?: it.metadata["projectName"].string) != projectName }
+            val ids = remaining.map { it.id }.toSet()
+            panels[DOCK_PANEL_ID] = dock.copy(tabs = remaining,
+                tabHistory = dock.tabHistory.filter { it in ids },
+                activeTabId = dock.activeTabId?.takeIf { it in ids } ?: remaining.lastOrNull()?.id)
+        }
+        val (stripped, emptied) = stripProjectFromWindowPanels(panels, projectName)
+        commit(st.copy(panels = stripped,
+            currentProject = if (active) null else st.currentProject,
+            grid = if (active) emptyList() else st.grid,
+            focusedPanelId = if (active) "" else st.focusedPanelId,
+            dock = if (active) DEFAULT_DOCK else st.dock,
+            dockExpanded = if (active) false else st.dockExpanded,
+            projectGrids = st.projectGrids - projectName,
+            projectFocused = st.projectFocused - projectName,
+            projectDock = st.projectDock - projectName,
+            lastFocusedChatProviders = st.lastFocusedChatProviders - projectName))
+        for (windowId in emptied) windows?.close(windowId)
+    }
+
     /**
      * Forgets what is in memory for [projectName] and loads it again, e.g. after its copy was
      * replaced by the server's. One state goes out, not the project gone and then back: a chat

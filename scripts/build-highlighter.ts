@@ -24,6 +24,8 @@ await mkdir(resolve(out, "langs"), { recursive: true });
 const result = await Bun.build({
   entrypoints: [resolve(import.meta.dir, "highlighter/entry.ts")],
   target: "browser",
+  // V8 has no DOM: entity decoding must use its worker implementation, not document.createElement.
+  conditions: ["worker"],
   format: "iife",
   minify: true,
 });

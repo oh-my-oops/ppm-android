@@ -28,6 +28,41 @@ class NewChatTest {
     )
 
     @Test
+    fun `late provider response cannot repopulate evicted or reused registration`() {
+        val values = MemoryValues()
+        val requestCache = NewChatCache(values, "server-a")
+        val currentCache = NewChatCache(values, "server-a")
+        val before = requestCache.projectRevision("app")
+        val old = listOf(ProviderInfo("old", "Old"))
+        currentCache.forgetProject("app")
+        assertFalse(requestCache.writeProvidersIfCurrent("app", before, old))
+        assertNull(currentCache.providers("app"))
+        val fresh = listOf(ProviderInfo("new", "New"))
+        assertTrue(currentCache.writeProvidersIfCurrent("app", currentCache.projectRevision("app"), fresh))
+        assertFalse(requestCache.writeProvidersIfCurrent("app", before, old))
+        assertEquals(fresh, currentCache.providers("app"))
+        assertEquals(0L, NewChatCache(values, "server-b").projectRevision("app"))
+    }
+
+    @Test
+    fun `forgetting project providers preserves server settings and other projects`() {
+        val values = MemoryValues()
+        val cache = NewChatCache(values, "server-a")
+        val other = NewChatCache(values, "server-b")
+        val settings = ChatPreparationSettings("codex", null, emptyMap())
+        cache.writeSettings(settings)
+        val providers = listOf(ProviderInfo("codex", "Codex"))
+        cache.writeProviders("old", providers)
+        cache.writeProviders("kept", providers)
+        other.writeProviders("old", providers)
+        cache.forgetProject("old")
+        assertNull(cache.providers("old"))
+        assertEquals(providers, cache.providers("kept"))
+        assertEquals(providers, other.providers("old"))
+        assertEquals(settings, cache.settings())
+    }
+
+    @Test
     fun `the settings and providers come back as they went in, per server and project`() {
         val values = MemoryValues()
         val cache = NewChatCache(values, "server-a")

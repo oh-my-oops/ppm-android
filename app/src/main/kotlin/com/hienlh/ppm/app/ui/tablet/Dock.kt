@@ -61,8 +61,7 @@ private const val PILL_CAP = 2
 
 /**
  * The dock (dock-panel.tsx): one panel shared by every project, of which it shows the open
- * project's tabs — its header of pills over the tab in front. The web's "+" and empty state open
- * a terminal; this app has none yet, so it leaves both out.
+ * project's tabs — its header of pills over the tab in front, with a new-terminal button.
  */
 @Composable
 fun DockPanel(model: AppModel, state: WorkspaceState, borderEdge: Edge) {
@@ -91,7 +90,7 @@ private fun DockHeader(
     activeId: String?,
 ) {
     val tokens = LocalPpmTokens.current
-    val side = model.dockPosition != "bottom"
+    val side = model.wide && model.dockPosition != "bottom"
     val ids = tabs.map { it.first }
     val byId = tabs.toMap()
     val visible = if (!side || ids.size <= PILL_CAP) {
@@ -145,7 +144,8 @@ private fun DockHeader(
                 }
             }
         }
-        PositionMenu(model)
+        HeaderButton(ProductIcon.Plus, "New terminal") { model.openTerminal(inDock = true) }
+        if (model.wide) PositionMenu(model)
         Box(Modifier.width(1.dp).height(16.dp).background(tokens.border.color))
         HeaderButton(if (state.dockExpanded) ProductIcon.Minimize2 else ProductIcon.Maximize2, if (state.dockExpanded) "Restore panel" else "Maximize panel") {
             model.toggleDockExpanded()

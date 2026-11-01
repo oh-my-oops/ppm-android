@@ -7,8 +7,11 @@ import com.hienlh.ppm.client.workspace
 import com.hienlh.ppm.protocol.WireJson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.time.Instant
@@ -49,7 +52,19 @@ class WorkspaceCache(
 ) : LayoutStorage {
     private val pending = HashMap<String, Pending>()
 
-    private class Pending(val layout: PanelLayout, val job: Job)
+    private val revisions = HashMap<String, Long>()
+    private val pushes = HashMap<String, MutableSet<Job>>()
+    private fun revision(project: String) = revisions[project] ?: 0L
+
+    private class Pending(val layout: PanelLayout, val job: Job, val revision: Long)
+
+    /** Remove registration-scoped cache and invalidate responses already in flight. */
+    fun forget(project: String) {
+        revisions[project] = revision(project) + 1
+        pending.remove(project)?.job?.cancel()
+        pushes.remove(project)?.toList()?.forEach { it.cancel() }
+        values.put(key(project), null)
+    }
 
     override fun load(project: String): PanelLayout? = stored(project)?.layout?.let(::migrateLoadedLayout)
 
@@ -60,6 +75,8 @@ class WorkspaceCache(
     }
 
     override fun save(project: String, layout: PanelLayout) {
+        val revision = revision(project) + 1
+        revisions[project] = revision
         write(project, SavedLayout(layout, ISO.format(Instant.ofEpochMilli(now()))))
         // `__global__` is not a project the server knows.
         if (project == GLOBAL_PROJECT) return
@@ -67,9 +84,9 @@ class WorkspaceCache(
         val job = scope.launch {
             delay(SYNC_DELAY_MS)
             pending.remove(project)
-            push(project, layout)
+            push(project, layout, revision)
         }
-        pending[project] = Pending(layout, job)
+        pending[project] = Pending(layout, job, revision)
     }
 
     /** Sends every change still waiting out now: Android may end a process in the background without asking. */
@@ -78,7 +95,17 @@ class WorkspaceCache(
         pending.clear()
         for ((project, change) in waiting) {
             change.job.cancel()
-            scope.launch { push(project, change.layout) }
+            scope.launch { push(project, change.layout, change.revision) }
+        }
+    }
+
+    /** Drain pending layouts from an owner's replacement cleanup scope on window disposal. */
+    suspend fun flushPending() = coroutineScope {
+        val waiting = pending.toList()
+        pending.clear()
+        for ((project, change) in waiting) {
+            change.job.cancel()
+            launch { push(project, change.layout, change.revision) }
         }
     }
 
@@ -91,11 +118,14 @@ class WorkspaceCache(
      */
     suspend fun hydrate(project: String): Boolean {
         if (project == GLOBAL_PROJECT) return false
+        val revision = revision(project)
         val server = try {
             remote.get(project)
-        } catch (_: Exception) {
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) {
             null
         } ?: return false
+        if (revision(project) != revision) return false
         val local = stored(project)
         if (resolveWorkspaceConflict(local, server) !== server) return false
         // Migrated before it is written, as on the web, so a legacy tab from another device never lands here.
@@ -106,16 +136,22 @@ class WorkspaceCache(
         return true
     }
 
-    private suspend fun push(project: String, layout: PanelLayout) {
-        val updatedAt = try {
-            remote.put(project, layout.toJson())
-        } catch (_: Exception) {
-            // The local copy is still the cache; the next change sends it again.
-            return
-        } ?: return
-        // The server's clock decides the next conflict, not this device's.
-        val local = values.get(key(project))?.let(WireJson::parseOrNull) as? JsonObject ?: return
-        values.put(key(project), JsonObject(local + ("updatedAt" to JsonPrimitive(updatedAt))).toString())
+    private suspend fun push(project: String, layout: PanelLayout, revision: Long) {
+        if (revision(project) != revision) return
+        val job = currentCoroutineContext()[Job]!!
+        pushes.getOrPut(project) { mutableSetOf() }.add(job)
+        try {
+            val updatedAt = try {
+                remote.put(project, layout.toJson())
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { return } ?: return
+            // A late response must not stamp a newer edit or resurrect a forgotten project.
+            if (revision(project) != revision) return
+            val local = values.get(key(project))?.let(WireJson::parseOrNull) as? JsonObject ?: return
+            values.put(key(project), JsonObject(local + ("updatedAt" to JsonPrimitive(updatedAt))).toString())
+        } finally {
+            pushes[project]?.let { jobs -> if (jobs.remove(job) && jobs.isEmpty()) pushes.remove(project) }
+        }
     }
 
     private fun stored(project: String): SavedLayout? =

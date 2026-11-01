@@ -3,6 +3,13 @@ package com.hienlh.ppm.state.workspace
 import com.hienlh.ppm.client.KeyValueStore
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.string
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -56,6 +63,84 @@ class WorkspaceCacheTest {
     )
 
     private fun stored(project: String) = values.map["workspace.s1.$project"]?.let { WireJson.parse(it) as JsonObject }
+
+    @Test
+    fun `window cleanup drains unsent layouts after the owner scope ends`() = runTest {
+        val owner = CoroutineScope(coroutineContext + SupervisorJob())
+        val cache = WorkspaceCache(values, "workspace.s1.", remote, owner, now = { clock })
+        cache.save("app", oneTab("unsent"))
+        owner.cancel()
+        cache.flushPending()
+        assertEquals(listOf("app"), remote.puts.map { it.first })
+        assertEquals(oneTab("unsent").toJson(), remote.puts.single().second)
+        assertEquals("2026-10-20T05:00:00.000Z", stored("app")!!["updatedAt"].string)
+    }
+
+    @Test
+    fun `forget cancels pending writes and leaves other projects alone`() = runTest {
+        val cache = cache()
+        cache.save("removed", oneTab("old"))
+        cache.save("kept", oneTab("keep"))
+        cache.forget("removed")
+        cache.flush()
+        runCurrent()
+        assertFalse(cache.has("removed"))
+        assertEquals(listOf("kept"), remote.puts.map { it.first })
+        assertTrue(cache.has("kept"))
+    }
+
+    @Test
+    fun `late hydrate cannot restore forgotten project even if same name is reused`() = runTest {
+        val response = CompletableDeferred<SavedLayout?>()
+        val remote = object : WorkspaceRemote {
+            override suspend fun get(project: String) = response.await()
+            override suspend fun put(project: String, layout: JsonObject): String? = null
+        }
+        val cache = WorkspaceCache(values, "workspace.s1.", remote, this, now = { clock })
+        val hydrate = async { cache.hydrate("app") }
+        runCurrent()
+        cache.forget("app")
+        cache.save("app", oneTab("new"))
+        response.complete(SavedLayout(oneTab("old"), "2030-01-01T00:00:00.000Z"))
+        assertFalse(hydrate.await())
+        assertEquals("new", cache.load("app")!!.panels.getValue("p").activeTabId)
+    }
+
+    @Test
+    fun `late put cannot stamp a newer local edit`() = runTest {
+        val response = CompletableDeferred<String?>()
+        val remote = object : WorkspaceRemote {
+            override suspend fun get(project: String): SavedLayout? = null
+            override suspend fun put(project: String, layout: JsonObject) = response.await()
+        }
+        val cache = WorkspaceCache(values, "workspace.s1.", remote, this, now = { clock })
+        cache.save("app", oneTab("old"))
+        cache.flush()
+        runCurrent()
+        clock += 1000
+        cache.save("app", oneTab("new"))
+        response.complete("2030-01-01T00:00:00.000Z")
+        runCurrent()
+        assertEquals("2026-10-20T04:00:01.000Z", stored("app")!!["updatedAt"].string)
+        cache.forget("app")
+    }
+
+    @Test
+    fun `forget invalidates a put that finishes despite cancellation`() = runTest {
+        val response = CompletableDeferred<String?>()
+        val remote = object : WorkspaceRemote {
+            override suspend fun get(project: String): SavedLayout? = null
+            override suspend fun put(project: String, layout: JsonObject) = withContext(NonCancellable) { response.await() }
+        }
+        val cache = WorkspaceCache(values, "workspace.s1.", remote, this, now = { clock })
+        cache.save("app", oneTab("old"))
+        cache.flush()
+        runCurrent()
+        cache.forget("app")
+        response.complete("2030-01-01T00:00:00.000Z")
+        runCurrent()
+        assertFalse(cache.has("app"))
+    }
 
     @Test
     fun `a change is kept at once and sent 1,5 s after the last one`() = runTest {

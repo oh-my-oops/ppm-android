@@ -122,6 +122,9 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
         }
         listOf(
             PaletteCommand("New AI Chat", ProductIcon.MessageSquare, "ai assistant claude", formatShortcut(bindings.binding("open-chat")), run { model.newChat() }),
+            PaletteCommand("Add Project", ProductIcon.FolderPlus, "project folder clone git", null, run { model.addingProject = true }),
+            PaletteCommand("File Explorer", ProductIcon.FolderOpen, "files folders host browse", null, run { model.openExplorer() }),
+            PaletteCommand("New Terminal", ProductIcon.Terminal, "shell console command", formatShortcut(bindings.binding("open-terminal")), run { model.openTerminal(inDock = true) }),
             PaletteCommand("Voice Input", ProductIcon.Mic, "speech microphone dictate voice", formatShortcut(bindings.binding("voice-input")), run { model.toggleVoiceInput() }),
             PaletteCommand("Settings", ProductIcon.Settings, "config preferences theme", formatShortcut(bindings.binding("open-settings")), run { model.openSettings() }),
         )

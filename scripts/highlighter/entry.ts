@@ -13,6 +13,7 @@
 import { createHighlighterCoreSync } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import type { LanguageRegistration } from "shiki/core";
+import { sanitizeDocxHtml } from "../../../src/web/components/shared/docx-html-sanitize";
 
 import githubDarkDimmed from "@shikijs/themes/github-dark-dimmed";
 import githubLight from "@shikijs/themes/github-light";
@@ -52,6 +53,8 @@ const highlighter = createHighlighterCoreSync({
 });
 
 const g = globalThis as Record<string, unknown>;
+// The same allow-list as the web, before converted Word HTML enters a script-disabled surface.
+g.ppmSanitizeDocx = sanitizeDocxHtml;
 
 /**
  * Lines of `[text, colour, fontStyle]` runs plus the theme's own foreground and background, as

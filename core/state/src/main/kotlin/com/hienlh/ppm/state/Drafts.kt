@@ -172,6 +172,12 @@ class DraftSync(
         send(draft)
     }
 
+    /** A finishing window keeps its request owner alive until ordered writes have drained. */
+    suspend fun flushAndJoin() {
+        flush()
+        lastRequest?.join()
+    }
+
     /**
      * Drops a save still waiting (`cancelPendingSave`), without touching the server. Called as a
      * message is sent: the send deletes the draft once the message is on a socket, usually within

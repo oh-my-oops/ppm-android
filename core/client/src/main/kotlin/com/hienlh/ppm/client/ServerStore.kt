@@ -29,12 +29,13 @@ interface SecretStore {
 }
 
 /** The servers added to this app, and which one is open. */
-class ServerStore(private val values: KeyValueStore, private val secrets: SecretStore) {
+class ServerStore(private val values: KeyValueStore, private val secrets: SecretStore,
+                  private val selectionKey: String = "selectedServer") {
     private val _servers = MutableStateFlow(load())
     val servers: StateFlow<List<ServerProfile>> = _servers.asStateFlow()
 
     private val _selectedId = MutableStateFlow(
-        values.get(SELECTED_KEY)?.takeIf { id -> _servers.value.any { it.id == id } } ?: _servers.value.firstOrNull()?.id,
+        values.get(selectionKey)?.takeIf { id -> _servers.value.any { it.id == id } } ?: _servers.value.firstOrNull()?.id,
     )
     val selectedId: StateFlow<String?> = _selectedId.asStateFlow()
 
@@ -43,6 +44,7 @@ class ServerStore(private val values: KeyValueStore, private val secrets: Secret
     fun token(server: ServerProfile): String? = secrets.read(server.id)
 
     fun add(name: String, url: String, token: String): ServerProfile {
+        refresh()
         val server = ServerProfile(name = name, url = url)
         secrets.write(server.id, token)
         _servers.value = _servers.value + server
@@ -54,11 +56,13 @@ class ServerStore(private val values: KeyValueStore, private val secrets: Secret
     fun updateToken(token: String, server: ServerProfile) = secrets.write(server.id, token)
 
     fun rename(server: ServerProfile, name: String) {
+        refresh()
         _servers.value = _servers.value.map { if (it.id == server.id) it.copy(name = name) else it }
         persist()
     }
 
     fun remove(server: ServerProfile) {
+        refresh()
         secrets.delete(server.id)
         _servers.value = _servers.value.filter { it.id != server.id }
         if (_selectedId.value == server.id) _selectedId.value = _servers.value.firstOrNull()?.id
@@ -66,8 +70,20 @@ class ServerStore(private val values: KeyValueStore, private val secrets: Secret
     }
 
     fun select(server: ServerProfile) {
+        refresh()
+        if (_servers.value.none { it.id == server.id }) return
         _selectedId.value = server.id
-        persist()
+        // Selection must never rewrite a stale snapshot of the shared server list.
+        values.put(selectionKey, server.id)
+    }
+
+    /** Refresh shared registrations while retaining this window's selected connection. */
+    fun refresh() {
+        _servers.value = load()
+        if (_servers.value.none { it.id == _selectedId.value }) {
+            _selectedId.value = _servers.value.firstOrNull()?.id
+            values.put(selectionKey, _selectedId.value)
+        }
     }
 
     private fun load(): List<ServerProfile> {
@@ -90,11 +106,10 @@ class ServerStore(private val values: KeyValueStore, private val secrets: Secret
             },
         )
         values.put(SERVERS_KEY, list.toString())
-        values.put(SELECTED_KEY, _selectedId.value)
+        values.put(selectionKey, _selectedId.value)
     }
 
     private companion object {
         const val SERVERS_KEY = "servers"
-        const val SELECTED_KEY = "selectedServer"
     }
 }

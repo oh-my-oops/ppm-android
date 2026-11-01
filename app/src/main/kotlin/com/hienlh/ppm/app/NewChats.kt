@@ -99,14 +99,17 @@ internal class NewChats(private val model: AppModel) {
         val project = chat.project
         // Taken now: what it answers belongs to this server, whichever is open by then.
         val cache = model.newChatCache
+        val projectRevision = cache.projectRevision(project)
         val slash = model.slashItems
         val usages = model.usageCache
         preparations.start(
             tabId,
             request = { bounded(PREPARE_MILLIS, "The server did not answer in time.") { api.prepareChat(project, openedOn, focused, skipPick) } },
         ) { result, current ->
+            // Rename/delete can finish while the server is preparing this tab. Its response
+            // must not restore providers or seed any project-scoped caches after eviction.
+            if (!cache.writeProvidersIfCurrent(project, projectRevision, result.providers)) return@start
             cache.writeSettings(result.settings)
-            cache.writeProviders(project, result.providers)
             preparationCache.seedProviders(project, result.providers)
             result.slash?.let { slash?.seed(it, project, result.providerId) }
             result.tags?.let { model.seedTags(project, it) }

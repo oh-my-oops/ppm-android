@@ -114,8 +114,7 @@ private val AUTOSCROLL_STEP = 10.dp
  * Back or a tap anywhere else closes it. In the Priority order with nothing searched, a row
  * dragged onto another takes its place — a finger rests on it first, a mouse just moves — and
  * the server keeps the new order. [anchor] is the button on the screen; [limit], how far down the
- * screen the shell reaches, which the list stops at rather than going under the keyboard. Adding
- * a project, the row's menu and "open in a new browser tab" are left out until this app has them.
+ * screen the shell reaches, which the list stops at rather than going under the keyboard. The Add Project row opens the shared native registration/clone form.
  */
 @Composable
 fun ProjectFlyout(model: AppModel, anchor: Rect, limit: Float, onDismiss: () -> Unit) {
@@ -351,6 +350,7 @@ private fun Flyout(model: AppModel, drag: RowDrag, modifier: Modifier, onDismiss
                         onHover = { highlight = index },
                         onDrop = ::drop,
                         onOpen = { open(project) },
+                        onActions = { onDismiss(); model.projectActions = project },
                     )
                 }
             }
@@ -361,6 +361,13 @@ private fun Flyout(model: AppModel, drag: RowDrag, modifier: Modifier, onDismiss
                     style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
                 )
             }
+        }
+        Row(Modifier.fillMaxWidth().edge(Edge.Top, tokens.border.color).ppmClickable {
+            onDismiss(); model.addingProject = true
+        }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PpmIcon(ProductIcon.Plus, 16.dp, tokens.text2.color)
+            BasicText("Add Project", style = ppmText(13f, FontWeight.Medium).copy(color = tokens.text2.color))
         }
     }
 }
@@ -385,6 +392,7 @@ private fun ProjectRow(
     onHover: () -> Unit,
     onDrop: () -> Unit,
     onOpen: () -> Unit,
+    onActions: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
@@ -474,6 +482,7 @@ private fun ProjectRow(
                 )
             }
         }
+        com.hienlh.ppm.app.ui.osexplorer.HostExplorerButton(ProductIcon.MoreHorizontal, "Actions for ${project.name}", onClick = onActions)
         model.projectOpenedAt[project.name]?.let {
             RelativeTime(Instant.ofEpochMilli(it), ppmText(10f, lineHeight = 15f).copy(color = tokens.text3.color), Modifier.padding(end = 8.dp))
         }

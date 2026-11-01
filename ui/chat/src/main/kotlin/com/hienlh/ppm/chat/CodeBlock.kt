@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
@@ -31,6 +32,7 @@ import com.hienlh.ppm.design.ChromeFace
 import com.hienlh.ppm.design.ChromeStrut
 import com.hienlh.ppm.design.ChromeText
 import com.hienlh.ppm.design.CssColumn
+import com.hienlh.ppm.design.CssRow
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTheme
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -55,6 +57,9 @@ private val CODE_STRUT = ChromeStrut(ChromeFace.Mono, CODE_SIZE, CODE_LINE_HEIGH
 /** The markdown being drawn is still streaming in: its code stays plain until it is done (`MdContext.isStreaming`). */
 internal val LocalMarkdownStreaming = compositionLocalOf { false }
 
+/** Sends normalized shell text without Enter. Absent outside a host that can open a terminal. */
+val LocalRunInTerminal = compositionLocalOf<((String) -> Unit)?> { null }
+
 /**
  * A fenced code block (`.markdown-content pre`): 12px Monaspace on the page background inside a
  * 1px border, scrolling sideways, with the copy button a touch screen always shows
@@ -64,6 +69,7 @@ internal val LocalMarkdownStreaming = compositionLocalOf { false }
 @Composable
 fun CodeBlockView(code: String, language: String?, modifier: Modifier = Modifier, highlight: Boolean = true) {
     val tokens = LocalPpmTokens.current
+    val runInTerminal = LocalRunInTerminal.current
     val shape = RoundedCornerShape(6.dp)
     val enabled = highlight && !LocalMarkdownStreaming.current
     val theme = LocalPpmTheme.current.shikiTheme
@@ -97,7 +103,14 @@ fun CodeBlockView(code: String, language: String?, modifier: Modifier = Modifier
                 )
             }
         }
-        CopyIconButton(code, Modifier.align(Alignment.TopEnd).padding(4.dp))
+        CssRow(Modifier.align(Alignment.TopEnd).padding(4.dp), gap = 4.dp, alignEnd = true) {
+            CopyIconButton(code)
+            if (runInTerminal != null && isTerminalCodeBlock(code, language)) {
+                CodeActionButton(TERMINAL_ICON, "Send to terminal") {
+                    normalizeCodeBlockCommand(code).takeIf { it.isNotEmpty() }?.let(runInTerminal)
+                }
+            }
+        }
     }
 }
 
@@ -107,10 +120,23 @@ fun CodeBlockView(code: String, language: String?, modifier: Modifier = Modifier
  */
 @Composable
 internal fun CopyIconButton(text: String, modifier: Modifier = Modifier) {
-    val tokens = LocalPpmTokens.current
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
+    CodeActionButton(if (copied) COPIED_ICON else COPY_ICON, "Copy", modifier) {
+        scope.launch {
+            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("code", text)))
+            copied = true
+            delay(2_000)
+            copied = false
+        }
+    }
+}
+
+/** `ActionBtn`: both code actions share the web's size, border and hover colours. */
+@Composable
+private fun CodeActionButton(icon: ImageVector, title: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(4.dp)
     val hover = rememberHover()
     val lit = hover.lit.toDouble()
@@ -119,19 +145,12 @@ internal fun CopyIconButton(text: String, modifier: Modifier = Modifier) {
             .size(24.dp)
             .clip(shape)
             .background(tokens.panel2.mix(tokens.panel2.opacity(0.8), lit).color)
-            .ppmClickable(pressedColor = tokens.panel2.color, source = hover.source) {
-                scope.launch {
-                    clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("code", text)))
-                    copied = true
-                    delay(2_000)
-                    copied = false
-                }
-            }
+            .ppmClickable(pressedColor = tokens.panel2.color, source = hover.source, onClick = onClick)
             .cssBorder(tokens.border.opacity(0.5).color, shape)
-            .semantics { contentDescription = "Copy" },
+            .semantics { contentDescription = title },
         contentAlignment = Alignment.Center,
     ) {
-        PpmIcon(if (copied) COPIED_ICON else COPY_ICON, 12.dp, tokens.text.mix(tokens.text2, lit).color)
+        PpmIcon(icon, 12.dp, tokens.text.mix(tokens.text2, lit).color)
     }
 }
 
@@ -141,3 +160,5 @@ private val COPY_ICON = lucideOutline(
     listOf("M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z", "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"),
 )
 private val COPIED_ICON = lucideOutline("CodeCopied", listOf("M20 6L9 17L4 12"))
+/** The web's `PlayIcon` is a terminal prompt, not a triangular play glyph. */
+private val TERMINAL_ICON = lucideOutline("CodeTerminal", listOf("M4 17L10 11L4 5", "M12 19H20"))

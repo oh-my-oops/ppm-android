@@ -1,0 +1,183 @@
+package com.hienlh.ppm.app.ui.files
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ui.HtmlEditorBody
+import com.hienlh.ppm.app.ui.TabPlaceholder
+import com.hienlh.ppm.app.ui.isHtmlEditorTab
+import com.hienlh.ppm.design.CssSides
+import com.hienlh.ppm.design.LocalPpmMobile
+import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.PpmIcon
+import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.ppmClickable
+import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.vector
+import com.hienlh.ppm.protocol.bool
+import com.hienlh.ppm.protocol.string
+import com.hienlh.ppm.state.files.FileDocumentClassifier
+import com.hienlh.ppm.state.files.FileDocumentState
+import com.hienlh.ppm.state.files.FileDocumentViewer
+import com.hienlh.ppm.state.workspace.WorkspaceTab
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.longOrNull
+
+/** The first native file-viewer slice. HTML keeps its existing preview and toolbar. */
+@Composable
+fun FileBody(model: AppModel, tab: WorkspaceTab) {
+    if (isHtmlEditorTab(tab)) HtmlEditorBody(model, tab)
+    else key(tab.id) { DocumentBody(model, tab, forceCode = false) }
+}
+
+/** Source-only view. HTML owns the toolbar by default; standalone callers can opt into one. */
+@Composable
+fun ReadOnlyFileBody(model: AppModel, tab: WorkspaceTab, showToolbar: Boolean = false) {
+    key(tab.id) { DocumentBody(model, tab, forceCode = true, showToolbar = showToolbar) }
+}
+
+/** Empty inline content is still a buffer; an untitled buffer never reads a metadata path. */
+internal fun fileBufferContent(tab: WorkspaceTab): String? = tab.metadata["inlineContent"].string
+    ?: if (tab.metadata["isUntitled"].bool == true) tab.metadata["unsavedContent"].string.orEmpty() else null
+
+@Composable
+private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean, showToolbar: Boolean = true) {
+    val path = tab.metaString("filePath")
+    val buffer = fileBufferContent(tab)
+    val viewer = if (buffer != null || forceCode) FileDocumentViewer.TEXT else FileDocumentClassifier.classify(path.orEmpty())
+    if (viewer == FileDocumentViewer.VIDEO || viewer == FileDocumentViewer.AUDIO) {
+        FileMediaView(model, tab)
+        return
+    }
+    if (viewer !in setOf(FileDocumentViewer.TEXT, FileDocumentViewer.MARKDOWN, FileDocumentViewer.CSV, FileDocumentViewer.IMAGE, FileDocumentViewer.PDF, FileDocumentViewer.DOCX)) {
+        TabPlaceholder(ProductIcon.FileCode.vector, tab.title, "This file viewer is not in the Android app yet.")
+        return
+    }
+    val project = tab.projectId ?: tab.metaString("projectName")
+    val controller = if (buffer == null) remember(model, model.api, tab.id, path, project) { model.fileDocument(tab) } else null
+    if (buffer == null && controller == null) {
+        FileMessage("File unavailable", "Connect to the server to read this file.")
+        return
+    }
+    val visible = com.hienlh.ppm.app.ui.LocalWindowContentVisible.current
+    if (controller != null) DisposableEffect(controller, forceCode, visible) {
+        if (visible) controller.show(readAsText = forceCode) else controller.hide()
+        onDispose { controller.hide() }
+    }
+    val state = controller?.state?.collectAsState()?.value ?: FileDocumentState(project, path.orEmpty(), content = buffer, stale = false)
+    val colors = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
+    val line = (tab.metadata["lineNumber"] as? JsonPrimitive)?.longOrNull
+    val end = (tab.metadata["endLine"] as? JsonPrimitive)?.longOrNull
+    val reveal = (tab.metadata["revealAt"] as? JsonPrimitive)?.content
+    val aiStamp = (tab.metadata["aiOpenAt"] as? JsonPrimitive)?.content
+    val aiView = tab.metaString("aiView")
+    var preview by remember(path) { mutableStateOf(viewer == FileDocumentViewer.MARKDOWN && aiView != "code" && line == null) }
+    var csvTable by remember(path) { mutableStateOf(true) }
+    var wrap by remember { mutableStateOf(mobile) }
+    LaunchedEffect(aiStamp, reveal) {
+        if (aiView == "code" || (line != null && reveal != null)) preview = false
+        else if (aiView == "preview") preview = true
+    }
+    val code = viewer !in setOf(FileDocumentViewer.IMAGE, FileDocumentViewer.PDF, FileDocumentViewer.DOCX) && (viewer != FileDocumentViewer.MARKDOWN || !preview)
+    Column(Modifier.fillMaxSize().background(colors.bgSolid.color)) {
+        if (showToolbar) Row(
+            Modifier.fillMaxWidth().heightIn(min = if (mobile) 48.dp else 32.dp)
+                .cssBorder(colors.border.color, sides = CssSides.Bottom).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BasicText(path ?: tab.title, Modifier.weight(1f).padding(end = 8.dp),
+                style = ppmText(12f, lineHeight = 16f).copy(color = colors.text2.color),
+                maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+            if (viewer == FileDocumentViewer.MARKDOWN) {
+                FileAction(ProductIcon.Code, "Code", active = !preview) { preview = false }
+                FileAction(ProductIcon.Eye, "Preview", active = preview) { preview = true }
+            }
+            if (viewer == FileDocumentViewer.CSV) {
+                FileAction(ProductIcon.Table, "Table", active = csvTable) { csvTable = true }
+                FileAction(ProductIcon.Code, "Raw", active = !csvTable) { csvTable = false }
+            }
+            if (code) FileAction(ProductIcon.WrapText, "Wrap lines", active = wrap) { wrap = !wrap }
+            if (controller != null) FileAction(ProductIcon.RefreshCw, "Refresh file", enabled = !state.loading) { controller.refresh() }
+        }
+        val error = state.error
+        if (error != null) Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BasicText(error, Modifier.weight(1f), style = ppmText(12f, lineHeight = 16f).copy(color = colors.text2.color))
+            FileAction(ProductIcon.RefreshCw, "Retry", label = "Retry") { controller?.refresh() }
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                state.cannotDisplay -> FileMessage("Cannot be displayed", "This file is binary or uses an unsupported text encoding.")
+                viewer == FileDocumentViewer.IMAGE && state.raw != null -> FileImageView(state.raw!!, path.orEmpty())
+                viewer == FileDocumentViewer.PDF && state.raw != null -> FilePdfView(model, state.raw!!, path.orEmpty())
+                state.content != null -> {
+                    if (viewer == FileDocumentViewer.DOCX) key(state.revision) { FileDocxView(model, state.content!!) }
+                    else if (viewer == FileDocumentViewer.CSV && csvTable) FileCsvView(state.content!!, wrap)
+                    else if (viewer == FileDocumentViewer.MARKDOWN && preview) FileMarkdownView(model, project, state.content!!)
+                    else FileCodeView(state.content!!,
+                        fileCodeLanguage(path, tab.metaString("inlineLanguage") ?: tab.metaString("language")),
+                        wrap, line, end, reveal)
+                }
+                state.loading || error == null -> FileMessage("Loading…")
+            }
+            if (state.loading && (state.content != null || state.raw != null)) {
+                BasicText("Refreshing…", Modifier.align(Alignment.TopEnd).background(colors.bgSolid.color).padding(8.dp),
+                    style = ppmText(12f, lineHeight = 16f).copy(color = colors.text2.color))
+            }
+        }
+    }
+}
+
+@Composable
+internal fun FileMessage(title: String, detail: String? = null) {
+    val colors = LocalPpmTokens.current
+    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+        BasicText(title, style = ppmText(14f, lineHeight = 20f).copy(color = colors.text2.color))
+        if (detail != null) BasicText(detail, Modifier.padding(top = 8.dp), style = ppmText(12f, lineHeight = 16f).copy(color = colors.text3.color))
+    }
+}
+
+@Composable
+internal fun FileAction(icon: ProductIcon, description: String, label: String? = null, active: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+    val colors = LocalPpmTokens.current
+    val side = if (LocalPpmMobile.current) 44.dp else 28.dp
+    Row(Modifier.sizeIn(minWidth = side, minHeight = side)
+        .background(if (active) colors.panel.color else Color.Transparent)
+        .semantics { contentDescription = description }
+        .ppmClickable(enabled = enabled, pressedColor = colors.panel.color, hoverColor = colors.panel.color,
+            onClickLabel = description, onClick = onClick).padding(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PpmIcon(icon, 16.dp, if (enabled) colors.text2.color else colors.text3.color)
+        if (label != null) BasicText(label, style = ppmText(12f, lineHeight = 16f).copy(color = colors.text2.color))
+    }
+}

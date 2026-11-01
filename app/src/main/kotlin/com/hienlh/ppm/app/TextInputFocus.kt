@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.IntSize
  */
 object TextInputFocus {
     private var state by mutableStateOf<TextFieldState?>(null)
+    private var nativeOwner by mutableStateOf<Any?>(null)
+    private var nativeBounds: ((LayoutCoordinates) -> Rect?)? = null
 
     /** Where the focused field is laid out, once it has been. */
     private var placed: LayoutCoordinates? = null
@@ -62,7 +64,7 @@ object TextInputFocus {
         activated = true
     }
 
-    val focused: Boolean get() = state != null
+    val focused: Boolean get() = state != null || nativeOwner != null
 
     /** An IME is composing in it (Telex before the word is done, say). */
     val composing: Boolean get() = state?.composition != null
@@ -71,10 +73,11 @@ object TextInputFocus {
     val text: String? get() = state?.text?.toString()
 
     /** The focused field, to observe: another one is a fresh focus. */
-    val field: Any? get() = state
+    val field: Any? get() = nativeOwner ?: state
 
     /** Where the focused field lies in [page], null with none focused or one laid out elsewhere (a sheet's window). */
     fun boundsIn(page: LayoutCoordinates): Rect? {
+        if (nativeOwner != null) return nativeBounds?.invoke(page)
         val field = placed?.takeIf { state != null && it.isAttached } ?: return null
         if (!page.isAttached || field.findRootCoordinates() != page.findRootCoordinates()) return null
         return page.localBoundingBoxOf(field, clipBounds = false)
@@ -87,8 +90,28 @@ object TextInputFocus {
         // nothing focused once the palette closes.
         if (this.state !== state && before != null && window != null && before !== window) before.clearFocus()
         this.state = state
+        nativeOwner = null
+        nativeBounds = null
         this.placed = placed
         this.window = window
+    }
+
+    /** A native terminal editor participates in the same focus/keyboard-pan rules as Compose fields. */
+    internal fun takeNative(owner: Any, window: FocusManager, bounds: (LayoutCoordinates) -> Rect?) {
+        val before = this.window
+        if (field !== owner && before != null && before !== window) before.clearFocus()
+        state = null
+        placed = null
+        nativeOwner = owner
+        nativeBounds = bounds
+        this.window = window
+    }
+
+    internal fun releaseNative(owner: Any) {
+        if (nativeOwner !== owner) return
+        nativeOwner = null
+        nativeBounds = null
+        window = null
     }
 
     /** Where the focused [state] is laid out now. */
@@ -113,17 +136,17 @@ object TextInputFocus {
     }
 
     /** What a tap leaves behind as it starts: the field focused, and the asks so far. */
-    internal class TapStart(val focused: TextFieldState?, val asks: Int)
+    internal class TapStart(val focused: Any?, val asks: Int)
 
     internal fun tapStarts(): TapStart {
         // Before the fields under the press say which of them it landed in.
         pressedIn = null
-        return TapStart(state, asks)
+        return TapStart(field, asks)
     }
 
     /** The tap begun at [start] left the focus where it was: not in that field, and nobody asked. */
     internal fun tapLeaves(start: TapStart): Boolean =
-        state === start.focused && asks == start.asks && (start.focused == null || pressedIn !== start.focused)
+        field === start.focused && asks == start.asks && (start.focused == null || pressedIn !== start.focused)
 }
 
 /**

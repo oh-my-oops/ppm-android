@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.app.ui.files.ReadOnlyFileBody
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -65,8 +66,7 @@ private class SeenStamp(var value: String?)
 
 /**
  * An `.html` file's editor tab (code-editor.tsx with `isHtml`): the toolbar both views share,
- * and below it the page in preview. The code view needs the editor, which this app does not
- * have yet, so it says so.
+ * and below it either the page preview or native highlighted source.
  *
  * The AI's `open_file` and `open_preview` stamp the tab's `aiOpenAt` and ask for a view with
  * `aiView`: each new stamp switches to that view, and a preview loads the page again. The stamp
@@ -76,7 +76,7 @@ private class SeenStamp(var value: String?)
 fun HtmlEditorBody(model: AppModel, tab: WorkspaceTab) {
     val api = model.api ?: return
     val filePath = tab.metaString("filePath") ?: return
-    val projectName = tab.metaString("projectName")
+    val projectName = tab.projectId ?: tab.metaString("projectName")
     val aiView = tab.metaString("aiView")
     val aiOpenAt = (tab.metadata["aiOpenAt"] as? JsonPrimitive)?.content
     var mode by remember { mutableStateOf(if (aiView == "code") HtmlMode.Edit else HtmlMode.Preview) }
@@ -108,7 +108,7 @@ fun HtmlEditorBody(model: AppModel, tab: WorkspaceTab) {
             HtmlPreview(filePath, projectName, revision, api, model.previews, Modifier.weight(1f))
         } else {
             Box(Modifier.weight(1f)) {
-                TabPlaceholder(ProductIcon.FileCode.vector, filePath.split('/', '\\').last(), "The code editor is not in the Android app yet.")
+                ReadOnlyFileBody(model, tab)
             }
         }
     }

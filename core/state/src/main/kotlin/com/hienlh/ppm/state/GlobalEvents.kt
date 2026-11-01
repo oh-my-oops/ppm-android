@@ -81,7 +81,7 @@ class GlobalEvents(
     var onGitChanged: ((project: String) -> Unit)? = null
 
     /** A file of this project changed on disk (`file:changed`). */
-    var onFileChanged: ((project: String) -> Unit)? = null
+    var onFileChanged: ((project: String, path: String?) -> Unit)? = null
 
     /** The server rebuilt this project's file list and it names other paths (`files:index-changed`). */
     var onIndexChanged: ((project: String) -> Unit)? = null
@@ -224,7 +224,7 @@ class GlobalEvents(
             // Every phase from now on carries the new id, so the old one's `idle` never comes.
             "session:migrated" -> frame["oldSessionId"].string?.let { _running.value -= it }
             "git:changed" -> frame["projectName"].string?.let { onGitChanged?.invoke(it) }
-            "file:changed" -> frame["projectName"].string?.let { onFileChanged?.invoke(it) }
+            "file:changed" -> frame["projectName"].string?.let { onFileChanged?.invoke(it, frame["path"].string) }
             "files:index-changed" -> frame["projectName"].string?.let { onIndexChanged?.invoke(it) }
             "session:file-changes" -> SessionFileChangesPush.from(frame)?.let { onSessionFileChanges?.invoke(it) }
             "agent-transcript:events", "agent-transcript:error", "agent-activity" ->
@@ -332,8 +332,9 @@ class GlobalEvents(
 
     private fun sendWatch() {
         val socket = socket
-        val project = project
-        if (!_isConnected.value || socket == null || project == null) return
+        // An empty name releases the old server-side watcher when no project is selected.
+        val project = project.orEmpty()
+        if (!_isConnected.value || socket == null) return
         socket.send(
             buildJsonObject {
                 put("type", "watch")

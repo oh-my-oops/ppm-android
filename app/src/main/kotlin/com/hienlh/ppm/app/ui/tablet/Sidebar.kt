@@ -75,7 +75,7 @@ import kotlin.math.roundToInt
 /**
  * The sidebar (sidebar.tsx): the PPM wordmark and the project switcher on top, the section rail
  * and the open section below, its right edge dragged to resize it; folded, only the rail. Chat
- * History and Teams are the sections this app has, so they are the ones on the rail.
+ * History, Explorer and Teams share the same section rail as the web.
  */
 @Composable
 fun Sidebar(model: AppModel) {
@@ -119,7 +119,12 @@ fun Sidebar(model: AppModel) {
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                     NavSectionRail(model, Modifier.edge(Edge.Right, tokens.border.color))
                     Box(Modifier.weight(1f).fillMaxHeight()) {
-                        if (model.sidebarSection == "teams") GroupList(model) else HistorySection(model)
+                        when (model.sidebarSection) {
+                            "teams" -> GroupList(model)
+                            "explorer" -> com.hienlh.ppm.app.ui.files.ExplorerBody(model)
+                            "search" -> com.hienlh.ppm.app.ui.files.SearchBody(model)
+                            else -> HistorySection(model)
+                        }
                     }
                 }
             }
@@ -312,7 +317,11 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
             // The open section stays lit while the sidebar is folded, as on the web.
             for (section in model.sidebarSections) {
                 val active = model.sidebarSection == section
-                if (section == "teams") {
+                if (section == "explorer") {
+                    NavItem(ProductIcon.FolderOpen, "Explorer", active, badge = 0) { model.pickSidebarSection(section) }
+                } else if (section == "search") {
+                    NavItem(ProductIcon.Search, "Search", active, badge = 0) { model.pickSidebarSection(section) }
+                } else if (section == "teams") {
                     NavItem(ProductIcon.Users, "Teams", active, badge = 0, featureBadge = FeatureBadgeKind.BETA) { model.pickSidebarSection(section) }
                 } else {
                     NavItem(ProductIcon.BotMessageSquare, "Chat History", active, badge = model.unread(model.selectedProject, unread).size) {
@@ -327,6 +336,7 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             NotificationBell(model)
+            FooterUtil(ProductIcon.FolderTree, "File Explorer") { model.openExplorer() }
             FooterUtil(ProductIcon.Settings, "Settings") { model.openSettings() }
         }
     }

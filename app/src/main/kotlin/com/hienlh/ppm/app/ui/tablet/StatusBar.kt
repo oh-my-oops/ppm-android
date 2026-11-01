@@ -187,7 +187,6 @@ private fun DockToggle(model: AppModel, text: TextStyle) {
     val tokens = LocalPpmTokens.current
     val visible = model.layout?.dock?.visible == true
     val count = model.dockTabs.size
-    if (count == 0 && !visible) return
     val hover = rememberHover()
     val color = if (visible) tokens.accent else tokens.text.mix(tokens.text3, hover.lit.toDouble())
     Row(

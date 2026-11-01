@@ -54,6 +54,31 @@ class DraftsTest {
     private suspend fun MockWebServer.next(): RecordedRequest = withContext(Dispatchers.IO) { takeRequest(2, TimeUnit.SECONDS)!! }
 
     @Test
+    fun `window drain waits for the final draft write and marks its local copy synced`() = withServer(saved) { server, drafts ->
+        val sync = drafts(60_000)
+        sync.save(ChatDraft("last characters before close"))
+        sync.flushAndJoin()
+        val sent = server.next()
+        assertEquals("PUT", sent.method)
+        assertTrue(sent.body!!.utf8().contains("last characters before close"))
+        assertEquals(true, store.read(key)?.synced)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `window drain preserves draft delete ordering and does not resurrect sent text`() = withServer(saved, ok) { server, drafts ->
+        val sync = drafts(60_000)
+        sync.save(ChatDraft("sent text"))
+        sync.flush()
+        sync.clear()
+        sync.flushAndJoin()
+        assertEquals("PUT", server.next().method)
+        assertEquals("DELETE", server.next().method)
+        assertNull(store.read(key))
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
     fun `keyed like the web's, per server, and read back whole`() {
         assertEquals("""draft.server-a.["p","tab-1","s-1"]""", key)
         assertFalse(key == DraftLocalStore(values, "server-b").key("p", "tab-1", "s-1"))

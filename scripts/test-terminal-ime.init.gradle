@@ -1,0 +1,10 @@
+// Select the isolated IME instrumentation without changing the engine's default JNI runner.
+// ./gradlew -I scripts/test-terminal-ime.init.gradle :ui:terminal-engine:assembleDebugAndroidTest
+gradle.beforeProject { project ->
+    if (project.path == ':ui:terminal-engine') {
+        project.afterEvaluate {
+            project.android.defaultConfig.testInstrumentationRunner =
+                'org.connectbot.terminal.CommittedImeInstrumentation'
+        }
+    }
+}

@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.app.ui.files.FileBody
 import com.hienlh.ppm.design.FileIcon
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.LucideIcon
@@ -49,9 +50,9 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
         "session-review" -> SessionReviewBody(model, tab)
         "web-preview" -> WebPreviewBody(model, tab)
         "group" -> GroupChatBody(model, tab)
-        else -> if (isHtmlEditorTab(tab)) {
-            HtmlEditorBody(model, tab)
-        } else {
+        "terminal" -> TerminalBody(model, tab)
+        "editor" -> FileBody(model, tab)
+        else -> {
             TabPlaceholder(tabTypeIcon(tab.type), tab.title, "This tab is not in the Android app yet.")
         }
     }

@@ -138,7 +138,7 @@ fun stripProjectFromWindowPanels(panels: Map<String, WorkspacePanel>, projectNam
     val windowIdsToClose = ArrayList<String>()
     for ((id, panel) in panels) {
         if (!isWindowPanelId(id)) continue
-        val tabs = panel.tabs.filter { it.projectId != projectName }
+        val tabs = panel.tabs.filter { (it.projectId ?: it.metadata["projectName"].string) != projectName }
         if (tabs.size == panel.tabs.size) continue
         val windowId = windowIdFromPanelId(id)
         if (tabs.isEmpty()) {

@@ -18,12 +18,15 @@ import androidx.javascriptengine.JavaScriptSandbox
 import androidx.javascriptengine.SandboxDeadException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -96,6 +99,37 @@ class SyntaxHighlighter private constructor(private val context: Context) {
             }
             synchronized(cache) { cache[key] = result }
             result
+        }
+    }
+
+    /** Search/replace uses this process's existing V8 isolate, serialized with highlighting. */
+    suspend fun evaluateRegexOperations(request: RegexOperationsRequest): RegexOperationsResult {
+        val script = withContext(Dispatchers.Default) { regexOperationsScript(request) }
+        val result = evaluateDocumentOperation(script, 3_000, "Regular expression timed out. Simplify the pattern and retry.")
+        return withContext(Dispatchers.Default) { parseRegexOperations(result) }
+    }
+
+    /** The bundled web sanitizer must succeed; never return the original HTML on failure. */
+    suspend fun sanitizeDocumentHtml(html: String): String {
+        val script = withContext(Dispatchers.Default) { "ppmSanitizeDocx(${quote(html)})" }
+        return evaluateDocumentOperation(script, 10_000, "Document sanitization timed out. Retry with a smaller document.")
+    }
+
+    private suspend fun evaluateDocumentOperation(script: String, timeoutMillis: Long, timeoutMessage: String): String = mutex.withLock {
+        val engine = engine() ?: throw IllegalStateException("JavaScript is unavailable. Update Android System WebView and retry.")
+        try {
+            // A disappearing result row must not kill the shared engine. Drain this fixed operation;
+            // a pathological regex is bounded and its isolate is retired before another use.
+            withContext(NonCancellable) {
+                withTimeout(timeoutMillis) { engine.isolate.evaluateJavaScriptAsync(script).await() }
+            }
+        } catch (error: TimeoutCancellationException) {
+            engine.dead = true
+            engine.close()
+            throw IllegalStateException(timeoutMessage, error)
+        } catch (error: Exception) {
+            if (error is IsolateTerminatedException || error is SandboxDeadException) engine.dead = true
+            throw error
         }
     }
 

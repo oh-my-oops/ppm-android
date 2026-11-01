@@ -62,6 +62,40 @@ class WorkspaceStoreTest {
     // ---------------------------------------------------------------------------------------
 
     @Test
+    fun `forget active project does not save it when switching to another project`() {
+        val storage = MemoryStorage()
+        val store = store(storage)
+        store.switchProject("old")
+        store.openTab(editor("old.txt", "old"))
+        storage.saves.clear()
+        store.forgetProject("old")
+        assertNull(store.s.currentProject)
+        assertTrue(store.s.grid.isEmpty())
+        assertTrue(store.s.panels.values.flatMap { it.tabs }.none { it.projectId == "old" })
+        store.switchProject("next")
+        assertEquals("next", store.s.currentProject)
+        assertTrue(storage.saves.none { it.first == "old" })
+    }
+
+    @Test
+    fun `forget inactive project preserves active panels and strips its keep alive grid`() {
+        val store = store()
+        store.switchProject("old")
+        store.openTab(editor("old.txt", "old"))
+        store.switchProject("kept")
+        store.openTab(editor("kept.txt", "kept"))
+        val grid = store.s.grid
+        val focused = store.s.focusedPanelId
+        store.forgetProject("old")
+        assertEquals("kept", store.s.currentProject)
+        assertEquals(grid, store.s.grid)
+        assertEquals(focused, store.s.focusedPanelId)
+        assertFalse(store.s.projectGrids.containsKey("old"))
+        assertTrue(store.s.panels.values.flatMap { it.tabs }.none { it.projectId == "old" })
+        assertTrue(store.s.panels.values.flatMap { it.tabs }.any { it.projectId == "kept" })
+    }
+
+    @Test
     fun `tab ids are derived as the web derives them`() {
         val random = { "abc" }
         assertEquals("editor:src/a.ts", deriveTabId("editor", meta("filePath" to "src/a.ts"), random))

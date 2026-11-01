@@ -21,9 +21,9 @@ sealed class PpmError(message: String) : Exception(message) {
      * `{ ok: false }`: the server's message, and its machine-readable [code] when it sent one
      * (`DB_LOGIN_REQUIRED`, `EEXIST`…).
      */
-    class Server(val status: Int, val serverMessage: String, val code: String? = null) : PpmError(serverMessage) {
+    class Server(val status: Int, val serverMessage: String, val code: String? = null, val hint: String? = null) : PpmError(serverMessage) {
         override fun equals(other: Any?) =
-            other is Server && other.status == status && other.serverMessage == serverMessage && other.code == code
+            other is Server && other.status == status && other.serverMessage == serverMessage && other.code == code && other.hint == hint
 
         override fun hashCode() = status * 31 + serverMessage.hashCode()
         override fun toString() = "Server(status=$status, message=$serverMessage, code=$code)"

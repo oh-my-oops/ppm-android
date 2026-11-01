@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,6 +34,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -155,7 +157,20 @@ fun PhoneShell(model: AppModel) {
             MobileDrawer(model, drawerOpen, drawerSection, onSection = { drawerSection = it }) { drawerOpen = false }
         }
     }
-    if (projectsOpen) ProjectSheet(model) { projectsOpen = false }
+    model.layout?.takeIf { it.dock.visible }?.let { state ->
+        val keyboard = WindowInsets.ime.getBottom(density)
+        val screen = LocalConfiguration.current.screenHeightDp.dp
+        BottomSheet(
+            { model.setDockVisible(false) },
+            Modifier.height(if (keyboard > 0) screen else screen * if (state.dockExpanded) 0.92f else 0.6f),
+        ) {
+            com.hienlh.ppm.app.ui.tablet.DockPanel(model, state, com.hienlh.ppm.app.ui.tablet.Edge.Top)
+        }
+    }
+    if (projectsOpen || model.phoneProjectRename != null) ProjectSheet(model) {
+        projectsOpen = false
+        model.phoneProjectRename = null
+    }
     if (tabsOpen) TabSwitcherSheet(model, onDismiss = { tabsOpen = false }, onLongPress = { tabMenu = it })
     tabMenu?.let { id -> TabMenuSheet(model, id, onDismiss = { tabMenu = null }, onRename = { renaming = it }) }
     renaming?.let { session -> RenameSheet(model, session) { renaming = null } }
@@ -169,7 +184,7 @@ private fun MobileNav(model: AppModel, onMenu: () -> Unit, onProjects: () -> Uni
     val tokens = LocalPpmTokens.current
     Column(modifier.fillMaxWidth().background(tokens.bgSolid.color).line(top = true, tokens.border.color)) {
         Row(Modifier.fillMaxWidth().height(NAV_HEIGHT), verticalAlignment = Alignment.CenterVertically) {
-            // The fixed cluster, `border-r border-border`; the Terminal button waits for terminals.
+            // The fixed cluster, `border-r border-border`.
             Row(
                 Modifier.fillMaxHeight().cssBorder(tokens.border.color, sides = CssSides.End),
                 verticalAlignment = Alignment.CenterVertically,
@@ -180,6 +195,8 @@ private fun MobileNav(model: AppModel, onMenu: () -> Unit, onProjects: () -> Uni
                     val project = model.currentProject
                     if (project != null) ProjectAvatar(model, project, 28.dp) else PpmIcon(ProductIcon.Layers, 20.dp, tokens.text2.color)
                 }
+                NavDivider()
+                NavCell("Terminal", { model.setDockVisible(model.layout?.dock?.visible != true) }) { PpmIcon(ProductIcon.Terminal, 20.dp, tokens.text2.color) }
                 NavDivider()
                 NavCell("New tab", { model.openPalette() }) { PpmIcon(ProductIcon.Plus, 20.dp, tokens.text2.color) }
             }
@@ -297,7 +314,7 @@ fun ProjectAvatar(model: AppModel, project: ProjectInfo, size: Dp, square: Boole
 }
 
 /** `project-palette.ts`. */
-private val PROJECT_PALETTE = listOf(
+internal val PROJECT_PALETTE = listOf(
     "linear-gradient(135deg, #667eea, #764ba2)",
     "linear-gradient(135deg, #f5576c, #f093fb)",
     "linear-gradient(135deg, #4facfe, #00c6ff)",
@@ -354,13 +371,17 @@ internal val PROJECT_SORTS = listOf(
 
 /**
  * The projects (`ProjectBottomSheet`): a search, the order (Recent, Priority, Name), then each
- * project with its path. Adding and editing projects are left out until this app has them.
+ * project with its path and an inline rename field.
  */
 @Composable
 internal fun ProjectSheet(model: AppModel, onDismiss: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val query = rememberTextFieldState()
-    BottomSheet(onDismiss, background = tokens.bgSolid.color) {
+    val list = rememberLazyListState()
+    if (model.projectActions != null) return
+    val screen = LocalConfiguration.current.screenHeightDp.dp
+    val status = with(LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() }
+    BottomSheet(onDismiss, Modifier.heightIn(max = screen - status), background = tokens.bgSolid.color) {
         Row(
             Modifier.fillMaxWidth().line(top = false, tokens.border.color).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -404,25 +425,30 @@ internal fun ProjectSheet(model: AppModel, onDismiss: () -> Unit) {
         val q = query.text.toString().trim().lowercase()
         val shown = model.sortedProjects.filter { q.isEmpty() || it.name.lowercase().contains(q) || it.path.lowercase().contains(q) }
         val maxList = LocalConfiguration.current.screenHeightDp.dp * 0.6f
-        val list = rememberLazyListState()
-        LazyColumn(Modifier.fillMaxWidth().heightIn(max = maxList).cssScrollbar(list), list) {
+        LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = maxList).cssScrollbar(list), list) {
             items(shown, key = { it.name }) { project ->
                 val active = project.name == model.selectedProject
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .background(if (active) tokens.panel2.opacity(0.1).color else Color.Transparent)
-                        .ppmClickable(pressedColor = tokens.panel2.color) {
-                            onDismiss()
-                            model.scope.launch { model.openProject(project.name) }
-                        }
+                        .pressable(pressedColor = tokens.panel2.color, onLongClick = {
+                            model.projectActionsCanReorder = query.text.isBlank(); model.projectActions = project
+                        }, onClick = {
+                            if (model.phoneProjectRename != project.name) {
+                                onDismiss()
+                                model.scope.launch { model.openProject(project.name) }
+                            }
+                        })
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     ProjectAvatar(model, project, 40.dp)
                     Column(Modifier.weight(1f)) {
-                        BasicText(project.name, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (model.phoneProjectRename == project.name) {
+                            com.hienlh.ppm.app.ui.projects.InlineProjectRename(model, project)
+                        } else BasicText(project.name, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         BasicText(project.path, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     val opened = model.projectOpenedAt[project.name]
@@ -441,6 +467,12 @@ internal fun ProjectSheet(model: AppModel, onDismiss: () -> Unit) {
                     )
                 }
             }
+        }
+        Row(Modifier.fillMaxWidth().ppmClickable { onDismiss(); model.addingProject = true }
+            .padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PpmIcon(ProductIcon.Plus, 20.dp, tokens.text2.color)
+            BasicText("Add Project", style = ppmText(14f).copy(color = tokens.text2.color))
         }
         Row(
             Modifier.fillMaxWidth().line(top = true, tokens.border.color).padding(horizontal = 16.dp, vertical = 12.dp),
@@ -867,7 +899,11 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                 val list = model.sidebarList
                 val search = model.sidebarSearch
                 // The web's GroupList closes nothing as it opens a group, which leaves the tab it opened behind the drawer.
-                if (shown == "teams" && model.currentProject != null) {
+                if (shown == "explorer") {
+                    com.hienlh.ppm.app.ui.files.ExplorerBody(model, onNavigate = onClose)
+                } else if (shown == "search") {
+                    com.hienlh.ppm.app.ui.files.SearchBody(model, onNavigate = onClose)
+                } else if (shown == "teams" && model.currentProject != null) {
                     GroupList(model, onNavigate = onClose)
                 } else if (shown == "history" && list != null && search != null) {
                     SessionHistoryPanel(model, list, search, onNavigate = onClose)
@@ -886,14 +922,20 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                     for (id in sections) {
                         val teams = id == "teams"
                         DrawerTabSlot(
-                            if (teams) ProductIcon.Users else ProductIcon.BotMessageSquare,
-                            if (teams) "Teams" else "History",
+                            when (id) { "explorer" -> ProductIcon.FolderOpen; "search" -> ProductIcon.Search; "teams" -> ProductIcon.Users; else -> ProductIcon.BotMessageSquare },
+                            when (id) { "explorer" -> "Explorer"; "search" -> "Search"; "teams" -> "Teams"; else -> "History" },
                             active = id == shown,
                             badge = if (teams) FeatureBadgeKind.BETA else null,
                         ) { onSection(id) }
                     }
                 }
                 Column(Modifier.fillMaxWidth().line(top = true, tokens.border.color).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openExplorer() }.padding(vertical = 10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        PpmIcon(ProductIcon.FolderTree, 16.dp, tokens.text3.color)
+                        BasicText("Files", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
+                    }
                     Column(
                         Modifier
                             .fillMaxWidth()
