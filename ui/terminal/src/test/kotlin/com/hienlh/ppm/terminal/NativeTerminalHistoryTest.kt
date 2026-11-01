@@ -13,9 +13,9 @@ class NativeTerminalHistoryTest {
     )
 
     @Test
-    fun `without Enter command is empty and output includes buffer through cursor only`() {
+    fun `without Enter command is empty and output is the screen through the cursor, not the scrollback above it`() {
         val history = NativeTerminalHistory()
-        val buffer = snapshot("banner", "  indented output   ", "   ", "stale row below cursor", cursor = 2)
+        val buffer = snapshot("scrolled off", "also scrolled off", "banner", "  indented output   ", "   ", "stale row below cursor", cursor = 4, screenStart = 2)
         assertEquals("", history.lastCommand(buffer))
         assertEquals("banner\n  indented output", history.lastOutput(buffer))
         assertEquals("", history.lastOutput(snapshot()))
@@ -32,6 +32,16 @@ class NativeTerminalHistoryTest {
         })
         assertEquals("  $ printf hello", history.lastCommand(buffer))
         assertEquals("hello", history.lastOutput(buffer))
+    }
+
+    @Test
+    fun `a known command keeps all of its output, however far up into the scrollback it has gone`() {
+        val history = NativeTerminalHistory()
+        history.send("\r", { snapshot("$ seq 1 6", cursor = 0) }) { true }
+        // The screen is the last two rows; the output began five rows above it.
+        val after = snapshot("$ seq 1 6", "1", "2", "3", "4", "5", "6", "$ ", cursor = 7, screenStart = 6)
+        assertEquals("$ seq 1 6", history.lastCommand(after))
+        assertEquals("1\n2\n3\n4\n5\n6\n$", history.lastOutput(after))
     }
 
     @Test

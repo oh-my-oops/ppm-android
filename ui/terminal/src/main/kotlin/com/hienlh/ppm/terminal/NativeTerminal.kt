@@ -111,7 +111,7 @@ class NativeTerminal(
     /** The prompt row where Enter was last sent. Works without shell OSC integration. */
     fun lastCommand(): String = if (closed) "" else history.lastCommand(emulator.getBufferSnapshot())
 
-    /** Rows after that Enter through the cursor; before any Enter, the whole buffer to the cursor. */
+    /** Rows after that Enter through the cursor; before any Enter, the screen to the cursor, not the scrollback above it. */
     fun lastOutput(): String = if (closed) "" else history.lastOutput(emulator.getBufferSnapshot())
 
     /** The web's physical-row scan, with native soft-wrap flags translated to xterm's direction. */
@@ -193,10 +193,16 @@ internal class NativeTerminalHistory {
     fun lastCommand(snapshot: TerminalBufferSnapshot): String =
         snapshot.lines.getOrNull(commandRow)?.text?.trimEnd(::isJsSpace).orEmpty()
 
+    /**
+     * The rows after the last Enter through the cursor. With no Enter seen there is no command to start from: the web
+     * starts at row 0, which sends whatever the server replayed (up to 1 MB) into a chat chip, so here it is the
+     * screen, from its top row.
+     */
     fun lastOutput(snapshot: TerminalBufferSnapshot): String {
+        val start = if (commandRow < 0) snapshot.screenStartRow else outputStartRow
         val end = snapshot.cursorRow.coerceAtMost(snapshot.lines.lastIndex)
-        if (end < outputStartRow) return ""
-        val rows = (outputStartRow..end).map { snapshot.lines[it].text.trimEnd(::isJsSpace) }.toMutableList()
+        if (end < start) return ""
+        val rows = (start..end).map { snapshot.lines[it].text.trimEnd(::isJsSpace) }.toMutableList()
         while (rows.lastOrNull()?.all(::isJsSpace) == true) rows.removeAt(rows.lastIndex)
         // As on the web, output keeps physical row breaks, even where the terminal soft-wrapped.
         return rows.joinToString("\n")
