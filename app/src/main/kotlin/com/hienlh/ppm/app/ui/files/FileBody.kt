@@ -46,6 +46,7 @@ import com.hienlh.ppm.state.files.FileDocumentClassifier
 import com.hienlh.ppm.state.files.FileDocumentState
 import com.hienlh.ppm.state.files.FileDocumentViewer
 import com.hienlh.ppm.state.workspace.WorkspaceTab
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
@@ -82,7 +83,7 @@ private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean,
     val project = tab.projectId ?: tab.metaString("projectName")
     val controller = if (buffer == null) remember(model, model.api, tab.id, path, project) { model.fileDocument(tab) } else null
     if (buffer == null && controller == null) {
-        FileMessage("File unavailable", "Connect to the server to read this file.")
+        FileNoteView(unreadableFileNote(path), Modifier.fillMaxSize().background(LocalPpmTokens.current.bgSolid.color))
         return
     }
     val visible = com.hienlh.ppm.app.ui.LocalWindowContentVisible.current
@@ -101,6 +102,14 @@ private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean,
     var preview by remember(path) { mutableStateOf(viewer == FileDocumentViewer.MARKDOWN && aiView != "code" && line == null) }
     var csvTable by remember(path) { mutableStateOf(true) }
     var wrap by remember { mutableStateOf(mobile) }
+    // The web's Refresh button spins, disabled, while the reload it asked for runs; a reload the watcher asked for shows nothing.
+    var refreshing by remember(controller) { mutableStateOf(false) }
+    LaunchedEffect(refreshing, controller) {
+        if (refreshing && controller != null) {
+            controller.state.first { !it.loading }
+            refreshing = false
+        }
+    }
     LaunchedEffect(aiStamp, reveal) {
         if (aiView == "code" || (line != null && reveal != null)) preview = false
         else if (aiView == "preview") preview = true
@@ -130,7 +139,10 @@ private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean,
                 FileAction(ProductIcon.Code, "Raw", active = !csvTable) { csvTable = false }
             }
             if (code) FileAction(ProductIcon.WrapText, "Wrap lines", active = wrap) { wrap = !wrap }
-            if (controller != null) FileAction(ProductIcon.RefreshCw, "Refresh file", enabled = !state.loading) { controller.refresh() }
+            if (controller != null) FileAction(ProductIcon.RefreshCw, "Refresh file", enabled = !refreshing, spinning = refreshing) {
+                refreshing = true
+                controller.refresh()
+            }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
@@ -144,10 +156,6 @@ private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean,
                         fileCodeLanguage(path, tab.metaString("inlineLanguage") ?: tab.metaString("language")),
                         wrap, line, end, reveal)
                 }
-            }
-            if (state.loading && (state.content != null || state.raw != null)) {
-                BasicText("Refreshing…", Modifier.align(Alignment.TopEnd).background(colors.bgSolid.color).padding(8.dp),
-                    style = ppmText(12f, lineHeight = 16f).copy(color = colors.text2.color))
             }
         }
     }
@@ -163,7 +171,10 @@ internal fun FileMessage(title: String, detail: String? = null) {
 }
 
 @Composable
-internal fun FileAction(icon: ProductIcon, description: String, label: String? = null, active: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun FileAction(
+    icon: ProductIcon, description: String, label: String? = null, active: Boolean = false, enabled: Boolean = true,
+    spinning: Boolean = false, onClick: () -> Unit,
+) {
     val colors = LocalPpmTokens.current
     val side = if (LocalPpmMobile.current) 44.dp else 28.dp
     Row(Modifier.sizeIn(minWidth = side, minHeight = side)
@@ -173,7 +184,7 @@ internal fun FileAction(icon: ProductIcon, description: String, label: String? =
             onClickLabel = description, onClick = onClick).padding(horizontal = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically,
     ) {
-        PpmIcon(icon, 16.dp, if (enabled) colors.text2.color else colors.text3.color)
+        PpmIcon(icon, 16.dp, if (enabled) colors.text2.color else colors.text3.color, spinning = spinning)
         if (label != null) BasicText(label, style = ppmText(12f, lineHeight = 16f).copy(color = colors.text2.color))
     }
 }

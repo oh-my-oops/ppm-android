@@ -33,6 +33,9 @@ internal sealed interface FileNote {
 
     /** The file-warning icon over a line and, under it, a smaller one: a preview that could not show its file. */
     data class Warning(val text: String, val detail: String? = null) : FileNote
+
+    /** One line in the secondary text colour (`text-text-secondary text-sm`): a tab with no file to read. */
+    data class Plain(val text: String) : FileNote
 }
 
 /**
@@ -69,6 +72,25 @@ internal fun fileNote(viewer: FileDocumentViewer, state: FileDocumentState): Fil
     }
 }
 
+/**
+ * The note for a file tab that cannot start reading. With no path it is the editor's own "No file
+ * selected."; with a path but no server open nothing has been read yet, which the web words as
+ * "Loading file...".
+ */
+internal fun unreadableFileNote(path: String?): FileNote =
+    if (path.isNullOrEmpty()) FileNote.Plain("No file selected.") else FileNote.Loading("Loading file...")
+
+/**
+ * What the PDF view says once it has the bytes. The web has no words for a document with no pages;
+ * its only PDF failure line is "Failed to load PDF.", so a document that failed to open and one with
+ * nothing to show both say that. One still opening is a spinner alone, and null means there are pages.
+ */
+internal fun pdfRenderNote(failed: Boolean, pageCount: Int?): FileNote? = when {
+    failed || pageCount == 0 -> FileNote.Warning("Failed to load PDF.")
+    pageCount == null -> FileNote.Spinner
+    else -> null
+}
+
 @Composable
 internal fun FileNoteView(note: FileNote, modifier: Modifier = Modifier.fillMaxSize()) {
     val tokens = LocalPpmTokens.current
@@ -84,6 +106,9 @@ internal fun FileNoteView(note: FileNote, modifier: Modifier = Modifier.fillMaxS
         }
         is FileNote.Error -> Box(modifier, Alignment.Center) {
             BasicText(note.message, style = sm.copy(color = tokens.error.color))
+        }
+        is FileNote.Plain -> Box(modifier, Alignment.Center) {
+            BasicText(note.text, style = sm.copy(color = tokens.text2.color))
         }
         is FileNote.Warning -> Column(modifier, Arrangement.spacedBy(12.dp, Alignment.CenterVertically), Alignment.CenterHorizontally) {
             PpmIcon(ProductIcon.FileWarning, 40.dp, tokens.text3.color)

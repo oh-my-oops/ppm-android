@@ -85,9 +85,9 @@ internal fun FilePdfView(model: AppModel, raw: RawFile, path: String) {
         }
     }
     val pages = reader
-    // As the web's: a failed PDF or one still opening is a line of its own, with no page controls around it.
-    if (error != null) { FileNoteView(FileNote.Warning("Failed to load PDF.")); return }
-    if (pages == null) { FileNoteView(FileNote.Spinner); return }
+    // As the web's: a failed or empty PDF, or one still opening, is a line of its own, with no page controls around it.
+    pdfRenderNote(error != null, pages?.sizes?.size)?.let { note -> FileNoteView(note); return }
+    if (pages == null) return // the spinner above answered for it; this narrows the type
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             val count = pages.sizes.size
@@ -123,21 +123,18 @@ internal fun FilePdfView(model: AppModel, raw: RawFile, path: String) {
                 }
             }
         }
-        when {
-            pages.sizes.isEmpty() -> FileMessage("Empty PDF file")
-            else -> BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
-                val density = LocalDensity.current
-                val pageWidth = ((maxWidth - 16.dp) * zoom).coerceAtLeast(1.dp)
-                val canvasWidth = maxOf(maxWidth, pageWidth + 16.dp)
-                val pixels = with(density) { pageWidth.roundToPx() }
-                val horizontal = rememberScrollState()
-                Box(Modifier.fillMaxSize().cssScrollbar(list).chromeScrollbar(horizontal, vertical = false, color = colors.border.color)) {
-                    LazyColumn(Modifier.horizontalScroll(horizontal).width(canvasWidth).fillMaxHeight(), state = list,
-                        contentPadding = PaddingValues(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        items(pages.sizes.size, contentType = { "pdf-page" }) { index ->
-                            val size = pages.sizes[index]
-                            PdfPage(pages, index, pixels, Modifier.width(pageWidth).height(pageWidth * (size.height.toFloat() / size.width)))
-                        }
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
+            val density = LocalDensity.current
+            val pageWidth = ((maxWidth - 16.dp) * zoom).coerceAtLeast(1.dp)
+            val canvasWidth = maxOf(maxWidth, pageWidth + 16.dp)
+            val pixels = with(density) { pageWidth.roundToPx() }
+            val horizontal = rememberScrollState()
+            Box(Modifier.fillMaxSize().cssScrollbar(list).chromeScrollbar(horizontal, vertical = false, color = colors.border.color)) {
+                LazyColumn(Modifier.horizontalScroll(horizontal).width(canvasWidth).fillMaxHeight(), state = list,
+                    contentPadding = PaddingValues(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    items(pages.sizes.size, contentType = { "pdf-page" }) { index ->
+                        val size = pages.sizes[index]
+                        PdfPage(pages, index, pixels, Modifier.width(pageWidth).height(pageWidth * (size.height.toFloat() / size.width)))
                     }
                 }
             }

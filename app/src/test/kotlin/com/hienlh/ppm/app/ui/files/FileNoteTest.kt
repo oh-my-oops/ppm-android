@@ -64,6 +64,21 @@ class FileNoteTest {
         assertNull(fileNote(FileDocumentViewer.DOCX, FileDocumentState("app", "a.docx", content = "<p>x</p>", stale = false)))
     }
 
+    @Test fun `a tab with no path says No file selected, and one with a path but no server is a file not read yet`() {
+        assertEquals(FileNote.Plain("No file selected."), unreadableFileNote(null))
+        assertEquals(FileNote.Plain("No file selected."), unreadableFileNote(""))
+        assertEquals(FileNote.Loading("Loading file..."), unreadableFileNote("/tmp/a.txt"))
+    }
+
+    @Test fun `a PDF that failed to open or has no pages says Failed to load PDF, one still opening a spinner, one with pages nothing`() {
+        val failed = FileNote.Warning("Failed to load PDF.")
+        assertEquals(failed, pdfRenderNote(failed = true, pageCount = null))
+        assertEquals(failed, pdfRenderNote(failed = true, pageCount = 3))
+        assertEquals(failed, pdfRenderNote(failed = false, pageCount = 0))
+        assertEquals(FileNote.Spinner, pdfRenderNote(failed = false, pageCount = null))
+        assertNull(pdfRenderNote(failed = false, pageCount = 1))
+    }
+
     @Test fun `no viewer says Loading file for a preview that is not read as text`() {
         for (viewer in listOf(FileDocumentViewer.IMAGE, FileDocumentViewer.PDF, FileDocumentViewer.DOCX)) {
             assertNotEquals(FileNote.Loading("Loading file..."), fileNote(viewer, FileDocumentState("app", "a", loading = true)))
