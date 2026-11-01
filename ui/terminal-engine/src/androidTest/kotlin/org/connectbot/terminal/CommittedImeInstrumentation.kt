@@ -304,9 +304,10 @@ class CommittedImeInstrumentation : Instrumentation() {
             connection = view.onCreateInputConnection(info)
             check(connection is TerminalImeConnectionHandle)
             // Chrome's numbers for xterm.js's textarea (dumpsys input_method); 0x200000 is its Android 17 flag.
+            // The options carry one more, 0x01000000 (no personalised learning), which Chrome omits.
             val chromeType = if (Build.VERSION.SDK_INT >= 37) 0x2200a1 else 0x200a1
             check(info.inputType == chromeType) { "inputType 0x${info.inputType.toString(16)}, Chrome's is 0x${chromeType.toString(16)}" }
-            check(info.imeOptions == 0x12000001) { "imeOptions 0x${info.imeOptions.toString(16)}, Chrome's is 0x12000001" }
+            check(info.imeOptions == 0x13000001) { "imeOptions 0x${info.imeOptions.toString(16)}, expected Chrome's 0x12000001 plus 0x01000000" }
             check(keyboard.composeMode == null)
         }
         try {

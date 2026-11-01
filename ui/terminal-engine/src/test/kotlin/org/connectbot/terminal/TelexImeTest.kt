@@ -208,11 +208,12 @@ class TelexImeTest {
         assertSent("tiee")
     }
 
-    @Test fun `the editor is the one Chrome describes for xterm, which Gboard does not autocorrect`() {
-        // The numbers `dumpsys input_method` shows for the web terminal's textarea. Chrome adds 0x200000
+    @Test fun `the editor is the one Chrome describes for xterm, which Gboard does not autocorrect, and keeps what is typed unlearned`() {
+        // The numbers `dumpsys input_method` shows for the web terminal's textarea, plus the app's
+        // no-personalised-learning flag (0x01000000) on the options. Chrome adds 0x200000 to the type
         // from Android 17, which this runs below; TerminalEditorInfoTest pins that half.
         assertEquals(0x200a1, rig.info.inputType)
-        assertEquals(0x12000001, rig.info.imeOptions)
+        assertEquals(0x13000001, rig.info.imeOptions)
     }
 
     @Test fun `physical keys go straight through, in order with a word the soft keyboard was composing`() {
