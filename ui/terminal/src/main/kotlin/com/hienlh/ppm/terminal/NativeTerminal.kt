@@ -45,6 +45,9 @@ class NativeTerminal(
         // Clear screen alone leaves scrollback behind. A new parser also resets alternate
         // screen/cursor modes before the server's replay, without creating another PTY.
         onReset = ::replaceEmulator,
+        // The replay is shown but never answered: the engine drops what it asks (cursor position, device
+        // attributes, window size), which would otherwise be typed at the prompt it comes back to.
+        onReplay = { bytes -> if (!closed) emulator.writeReplay(bytes) },
     )
 
     private fun replaceEmulator() {

@@ -60,6 +60,7 @@ class EngineInstrumentation : Instrumentation() {
             emulator.close(); emulator.close()
             check(emulator.isClosed)
             emulator.writeInput("late".toByteArray())
+            emulator.writeReplay("late".toByteArray())
             emulator.pasteText("late"); emulator.dispatchCharacter(0, 'x'.code); emulator.resize(4, 20)
             emulator.reset()
             check(emulator.getScreenText().isEmpty()) { "Closed screen: ${emulator.getScreenText().toList()}" }

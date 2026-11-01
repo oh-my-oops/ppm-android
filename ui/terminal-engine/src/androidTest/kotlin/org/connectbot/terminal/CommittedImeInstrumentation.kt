@@ -18,12 +18,15 @@ import java.io.ByteArrayOutputStream
 class CommittedImeInstrumentation : Instrumentation() {
     private val passed = mutableListOf<String>()
 
+    /** What the real library did where the check only reports it, printed after the passes and not counted with them. */
+    private val notes = mutableListOf<String>()
+
     override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
 
     override fun onStart() {
-        val result = runCatching { connectionChecks(); nativeChecks() }
+        val result = runCatching { connectionChecks(); nativeChecks(); replayChecks() }
         finish(if (result.isSuccess) Activity.RESULT_OK else Activity.RESULT_CANCELED, Bundle().apply {
-            putString("stream", passed.joinToString("\n", postfix = "\n") +
+            putString("stream", passed.joinToString("\n", postfix = "\n") + notes.joinToString("\n", postfix = "\n") +
                 if (result.isSuccess) "PASS: ${passed.size} committed-IME checks\n" else result.exceptionOrNull()!!.stackTraceToString())
         })
     }
@@ -456,5 +459,78 @@ class CommittedImeInstrumentation : Instrumentation() {
             main { connection.closeConnection() }
             emulator.close()
         }
+    }
+
+    /** What reached the PTY and the clipboard when [text] went into a fresh real emulator, as a replay or as live output. */
+    private fun through(text: String, replay: Boolean): Pair<String, List<String>> {
+        val bytes = ByteArrayOutputStream()
+        val copied = mutableListOf<String>()
+        lateinit var emulator: TerminalEmulatorImpl
+        main { emulator = TerminalEmulatorFactory.create(onKeyboardInput = bytes::write, onClipboardCopy = { copied += it }) as TerminalEmulatorImpl }
+        try {
+            main { if (replay) emulator.writeReplay(text.toByteArray()) else emulator.writeInput(text.toByteArray()) }
+            emulator.commands.call { }
+            waitForIdleSync()
+            return bytes.toByteArray().toString(Charsets.UTF_8) to copied.toList()
+        } finally {
+            emulator.close()
+        }
+    }
+
+    private fun show(text: String) = text.replace("\u001b", "ESC").replace("\u0007", "BEL")
+
+    /**
+     * A replay is shown and never answered. Vim leaves its queries in a session's buffer, and the replay a server sends
+     * when the app picks the shell up again carries them to a prompt: answered, they are text that Enter runs. Each
+     * query goes through the real libvterm twice, as a replay (nothing may reach the PTY, no clipboard write) and as
+     * live output (the answer a tablet's libvterm was seen to give). What libvterm says to colour queries and the
+     * focus mode is reported, not asserted: the web answers both on a replay, and its symbols show no code that would.
+     */
+    private fun replayChecks() {
+        val seen = listOf(
+            "\u001b[6n" to "\u001b[1;1R",
+            "\u001b[>c" to "\u001b[>0;100;0c",
+            "\u001b[14t" to "\u001b[4;384;640t",
+            "\u001b[16t" to "\u001b[6;16;8t",
+            "\u001b[?12\$p" to "\u001b[?12;2\$y",
+        )
+        for ((query, answer) in seen) {
+            val live = through(query, replay = false).first
+            check(live == answer) { "Live ${show(query)} was answered ${show(live)}, expected ${show(answer)}" }
+            val replayed = through(query, replay = true).first
+            check(replayed.isEmpty()) { "A replayed ${show(query)} was answered: ${show(replayed)}" }
+        }
+        passed += "PASS: real libvterm answers cursor position, DA2, pixel size, cell size and DECRQM live, and none of them in a replay"
+
+        val unverified = listOf(
+            "\u001b[c", "\u001b[5n", "\u001b[?6n", "\u001b[18t", "\u001b[>q", "\u001b[?u", "\u001b[?1004h", "\u001b[?1004l",
+            "\u001b]10;?\u0007", "\u001b]11;?\u0007", "\u001b]10;?\u001b\\", "\u001b]11;?\u001b\\", "\u001b]4;1;?\u0007",
+            "\u001bP\$qm\u001b\\", "\u001b[4\$p",
+        )
+        for (query in unverified) {
+            val replayed = through(query, replay = true).first
+            check(replayed.isEmpty()) { "A replayed ${show(query)} was answered: ${show(replayed)}" }
+            notes += "INFO: live ${show(query)} -> ${show(through(query, replay = false).first)}"
+        }
+
+        // The queries as a vim session leaves them, one replay.
+        val session = (seen.map { it.first } + unverified).joinToString("text ", prefix = "prompt$ ")
+        val replayed = through(session, replay = true)
+        check(replayed.first.isEmpty()) { "A replayed session was answered: ${show(replayed.first)}" }
+        val live = through(session, replay = false).first
+        var at = 0
+        for ((query, answer) in seen) {
+            val found = live.indexOf(answer, at)
+            check(found >= 0) { "Live session lost the answer to ${show(query)}: ${show(live)}" }
+            at = found + answer.length
+        }
+        passed += "PASS: the whole session of queries, replayed: 0 bytes to the PTY; the same live: ${live.length} bytes"
+
+        val write = "\u001b]52;c;aGVsbG8=\u0007"
+        val liveCopy = through(write, replay = false).second
+        val replayedCopy = through(write, replay = true).second
+        check(replayedCopy.isEmpty()) { "A replayed OSC 52 wrote the clipboard: $replayedCopy" }
+        notes += "INFO: live OSC 52 wrote the clipboard: $liveCopy" + if (liveCopy.isEmpty()) " (the replay check above proves nothing for it)" else ""
+        passed += "PASS: a replayed OSC 52 clipboard write is not performed"
     }
 }

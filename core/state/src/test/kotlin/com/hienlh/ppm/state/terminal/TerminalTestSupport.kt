@@ -52,10 +52,13 @@ internal class TerminalFixture(
     scope: CoroutineScope = test,
     onReset: (() -> Unit)? = null,
     onOutput: ((ByteArray) -> Unit)? = null,
+    /** An owner that tells a replay from live output: it lands in [replays] and in [delivery] as `REPLAY:<text>`. Else it is plain output. */
+    separateReplay: Boolean = false,
 ) : AutoCloseable {
     val urls = mutableListOf<String>()
     val sockets = mutableListOf<TestTerminalSocket>()
     val output = mutableListOf<ByteArray>()
+    val replays = mutableListOf<ByteArray>()
     val delivery = mutableListOf<String>()
     val controller = TerminalController(
         api = ApiClient("https://ppm.test/base/?obsolete=1#old".toHttpUrl(), "t +/&?#"),
@@ -73,6 +76,7 @@ internal class TerminalFixture(
             urls += url
             TestTerminalSocket().also { sockets += it }
         },
+        onReplay = if (separateReplay) { bytes -> replays += bytes; delivery += "REPLAY:" + bytes.toString(Charsets.UTF_8) } else null,
     )
     val socket get() = sockets.last()
     val state get() = controller.state.value

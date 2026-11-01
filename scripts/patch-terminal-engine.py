@@ -49,6 +49,14 @@ def emulator(text):
         val isClosed: Boolean
         /** Fresh parser/screens/history, preserving dimensions, callbacks, palette and defaults. */
         fun reset()
+        /**
+         * [writeInput] for the buffer a server replays when it picks a running session up again. It is parsed
+         * like any output and what it asks is dropped: a cursor position, the device attributes or a window
+         * size was answered when a program first asked, and an answer now lands at whatever is running, a
+         * shell prompt typically, as text that Enter then runs. An OSC 52 clipboard write in it is dropped
+         * too, so history never overwrites what was copied since.
+         */
+        fun writeReplay(data: ByteArray)
         /** Screen-relative (row, column), zero-based. */
         fun getCursorPosition(): Pair<Int, Int>
         /** Atomic history + screen read, with an absolute cursor row and screenStartRow. */
@@ -66,7 +74,7 @@ def emulator(text):
     text = replace(text, "\n    inlineImages: InlineImages = InlineImages.Off,", "\n    inlineImages: InlineImages = InlineImages.Off,\n    private val maxScrollbackLines: Int = 50_000,")
     text = replace(text, "    // Handler for escaping native mutex", "    init { require(maxScrollbackLines >= 0) { \"maxScrollbackLines must be non-negative\" } }\n\n    // Handler for escaping native mutex")
     text = replace(text, "    private val maxScrollbackLines = 1000\n", "")
-    text = replace(text, "    private val damageLock = Any()", "    private val damageLock = Any()\n    @Volatile override var isClosed = false\n        private set\n    private var currentAnsiPalette: IntArray? = null")
+    text = replace(text, "    private val damageLock = Any()", "    private val damageLock = Any()\n    @Volatile override var isClosed = false\n        private set\n    private var currentAnsiPalette: IntArray? = null\n    /** True only while [writeReplay] parses. Set and read under [damageLock]: libvterm calls back from inside the parse, on its thread. */\n    private var replaying = false")
     start = text.index("    private val terminalNative by lazy {")
     end = text.index("    // Parser for OSC sequences", start)
     text = text[:start] + dedent('''
@@ -87,6 +95,16 @@ def emulator(text):
     text = replace(text, "    private val oscParser = OscParser()", "    private var oscParser = OscParser()")
     marker = "    override fun clearScreen() = writeInput(\"\\u001B[2J\\u001B[H\".toByteArray())"
     text = replace(text, marker, marker + "\n\n" + dedent('''
+        override fun writeReplay(data: ByteArray): Unit = synchronized(damageLock) {
+            if (isClosed) return@synchronized
+            replaying = true
+            try {
+                writeInput(data, 0, data.size)
+            } finally {
+                replaying = false
+            }
+        }
+
         override fun getCursorPosition(): Pair<Int, Int> = synchronized(damageLock) {
             cursorRow to cursorCol
         }
@@ -173,6 +191,13 @@ def emulator(text):
     text = replace(text, "        val result = terminalNative.setPaletteColors(ansiColors, 16)", "        currentAnsiPalette = ansiColors.copyOf(16)\n        val result = terminalNative.setPaletteColors(ansiColors, 16)")
     text = replace(text, "        if (damagePosted) return", "        if (isClosed || damagePosted) return")
     text = replace(text, "                                    synchronized(imageStore) { completion(result.getOrDefault(false)) }", "                                    if (isClosed) return@synchronized\n                                    synchronized(imageStore) { completion(result.getOrDefault(false)) }")
+    # libvterm answers a query inside the parse that read it. Every answer (device attributes, cursor position,
+    # window size, the image protocols') reaches Kotlin through this one callback, so a replay's are dropped here.
+    text = replace(text, "    override fun onKeyboardInput(data: ByteArray): Int {\n        outputBatch?.let { batch ->",
+                   "    override fun onKeyboardInput(data: ByteArray): Int {\n        if (replaying) return 0\n        outputBatch?.let { batch ->")
+    # History must not overwrite what the user has copied since: a replayed OSC 52 write is not performed either.
+    text = replace(text, "                        handler.post {\n                            onClipboardCopy?.invoke(action.data)\n                        }",
+                   "                        if (!replaying) {\n                            handler.post {\n                                onClipboardCopy?.invoke(action.data)\n                            }\n                        }")
     return text
 
 

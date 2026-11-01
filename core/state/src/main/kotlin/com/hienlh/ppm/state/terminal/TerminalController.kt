@@ -31,6 +31,12 @@ import kotlinx.serialization.json.JsonNull
  * synchronously, including replay. It never passes through a flow that can drop bytes. On each
  * subsequent connection [onReset] runs before any output, so an owner can replace its emulator
  * and scrollback. Keep that owner alive while a tab is hidden, then [close] when it is removed.
+ *
+ * The buffer a server replays when a session is picked up again is history, not live output, and
+ * comes through [onReplay] (falling back to [onOutput]) so an owner can show it without answering the
+ * queries inside it: a program that asked for the cursor position or the device attributes was
+ * answered when it asked, and an answer now lands at whatever is running, a prompt typically, as text
+ * that Enter then runs.
  */
 class TerminalController internal constructor(
     private val api: ApiClient,
@@ -45,6 +51,7 @@ class TerminalController internal constructor(
     private val onReset: () -> Unit,
     private val clock: () -> Long,
     private val connectSocket: (String) -> TerminalConnection,
+    private val onReplay: ((ByteArray) -> Unit)? = null,
 ) : AutoCloseable {
     /**
      * [keyPrefix] must identify the server; the key is `${keyPrefix}ppm:terminal-session:${tabId}`.
@@ -62,9 +69,10 @@ class TerminalController internal constructor(
         initialSessionId: String = "new",
         onOutput: (ByteArray) -> Unit,
         onReset: () -> Unit,
+        onReplay: ((ByteArray) -> Unit)? = null,
     ) : this(
         api, project, tabId, scope, store, keyPrefix, cwd, initialSessionId, onOutput, onReset,
-        System::currentTimeMillis, ::TerminalSocket,
+        System::currentTimeMillis, ::TerminalSocket, onReplay,
     )
 
     private val controllerScope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
@@ -82,6 +90,12 @@ class TerminalController internal constructor(
     private var started = false
     private var closed = false
     private var hasConnected = false
+
+    /** The session this connection asked for: what the URL named, `new` for a shell not yet made. */
+    private var requestedSession = "new"
+
+    /** Set by the `session` frame that says the server picked an existing shell up again; the next output is its buffer. */
+    private var replayPending = false
     private var visible = false
     private var failures = 0
     private var lastActivity = 0L
@@ -167,6 +181,8 @@ class TerminalController internal constructor(
         disconnectSocket()
         mutableState.value = state.value.copy(connected = false, reconnecting = hasConnected || failures > 0, shellReady = false)
         lastActivity = clock()
+        requestedSession = sessionId
+        replayPending = false
         val source = try {
             connectSocket(terminalSocketUrl(api, project, sessionId, cwd))
         } catch (error: CancellationException) {
@@ -219,17 +235,24 @@ class TerminalController internal constructor(
         if (control) {
             when (type.string) {
                 "session" -> json["id"].string?.takeIf { it.isNotBlank() }?.let {
+                    // The server answers a connection with this frame and then, if the shell has printed anything,
+                    // its whole buffer as one frame, with nothing to say where the replay ends. It is a replay only
+                    // when the shell asked for already exists: `new`, or an id the server no longer knows (it makes
+                    // another shell and says so with another id), has no buffer, and its first output is live.
+                    replayPending = requestedSession != "new" && it == requestedSession
                     sessionId = it
                     mutableState.value = state.value.copy(sessionId = it)
                     persistSession(it)
                 }
                 "error" -> {
+                    replayPending = false
                     cancelReadiness()
                     val message = json["message"].string ?: "Terminal error"
                     mutableState.value = state.value.copy(error = message, shellReady = false)
                     onOutput("\r\n\u001b[31mError: $message\u001b[0m\r\n".toByteArray(Charsets.UTF_8))
                 }
                 "exited" -> {
+                    replayPending = false
                     cancelReadiness()
                     mutableState.value = state.value.copy(exited = true, shellReady = false, reconnecting = false)
                 }
@@ -243,7 +266,12 @@ class TerminalController internal constructor(
                 markReady()
             }
         }
-        onOutput(bytes)
+        // Only the first output after that frame is the replay; whatever follows is live and its queries are answered.
+        // A shell that has printed nothing has no buffer to replay, so its first live output is taken for one and its
+        // queries go unanswered that once. The mistake the other way, a replay answered, is what this exists to stop.
+        val replay = replayPending
+        replayPending = false
+        if (replay && onReplay != null) onReplay.invoke(bytes) else onOutput(bytes)
     }
 
     private fun markReady() {
@@ -301,6 +329,7 @@ class TerminalController internal constructor(
     }
 
     private fun disconnectSocket() {
+        replayPending = false
         reconnectJob?.cancel()
         reconnectJob = null
         resizeJob?.cancel()
