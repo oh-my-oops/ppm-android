@@ -1,6 +1,7 @@
 #!/bin/bash
 # A throwaway PPM server for the app to test against: its own PPM_HOME under /tmp (never the
-# real ~/.ppm), one project called `demo` and a random password. It listens on 127.0.0.1, which
+# real ~/.ppm), one project called `demo`, a random password and no Claude or Codex login (a chat
+# turn there fails instead of spending anything; use a mock session). It listens on 127.0.0.1, which
 # the emulator reaches as 10.0.2.2; set PPM_SCRATCH_HOST (a Tailscale or LAN address) for a
 # phone. Runs the server of the checkout this script is in.
 #
@@ -38,7 +39,12 @@ case "${1:-}" in
     password=$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')
     cd "$repo"
     env -u NOTIFY_SOCKET PPM_HOME="$home_dir" bun src/index.ts config set auth.token "$password" >/dev/null
-    env -u NOTIFY_SOCKET PPM_HOME="$home_dir" setsid nohup bun src/index.ts __serve__ "$port" "$host" \
+    # No AI login reaches it: text typed into the wrong box must not start a real Claude or Codex
+    # turn. The clean environment also keeps the caller's CLAUDE_* and NOTIFY_SOCKET out of it.
+    mkdir -m 700 "$home_dir/no-claude" "$home_dir/no-codex"
+    env -i HOME="$HOME" PATH="$PATH" PPM_HOME="$home_dir" \
+      CLAUDE_CONFIG_DIR="$home_dir/no-claude" CODEX_HOME="$home_dir/no-codex" \
+      setsid nohup bun src/index.ts __serve__ "$port" "$host" \
       > "$home_dir/serve.log" 2>&1 < /dev/null &
     pid=$!
     url="http://$host:$port"
