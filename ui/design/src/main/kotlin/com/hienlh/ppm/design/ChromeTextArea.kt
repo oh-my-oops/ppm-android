@@ -86,7 +86,11 @@ import kotlin.math.min
  * Android's line breaker ends lines where Blink's would not (after the `/` inside a path) and
  * keeps whole what Blink breaks, so a field handed [marks] — the invisible mark a line breaker
  * needs before a character, if any — lays its text out with them in, through its
- * [outputTransformation]: what is edited, copied and told the IME holds none of them.
+ * [outputTransformation]: what is edited and told the IME holds none of them. What a copy or a cut
+ * takes, and what an accessibility service reads and does to the caret, is the text as laid out,
+ * marks in it, so the field's owner has to see to both: the message box provides a clipboard that
+ * drops the marks (`textareaClipboard`, which drops a real U+200B or U+FEFF the user typed or
+ * pasted with them) and semantics in the text the user typed (`plainTextSemantics`, Composer.kt).
  */
 @Stable
 class ChromeTextArea internal constructor(

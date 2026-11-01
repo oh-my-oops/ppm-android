@@ -42,6 +42,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.verticalScroll
@@ -93,10 +94,14 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.editableText
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setSelection
+import androidx.compose.ui.semantics.textSelectionRange
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -123,6 +128,7 @@ import com.hienlh.ppm.chat.sky400
 import com.hienlh.ppm.chat.sky500
 import com.hienlh.ppm.chat.sky600
 import com.hienlh.ppm.chat.textareaBreakMark
+import com.hienlh.ppm.chat.textareaClipboard
 import com.hienlh.ppm.design.ChromeTextAreaBox
 import com.hienlh.ppm.design.CssAlign
 import com.hienlh.ppm.design.CssColumn
@@ -485,11 +491,12 @@ internal fun ComposerField(
         focus.requestFocus()
         focusQuietly.value = false
     }
-    CompositionLocalProvider(LocalTextSelectionColors provides area.selectionColors(selectionColors)) {
+    CompositionLocalProvider(LocalTextSelectionColors provides area.selectionColors(selectionColors), textareaClipboard()) {
         BasicTextField(
             state = tab.draft,
             modifier = modifier
                 .chromeTextArea(area, maxHeight)
+                .plainTextSemantics(tab.draft, enabled)
                 // `disabled:opacity-50`.
                 .alpha(if (enabled) 1f else 0.5f)
                 .heightIn(max = maxHeight)
@@ -564,6 +571,31 @@ internal fun ComposerField(
                 ) { field() }
             },
         )
+    }
+}
+
+/**
+ * What an accessibility service reads of the field and does to its caret, in the text the user typed. The
+ * field's own semantics describe its text as laid out, marks and all (`ChromeTextArea`'s): a service reads
+ * "/<U+FEFF>skills" (what uiautomator dumps), is told the caret is where it is in that, and moving it a
+ * character at a time stops it on 1, 3, 5, 7, 9. So the text, the caret and the action that sets it are stated
+ * together, in the draft's own offsets: the text alone leaves ACTION_SET_SELECTION landing a character off for
+ * every mark before it, because the field still reads its offsets in the laid-out text. The field's own check
+ * stays: nothing moves while it is disabled, nor to an offset past the text.
+ *
+ * Line and paragraph traversal stay approximate: they read the line ends from the field's text layout, whose
+ * offsets include the marks, and no semantics property can replace that layout. Measured in a 150 dp box over
+ * a 53-character draft, three line steps from the start end at 25, 48, 48 and never reach the text's end
+ * (25, 25, 25 without this: the caret stays where the first step put it).
+ */
+private fun Modifier.plainTextSemantics(state: TextFieldState, enabled: Boolean): Modifier = semantics {
+    editableText = AnnotatedString(state.text.toString())
+    textSelectionRange = state.selection
+    setSelection { start, end, _ ->
+        val length = state.text.length
+        if (!enabled || start !in 0..length || end !in 0..length) return@setSelection false
+        state.edit { selection = TextRange(start, end) }
+        true
     }
 }
 

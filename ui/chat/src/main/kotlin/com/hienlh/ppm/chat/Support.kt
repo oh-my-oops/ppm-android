@@ -4,6 +4,7 @@ import android.content.ClipData
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ProvidedValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -251,6 +252,20 @@ internal fun breakMark(text: CharSequence, i: Int, codeEnd: Boolean = false, cod
 
 /** [breakMark] for a textarea's text, which wraps as a `pre-wrap` message does: the mark before [text]`[i]`. */
 fun textareaBreakMark(text: CharSequence, i: Int): Char? = breakMark(text, i)
+
+/**
+ * The clipboard for a field laid out with [textareaBreakMark]'s marks, to provide as `LocalClipboard`: a copy or a
+ * cut puts the text on the clipboard without them. Foundation copies the text as it is laid out, so a path copied
+ * from the box would otherwise paste with invisible characters in it (`echo <paste> | od -c` showed them). The box
+ * marks every text, so a real U+200B or U+FEFF the user typed or pasted cannot be told from a mark and is dropped
+ * from the clipboard with them, where a textarea's copy would keep it; both are invisible. Reading the clipboard,
+ * a paste, is untouched.
+ */
+@Composable
+fun textareaClipboard(): ProvidedValue<Clipboard> {
+    val clipboard = LocalClipboard.current
+    return LocalClipboard provides remember(clipboard) { CleanClipboard(clipboard, "$BREAK$JOIN") }
+}
 
 /** [text] with [breakMark]'s marks in it, for Android to end its lines where Chrome ends them. */
 internal fun chromeBreaks(text: String): String = buildString(text.length + 8) {
