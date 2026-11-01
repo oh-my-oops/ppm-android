@@ -1,23 +1,29 @@
 package com.hienlh.ppm.state.files
 
 import com.hienlh.ppm.client.ApiClient
+import com.hienlh.ppm.client.PpmHttp
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.WireJson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import mockwebserver3.QueueDispatcher
 import mockwebserver3.RecordedRequest
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 class FileMutationsTest {
     private val project = ProjectInfo("app", "/work/app")
@@ -25,11 +31,28 @@ class FileMutationsTest {
         .body("""{"ok":true,"data":$data}""").build()
     private fun refused() = MockResponse.Builder().code(409).addHeader("Content-Type", "application/json")
         .body("""{"ok":false,"error":"Already exists","code":"EEXIST"}""").build()
-    private fun withServer(block: suspend CoroutineScope.(MockWebServer, FileMutations) -> Unit) = runBlocking {
+    /**
+     * A request nobody queued an answer for gets a 404 at once. MockWebServer's own dispatcher holds
+     * it until the server closes, and a mutation waits 600 s for an answer: one request more than a
+     * test expected sat a gate for ten minutes. A test that still waits is stopped after [timeoutMs],
+     * with what the server and the HTTP client were holding a tenth of the time before: the timeout
+     * cancels the call, and a cancelled call holds nothing.
+     */
+    private fun withServer(timeoutMs: Long = 20_000, block: suspend CoroutineScope.(MockWebServer, FileMutations) -> Unit) = runBlocking {
         val server = MockWebServer()
+        server.dispatcher = QueueDispatcher().apply { setFailFast(true) }
         server.start()
-        try { block(server, FileMutations(ApiClient(server.url("/"), "secret"))) }
-        finally { withContext(Dispatchers.IO) { server.close() } }
+        val held = AtomicReference("")
+        val watch = launch(Dispatchers.IO) { delay(timeoutMs - timeoutMs / 10); held.set(heldBy(server)) }
+        try {
+            try { withTimeout(timeoutMs) { block(server, FileMutations(ApiClient(server.url("/"), "secret"))) } }
+            catch (e: TimeoutCancellationException) { throw AssertionError("Still waiting after $timeoutMs ms: ${held.get()}", e) }
+        } finally { watch.cancel(); withContext(Dispatchers.IO) { server.close() } }
+    }
+    private fun heldBy(server: MockWebServer): String {
+        val calls = PpmHttp.client.dispatcher
+        return "the server was sent ${server.requestCount} request(s); the HTTP client holds " +
+            "running ${calls.runningCalls().map { it.request().url }} and queued ${calls.queuedCalls().map { it.request().url }}"
     }
     private suspend fun request(server: MockWebServer): RecordedRequest = withContext(Dispatchers.IO) {
         checkNotNull(server.takeRequest(3, TimeUnit.SECONDS)) { "No request arrived" }
@@ -193,5 +216,11 @@ class FileMutationsTest {
             assertFalse(files.state.value.busy)
             assertEquals(2, server.requestCount)
         } finally { release.countDown(); create.cancelAndJoin() }
+    }
+
+    @Test fun `a request nobody queued an answer for fails at once instead of waiting out the read timeout`() = withServer(timeoutMs = 5_000) { server, files ->
+        val result = files.delete(project, listOf("a"))
+        assertFalse(result.succeeded)
+        assertEquals(1, server.requestCount)
     }
 }
