@@ -70,6 +70,10 @@ The added APIs are:
   by `terminal_ime_patch.py` and the separately maintained IME types. Default `Legacy` preserves
   the upstream input path. This option is independent of the line-buffering ComposeMode;
   do not enable ComposeMode to turn on committed-text IME editing.
+- `Terminal(onTerminalTap = ...)`: runs for every tap, after the tap has asked for the focus and, if
+  `keyboardEnabled`, the keyboard. A tap that only cleared a selection or opened a link did neither
+  upstream, which left the terminal unfocused (the web's capture-phase `touchend` focuses it on every
+  tap). A caller that must raise nothing, as in select mode, turns `keyboardEnabled` off and ignores the call.
 
 The contrast algorithm matches the repository's xterm `Color.ts`, including its alternate
 direction search and powerline/box/block exclusions. A bounded 1,024-entry cache belongs to

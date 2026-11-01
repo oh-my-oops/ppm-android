@@ -295,7 +295,37 @@ def terminal(text):
 """
     text = replace(text, marker, addition + marker)
     text = replace(text, "                selectionBackgroundColor.takeUnless { it == Color.Unspecified } ?: Color(0xFFB3D7FF)", "                (selectionBackgroundColor.takeUnless { it == Color.Unspecified } ?: Color(0xFFB3D7FF))\n                    .compositeOver(if (cells.flags(col) and 32 != 0) cells.foreground(col) else cells.background(col))")
-    return text
+    return tap_asks_for_focus(text)
+
+
+def tap_asks_for_focus(text):
+    # The web's capture-phase `touchend` (terminal-tab.tsx) asks for the focus on every tap of the terminal, whatever
+    # else the tap does. Upstream asks, and calls onTerminalTap, only for a tap that cleared no selection and opened
+    # no link, so a tap that did either left the terminal unfocused, and `leavesTextOnTap` blurred a focused one.
+    old = """                                        currentOnHyperlinkClick(hyperlinkUrl)
+                                    } else {
+                                        // Request focus when terminal is tapped to show keyboard
+                                        if (currentKeyboardEnabled) {
+                                            focusRequester.requestFocus()
+                                            if (currentShouldShowIme) imeInputView?.showIme()
+                                        }
+                                        currentOnTerminalTap()
+                                    }
+                                }
+                                // Record tap for double-tap detection
+"""
+    new = """                                        currentOnHyperlinkClick(hyperlinkUrl)
+                                    }
+                                }
+                                // Every tap asks for the focus: one that cleared a selection or opened a link too.
+                                if (currentKeyboardEnabled) {
+                                    focusRequester.requestFocus()
+                                    if (currentShouldShowIme) imeInputView?.showIme()
+                                }
+                                currentOnTerminalTap()
+                                // Record tap for double-tap detection
+"""
+    return replace(text, old, new)
 
 
 def text_paint(text):

@@ -148,18 +148,20 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
             )
         }
     }
-    fun paste() {
-        if (inputReady) clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()?.let {
-            imeController?.finishBeforeExternalInput()
-            emulator.pasteText(it)
-        }
-    }
     // The web's focusTerminal(): a key of the row keeps the terminal focused, so the soft keyboard stays up
     // (and comes up when the terminal had lost the focus), rather than taking it as a tap elsewhere does.
     fun focusTerminal() {
         TextInputFocus.asked()
         keyboardRequested = true
         runCatching { focus.requestFocus() }
+    }
+    // As handlePaste: an empty clipboard does nothing at all, and what was pasted leaves the terminal focused.
+    fun paste() {
+        if (inputReady) clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()?.takeIf { it.isNotEmpty() }?.let {
+            imeController?.finishBeforeExternalInput()
+            emulator.pasteText(it)
+            focusTerminal()
+        }
     }
     fun chat() {
         val draft = TerminalText.chatDraft(selection = selection?.getSelectionText().orEmpty(), command = session.lastCommand(), output = session.lastOutput()) ?: return
@@ -210,7 +212,8 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
                 imeMode = TerminalImeMode.CommittedText,
                 onComposeControllerAvailable = { inputControl = it },
                 onImeControllerAvailable = { imeController = it },
-                onTerminalTap = { TextInputFocus.asked(); keyboardRequested = true },
+                // Every tap asks, as the web's touchend does, except in select mode, which raises nothing (it has no touchend).
+                onTerminalTap = { if (!selecting) { TextInputFocus.asked(); keyboardRequested = true } },
                 onCursorBoundsChanged = { cursor[0] = it },
                 modifierManager = modifiers,
                 onSelectionControllerAvailable = { selection = it },
