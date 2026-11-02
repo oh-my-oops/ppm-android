@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -70,6 +72,7 @@ class WindowDropRoutingTest {
     private var router: DropRouter? = null
     private val drag = DragDriver(compose) { view!! }
     private var zones = false
+    private var counted = false
     private val names = mutableMapOf<String, String>()
 
     private fun contentTarget(id: String) = object : DragAndDropTarget {
@@ -92,6 +95,7 @@ class WindowDropRoutingTest {
 
     @Before
     fun setUp() {
+        compositions.clear()
         model = AppModel(ApplicationProvider.getApplicationContext<Application>())
         compose.setContent {
             view = LocalView.current
@@ -106,6 +110,7 @@ class WindowDropRoutingTest {
                     },
                     windows = {
                         WindowLayer(model, store, state) { win ->
+                            if (counted) Counted(win.id)
                             if (zones) Box(Modifier.fillMaxSize().dropZone({ true }, contentTarget(win.id)))
                         }
                     },
@@ -274,4 +279,45 @@ class WindowDropRoutingTest {
         drag.end()
         assertTrue("CHAT drop" in log)
     }
+
+    @Test
+    fun `raising a window does not recompose what is in the windows whose layer it moves, which only the zones read`() {
+        counted = true
+        val a = open(50, 50, 400, 300)
+        val b = open(250, 150, 400, 300)
+        val opened = compositions.toMap()
+        assertEquals("each window's content was composed once", mapOf(a to 1, b to 1), opened)
+
+        // A comes over B: A goes from layer 1 to 2 and B from 2 to 1.
+        act { store.focus(a) }
+
+        assertEquals("a content that reads no layer is left as it was", opened, compositions.toMap())
+    }
+
+    @Test
+    fun `a raise still moves the drop to the window that is in front, though nothing else is recomposed`() {
+        zones = true
+        counted = true
+        val a = open(50, 50, 200, 200)
+        val b = open(100, 100, 400, 300)
+        names[a] = "A"
+        names[b] = "B"
+        assertTrue(letGoAt(300, 200))
+        assertEquals(listOf("B content drop"), log)
+        val before = compositions.toMap()
+
+        act { store.focus(a) }
+
+        assertTrue(letGoAt(300, 200))
+        assertEquals(listOf("A content drop"), log)
+        assertEquals(before, compositions.toMap())
+    }
+}
+
+/** Every window's content runs this, and what it counts is how many times the content below the layer was composed, by window id. */
+private val compositions = mutableMapOf<String, Int>()
+
+@Composable
+private fun Counted(id: String) {
+    SideEffect { compositions[id] = (compositions[id] ?: 0) + 1 }
 }

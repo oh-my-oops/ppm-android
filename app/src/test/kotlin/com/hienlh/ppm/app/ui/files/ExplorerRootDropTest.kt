@@ -44,6 +44,17 @@ internal class ExplorerRootDropTest : ExplorerTreeDragTestBase() {
         assertEquals(listOf("$ROOT/README.md", "$ROOT/src/app.kt"), transfers.single().paths)
     }
 
+    @Test fun `a drag of a window's entries is taken by nothing in the tree, which hears only rows of its own project`() {
+        show()
+        val drag = HostEntryDrag(listOf("/elsewhere/x.txt"))
+        assertFalse("not by the blank area", begin(drag))
+        over(drag, blank())
+        over(drag, center("docs"))
+        assertFalse(drop(drag, blank()))
+        assertEquals(emptyList<Transfer>(), transfers)
+        assertEquals(emptyList<Pair<String, String>>(), moves)
+    }
+
     private fun dropOnHeader(drag: ExplorerRowDrag): Boolean {
         assertTrue(begin(drag))
         over(drag, header())

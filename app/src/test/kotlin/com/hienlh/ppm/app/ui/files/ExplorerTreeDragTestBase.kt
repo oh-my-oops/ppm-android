@@ -131,7 +131,7 @@ internal abstract class ExplorerTreeDragTestBase {
     protected fun row(path: String, isDirectory: Boolean = false, paths: List<String> = listOf(path)) =
         ExplorerRowDrag("p", path, isDirectory, paths, ROOT)
 
-    protected fun dispatch(action: Int, drag: ExplorerRowDrag, at: Offset = Offset.Zero): Boolean {
+    protected fun dispatch(action: Int, drag: EntryDrag, at: Offset = Offset.Zero): Boolean {
         var result = false
         compose.runOnUiThread {
             val clip = explorerDragClip(drag)
@@ -146,19 +146,19 @@ internal abstract class ExplorerTreeDragTestBase {
     }
 
     /** Android's order for a drag that begins in this window; answers whether the tree took part. */
-    protected fun begin(drag: ExplorerRowDrag): Boolean {
+    protected fun begin(drag: EntryDrag): Boolean {
         val accepted = dispatch(DragEvent.ACTION_DRAG_STARTED, drag)
         if (accepted) dispatch(DragEvent.ACTION_DRAG_ENTERED, drag)
         return accepted
     }
 
-    protected fun over(drag: ExplorerRowDrag, at: Offset) {
+    protected fun over(drag: EntryDrag, at: Offset) {
         dispatch(DragEvent.ACTION_DRAG_LOCATION, drag, at)
         compose.waitForIdle()
     }
 
     /** Lets go at [at]: whether the tree took the drop. */
-    protected fun drop(drag: ExplorerRowDrag, at: Offset): Boolean {
+    protected fun drop(drag: EntryDrag, at: Offset): Boolean {
         val taken = dispatch(DragEvent.ACTION_DROP, drag, at)
         dispatch(DragEvent.ACTION_DRAG_ENDED, drag)
         compose.waitForIdle()
@@ -168,7 +168,7 @@ internal abstract class ExplorerTreeDragTestBase {
     protected fun advance(ms: Long) = compose.mainClock.advanceTimeBy(ms)
 
     /** A location with the frames after it run, because the effects that watch it only see it on a frame. */
-    protected fun hover(drag: ExplorerRowDrag, at: Offset) {
+    protected fun hover(drag: EntryDrag, at: Offset) {
         dispatch(DragEvent.ACTION_DRAG_LOCATION, drag, at)
         compose.mainClock.advanceTimeByFrame()
     }

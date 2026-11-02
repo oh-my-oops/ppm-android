@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -32,12 +33,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.app.ui.files.HostEntryDrag
+import com.hienlh.ppm.app.ui.files.explorerEntryDragSource
 import com.hienlh.ppm.design.*
 import com.hienlh.ppm.protocol.HostFileEntry
 import com.hienlh.ppm.state.files.FileDocumentClassifier
 import com.hienlh.ppm.state.osexplorer.*
 import java.time.Instant
 import java.util.Locale
+
+/** `p-2` of the Icons view's scrolling grid (icons-view.tsx), which the drop's hit test has to count from. */
+private val GRID_PADDING = 8.dp
 
 @Composable
 internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session: ExplorerSession, entries: List<HostFileEntry>, state: ExplorerSessionState,
@@ -49,6 +55,10 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
     val tokens = LocalPpmTokens.current
     // A name being typed for a new file or folder takes the place of the "empty" line, as in the web's views.
     val creating = commands?.edit?.let { it.entry == null } == true
+    val drops = rememberHostEntryDrops(commands, mobile)
+    // A row or tile drags what a menu on it would act on (`menuTargets`): the selection it is part of, else itself.
+    fun dragOf(entry: HostFileEntry) = HostEntryDrag(
+        if (entry.path in state.selection) entries.filter { it.path in state.selection }.map { it.path } else listOf(entry.path))
     fun menu(entry: HostFileEntry, at: Offset) {
         if (entry.path !in state.selection) session.select(entry.path)
         onMenu(if (entry.path in state.selection) entries.filter { it.path in state.selection } else listOf(entry), at)
@@ -70,8 +80,12 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
             val index = entries.indexOfFirst { it.path == state.anchor }
             if (index >= 0 && grid.layoutInfo.visibleItemsInfo.none { it.index == index }) grid.animateScrollToItem(index)
         }
-        LazyVerticalGrid(cells, Modifier.fillMaxSize().hostBackgroundMenu(session::clearSelection) { onMenu(emptyList(), it) },
-            state = grid, contentPadding = PaddingValues(8.dp)) {
+        val padding = with(LocalDensity.current) { GRID_PADDING.toPx() }
+        val inset = with(LocalDensity.current) { 4.dp.toPx() }
+        val gridDrops = rememberHostListDrops(drops, state.currentDirectory) { at -> grid.entryAt(at, padding, inset, entries) }
+        LazyVerticalGrid(cells, Modifier.fillMaxSize().hostBackgroundMenu(session::clearSelection) { onMenu(emptyList(), it) }
+            .then(gridDrops.target).then(gridDrops.list()),
+            state = grid, contentPadding = PaddingValues(GRID_PADDING)) {
             items(entries, key = { it.path }) { entry ->
                 val edit = commands?.edit
                 if (edit?.entry?.path == entry.path) { HostInlineName(commands, edit); return@items }
@@ -79,7 +93,9 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
                 Column(Modifier.padding(4.dp).clip(RoundedCornerShape(6.dp))
                     .background(if (selected) tokens.accent.opacity(.12).color else Color.Transparent)
                     .alpha(if (entry.path in cut) .4f else 1f)
+                    .then(gridDrops.row(entry, RoundedCornerShape(6.dp)))
                     .then(if (entry.isDirectory) dropModifier(entry.path) else Modifier)
+                    .explorerEntryDragSource(drops != null) { dragOf(entry) }
                     .hostEntryInput(entry, selected, { toggle, range -> tap(entry, toggle, range) }, { onOpen(entry) }, { menu(entry, it) })
                     .padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     if (api != null) HostFileThumbnail(api, entry, 48.dp) else HostEntryIcon(entry, Modifier.size(48.dp))
@@ -91,6 +107,7 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
         }
     } else {
         val scroll = rememberLazyListState()
+        val listDrops = rememberHostListDrops(drops, state.currentDirectory) { at -> scroll.entryAt(at.y, entries) }
         LaunchedEffect(state.anchor) {
             val index = entries.indexOfFirst { it.path == state.anchor }
             if (index >= 0 && scroll.layoutInfo.visibleItemsInfo.none { it.index == index }) scroll.animateScrollToItem(index)
@@ -111,7 +128,8 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
                             textAlign = if (sort == ExplorerSort.NAME) TextAlign.Start else TextAlign.End))
                 }
             }
-            LazyColumn(Modifier.weight(1f).fillMaxWidth().hostBackgroundMenu(session::clearSelection) { onMenu(emptyList(), it) }, state = scroll) {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth().hostBackgroundMenu(session::clearSelection) { onMenu(emptyList(), it) }
+                .then(listDrops.target).then(listDrops.list()), state = scroll) {
                 itemsIndexed(entries, key = { _, entry -> entry.path }) { index, entry ->
                     val edit = commands?.edit
                     if (edit?.entry?.path == entry.path) { HostInlineName(commands, edit); return@itemsIndexed }
@@ -120,7 +138,9 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
                         .background(when { selected -> tokens.accent.opacity(.12).color
                             !windows && index % 2 == 1 -> tokens.panel2.opacity(.4).color; else -> Color.Transparent })
                         .alpha(if (entry.path in cut) .4f else 1f)
+                        .then(listDrops.row(entry))
                     .then(if (entry.isDirectory) dropModifier(entry.path) else Modifier)
+                        .explorerEntryDragSource(drops != null) { dragOf(entry) }
                         .hostEntryInput(entry, selected, { toggle, range -> tap(entry, toggle, range) }, { onOpen(entry) }, { menu(entry, it) })
                         .padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (mobile && selectMode) PpmIcon(if (selected) ProductIcon.Check else ProductIcon.Square, 20.dp, tokens.accent.color)

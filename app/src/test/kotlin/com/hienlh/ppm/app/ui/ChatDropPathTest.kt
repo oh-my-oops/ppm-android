@@ -24,7 +24,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.ChatTab
+import com.hienlh.ppm.app.ui.files.ENTRY_DRAG_MIME
 import com.hienlh.ppm.app.ui.files.ExplorerRowDrag
+import com.hienlh.ppm.app.ui.files.HostEntryDrag
 import com.hienlh.ppm.app.ui.files.explorerDragClip
 import com.hienlh.ppm.app.ui.tablet.WorkingAreaLayers
 import com.hienlh.ppm.app.withComposeActivity
@@ -292,6 +294,36 @@ open class ChatDropPathTest {
 
         assertEquals(listOf(uri), attached)
         assertEquals("hi", text())
+    }
+
+    @Test
+    fun `entries of an explorer window light no overlay and put nothing in the box, as the web's overlay looks only for a file or a tree row`() {
+        show("hi")
+        val drag = HostEntryDrag(listOf("/home/me/a.txt"))
+        val clip = explorerDragClip(drag)
+
+        begin(clip, drag)
+        dispatch(DragEvent.ACTION_DRAG_LOCATION, clip, drag, transcript)
+        assertFalse("no overlay over the chat", tab.filesOver)
+        dispatch(DragEvent.ACTION_DRAG_LOCATION, clip, drag, box)
+        assertFalse("none over the box", tab.filesOver)
+        letGo(clip, drag, transcript)
+
+        assertEquals("hi", text())
+        assertEquals(0, tab.focusRequests)
+        assertEquals(emptyList<Uri>(), attached)
+    }
+
+    @Test
+    fun `a file that comes with entries is still a file, and lights the overlay`() {
+        show("hi")
+        val clip = ClipData(ClipDescription("both", arrayOf(ENTRY_DRAG_MIME, "image/png")), ClipData.Item("{}"))
+
+        begin(clip, null)
+        dispatch(DragEvent.ACTION_DRAG_LOCATION, clip, null, transcript)
+
+        assertTrue(tab.filesOver)
+        dispatch(DragEvent.ACTION_DRAG_ENDED, clip, null)
     }
 
     @Test

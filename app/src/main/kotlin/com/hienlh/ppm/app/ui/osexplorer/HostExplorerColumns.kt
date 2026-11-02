@@ -35,6 +35,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import com.hienlh.ppm.app.TextInputFocus
 import com.hienlh.ppm.app.ui.LocalWindowContentVisible
+import com.hienlh.ppm.app.ui.files.HostEntryDrag
+import com.hienlh.ppm.app.ui.files.explorerEntryDragSource
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.fsBrowse
 import com.hienlh.ppm.design.*
@@ -59,6 +61,7 @@ internal fun HostExplorerColumns(
     val scope = rememberCoroutineScope()
     val controller = remember(api, session) { HostColumnState(HostDirectoryReader { path, hidden -> api.fsBrowse(path, hidden) }, scope) }
     val cached by controller.state.collectAsState()
+    val drops = rememberHostEntryDrops(commands, mobile)
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     val visible = LocalWindowContentVisible.current && lifecycle.isAtLeast(Lifecycle.State.STARTED)
     val paths = state.directory?.breadcrumbs?.map { it.path }?.takeIf { it.isNotEmpty() } ?: hostAncestorPaths(state.path)
@@ -117,7 +120,7 @@ internal fun HostExplorerColumns(
         }
         @Composable fun column(index: Int, fullWidth: Boolean) {
             val value = columns[index]
-            HostColumnView(value, selectedPath(index), index == activeIndex, mobile, fullWidth, cut, commands, dropModifier,
+            HostColumnView(value, selectedPath(index), index == activeIndex, mobile, fullWidth, cut, commands, drops, dropModifier,
                 onSelect = { entry ->
                     select(index, entry)
                     if (mobile && !entry.isDirectory) {
@@ -146,17 +149,21 @@ internal fun HostExplorerColumns(
 
 @Composable
 private fun HostColumnView(column: HostColumn, selected: String?, focused: Boolean, mobile: Boolean, fullWidth: Boolean,
-                           cut: Set<String>, commands: HostExplorerCommands?, dropModifier: @Composable (String) -> Modifier, onSelect: (HostFileEntry) -> Unit, onOpen: (HostFileEntry) -> Unit,
+                           cut: Set<String>, commands: HostExplorerCommands?, drops: HostEntryDrops?, dropModifier: @Composable (String) -> Modifier, onSelect: (HostFileEntry) -> Unit, onOpen: (HostFileEntry) -> Unit,
                            onMenu: (HostFileEntry?, Offset) -> Unit, onRetry: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val scroll = rememberLazyListState()
+    // A drag that rests on a folder 800 ms selects it, which opens it in the next column, as the web's `springLoad: onSelect` does.
+    val listDrops = rememberHostListDrops(drops, column.path, springLoad = { path -> column.entries.firstOrNull { it.path == path }?.let(onSelect) }) { at ->
+        scroll.entryAt(at.y, column.entries)
+    }
     LaunchedEffect(selected, column.entries) {
         val index = column.entries.indexOfFirst { it.path == selected }
         if (index >= 0 && scroll.layoutInfo.visibleItemsInfo.none { it.index == index }) scroll.animateScrollToItem(index)
     }
     LazyColumn((if (fullWidth) Modifier.fillMaxWidth() else Modifier.width(220.dp).cssBorder(tokens.border.color, sides = CssSides.End))
         .fillMaxHeight().background(if (focused) tokens.panel2.opacity(.4).color else Color.Transparent)
-        .then(dropModifier(column.path)).semantics { contentDescription = column.path }.cssScrollbar(scroll)
+        .then(dropModifier(column.path)).then(listDrops.target).then(listDrops.list()).semantics { contentDescription = column.path }.cssScrollbar(scroll)
         .hostColumnInput({}, {}, { onMenu(null, it) }), state = scroll) {
         if (column.loading && column.entries.isEmpty()) item { HostColumnMessage("Loading…") }
         column.error?.let { error -> item {
@@ -170,8 +177,10 @@ private fun HostColumnView(column: HostColumn, selected: String?, focused: Boole
             else Row(Modifier.fillMaxWidth().height(if (mobile) 48.dp else 32.dp)
                 .background(if (entry.path == selected) tokens.accentWash.color else Color.Transparent)
                 .alpha(if (entry.path in cut) .4f else 1f)
+                .then(listDrops.row(entry))
                 .then(if (entry.isDirectory) dropModifier(entry.path) else Modifier)
                 .semantics { this.selected = entry.path == selected; contentDescription = entry.name }
+                .explorerEntryDragSource(drops != null) { HostEntryDrag(listOf(entry.path)) }
                 .hostColumnInput({ onSelect(entry) }, { onOpen(entry) }, { onMenu(entry, it) })
                 .padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 HostEntryIcon(entry, Modifier.size(16.dp))

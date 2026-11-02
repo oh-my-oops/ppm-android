@@ -21,12 +21,16 @@ private class MemoryValues : KeyValueStore {
 
 /**
  * A session shown on [directory] that answers at once, with its preferences kept in memory, so that a test sees
- * the folder as soon as it composes. Close it when the test is over.
+ * the folder as soon as it composes. It answers [directory] to every path, unless a test that navigates says what [answer] is
+ * for each, and it starts at [directory]'s own path unless a test says [initialPath] is another way to spell it (`~`).
+ * Close it when the test is over.
  */
-internal fun explorerSessionOn(directory: HostDirectory): ExplorerSession =
+internal fun explorerSessionOn(
+    directory: HostDirectory, answer: (String) -> HostDirectory = { directory }, initialPath: String = directory.current,
+): ExplorerSession =
     ExplorerSession(
-        HostDirectoryReader { _, _ -> directory },
+        HostDirectoryReader { path, _ -> answer(path) },
         ExplorerPreferences(MemoryValues(), "test."),
         CoroutineScope(Dispatchers.Unconfined + SupervisorJob()),
-        directory.current,
+        initialPath,
     ).also { it.show() }

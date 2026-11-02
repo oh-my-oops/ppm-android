@@ -2,7 +2,6 @@ package com.hienlh.ppm.app.ui.files
 
 import android.content.ClipData
 import android.content.ClipDescription
-import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
@@ -35,16 +34,15 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.rememberTextMeasurer
 import com.hienlh.ppm.app.DragModifierKeys
+import com.hienlh.ppm.app.ui.dropZone
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.state.osexplorer.EntryDragOrigin
+import com.hienlh.ppm.state.osexplorer.EntryDragPayload
 import com.hienlh.ppm.state.osexplorer.EntryDropDecision
 import com.hienlh.ppm.state.osexplorer.decideEntryDrop
 import com.hienlh.ppm.state.workspace.absoluteProjectPath
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.serialization.json.add
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
 import kotlin.math.ceil
 
 /** The web's `TREE_LEGACY_DRAG_MIME`: what a drag that began on a project-tree row says it carries. */
@@ -72,31 +70,34 @@ internal const val ROOT_TINT_DELAY_MS = 120L
 internal data class ExplorerRowDrag(
     val project: String, val path: String, val isDirectory: Boolean,
     val paths: List<String> = listOf(path), val root: String? = null,
-) {
+) : EntryDrag {
     /** [paths] as the payload carries them: absolute under [root]. */
     val absolutePaths: List<String> get() = root?.let { base -> paths.map { absoluteProjectPath(base, it) } } ?: paths
+
+    override val payload get() = EntryDragPayload(absolutePaths, EntryDragOrigin.TREE, project)
 }
 
-/** The web's `encodeEntryDrag`: `{ paths, origin: "tree", projectName }`, the shared payload every drop target of PPM reads. */
-internal fun explorerEntryPayload(drag: ExplorerRowDrag): String = buildJsonObject {
-    putJsonArray("paths") { drag.absolutePaths.forEach { add(it) } }
-    put("origin", "tree")
-    if (drag.project.isNotEmpty()) put("projectName", drag.project)
-}.toString()
+/** The web's `encodeEntryDrag`: `{ paths, origin, projectName }`, the shared payload every drop target of PPM reads. */
+internal fun explorerEntryPayload(drag: EntryDrag): String = drag.payload.toJson()
 
 /**
- * The clip of a row's drag. Item 0 is the web's legacy single-path value, with a "/" after a folder's path: the chat's drop reads that
- * one, so it stays first. Item 1 is the shared payload ([explorerEntryPayload]). No `text/plain` or `text/uri-list` mirror, which the
- * web writes for apps that understand dropped files: here they would light the chat's "Drop files to attach" for what is not a file.
+ * The clip of a drag of entries. A project tree's row has the web's legacy single-path value as item 0, with a "/" after a folder's path:
+ * the chat's drop reads that one, so it stays first; item 1 is the shared payload ([explorerEntryPayload]). A window's entries have the
+ * shared payload alone: they are no rows of a project, and the chat's drop has no path to take from them. No `text/plain` or
+ * `text/uri-list` mirror, which the web writes for apps that understand dropped files: here they would light the chat's "Drop files to
+ * attach" for what is not a file.
  */
-internal fun explorerDragClip(drag: ExplorerRowDrag): ClipData = ClipData(
-    ClipDescription("PPM path", arrayOf(TREE_PATH_MIME, ENTRY_DRAG_MIME)),
-    ClipData.Item(if (drag.isDirectory) drag.path + "/" else drag.path),
-).apply { addItem(ClipData.Item(explorerEntryPayload(drag))) }
+internal fun explorerDragClip(drag: EntryDrag): ClipData = when (drag) {
+    is ExplorerRowDrag -> ClipData(
+        ClipDescription("PPM path", arrayOf(TREE_PATH_MIME, ENTRY_DRAG_MIME)),
+        ClipData.Item(if (drag.isDirectory) drag.path + "/" else drag.path),
+    ).apply { addItem(ClipData.Item(explorerEntryPayload(drag))) }
+    is HostEntryDrag -> ClipData(ClipDescription("PPM entries", arrayOf(ENTRY_DRAG_MIME)), ClipData.Item(explorerEntryPayload(drag)))
+}
 
 /** The chip's words (`drag-ghost.ts`): the entry's own name for one, "N items" for a selection. */
-internal fun explorerDragLabel(drag: ExplorerRowDrag): String {
-    val names = drag.paths.map { path -> path.split('/', '\\').lastOrNull { it.isNotEmpty() } ?: path }
+internal fun explorerDragLabel(drag: EntryDrag): String {
+    val names = drag.payload.paths.map { path -> path.split('/', '\\').lastOrNull { it.isNotEmpty() } ?: path }
     return names.singleOrNull() ?: "${names.size} items"
 }
 
@@ -133,7 +134,7 @@ internal fun explorerAutoScrollStep(fromTop: Double, fromBottom: Double) = explo
  * put the dragged row (a folder's own path for a folder, its parent for a file, "" for the blank area) and [collapsedFolder]
  * whether it is a folder that is shut, which a drag resting on it opens.
  */
-internal data class ExplorerDropSite(val drag: ExplorerRowDrag, val key: String, val directory: String, val collapsedFolder: Boolean)
+internal data class ExplorerDropSite(val drag: EntryDrag, val key: String, val directory: String, val collapsedFolder: Boolean)
 
 /** One drag of a row over the tree: what the pointer is over, and where it is, in the tree's own pixels. Both clear when it leaves. */
 @Stable
@@ -143,7 +144,7 @@ internal class ExplorerDragOver {
 }
 
 /**
- * A row is the source of a drag by a mouse's primary button, once it has moved past the touch slop, and by nothing else.
+ * A row, a tile or an entry is the source of a drag by a mouse's primary button, once it has moved past the touch slop, and by nothing else.
  * Compose's own start detector cannot be told to ignore a finger: it waits out a long press and consumes the lift of a
  * tap that is not one, so a tap on a row that was a drag source opened nothing. This one watches in the initial pass and
  * consumes nothing, so a tap, the long-press menu and a right click reach the row as if it were not a source.
@@ -151,11 +152,12 @@ internal class ExplorerDragOver {
  * It starts the platform drag itself, with [View.startDragAndDrop], because Compose's `dragAndDropSource` holds the touch point
  * at the middle of the image it draws and the browser holds its image 12 dp from the corner. The image is the chip of
  * `drag-ghost.ts` ([ExplorerDragChip]), not the row: the web's `setDragImage` is given a small box with the entry's name or "N
- * items" in it. Targets inside the window still hear the drag, whoever started it, with [ExplorerRowDrag] as its local state.
- * The modifier keys at the press are noted for the drop, which Android's `DragEvent` carries none for ([DragModifierKeys]).
+ * items" in it. Targets inside the window still hear the drag, whoever started it, with the [EntryDrag] as its local state. That is
+ * asked for ([drag]) when the drag starts, not when the gesture was set up, so what a window's row carries is the selection it is part of
+ * at that moment. The modifier keys at the press are noted for the drop, which Android's `DragEvent` carries none for ([DragModifierKeys]).
  */
 @Composable
-internal fun Modifier.explorerRowDragSource(drag: ExplorerRowDrag, enabled: Boolean): Modifier {
+internal fun Modifier.explorerEntryDragSource(enabled: Boolean, drag: () -> EntryDrag): Modifier {
     if (!enabled) return this
     val current by rememberUpdatedState(drag)
     val view = LocalView.current
@@ -168,13 +170,17 @@ internal fun Modifier.explorerRowDragSource(drag: ExplorerRowDrag, enabled: Bool
             if (explorerDragStarts(down.type, currentEvent.buttons.isPrimaryPressed) && awaitPastSlop(down)) {
                 currentEvent.keyboardModifiers.let { DragModifierKeys.update(ctrl = it.isCtrlPressed, alt = it.isAltPressed) }
                 // One drag for the chip, the clip and the local state: what the row carries now, not when this gesture was set up.
-                val started = current
+                val started = current()
                 val chip = ExplorerDragChip.of(explorerDragLabel(started), measurer, density, tokens)
                 view.startDragAndDrop(explorerDragClip(started), ExplorerDragShadow(chip), started, 0)
             }
         }
     }
 }
+
+/** A project tree's row as the source of its drag ([explorerEntryDragSource]). */
+@Composable
+internal fun Modifier.explorerRowDragSource(drag: ExplorerRowDrag, enabled: Boolean): Modifier = explorerEntryDragSource(enabled) { drag }
 
 /** True once [down]'s pointer has moved further than the touch slop with its button held; false if it lifts or is cancelled first. */
 private suspend fun AwaitPointerEventScope.awaitPastSlop(down: PointerInputChange): Boolean {
@@ -186,8 +192,8 @@ private suspend fun AwaitPointerEventScope.awaitPastSlop(down: PointerInputChang
 }
 
 private class DropHere(
-    val project: String, val accepting: Boolean,
-    val siteAt: (ExplorerRowDrag, Offset) -> ExplorerDropSite, val onDrop: (ExplorerRowDrag, ExplorerDropSite) -> Boolean,
+    val accepts: (EntryDrag) -> Boolean,
+    val siteAt: (EntryDrag, Offset) -> ExplorerDropSite, val onDrop: (EntryDrag, ExplorerDropSite) -> Boolean,
 )
 
 /**
@@ -198,7 +204,7 @@ private class DropHere(
 private class ExplorerMoveTarget(private val over: ExplorerDragOver, private val here: () -> DropHere) : DragAndDropTarget {
     fun accepts(event: DragAndDropEvent): Boolean {
         val drag = event.drag() ?: return false
-        return here().let { it.accepting && it.project == drag.project }
+        return here().accepts(drag)
     }
 
     override fun onEntered(event: DragAndDropEvent) = moved(event)
@@ -229,46 +235,52 @@ private class ExplorerMoveTarget(private val over: ExplorerDragOver, private val
         over.site = null
     }
 
-    private fun DragAndDropEvent.drag() = toAndroidDragEvent().localState as? ExplorerRowDrag
+    private fun DragAndDropEvent.drag() = toAndroidDragEvent().localState as? EntryDrag
 
     private fun DragAndDropEvent.at() = toAndroidDragEvent().let { Offset(it.x, it.y) }
 }
 
 /**
- * The drop target of a drag of one of this project's rows, over the whole list. [siteAt] answers what is at a point of it,
- * [onDrop] gets the site the row is let go over and says whether the drop was taken.
+ * The drop target of a drag of entries [accepts] says it takes, over the whole list. [siteAt] answers what is at a point of it,
+ * [onDrop] gets the site the entries are let go over and says whether the drop was taken. A zone of the working area's router
+ * ([dropZone]) where there is one, so that a window floating over the chat has what is let go on it.
  */
 @Composable
 internal fun Modifier.explorerMoveTarget(
-    over: ExplorerDragOver, project: String, accepting: Boolean,
-    siteAt: (ExplorerRowDrag, Offset) -> ExplorerDropSite, onDrop: (ExplorerRowDrag, ExplorerDropSite) -> Boolean,
+    over: ExplorerDragOver, accepts: (EntryDrag) -> Boolean,
+    siteAt: (EntryDrag, Offset) -> ExplorerDropSite, onDrop: (EntryDrag, ExplorerDropSite) -> Boolean,
 ): Modifier {
-    val here by rememberUpdatedState(DropHere(project, accepting, siteAt, onDrop))
+    val here by rememberUpdatedState(DropHere(accepts, siteAt, onDrop))
     val target = remember(over) { ExplorerMoveTarget(over) { here } }
-    return dragAndDropTarget(shouldStartDragAndDrop = target::accepts, target = target)
+    return dropZone(shouldStartDragAndDrop = target::accepts, target = target)
 }
 
 /**
- * Whether the tree is tinted for a drag over its blank area, as `useEntryDropTarget` is: only once the pointer has rested
- * [ROOT_TINT_DELAY_MS] there, and only if the drop would be taken ([takes], asked as the pointer arrives, with the modifier keys as
- * they are then), so a sweep across the blank area flashes nothing and a refused drop never looks like a promise. Leaving it, by
- * any way a drag leaves, takes the tint away, and coming back waits again.
+ * The site a drag is tinted for, as `useEntryDropTarget` tints: only once the pointer has rested [ROOT_TINT_DELAY_MS] on it, and only if
+ * the drop would be taken ([takes], asked as the pointer arrives, with the modifier keys as they are then), so a sweep across rows
+ * flashes none and a refused drop never looks like a promise. Moving to another site, or leaving by any way a drag leaves, takes the
+ * tint away, and coming back waits again. Null while there is none.
  */
 @Composable
-internal fun explorerRootTint(over: ExplorerDragOver, takes: (ExplorerRowDrag) -> Boolean): Boolean {
-    var tint by remember(over) { mutableStateOf(false) }
+internal fun explorerDropTint(over: ExplorerDragOver, takes: (ExplorerDropSite) -> Boolean): ExplorerDropSite? {
+    var tint by remember(over) { mutableStateOf<ExplorerDropSite?>(null) }
     val takesNow by rememberUpdatedState(takes)
     LaunchedEffect(over) {
-        snapshotFlow { over.site?.takeIf { it.key == ROOT_DROP_KEY }?.drag }.collectLatest { drag ->
-            tint = false
-            if (drag != null && takesNow(drag)) {
+        snapshotFlow { over.site }.collectLatest { site ->
+            tint = null
+            if (site != null && takesNow(site)) {
                 delay(ROOT_TINT_DELAY_MS)
-                tint = true
+                tint = site
             }
         }
     }
     return tint
 }
+
+/** [explorerDropTint] for the tree's blank area: whether the drag has rested there and would be taken ([takes]). */
+@Composable
+internal fun explorerRootTint(over: ExplorerDragOver, takes: (EntryDrag) -> Boolean): Boolean =
+    explorerDropTint(over) { site -> site.key == ROOT_DROP_KEY && takes(site.drag) } != null
 
 /**
  * Dp to scroll in a frame for a pointer at [pointer] over [area]: 0 with no pointer or no area, and 0 for a pointer outside it, over

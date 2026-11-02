@@ -104,6 +104,7 @@ import com.hienlh.ppm.app.PREWARM_SETTLE_MILLIS
 import com.hienlh.ppm.app.PrewarmAsk
 import com.hienlh.ppm.app.attach
 import com.hienlh.ppm.app.tracksTextFocus
+import com.hienlh.ppm.app.ui.files.ENTRY_DRAG_MIME
 import com.hienlh.ppm.app.ui.files.TREE_PATH_MIME
 import com.hienlh.ppm.app.ui.tablet.dashedBorder
 import com.hienlh.ppm.chat.AgentSessionOpener
@@ -501,7 +502,9 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
  * no overlay for those, but still attaches them; plain text dropped here is swallowed, as the
  * web's handlers swallow it. A row of the project tree (`application/x-ppm-path`) is no file: it
  * lights the same overlay and its path goes into the box as `@path ` ([ChatTab.dropPath]), once
- * wherever in the chat it is let go. Also the message box's own target, to keep the drop from its field. On a tablet both are zones of the
+ * wherever in the chat it is let go. Entries of an explorer window (the shared `application/x-ppm-paths` alone) are neither, as the
+ * web's overlay looks only for a file or a tree row: no overlay, and nothing is taken from them.
+ * Also the message box's own target, to keep the drop from its field. On a tablet both are zones of the
  * working area's [DropRouter], so a window floating over the chat has what is let go on the window, and the chat has the rest.
  */
 class ChatFileDrop(private val tab: ChatTab, private val drop: (List<Uri>, DragEvent) -> Unit) : DragAndDropTarget {
@@ -519,7 +522,10 @@ class ChatFileDrop(private val tab: ChatTab, private val drop: (List<Uri>, DragE
 
     override fun onStarted(event: DragAndDropEvent) {
         val description = event.toAndroidDragEvent().clipDescription
-        files = description != null && (0 until description.mimeTypeCount).any { !description.getMimeType(it).startsWith("text/") }
+        files = description != null && (0 until description.mimeTypeCount).any {
+            val type = description.getMimeType(it)
+            !type.startsWith("text/") && type != ENTRY_DRAG_MIME
+        }
     }
 
     override fun onEntered(event: DragAndDropEvent) {

@@ -4,6 +4,7 @@ import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
@@ -217,8 +218,12 @@ internal class DropZone(
 /** What answers drops in the area it is in: null where there is none (the phone, a sheet), and a [dropZone] is then an ordinary target. */
 internal val LocalDropRouter = staticCompositionLocalOf<DropRouter?> { null }
 
-/** Which layer the zones below are on: 0 for the panels, a window's own above the windows behind it. */
-internal val LocalDropLayer = staticCompositionLocalOf { 0 }
+/**
+ * Which layer the zones below are on: 0 for the panels, a window's own above the windows behind it. Raising a window moves that window and
+ * every one above it by one, so this is not a static local, which would recompose the whole content of each of them (a chat, a terminal)
+ * for a value only the zones read.
+ */
+internal val LocalDropLayer = compositionLocalOf { 0 }
 
 /** The one target of an area whose zones are routed ([DropRouter]). */
 internal fun Modifier.dropRouter(router: DropRouter): Modifier =
