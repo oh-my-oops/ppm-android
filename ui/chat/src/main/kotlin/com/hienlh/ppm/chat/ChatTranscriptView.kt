@@ -203,13 +203,15 @@ private fun TranscriptList(
     // the messages oldest first, the turn streaming in, the cache gone cold while the chat is
     // idle, and the approval or the thinking line while there is one.
     val head = (if (state.hasEarlier) 1 else 0) + (if (state.loadingEarlier) 1 else 0)
-    // Read again once a minute, as `useMinuteClock` reads the time.
-    val idleCache by produceState(coldCache(state), state.promptCache, state.isRunning, state.pendingApproval) {
+    // Read again once a minute, as `useMinuteClock` reads the time. Read once, here: the list's
+    // builder reruns by itself when a state it reads changes, and read live there the notice could
+    // join a list whose `keys` were built without it (`index: -1` on a tablet, 03/11).
+    val idleCache = produceState(coldCache(state), state.promptCache, state.isRunning, state.pendingApproval) {
         while (true) {
             value = coldCache(state)
             delay(60_000)
         }
-    }
+    }.value
     val trailing = state.pendingApproval != null || indicatorLabel(state) != null
     val count = head + rows.size + (if (!live.isNullOrEmpty()) 1 else 0) + (if (idleCache != null) 1 else 0) + (if (trailing) 1 else 0)
     // Opened at its end, so the first frame is already the newest, and the sentinel, which loads
