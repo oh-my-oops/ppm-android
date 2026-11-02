@@ -98,6 +98,11 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
     LaunchedEffect(api, lifecycle) {
         if (api != null) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { model.watchHealth(api) }
     }
+    // The version chip's minute check, which the web runs with the app shell (status bar and drawer).
+    val upgrade = model.upgrade
+    LaunchedEffect(upgrade, lifecycle) {
+        if (upgrade != null) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { upgrade.watch() }
+    }
 
     val focusManager = LocalFocusManager.current
     val toaster = remember { ToasterState() }

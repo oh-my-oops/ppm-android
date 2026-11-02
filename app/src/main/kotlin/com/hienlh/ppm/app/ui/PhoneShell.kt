@@ -951,13 +951,15 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                         PpmIcon(ProductIcon.Settings, 16.dp, tokens.text3.color)
                         BasicText("Settings", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
                     }
-                    model.info?.version?.let { version ->
-                        Box(
-                            Modifier.fillMaxWidth().padding(top = 8.dp).line(top = true, tokens.border.color).padding(horizontal = 4.dp).heightIn(min = 44.dp),
-                            contentAlignment = Alignment.CenterStart,
-                        ) {
-                            BasicText("v$version", Modifier.padding(horizontal = 4.dp), style = ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text.color))
-                        }
+                    // `mt-2 border-t border-border px-1 text-[11px]`, there with or without the version.
+                    Box(Modifier.fillMaxWidth().padding(top = 8.dp).line(top = true, tokens.border.color).padding(horizontal = 4.dp)) {
+                        UpgradeButton(
+                            model,
+                            ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text.color),
+                            Modifier.fillMaxWidth(),
+                            alignStart = true,
+                            minHeight = 44.dp,
+                        )
                     }
                 }
             }

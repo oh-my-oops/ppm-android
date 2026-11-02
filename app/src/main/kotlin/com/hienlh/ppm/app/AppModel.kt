@@ -422,6 +422,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** The usage readings every chat on the open server shares (use-usage.ts's module cache). */
     var usageCache by mutableStateOf<UsageCache?>(null)
         private set
+
+    /** The status bar's version chip for the open server (upgrade-button.tsx); `internal` for a test's fake server. */
+    var upgrade by mutableStateOf<com.hienlh.ppm.state.ServerUpgrade?>(null)
+        internal set
+
+    /** The versions Later was chosen for on each server while the app runs, as the web's `sessionStorage` keeps them. */
+    private val upgradeDismissals = HashMap<String, MutableSet<String>>()
     var info by mutableStateOf<ServerInfo?>(null)
         private set
     var projects by mutableStateOf(emptyList<ProjectInfo>())
@@ -853,6 +860,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         explorerPreferences = null
         hostPickerPreferences = null
         usageCache = null
+        upgrade?.close()
+        upgrade = null
         info = null
         projects = emptyList()
         projectsLoad = Load.Idle
@@ -891,6 +900,14 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             com.hienlh.ppm.state.files.FileTreePersistence(prefs, "files.$serverKey."),
         )
         usageCache = UsageCache()
+        upgrade = com.hienlh.ppm.state.ServerUpgrade(
+            api,
+            scope,
+            upgradeDismissals.getOrPut(serverKey) { mutableSetOf() },
+            notify = { toast(ErrorToastMessage(it.text, kind = if (it.error) ErrorToastMessage.Kind.ERROR else ErrorToastMessage.Kind.INFO)) },
+            // Once the new server answers, everything is read from it again, as the web reloads the page.
+            reopen = ::reopenServer,
+        )
         openWorkspace(api)
         startEvents(api)
         scope.launch { readAddresses(api) }
