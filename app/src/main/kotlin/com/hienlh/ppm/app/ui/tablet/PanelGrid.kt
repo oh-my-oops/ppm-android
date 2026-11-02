@@ -14,7 +14,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +47,32 @@ private const val DOCK_MAX = 0.85f
 private const val PANE_MIN = 0.15f
 
 /**
+ * What a drag of the dock's handle has set: its [share], which stands for as long as the layout's saved height (in percent) is [began], the
+ * height the drag began from, or [kept], what the layout kept of the drag's save (null until the drag ends). The layout takes the save a
+ * moment after it was made, so the height the drag began from is still the layout's for a while after the drag has ended; and the layout
+ * may keep less than was saved (a drag can reach 10 %, the layout keeps 15 %), so the drag's share stays for the size the web keeps.
+ */
+internal data class DockDrag(val share: Float, val began: Double, val kept: Double? = null) {
+    /** What stands once the layout shows [saved]: this while it is where it began, the save alone once it shows that, nothing for a height that came from elsewhere. */
+    fun settle(saved: Double): DockDrag? = when (saved) {
+        began -> this
+        kept -> copy(began = saved)
+        else -> null
+    }
+}
+
+/**
+ * The dock's share of the working area, given what the layout saves ([saved], in percent) and what a drag has set: a maximized dock takes the
+ * web's own share, a drag's share stands for as long as the layout still shows what the drag began from or saved ([DockDrag]), and anything
+ * else is the layout's.
+ */
+internal fun dockShare(bottom: Boolean, expanded: Boolean, saved: Double, drag: DockDrag?): Float = when {
+    expanded -> drag?.share ?: if (bottom) DOCK_EXPANDED_BOTTOM else DOCK_EXPANDED_SIDE
+    drag != null && (saved == drag.began || saved == drag.kept) -> drag.share
+    else -> (saved / 100).toFloat()
+}
+
+/**
  * The working area (panel-layout.tsx): the panel grid, and the dock beside or under it. The grid
  * keeps its place in the composition whether the dock shows or not, so showing the dock never
  * rebuilds the panels — on the web it would scroll every chat back to the top.
@@ -58,22 +83,19 @@ fun PanelArea(model: AppModel) {
     val position = model.dockPosition
     val expanded = state.dockExpanded
     val visible = state.dock.visible
-    // Taken when the dock is placed, maximized or restored (the web freezes `defaultSize` per
-    // `${dockPosition}-${dockExpanded}`), then the drag's own.
-    var share by remember(position, expanded) {
-        mutableFloatStateOf(
-            if (expanded) (if (position == "bottom") DOCK_EXPANDED_BOTTOM else DOCK_EXPANDED_SIDE) else (state.dock.height / 100).toFloat(),
-        )
-    }
-    // A saved size that arrives is taken too: the layout first drawn can be the default one, with
-    // the project's after it. This device's own save is not, as the layout may have clamped it
-    // (a drag can reach 10 %, the layout keeps 15 %) and on the web the drag's size stays.
-    var kept by remember { mutableStateOf<Double?>(null) }
-    LaunchedEffect(state.dock.height) {
-        if (!expanded && state.dock.height != kept) share = (state.dock.height / 100).toFloat()
+    val saved = state.dock.height
+    val bottom = position == "bottom"
+    // What a drag has set, until the dock is placed, maximized or restored (the web freezes `defaultSize`
+    // per dock position and expansion).
+    var dragged by remember(position, expanded) { mutableStateOf<DockDrag?>(null) }
+    // Worked out here from the layout this composition has, not taken from it afterwards: the layout first
+    // drawn can be the default one, with the project's after it, and a share that caught up a frame later
+    // laid the dock out at a height nobody asked for, which its terminal was sized to and then resized from.
+    val share = dockShare(bottom, expanded, saved, dragged)
+    LaunchedEffect(saved) {
+        if (!expanded) dragged = dragged?.settle(saved)
     }
     var extent by remember { mutableIntStateOf(0) }
-    val bottom = position == "bottom"
     // The share the drag began with: the dock is that moved by the whole offset, and so back under
     // the pointer once the pointer returns from past a limit.
     val from = remember { FloatArray(1) }
@@ -83,14 +105,20 @@ fun PanelArea(model: AppModel) {
             // Dragging toward the grid grows the dock: up for a bottom dock, toward the middle for a side one.
             val toward = if (position == "left") moved else -moved
             val wanted = from[0] + toward / extent
-            share = wanted.coerceIn(DOCK_MIN, DOCK_MAX)
-            share != wanted
+            val held = wanted.coerceIn(DOCK_MIN, DOCK_MAX)
+            dragged = DockDrag(held, saved)
+            held != wanted
         } else {
             false
         }
     }
     // A maximized dock's size is not the one to keep: restoring returns to the saved one.
-    val dragEnd = { if (!expanded) kept = model.setDockHeight(share * 100.0) }
+    val dragEnd = {
+        if (!expanded) {
+            val kept = model.setDockHeight((dragged?.share ?: share) * 100.0)
+            dragged = dragged?.copy(kept = kept)
+        }
+    }
     val grid = @Composable { m: Modifier -> Box(m) { PanelGrid(model, state) } }
     val dock = @Composable { m: Modifier ->
         Box(m) {
