@@ -21,6 +21,20 @@ The added APIs are:
 
 - `TerminalEmulatorFactory.create(maxScrollbackLines = 50_000, ...)`: non-negative, zero
   disables retained history. Explicit small values work without changing native code.
+  A row of that history costs what it holds, not what it is wide. Upstream's `PackedCells` kept four arrays as long as the row is
+  wide: 2,198 B a row at 105 columns whatever the row held, so one terminal's 50,000 rows were 104 MB of the 192 MB an app's heap is
+  capped at, and the 1 MB of `seq` output a server replays on a reconnect built 50,000 rows (102 MB, 4.8 s). `src/main/.../PackedCells.kt`
+  replaces the generated file (`REPLACED` in `patch-terminal-engine.py`, and `"replaced"` in `PROVENANCE.json`): the text of the cells
+  up to the row's trailing run of one plain character (a line's blank tail, a rule of dashes), which is kept once; the colours and flags
+  as runs of the cells that share them; and, only for a row with a wide, combining or emoji cell, where each cell's text starts and its
+  width. Every method answers as upstream's did, which `PackedCellsTest` holds against `LegacyPackedCells`, upstream's class as it was
+  shipped, over rows made the ways the emulator makes them (one read, a read in pieces, a copy around the cells that changed, `from`,
+  `empty`). `TerminalLine`'s three `by lazy` were 120 B a row between them and are fields of the row now (`terminal_line`). Measured on
+  a device (`-e only memory` of `EngineInstrumentation`), per row at 105 columns: `seq` output 189 B (9 MB for 50,000 rows), a full-width
+  row 389 B (18 MB), a full-width row of 20 colour runs 613 B (29 MB), and the worst case, every cell in a colour of its own, 2,070 B
+  (about 100 MB, as before: a run is 16 B), which only an image drawn in terminal cells produces. The replay of 1 MB of `seq` is 7 MB
+  and 2.4 s. A history that is full holds the rows an old snapshot still names for as long as the snapshot is the published one
+  (3,208 of 50,000 rows in the flood measured, 6%), which at these sizes is 1 MB.
 - `emulator.getCursorPosition()`: screen-relative `(row, column)`, zero-based.
 - `emulator.getBufferSnapshot()`: one coherent read with `lines`, absolute `cursorRow`,
   `cursorColumn`, `screenStartRow`, and `alternateScreen`. Physical rows include retained

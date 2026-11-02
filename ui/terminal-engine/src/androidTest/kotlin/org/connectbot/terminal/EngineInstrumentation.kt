@@ -19,7 +19,7 @@ import kotlin.random.Random
 
 /** JNI smoke checks in an isolated test APK; no app activity or clipboard access. */
 class EngineInstrumentation : Instrumentation() {
-    /** `-e only region` runs the scroll region checks alone. */
+    /** `-e only region` runs the scroll region checks alone; `-e only memory` prints what the history costs in heap. */
     private var only: String? = null
 
     override fun onCreate(arguments: Bundle?) { only = arguments?.getString("only"); super.onCreate(arguments); start() }
@@ -32,6 +32,12 @@ class EngineInstrumentation : Instrumentation() {
     }
 
     override fun onStart() {
+        if (only == "memory") {
+            // Numbers, not a verdict: what the history costs in heap on the real library (see MemoryChecks).
+            val text = runCatching { MemoryChecks.run() }.getOrElse { it.stackTraceToString() }
+            finish(Activity.RESULT_OK, Bundle().apply { putString("stream", text) })
+            return
+        }
         val result = runCatching {
             if (only == "region") verifyScrollRegions()
             else { verifyEngine(); verifyScrollbackWraps(); verifyWrapFlagsAcrossWrites(); verifyLinks(); verifyLinksAcrossScrolls(); verifyStaleLinks(); ResizeChecks.verifyResizeModel(); ResizeChecks.verifyResize(); verifyWriteCuts(); verifyScrollRegions(); verifyReplayCursor(); verifyRenderer() }

@@ -946,7 +946,7 @@ def screen_transfer(text):
 def terminal_line(text):
     # The library clears every row's wrap flag when the screen is resized. The flag the emulator carried across is told apart from one the library reads,
     # so that the row keeps it until the row is rewritten (see ResizedRows and updateLine).
-    return replace(text, "    val softWrapped: Boolean = false,\n    val images: List<ImageSlice> = emptyList(),\n) {\n",
+    text = replace(text, "    val softWrapped: Boolean = false,\n    val images: List<ImageSlice> = emptyList(),\n) {\n",
                    "    val softWrapped: Boolean = false,\n"
                    "    val images: List<ImageSlice> = emptyList(),\n"
                    "    /**\n"
@@ -955,8 +955,28 @@ def terminal_line(text):
                    "     */\n"
                    "    val wrapKept: Boolean = false,\n"
                    ") {\n")
+    # Three `by lazy` on every row are a lazy object and a lambda each: 120 B a row, which is as much as the row's cells now cost (a row of
+    # `seq` output is 310 B with them, 190 without). A read that has been made is kept in a field of the row instead; two threads that read
+    # at once both compute the same value, and either's is kept.
+    text = replace(text, "    val text: String by lazy {\n        cells.text()\n    }\n",
+                   "    val text: String get() = textCache ?: cells.text().also { textCache = it }\n"
+                   "    private var textCache: String? = null\n")
+    text = replace(text, "    internal val columnText: String by lazy {\n        cells.columnText()\n    }\n",
+                   "    internal val columnText: String get() = columnTextCache ?: cells.columnText().also { columnTextCache = it }\n"
+                   "    private var columnTextCache: String? = null\n")
+    return replace(text, "    internal val autoDetectedUrls: List<Triple<Int, Int, String>> by lazy {\n"
+                   "        if (cells.isEmpty()) return@lazy emptyList()\n"
+                   "        URL_REGEX.findAll(columnText).mapNotNull { match ->\n",
+                   "    internal val autoDetectedUrls: List<Triple<Int, Int, String>> get() = urlsCache ?: detectUrls().also { urlsCache = it }\n"
+                   "    private var urlsCache: List<Triple<Int, Int, String>>? = null\n\n"
+                   "    private fun detectUrls(): List<Triple<Int, Int, String>> {\n"
+                   "        if (cells.isEmpty()) return emptyList()\n"
+                   "        return URL_REGEX.findAll(columnText).mapNotNull { match ->\n")
 
 
+# Upstream files this repository replaces whole instead of patching: the same class, written in src/main. PackedCells keeps four arrays as long as
+# the row is wide, which is 104 MB for one terminal's 50,000 rows of history; the owned one holds what the row has (see its own header).
+REPLACED = {"PackedCells.kt"}
 PATCHES = {"TerminalEmulator.kt": emulator, "SelectionManager.kt": selection, "Terminal.kt": terminal, "TerminalTextPaint.kt": text_paint, "ScreenTransfer.kt": screen_transfer, "TerminalLine.kt": terminal_line}
 
 
@@ -983,10 +1003,14 @@ def build(sources, aar, pom, output):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
         patched = []
+        replaced = []
         with ZipFile(sources) as archive:
             for name, data in files(archive):
                 if name.endswith(".kt"):
                     filename = PurePosixPath(name).name
+                    if filename in REPLACED:
+                        replaced.append(filename)
+                        continue
                     patch = PATCHES.get(filename)
                     if patch:
                         data = patch(data.decode()).encode()
@@ -1002,6 +1026,8 @@ def build(sources, aar, pom, output):
         targets = set(PATCHES) | IME_TARGETS
         if set(patched) != targets:
             raise RuntimeError(f"Missing patch targets: {targets - set(patched)}")
+        if sorted(replaced) != sorted(REPLACED):
+            raise RuntimeError(f"Missing replaced files: {REPLACED - set(replaced)}")
         with ZipFile(aar) as archive:
             for name, data in files(archive):
                 if name.startswith(("jni/", "res/", "assets/")) or name == "proguard.txt":
@@ -1023,7 +1049,7 @@ def build(sources, aar, pom, output):
         for license in (REPO / "android/ui/terminal-engine/licenses").glob("*.txt"):
             write("assets/terminal-engine/licenses/" + license.name, license.read_bytes())
         write("upstream/termlib-0.3.13.pom", pom.read_bytes())
-        write("assets/terminal-engine/PROVENANCE.json", (json.dumps({"coordinate": "org.connectbot:termlib:0.3.13", "sha256": PINS, "patched": sorted(patched), "native": "Unmodified JNI from original AAR"}, indent=2, sort_keys=True) + "\n").encode())
+        write("assets/terminal-engine/PROVENANCE.json", (json.dumps({"coordinate": "org.connectbot:termlib:0.3.13", "sha256": PINS, "patched": sorted(patched), "replaced": sorted(replaced), "native": "Unmodified JNI from original AAR"}, indent=2, sort_keys=True) + "\n").encode())
         # Guards have all passed. Sync only this task's output; preserve mtimes when unchanged.
         expected = {p.relative_to(stage) for p in stage.rglob("*") if p.is_file()}
         for relative in expected:
