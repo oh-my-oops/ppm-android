@@ -5,7 +5,6 @@ import android.provider.DocumentsContract
 import android.view.DragEvent
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
-import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropEvent
@@ -14,6 +13,7 @@ import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import androidx.compose.ui.platform.LocalContext
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.app.ui.dropZone
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.state.osexplorer.HostUploads
 import kotlinx.coroutines.*
@@ -70,7 +70,7 @@ internal fun hostExternalDrop(model: AppModel, queue: HostUploads?, commands: Ho
         }
     }
     val tokens = LocalPpmTokens.current
-    return Modifier.dragAndDropTarget(shouldStartDragAndDrop = {
+    return Modifier.dropZone(shouldStartDragAndDrop = {
         val event = it.toAndroidDragEvent()
         event.localState == null && event.clipDescription != null
     }, target = target).then(if (target.over) Modifier.background(tokens.accentWash.color) else Modifier)

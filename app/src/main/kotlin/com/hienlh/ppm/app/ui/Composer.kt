@@ -12,7 +12,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -568,7 +567,7 @@ internal fun ComposerField(
                     placeholderColor = tokens.text3.color,
                     selectionColor = selectionColors.backgroundColor,
                     scrollbarColor = tokens.border.color,
-                    modifier = Modifier.dragAndDropTarget(shouldStartDragAndDrop = { true }, target = fileDrop),
+                    modifier = Modifier.dropZone(shouldStartDragAndDrop = { true }, target = fileDrop).dropRelay(),
                 ) { field() }
             },
         )

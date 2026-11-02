@@ -12,7 +12,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -299,7 +298,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
             model.attach(context, tab, uris)
         }
     }
-    BoxWithConstraints(modifier.fillMaxSize().dragAndDropTarget(shouldStartDragAndDrop = { true }, target = fileDrop)) {
+    BoxWithConstraints(modifier.fillMaxSize().dropZone(shouldStartDragAndDrop = { true }, target = fileDrop)) {
         // The chat's own `@container`: under 420 px the chips drop their words.
         val narrow = maxWidth <= 420.dp
         // `backdrop-blur-sm` under the drop overlay and the edit's: CSS's blur(8px) is Android's at a radius of 13.
@@ -502,7 +501,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
  * no overlay for those, but still attaches them; plain text dropped here is swallowed, as the
  * web's handlers swallow it. A row of the project tree (`application/x-ppm-path`) is no file: it
  * lights the same overlay and its path goes into the box as `@path ` ([ChatTab.dropPath]), once
- * wherever in the chat it is let go. Also the message box's own target, to keep the drop from its field.
+ * wherever in the chat it is let go. Also the message box's own target, to keep the drop from its field. On a tablet both are zones of the
+ * working area's [DropRouter], so a window floating over the chat has what is let go on the window, and the chat has the rest.
  */
 class ChatFileDrop(private val tab: ChatTab, private val drop: (List<Uri>, DragEvent) -> Unit) : DragAndDropTarget {
     /** Entries less exits, over the chat and the message box (`dragCounterRef`). */

@@ -48,7 +48,10 @@ import androidx.compose.ui.zIndex
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.Backdrop
 import com.hienlh.ppm.app.ui.CornerChrome
+import com.hienlh.ppm.app.ui.DropRouter
 import com.hienlh.ppm.app.ui.KeyboardPannedPage
+import com.hienlh.ppm.app.ui.LocalDropRouter
+import com.hienlh.ppm.app.ui.dropRouter
 import com.hienlh.ppm.app.ui.windows.WindowLayer
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -75,16 +78,29 @@ fun TabletShell(model: AppModel) {
                 Row(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
                     Sidebar(model)
                     Column(Modifier.weight(1f).fillMaxHeight()) {
-                        Box(Modifier.weight(1f).fillMaxWidth()) {
-                            PanelArea(model)
-                            WindowLayer(model)
-                        }
+                        WorkingAreaLayers(Modifier.weight(1f).fillMaxWidth(), panels = { PanelArea(model) }, windows = { WindowLayer(model) })
                         StatusBar(model)
                     }
                 }
                 CornerChrome(model, mobile = false)
             }
             TabDragGhost(drag)
+        }
+    }
+}
+
+/**
+ * The working area: the [panels] with the floating [windows] over them, and the [DropRouter] that every place which takes a drag in either
+ * answers to, so what is dropped goes to what is on top of where it is let go. The sidebar and the status bar are outside it, and so are
+ * the places in them, which are ordinary targets.
+ */
+@Composable
+internal fun WorkingAreaLayers(modifier: Modifier, panels: @Composable () -> Unit, windows: @Composable () -> Unit) {
+    val router = remember { DropRouter() }
+    CompositionLocalProvider(LocalDropRouter provides router) {
+        Box(modifier.dropRouter(router)) {
+            panels()
+            windows()
         }
     }
 }

@@ -5,12 +5,12 @@ import android.content.ClipDescription
 import android.net.Uri
 import android.view.DragEvent
 import android.view.View
-import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.ChatTab
 import com.hienlh.ppm.app.ui.files.ExplorerRowDrag
 import com.hienlh.ppm.app.ui.files.explorerDragClip
+import com.hienlh.ppm.app.ui.tablet.WorkingAreaLayers
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.SessionInfo
@@ -50,8 +51,11 @@ import org.robolectric.shadows.DragEventBuilder
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
-class ChatDropPathTest {
+open class ChatDropPathTest {
     private val compose = createComposeRule()
+
+    /** Whether the chat is in a working area's [DropRouter], as on a tablet, or alone, as on a phone: [ChatDropPathRoutedTest] runs every case again with it. */
+    protected open val routed = false
 
     @get:Rule
     val rules: RuleChain = withComposeActivity(compose)
@@ -71,17 +75,20 @@ class ChatDropPathTest {
         compose.setContent {
             view = LocalView.current
             val focus = remember { FocusRequester() }
-            Box(Modifier.fillMaxSize().dragAndDropTarget(shouldStartDragAndDrop = { true }, target = fileDrop)) {
-                Column(Modifier.fillMaxSize()) {
-                    Box(Modifier.fillMaxWidth().weight(1f).testTag(TRANSCRIPT))
-                    ComposerField(
-                        tab, focus, remember { mutableStateOf(false) }, remember { mutableStateOf(false) },
-                        onKey = { false }, send = {}, pasteImage = {}, fileDrop = fileDrop,
-                        style = ppmText(14f, lineHeight = 14f * 1.625f), padding = 8.dp, cssStart = 0.dp, maxHeight = 90.dp,
-                        placeholder = "Ask anything...", enabled = true,
-                    )
+            val chat = @Composable {
+                Box(Modifier.fillMaxSize().dropZone(shouldStartDragAndDrop = { true }, target = fileDrop)) {
+                    Column(Modifier.fillMaxSize()) {
+                        Box(Modifier.fillMaxWidth().weight(1f).testTag(TRANSCRIPT))
+                        ComposerField(
+                            tab, focus, remember { mutableStateOf(false) }, remember { mutableStateOf(false) },
+                            onKey = { false }, send = {}, pasteImage = {}, fileDrop = fileDrop,
+                            style = ppmText(14f, lineHeight = 14f * 1.625f), padding = 8.dp, cssStart = 0.dp, maxHeight = 90.dp,
+                            placeholder = "Ask anything...", enabled = true,
+                        )
+                    }
                 }
             }
+            if (routed) WorkingAreaLayers(Modifier.fillMaxSize(), panels = chat, windows = {}) else chat()
         }
         compose.waitForIdle()
     }

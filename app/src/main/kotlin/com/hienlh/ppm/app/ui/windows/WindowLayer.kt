@@ -63,8 +63,11 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ui.LocalDropLayer
+import com.hienlh.ppm.app.ui.RefusingDrop
 import com.hienlh.ppm.app.ui.SettingsWindowContent
 import com.hienlh.ppm.app.ui.TabBody
+import com.hienlh.ppm.app.ui.dropZone
 import com.hienlh.ppm.app.ui.tablet.LocalHeldCursor
 import com.hienlh.ppm.chat.AgentSessionContent
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -82,6 +85,7 @@ import com.hienlh.ppm.state.windows.WindowKind
 import com.hienlh.ppm.state.windows.WindowRuntimeState
 import com.hienlh.ppm.state.windows.WindowStore
 import com.hienlh.ppm.state.windows.WindowVisualState
+import com.hienlh.ppm.state.windows.WindowsState
 import com.hienlh.ppm.state.windows.applyResize
 import com.hienlh.ppm.state.windows.clampRect
 import com.hienlh.ppm.state.windows.displayedRect
@@ -103,7 +107,17 @@ import com.hienlh.ppm.state.windows.Rect as WindowRect
 @Composable
 fun WindowLayer(model: AppModel) {
     val store = model.windows ?: return
-    val state = model.windowState
+    WindowLayer(model, store, model.windowState)
+}
+
+/** [WindowLayer] over the store and the state it draws, and what fills each window ([content]), which is how a test gives it windows. */
+@Composable
+internal fun WindowLayer(
+    model: AppModel,
+    store: WindowStore,
+    state: WindowsState,
+    content: @Composable (WindowRuntimeState) -> Unit = { WindowContent(model, it) },
+) {
     // The keyboard does not shrink it: the page pans instead, as Chrome's does (KeyboardPannedPage).
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds()) {
         val bounds = Bounds(cssRound(maxWidth.value.toDouble()), cssRound(maxHeight.value.toDouble()))
@@ -114,8 +128,9 @@ fun WindowLayer(model: AppModel) {
         }
         if (state.snapPreviewId != null) SnapGhost(bounds)
         val frontId = frontWindowId(state.windows)
-        for (win in windowsInRankOrder(state.windows)) {
-            key(win.id) { FloatingWindow(model, store, win, bounds, focused = win.id == frontId) }
+        // The drop layer of each is above the one behind it, as the window is drawn; the panels are layer 0.
+        for ((index, win) in windowsInRankOrder(state.windows).withIndex()) {
+            key(win.id) { FloatingWindow(model, store, win, bounds, focused = win.id == frontId, layer = index + 1, content = content) }
         }
     }
 }
@@ -143,7 +158,15 @@ private val SHADOW_BEHIND_NEAR = ThemeShadow(0.0, 4.0, 6.0, -4.0, Rgba(0.0, 0.0,
  * neither laid out nor drawn: the dock brings it back.
  */
 @Composable
-private fun FloatingWindow(model: AppModel, store: WindowStore, win: WindowRuntimeState, bounds: Bounds, focused: Boolean) {
+private fun FloatingWindow(
+    model: AppModel,
+    store: WindowStore,
+    win: WindowRuntimeState,
+    bounds: Bounds,
+    focused: Boolean,
+    layer: Int,
+    content: @Composable (WindowRuntimeState) -> Unit,
+) {
     val tokens = LocalPpmTokens.current
     val target = displayedRect(win.state, win.rect, bounds)
     val minimized = win.state == WindowVisualState.Minimized
@@ -276,7 +299,10 @@ private fun FloatingWindow(model: AppModel, store: WindowStore, win: WindowRunti
             layout(constraints.maxWidth, constraints.maxHeight) {
                 placeable.place(cssRound(r.x).dp.roundToPx() - pad, cssRound(r.y).dp.roundToPx() - pad)
             }
-        },
+        }
+            // The whole of the window, its resize strips and its titlebar too, takes every drag and refuses every drop, so that what is under
+            // a window is not reached through it. A zone of its content is inside this one, and so smaller: it has the drop where it is.
+            .dropZone(shouldStartDragAndDrop = { true }, target = RefusingDrop, visible = !minimized, layer = layer),
     ) {
         Column(
             Modifier
@@ -307,8 +333,8 @@ private fun FloatingWindow(model: AppModel, store: WindowStore, win: WindowRunti
                     .clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
                     .background(tokens.panel.color),
             ) {
-                androidx.compose.runtime.CompositionLocalProvider(com.hienlh.ppm.app.ui.LocalWindowContentVisible provides !minimized) {
-                    WindowContent(model, win)
+                androidx.compose.runtime.CompositionLocalProvider(com.hienlh.ppm.app.ui.LocalWindowContentVisible provides !minimized, LocalDropLayer provides layer) {
+                    content(win)
                 }
             }
         }
