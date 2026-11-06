@@ -4,6 +4,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -50,7 +52,7 @@ import java.util.concurrent.TimeUnit
 internal class ExplorerEntryDropsTest {
     companion object {
         const val ROOT = "/home/me/p"
-        const val TAKEN = "A file named “app.kt” already exists"
+        const val TAKEN = "An item with that name already exists"
     }
 
     private val compose = createComposeRule()
@@ -183,8 +185,9 @@ internal class ExplorerEntryDropsTest {
         show()
         assertTrue(drop("src/app.kt"))
         waitFor(TAKEN)
-        assertTrue(isShown("$ROOT/app.kt"))
-        assertTrue(isShown("Replace moves the existing item to Trash. Keep both saves the copy with a new name."))
+        assertTrue(isShown("app.kt"))
+        assertFalse(isShown("$ROOT/app.kt"))
+        assertTrue(isShown("Replacing moves the existing item to the Trash first, so it stays recoverable. Keep both adds a numbered suffix."))
         click("Skip")
         waitUntilDone()
         assertRequest("POST", "/api/fs/move")
@@ -226,12 +229,12 @@ internal class ExplorerEntryDropsTest {
         show()
         assertTrue(drop("src/app.kt", "src/main.kt"))
         waitFor(TAKEN)
-        assertTrue(isShown("☐ Apply to all"))
-        click("☐ Apply to all")
-        assertTrue(isShown("☑ Apply to all"))
+        compose.onNodeWithText("Apply to all 1 remaining item").assertIsOff()
+        click("Apply to all 1 remaining item")
+        compose.onNodeWithText("Apply to all 1 remaining item").assertIsOn()
         click("Keep both")
         waitUntilDone()
-        assertFalse("main.kt was not asked about", isShown("A file named “main.kt” already exists"))
+        assertFalse("main.kt was not asked about", isShown("main.kt"))
         assertRequest("POST", "/api/fs/move")
         assertRequest("GET", "/api/fs/stat?path=%2Fhome%2Fme%2Fp%2Fapp%20%282%29.kt")
         assertRequest("POST", "/api/fs/move", """{"source":"$ROOT/src/app.kt","destination":"$ROOT/app (2).kt"}""")
@@ -251,8 +254,9 @@ internal class ExplorerEntryDropsTest {
         show()
         assertTrue(drop("src/app.kt", "src/main.kt"))
         waitFor(TAKEN)
+        assertTrue(isShown("app.kt"))
         click("Skip")
-        waitFor("A file named “main.kt” already exists")
+        waitFor("main.kt")
         click("Skip")
         waitUntilDone()
         assertEquals(2, server.requestCount)
@@ -288,7 +292,7 @@ internal class ExplorerEntryDropsTest {
         waitFor(TAKEN)
         click("Replace")
         waitFor("This host has no Trash")
-        assertTrue(isShown("These items will be permanently deleted. This cannot be undone."))
+        assertTrue(isShown("Replacing this item cannot go through the Trash on this host. Deleting it permanently cannot be undone."))
         assertTrue("the name of what would be deleted", isShown("app.kt"))
         click("Cancel")
         waitUntilDone()

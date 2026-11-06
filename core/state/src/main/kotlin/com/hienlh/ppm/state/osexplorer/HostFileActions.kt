@@ -26,7 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 enum class HostTransferOperation { COPY, MOVE }
 enum class HostCollisionChoice { SKIP, KEEP_BOTH, REPLACE }
-data class HostCollision(val source: String, val destination: String, val name: String)
+data class HostCollision(val source: String, val destination: String, val name: String, val remaining: Int = 0)
 
 /** One UI prompt context per batch. Apply-to-all choices belong to the UI, never this owner. */
 data class HostTransferPrompts(
@@ -210,14 +210,14 @@ class HostFileActions(
         suspend fun transferEntries(paths: List<String>, directory: String, operation: HostTransferOperation, prompts: HostTransferPrompts) {
             this.operation = operation
             touched += directory
-            for (source in paths) {
+            for ((index, source) in paths.withIndex()) {
                 currentCoroutineContext().ensureActive()
                 touched += parent(source)
-                transferOne(source, directory, operation, prompts)
+                transferOne(source, directory, operation, prompts, paths.size - 1 - index)
             }
         }
 
-        suspend fun transferOne(source: String, directory: String, operation: HostTransferOperation, prompts: HostTransferPrompts) {
+        suspend fun transferOne(source: String, directory: String, operation: HostTransferOperation, prompts: HostTransferPrompts, remaining: Int) {
             val moving = operation == HostTransferOperation.MOVE
             val mutation = if (moving) FileMutationOperation.MOVE else FileMutationOperation.COPY
             val name = source.split('/', '\\').lastOrNull { it.isNotEmpty() } ?: source
@@ -237,7 +237,7 @@ class HostFileActions(
                 catch (error: Exception) {
                     if ((error as? PpmError.Server)?.code != "EEXIST") throw error
                 }
-                val collision = HostCollision(source, destination, name)
+                val collision = HostCollision(source, destination, name, remaining)
                 when (prompts.resolveCollision(collision)) {
                     HostCollisionChoice.SKIP -> { skip(source); return }
                     HostCollisionChoice.KEEP_BOTH ->

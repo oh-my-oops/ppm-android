@@ -77,7 +77,7 @@ class HostUploads internal constructor(parent: CoroutineScope, private val separ
                             update(id, item.id) { it.copy(phase = HostUploadPhase.UPLOADING) }
                             affected += hostUploadParent(item.destination, separator)
                             collector = launch { progress.collect { value -> update(id, item.id) { it.copy(bytes = value.bytes) } } }
-                            val destination = upload(item.destination, sources[item.id], prompts) { progress.value = it }
+                            val destination = upload(item.destination, sources[item.id], prompts, { (remaining - 1).coerceAtLeast(0) }) { progress.value = it }
                             update(id, item.id) { it.copy(destination = destination ?: it.destination, bytes = progress.value.bytes,
                                 phase = if (destination == null) HostUploadPhase.SKIPPED else HostUploadPhase.DONE) }
                         }
@@ -113,12 +113,12 @@ class HostUploads internal constructor(parent: CoroutineScope, private val separ
     }
 
     private suspend fun upload(destination: String, source: HostUploadSource, prompts: HostTransferPrompts,
-                               progress: (HostTransferProgress) -> Unit): String? {
+                               remainingAfter: () -> Int, progress: (HostTransferProgress) -> Unit): String? {
         try { return backend.upload(destination, source, false, progress).path }
         catch (error: PpmError.Server) { if (error.code != "EEXIST") throw error }
-        val collision = HostCollision(source.relativePath, destination, source.relativePath.replace('\\', '/').substringAfterLast('/'))
         // Keep the whole decision/trash/probe sequence in order; two prompts cannot replace one another.
         val retry = promptsLock.withLock {
+            val collision = HostCollision(source.relativePath, destination, source.relativePath.replace('\\', '/').substringAfterLast('/'), remainingAfter())
             when (prompts.resolveCollision(collision)) {
                 HostCollisionChoice.SKIP -> null
                 HostCollisionChoice.KEEP_BOTH -> freePath(destination, collision.name) to false

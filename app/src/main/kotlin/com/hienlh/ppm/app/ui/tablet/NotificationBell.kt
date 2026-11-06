@@ -32,6 +32,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
@@ -74,6 +76,7 @@ internal fun NotificationBell(model: AppModel) {
                 .size(32.dp)
                 .clip(shape)
                 .background(if (open) tokens.accent.opacity(0.1).color else Color.Transparent)
+                .semantics { contentDescription = "Notifications" }
                 .ppmClickable(
                     pressedColor = if (open) Color.Transparent else tokens.panel2.color,
                     hoverColor = if (open) Color.Transparent else tokens.panel2.color,

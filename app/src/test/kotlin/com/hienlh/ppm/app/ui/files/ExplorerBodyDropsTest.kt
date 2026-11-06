@@ -87,7 +87,7 @@ internal class ExplorerBodyDropsTest : ExplorerTreeDragTestBase() {
         assertTrue(drop(drag, blank()))
     }
 
-    private val taken = "A file named “app.kt” already exists"
+    private val taken = "An item with that name already exists"
 
     @Test fun `a drop on the blank area goes to the server as absolute paths, and the folders it touched are listed again`() {
         server.enqueue(moved("$ROOT/src/app.kt", "$ROOT/app.kt"))

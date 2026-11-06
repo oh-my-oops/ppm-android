@@ -6,9 +6,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.test.core.app.ApplicationProvider
+import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.app.ui.tablet.Sidebar
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.protocol.HostDirectory
@@ -16,6 +20,7 @@ import com.hienlh.ppm.protocol.HostFileEntry
 import com.hienlh.ppm.protocol.HostPlace
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.state.files.FileMutations
+import com.hienlh.ppm.state.osexplorer.HostCollision
 import com.hienlh.ppm.state.osexplorer.HostFileActions
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
@@ -23,6 +28,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import mockwebserver3.MockResponse
@@ -61,6 +67,7 @@ class HostExplorerCommandsPromptsTest {
         HostDirectory(listOf(old), "/home/me", "/home", listOf(HostPlace("me", "/home/me")), "/", truncated = false),
     )
     private var shown by mutableStateOf(true)
+    private var sidebarModel by mutableStateOf<AppModel?>(null)
     private lateinit var commands: HostExplorerCommands
 
     @Before
@@ -69,6 +76,7 @@ class HostExplorerCommandsPromptsTest {
         val api = ApiClient(server.url("/"), "secret")
         commands = HostExplorerCommands(toasts::add, api, session, HostFileActions(api, FileMutations(api), "/", null), null, scope)
         compose.setContent {
+            sidebarModel?.let { Sidebar(it) }
             if (shown) {
                 DisposableEffect(commands) {
                     commands.attach()
@@ -118,20 +126,43 @@ class HostExplorerCommandsPromptsTest {
         if (body != null) assertEquals(WireJson.parse(body), WireJson.parse(request.body!!.utf8()))
     }
 
-    private val taken = "A file named “a.txt” already exists"
+    private val taken = "An item with that name already exists"
 
     @Test
     fun `a name that is taken asks in the window's dialog, and Skip leaves the item where it is`() {
         server.enqueue(refused("EEXIST"))
         commands.transfer(listOf("/src/a.txt"), "/home/me", copy = false)
         waitFor(taken)
-        assertTrue(isShown("/home/me/a.txt"))
-        assertTrue(isShown("Replace moves the existing item to Trash. Keep both saves the copy with a new name."))
+        assertTrue(isShown("a.txt"))
+        assertFalse("destination path is not shown", isShown("/home/me/a.txt"))
+        assertFalse("single item has no Apply to all checkbox", isShown("Apply to all 0 remaining items"))
+        assertFalse("single item has no Apply to all checkbox", isShown("Apply to all 1 remaining item"))
+        assertTrue(isShown("Replacing moves the existing item to the Trash first, so it stays recoverable. Keep both adds a numbered suffix."))
         click("Skip")
         waitUntilDone()
         assertEquals(1, server.requestCount)
         assertEquals(emptyList<ErrorToastMessage>(), toasts.toList())
         assertFalse("the dialog is gone", isShown(taken))
+    }
+
+    @Test
+    fun `Apply to all counts the remaining items in the batch and is hidden at the last`() {
+        server.enqueue(refused("EEXIST"))
+        server.enqueue(refused("EEXIST"))
+        server.enqueue(refused("EEXIST"))
+        commands.transfer(listOf("/src/a.txt", "/src/b.txt", "/src/c.txt"), "/home/me", copy = true)
+        waitFor("a.txt")
+        assertTrue(isShown("Apply to all 2 remaining items"))
+        click("Skip")
+        waitFor("b.txt")
+        assertTrue(isShown("Apply to all 1 remaining item"))
+        click("Skip")
+        waitFor("c.txt")
+        assertFalse(isShown("Apply to all 2 remaining items"))
+        assertFalse(isShown("Apply to all 1 remaining item"))
+        assertFalse(isShown("Apply to all 0 remaining items"))
+        click("Skip")
+        waitUntilDone()
     }
 
     @Test
@@ -144,10 +175,10 @@ class HostExplorerCommandsPromptsTest {
         server.enqueue(moved("/src/b.txt", "/home/me/b (2).txt"))
         commands.transfer(listOf("/src/a.txt", "/src/b.txt"), "/home/me", copy = true)
         waitFor(taken)
-        click("☐ Apply to all")
+        click("Apply to all 1 remaining item")
         click("Keep both")
         waitUntilDone()
-        assertFalse("b.txt was not asked about", isShown("A file named “b.txt” already exists"))
+        assertFalse("b.txt was not asked about", isShown("b.txt"))
         assertRequest("POST", "/api/fs/copy", """{"source":"/src/a.txt","destination":"/home/me/a.txt"}""")
         assertRequest("GET", "/api/fs/stat?path=%2Fhome%2Fme%2Fa%20%282%29.txt")
         assertRequest("POST", "/api/fs/copy", """{"source":"/src/a.txt","destination":"/home/me/a (2).txt"}""")
@@ -166,8 +197,8 @@ class HostExplorerCommandsPromptsTest {
     @Test
     fun `a delete for good asks first, and Cancel sends nothing`() {
         commands.permanentlyDelete(listOf(old))
-        waitFor("Delete permanently?")
-        assertTrue(isShown("These items will be permanently deleted. This cannot be undone."))
+        waitFor("Delete 1 item permanently?")
+        assertTrue(isShown("This cannot be undone — the items do not go to the Trash."))
         assertTrue(isShown("old.txt"))
         click("Cancel")
         waitUntilDone()
@@ -175,10 +206,23 @@ class HostExplorerCommandsPromptsTest {
     }
 
     @Test
+    fun `Delete permanently lists at most 10 names and summarises the rest`() {
+        val twelve = (1..12).map { HostFileEntry("f$it.txt", "/home/me/f$it.txt", "file", "file", size = 1) }
+        commands.permanentlyDelete(twelve)
+        waitFor("Delete 12 items permanently?")
+        assertTrue(isShown("f1.txt"))
+        assertTrue(isShown("f10.txt"))
+        assertFalse(isShown("f11.txt"))
+        assertTrue(isShown("and 2 more…"))
+        click("Cancel")
+        waitUntilDone()
+    }
+
+    @Test
     fun `Delete permanently sends the delete, and a host with no Trash asks the same way`() {
         server.enqueue(ok("""{"removed":"/home/me/old.txt","permanent":true,"trashed":false}"""))
         commands.permanentlyDelete(listOf(old))
-        waitFor("Delete permanently?")
+        waitFor("Delete 1 item permanently?")
         click("Delete permanently")
         waitUntilDone()
         assertRequest("DELETE", "/api/fs/delete", """{"path":"/home/me/old.txt","permanent":true}""")
@@ -186,7 +230,7 @@ class HostExplorerCommandsPromptsTest {
         server.enqueue(refused("NO_TRASH", 400))
         server.enqueue(ok("""{"removed":"/home/me/old.txt","permanent":true,"trashed":false}"""))
         commands.trash(listOf(old))
-        waitFor("This host has no Trash")
+        waitFor("Delete 1 item permanently?")
         click("Delete permanently")
         waitUntilDone()
         assertRequest("DELETE", "/api/fs/delete", """{"path":"/home/me/old.txt","permanent":false}""")
@@ -204,7 +248,7 @@ class HostExplorerCommandsPromptsTest {
         assertFalse("the dialog is gone", isShown(taken))
 
         commands.permanentlyDelete(listOf(old))
-        waitFor("Delete permanently?")
+        waitFor("Delete 1 item permanently?")
         pressBackInDialog()
         waitUntilDone()
         assertEquals("no delete was sent", 1, server.requestCount)
@@ -213,7 +257,7 @@ class HostExplorerCommandsPromptsTest {
     @Test
     fun `a window that stops hosting the dialogs declines the delete that waits`() {
         commands.permanentlyDelete(listOf(old))
-        waitFor("Delete permanently?")
+        waitFor("Delete 1 item permanently?")
         compose.runOnUiThread { shown = false }
         compose.waitForIdle()
         waitUntilDone()
@@ -239,5 +283,33 @@ class HostExplorerCommandsPromptsTest {
         commands.permanentlyDelete(listOf(old))
         waitUntilDone()
         assertEquals("nothing to ask in, so nothing is deleted for good", 2, server.requestCount)
+    }
+
+    @Test
+    fun `a second collision waiting behind the open prompt adds and N more to the description`() {
+        val prompts = commands.prompts()
+        val first = scope.launch { prompts.resolveCollision(HostCollision("/src/a.txt", "/home/me/a.txt", "a.txt", remaining = 0)) }
+        waitFor("a.txt")
+        assertFalse(isShown("a.txt — and 1 more"))
+        val second = scope.launch { prompts.resolveCollision(HostCollision("/src/b.txt", "/home/me/b.txt", "b.txt", remaining = 0)) }
+        waitFor("a.txt — and 1 more")
+        click("Skip")
+        waitFor("b.txt")
+        assertFalse(isShown("b.txt — and 1 more"))
+        click("Skip")
+        compose.waitUntil(10_000) { first.isCompleted && second.isCompleted }
+    }
+
+    @Test
+    fun `rail buttons expose their label as their accessible content description`() {
+        val model = AppModel(ApplicationProvider.getApplicationContext())
+        compose.runOnUiThread { sidebarModel = model }
+        compose.waitForIdle()
+        for (label in listOf("Chat History", "Explorer", "Search", "Teams", "Notifications", "File Explorer", "Settings")) {
+            compose.onNodeWithContentDescription(label).assertExists()
+        }
+        compose.runOnUiThread { model.toggleSidebar() }
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Expand sidebar").assertExists()
     }
 }

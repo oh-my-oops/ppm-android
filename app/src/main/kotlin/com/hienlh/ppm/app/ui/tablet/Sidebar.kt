@@ -45,6 +45,8 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -91,6 +93,7 @@ fun Sidebar(model: AppModel) {
                     .fillMaxWidth()
                     .height(BAR_HEIGHT)
                     .edge(Edge.Bottom, tokens.border.color)
+                    .semantics { contentDescription = "Expand sidebar" }
                     .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, onClickLabel = "Expand sidebar") { model.toggleSidebar() },
                 contentAlignment = Alignment.Center,
             ) { PpmIcon(ProductIcon.PanelLeftOpen, 16.dp, tokens.text2.color) }
@@ -379,6 +382,7 @@ private fun NavTile(icon: ProductIcon, label: String, active: Boolean, badge: In
                     Modifier
                 },
             )
+            .semantics { contentDescription = label }
             .ppmClickable(
                 pressedColor = tokens.panel2.color,
                 hoverColor = if (active) Color.Transparent else tokens.panel2.color,
@@ -422,6 +426,7 @@ private fun FooterUtil(icon: ProductIcon, label: String, onClick: () -> Unit) {
         Modifier
             .size(32.dp)
             .clip(shape)
+            .semantics { contentDescription = label }
             .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, shape = shape, onClickLabel = label, source = hover.source, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { PpmIcon(icon, 16.dp, tokens.text.mix(tokens.text3, hover.lit.toDouble()).color) }

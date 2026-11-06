@@ -123,11 +123,11 @@ class HostFileActionsTest {
         val calls = mutableListOf<String>()
         var count = 0
         val prompts = HostTransferPrompts(
-            resolveCollision = { calls += it.name; if (count++ == 0) HostCollisionChoice.SKIP else HostCollisionChoice.KEEP_BOTH },
+            resolveCollision = { calls += "${it.name}:${it.remaining}"; if (count++ == 0) HostCollisionChoice.SKIP else HostCollisionChoice.KEEP_BOTH },
             startBatch = { calls += "start" }, endBatch = { calls += "end" },
         )
         val result = c.actions.transfer(listOf("/src/a", "/src/b"), "/dst", HostTransferOperation.COPY, prompts)
-        assertEquals(listOf("start", "a", "b", "end"), calls)
+        assertEquals(listOf("start", "a:1", "b:0", "end"), calls)
         assertEquals(listOf("/src/a"), result.skipped)
         assertEquals(1, result.succeeded); assertEquals(0, result.failed)
         assertEquals(setOf("/src", "/dst"), result.report.affectedDirectories)

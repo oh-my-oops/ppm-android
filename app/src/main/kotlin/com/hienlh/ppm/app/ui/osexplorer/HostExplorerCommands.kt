@@ -99,10 +99,10 @@ internal class HostExplorerCommands(private val toast: (ErrorToastMessage) -> Un
     fun trash(entries: List<HostFileEntry>) = remove(entries.map { it.path }, permanent = false)
     fun permanentlyDelete(entries: List<HostFileEntry>) = remove(entries.map { it.path }, permanent = true)
     private fun remove(paths: List<String>, permanent: Boolean) = work {
-        if (paths.isEmpty() || (permanent && !confirmDelete(paths, false))) return@work
+        if (paths.isEmpty() || (permanent && !confirmDelete(paths))) return@work
         val result = core.delete(paths, permanent)
         report(result, if (permanent) "Deleted" else "Moved to Trash", omitNoTrash = true)
-        if (result.needsPermanent.isNotEmpty() && confirmDelete(result.needsPermanent, true)) {
+        if (result.needsPermanent.isNotEmpty() && confirmDelete(result.needsPermanent)) {
             report(core.delete(result.needsPermanent, true), "Deleted")
         }
     }
@@ -110,7 +110,7 @@ internal class HostExplorerCommands(private val toast: (ErrorToastMessage) -> Un
         reportTransfer(core.transfer(paths, directory, if (copy) HostTransferOperation.COPY else HostTransferOperation.MOVE, prompts()), announce = true, toast)
     }
     fun prompts(): HostTransferPrompts = promptHost.prompts()
-    private suspend fun confirmDelete(paths: List<String>, noTrash: Boolean): Boolean = promptHost.confirmDelete(paths, noTrash)
+    private suspend fun confirmDelete(paths: List<String>): Boolean = promptHost.confirmDelete(paths)
     private fun work(block: suspend () -> Unit) {
         if (busy) return
         running = scope.launch {

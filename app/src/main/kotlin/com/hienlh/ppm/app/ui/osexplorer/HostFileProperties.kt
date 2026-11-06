@@ -8,6 +8,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -74,9 +75,11 @@ internal fun HostExplorerDialog(title: String, description: String? = null, onDi
 @Composable
 internal fun HostDialogButton(label: String, enabled: Boolean = true, danger: Boolean = false, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
-    BasicText(label, Modifier.clip(RoundedCornerShape(6.dp)).cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
+    val shape = RoundedCornerShape(6.dp)
+    BasicText(label, Modifier.clip(shape)
+        .then(if (danger) Modifier.background(tokens.error.color) else Modifier.cssBorder(tokens.border.color, shape))
         .ppmClickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
-        style = ppmText(14f, FontWeight.Medium).copy(color = (if (danger) tokens.error else tokens.text).color))
+        style = ppmText(14f, FontWeight.Medium).copy(color = if (danger) Color.White else tokens.text.color))
 }
 
 @Composable
