@@ -98,11 +98,12 @@ class KeyboardPanTest {
     }
 
     @Test
-    fun `a cursor in view brings the keys up with it when both fit`() {
-        // The phone's page, a keyboard of 1,100 px under it: the cursor's row just above the keys and the nav under them.
+    fun `a cursor in view is not re-centred just because the keys fit with it`() {
+        // The phone's page, a keyboard of 1,100 px under it: the cursor's row (hidden under the keyboard) brings the keys up with it.
         assertEquals(1028, panFor(2060f, 2085f, 2083f, 2203f, 142f, 1300f, now = 0, max = 1028))
-        // A cursor row in view with the keys under the keyboard: the page goes up for them.
-        assertEquals(353, panFor(700f, 726f, 800f, 900f, view.first, view.second, now = 0, max = 688))
+        // A cursor row already in view with the keys under the keyboard: the pan stays where it is.
+        assertEquals(0, panFor(700f, 726f, 800f, 900f, view.first, view.second, now = 0, max = 688))
+        assertEquals(168, panFor(640f, 666f, 1330f, 1438f, view.first, view.second, now = 168, max = 688))
     }
 
     @Test

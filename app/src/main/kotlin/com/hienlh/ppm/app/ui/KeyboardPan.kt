@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import com.hienlh.ppm.app.TextInputFocus
+import com.hienlh.ppm.app.ui.tablet.LocalHeldCursor
 import kotlin.math.roundToInt
 
 /**
@@ -44,8 +45,10 @@ import kotlin.math.roundToInt
  *
  * A terminal's field is its cursor's row, and the pan follows the cursor as it moves: a line typed
  * below the keyboard's edge brings the page up, as Chrome does for xterm's textarea, which stays on
- * the cursor cell. The key row under the terminal is shown too whenever it and the cursor's row fit
- * above the keyboard together; when they do not, the cursor's row is the one that shows ([panFor]).
+ * the cursor cell. When the cursor's row is out of view and has to be panned in, the key row under
+ * the terminal is shown too whenever it and the cursor's row fit above the keyboard together; when
+ * they do not, the cursor's row is the one that shows ([panFor]). While a split handle is being
+ * dragged the pan is held where it is and re-evaluated on release.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -56,16 +59,25 @@ fun KeyboardPannedPage(content: @Composable BoxScope.() -> Unit) {
         opening = WindowInsets.imeAnimationTarget.getBottom(density),
         navigationBar = WindowInsets.navigationBars.getBottom(density),
         statusBar = WindowInsets.statusBars.getTop(density),
+        hold = LocalHeldCursor.current.icon != null,
         content = content,
     )
 }
 
 /** [KeyboardPannedPage] with the four insets it reads handed in: the keyboard now, the keyboard it is opening to, and the two bars. */
 @Composable
-internal fun PannedPage(keyboard: Int, opening: Int, navigationBar: Int, statusBar: Int, content: @Composable BoxScope.() -> Unit) {
+internal fun PannedPage(
+    keyboard: Int,
+    opening: Int,
+    navigationBar: Int,
+    statusBar: Int,
+    hold: Boolean = false,
+    content: @Composable BoxScope.() -> Unit,
+) {
     var wanted by remember { mutableIntStateOf(0) }
     val pan = minOf(wanted, maxOf(0, keyboard - navigationBar))
     val panNow by rememberUpdatedState(pan)
+    val holdNow by rememberUpdatedState(hold)
     val page = remember { Placed() }
     val field = TextInputFocus.field
     LaunchedEffect(opening, field) {
@@ -76,7 +88,11 @@ internal fun PannedPage(keyboard: Int, opening: Int, navigationBar: Int, statusB
         val viewBottom = (at.size.height - opening).toFloat()
         val max = maxOf(0, opening - navigationBar)
         // Where the field is now, and again whenever it moves: a terminal's cursor does with every line.
-        snapshotFlow { TextInputFocus.panTargetIn(at) }.collect { target ->
+        // While a split handle is being dragged the pan stays put so the handle does not jump away from
+        // the finger, and is worked out again as soon as the drag lets go.
+        snapshotFlow { if (holdNow) null else TextInputFocus.panTargetIn(at) to true }.collect { pair ->
+            if (pair == null) return@collect
+            val target = pair.first
             // A field elsewhere (a sheet's) leaves the page where it was.
             wanted = if (target == null) {
                 0
@@ -102,12 +118,14 @@ internal fun centredIfNeeded(fieldTop: Float, fieldBottom: Float, viewTop: Float
 }
 
 /**
- * [centredIfNeeded] for a field with something beside it that is worth seeing too: the key row under a terminal's cursor. The two together are
- * what is centred, and the pan is theirs when both are in view at it. They are not when they do not fit the view together, or when the limits of
- * the pan (none, or the page's bottom on the keyboard) stop short of it; then it is the field alone, as for every field with nothing beside it:
- * the cursor's row is the one that must show. [keepTop] and [keepBottom] are both null for no such thing.
+ * [centredIfNeeded] for a field with something beside it that is worth seeing too: the key row under a terminal's cursor. While the field itself is
+ * in view the pan stays where it is, so a layout change that brings the key row within reach never re-centres a cursor that is still visible. When
+ * the field is hidden, the two together are what is centred when both are in view at that pan — they fit the view and the limits of the pan reach it —
+ * and otherwise the field alone, as for every field with nothing beside it: the cursor's row is the one that must show. [keepTop] and [keepBottom]
+ * are both null for no such thing.
  */
 internal fun panFor(fieldTop: Float, fieldBottom: Float, keepTop: Float?, keepBottom: Float?, viewTop: Float, viewBottom: Float, now: Int, max: Int): Int {
+    if (fieldTop >= viewTop + now && fieldBottom <= viewBottom + now) return now.coerceIn(0, max)
     if (keepTop != null && keepBottom != null) {
         val top = minOf(fieldTop, keepTop)
         val bottom = maxOf(fieldBottom, keepBottom)
