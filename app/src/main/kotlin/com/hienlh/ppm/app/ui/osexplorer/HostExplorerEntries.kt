@@ -82,7 +82,7 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
         }
         val padding = with(LocalDensity.current) { GRID_PADDING.toPx() }
         val inset = with(LocalDensity.current) { 4.dp.toPx() }
-        val gridDrops = rememberHostListDrops(drops, state.currentDirectory) { at -> grid.entryAt(at, padding, inset, entries) }
+        val gridDrops = rememberHostListDrops(drops, state.currentDirectory, scroll = grid) { at -> grid.entryAt(at, padding, inset, entries) }
         LazyVerticalGrid(cells, Modifier.fillMaxSize().hostBackgroundMenu(session::clearSelection) { onMenu(emptyList(), it) }
             .then(gridDrops.target).then(gridDrops.list()),
             state = grid, contentPadding = PaddingValues(GRID_PADDING)) {
@@ -107,7 +107,7 @@ internal fun HostExplorerEntries(api: com.hienlh.ppm.client.ApiClient?, session:
         }
     } else {
         val scroll = rememberLazyListState()
-        val listDrops = rememberHostListDrops(drops, state.currentDirectory) { at -> scroll.entryAt(at.y, entries) }
+        val listDrops = rememberHostListDrops(drops, state.currentDirectory, scroll = scroll) { at -> scroll.entryAt(at.y, entries) }
         LaunchedEffect(state.anchor) {
             val index = entries.indexOfFirst { it.path == state.anchor }
             if (index >= 0 && scroll.layoutInfo.visibleItemsInfo.none { it.index == index }) scroll.animateScrollToItem(index)

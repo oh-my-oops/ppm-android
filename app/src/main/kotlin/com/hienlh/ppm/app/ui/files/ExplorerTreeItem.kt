@@ -29,11 +29,18 @@ internal fun ExplorerTreeItem(
     dragOver: ExplorerDragOver,
     projectRoot: String? = null,
     dropModifier: @Composable (String) -> Modifier = { Modifier },
+    dropTint: ExplorerDropSite? = null,
 ) {
     val node = row.node
     val expanded = node.path in state.expandedPaths
     var menuAt by remember(tree, node.path) { mutableStateOf<Offset?>(null) }
-    val dropOver by remember(dragOver, node.path) { derivedStateOf { dragOver.site?.key == node.path } }
+    val sameProjectOver by remember(dragOver, node.path, state.project) {
+        derivedStateOf {
+            val site = dragOver.site
+            site?.key == node.path && site.drag is ExplorerRowDrag && site.drag.project == state.project.orEmpty()
+        }
+    }
+    val dropOver = sameProjectOver || dropTint?.key == node.path
     Box(dropModifier(if (node.isDirectory) node.path else node.path.substringBeforeLast('/', ""))) {
         Column {
             ExplorerTreeRow(

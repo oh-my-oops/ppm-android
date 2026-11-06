@@ -1,12 +1,19 @@
 package com.hienlh.ppm.app.ui.files
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -177,5 +184,57 @@ class ExplorerDragAutoScrollTest {
         flushStateWrites()
         frames(3)
         assertTrue("the list moves again once it has more to show", movesIn(3) > 0)
+    }
+
+    @Test fun `a horizontal row strip moves right at the right edge and left at the left edge`() {
+        compose.setContent {
+            list = rememberLazyListState()
+            density = LocalDensity.current.density
+            val bounds = remember { mutableStateOf<Rect?>(null) }
+            Box(Modifier.size(400.dp, 200.dp).onGloballyPositioned { bounds.value = it.boundsInRoot().also { rect -> area = rect } }) {
+                LazyRow(Modifier.fillMaxSize(), state = list) {
+                    items(40) { Box(Modifier.width(50.dp).fillMaxHeight()) }
+                }
+            }
+            ExplorerDragAutoScroll(over, list, { bounds.value }, horizontal = true) { rehits += over.pointer }
+        }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+
+        fun scrolledX() = list.firstVisibleItemIndex * Math.round(50 * density) + list.firstVisibleItemScrollOffset
+        pointerAt(area.right - 12f, area.center.y)
+        frames(3)
+        val beforeRight = scrolledX()
+        frames(3)
+        assertEquals(36, scrolledX() - beforeRight)
+
+        pointerAt(area.left + 12f, area.center.y)
+        frames(3)
+        val beforeLeft = scrolledX()
+        frames(2)
+        assertEquals(-24, scrolledX() - beforeLeft)
+    }
+
+    @Test fun `a grid scrolls vertically by the same step as a list`() {
+        lateinit var grid: LazyGridState
+        compose.setContent {
+            grid = rememberLazyGridState()
+            density = LocalDensity.current.density
+            val bounds = remember { mutableStateOf<Rect?>(null) }
+            Box(Modifier.size(300.dp, 400.dp).onGloballyPositioned { bounds.value = it.boundsInRoot().also { rect -> area = rect } }) {
+                LazyVerticalGrid(GridCells.Fixed(3), Modifier.fillMaxSize(), state = grid) {
+                    items(120) { Box(Modifier.fillMaxWidth().height(80.dp)) }
+                }
+            }
+            ExplorerDragAutoScroll(over, grid, { bounds.value }) { rehits += over.pointer }
+        }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+
+        pointerAt(area.center.x, area.bottom - 12f)
+        frames(3)
+        val before = grid.firstVisibleItemScrollOffset
+        frames(2)
+        assertEquals(24, grid.firstVisibleItemScrollOffset - before)
     }
 }

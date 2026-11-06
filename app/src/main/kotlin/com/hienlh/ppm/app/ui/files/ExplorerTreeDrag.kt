@@ -2,10 +2,10 @@ package com.hienlh.ppm.app.ui.files
 
 import android.content.ClipData
 import android.content.ClipDescription
+import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -108,8 +108,8 @@ internal fun explorerDragLabel(drag: EntryDrag): String {
  * copy of them is not (it makes `name (2)`, as every OS does). So is a drag that holds the folder itself or one above it, which would
  * go into itself: from the tree's own rows (all under the folder) it never happens, from a window's entries it can.
  */
-internal fun explorerRootDropTaken(drag: ExplorerRowDrag, copy: Boolean, root: String): Boolean =
-    decideEntryDrop(drag.absolutePaths, root, copy) is EntryDropDecision.Accept
+internal fun explorerRootDropTaken(drag: EntryDrag, copy: Boolean, root: String): Boolean =
+    decideEntryDrop(drag.payload.paths, root, copy) is EntryDropDecision.Accept
 
 /**
  * Only a mouse's primary button drags a row. The web gives a coarse pointer no drag at all, a long press is the menu,
@@ -286,31 +286,41 @@ internal fun explorerRootTint(over: ExplorerDragOver, takes: (EntryDrag) -> Bool
  * Dp to scroll in a frame for a pointer at [pointer] over [area]: 0 with no pointer or no area, and 0 for a pointer outside it, over
  * the header above the list, as the web's list hears only a drag over itself. [area] is read inside a `snapshotFlow`, so it has to be state.
  */
-internal fun explorerPointerScrollStep(pointer: Offset, area: Rect?, density: Float): Int {
-    if (pointer == Offset.Unspecified || area == null || pointer.y < area.top || pointer.y > area.bottom) return 0
-    return explorerAutoScrollStep((pointer.y - area.top) / density.toDouble(), (area.bottom - pointer.y) / density.toDouble())
+internal fun explorerPointerScrollStep(pointer: Offset, area: Rect?, density: Float, horizontal: Boolean = false): Int {
+    if (pointer == Offset.Unspecified || area == null ||
+        pointer.x < area.left || pointer.x > area.right ||
+        pointer.y < area.top || pointer.y > area.bottom
+    ) return 0
+    return if (horizontal) {
+        explorerAutoScrollStep((pointer.x - area.left) / density.toDouble(), (area.right - pointer.x) / density.toDouble())
+    } else {
+        explorerAutoScrollStep((pointer.y - area.top) / density.toDouble(), (area.bottom - pointer.y) / density.toDouble())
+    }
 }
 
 /**
- * The web's `useDragAutoScroll`: while the pointer of a dragged row is within 48 dp of the top or bottom of the list,
- * scrolls `ceil(intensity x 16)` dp a frame, the more the closer it is, and says so ([rehit]) so what is under the
- * pointer is asked again. The last position stands in for the web's `dragover`, which a pointer held still keeps sending.
- * Frames are only asked for while the list can move that way, so a drag in the middle of it, or at an end it has reached,
+ * The web's `useDragAutoScroll`: while the pointer of a dragged row is within 48 dp of an edge of [scroll] (top and bottom, or left and
+ * right when [horizontal]), scrolls `ceil(intensity x 16)` dp a frame, the more the closer it is, and says so ([rehit]) so what is under
+ * the pointer is asked again. The last position stands in for the web's `dragover`, which a pointer held still keeps sending.
+ * Frames are only asked for while [scroll] can move that way, so a drag in the middle of it, or at an end it has reached,
  * costs none, and a list that grows under a held pointer (a folder opening) starts again by itself.
  */
 @Composable
-internal fun ExplorerDragAutoScroll(over: ExplorerDragOver, list: LazyListState, area: () -> Rect?, rehit: () -> Unit) {
+internal fun ExplorerDragAutoScroll(
+    over: ExplorerDragOver, scroll: ScrollableState, area: () -> Rect?,
+    horizontal: Boolean = false, rehit: () -> Unit,
+) {
     val density by rememberUpdatedState(LocalDensity.current.density)
     val areaNow by rememberUpdatedState(area)
     val rehitNow by rememberUpdatedState(rehit)
-    LaunchedEffect(over, list) {
+    LaunchedEffect(over, scroll, horizontal) {
         snapshotFlow {
-            val step = explorerPointerScrollStep(over.pointer, areaNow(), density)
-            if ((step > 0 && !list.canScrollForward) || (step < 0 && !list.canScrollBackward)) 0 else step
+            val step = explorerPointerScrollStep(over.pointer, areaNow(), density, horizontal)
+            if ((step > 0 && !scroll.canScrollForward) || (step < 0 && !scroll.canScrollBackward)) 0 else step
         }.collectLatest { step ->
             while (step != 0) {
                 withFrameNanos { }
-                list.scrollBy(step * density)
+                scroll.scrollBy(step * density)
                 rehitNow()
             }
         }

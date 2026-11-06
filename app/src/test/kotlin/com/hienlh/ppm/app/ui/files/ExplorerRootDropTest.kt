@@ -1,9 +1,12 @@
 package com.hienlh.ppm.app.ui.files
 
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.moveBy
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performMouseInput
 import kotlinx.coroutines.CompletableDeferred
@@ -25,7 +28,7 @@ import org.robolectric.shadows.ShadowWindowManagerGlobal
 @Config(sdk = [34])
 internal class ExplorerRootDropTest : ExplorerTreeDragTestBase() {
 
-    private fun dropOnBlank(drag: ExplorerRowDrag): Boolean {
+    private fun dropOnBlank(drag: EntryDrag): Boolean {
         assertTrue(begin(drag))
         over(drag, blank())
         return drop(drag, blank())
@@ -44,18 +47,91 @@ internal class ExplorerRootDropTest : ExplorerTreeDragTestBase() {
         assertEquals(listOf("$ROOT/README.md", "$ROOT/src/app.kt"), transfers.single().paths)
     }
 
-    @Test fun `a drag of a window's entries is taken by nothing in the tree, which hears only rows of its own project`() {
+    @Test fun `a drag of a window's entries, or of another project's rows with a known root, is taken by the blank area, the header, a file's row and a folder's row`() {
         show()
-        val drag = HostEntryDrag(listOf("/elsewhere/x.txt"))
-        assertFalse("not by the blank area", begin(drag))
-        over(drag, blank())
-        over(drag, center("docs"))
-        assertFalse(drop(drag, blank()))
-        assertEquals(emptyList<Transfer>(), transfers)
+        val windowDrag = HostEntryDrag(listOf("/elsewhere/x.txt"))
+        assertTrue(dropOnBlank(windowDrag))
+        assertTrue(dropOnHeader(windowDrag))
+        assertTrue(begin(windowDrag))
+        over(windowDrag, center("README.md"))
+        assertTrue("a file's row hands it to the project folder", drop(windowDrag, center("README.md")))
+        assertTrue(begin(windowDrag))
+        over(windowDrag, center("docs"))
+        assertTrue("a folder's row takes it into that folder", drop(windowDrag, center("docs")))
+
+        val otherProject = ExplorerRowDrag("elsewhere", "src/app.kt", false, listOf("src/app.kt"), "/home/me/p2")
+        assertTrue(dropOnBlank(otherProject))
+        assertTrue(begin(otherProject))
+        over(otherProject, center("docs"))
+        assertTrue(drop(otherProject, center("docs")))
+
+        assertEquals(
+            listOf(
+                Transfer(listOf("/elsewhere/x.txt"), ROOT, copy = false),
+                Transfer(listOf("/elsewhere/x.txt"), ROOT, copy = false),
+                Transfer(listOf("/elsewhere/x.txt"), ROOT, copy = false),
+                Transfer(listOf("/elsewhere/x.txt"), "$ROOT/docs", copy = false),
+                Transfer(listOf("/home/me/p2/src/app.kt"), ROOT, copy = false),
+                Transfer(listOf("/home/me/p2/src/app.kt"), "$ROOT/docs", copy = false),
+            ),
+            transfers,
+        )
         assertEquals(emptyList<Pair<String, String>>(), moves)
     }
 
-    private fun dropOnHeader(drag: ExplorerRowDrag): Boolean {
+    @Test fun `a folder row refuses a window's drag that is in it already as a move, or is an ancestor of it, and does not hand it on to the project folder`() {
+        show()
+        val inside = HostEntryDrag(listOf("$ROOT/docs/guide.md"))
+        assertTrue(begin(inside))
+        over(inside, center("docs"))
+        assertFalse(drop(inside, center("docs")))
+
+        val ancestor = HostEntryDrag(listOf(ROOT))
+        for (copy in listOf(false, true)) {
+            copyHeld = copy
+            assertTrue(begin(ancestor))
+            over(ancestor, center("docs"))
+            assertFalse("ancestor, copy=$copy", drop(ancestor, center("docs")))
+        }
+        assertEquals(emptyList<Transfer>(), transfers)
+
+        copyHeld = true
+        assertTrue(begin(inside))
+        over(inside, center("docs"))
+        assertTrue("a copy in the same folder is taken", drop(inside, center("docs")))
+        assertEquals(listOf(Transfer(listOf("$ROOT/docs/guide.md"), "$ROOT/docs", copy = true)), transfers)
+    }
+
+    @Test fun `a window's drag resting 800 ms on a shut folder opens it when the folder would take the drop, and not when it would refuse`() {
+        show()
+        compose.mainClock.autoAdvance = false
+        val refused = HostEntryDrag(listOf("$ROOT/docs/guide.md"))
+        assertTrue(begin(refused))
+        hover(refused, center("docs"))
+        advance(2_000)
+        assertFalse("refused move does not spring-load", "docs" in expanded())
+        dispatch(android.view.DragEvent.ACTION_DRAG_ENDED, refused)
+        compose.mainClock.advanceTimeByFrame()
+
+        val taken = HostEntryDrag(listOf("/elsewhere/x.txt"))
+        assertTrue(begin(taken))
+        hover(taken, center("docs"))
+        advance(700)
+        assertFalse("not yet at 700 ms", "docs" in expanded())
+        advance(200)
+        assertTrue("opened after 800 ms", "docs" in expanded())
+    }
+
+    @Test fun `the root drop modifier wraps the header as well as the list`() {
+        show(content = { tree, commands ->
+            ExplorerTree(tree, onOpenFile = {}, mutations = commands, entryDrops = drops, dropModifier = { dir -> Modifier.testTag("drop:$dir") })
+        })
+        val bounds = compose.onAllNodesWithTag("drop:")[0].fetchSemanticsNode().boundsInRoot
+        assertTrue("covers the header", bounds.contains(header()))
+        assertTrue("covers the blank area", bounds.contains(blank()))
+    }
+
+    private fun dropOnHeader(drag: EntryDrag): Boolean {
         assertTrue(begin(drag))
         over(drag, header())
         return drop(drag, header())
@@ -214,6 +290,8 @@ internal class ExplorerRootDropTest : ExplorerTreeDragTestBase() {
 
     @Test fun `a tree with no shared transfer takes nothing on the blank area, and still moves a row onto a row`() {
         show(content = { tree, commands -> ExplorerTree(tree, onOpenFile = {}, mutations = commands) })
+        assertFalse(begin(HostEntryDrag(listOf("/elsewhere/x.txt"))))
+        assertFalse(begin(ExplorerRowDrag("elsewhere", "src/app.kt", false, listOf("src/app.kt"), "/home/me/p2")))
         val drag = row("src/app.kt")
         assertTrue(begin(drag))
         over(drag, blank())

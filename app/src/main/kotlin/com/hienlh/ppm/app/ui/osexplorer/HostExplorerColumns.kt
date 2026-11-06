@@ -115,12 +115,13 @@ internal fun HostExplorerColumns(
     }.focusable()) {
         val preview = !mobile && maxWidth >= 720.dp
         val previewWidth = maxOf(240.dp, maxWidth - 220.dp * paths.size)
+        val columnsDrops = rememberHostColumnsDrops(drops, horizontal)
         LaunchedEffect(paths.size, preview, mobile) {
             if (!mobile && paths.isNotEmpty()) horizontal.animateScrollToItem(if (preview) paths.size else paths.lastIndex)
         }
         @Composable fun column(index: Int, fullWidth: Boolean) {
             val value = columns[index]
-            HostColumnView(value, selectedPath(index), index == activeIndex, mobile, fullWidth, cut, commands, drops, dropModifier,
+            HostColumnView(value, selectedPath(index), index == activeIndex, mobile, fullWidth, cut, commands, drops != null, columnsDrops, dropModifier,
                 onSelect = { entry ->
                     select(index, entry)
                     if (mobile && !entry.isDirectory) {
@@ -137,7 +138,7 @@ internal fun HostExplorerColumns(
                 BasicText("Back", style = ppmText(14f).copy(color = tokens.text2.color))
             }
             Box(Modifier.weight(1f).fillMaxWidth()) { if (columns.isNotEmpty()) key(columns[activeIndex].path) { column(activeIndex, true) } }
-        } else LazyRow(Modifier.fillMaxSize().cssScrollbar(horizontal), state = horizontal) {
+        } else LazyRow(Modifier.fillMaxSize().then(columnsDrops.target).cssScrollbar(horizontal), state = horizontal) {
             itemsIndexed(paths, key = { _, path -> path }) { index, _ -> column(index, false) }
             if (preview) item(key = "preview") {
                 val selected = columns.asSequence().flatMap { it.entries.asSequence() }.firstOrNull { it.path == anchor }
@@ -149,14 +150,13 @@ internal fun HostExplorerColumns(
 
 @Composable
 private fun HostColumnView(column: HostColumn, selected: String?, focused: Boolean, mobile: Boolean, fullWidth: Boolean,
-                           cut: Set<String>, commands: HostExplorerCommands?, drops: HostEntryDrops?, dropModifier: @Composable (String) -> Modifier, onSelect: (HostFileEntry) -> Unit, onOpen: (HostFileEntry) -> Unit,
+                           cut: Set<String>, commands: HostExplorerCommands?, hasDrops: Boolean, columnsDrops: HostColumnsDrops,
+                           dropModifier: @Composable (String) -> Modifier, onSelect: (HostFileEntry) -> Unit, onOpen: (HostFileEntry) -> Unit,
                            onMenu: (HostFileEntry?, Offset) -> Unit, onRetry: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val scroll = rememberLazyListState()
     // A drag that rests on a folder 800 ms selects it, which opens it in the next column, as the web's `springLoad: onSelect` does.
-    val listDrops = rememberHostListDrops(drops, column.path, springLoad = { path -> column.entries.firstOrNull { it.path == path }?.let(onSelect) }) { at ->
-        scroll.entryAt(at.y, column.entries)
-    }
+    val listDrops = columnsDrops.column(column.path, column.entries, scroll, onSelect)
     LaunchedEffect(selected, column.entries) {
         val index = column.entries.indexOfFirst { it.path == selected }
         if (index >= 0 && scroll.layoutInfo.visibleItemsInfo.none { it.index == index }) scroll.animateScrollToItem(index)
@@ -180,7 +180,7 @@ private fun HostColumnView(column: HostColumn, selected: String?, focused: Boole
                 .then(listDrops.row(entry))
                 .then(if (entry.isDirectory) dropModifier(entry.path) else Modifier)
                 .semantics { this.selected = entry.path == selected; contentDescription = entry.name }
-                .explorerEntryDragSource(drops != null) { HostEntryDrag(listOf(entry.path)) }
+                .explorerEntryDragSource(hasDrops) { HostEntryDrag(listOf(entry.path)) }
                 .hostColumnInput({ onSelect(entry) }, { onOpen(entry) }, { onMenu(entry, it) })
                 .padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 HostEntryIcon(entry, Modifier.size(16.dp))

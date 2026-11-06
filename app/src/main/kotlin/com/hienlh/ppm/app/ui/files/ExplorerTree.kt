@@ -90,6 +90,7 @@ fun ExplorerTree(
     var rootMenu by remember(tree, state.project) { mutableStateOf<Offset?>(null) }
     val dragOver = remember(tree, state.project) { ExplorerDragOver() }
     val listArea = remember { mutableStateOf<Rect?>(null) }
+    fun sameProject(drag: EntryDrag): Boolean = drag is ExplorerRowDrag && drag.project == state.project.orEmpty()
     // What a dragged row is over at [at] (root pixels), asked of the list's own layout each time because the rows scroll under a held pointer.
     // A point above the list, over the header, is the project folder, though the first row, scrolled half out of sight, is laid out above it.
     fun siteAt(drag: EntryDrag, at: Offset): ExplorerDropSite {
@@ -97,14 +98,25 @@ fun ExplorerTree(
         val item = if (y < 0f) null else list.layoutInfo.visibleItemsInfo.firstOrNull { y >= it.offset && y < it.offset + it.size }
         val node = (item?.let { displayRows.getOrNull(it.index) } as? ExplorerDisplayRow.Node)?.row?.node
             ?: return ExplorerDropSite(drag, ROOT_DROP_KEY, "", collapsedFolder = false)
+        if (sameProject(drag)) {
+            return ExplorerDropSite(
+                drag, node.path, if (node.isDirectory) node.path else node.path.substringBeforeLast('/', ""),
+                collapsedFolder = node.isDirectory && node.path !in state.expandedPaths,
+            )
+        }
+        if (!node.isDirectory) return ExplorerDropSite(drag, ROOT_DROP_KEY, "", collapsedFolder = false)
         return ExplorerDropSite(
-            drag, node.path, if (node.isDirectory) node.path else node.path.substringBeforeLast('/', ""),
-            collapsedFolder = node.isDirectory && node.path !in state.expandedPaths,
+            drag, node.path, node.path,
+            collapsedFolder = node.path !in state.expandedPaths && entryDrops?.takes(drag, node.path) == true,
         )
     }
     ExplorerDragAutoScroll(dragOver, list, { listArea.value }) { dragOver.site?.let { dragOver.site = siteAt(it.drag, dragOver.pointer) } }
     ExplorerDragSpringLoad(dragOver) { path -> tree.setExpanded(path, true) }
-    val rootTint = explorerRootTint(dragOver) { drag -> commands != null && drag is ExplorerRowDrag && entryDrops?.takes(drag) == true }
+    val dropTint = explorerDropTint(dragOver) { site ->
+        commands != null && (site.key == ROOT_DROP_KEY || !sameProject(site.drag)) &&
+            entryDrops?.takes(site.drag, site.directory) == true
+    }
+    val rootTint = dropTint?.key == ROOT_DROP_KEY
     DisposableEffect(session) { onDispose { session.close() } }
     LaunchedEffect(edit?.id) {
         if (edit != null) {
@@ -132,17 +144,21 @@ fun ExplorerTree(
         if (parent.isNotEmpty()) tree.setExpanded(parent, true)
         session.create(parent, directory)
     }
-    // The blank area is the project folder, which the web's background target takes whole; a row keeps the tree's own single-path move.
-    fun drop(drag: EntryDrag, site: ExplorerDropSite): Boolean {
-        if (drag !is ExplorerRowDrag) return false
-        return if (site.key == ROOT_DROP_KEY) commands != null && entryDrops?.dropOnRoot(drag) == true
-        else commands?.let { session.move(drag.path, site.directory, it) } != null
-    }
-    // The web's root target is the container, header and all (file-tree.tsx puts `backgroundDrop` and `bg-primary/5` on the div that wraps
-    // SidebarHeader), so the whole tree is the drop target and a point above the list is the project folder, as one under the rows is.
+    // The blank area is the project folder, which the web's background target takes whole; a row of this project keeps the tree's own single-path move,
+    // while a drag from a window or from another project's tree transfers into the folder row it is let go on.
+    fun accepts(drag: EntryDrag): Boolean = commands != null && !busy && (sameProject(drag) || entryDrops != null && when (drag) {
+        is HostEntryDrag -> true
+        is ExplorerRowDrag -> drag.root != null
+    })
+    fun drop(drag: EntryDrag, site: ExplorerDropSite): Boolean =
+        if (site.key == ROOT_DROP_KEY || !sameProject(drag)) commands != null && entryDrops?.drop(drag, site.directory) == true
+        else commands?.let { session.move((drag as ExplorerRowDrag).path, site.directory, it) } != null
+    // The web's root target is the container, header and all (file-tree.tsx puts `backgroundDrop`, `bg-primary/5` and the OS-file upload handlers on the div
+    // that wraps SidebarHeader), so the whole tree is the drop target and a point above the list is the project folder, as one under the rows is.
     Column(modifier.fillMaxSize().explorerMutationKeys(tree, session, commands)
+        .then(if (state.project != null) dropModifier("") else Modifier)
         .then(if (rootTint) Modifier.background(LocalPpmTokens.current.accent.opacity(0.05).color) else Modifier)
-        .explorerMoveTarget(dragOver, { drag -> commands != null && !busy && drag is ExplorerRowDrag && drag.project == state.project.orEmpty() }, ::siteAt, ::drop)) {
+        .explorerMoveTarget(dragOver, ::accepts, ::siteAt, ::drop)) {
         ExplorerMutationToolbar(
             hasProject = state.project != null,
             busy = busy,
@@ -175,7 +191,7 @@ fun ExplorerTree(
         revealError?.let { ExplorerNote(it) }
         if (mutationState.pasting) ExplorerNote("Pasting files…")
         mutationState.error?.let { error -> ExplorerError(error, retryLabel = "Dismiss", onRetry = session::clearError) }
-        Box(Modifier.weight(1f).fillMaxWidth().then(dropModifier(""))
+        Box(Modifier.weight(1f).fillMaxWidth()
             .onGloballyPositioned { listArea.value = it.boundsInRoot() }
             .explorerContextGesture(
             onMenu = { rootMenu = it },
@@ -193,7 +209,7 @@ fun ExplorerTree(
                         onSubmit = { if (tree.state.value.project == commands?.project) commands?.let { session.submit(display.edit, field.text.toString(), it) } },
                         onCancel = session::cancelEdit, onEdit = session::edited)
                     is ExplorerDisplayRow.Node -> ExplorerTreeItem(display.row, tree, state, visiblePaths, selected,
-                        onOpenFile, onOpenTerminal, onOpenExplorer, actionsForNode, commands, session, busy, ::create, dragOver, entryDrops?.root, dropModifier)
+                        onOpenFile, onOpenTerminal, onOpenExplorer, actionsForNode, commands, session, busy, ::create, dragOver, entryDrops?.root, dropModifier, dropTint)
                 }
             }
             }

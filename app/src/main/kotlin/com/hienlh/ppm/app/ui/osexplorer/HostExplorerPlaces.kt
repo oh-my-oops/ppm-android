@@ -34,12 +34,14 @@ internal val HostPlaceIcon.vector: ImageVector
 /** The tablet's sidebar (`ExplorerSidebar`); the phone has its strip and sheet in `HostExplorerPhone.kt`. */
 @Composable
 internal fun HostExplorerPlaces(session: ExplorerSession, host: HostFilesystem?, windows: Boolean,
-                                dropModifier: @Composable (String) -> Modifier = { Modifier }) {
+                                dropModifier: @Composable (String) -> Modifier = { Modifier },
+                                commands: HostExplorerCommands? = null) {
     val pins by session.preferences.pins.collectAsState()
     val state by session.state.collectAsState()
     val sections = remember(pins, host, windows) { hostPlaceSections(pins, host, hostPlacesVocab(windows)) }
+    val drops = rememberHostEntryDrops(commands, LocalPpmMobile.current, announce = false)
     Column(Modifier.width(176.dp).fillMaxHeight().background(LocalPpmTokens.current.panel2.color).cssScrollY().padding(4.dp)) {
-        PlacesSections(sections, state.currentDirectory, session.preferences::unpin, dropModifier) { session.go(it) }
+        PlacesSections(sections, state.currentDirectory, session.preferences::unpin, drops, dropModifier) { session.go(it) }
         host?.warnings?.forEach { warning -> BasicText(warning, Modifier.padding(8.dp),
             style = ppmText(11f, lineHeight = 15f).copy(color = LocalPpmTokens.current.text3.color)) }
     }
@@ -47,23 +49,24 @@ internal fun HostExplorerPlaces(session: ExplorerSession, host: HostFilesystem?,
 
 @Composable
 private fun PlacesSections(sections: List<HostPlacesSection>, current: String, unpin: (String) -> Unit,
-                           dropModifier: @Composable (String) -> Modifier, go: (String) -> Unit) {
+                           drops: HostEntryDrops?, dropModifier: @Composable (String) -> Modifier, go: (String) -> Unit) {
     val tokens = LocalPpmTokens.current
     for (section in sections) {
         BasicText(section.title.uppercase(), Modifier.padding(start = 8.dp, top = 8.dp, bottom = 2.dp),
             style = ppmText(10f, FontWeight.SemiBold).copy(color = tokens.text3.color))
         for (place in section.places) Row(verticalAlignment = Alignment.CenterVertically) {
-            Place(place, current == place.path, Modifier.weight(1f).then(dropModifier(place.path))) { go(place.path) }
+            Place(place, current == place.path, Modifier.weight(1f).then(dropModifier(place.path)), drops) { go(place.path) }
             if (place.icon == HostPlaceIcon.PIN) HostExplorerButton(ProductIcon.Pin, "Unpin ${place.label}") { unpin(place.path) }
         }
     }
 }
 
 @Composable
-private fun Place(place: HostPlaceLink, active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun Place(place: HostPlaceLink, active: Boolean, modifier: Modifier = Modifier, drops: HostEntryDrops? = null, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     Row(modifier.heightIn(min = if (LocalPpmMobile.current) 44.dp else 32.dp).clip(RoundedCornerShape(4.dp))
         .background(if (active) tokens.accent.opacity(.12).color else androidx.compose.ui.graphics.Color.Transparent)
+        .hostPathDrop(drops, place.path)
         .ppmClickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         PpmIcon(place.icon.vector, 16.dp, tokens.text3.color)

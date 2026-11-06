@@ -106,8 +106,8 @@ internal class HostExplorerCommands(private val toast: (ErrorToastMessage) -> Un
             report(core.delete(result.needsPermanent, true), "Deleted")
         }
     }
-    fun transfer(paths: List<String>, directory: String, copy: Boolean) = work {
-        reportTransfer(core.transfer(paths, directory, if (copy) HostTransferOperation.COPY else HostTransferOperation.MOVE, prompts()), announce = true, toast)
+    fun transfer(paths: List<String>, directory: String, copy: Boolean, announce: Boolean = true) = work {
+        reportTransfer(core.transfer(paths, directory, if (copy) HostTransferOperation.COPY else HostTransferOperation.MOVE, prompts()), announce = announce, toast)
     }
     fun prompts(): HostTransferPrompts = promptHost.prompts()
     private suspend fun confirmDelete(paths: List<String>): Boolean = promptHost.confirmDelete(paths)

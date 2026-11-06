@@ -52,13 +52,24 @@ class ExplorerTreeDragTest {
         assertEquals(12, explorerPointerScrollStep(Offset(10f, 476f), area, density = 2f))
     }
 
-    @Test fun `a pointer outside the list, over the header above it, scrolls nothing, as the web's list hears only a drag over itself`() {
+    @Test fun `a pointer outside the list, over the header above it or beside it, scrolls nothing, as the web's list hears only a drag over itself`() {
         val area = Rect(0f, 100f, 300f, 500f)
         assertEquals(0, explorerPointerScrollStep(Offset(10f, 99f), area, density = 1f))
         assertEquals(0, explorerPointerScrollStep(Offset(10f, 20f), area, density = 1f))
         assertEquals(0, explorerPointerScrollStep(Offset(10f, 501f), area, density = 1f))
+        assertEquals(0, explorerPointerScrollStep(Offset(-1f, 490f), area, density = 1f))
+        assertEquals(0, explorerPointerScrollStep(Offset(301f, 490f), area, density = 1f))
         assertEquals("the edge itself is the list's", 16, explorerPointerScrollStep(Offset(10f, 500f), area, density = 1f))
         assertEquals(-16, explorerPointerScrollStep(Offset(10f, 100f), area, density = 1f))
+    }
+
+    @Test fun `horizontally, near the right edge scrolls right and near the left scrolls left, only while inside the box`() {
+        val area = Rect(50f, 100f, 450f, 500f)
+        assertEquals(12, explorerPointerScrollStep(Offset(438f, 300f), area, density = 1f, horizontal = true))
+        assertEquals(-12, explorerPointerScrollStep(Offset(62f, 300f), area, density = 1f, horizontal = true))
+        assertEquals(0, explorerPointerScrollStep(Offset(250f, 300f), area, density = 1f, horizontal = true))
+        assertEquals(0, explorerPointerScrollStep(Offset(438f, 99f), area, density = 1f, horizontal = true))
+        assertEquals(0, explorerPointerScrollStep(Offset(451f, 300f), area, density = 1f, horizontal = true))
     }
 
     @Test fun `no pointer or no list means no scroll`() {

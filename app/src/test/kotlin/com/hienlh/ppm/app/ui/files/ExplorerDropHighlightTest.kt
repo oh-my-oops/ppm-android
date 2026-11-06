@@ -293,12 +293,56 @@ internal class ExplorerDropHighlightTest : ExplorerTreeDragTestBase() {
         assertColor("blank area", Color.Black, blankFill())
     }
 
-    @Test fun `a drag from another project lights nothing`() {
+    @Test fun `a drag from another project whose root is unknown lights nothing`() {
         showOnBlack()
         val other = ExplorerRowDrag("elsewhere", "README.md", false)
         begin(other)
         over(other, center("docs"))
         assertColor("fill", Color.Black, fill("docs"))
         assertColor("ring", Color.Black, ring("docs"))
+    }
+
+    @Test fun `a window's drag, or another project's with a known root, lights a folder row after 120 ms when it would take the drop, and not when it would refuse`() {
+        showOnBlack()
+        compose.mainClock.autoAdvance = false
+        for (drag in listOf(HostEntryDrag(listOf("/elsewhere/x.txt")), ExplorerRowDrag("elsewhere", "src/app.kt", false, listOf("src/app.kt"), "/home/me/p2"))) {
+            begin(drag)
+            hover(drag, center("docs"))
+            advance(64)
+            settle()
+            assertColor("$drag before 120 ms", Color.Black, fill("docs"))
+            advance(40)
+            settle()
+            assertColor("$drag fill after 120 ms", tinted10, fill("docs"))
+            assertColor("$drag ring after 120 ms", accent.compositeOver(Color.Black), ring("docs"))
+            assertColor("$drag blank area stays plain", Color.Black, blankFill())
+            dispatch(DragEvent.ACTION_DRAG_ENDED, drag)
+            settle()
+        }
+
+        val refused = HostEntryDrag(listOf("$ROOT/docs/guide.md"))
+        begin(refused)
+        hover(refused, center("docs"))
+        advance(1000)
+        settle()
+        assertColor("refused folder fill", Color.Black, fill("docs"))
+        assertColor("refused folder ring", Color.Black, ring("docs"))
+    }
+
+    @Test fun `a window's drag over a file's row tints the whole tree after 120 ms, the file's row having no ring of its own`() {
+        showOnBlack()
+        compose.mainClock.autoAdvance = false
+        val drag = HostEntryDrag(listOf("/elsewhere/x.txt"))
+        begin(drag)
+        hover(drag, center("README.md"))
+        advance(64)
+        settle()
+        assertColor("blank area before 120 ms", Color.Black, blankFill())
+        advance(40)
+        settle()
+        assertColor("blank area after 120 ms", tinted5, blankFill())
+        assertColor("header after 120 ms", tinted5, headerFill())
+        assertColor("file row fill is the tree's tint", tinted5, fill("README.md"))
+        assertColor("file row has no ring of its own", tinted5, ring("README.md"))
     }
 }

@@ -112,11 +112,11 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
             if (mobile) {
                 HostPhoneTopBar(hostFolderName(state.path, state.directory?.breadcrumbs.orEmpty()), model::closeExplorerSheet)
                 HostPhonePlaces(session, host.host, windows, dropModifier)
-            } else HostExplorerToolbar(session, state, preferences, canUpload = uploadQueue != null) { folder ->
+            } else HostExplorerToolbar(session, state, preferences, canUpload = uploadQueue != null, commands = commands) { folder ->
                 menuActions.run(if (folder) HostMenuCommand.UPLOAD_FOLDER else HostMenuCommand.UPLOAD_FILES, emptyList(), state.currentDirectory)
             }
             Row(Modifier.weight(1f)) {
-                if (showPlaces) HostExplorerPlaces(session, host.host, windows, dropModifier)
+                if (showPlaces) HostExplorerPlaces(session, host.host, windows, dropModifier, commands = commands)
                 Column(Modifier.weight(1f).fillMaxHeight()) {
                     state.error?.let { failure ->
                         Column(Modifier.fillMaxWidth().padding(12.dp)) {

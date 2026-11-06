@@ -63,8 +63,9 @@ private fun BarButton(icon: ProductIcon, label: String, enabled: Boolean = true,
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun HostExplorerToolbar(session: ExplorerSession, state: ExplorerSessionState, preferences: ExplorerViewPreferences,
-                                 canUpload: Boolean, onUpload: (folder: Boolean) -> Unit) {
+                                 canUpload: Boolean, commands: HostExplorerCommands? = null, onUpload: (folder: Boolean) -> Unit) {
     val tokens = LocalPpmTokens.current
+    val drops = rememberHostEntryDrops(commands, LocalPpmMobile.current, announce = false)
     var editing by remember { mutableStateOf(false) }
     val path = rememberTextFieldState(state.path)
     val filter = rememberTextFieldState(state.filter)
@@ -99,7 +100,7 @@ internal fun HostExplorerToolbar(session: ExplorerSession, state: ExplorerSessio
                 if (crumbs.isEmpty()) BasicText(state.path, style = ppmText(12f).copy(color = tokens.text2.color), maxLines = 1)
                 crumbs.forEachIndexed { index, crumb ->
                     if (index > 0) PpmIcon(ProductIcon.ChevronRight, 12.dp, tokens.text3.color)
-                    BasicText(crumb.name, Modifier.ppmClickable { session.go(crumb.path) }.padding(4.dp),
+                    BasicText(crumb.name, Modifier.hostPathDrop(drops, crumb.path).ppmClickable { session.go(crumb.path) }.padding(4.dp),
                         style = ppmText(12f).copy(color = tokens.text2.color), maxLines = 1)
                 }
             }

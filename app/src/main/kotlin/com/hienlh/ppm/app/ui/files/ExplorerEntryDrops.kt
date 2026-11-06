@@ -19,6 +19,7 @@ import com.hienlh.ppm.state.files.FileMutations
 import com.hienlh.ppm.state.osexplorer.HostFileActions
 import com.hienlh.ppm.state.osexplorer.HostTransferOperation
 import com.hienlh.ppm.state.osexplorer.HostTransferPrompts
+import com.hienlh.ppm.state.workspace.absoluteProjectPath
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -51,20 +52,25 @@ class ExplorerEntryDrops internal constructor(
     @Composable
     fun Dialogs() = prompts.Dialogs()
 
-    /** Whether [drag] let go on the blank area or the header now would be taken, with the modifier keys as they are. */
-    internal fun takes(drag: ExplorerRowDrag): Boolean = !running && explorerRootDropTaken(drag, copyHeld(), root)
+    /** Whether [drag] let go on [directory] ("" for the blank area or the header) now would be taken, with the modifier keys as they are. */
+    internal fun takes(drag: EntryDrag, directory: String = ""): Boolean =
+        !running && explorerRootDropTaken(drag, copyHeld(), absoluteProjectPath(root, directory))
 
-    /** The drop, with the modifier keys as they are at the moment it is let go. False when it is refused, which hands the rows back. */
-    internal fun dropOnRoot(drag: ExplorerRowDrag): Boolean {
+    /** The drop on [directory] ("" for the blank area or the header), with the modifier keys as they are at the moment it is let go. */
+    internal fun drop(drag: EntryDrag, directory: String = ""): Boolean {
         val copy = copyHeld()
-        if (running || !explorerRootDropTaken(drag, copy, root)) return false
+        val target = absoluteProjectPath(root, directory)
+        if (running || !explorerRootDropTaken(drag, copy, target)) return false
         running = true
         scope.launch {
-            try { run(drag.absolutePaths, root, copy, prompts.prompts()) }
+            try { run(drag.payload.paths, target, copy, prompts.prompts()) }
             finally { running = false }
         }
         return true
     }
+
+    /** The drop on the project folder itself, with the modifier keys as they are at the moment it is let go. */
+    internal fun dropOnRoot(drag: EntryDrag): Boolean = drop(drag, "")
 }
 
 /**
