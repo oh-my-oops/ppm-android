@@ -114,12 +114,14 @@ class TerminalFirstSizeTest {
             )
             assertEquals(3, f.replays.size)
             assertTrue(f.output.isEmpty())
-            assertEquals("nothing is kept once it is written", 0, f.controller.heldBytes)
+            val beforeLive = "the buffer the shell made for 105 columns".length + "live one".length + "live two".length
+            assertEquals("the ring keeps what was written so a later park can replay it", beforeLive, f.controller.heldBytes)
             // The shell hears the size at once, with no debounce to wait out, and from then on output is written as it comes.
             assertEquals(listOf("\u0001RESIZE:105,30"), f.socket.sent)
             f.text("live three")
             assertEquals("live three", f.delivery.last())
             assertEquals(1, f.output.size)
+            assertEquals(beforeLive + "live three".length, f.controller.heldBytes)
             // Said once: the view reporting the same size again, or a heartbeat, adds nothing.
             f.controller.resize(105, 30)
             advanceTimeBy(500)
@@ -426,6 +428,63 @@ class TerminalFirstSizeTest {
             f.text("three")
             f.controller.resize(105, 30)
             assertEquals(1, f.output.size)
+        }
+    }
+
+    @Test
+    fun `park drops the size, holds output while hidden, and replays the newest 1 MB when shown and laid out again`() = runTest {
+        TerminalFixture(this, disk(), measured = false, separateReplay = true).use { f ->
+            f.controller.setVisible(true)
+            f.controller.start()
+            f.open()
+            f.text(session)
+            f.text("initial\n")
+            f.controller.resize(105, 30)
+            f.text("live while shown\n")
+            assertEquals(listOf("REPLAY:initial\n", "live while shown\n"), f.delivery)
+
+            // Hidden and parked: no output reaches the torn-down emulator, even if a flood arrives.
+            f.controller.setVisible(false)
+            f.controller.park()
+            f.delivery.clear()
+            f.replays.clear()
+            f.output.clear()
+
+            for (i in 1..300_000) {
+                f.text("$i\n")
+            }
+            assertTrue("nothing is written while parked", f.delivery.isEmpty())
+            assertEquals("capped at 1 MB through a 300,000-line flood", MAX_HELD_BYTES, f.controller.heldBytes)
+
+            // Shown again: the new emulator lays out and reports its size; the newest 1 MB is replayed at once.
+            f.controller.setVisible(true)
+            f.controller.resize(105, 30)
+            assertTrue(f.output.isEmpty())
+            assertEquals(MAX_HELD_BYTES, f.replays.sumOf { it.size })
+            assertTrue(delivered(f).endsWith("299999\n300000\n"))
+            assertEquals(listOf("\u0001RESIZE:105,30", "\u0001RESIZE:105,30"), f.socket.sent)
+        }
+    }
+
+    @Test
+    fun `parking and showing again with no new output in between replays the screen that was there`() = runTest {
+        TerminalFixture(this, disk(), measured = false, separateReplay = true).use { f ->
+            f.controller.setVisible(true)
+            f.controller.start()
+            f.open()
+            f.text(session)
+            f.text("prompt$ ls\n")
+            f.controller.resize(105, 30)
+            f.text("file-a  file-b\nprompt$ ")
+            assertEquals(listOf("REPLAY:prompt$ ls\n", "file-a  file-b\nprompt$ "), f.delivery)
+
+            f.controller.setVisible(false)
+            f.controller.park()
+            f.delivery.clear()
+
+            f.controller.setVisible(true)
+            f.controller.resize(105, 30)
+            assertEquals(listOf("REPLAY:prompt$ ls\n", "REPLAY:file-a  file-b\nprompt$ "), f.delivery)
         }
     }
 }

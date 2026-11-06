@@ -95,9 +95,9 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     val caret = remember(session) { TerminalCaret() }
     SideEffect { session.theme(theme) }
     DisposableEffect(session, visible) {
-        session.controller.setVisible(visible)
+        session.setShown(visible)
         session.controller.start()
-        onDispose { session.controller.setVisible(false); TextInputFocus.releaseNative(session) }
+        onDispose { session.setShown(false); TextInputFocus.releaseNative(session) }
     }
     LaunchedEffect(tab.metaString("pendingCommand")) {
         tab.metaString("pendingCommand")?.takeIf { it.isNotEmpty() }?.let {
@@ -146,9 +146,10 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     }
     // As handlePaste: an empty clipboard does nothing at all, and what was pasted leaves the terminal focused.
     fun paste() {
+        val current = emulator ?: return
         if (inputReady) clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()?.takeIf { it.isNotEmpty() }?.let {
             imeController?.finishBeforeExternalInput()
-            emulator.pasteText(it)
+            current.pasteText(it)
             focusTerminal()
         }
     }
@@ -175,63 +176,67 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
                 BasicText(it, Modifier.weight(1f, fill = false), style = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text3.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        key(emulator) {
-            Terminal(
-                terminalEmulator = emulator,
-                modifier = Modifier.weight(1f).fillMaxWidth().padding(4.dp)
-                    .onGloballyPositioned(caret::terminalPlaced)
-                    .onFocusChanged { focusState ->
-                        // A tap on nothing blurs the terminal as it does xterm's textarea: the keyboard goes with the
-                        // focus, and the next tap on the terminal asks for it again like the first one did.
-                        if (focusState.hasFocus) TextInputFocus.takeNative(session, focusManager, onBlur = {
-                            keyboardRequested = false
-                            imeController?.hideKeyboard()
-                        }, keep = caret::keysIn, bounds = caret::cursorIn) else TextInputFocus.releaseNative(session)
-                    },
-                typeface = face, initialFontSize = 13.sp,
-                backgroundColor = tokens.bgSolid.color, foregroundColor = tokens.text.color,
-                selectionBackgroundColor = tokens.accentWash.color, selectionForegroundColor = tokens.text.color,
-                cursorColor = tokens.accent.color, cursorAccent = tokens.bgSolid.color, minimumContrastRatio = 4.5,
-                keyboardEnabled = inputReady && !selecting, showSoftKeyboard = keyboardRequested && !selecting, focusRequester = focus,
-                imeMode = TerminalImeMode.CommittedText,
-                onComposeControllerAvailable = { inputControl = it },
-                onImeControllerAvailable = { imeController = it },
-                // Every tap asks, as the web's touchend does, except in select mode, which raises nothing (it has no touchend).
-                onTerminalTap = { if (!selecting) { TextInputFocus.asked(); keyboardRequested = true } },
-                onCursorBoundsChanged = caret::cursorMoved,
-                modifierManager = modifiers,
-                onSelectionControllerAvailable = { selection = it },
-                // Select mode: a one-finger drag selects from where it came down (useTerminalTouchSelection) and does not scroll.
-                touchSelect = selecting,
-                selectionActions = { selected ->
-                    TerminalText.selectionContext(selected.getSelectionText())?.let { context ->
-                        FlowRow(
-                            Modifier.shadow(4.dp, RoundedCornerShape(6.dp)).clip(RoundedCornerShape(6.dp))
-                                .background(tokens.panel.color).cssBorder(tokens.border.color, RoundedCornerShape(6.dp)).padding(2.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            for ((label, newTab) in listOf("Add to current chat" to false, "Add to new chat" to true)) {
-                                Row(
-                                    Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(4.dp)).background(tokens.panel2.color)
-                                        .ppmClickable(onClickLabel = label, pressedColor = tokens.accent.color) {
-                                            model.terminalToChat(context.text, context.label, session.project, newTab, asContext = true)
-                                            selected.clearSelection()
-                                        }.padding(horizontal = 12.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    PpmIcon(if (newTab) ProductIcon.MessageSquarePlus else ProductIcon.MessageSquare, 16.dp, tokens.text.color)
-                                    BasicText(label, style = ppmText(14f).copy(color = tokens.text.color))
+        if (emulator == null) {
+            Spacer(Modifier.weight(1f).fillMaxWidth())
+        } else {
+            key(emulator) {
+                Terminal(
+                    terminalEmulator = emulator,
+                    modifier = Modifier.weight(1f).fillMaxWidth().padding(4.dp)
+                        .onGloballyPositioned(caret::terminalPlaced)
+                        .onFocusChanged { focusState ->
+                            // A tap on nothing blurs the terminal as it does xterm's textarea: the keyboard goes with the
+                            // focus, and the next tap on the terminal asks for it again like the first one did.
+                            if (focusState.hasFocus) TextInputFocus.takeNative(session, focusManager, onBlur = {
+                                keyboardRequested = false
+                                imeController?.hideKeyboard()
+                            }, keep = caret::keysIn, bounds = caret::cursorIn) else TextInputFocus.releaseNative(session)
+                        },
+                    typeface = face, initialFontSize = 13.sp,
+                    backgroundColor = tokens.bgSolid.color, foregroundColor = tokens.text.color,
+                    selectionBackgroundColor = tokens.accentWash.color, selectionForegroundColor = tokens.text.color,
+                    cursorColor = tokens.accent.color, cursorAccent = tokens.bgSolid.color, minimumContrastRatio = 4.5,
+                    keyboardEnabled = inputReady && !selecting, showSoftKeyboard = keyboardRequested && !selecting, focusRequester = focus,
+                    imeMode = TerminalImeMode.CommittedText,
+                    onComposeControllerAvailable = { inputControl = it },
+                    onImeControllerAvailable = { imeController = it },
+                    // Every tap asks, as the web's touchend does, except in select mode, which raises nothing (it has no touchend).
+                    onTerminalTap = { if (!selecting) { TextInputFocus.asked(); keyboardRequested = true } },
+                    onCursorBoundsChanged = caret::cursorMoved,
+                    modifierManager = modifiers,
+                    onSelectionControllerAvailable = { selection = it },
+                    // Select mode: a one-finger drag selects from where it came down (useTerminalTouchSelection) and does not scroll.
+                    touchSelect = selecting,
+                    selectionActions = { selected ->
+                        TerminalText.selectionContext(selected.getSelectionText())?.let { context ->
+                            FlowRow(
+                                Modifier.shadow(4.dp, RoundedCornerShape(6.dp)).clip(RoundedCornerShape(6.dp))
+                                    .background(tokens.panel.color).cssBorder(tokens.border.color, RoundedCornerShape(6.dp)).padding(2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                for ((label, newTab) in listOf("Add to current chat" to false, "Add to new chat" to true)) {
+                                    Row(
+                                        Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(4.dp)).background(tokens.panel2.color)
+                                            .ppmClickable(onClickLabel = label, pressedColor = tokens.accent.color) {
+                                                model.terminalToChat(context.text, context.label, session.project, newTab, asContext = true)
+                                                selected.clearSelection()
+                                            }.padding(horizontal = 12.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        PpmIcon(if (newTab) ProductIcon.MessageSquarePlus else ProductIcon.MessageSquare, 16.dp, tokens.text.color)
+                                        BasicText(label, style = ppmText(14f).copy(color = tokens.text.color))
+                                    }
                                 }
                             }
                         }
-                    }
-                },
-                onPasteRequest = ::paste,
-                // A plain address opens at once, as the web's `WebLinksAddon` does; an OSC 8 one asks first, as xterm's own handler does.
-                onHyperlinkClick = ::openLink,
-                onOsc8HyperlinkClick = { oscLink = it },
-            )
+                    },
+                    onPasteRequest = ::paste,
+                    // A plain address opens at once, as the web's `WebLinksAddon` does; an OSC 8 one asks first, as xterm's own handler does.
+                    onHyperlinkClick = ::openLink,
+                    onOsc8HyperlinkClick = { oscLink = it },
+                )
+            }
         }
         TerminalMobileToolbar(
             ctrlMode = modifiers.ctrl,

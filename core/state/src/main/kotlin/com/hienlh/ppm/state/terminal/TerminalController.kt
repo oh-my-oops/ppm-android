@@ -171,6 +171,19 @@ class TerminalController internal constructor(
         }
     }
 
+    /**
+     * Drop the known size when the owner's emulator is torn down while hidden. Output keeps accumulating
+     * in [held] (up to [MAX_HELD_BYTES]) without calling [onOutput] or [onReplay]; the next [resize] when
+     * the terminal is shown again sends the size at once and replays [held] into the new emulator.
+     */
+    fun park() {
+        if (closed) return
+        resizeJob?.cancel()
+        resizeJob = null
+        size = null
+        sentSize = null
+    }
+
     /** Raw keystrokes. Returns false when unavailable; input is never queued for another shell. */
     fun send(text: String): Boolean {
         val source = socket ?: return false
@@ -203,6 +216,7 @@ class TerminalController internal constructor(
         if (closed) return
         closed = true
         disconnectSocket()
+        discardHeld()
         controllerScope.cancel()
         mutableState.value = state.value.copy(connected = false, reconnecting = false, shellReady = false)
     }
@@ -310,9 +324,10 @@ class TerminalController internal constructor(
         deliver(bytes, replay)
     }
 
-    /** To the owner's emulator, or held until the owner has a size to lay it out at. */
+    /** Kept in the 1 MB ring so a parked terminal can rebuild its screen when shown again, and written to the emulator while it has a size. */
     private fun deliver(bytes: ByteArray, replay: Boolean) {
-        if (size != null) write(bytes, replay) else hold(bytes)
+        hold(bytes)
+        if (size != null) write(bytes, replay)
     }
 
     private fun write(bytes: ByteArray, replay: Boolean) {
@@ -339,15 +354,20 @@ class TerminalController internal constructor(
     }
 
     /**
-     * The first size is known: what was held goes to the emulator it was waiting for, in the order it arrived, all of it as a
-     * replay: a live piece that was held is no longer live, and nobody was there to answer what it asked.
+     * The first size is known (or a parked terminal is shown again): what was held in the ring goes to the emulator it was
+     * waiting for, in the order it arrived, all of it as a replay: a live piece that was held is no longer live, and nobody
+     * was there to answer what it asked. The ring stays in [held] so a terminal hidden and shown again without new output
+     * still has its screen.
      */
     private fun release() {
-        val pieces = held.toList()
-        discardHeld()
+        val pieces = held.mapNotNull { piece ->
+            if (piece.size <= 0) null
+            else if (piece.from == 0) piece.bytes
+            else piece.bytes.copyOfRange(piece.from, piece.bytes.size)
+        }
         for (piece in pieces) {
-            if (closed) return
-            if (piece.size > 0) write(if (piece.from == 0) piece.bytes else piece.bytes.copyOfRange(piece.from, piece.bytes.size), replay = true)
+            if (closed || size == null) return
+            write(piece, replay = true)
         }
     }
 

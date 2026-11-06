@@ -1,6 +1,7 @@
 package org.connectbot.terminal
 
 import androidx.compose.ui.graphics.Color
+import java.lang.reflect.Modifier
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
@@ -27,6 +28,13 @@ class TerminalLineCacheTest {
     @Test fun `a row holds no lazy objects`() {
         val lazies = TerminalLine::class.java.declaredFields.filter { Lazy::class.java.isAssignableFrom(it.type) }.map { it.name }
         assertTrue("a lazy costs a row 40 B, and the history holds 50,000 rows: $lazies", lazies.isEmpty())
+    }
+
+    @Test fun `cache fields are volatile so another thread never sees a half-published list`() {
+        for (name in listOf("textCache", "columnTextCache", "urlsCache")) {
+            val field = TerminalLine::class.java.getDeclaredField(name)
+            assertTrue("$name must be @Volatile", Modifier.isVolatile(field.modifiers))
+        }
     }
 
     @Test fun `a read of a row is made once`() {

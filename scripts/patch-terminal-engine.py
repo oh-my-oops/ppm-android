@@ -94,14 +94,14 @@ def emulator(text):
     text = replace(text,
                    "    private var currentDefaultForeground: Color = defaultForeground\n    private var currentDefaultBackground: Color = defaultBackground\n",
                    "    private var currentDefaultForeground: Color = defaultForeground\n    private var currentDefaultBackground: Color = defaultBackground\n    internal var currentCursorColor: Color = defaultCursorColor\n")
-    text = replace(text, "            inlineImages: InlineImages = InlineImages.Off,", "            inlineImages: InlineImages = InlineImages.Off,\n            maxScrollbackLines: Int = 50_000,")
-    text = replace(text, "            inlineImages = inlineImages,", "            inlineImages = inlineImages,\n            maxScrollbackLines = maxScrollbackLines,")
-    text = replace(text, "\n    inlineImages: InlineImages = InlineImages.Off,", "\n    inlineImages: InlineImages = InlineImages.Off,\n    private val maxScrollbackLines: Int = 50_000,")
-    text = replace(text, "    // Handler for escaping native mutex", "    init { require(maxScrollbackLines >= 0) { \"maxScrollbackLines must be non-negative\" } }\n\n    // Handler for escaping native mutex")
+    text = replace(text, "            inlineImages: InlineImages = InlineImages.Off,", "            inlineImages: InlineImages = InlineImages.Off,\n            maxScrollbackLines: Int = 50_000,\n            maxScrollbackBytes: Long = Runtime.getRuntime().maxMemory() / 6,")
+    text = replace(text, "            inlineImages = inlineImages,", "            inlineImages = inlineImages,\n            maxScrollbackLines = maxScrollbackLines,\n            maxScrollbackBytes = maxScrollbackBytes,")
+    text = replace(text, "\n    inlineImages: InlineImages = InlineImages.Off,", "\n    inlineImages: InlineImages = InlineImages.Off,\n    private val maxScrollbackLines: Int = 50_000,\n    private val maxScrollbackBytes: Long = Runtime.getRuntime().maxMemory() / 6,")
+    text = replace(text, "    // Handler for escaping native mutex", "    init {\n        require(maxScrollbackLines >= 0) { \"maxScrollbackLines must be non-negative\" }\n        require(maxScrollbackBytes >= 0) { \"maxScrollbackBytes must be non-negative\" }\n    }\n\n    // Handler for escaping native mutex")
     text = replace(text, "    private val maxScrollbackLines = 1000\n", "")
     # The JNI is reached through ScreenNative, so the unit tests can stand a model of libvterm in for it (the library cannot load on the JVM).
-    text = replace(text, "    private val maxScrollbackLines: Int = 50_000,\n) : TerminalEmulator,",
-                   "    private val maxScrollbackLines: Int = 50_000,\n    private val nativeFactory: (TerminalCallbacks) -> ScreenNative = { TerminalNativeAdapter(TerminalNative(it)) },\n) : TerminalEmulator,")
+    text = replace(text, "    private val maxScrollbackBytes: Long = Runtime.getRuntime().maxMemory() / 6,\n) : TerminalEmulator,",
+                   "    private val maxScrollbackBytes: Long = Runtime.getRuntime().maxMemory() / 6,\n    private val nativeFactory: (TerminalCallbacks) -> ScreenNative = { TerminalNativeAdapter(TerminalNative(it)) },\n) : TerminalEmulator,")
     text = replace(text, "    private val damageLock = Any()", "    private val damageLock = Any()\n    @Volatile override var isClosed = false\n        private set\n    private var currentAnsiPalette: IntArray? = null\n    /** True only while [writeReplay] parses. Set and read under [damageLock]: libvterm calls back from inside the parse, on its thread. */\n    private var replaying = false")
     start = text.index("    private val terminalNative by lazy {")
     end = text.index("    // Parser for OSC sequences", start)
@@ -189,6 +189,7 @@ def emulator(text):
             imageStore.switchScreen(false)
             oscParser = OscParser()
             scrollback.clear()
+            scrollbackBytes = 0L
             scrollbackWrap.reset()
             scrollbackSnapshot = emptyList()
             scrollbackDirty = false
@@ -271,11 +272,14 @@ def emulator(text):
     # libvterm's scrollback callback sends the soft-wrap flag of the row after the one pushed (see ScrollbackWrap),
     # so the history stored every row with its neighbour's flag: URLs wrapped across rows came out glued or cut.
     text = replace(text, "    private val scrollback = ArrayDeque<TerminalLine>()\n",
-                   "    private val scrollback = ArrayDeque<TerminalLine>()\n    private val scrollbackWrap = ScrollbackWrap()\n")
+                   "    private val scrollback = ArrayDeque<TerminalLine>()\n    private var scrollbackBytes = 0L\n    private val scrollbackWrap = ScrollbackWrap()\n")
     text = replace(text, "softWrapped = softWrapped, semanticSegments = line0Segments)", "softWrapped = wrapped, semanticSegments = line0Segments)")
-    text = replace(text, "            imageStore.trimHistory(0)\n            scrollback.clear()\n", "            imageStore.trimHistory(0)\n            scrollback.clear()\n            scrollbackWrap.reset()\n")
+    text = replace(text,
+                   "            scrollback.add(line)\n            if (scrollback.size > maxScrollbackLines) {\n                scrollback.removeFirst()\n            }\n",
+                   "            scrollback.add(line)\n            scrollbackBytes += line.cells.shapingRetentionBytes\n            while (scrollback.size > maxScrollbackLines || (scrollback.isNotEmpty() && scrollbackBytes > maxScrollbackBytes)) {\n                scrollbackBytes -= scrollback.removeFirst().cells.shapingRetentionBytes\n            }\n")
+    text = replace(text, "            imageStore.trimHistory(0)\n            scrollback.clear()\n", "            imageStore.trimHistory(0)\n            scrollback.clear()\n            scrollbackBytes = 0L\n            scrollbackWrap.reset()\n")
     text = replace(text, "            scrollback.removeLast()\n            scrollbackDirty = true",
-                   "            val restored = scrollback.removeLast()\n            scrollbackWrap.pop(restored.softWrapped)\n            if (resizePushes >= 0) resizeRestored.add(restored)\n            scrollbackDirty = true")
+                   "            val restored = scrollback.removeLast()\n            scrollbackBytes -= restored.cells.shapingRetentionBytes\n            scrollbackWrap.pop(restored.softWrapped)\n            if (resizePushes >= 0) resizeRestored.add(restored)\n            scrollbackDirty = true")
     # libvterm merges the scrolls of one write (VTERM_DAMAGE_SCROLL): it sends each row it pushes into the history, and every OSC
     # with the cursor's row, as they happen, but the one moverect for all of them only when the write is flushed. Segments stayed
     # on the rows the screen had before the write, so every pushed row got the top row's links and a link written after a scroll
@@ -1037,15 +1041,15 @@ def terminal_line(text):
     # at once both compute the same value, and either's is kept.
     text = replace(text, "    val text: String by lazy {\n        cells.text()\n    }\n",
                    "    val text: String get() = textCache ?: cells.text().also { textCache = it }\n"
-                   "    private var textCache: String? = null\n")
+                   "    @Volatile private var textCache: String? = null\n")
     text = replace(text, "    internal val columnText: String by lazy {\n        cells.columnText()\n    }\n",
                    "    internal val columnText: String get() = columnTextCache ?: cells.columnText().also { columnTextCache = it }\n"
-                   "    private var columnTextCache: String? = null\n")
+                   "    @Volatile private var columnTextCache: String? = null\n")
     return replace(text, "    internal val autoDetectedUrls: List<Triple<Int, Int, String>> by lazy {\n"
                    "        if (cells.isEmpty()) return@lazy emptyList()\n"
                    "        URL_REGEX.findAll(columnText).mapNotNull { match ->\n",
                    "    internal val autoDetectedUrls: List<Triple<Int, Int, String>> get() = urlsCache ?: detectUrls().also { urlsCache = it }\n"
-                   "    private var urlsCache: List<Triple<Int, Int, String>>? = null\n\n"
+                   "    @Volatile private var urlsCache: List<Triple<Int, Int, String>>? = null\n\n"
                    "    private fun detectUrls(): List<Triple<Int, Int, String>> {\n"
                    "        if (cells.isEmpty()) return emptyList()\n"
                    "        return URL_REGEX.findAll(columnText).mapNotNull { match ->\n")

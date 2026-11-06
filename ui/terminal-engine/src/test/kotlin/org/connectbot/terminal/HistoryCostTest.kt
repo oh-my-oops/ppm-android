@@ -17,9 +17,20 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class HistoryCostTest {
-    private class Rig(rows: Int, cols: Int, cap: Int) : AutoCloseable {
+    private class Rig(
+        rows: Int,
+        cols: Int,
+        cap: Int,
+        byteCap: Long = Runtime.getRuntime().maxMemory() / 6,
+    ) : AutoCloseable {
         val vterm = FakeVterm(rows, cols)
-        val emulator = TerminalEmulatorImpl(initialRows = rows, initialCols = cols, maxScrollbackLines = cap, nativeFactory = { callbacks -> vterm.attach(callbacks) })
+        val emulator = TerminalEmulatorImpl(
+            initialRows = rows,
+            initialCols = cols,
+            maxScrollbackLines = cap,
+            maxScrollbackBytes = byteCap,
+            nativeFactory = { callbacks -> vterm.attach(callbacks) },
+        )
 
         /** What libvterm's parse does at its end, which the model leaves to the caller: it reports where the cursor is. */
         fun write(text: String) {
@@ -79,6 +90,49 @@ class HistoryCostTest {
             assertTrue("four terminals of 50,000 rows: ${total / 1_048_576} MB in arrays", total <= 4L * 50_000 * 160)
         } finally {
             rigs.forEach { it.close() }
+        }
+    }
+
+    @Test fun `the byte budget evicts oldest rows when heavy rows blow past it before the 50,000-line cap`() {
+        val budget = 100_000L
+        Rig(24, 105, 50_000, byteCap = budget).use { rig ->
+            val full = "0123456789".repeat(10)
+            rig.flood(2_000) { full + it.toString().padStart(4, '0') }
+            val history = rig.history()
+            val bytes = history.bytes()
+            assertTrue("kept ${history.size} rows (${bytes} B), well below the 50,000-line cap", history.size in 200..400)
+            assertTrue("never exceeds the byte budget ($bytes <= $budget)", bytes <= budget)
+            // One more row would push it over the budget.
+            val oneRowBytes = history.first().cells.shapingRetentionBytes
+            assertTrue("packed right up to the budget", bytes + oneRowBytes > budget)
+            val newest = 2_000 - 23
+            assertTrue(history.last().text.trimEnd().endsWith(newest.toString().padStart(4, '0')))
+            assertTrue(history.first().text.trimEnd().endsWith((newest - history.size + 1).toString().padStart(4, '0')))
+
+            // Growing the screen pops rows back from scrollback; a subsequent flood still fills right up to the byte budget.
+            rig.emulator.resize(40, 105)
+            rig.flood(500) { full + (2_000 + it).toString().padStart(4, '0') }
+            val afterResize = rig.history()
+            assertTrue(afterResize.bytes() in (budget - oneRowBytes + 1)..budget)
+        }
+    }
+
+    @Test fun `replaying the newest 1 MB ring into a fresh emulator yields the same screen and tail rows as the live emulator`() {
+        val stream = (1..200_000).joinToString("") { "$it\r\n" }.toByteArray(Charsets.ISO_8859_1)
+        val tail = stream.copyOfRange(stream.size - 1_048_576, stream.size)
+        Rig(24, 105, 50_000).use { live ->
+            Rig(24, 105, 50_000).use { replayed ->
+                live.emulator.writeInput(stream, 0, stream.size)
+                val (liveRow, liveCol) = live.vterm.cursor
+                live.emulator.moveCursor(liveRow, liveCol, liveRow, liveCol, true)
+
+                replayed.emulator.writeReplay(tail)
+                val (repRow, repCol) = replayed.vterm.cursor
+                replayed.emulator.moveCursor(repRow, repCol, repRow, repCol, true)
+
+                assertEquals(live.emulator.getScreenText(), replayed.emulator.getScreenText())
+                assertEquals(live.history().takeLast(500).map { it.text }, replayed.history().takeLast(500).map { it.text })
+            }
         }
     }
 }

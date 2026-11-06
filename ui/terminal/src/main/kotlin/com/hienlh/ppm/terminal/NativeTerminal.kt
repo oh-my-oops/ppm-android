@@ -14,10 +14,69 @@ import com.hienlh.ppm.state.terminal.NamedKey
 import com.hienlh.ppm.state.terminal.TerminalController
 import com.hienlh.ppm.state.terminal.TerminalText
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.connectbot.terminal.TerminalBufferSnapshot
 import org.connectbot.terminal.TerminalEmulator
 import org.connectbot.terminal.TerminalEmulatorFactory
 import org.connectbot.terminal.VTermKey
+
+internal const val PARK_GRACE_MS = 150L
+
+/**
+ * Schedules tearing down a hidden terminal's emulator after [graceMs], cancelling the teardown if the
+ * terminal is shown again within the grace window (such as a tab move or dock move that disposes and
+ * recomposes in one frame). Kept separate from JNI so show/hide/grace transitions can be tested on the JVM.
+ */
+internal class TerminalParkGate(
+    private val scope: CoroutineScope,
+    private val graceMs: Long = PARK_GRACE_MS,
+    private val onShow: () -> Unit,
+    private val onPark: () -> Unit,
+    private val schedule: (Long, () -> Unit) -> Job = { ms, block ->
+        scope.launch {
+            delay(ms)
+            block()
+        }
+    },
+) {
+    var shown = false
+        private set
+    var parked = true
+        private set
+    private var parkJob: Job? = null
+
+    fun setShown(value: Boolean) {
+        if (value) {
+            shown = true
+            parkJob?.cancel()
+            parkJob = null
+            if (parked) {
+                parked = false
+                onShow()
+            }
+        } else {
+            if (!shown) return
+            shown = false
+            if (parked || parkJob != null) return
+            parkJob = schedule(graceMs) {
+                parkJob = null
+                if (!shown && !parked) {
+                    parked = true
+                    onPark()
+                }
+            }
+        }
+    }
+
+    fun close() {
+        shown = false
+        parkJob?.cancel()
+        parkJob = null
+        parked = true
+    }
+}
 
 /** Kept by the workspace, not by a composable: hiding a tab must not end its shell. */
 class NativeTerminal(
@@ -36,20 +95,51 @@ class NativeTerminal(
     private var closed = false
     internal val history = NativeTerminalHistory()
     var pendingCommand by mutableStateOf<String?>(null)
-    var emulator by mutableStateOf(newEmulator())
+    var emulator by mutableStateOf<TerminalEmulator?>(null)
         private set
+
+    private val parkGate = TerminalParkGate(
+        scope = scope,
+        onShow = ::unparkEmulator,
+        onPark = ::parkEmulator,
+    )
 
     val controller = TerminalController(
         api = api, project = project, tabId = tabId, scope = scope, store = store,
         keyPrefix = keyPrefix, cwd = cwd, initialSessionId = initialSessionId,
-        onOutput = { bytes -> if (!closed) emulator.writeInput(bytes) },
+        onOutput = { bytes -> if (!closed) emulator?.writeInput(bytes) },
         // Clear screen alone leaves scrollback behind. A new parser also resets alternate
         // screen/cursor modes before the server's replay, without creating another PTY.
         onReset = { replaceEmulator() },
         // The replay is shown but never answered: the engine drops what it asks (cursor position, device
         // attributes, window size), which would otherwise be typed at the prompt it comes back to.
-        onReplay = { bytes -> if (!closed) emulator.writeReplay(bytes) },
+        onReplay = { bytes -> if (!closed) emulator?.writeReplay(bytes) },
     )
+
+    /**
+     * Show or hide the terminal view. Showing builds [emulator] if parked (waiting for its first layout to
+     * release the controller's 1 MB ring); hiding parks it after [PARK_GRACE_MS] unless shown again first.
+     */
+    fun setShown(shown: Boolean) {
+        if (closed) return
+        controller.setVisible(shown)
+        parkGate.setShown(shown)
+    }
+
+    private fun unparkEmulator() {
+        if (closed || emulator != null) return
+        emulator = newEmulator().also { applyTheme(it) }
+    }
+
+    private fun parkEmulator() {
+        if (closed) return
+        generation++
+        val previous = emulator
+        emulator = null
+        history.reset()
+        controller.park()
+        previous?.close()
+    }
 
     /**
      * What a reconnect asks for, ahead of the server replaying the shell's buffer into the new emulator. The last
@@ -58,11 +148,16 @@ class NativeTerminal(
      * buffer says nothing about the new one, which has more rows above the command or fewer. With fewer the old number
      * is past the replay's cursor and Send to Chat and Copy answered nothing, as on a themed zsh; with more it points at
      * other rows. Dropped, they had no command to start from and took the screen. [restart] drops it, for a shell that
-     * is another one.
+     * is another one. A parked terminal has no emulator to replace and stays parked until shown.
      */
     internal fun replaceEmulator(bufferOf: (TerminalEmulator) -> TerminalBufferSnapshot = TerminalEmulator::getBufferSnapshot) {
         if (closed) return
         val previous = emulator
+        if (previous == null) {
+            generation++
+            history.reset()
+            return
+        }
         val dimensions = previous.dimensions
         history.replaced(bufferOf(previous))
         // Invalidate posted callbacks before draining/closing the old parser's work queue.
@@ -100,8 +195,13 @@ class NativeTerminal(
     /**
      * Shared by the native keyboard, toolbar and injected commands; never queues rejected input. The rows it reads before a key
      * are the screen's, not the history's: a read of 50,000 lines of history, under the parser's lock, held a first key back.
+     * A parked terminal has no emulator to read a prompt from and sends straight to the controller.
      */
-    fun send(text: String): Boolean = !closed && history.send(text, emulator::getScreenSnapshot, controller::send)
+    fun send(text: String): Boolean {
+        if (closed) return false
+        val current = emulator ?: return controller.send(text)
+        return history.send(text, current::getScreenSnapshot, controller::send)
+    }
 
     /** A complete UTF-8 input chunk, as emitted by the native keyboard callback. */
     fun sendBytes(bytes: ByteArray): Boolean = send(bytes.toString(Charsets.UTF_8))
@@ -113,13 +213,14 @@ class NativeTerminal(
      * (`finishBeforeExternalInput`), which a direct write would overtake. And only libvterm knows
      * whether the program running asked for application cursor keys, so an arrow is `ESC O A` in vim
      * and htop and `ESC [ A` at a prompt, where the web sent `ESC [ A` always. The bytes come back
-     * through `onKeyboardInput` like any typed key's. False when the terminal is closed.
+     * through `onKeyboardInput` like any typed key's. False when the terminal is closed or parked.
      */
     fun sendKey(keystroke: Keystroke): Boolean {
         if (closed) return false
+        val current = emulator ?: return false
         when (val key = engineKey(keystroke)) {
-            is EngineKey.Special -> emulator.dispatchKey(key.modifiers, key.code)
-            is EngineKey.Text -> emulator.dispatchCharacter(key.modifiers, key.codepoint)
+            is EngineKey.Special -> current.dispatchKey(key.modifiers, key.code)
+            is EngineKey.Text -> current.dispatchCharacter(key.modifiers, key.codepoint)
         }
         return true
     }
@@ -128,21 +229,33 @@ class NativeTerminal(
      * The prompt row where Enter was last sent; where the text typed is now, when the shell redrew its prompt after it
      * (a themed zsh collapses it to one row). Works without shell OSC integration.
      */
-    fun lastCommand(): String = if (closed) "" else history.lastCommand(emulator.getBufferSnapshot())
+    fun lastCommand(): String {
+        if (closed) return ""
+        val current = emulator ?: return ""
+        return history.lastCommand(current.getBufferSnapshot())
+    }
 
     /**
      * Rows after that command through the cursor; with no command known (no Enter yet, or one the buffer does not hold any
      * more, as after a reconnect's replay), the screen to the cursor, not the scrollback above it.
      */
-    fun lastOutput(): String = if (closed) "" else history.lastOutput(emulator.getBufferSnapshot())
+    fun lastOutput(): String {
+        if (closed) return ""
+        val current = emulator ?: return ""
+        return history.lastOutput(current.getBufferSnapshot())
+    }
 
     /** The web's physical-row scan, with native soft-wrap flags translated to xterm's direction. */
-    fun bufferUrls(): List<String> = if (closed) emptyList() else history.bufferUrls(emulator.getBufferSnapshot())
+    fun bufferUrls(): List<String> {
+        if (closed) return emptyList()
+        val current = emulator ?: return emptyList()
+        return history.bufferUrls(current.getBufferSnapshot())
+    }
 
     fun theme(value: PpmTheme) {
         if (closed || theme == value) return
         theme = value
-        applyTheme(emulator)
+        emulator?.let(::applyTheme)
     }
 
     private fun applyTheme(target: TerminalEmulator) {
@@ -159,10 +272,12 @@ class NativeTerminal(
         if (closed) return
         closed = true
         generation++
+        parkGate.close()
         controller.close()
         pendingCommand = null
         history.reset()
-        emulator.close()
+        emulator?.close()
+        emulator = null
     }
 }
 

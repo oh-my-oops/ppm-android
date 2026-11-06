@@ -19,9 +19,9 @@ the generated assets additionally carry Apache-2.0 and the MIT notice for the xt
 
 The added APIs are:
 
-- `TerminalEmulatorFactory.create(maxScrollbackLines = 50_000, ...)`: non-negative, zero
+- `TerminalEmulatorFactory.create(maxScrollbackLines = 50_000, maxScrollbackBytes = Runtime.getRuntime().maxMemory() / 6, ...)`: non-negative, zero
   disables retained history. Explicit small values work without changing native code.
-  A row of that history costs what it holds, not what it is wide. Upstream's `PackedCells` kept four arrays as long as the row is
+  A row of that history costs what it holds, not what it is wide, and `maxScrollbackBytes` evicts the oldest rows when per-cell-colour output exceeds a sixth of the heap before reaching 50,000 rows. Upstream's `PackedCells` kept four arrays as long as the row is
   wide: 2,198 B a row at 105 columns whatever the row held, so one terminal's 50,000 rows were 104 MB of the 192 MB an app's heap is
   capped at, and the 1 MB of `seq` output a server replays on a reconnect built 50,000 rows (102 MB, 4.8 s). `src/main/.../PackedCells.kt`
   replaces the generated file (`REPLACED` in `patch-terminal-engine.py`, and `"replaced"` in `PROVENANCE.json`): the text of the cells

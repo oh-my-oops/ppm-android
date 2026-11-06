@@ -11,8 +11,11 @@ import org.connectbot.terminal.TerminalEmulator
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -41,10 +44,13 @@ class NativeTerminalReattachTest {
     @After
     fun close() = terminals.forEach { it.close() }
 
-    private fun terminal() = NativeTerminal(
+    private fun terminal(shown: Boolean = true) = NativeTerminal(
         ApiClient("http://127.0.0.1:9/".toHttpUrl(), "token"), "project", "tab", CoroutineScope(Dispatchers.Unconfined), store, "server:",
         copyToClipboard = {},
-    ).also { terminals += it }
+    ).also {
+        terminals += it
+        if (shown) it.setShown(true)
+    }
 
     private fun snapshot(vararg rows: String, cursor: Int = rows.lastIndex) = TerminalBufferSnapshot(
         rows.map { TerminalBufferLine(it, false) }, cursor, 0, 0, alternateScreen = false,
@@ -107,5 +113,21 @@ class NativeTerminalReattachTest {
         val banner = snapshot("Welcome", "Last login: today", "message of the day", "", "$ ")
 
         assertEquals("", terminal.history.lastCommand(banner))
+    }
+
+    @Test
+    fun `a hidden terminal starts with no emulator, stays parked across a reconnect, and builds one only when shown`() {
+        val terminal = terminal(shown = false)
+        assertNull(terminal.emulator)
+        assertEquals("", terminal.lastCommand())
+        assertEquals("", terminal.lastOutput())
+        assertTrue(terminal.bufferUrls().isEmpty())
+
+        // Reconnect while parked must not allocate an emulator for a hidden tab.
+        terminal.replaceEmulator()
+        assertNull(terminal.emulator)
+
+        terminal.setShown(true)
+        assertNotNull(terminal.emulator)
     }
 }
