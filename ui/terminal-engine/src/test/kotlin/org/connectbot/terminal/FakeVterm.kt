@@ -65,6 +65,20 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
     /** `mode.origin` (DECOM): rows are counted from the top of the scroll region, and the cursor stays inside it. */
     private var origin = false
 
+    // The remaining DEC modes `set_dec_mode` and `request_dec_mode` of state.c keep, with the defaults `vterm_state_reset` gives them.
+    private var cursorKeyMode = false
+    private var reverseScreen = false
+    private var autoWrap = true
+    private var cursorBlink = true
+    private var cursorVisible = true
+    private var leftRightMargin = false
+    private var mouseFlags = 0
+    private var reportFocus = false
+    private var mouseProtocol = 0
+    private var bracketPaste = false
+    private var savedCursorVisible = true
+    private var savedCursorBlink = true
+
     /** `scrollregion_bottom == -1`: the region reaches the last row, whatever the screen's height becomes. */
     private var regionBottomUnset = true
 
@@ -378,9 +392,47 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
         fun count() = maxOf(1, arg(0, 1))
         val old = row to col
         when {
-            // `INTERMED('!', 0x70)`: the soft reset puts the scroll region and the origin mode back and leaves the cursor and the screens alone.
+            // `INTERMED('!', 0x70)`: the soft reset (`vterm_state_reset(state, 0)`) puts the modes, saved cursor and scroll region back and leaves the cursor and the screens alone.
             raw == "!" && final == 'p' -> {
                 regionTop = 0; regionBottom = rows; regionBottomUnset = true; origin = false
+                cursorKeyMode = false; autoWrap = true; cursorBlink = true; cursorVisible = true
+                leftRightMargin = false; mouseFlags = 0; reportFocus = false; bracketPaste = false
+                savedRow = 0; savedCol = 0; savedCursorVisible = true; savedCursorBlink = true
+                return
+            }
+            // `CSI 6 n` (DSR) and `CSI > c` (DA2): `state.c` answers through `vterm_push_output_sprintf_ctrl` as it reads them.
+            raw == "6" && final == 'n' -> {
+                emulator.onKeyboardInput("\u001b[${row - originOffset() + 1};${col + 1}R".toByteArray(Charsets.ISO_8859_1))
+                return
+            }
+            raw == ">" && final == 'c' -> {
+                emulator.onKeyboardInput("\u001b[>0;100;0c".toByteArray(Charsets.ISO_8859_1))
+                return
+            }
+            // `INTERMED('$', 0x70)` with `?`: `request_dec_mode` of `state.c`. It knows the sixteen DEC modes below (including 1047,
+            // `mode.alt_screen`, set by 1047 and 1049 alike) and answers 0 ("not recognised") to every other, 47 and 1049 included.
+            leader == '?' && raw.endsWith("$") && final == 'p' -> {
+                val mode = raw.removePrefix("?").removeSuffix("$").substringBefore(';').substringBefore(':').toIntOrNull() ?: return
+                val status = when (mode) {
+                    1 -> if (cursorKeyMode) 1 else 2
+                    5 -> if (reverseScreen) 1 else 2
+                    6 -> if (origin) 1 else 2
+                    7 -> if (autoWrap) 1 else 2
+                    12 -> if (cursorBlink) 1 else 2
+                    25 -> if (cursorVisible) 1 else 2
+                    69 -> if (leftRightMargin) 1 else 2
+                    1000 -> if (mouseFlags == 1) 1 else 2
+                    1002 -> if (mouseFlags == 3) 1 else 2
+                    1003 -> if (mouseFlags == 5) 1 else 2
+                    1004 -> if (reportFocus) 1 else 2
+                    1005 -> if (mouseProtocol == 1) 1 else 2
+                    1006 -> if (mouseProtocol == 2) 1 else 2
+                    1015 -> if (mouseProtocol == 3) 1 else 2
+                    1047 -> if (onAlternate) 1 else 2
+                    2004 -> if (bracketPaste) 1 else 2
+                    else -> 0
+                }
+                emulator.onKeyboardInput("\u001b[?$mode;$status\$y".toByteArray(Charsets.ISO_8859_1))
                 return
             }
             leader == '?' && (final == 'h' || final == 'l') -> {
@@ -388,10 +440,24 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
                 // 47, the one older programs use, is not a mode of this library, so it changes nothing.
                 val on = final == 'h'
                 for (mode in numbers) when (mode) {
+                    1 -> cursorKeyMode = on
+                    5 -> reverseScreen = on
                     6 -> setOrigin(on)
+                    7 -> autoWrap = on
+                    12 -> cursorBlink = on
+                    25 -> cursorVisible = on
+                    69 -> leftRightMargin = on
+                    1000 -> mouseFlags = if (on) 1 else 0
+                    1002 -> mouseFlags = if (on) 3 else 0
+                    1003 -> mouseFlags = if (on) 5 else 0
+                    1004 -> reportFocus = on
+                    1005 -> mouseProtocol = if (on) 1 else 0
+                    1006 -> mouseProtocol = if (on) 2 else 0
+                    1015 -> mouseProtocol = if (on) 3 else 0
                     1047 -> setAlternate(on)
                     1048 -> saveCursor(on)
                     1049 -> { setAlternate(on); saveCursor(on) }
+                    2004 -> bracketPaste = on
                 }
                 return
             }
@@ -502,6 +568,9 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
         primary = blankScreen(); screen = primary; alternate = null; onAlternate = false
         primaryContinuation = BooleanArray(rows); alternateContinuation = BooleanArray(rows); continuation = primaryContinuation
         row = 0; col = 0; atPhantom = false; regionTop = 0; regionBottom = rows; regionBottomUnset = true; origin = false
+        cursorKeyMode = false; reverseScreen = false; autoWrap = true; cursorBlink = true; cursorVisible = true
+        leftRightMargin = false; mouseFlags = 0; reportFocus = false; mouseProtocol = 0; bracketPaste = false
+        savedRow = 0; savedCol = 0; savedCursorVisible = true; savedCursorBlink = true
         damagerect(Rect(0, rows, 0, cols))
     }
 
@@ -521,13 +590,13 @@ internal class FakeVterm(rows: Int, cols: Int) : ScreenNative {
         }
     }
 
-    /** `savecursor`: the position is saved, or put back as it was saved (home if it never was), unclamped; `updatecursor` leaves a pending wrap alone when the cursor did not move. */
+    /** `savecursor`: the position and cursor modes are saved, or put back as they were saved (home if never saved), unclamped; `updatecursor` leaves a pending wrap alone when the cursor did not move. */
     private fun saveCursor(save: Boolean) {
         if (save) {
-            savedRow = row; savedCol = col
+            savedRow = row; savedCol = col; savedCursorVisible = cursorVisible; savedCursorBlink = cursorBlink
         } else {
             val old = row to col
-            row = savedRow; col = savedCol
+            row = savedRow; col = savedCol; cursorVisible = savedCursorVisible; cursorBlink = savedCursorBlink
             cursorChanged(old)
         }
     }

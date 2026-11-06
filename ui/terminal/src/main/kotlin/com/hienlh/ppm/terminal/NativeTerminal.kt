@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.toArgb
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.KeyValueStore
+import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmTheme
 import com.hienlh.ppm.protocol.isJsSpace
 import com.hienlh.ppm.state.terminal.Keystroke
@@ -78,8 +79,12 @@ class NativeTerminal(
 
     private fun newEmulator(rows: Int = 24, columns: Int = 80): TerminalEmulator {
         val ownGeneration = generation
+        val current = theme ?: BuiltInThemes.auroraDark
         return TerminalEmulatorFactory.create(
             initialRows = rows, initialCols = columns,
+            defaultForeground = current.tokens.text.color,
+            defaultBackground = current.tokens.bgSolid.color,
+            defaultCursorColor = current.tokens.accent.color,
             onKeyboardInput = { if (!closed && ownGeneration == generation) sendBytes(it) },
             // The first report, made when the view is laid out, is what lets the controller write into this emulator: the server
             // replays the shell's buffer at once and an emulator wraps what it is written at the width it has then, so the
@@ -142,7 +147,12 @@ class NativeTerminal(
 
     private fun applyTheme(target: TerminalEmulator) {
         val current = theme ?: return
-        target.applyColorScheme(terminalPalette(current), current.tokens.text.color.toArgb(), current.tokens.bgSolid.color.toArgb())
+        target.applyColorScheme(
+            terminalPalette(current),
+            current.tokens.text.color.toArgb(),
+            current.tokens.bgSolid.color.toArgb(),
+            current.tokens.accent.color.toArgb(),
+        )
     }
 
     fun close() {

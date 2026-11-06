@@ -75,6 +75,25 @@ def emulator(text):
             return buffer.getTextBetweenRows(buffer.screenStartRow, buffer.lines.size)
         }
     '''))
+    text = replace(text, "    fun setDefaultColors(foreground: Int, background: Int): Int\n",
+                   "    fun setDefaultColors(foreground: Int, background: Int): Int\n\n"
+                   "    fun setDefaultColors(foreground: Int, background: Int, cursorColor: Int): Int\n")
+    text = replace(text,
+                   "    fun applyColorScheme(\n        ansiColors: IntArray,\n        defaultForeground: Int,\n        defaultBackground: Int,\n    )\n",
+                   "    fun applyColorScheme(\n        ansiColors: IntArray,\n        defaultForeground: Int,\n        defaultBackground: Int,\n    )\n\n"
+                   "    fun applyColorScheme(\n        ansiColors: IntArray,\n        defaultForeground: Int,\n        defaultBackground: Int,\n        defaultCursorColor: Int,\n    )\n")
+    text = replace(text,
+                   "            defaultForeground: Color = Color.White,\n            defaultBackground: Color = Color.Black,\n",
+                   "            defaultForeground: Color = Color.White,\n            defaultBackground: Color = Color.Black,\n            defaultCursorColor: Color = Color.White,\n")
+    text = replace(text,
+                   "            defaultForeground = defaultForeground,\n            defaultBackground = defaultBackground,\n",
+                   "            defaultForeground = defaultForeground,\n            defaultBackground = defaultBackground,\n            defaultCursorColor = defaultCursorColor,\n")
+    text = replace(text,
+                   "\n    defaultForeground: Color = Color.White,\n    defaultBackground: Color = Color.Black,\n",
+                   "\n    defaultForeground: Color = Color.White,\n    defaultBackground: Color = Color.Black,\n    defaultCursorColor: Color = Color.White,\n")
+    text = replace(text,
+                   "    private var currentDefaultForeground: Color = defaultForeground\n    private var currentDefaultBackground: Color = defaultBackground\n",
+                   "    private var currentDefaultForeground: Color = defaultForeground\n    private var currentDefaultBackground: Color = defaultBackground\n    internal var currentCursorColor: Color = defaultCursorColor\n")
     text = replace(text, "            inlineImages: InlineImages = InlineImages.Off,", "            inlineImages: InlineImages = InlineImages.Off,\n            maxScrollbackLines: Int = 50_000,")
     text = replace(text, "            inlineImages = inlineImages,", "            inlineImages = inlineImages,\n            maxScrollbackLines = maxScrollbackLines,")
     text = replace(text, "\n    inlineImages: InlineImages = InlineImages.Off,", "\n    inlineImages: InlineImages = InlineImages.Off,\n    private val maxScrollbackLines: Int = 50_000,")
@@ -215,13 +234,37 @@ def emulator(text):
     for signature in ("setAnsiPalette(ansiColors: IntArray)", "setDefaultColors(foreground: Int, background: Int)"):
         guard = f"    override fun {signature}: Int = synchronized(damageLock) {{"
         text = replace(text, guard, guard + "\n        if (isClosed) return@synchronized -1")
+    text = replace(text,
+                   "        setAnsiPalette(ansiColors)\n        setDefaultColors(defaultForeground, defaultBackground)\n    }\n",
+                   "        setAnsiPalette(ansiColors)\n        setDefaultColors(defaultForeground, defaultBackground)\n    }\n\n" + indent(dedent('''\
+        override fun setDefaultColors(foreground: Int, background: Int, cursorColor: Int): Int = synchronized(damageLock) {
+            if (isClosed) return@synchronized -1
+            currentCursorColor = Color(cursorColor)
+            setDefaultColors(foreground, background)
+        }
+
+        override fun applyColorScheme(
+            ansiColors: IntArray,
+            defaultForeground: Int,
+            defaultBackground: Int,
+            defaultCursorColor: Int,
+        ) {
+            require(ansiColors.size >= 16) {
+                "Color scheme must provide 16 ANSI colors"
+            }
+
+            setAnsiPalette(ansiColors)
+            setDefaultColors(defaultForeground, defaultBackground, defaultCursorColor)
+        }
+    '''), "    "))
     text = replace(text, "        val result = terminalNative.setPaletteColors(ansiColors, 16)", "        currentAnsiPalette = ansiColors.copyOf(16)\n        val result = terminalNative.setPaletteColors(ansiColors, 16)")
     text = replace(text, "        if (damagePosted) return", "        if (isClosed || damagePosted) return")
     text = replace(text, "                                    synchronized(imageStore) { completion(result.getOrDefault(false)) }", "                                    if (isClosed) return@synchronized\n                                    synchronized(imageStore) { completion(result.getOrDefault(false)) }")
     # libvterm answers a query inside the parse that read it. Every answer (device attributes, cursor position,
-    # window size, the image protocols') reaches Kotlin through this one callback, so a replay's are dropped here.
+    # window size, the image protocols') reaches Kotlin through this one callback, so a replay's are dropped here,
+    # and so is libvterm's own DECRQM reply for 47, 1047 and 1049 while a piece is written (answerQuery sends xterm.js's).
     text = replace(text, "    override fun onKeyboardInput(data: ByteArray): Int {\n        outputBatch?.let { batch ->",
-                   "    override fun onKeyboardInput(data: ByteArray): Int {\n        if (replaying) return 0\n        outputBatch?.let { batch ->")
+                   "    override fun onKeyboardInput(data: ByteArray): Int {\n        if (replaying || (inWrite && isNativeAltScreenModeReport(data))) return 0\n        outputBatch?.let { batch ->")
     # History must not overwrite what the user has copied since: a replayed OSC 52 write is not performed either.
     text = replace(text, "                        handler.post {\n                            onClipboardCopy?.invoke(action.data)\n                        }",
                    "                        if (!replaying) {\n                            handler.post {\n                                onClipboardCopy?.invoke(action.data)\n                            }\n                        }")
@@ -403,6 +446,7 @@ def emulator(text):
                 if (cut >= 0) {
                     recordLinkTexts()
                     writeRegionFix()
+                    answerQuery()
                 }
                 if (to >= end) return
                 from = to
@@ -418,6 +462,37 @@ def emulator(text):
         private fun writeRegionFix() {
             val fix = writeCuts.regionFix(cursorRow, cursorCol) ?: return
             terminalNative.writeInput(fix, 0, fix.size)
+        }
+
+        /**
+         * Sends xterm.js's reply to the colour query (`OSC 10 / 11 / 12 ; ?`) or alternate-screen DECRQM (`CSI ? 47 / 1047 / 1049 $ p`)
+         * that ended the piece just written, right after any reply libvterm itself sent from inside that piece.
+         */
+        private fun answerQuery() {
+            val answer = writeCuts.queryAnswer(
+                currentDefaultForeground.toArgb(),
+                currentDefaultBackground.toArgb(),
+                currentCursorColor.toArgb(),
+            ) ?: return
+            onKeyboardInput(answer)
+        }
+
+        /**
+         * libvterm's `request_dec_mode` in `state.c` answers `0` ("not recognised") for `47` and `1049`, and `1` or `2` for `1047`.
+         * [WriteCuts] cuts at all three and [answerQuery] sends xterm.js's reply after the piece, so the library's own reply during the
+         * piece is dropped here.
+         */
+        private fun isNativeAltScreenModeReport(data: ByteArray): Boolean {
+            val n = data.size
+            if (n != 9 && n != 11) return false
+            if (data[0] != 0x1B.toByte() || data[1] != '['.code.toByte() || data[2] != '?'.code.toByte()) return false
+            if (data[n - 4] != ';'.code.toByte() || data[n - 2] != '$'.code.toByte() || data[n - 1] != 'y'.code.toByte()) return false
+            return if (n == 9) {
+                data[3] == '4'.code.toByte() && data[4] == '7'.code.toByte()
+            } else {
+                data[3] == '1'.code.toByte() && data[4] == '0'.code.toByte() && data[5] == '4'.code.toByte() &&
+                    (data[6] == '7'.code.toByte() || data[6] == '9'.code.toByte())
+            }
         }
 
         /**
@@ -598,6 +673,8 @@ def terminal(text):
     text = replace(text, "        onPageGesture = onPageGesture,", "        onPageGesture = onPageGesture,\n        cursorColor = cursorColor, cursorAccent = cursorAccent, minimumContrastRatio = minimumContrastRatio,\n        onCursorBoundsChanged = onCursorBoundsChanged,\n        selectionActions = selectionActions,\n        touchSelect = touchSelect,")
     text = replace(text, "remember(typeface, calculatedFontSize, density)", "remember(typeface, calculatedFontSize, density, minimumContrastRatio)")
     text = replace(text, "TerminalTextPaint(typeface, with(density) { calculatedFontSize.toPx() })", "TerminalTextPaint(typeface, with(density) { calculatedFontSize.toPx() }, minimumContrastRatio)")
+    text = replace(text, "    SideEffect {\n        keyboardHandler.onInterceptKey = currentOnInterceptKey\n    }\n",
+                   "    SideEffect {\n        keyboardHandler.onInterceptKey = currentOnInterceptKey\n        if (cursorColor != Color.Unspecified) terminalEmulator.currentCursorColor = cursorColor\n    }\n")
     marker = "    LaunchedEffect(terminalEmulator, baseCharWidth, baseCharHeight) {\n        terminalEmulator.commands.execute {"
     bounds = dedent('''
         // Bounds are relative to the outer terminal's content box, in physical pixels.

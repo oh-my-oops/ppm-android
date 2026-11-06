@@ -3,8 +3,9 @@ package org.connectbot.terminal
 import java.nio.ByteBuffer
 
 /**
- * Follows libvterm's parser over everything the emulator writes to it, however the bytes are cut into writes, for two things the library
- * cannot be asked about: where a write has to be cut, and what the scroll region of the screen that is shown has to be.
+ * Follows libvterm's parser over everything the emulator writes to it, however the bytes are cut into writes, for three things the library
+ * cannot be asked about: where a write has to be cut, what the scroll region of the screen that is shown has to be, and what to answer when
+ * a program asks for the terminal's colours or whether the alternate screen is on.
  *
  * **Links.** libvterm says where a link is when the link ends, but what text is there the emulator learns by reading the screen
  * afterwards, and anything written after the link may already have replaced those cells. A link whose cells were erased or overwritten
@@ -26,6 +27,12 @@ import java.nio.ByteBuffer
  * Wherever the two differ it ends a piece at the next place the parser is between sequences and [regionFix] gives the bytes that make the
  * library's region the one the screen shown has, and put the cursor back where it was, which setting a region moves. A plain shell never
  * differs, so it is never written to; neither is a program that leaves its region the way it found it.
+ *
+ * **Colour and alternate-screen queries.** xterm.js answers `OSC 10 / 11 / 12 ; ?` with the theme's foreground, background and cursor
+ * colours (`ESC ] Ps ; rgb:rrrr/gggg/bbbb ESC \`, stepping through slots 10..12 for each `;`-separated parameter as `_setOrReportSpecialColor`
+ * does), and answers `CSI ? 47 / 1047 / 1049 $ p` (DECRQM) from whether the alternate buffer is active (`1` on the alternate screen, `2` on
+ * the main one). libvterm says nothing to the colour queries and answers `0` ("not recognised") to `47` and `1049`. Ending a piece at each
+ * such query lets the emulator send [queryAnswer] right after the piece's own libvterm replies, in the order the queries arrived.
  *
  * Everything follows libvterm's own parser, in UTF-8 mode, which is the one the JNI sets: no 8-bit controls (so a lone 0x9c ends nothing),
  * NUL and DEL ignored wherever they are, CAN and SUB cancel anything open, ESC starts over and stays pending until the byte that completes
@@ -69,6 +76,13 @@ internal class WriteCuts(rows: Int = 24) {
     /** The number of the OSC being read, -1 until its first digit. */
     private var command = -1
 
+    // Special-colour query slots (0 = OSC 10 fg, 1 = OSC 11 bg, 2 = OSC 12 cursor) in the OSC being read, and what the last cut asked for.
+    private var colorSlot = 0
+    private var colorSlotState = SLOT_EMPTY
+    private var pendingColors = 0
+    private var queriedColors = 0
+    private var queriedMode = 0
+
     // The CSI being read, as far as the library's parser keeps it.
     private var leaders = 0
     private var firstLeader = 0
@@ -89,6 +103,11 @@ internal class WriteCuts(rows: Int = 24) {
         state = NORMAL
         inEsc = false
         command = -1
+        colorSlot = 0
+        colorSlotState = SLOT_EMPTY
+        pendingColors = 0
+        queriedColors = 0
+        queriedMode = 0
         held = WHOLE
         shown = WHOLE
         hidden = WHOLE
@@ -130,11 +149,57 @@ internal class WriteCuts(rows: Int = 24) {
     }
 
     /**
-     * The index of the first cut in [from] until [to], or -1 when there is none. A cut stands just past the last byte of an OSC 8, and just past
-     * the byte after which the library's region is not the one the screen shown has and the parser is between sequences (the caller then asks for
-     * [regionFix]). The scan goes on from the state it stopped in, so the next call takes the bytes after the last one given, or from the cut.
+     * What xterm.js answers to the colour query (`OSC 10 / 11 / 12 ; ?`) or alternate-screen DECRQM (`CSI ? 47 / 1047 / 1049 $ p`) that ended
+     * at the last cut, or null when the cut was for a link or a region fix. Each 8-bit channel of [foreground], [background] and [cursor]
+     * (ARGB) is doubled to four lowercase hex digits (`rgb:rrrr/gggg/bbbb`) and ended by `ESC \`, matching xterm.js's `toRgbString` and
+     * `_reportColor`.
+     */
+    fun queryAnswer(foreground: Int, background: Int, cursor: Int): ByteArray? {
+        if (queriedColors != 0) {
+            val colors = queriedColors
+            queriedColors = 0
+            val out = StringBuilder(32)
+            for (slot in 0..2) {
+                if (colors and (1 shl slot) == 0) continue
+                val color = when (slot) {
+                    0 -> foreground
+                    1 -> background
+                    else -> cursor
+                }
+                out.append(OSC).append(10 + slot).append(";rgb:")
+                appendChannel(out, (color ushr 16) and 0xFF)
+                out.append('/')
+                appendChannel(out, (color ushr 8) and 0xFF)
+                out.append('/')
+                appendChannel(out, color and 0xFF)
+                out.append(ST_ESCAPED)
+            }
+            return out.toString().toByteArray(Charsets.US_ASCII)
+        }
+        if (queriedMode != 0) {
+            val mode = queriedMode
+            queriedMode = 0
+            val status = if (onAlternate) 1 else 2
+            return "$CSI?$mode;$status\$y".toByteArray(Charsets.US_ASCII)
+        }
+        return null
+    }
+
+    private fun appendChannel(out: StringBuilder, byte: Int) {
+        val hi = HEX[(byte ushr 4) and 0x0F]
+        val lo = HEX[byte and 0x0F]
+        out.append(hi).append(lo).append(hi).append(lo)
+    }
+
+    /**
+     * The index of the first cut in [from] until [to], or -1 when there is none. A cut stands just past the last byte of an OSC 8, just past
+     * a colour or alternate-screen query (`OSC 10 / 11 / 12 ; ?`, `CSI ? 47 / 1047 / 1049 $ p`), and just past the byte after which the
+     * library's region is not the one the screen shown has and the parser is between sequences (the caller then asks for [regionFix] and
+     * [queryAnswer]). The scan goes on from the state it stopped in, so the next call takes the bytes after the last one given, or from the cut.
      */
     fun next(bytes: ByteArray, from: Int, to: Int): Int {
+        queriedColors = 0
+        queriedMode = 0
         var i = from
         while (i < to) {
             if (state == NORMAL && !inEsc) {
@@ -177,6 +242,8 @@ internal class WriteCuts(rows: Int = 24) {
 
     /** [next] over the first [to] bytes of a direct buffer, by absolute index: the buffer's position and limit are not read or moved. */
     fun next(buffer: ByteBuffer, from: Int, to: Int): Int {
+        queriedColors = 0
+        queriedMode = 0
         var i = from
         while (i < to) {
             if (state == NORMAL && !inEsc) {
@@ -211,7 +278,7 @@ internal class WriteCuts(rows: Int = 24) {
         return at
     }
 
-    /** One byte of the stream, in the order `vterm_input_write` takes it: true when it is the last of an OSC 8. */
+    /** One byte of the stream, in the order `vterm_input_write` takes it: true when it is the last of an OSC 8 or a query this answers. */
     private fun step(b: Int): Boolean {
         if (b == NUL || b == DEL) return false
         if (b == CAN || b == SUB) {
@@ -247,7 +314,10 @@ internal class WriteCuts(rows: Int = 24) {
 
             CSI_LEADER -> csiLeader(c)
             CSI_ARGUMENTS -> csiArguments(c)
-            CSI_INTERMEDIATE -> csiIntermediate(c)
+            CSI_INTERMEDIATE -> {
+                csiIntermediate(c)
+                return queriedMode != 0
+            }
 
             // `ESC P`, then bytes up to the first one that can end a command (0x40 to 0x7e); BEL and ESC end nothing here.
             DCS_COMMAND -> if (c in FINAL_FIRST..FINAL_LAST) state = STRING
@@ -256,14 +326,50 @@ internal class WriteCuts(rows: Int = 24) {
             OSC_COMMAND -> when {
                 // Int arithmetic that wraps, as libvterm's `int command` does: a number that wraps to 8 is an OSC 8 to the library too.
                 c in '0'.code..'9'.code -> command = (if (command == -1) 0 else command * 10) + (c - '0'.code)
-                c == ';'.code -> state = if (command == 8) OSC_8 else OSC_OTHER
+                c == ';'.code -> when (command) {
+                    8 -> state = OSC_8
+                    in 10..12 -> {
+                        colorSlot = command - 10
+                        colorSlotState = SLOT_EMPTY
+                        pendingColors = 0
+                        state = OSC_COLOR
+                    }
+                    else -> state = OSC_OTHER
+                }
                 else -> {
                     state = if (command == 8) OSC_8 else OSC_OTHER
                     return endOfString(c, hoisted)
                 }
             }
 
+            OSC_COLOR -> return stepOscColor(c, hoisted)
+
             OSC_8, OSC_OTHER, STRING -> return endOfString(c, hoisted)
+        }
+        return false
+    }
+
+    /**
+     * One byte of an `OSC 10 / 11 / 12 ; ...` payload. xterm.js splits the payload on `;` and walks `slot` from `command - 10` up to 2,
+     * reporting each slot whose parameter is `?`.
+     */
+    private fun stepOscColor(c: Int, hoisted: Boolean): Boolean {
+        if (c == BEL || (hoisted && c == ST)) {
+            if (colorSlotState == SLOT_QUESTION && colorSlot in 0..2) {
+                pendingColors = pendingColors or (1 shl colorSlot)
+            }
+            queriedColors = pendingColors
+            state = NORMAL
+            return queriedColors != 0
+        }
+        if (!hoisted && c == ';'.code) {
+            if (colorSlotState == SLOT_QUESTION && colorSlot in 0..2) {
+                pendingColors = pendingColors or (1 shl colorSlot)
+            }
+            colorSlot++
+            colorSlotState = SLOT_EMPTY
+        } else {
+            colorSlotState = if (!hoisted && colorSlotState == SLOT_EMPTY && c == '?'.code) SLOT_QUESTION else SLOT_OTHER
         }
         return false
     }
@@ -353,13 +459,21 @@ internal class WriteCuts(rows: Int = 24) {
         }
     }
 
-    /** `on_csi`: what a finished CSI means to the region. Only a leader `?` alone, or an intermediate `!` alone, or none of either, makes a command of these. */
+    /** `on_csi`: what a finished CSI means to the region or a mode query. Only a leader `?` alone, or an intermediate `!` or `$` alone, or none of either, makes a command of these. */
     private fun finishCsi(final: Int) {
         when {
             leaders == 0 && intermediates == 0 && final == 'r'.code -> setRegion()
             leaders == 0 && intermediates == 1 && firstIntermediate == '!'.code && final == 'p'.code -> softReset()
             leaders == 1 && firstLeader == '?'.code && intermediates == 0 && (final == 'h'.code || final == 'l'.code) -> setModes(final == 'h'.code)
+            leaders == 1 && firstLeader == '?'.code && intermediates == 1 && firstIntermediate == '$'.code && final == 'p'.code -> requestMode()
         }
+    }
+
+    /** `CSI ? Pm $ p` (DECRQM): xterm.js answers `1` (set) or `2` (reset) for 47, 1047 and 1049 from whether the alternate buffer is active. */
+    private fun requestMode() {
+        if (args[0] == MISSING) return
+        val mode = (args[0] and MASK).toInt()
+        if (mode == 47 || mode == 1047 || mode == 1049) queriedMode = mode
     }
 
     /** DECSTBM exactly as `state.c` takes it, and the screen shown has that region as the library does (it is the same sequence). */
@@ -430,8 +544,13 @@ internal class WriteCuts(rows: Int = 24) {
         const val DCS_COMMAND = 4
         const val OSC_COMMAND = 5
         const val OSC_8 = 6
-        const val OSC_OTHER = 7
-        const val STRING = 8
+        const val OSC_COLOR = 7
+        const val OSC_OTHER = 8
+        const val STRING = 9
+
+        const val SLOT_EMPTY = 0
+        const val SLOT_QUESTION = 1
+        const val SLOT_OTHER = 2
 
         const val NUL = 0x00
         const val ESC = 0x1B
@@ -463,5 +582,8 @@ internal class WriteCuts(rows: Int = 24) {
         const val MORE = 0x80000000L
 
         const val CSI = "\u001b["
+        const val OSC = "\u001b]"
+        const val ST_ESCAPED = "\u001b\\"
+        const val HEX = "0123456789abcdef"
     }
 }
