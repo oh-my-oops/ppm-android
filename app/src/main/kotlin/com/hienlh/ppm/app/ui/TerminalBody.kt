@@ -35,9 +35,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -82,12 +86,15 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     var inputControl by remember(emulator) { mutableStateOf<ComposeController?>(null) }
     var imeController by remember(emulator) { mutableStateOf<TerminalImeController?>(null) }
     var selecting by remember(emulator) { mutableStateOf(false) }
+    var terminalFocused by remember { mutableStateOf(false) }
     var keyboardRequested by remember { mutableStateOf(false) }
+    var imeWasVisible by remember { mutableStateOf(false) }
     var links by remember { mutableStateOf<List<String>?>(null) }
     var oscLink by remember { mutableStateOf<String?>(null) }
     val modifiers = remember(emulator) { TerminalModifiers() }
     val focus = remember { FocusRequester() }
     val visible = LocalWindowContentVisible.current
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
     val inputReady = visible && state.connected && state.shellReady && !state.exited && state.error == null
     val focusManager = LocalFocusManager.current
     // One for the session's life, not the engine's: the keyboard's pan is given its lambdas when the terminal takes the focus, which an
@@ -98,6 +105,19 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
         session.setShown(visible)
         session.controller.start()
         onDispose { session.setShown(false); TextInputFocus.releaseNative(session) }
+    }
+    LaunchedEffect(windowFocused) {
+        if (!windowFocused) keyboardRequested = false
+    }
+    LaunchedEffect(inputReady, state.exited) {
+        if (!inputReady) {
+            keyboardRequested = false
+            imeController?.hideKeyboard()
+        }
+        if (state.exited) {
+            terminalFocused = false
+            TextInputFocus.releaseNative(session)
+        }
     }
     LaunchedEffect(tab.metaString("pendingCommand")) {
         tab.metaString("pendingCommand")?.takeIf { it.isNotEmpty() }?.let {
@@ -113,12 +133,13 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
             if (session.send(command)) {
                 session.pendingCommand = null
                 // Like the web, type it without Enter; the user decides when to execute it.
+                terminalFocused = true
                 runCatching { focus.requestFocus() }
             }
         }
     }
-    LaunchedEffect(inputReady, keyboardRequested, emulator) {
-        if (inputReady && keyboardRequested && !selecting) runCatching { focus.requestFocus() }
+    LaunchedEffect(inputReady, terminalFocused, emulator) {
+        if (inputReady && terminalFocused) runCatching { focus.requestFocus() }
     }
     // Rich IME composition stays independent of hardware typing. Sticky Ctrl asks the IME
     // for raw key events for the next key, then restores Unicode composition immediately.
@@ -141,7 +162,11 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     // (and comes up when the terminal had lost the focus), rather than taking it as a tap elsewhere does.
     fun focusTerminal() {
         TextInputFocus.asked()
-        keyboardRequested = true
+        terminalFocused = true
+        if (!selecting) {
+            keyboardRequested = true
+            imeController?.showKeyboard()
+        }
         runCatching { focus.requestFocus() }
     }
     // As handlePaste: an empty clipboard does nothing at all, and what was pasted leaves the terminal focused.
@@ -169,7 +194,11 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
             val color = when { state.exited -> tokens.error; state.connected -> tokens.success; state.reconnecting -> tokens.warning; else -> tokens.error }
             Box(Modifier.size(8.dp).background(color.color, CircleShape))
             BasicText(when { state.exited -> "Process exited"; state.connected -> "Connected"; state.reconnecting -> "Reconnecting..."; else -> "Disconnected" }, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color))
-            if (state.exited) TerminalAction("Restart", ProductIcon.RotateCcw, compact = true) { session.restart() }
+            if (state.exited) TerminalAction("Restart", ProductIcon.RotateCcw, compact = true) {
+                terminalFocused = false
+                keyboardRequested = false
+                session.restart()
+            }
             Spacer(Modifier.weight(1f))
             TerminalAction("Chat", ProductIcon.MessageSquare, compact = true, action = ::chat)
             state.sessionId?.let {
@@ -183,25 +212,54 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
                 Terminal(
                     terminalEmulator = emulator,
                     modifier = Modifier.weight(1f).fillMaxWidth().padding(4.dp)
+                        .pointerInput(session) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (event.type == PointerEventType.Press) TextInputFocus.pressed(session)
+                                }
+                            }
+                        }
                         .onGloballyPositioned(caret::terminalPlaced)
                         .onFocusChanged { focusState ->
                             // A tap on nothing blurs the terminal as it does xterm's textarea: the keyboard goes with the
                             // focus, and the next tap on the terminal asks for it again like the first one did.
-                            if (focusState.hasFocus) TextInputFocus.takeNative(session, focusManager, onBlur = {
-                                keyboardRequested = false
-                                imeController?.hideKeyboard()
-                            }, keep = caret::keysIn, bounds = caret::cursorIn) else TextInputFocus.releaseNative(session)
+                            if (focusState.hasFocus) {
+                                terminalFocused = true
+                                TextInputFocus.takeNative(session, focusManager, onBlur = {
+                                    terminalFocused = false
+                                    keyboardRequested = false
+                                    imeController?.hideKeyboard()
+                                }, keep = caret::keysIn, bounds = caret::cursorIn)
+                            } else {
+                                if (TextInputFocus.field !== session && inputReady && session.emulator === emulator) {
+                                    terminalFocused = false
+                                    keyboardRequested = false
+                                }
+                                TextInputFocus.releaseNative(session)
+                            }
                         },
                     typeface = face, initialFontSize = 13.sp,
                     backgroundColor = tokens.bgSolid.color, foregroundColor = tokens.text.color,
                     selectionBackgroundColor = tokens.accentWash.color, selectionForegroundColor = tokens.text.color,
                     cursorColor = tokens.accent.color, cursorAccent = tokens.bgSolid.color, minimumContrastRatio = 4.5,
-                    keyboardEnabled = inputReady && !selecting, showSoftKeyboard = keyboardRequested && !selecting, focusRequester = focus,
+                    keyboardEnabled = inputReady, showSoftKeyboard = keyboardRequested && !selecting, focusRequester = focus,
                     imeMode = TerminalImeMode.CommittedText,
                     onComposeControllerAvailable = { inputControl = it },
                     onImeControllerAvailable = { imeController = it },
+                    onImeVisibilityChanged = { visible ->
+                        if (imeWasVisible && !visible) keyboardRequested = false
+                        imeWasVisible = visible
+                    },
                     // Every tap asks, as the web's touchend does, except in select mode, which raises nothing (it has no touchend).
-                    onTerminalTap = { if (!selecting) { TextInputFocus.asked(); keyboardRequested = true } },
+                    onTerminalTap = {
+                        TextInputFocus.asked()
+                        terminalFocused = true
+                        if (!selecting) {
+                            keyboardRequested = true
+                            imeController?.showKeyboard()
+                        }
+                    },
                     onCursorBoundsChanged = caret::cursorMoved,
                     modifierManager = modifiers,
                     onSelectionControllerAvailable = { selection = it },
@@ -246,7 +304,15 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
             },
             selectMode = selecting,
             // Like the web's, it selects nothing by itself: the drag does, and a selection outlives the mode.
-            onToggleSelect = { selecting = !selecting },
+            onToggleSelect = {
+                selecting = !selecting
+                keyboardRequested = false
+                imeController?.hideKeyboard()
+                if (terminalFocused) {
+                    TextInputFocus.asked()
+                    runCatching { focus.requestFocus() }
+                }
+            },
             onKey = { key, repeated ->
                 if (!repeated) {
                     focusTerminal()

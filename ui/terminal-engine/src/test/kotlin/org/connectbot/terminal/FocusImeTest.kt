@@ -152,4 +152,33 @@ class FocusImeTest {
         assertEquals(TerminalEditorInfo.inputType(), rig.info.inputType)
         assertEquals(TerminalEditorInfo.IME_OPTIONS, rig.info.imeOptions)
     }
+
+    @Test fun `returning to the window keeps the focused editor live without re-raising the soft keyboard`() {
+        rig.view.requestFocus()
+        rig.view.observeImeVisibility(true)
+        assertTrue(rig.ime.commitText("a", 1))
+
+        rig.view.onWindowFocusChanged(false)
+        rig.view.onWindowFocusChanged(true)
+
+        assertTrue("the terminal keeps focus across the window switch", rig.view.hasFocus())
+        assertEquals("returning to the window never asks the IME to pop back up", 0, rig.shows)
+        assertTrue("the editor stays live for immediate hardware or IME input", rig.ime.commitText("b", 1))
+        assertEquals("ab", rig.pty.line)
+    }
+
+    @Test fun `detaching a focused view right after ViewGroup clears its focus still hides the soft keyboard and drops the editor`() {
+        rig.view.requestFocus()
+        assertTrue(rig.ime.commitText("exit", 1))
+
+        // ViewGroup.removeViewInternal clears the child's focus synchronously before calling onDetachedFromWindow.
+        rig.view.clearFocus()
+        val onDetached = android.view.View::class.java.getDeclaredMethod("onDetachedFromWindow").apply { isAccessible = true }
+        onDetached.invoke(rig.view)
+
+        assertEquals("the soft keyboard is hidden even though clearFocus ran first", 1, rig.hides)
+        assertEquals("the IME is told the editor is gone without waiting for the posted runnable", 1, rig.restarts)
+        assertNull(rig.imeOrNull)
+        assertEquals(EditorInfo.TYPE_NULL, rig.info.inputType)
+    }
 }

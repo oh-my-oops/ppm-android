@@ -40,6 +40,7 @@ def terminal(text):
         val imeController = remember(terminalEmulator) {
             object : TerminalImeController {
                 override fun finishBeforeExternalInput() { imeInputView?.finishBeforeExternalInput() }
+                override fun showKeyboard() { imeInputView?.apply { imeAllowed = true; showIme() } }
                 override fun hideKeyboard() { imeInputView?.hideIme() }
             }
         }
@@ -91,6 +92,7 @@ def ime_input(text):
          * it, no byte reached the shell, and only a key that restarts the IME brought typing back.
          */
         private var detached = false
+        private var detachPending = false
 
         /** How [detachEditor] is posted; the tests run it themselves, as no looper does for a view with no window. */
         internal var postDetach: (Runnable) -> Unit = { post(it) }
@@ -98,6 +100,7 @@ def ime_input(text):
         // Posted, not run as the focus goes: it may be going to another view, which makes the IME start a
         // connection for that one, and `restartInput` does nothing for a view the IME no longer serves.
         private val detachEditor = Runnable {
+            detachPending = false
             if (imeMode == TerminalImeMode.CommittedText && !hasFocus()) {
                 detached = true
                 restartInputSoon()
@@ -174,10 +177,24 @@ def ime_input(text):
     text = replace(text, "            isComposeModeActive &&\n            keyboardHandler.hasTerminalShortcutModifiers()", "            (isComposeModeActive || imeMode == TerminalImeMode.CommittedText) &&\n            keyboardHandler.hasTerminalShortcutModifiers()")
     text = replace(text, "        resetImeBuffer()\n        shortcutInputMode = nextMode", "        committedConnection?.flushPending()\n        resetImeBuffer()\n        shortcutInputMode = nextMode")
     text = replace(text, "    fun resetImeBuffer() {", "    fun resetImeBuffer() {\n        committedConnection?.closeConnection()\n        committedConnection = null")
-    text = replace(text, "        if (!gainFocus) {", "        if (gainFocus) restartIfEditorEnded()\n        if (!gainFocus) {\n            committedConnection?.closeConnection()\n            if (imeMode == TerminalImeMode.CommittedText) postDetach(detachEditor)")
+    text = replace(text, "        if (!gainFocus) {", "        if (gainFocus) {\n            detachPending = false\n            removeCallbacks(detachEditor)\n            restartIfEditorEnded()\n        }\n        if (!gainFocus) {\n            committedConnection?.closeConnection()\n            if (imeMode == TerminalImeMode.CommittedText) {\n                detachPending = true\n                postDetach(detachEditor)\n            }")
+    text = replace(
+        text,
+        "            restoreOnWindowFocus = hasFocus() && lastImeVisible && imeAllowed",
+        "            restoreOnWindowFocus = imeMode != TerminalImeMode.CommittedText && hasFocus() && lastImeVisible && imeAllowed\n            if (imeMode == TerminalImeMode.CommittedText) pendingShow = false",
+    )
+    text = replace(
+        text,
+        "        if (isAttachedToWindow && hasFocus()) onHideKeyboard(this)",
+        "        if (hasFocus() || detachPending) onHideKeyboard(this)",
+    )
     # No editor is a null connection, which the platform's own signature allows.
     text = replace(text, "    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {", "    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {")
-    return replace(text, "    override fun onDetachedFromWindow() {", "    override fun onDetachedFromWindow() {\n        removeCallbacks(detachEditor)\n        committedConnection?.closeConnection()")
+    return replace(
+        text,
+        "    override fun onDetachedFromWindow() {\n        hideIme()",
+        "    override fun onDetachedFromWindow() {\n        removeCallbacks(detachEditor)\n        committedConnection?.closeConnection()\n        if (detachPending) {\n            detached = true\n            restartInputSoon()\n        }\n        hideIme()\n        detachPending = false",
+    )
 
 
 def keyboard(text):

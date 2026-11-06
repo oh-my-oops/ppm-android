@@ -141,6 +141,12 @@ internal class ImeRig {
         private set
     private var restartPending = true
 
+    /** How often the view asked the platform to show or hide the soft keyboard. */
+    var shows = 0
+        private set
+    var hides = 0
+        private set
+
     /** What the view told the IME about the editor's selection, each as start, end, composing start, composing end. */
     val reports = mutableListOf<List<Int>>()
 
@@ -179,6 +185,8 @@ internal class ImeRig {
         RuntimeEnvironment.getApplication(), keyboard,
         onUpdateSelection = { _, start, end, from, to -> reports += listOf(start, end, from, to) },
         onRestartInput = { restarts++; restartPending = true },
+        onShowKeyboard = { shows++ },
+        onHideKeyboard = { hides++ },
     ).also {
         it.imeMode = TerminalImeMode.CommittedText
         it.onImePreeditChanged = { text -> preedit = text }

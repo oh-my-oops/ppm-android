@@ -908,6 +908,11 @@ def touch_select(text):
 """ + marker)
     text = replace(text, "                        val isDoubleTap = (down.uptimeMillis", "                        val isDoubleTap = !currentTouchSelect && (down.uptimeMillis")
     text = replace(text, "                        val longPressJob = if (gestureType == GestureType.Undetermined) {", "                        val longPressJob = if (gestureType == GestureType.Undetermined && !currentTouchSelect) {")
+    text = replace(
+        text,
+        "                                    selectionManager.endSelection()\n                                }\n                            }\n",
+        "                                    selectionManager.endSelection()\n                                }\n                                if (currentKeyboardEnabled) focusRequester.requestFocus()\n                            }\n",
+    )
     return replace(text, "                                        gestureType = if (pagingCandidate && singleTouch &&", """                                        gestureType = if (dragSelects(currentTouchSelect, singleTouch)) {
                                             beginTouchSelection()
                                             GestureType.Selection

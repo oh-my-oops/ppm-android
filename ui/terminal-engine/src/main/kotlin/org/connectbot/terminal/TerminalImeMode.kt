@@ -10,8 +10,11 @@ enum class TerminalImeMode {
 
 /** What the host does to the soft keyboard's editor from outside the IME; call on the UI thread. */
 interface TerminalImeController {
-    /** Input sent outside the IME must end its editable context first: flush pending composition, then invalidate history before toolbar keys, paste or commands. */
+    /**Input sent outside the IME must end its editable context first: flush pending composition, then invalidate history before toolbar keys, paste or commands. */
     fun finishBeforeExternalInput()
+
+    /** Ask the focused terminal editor to show the soft keyboard when the user tapped the terminal or a toolbar key. */
+    fun showKeyboard() {}
 
     /**
      * Hide the soft keyboard of a terminal that is about to lose the focus without another editor taking it,

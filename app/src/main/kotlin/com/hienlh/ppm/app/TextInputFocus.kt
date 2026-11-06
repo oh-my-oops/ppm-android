@@ -57,7 +57,7 @@ object TextInputFocus {
     private var window: FocusManager? = null
 
     /** The field the press going on landed in, focused or not. */
-    private var pressedIn: TextFieldState? = null
+    private var pressedIn: Any? = null
 
     /** The deepest focus-start anchor under the current press. */
     private var pressedAnchor: FocusAnchor? = null
@@ -174,8 +174,8 @@ object TextInputFocus {
         window = null
     }
 
-    internal fun pressed(state: TextFieldState) {
-        pressedIn = state
+    internal fun pressed(field: Any) {
+        pressedIn = field
     }
 
     internal fun pressedAnchor(anchor: FocusAnchor) {
