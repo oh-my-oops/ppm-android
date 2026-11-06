@@ -50,6 +50,17 @@ class HostExplorerNamesTest {
         assertEquals(HostToast("Could not create folder", "No space left"), hostFailureToast(failed(FileMutationOperation.CREATE_DIRECTORY, "No space left")))
         assertEquals(HostToast("Rename failed", "Permission denied"), hostFailureToast(failed(FileMutationOperation.RENAME, "Permission denied")))
         assertEquals(HostToast("Rename failed", null), hostFailureToast(failed(FileMutationOperation.RENAME, null)))
+        assertEquals(HostToast("Delete failed", "Permission denied"), hostFailureToast(failed(FileMutationOperation.DELETE, "Permission denied")))
+    }
+
+    @Test
+    fun `a delete says Moved N items to Trash or Deleted N items as deleteEntries does`() {
+        assertEquals(HostToast("Moved 1 item to Trash", null), hostDeleteSuccessToast(1, permanent = false))
+        assertEquals(HostToast("Moved 2 items to Trash", null), hostDeleteSuccessToast(2, permanent = false))
+        assertEquals(HostToast("Deleted 1 item", null), hostDeleteSuccessToast(1, permanent = true))
+        assertEquals(HostToast("Deleted 3 items", null), hostDeleteSuccessToast(3, permanent = true))
+        assertNull(hostDeleteSuccessToast(0, permanent = false))
+        assertNull(hostDeleteSuccessToast(0, permanent = true))
     }
 
     private fun transferred(

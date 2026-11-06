@@ -1,14 +1,23 @@
 package com.hienlh.ppm.app.ui.osexplorer
 
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.client.ApiClient
@@ -57,6 +66,7 @@ class HostExplorerNameFieldTest {
     private val session = explorerSessionOn(
         HostDirectory(listOf(old), "/home/me", "/home", listOf(HostPlace("me", "/home/me")), "/", truncated = false),
     )
+    private val outsideFocus = FocusRequester()
     private lateinit var commands: HostExplorerCommands
 
     @Before
@@ -67,7 +77,12 @@ class HostExplorerNameFieldTest {
             toasts::add, api, session, HostFileActions(api, FileMutations(api), "/", null), null,
             CoroutineScope(Dispatchers.Unconfined + SupervisorJob()),
         )
-        compose.setContent { commands.edit?.let { HostInlineName(commands, it) } }
+        compose.setContent {
+            Column {
+                commands.edit?.let { HostInlineName(commands, it) }
+                Box(Modifier.size(16.dp).focusRequester(outsideFocus).focusable())
+            }
+        }
     }
 
     @After
@@ -197,5 +212,43 @@ class HostExplorerNameFieldTest {
         enter()
         assertNull(commands.edit)
         assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `the inline name field has no Save or Cancel buttons and commits when focus leaves it`() {
+        server.enqueue(ok())
+        commands.create(folder = false)
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Name").assertExists()
+        compose.onNodeWithContentDescription("Save name").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Cancel").assertDoesNotExist()
+
+        field().performTextInput("blurred.txt")
+        compose.runOnUiThread { outsideFocus.requestFocus() }
+        compose.waitForIdle()
+        answered()
+        assertEquals("""{"path":"/home/me/blurred.txt"}""", requestBody())
+        assertNull(commands.edit)
+    }
+
+    @Test
+    fun `trash and failed delete toasts match the web's deleteEntries messages`() {
+        server.enqueue(
+            MockResponse.Builder()
+                .addHeader("Content-Type", "application/json")
+                .body("""{"ok":true,"data":{"removed":"/home/me/old.txt","permanent":false,"trashed":true}}""")
+                .build(),
+        )
+        commands.trash(listOf(old))
+        compose.waitUntil(timeoutMillis = 5_000) { toasts.isNotEmpty() }
+        assertEquals("Moved 1 item to Trash", toasts.single().title)
+        toasts.clear()
+
+        server.enqueue(refused("EACCES", hint = "Permission denied."))
+        commands.trash(listOf(old))
+        compose.waitUntil(timeoutMillis = 5_000) { toasts.isNotEmpty() }
+        val failure = toasts.single()
+        assertEquals("Delete failed", failure.title)
+        assertEquals("Permission denied.", failure.description)
     }
 }

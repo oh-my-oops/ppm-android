@@ -38,11 +38,22 @@ fun hostFailureToast(item: FileMutationItem): HostToast = HostToast(
         FileMutationOperation.CREATE_DIRECTORY -> "Could not create folder"
         FileMutationOperation.CREATE_FILE -> "Could not create file"
         FileMutationOperation.RENAME -> "Rename failed"
+        FileMutationOperation.DELETE -> "Delete failed"
         FileMutationOperation.MOVE, FileMutationOperation.COPY -> transferFailureTitle(item)
         else -> "File operation failed"
     },
     item.error,
 )
+
+/**
+ * What `deleteEntries` (`explorer-actions-mutate.ts`) says once one or more entries were removed:
+ * `"Deleted N item(s)"` when [permanent] is true, and `"Moved N item(s) to Trash"` when moved to the OS Trash.
+ */
+fun hostDeleteSuccessToast(succeeded: Int, permanent: Boolean): HostToast? {
+    if (succeeded <= 0) return null
+    val noun = "$succeeded item${if (succeeded == 1) "" else "s"}"
+    return HostToast(if (permanent) "Deleted $noun" else "Moved $noun to Trash", null)
+}
 
 private fun transferFailureTitle(item: FileMutationItem): String {
     val name = item.path.split('/', '\\').lastOrNull { it.isNotEmpty() } ?: item.path

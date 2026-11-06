@@ -1,13 +1,19 @@
 package com.hienlh.ppm.app.ui.osexplorer
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.key.*
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -101,9 +107,9 @@ internal class HostExplorerCommands(private val toast: (ErrorToastMessage) -> Un
     private fun remove(paths: List<String>, permanent: Boolean) = work {
         if (paths.isEmpty() || (permanent && !confirmDelete(paths))) return@work
         val result = core.delete(paths, permanent)
-        report(result, if (permanent) "Deleted" else "Moved to Trash", omitNoTrash = true)
+        reportDelete(result, permanent = permanent, omitNoTrash = true)
         if (result.needsPermanent.isNotEmpty() && confirmDelete(result.needsPermanent)) {
-            report(core.delete(result.needsPermanent, true), "Deleted")
+            reportDelete(core.delete(result.needsPermanent, true), permanent = true)
         }
     }
     fun transfer(paths: List<String>, directory: String, copy: Boolean, announce: Boolean = true) = work {
@@ -119,10 +125,13 @@ internal class HostExplorerCommands(private val toast: (ErrorToastMessage) -> Un
             catch (error: Exception) { toast(ErrorToastMessage("File operation failed", error.message)) }
         }
     }
-    private fun report(result: HostFileActionResult, verb: String, omitNoTrash: Boolean = false) {
-        val failures = result.report.failures.filterNot { omitNoTrash && it.code == "NO_TRASH" }
-        if (failures.isNotEmpty()) toast(ErrorToastMessage("File operation failed", failures.joinToString("\n") { it.error ?: it.path }))
-        if (result.succeeded > 0) toast(ErrorToastMessage("$verb ${result.succeeded} item${if (result.succeeded == 1) "" else "s"}", kind = ErrorToastMessage.Kind.SUCCESS))
+    private fun reportDelete(result: HostFileActionResult, permanent: Boolean, omitNoTrash: Boolean = false) {
+        result.report.failures
+            .filterNot { omitNoTrash && it.code == "NO_TRASH" }
+            .forEach { toast(hostFailureToast(it).message()) }
+        hostDeleteSuccessToast(result.succeeded, permanent)?.let {
+            toast(ErrorToastMessage(it.title, it.description, kind = ErrorToastMessage.Kind.SUCCESS))
+        }
     }
 
     @Composable
@@ -132,26 +141,71 @@ internal class HostExplorerCommands(private val toast: (ErrorToastMessage) -> Un
     }
 }
 
+private class HostInlineLifetime { var mounted = true }
+
 @Composable
 internal fun HostInlineName(commands: HostExplorerCommands, edit: HostInlineEdit) {
     val state by commands.core.state.collectAsState()
     val tokens = LocalPpmTokens.current
     val focus = remember(edit) { FocusRequester() }
-    LaunchedEffect(edit) { TextInputFocus.asked(); focus.requestFocus() }
-    Column(Modifier.fillMaxWidth().padding(8.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    val scope = rememberCoroutineScope()
+    val lifetime = remember(edit) { HostInlineLifetime() }
+    var focused by remember(edit) { mutableStateOf(false) }
+    val pending by rememberUpdatedState(commands.busy)
+    DisposableEffect(edit) { lifetime.mounted = true; onDispose { lifetime.mounted = false } }
+    LaunchedEffect(edit) {
+        withFrameNanos { }
+        TextInputFocus.asked()
+        focus.requestFocus()
+    }
+    BackHandler(enabled = !state.busy) { commands.cancelEdit() }
+    val shape = RoundedCornerShape(4.dp)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             PpmIcon(if (edit.folder) ProductIcon.Folder else ProductIcon.File, 16.dp, tokens.text3.color)
-            PpmTextField(edit.field, if (edit.folder) "Folder name" else "File name", Modifier.weight(1f).onPreviewKeyEvent {
-                if (it.type != KeyEventType.KeyDown) false else when (it.key) {
-                    Key.Enter, Key.NumPadEnter -> { commands.commitEdit(); true }
-                    Key.Escape -> { commands.cancelEdit(); true }
-                    else -> false
-                }
-            }, desktopStyle = ppmText(13f), focusRequester = focus, keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
-                onKeyboardAction = { commands.commitEdit() })
-            HostExplorerButton(ProductIcon.Check, "Save name", enabled = !state.busy, onClick = commands::commitEdit)
-            HostExplorerButton(ProductIcon.X, "Cancel", enabled = !state.busy, onClick = commands::cancelEdit)
+            Box(
+                Modifier.weight(1f)
+                    .background(tokens.panel.color, shape)
+                    .cssBorder((if (commands.inlineError != null) tokens.error else tokens.accent).color, shape)
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            ) {
+                PpmTextField(
+                    edit.field,
+                    if (edit.folder) "Folder name" else "File name",
+                    Modifier.fillMaxWidth()
+                        .semantics { contentDescription = "Name" }
+                        .onPreviewKeyEvent {
+                            if (it.type != KeyEventType.KeyDown) false else when (it.key) {
+                                Key.Enter, Key.NumPadEnter -> { commands.commitEdit(); true }
+                                Key.Escape -> { commands.cancelEdit(); true }
+                                else -> false
+                            }
+                        },
+                    desktopStyle = ppmText(13f),
+                    focusRequester = focus,
+                    keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
+                    onKeyboardAction = { commands.commitEdit() },
+                    onFocusChanged = { now ->
+                        val lost = focused && !now
+                        focused = now
+                        if (lost && !pending) scope.launch {
+                            withFrameNanos { }
+                            if (lifetime.mounted && !pending && !focused) commands.commitEdit()
+                        }
+                    },
+                )
+            }
         }
-        commands.inlineError?.let { BasicText(it, style = ppmText(12f).copy(color = tokens.error.color)) }
+        commands.inlineError?.let {
+            val errorShape = RoundedCornerShape(4.dp)
+            BasicText(
+                it,
+                Modifier.padding(top = 2.dp)
+                    .background(tokens.panel2.color, errorShape)
+                    .cssBorder(tokens.border.color, errorShape)
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                style = ppmText(11f).copy(color = tokens.error.color),
+            )
+        }
     }
 }

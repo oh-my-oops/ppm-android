@@ -127,7 +127,9 @@ private fun HostExplorerBody(model: AppModel, id: String, path: String, visible:
                         }
                     }
                     if (state.loading && state.directory == null) BasicText("Loading…", Modifier.padding(12.dp), style = ppmText(12f).copy(color = tokens.text3.color))
-                    commands?.edit?.takeIf { it.entry == null }?.let { HostInlineName(commands, it) }
+                    if (preferences.view != ExplorerView.COLUMNS) {
+                        commands?.edit?.takeIf { it.entry == null }?.let { HostInlineName(commands, it) }
+                    }
                     Box(Modifier.weight(1f).fillMaxWidth().then(dropModifier(state.currentDirectory))
                         .focusRequester(focus).onKeyEvent { event ->
                             if (event.type != KeyEventType.KeyDown || com.hienlh.ppm.app.TextInputFocus.focused) return@onKeyEvent false

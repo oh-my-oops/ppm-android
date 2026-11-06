@@ -170,7 +170,9 @@ private fun HostColumnView(column: HostColumn, selected: String?, focused: Boole
             BasicText(error, Modifier.padding(8.dp), style = ppmText(12f).copy(color = tokens.error.color))
             BasicText("Retry", Modifier.ppmClickable(onClick = onRetry).padding(8.dp), style = ppmText(12f).copy(color = tokens.accent.color))
         } }
-        if (!column.loading && column.error == null && column.entries.isEmpty()) item { HostColumnMessage("Empty") }
+        val creating = commands?.edit?.takeIf { it.entry == null && it.directory == column.path }
+        if (creating != null) item(key = "__create__") { HostInlineName(commands, creating) }
+        if (!column.loading && column.error == null && column.entries.isEmpty() && creating == null) item { HostColumnMessage("Empty") }
         items(column.entries, key = { it.path }) { entry ->
             val edit = commands?.edit
             if (edit?.entry?.path == entry.path) HostInlineName(commands, edit)
