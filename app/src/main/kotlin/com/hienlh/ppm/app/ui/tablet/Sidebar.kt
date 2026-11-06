@@ -55,6 +55,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.toSize
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.FocusAnchor
+import com.hienlh.ppm.app.FocusStartAnchor
+import com.hienlh.ppm.app.focusStartArea
 import com.hienlh.ppm.app.ui.FeatureBadge
 import com.hienlh.ppm.app.ui.FeatureBadgeKind
 import com.hienlh.ppm.app.ui.GroupList
@@ -86,8 +89,10 @@ fun Sidebar(model: AppModel) {
     var flyoutAt by remember { mutableStateOf<Rect?>(null) }
     var shellBottom by remember { mutableFloatStateOf(Float.MAX_VALUE) }
     val switcher = remember { Placed() }
+    val sidebarAnchor = remember { FocusAnchor() }
     if (model.sidebarCollapsed) {
-        Column(Modifier.width(RAIL_WIDTH).fillMaxHeight().background(tokens.rail.color).edge(Edge.Right, tokens.border.color)) {
+        Column(Modifier.width(RAIL_WIDTH).fillMaxHeight().focusStartArea(sidebarAnchor).background(tokens.rail.color).edge(Edge.Right, tokens.border.color)) {
+            FocusStartAnchor(sidebarAnchor)
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -105,12 +110,14 @@ fun Sidebar(model: AppModel) {
             Modifier
                 .width(model.sidebarWidth.dp)
                 .fillMaxHeight()
+                .focusStartArea(sidebarAnchor)
                 .onGloballyPositioned { shellBottom = it.positionOnScreen().y + it.size.height }
                 .resizesSidebar(model, resize)
                 .background(tokens.panel.color)
                 .edge(Edge.Right, tokens.border.color),
         ) {
             Column(Modifier.fillMaxSize()) {
+                FocusStartAnchor(sidebarAnchor)
                 Row(Modifier.fillMaxWidth().height(BAR_HEIGHT).edge(Edge.Bottom, tokens.border.color)) {
                     Wordmark(model)
                     Box(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 6.dp), contentAlignment = Alignment.CenterStart) {

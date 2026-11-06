@@ -2,7 +2,11 @@ package com.hienlh.ppm.app
 
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -10,6 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusEventModifierNode
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.focus.FocusState
+import androidx.compose.ui.focus.FocusTargetModifierNode
+import androidx.compose.ui.focus.Focusability
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEvent
@@ -28,7 +34,9 @@ import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.PointerInputModifierNode
 import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 
 /**
  * The text field holding focus, for the keyboard shortcuts: most of them stand aside while one
@@ -50,6 +58,9 @@ object TextInputFocus {
 
     /** The field the press going on landed in, focused or not. */
     private var pressedIn: TextFieldState? = null
+
+    /** The deepest focus-start anchor under the current press. */
+    private var pressedAnchor: FocusAnchor? = null
 
     /** How many times a field was asked for focus: a tap can tell whether its handler asked. */
     private var asks = 0
@@ -167,23 +178,135 @@ object TextInputFocus {
         pressedIn = state
     }
 
+    internal fun pressedAnchor(anchor: FocusAnchor) {
+        pressedAnchor = anchor
+    }
+
     /** A handler wants a field focused, as the web's call `focus()` on their textarea. */
     fun asked() {
         asks++
     }
 
-    /** What a tap leaves behind as it starts: the field focused, and the asks so far. */
-    internal class TapStart(val focused: Any?, val asks: Int)
+    /** What a tap leaves behind as it starts: the field focused, the asks so far, and the window's fallback anchor. */
+    internal class TapStart(val focused: Any?, val asks: Int, val rootAnchor: FocusAnchor? = null) {
+        fun parkFocus(): Boolean = (pressedAnchor ?: rootAnchor)?.park() == true
+    }
 
-    internal fun tapStarts(): TapStart {
-        // Before the fields under the press say which of them it landed in.
+    internal fun tapStarts(rootAnchor: FocusAnchor? = null): TapStart {
+        // Before the fields and areas under the press say which of them it landed in.
         pressedIn = null
-        return TapStart(field, asks)
+        pressedAnchor = null
+        return TapStart(field, asks, rootAnchor)
     }
 
     /** The tap begun at [start] left the focus where it was: not in that field, and nobody asked. */
     internal fun tapLeaves(start: TapStart): Boolean =
         field === start.focused && asks == start.asks && (start.focused == null || pressedIn !== start.focused)
+}
+
+/**
+ * Where a window or a pane parks the focus while no control in it holds any: an invisible 0x0 leaf at its start that keeps the
+ * Android view focused (so the first key that takes the display out of touch mode does not make `ViewRootImpl.leaveTouchMode`
+ * run `restoreDefaultFocus()` from `(0, 0)` on the window behind a popover and scroll its tab strip) and gives `Tab` or an
+ * arrow key a starting point in the pane the user last touched, stepping out of the focus ring as soon as a control takes focus.
+ */
+class FocusAnchor {
+    internal var node: FocusAnchorNode? = null
+
+    fun park(): Boolean = node?.park() == true
+
+    fun parkIfUnfocused() {
+        node?.parkIfUnfocused()
+    }
+}
+
+@Composable
+fun FocusStartAnchor(anchor: FocusAnchor, parkOnStart: Boolean = false) {
+    Box(Modifier.size(0.dp).then(FocusAnchorElement(anchor, parkOnStart)))
+    if (parkOnStart) {
+        SideEffect { anchor.parkIfUnfocused() }
+    }
+}
+
+private data class FocusAnchorElement(val anchor: FocusAnchor, val parkOnStart: Boolean) : ModifierNodeElement<FocusAnchorNode>() {
+    override fun create() = FocusAnchorNode(anchor, parkOnStart)
+
+    override fun update(node: FocusAnchorNode) {
+        if (node.anchor !== anchor && node.anchor.node === node) node.anchor.node = null
+        node.anchor = anchor
+        node.anchor.node = node
+        node.parkOnStart = parkOnStart
+    }
+}
+
+internal class FocusAnchorNode(
+    var anchor: FocusAnchor,
+    var parkOnStart: Boolean,
+) : DelegatingNode(), LayoutAwareModifierNode, CompositionLocalConsumerModifierNode {
+    private var parkedOnStart = false
+
+    private val focusTarget: FocusTargetModifierNode = delegate(
+        FocusTargetModifierNode(
+            focusability = Focusability.Never,
+            onFocusChange = { _, curr ->
+                if (!curr.isFocused) focusTarget.focusability = Focusability.Never
+            },
+        ),
+    )
+
+    override fun onAttach() {
+        anchor.node = this
+    }
+
+    override fun onPlaced(coordinates: LayoutCoordinates) {
+        if (parkOnStart && !parkedOnStart) {
+            parkedOnStart = true
+            parkIfUnfocused()
+        }
+    }
+
+    override fun onDetach() {
+        if (anchor.node === this) anchor.node = null
+        parkedOnStart = false
+    }
+
+    fun park(): Boolean {
+        if (!isAttached) return false
+        focusTarget.focusability = Focusability.Always
+        val granted = focusTarget.requestFocus()
+        if (!focusTarget.focusState.isFocused) {
+            focusTarget.focusability = Focusability.Never
+        }
+        return granted || focusTarget.focusState.isFocused
+    }
+
+    fun parkIfUnfocused() {
+        if (!isAttached) return
+        if (!currentValueOf(LocalView).hasFocus() && !focusTarget.focusState.isFocused) {
+            park()
+        }
+    }
+}
+
+/** Marks a pane or area whose [anchor] should receive the parked focus when a tap lands inside it without focusing a field. */
+fun Modifier.focusStartArea(anchor: FocusAnchor): Modifier = this then FocusStartAreaElement(anchor)
+
+private data class FocusStartAreaElement(val anchor: FocusAnchor) : ModifierNodeElement<FocusStartAreaNode>() {
+    override fun create() = FocusStartAreaNode(anchor)
+
+    override fun update(node: FocusStartAreaNode) {
+        node.anchor = anchor
+    }
+}
+
+private class FocusStartAreaNode(var anchor: FocusAnchor) : Modifier.Node(), PointerInputModifierNode {
+    override fun onPointerEvent(pointerEvent: PointerEvent, pass: PointerEventPass, bounds: IntSize) {
+        if (pass == PointerEventPass.Initial && pointerEvent.type == PointerEventType.Press) {
+            TextInputFocus.pressedAnchor(anchor)
+        }
+    }
+
+    override fun onCancelPointerInput() = Unit
 }
 
 /** Where the focused field is in the page, and what is to be seen with it, both in the page's pixels. */
@@ -198,10 +321,10 @@ data class PanTarget(val field: Rect, val keep: Rect?)
  * `mousedown`. A drag or a long press leaves the focus where it is. The keyboard goes with the
  * focus, a native editor's too ([TextInputFocus.blurNative]).
  */
-fun Modifier.leavesTextOnTap(focusManager: FocusManager): Modifier = pointerInput(focusManager) {
+fun Modifier.leavesTextOnTap(focusManager: FocusManager, rootAnchor: FocusAnchor? = null): Modifier = pointerInput(focusManager, rootAnchor) {
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-        val start = TextInputFocus.tapStarts()
+        val start = TextInputFocus.tapStarts(rootAnchor)
         // After every handler under it, which may have asked for the focus back.
         val taps = if (down.type == PointerType.Mouse) {
             awaitPointerEvent(PointerEventPass.Final)
@@ -212,6 +335,7 @@ fun Modifier.leavesTextOnTap(focusManager: FocusManager): Modifier = pointerInpu
         if (taps && TextInputFocus.tapLeaves(start)) {
             TextInputFocus.blurNative(focusManager)
             focusManager.clearFocus()
+            start.parkFocus()
         }
     }
 }

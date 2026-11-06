@@ -32,6 +32,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.FocusAnchor
+import com.hienlh.ppm.app.FocusStartAnchor
+import com.hienlh.ppm.app.focusStartArea
 import com.hienlh.ppm.app.ui.DropdownBelowEnd
 import com.hienlh.ppm.app.ui.DropdownBelowStart
 import com.hienlh.ppm.app.ui.MenuIcon
@@ -68,9 +71,13 @@ fun DockPanel(model: AppModel, state: WorkspaceState, borderEdge: Edge) {
     val tokens = LocalPpmTokens.current
     val tabs = model.dockTabs
     val activeId = state.dockPanel?.activeTabId
-    Column(Modifier.fillMaxSize().background(tokens.panel.color).edge(borderEdge, tokens.border.color)) {
+    val dockAnchor = remember { FocusAnchor() }
+    val bodyAnchor = remember { FocusAnchor() }
+    Column(Modifier.fillMaxSize().focusStartArea(dockAnchor).background(tokens.panel.color).edge(borderEdge, tokens.border.color)) {
+        FocusStartAnchor(dockAnchor)
         DockHeader(model, state, tabs.map { it.id to it }, activeId)
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(Modifier.weight(1f).fillMaxWidth().focusStartArea(bodyAnchor)) {
+            FocusStartAnchor(bodyAnchor)
             val active = tabs.firstOrNull { it.id == activeId }
             if (active != null) key(active.id) { TabBody(model, active) }
         }

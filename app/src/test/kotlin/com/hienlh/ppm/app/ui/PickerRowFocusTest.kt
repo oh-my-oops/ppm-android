@@ -1,30 +1,43 @@
 package com.hienlh.ppm.app.ui
 
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.app.FocusAnchor
+import com.hienlh.ppm.app.FocusStartAnchor
+import com.hienlh.ppm.app.focusStartArea
+import com.hienlh.ppm.app.leavesTextOnTap
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.ppmClickable
@@ -144,5 +157,85 @@ class PickerRowFocusTest {
         show { ModelPanel(listOf(ModelOption("opus", "Claude Opus"), ModelOption("sonnet", "Claude Sonnet"), ModelOption("haiku", "Claude Haiku")), "haiku", null, pick = {}) }
 
         assertTheFocusedRowIsLit("Claude Opus", "Claude Sonnet")
+    }
+
+    @Test
+    fun `a popover's start anchor holds the view's focus on start, lights nothing on a letter key, and steps aside once Tab enters the rows`() {
+        var composeView: android.view.View? = null
+        compose.setContent {
+            val tokens = LocalPpmTokens.current
+            val anchor = remember { FocusAnchor() }
+            composeView = LocalView.current
+            modes = LocalInputModeManager.current
+            popover = tokens.panel2.over(tokens.bgSolid).color
+            lit = tokens.surfaceHover.over(tokens.panel2.over(tokens.bgSolid)).color
+            Box {
+                FocusStartAnchor(anchor, parkOnStart = true)
+                ModePanel(PermissionMode.BYPASS_PERMISSIONS, pick = {})
+            }
+        }
+        compose.waitForIdle()
+        compose.runOnUiThread { modes!!.requestInputMode(InputMode.Keyboard) }
+        assertEquals(true, composeView!!.hasFocus())
+        assertFill("Ask before edits before any key", popover, "Ask before edits")
+
+        compose.onRoot().performKeyInput { pressKey(Key.A) }
+        compose.waitForIdle()
+        assertFill("Ask before edits after a letter key", popover, "Ask before edits")
+
+        tab()
+        row("Ask before edits").assertIsFocused()
+        assertFill("Ask before edits on first Tab", lit, "Ask before edits")
+
+        // Tab through the remaining rows and wrap around: the anchor must not take a stop of its own.
+        tab()
+        row("Edit automatically").assertIsFocused()
+        tab()
+        row("Plan mode").assertIsFocused()
+        tab()
+        row("Bypass permissions").assertIsFocused()
+        tab()
+        row("Ask before edits").assertIsFocused()
+    }
+
+    @Test
+    fun `a tap in a pane's body parks focus at the body's anchor so the first Tab starts in the body instead of scrolling the tab strip`() {
+        var stripScroll = 0
+        var composeView: android.view.View? = null
+        compose.setContent {
+            val focusManager = LocalFocusManager.current
+            val rootAnchor = remember { FocusAnchor() }
+            val panelAnchor = remember { FocusAnchor() }
+            val bodyAnchor = remember { FocusAnchor() }
+            val scroll = rememberScrollState(initial = 300)
+            composeView = LocalView.current
+            modes = LocalInputModeManager.current
+            stripScroll = scroll.value
+            Column(Modifier.leavesTextOnTap(focusManager, rootAnchor).focusStartArea(panelAnchor)) {
+                FocusStartAnchor(rootAnchor, parkOnStart = true)
+                FocusStartAnchor(panelAnchor)
+                Row(Modifier.width(120.dp).horizontalScroll(scroll)) {
+                    for (i in 1..6) {
+                        Box(Modifier.size(80.dp, 32.dp).testTag("tab-$i").ppmClickable {})
+                    }
+                }
+                Column(Modifier.size(200.dp).testTag("body").focusStartArea(bodyAnchor)) {
+                    FocusStartAnchor(bodyAnchor)
+                    Box(Modifier.size(80.dp, 32.dp).testTag("body-button").ppmClickable {})
+                }
+            }
+        }
+        compose.waitForIdle()
+        assertEquals(300, stripScroll)
+
+        compose.onNodeWithTag("body").performTouchInput { click() }
+        compose.waitForIdle()
+        assertEquals(true, composeView!!.hasFocus())
+        assertEquals(300, stripScroll)
+
+        compose.runOnUiThread { modes!!.requestInputMode(InputMode.Keyboard) }
+        tab()
+        compose.onNodeWithTag("body-button").assertIsFocused()
+        assertEquals(300, stripScroll)
     }
 }

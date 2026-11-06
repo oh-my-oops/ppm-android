@@ -52,6 +52,8 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.FocusAnchor
+import com.hienlh.ppm.app.FocusStartAnchor
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -242,13 +244,17 @@ fun PlacedPopup(
         properties = if (passThrough) PassThroughProperties else MenuProperties,
     ) {
         val taps = remember(room, under, passThrough) { RoomTaps(room, under.takeIf { passThrough }) }
+        val focusAnchor = remember { FocusAnchor() }
         taps.onDismiss = onDismiss
         Box(
             Modifier
                 .onSizeChanged { taps.size = it }
                 .pointerInteropFilter(onTouchEvent = taps::onTouch)
                 .padding(ShadowRoom),
-        ) { content() }
+        ) {
+            FocusStartAnchor(focusAnchor, parkOnStart = true)
+            content()
+        }
     }
 }
 

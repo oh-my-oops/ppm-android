@@ -63,6 +63,9 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.FocusAnchor
+import com.hienlh.ppm.app.FocusStartAnchor
+import com.hienlh.ppm.app.focusStartArea
 import com.hienlh.ppm.app.ui.LocalDropLayer
 import com.hienlh.ppm.app.ui.RefusingDrop
 import com.hienlh.ppm.app.ui.SettingsWindowContent
@@ -304,16 +307,19 @@ private fun FloatingWindow(
             // a window is not reached through it. A zone of its content is inside this one, and so smaller: it has the drop where it is.
             .dropZone(shouldStartDragAndDrop = { true }, target = RefusingDrop, visible = !minimized, layer = layer),
     ) {
+        val windowAnchor = remember { FocusAnchor() }
         Column(
             Modifier
                 .padding(OVERHANG)
                 .fillMaxSize()
+                .focusStartArea(windowAnchor)
                 .then(if (focused) Modifier.ppmShadow(SHADOW_FRONT, frameShape) else Modifier.ppmShadow(SHADOW_BEHIND_NEAR, frameShape).ppmShadow(SHADOW_BEHIND, frameShape))
                 .background(tokens.panel.color, frameShape)
                 // Any press inside raises the window, its content's included.
                 .raiseOnPress(store, win.id)
                 .cssBorder(tokens.border.color, frameShape),
         ) {
+            FocusStartAnchor(windowAnchor)
             WindowTitlebar(
                 windowsSkin = model.windowsSkin,
                 win = win,

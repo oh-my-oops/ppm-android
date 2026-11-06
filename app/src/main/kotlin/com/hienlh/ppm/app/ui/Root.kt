@@ -44,6 +44,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.app.FocusAnchor
+import com.hienlh.ppm.app.FocusStartAnchor
 import com.hienlh.ppm.app.LightboxRequest
 import com.hienlh.ppm.app.leavesTextOnTap
 import com.hienlh.ppm.app.ui.tablet.TabletShell
@@ -105,13 +107,14 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
     }
 
     val focusManager = LocalFocusManager.current
+    val rootAnchor = remember { FocusAnchor() }
     val toaster = remember { ToasterState() }
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
             // A tap outside the text field leaves it, as a press outside an input does in a browser:
             // the keyboard goes, shortcuts work.
-            .leavesTextOnTap(focusManager)
+            .leavesTextOnTap(focusManager, rootAnchor)
             .onPreInterceptKeyBeforeSoftKeyboard {
                 beforeIme(it.nativeKeyEvent)
                 false
@@ -120,6 +123,7 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
             // Test tags as resource ids, which UI Automator can find (baselineprofile/).
             .semantics { testTagsAsResourceId = true },
     ) {
+        FocusStartAnchor(rootAnchor, parkOnStart = true)
         val mobile = maxWidth < 768.dp
         // The layout follows the window, not the device: a rotation or a split screen can cross it.
         SideEffect { model.setWindowWide(!mobile) }

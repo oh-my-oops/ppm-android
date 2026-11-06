@@ -28,6 +28,9 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.FocusAnchor
+import com.hienlh.ppm.app.FocusStartAnchor
+import com.hienlh.ppm.app.focusStartArea
 import com.hienlh.ppm.app.ui.EmptyPanel
 import com.hienlh.ppm.app.ui.TabBody
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -227,10 +230,13 @@ private fun EditorPanel(model: AppModel, state: WorkspaceState, panelId: String,
     // A panel holding only another project's tab shows none, and counts as empty (`visibleTabs`).
     val tabs = visibleTabs(panel.tabs, state.currentProject)
     val drag = LocalTabDrag.current
+    val panelAnchor = remember { FocusAnchor() }
+    val bodyAnchor = remember { FocusAnchor() }
     DisposableEffect(drag, panelId) { onDispose { drag?.areas?.remove(panelId) } }
     Column(
         Modifier
             .fillMaxSize()
+            .focusStartArea(panelAnchor)
             .then(
                 if (multiple) {
                     Modifier.cssBorder(if (focused) tokens.accent.opacity(0.3).color else Color.Transparent)
@@ -245,9 +251,17 @@ private fun EditorPanel(model: AppModel, state: WorkspaceState, panelId: String,
                 }
             },
     ) {
+        FocusStartAnchor(panelAnchor)
         TabBar(model, panelId, tabs, panel.activeTabId)
         // The content is where a dragged tab is dropped (`data-panel-drop-zone`).
-        Box(Modifier.weight(1f).fillMaxWidth().onGloballyPositioned { drag?.areas?.set(panelId, it.boundsInRoot()) }) {
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .focusStartArea(bodyAnchor)
+                .onGloballyPositioned { drag?.areas?.set(panelId, it.boundsInRoot()) },
+        ) {
+            FocusStartAnchor(bodyAnchor)
             val active = tabs.firstOrNull { it.id == panel.activeTabId }
             when {
                 tabs.isEmpty() -> EmptyPanel(
