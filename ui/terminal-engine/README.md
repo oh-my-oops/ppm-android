@@ -75,13 +75,14 @@ The added APIs are:
   names a pushed row only by its number, which is the count of pushes of that resize), and lays the copy out as the library lays out the
   screen it keeps (`ResizedRows` with that resize's pushes and pops, the flags kept for a resize in rows only), so what a taller
   screen takes back is the true row. The alternate screen's own rows are cut on a shrink and stay at the top on a grow, as in the
-  library; the copy is dropped when that screen is left and when the emulator is reset. A write that holds an entry is therefore
+  library; when that screen is left (`CSI ? Pm l` with 1047 or 1049, where `WriteCuts` ends a piece just past the `l`, `afterExit`),
+  `restoreShell` catches the mirror up with the library's primary screen and puts the copy's links, prompts and kept wraps back on
+  each row whose cells still hold the text they had, then drops the copy (as `reset` does). A write that holds an entry or an exit is therefore
   handed to the library in one more piece (an empty one is not handed over: the sequence was split between two writes and the cut
   is where the second begins), which is one more `writeInput` for anything that counts them. `ResizeWrapTest` pins the behaviour (the round trip,
-  a replay written as one, an entry split at every point, 1047 and `?25;1049`, two shrinks and a grow, wraps and links in the history,
-  columns, a second visit), `WriteCutsTest` the cut, and `verifyShellUnderAlternateScreen` the same flows through the real library.
-  The traces of `ResizeDiff` are the library's and do not change with it. Limits: leaving the alternate screen does not put the
-  copy's links, wraps and kept wraps back on the mirror, which holds what the library shows, the cells alone (a later commit);
+  a replay written as one, an entry split at every point, 1047 and `?25;1049`, two shrinks and a grow, wraps and links in the history
+  and back on the screen when the alternate screen is left, prompts, columns, a second visit), `WriteCutsTest` the cuts, and `verifyShellUnderAlternateScreen` the same flows through the real library.
+  The traces of `ResizeDiff` are the library's and do not change with it. Limits:
   libvterm puts the cursor `?1049l` restores back unclamped, so after a shrink with the screen up it can lie outside the screen.
 - `emulator.getTextBetweenRows(start, endExclusive)` and `emulator.getScreenText()`:
   non-mutating reads that join soft wraps, preserve indentation and strip blank line tails.
@@ -182,7 +183,7 @@ The added APIs are:
   ended at (an OSC 8 whose end the scan does not see and libvterm does) is read when the emulator catches up, as before.
   Limits: a link made again over the same text, or the same text written over it, is not told from the first; a redraw of the whole
   screen in the same flush as a scroll (Enter on the last row, then `clear`, in one write) looks like the scroll to the emulator, so a
-  link over text that came back identical stays; leaving the alternate screen loses the primary screen's links, as before; and an OSC 8
+  link over text that came back identical stays; and an OSC 8
   that is written over before it closes is linked where it ended, as upstream. The JVM tests (`StaleLinksTest`, `WriteCutsTest`,
   `ResizeWrapTest`) run the real emulator over `FakeVterm`, a model of libvterm's parse, screen and resize (`ScreenNative` is the one
   place they stand in for the JNI); `verifyStaleLinks`, `verifyWriteCuts` and `verifyResize` run the same bytes through the real

@@ -453,6 +453,49 @@ class ResizeWrapTest {
         }
     }
 
+    @Test fun `leaving the alternate screen restores the shell's links, prompts, wraps and kept wraps, with or without a resize under it`() {
+        val url = { n: Int -> listOf("https://l$n.test/") }
+        val prompt = "$escape]133;A\u0007\$ $escape]133;B\u0007"
+        // Without a resize: wraps, a kept wrap from an earlier resize, links and a prompt all come back, and the alternate screen's own do not stay.
+        Rig(8, 10).use { rig ->
+            rig.write("A".repeat(10) + "BBB\r\n" + link(1) + "\r\n" + link(2) + "\r\n" + prompt + "cmd")
+            rig.resize(6, 10)
+            assertTrue(rig.screen()[0].wrapKept)
+            rig.write("$escape[?1049h$escape[H" + link(9) + "\r\n" + prompt + "alt" + "$escape[?1049l")
+            assertEquals(listOf("AAAAAAAAAA" to true, "BBB" to false, "link1" to false, "link2" to false, "$ cmd" to false, "" to false), rig.screen().wraps())
+            assertTrue(rig.screen()[0].wrapKept)
+            assertEquals(listOf(emptyList(), emptyList(), url(1), url(2), emptyList(), emptyList()), rig.screen().links())
+            assertEquals(listOf(false, false, false, false, true, false), rig.screen().map { it.hasPrompt() })
+        }
+        // With a shrink and a grow under the alternate screen: the rows that went to the history and came back bring their wraps, links and prompts back to the screen.
+        Rig(8, 10).use { rig ->
+            rig.write("xx\r\n" + "A".repeat(10) + "BBBBB\r\n" + link(1) + "\r\n" + link(2) + "\r\n" + prompt + "ls")
+            rig.write("$escape[?1049h$escape[H" + link(9) + "\r\nALT")
+            rig.resize(4, 10)
+            rig.resize(8, 10)
+            rig.write("$escape[?1049l")
+            assertEquals(
+                listOf("xx" to false, "AAAAAAAAAA" to true, "BBBBB" to false, "link1" to false, "link2" to false, "$ ls" to false, "" to false, "" to false),
+                rig.screen().wraps(),
+            )
+            assertTrue(rig.screen()[1].wrapKept)
+            assertEquals(listOf(emptyList(), emptyList(), emptyList(), url(1), url(2), emptyList(), emptyList(), emptyList()), rig.screen().links())
+            assertEquals(listOf(false, false, false, false, false, true, false, false), rig.screen().map { it.hasPrompt() })
+            // A restored link still ends when its cells are written over, and the restored kept wrap on row 1 goes into the history when two line feeds scroll it off.
+            rig.write("$escape[4;1Hplain$escape[8;1H\r\n\r\n")
+            assertEquals(listOf("xx" to false, "AAAAAAAAAA" to true), rig.history().wraps())
+            assertEquals(listOf(emptyList(), emptyList(), url(2), emptyList(), emptyList(), emptyList(), emptyList(), emptyList()), rig.screen().links())
+        }
+        // A resize in columns under the alternate screen cuts a link at the narrow width even if widened again before leaving, and drops wraps.
+        Rig(4, 40).use { rig ->
+            rig.write("  " + link(1) + "\r\n" + " ".repeat(30) + link(2) + "\r\n$escape[?1049h$escape[Halt")
+            rig.resize(4, 20)
+            rig.resize(4, 40)
+            rig.write("$escape[?1049l")
+            assertEquals(listOf(url(1), emptyList(), emptyList(), emptyList()), rig.screen().links())
+        }
+    }
+
     private val savedShellField = TerminalEmulatorImpl::class.java.getDeclaredField("savedShell").apply { isAccessible = true }
 
     @Suppress("UNCHECKED_CAST")

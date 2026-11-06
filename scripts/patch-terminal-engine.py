@@ -275,9 +275,6 @@ def emulator(text):
     text = replace(text, "    private val scrollback = ArrayDeque<TerminalLine>()\n",
                    "    private val scrollback = ArrayDeque<TerminalLine>()\n    private var scrollbackBytes = 0L\n    private val scrollbackWrap = ScrollbackWrap()\n")
     text = replace(text, "softWrapped = softWrapped, semanticSegments = line0Segments)", "softWrapped = wrapped, semanticSegments = line0Segments)")
-    # The shell's screen kept for the alternate screen to give back (savedShell) is not wanted once that screen is left.
-    text = replace(text, "                            imageStore.switchScreen(value.value)\n                            isAltScreenActive = value.value\n",
-                   "                            imageStore.switchScreen(value.value)\n                            isAltScreenActive = value.value\n                            if (!value.value) savedShell = null\n")
     text = replace(text,
                    "            scrollback.add(line)\n            if (scrollback.size > maxScrollbackLines) {\n                scrollback.removeFirst()\n            }\n",
                    "            scrollback.add(line)\n            scrollbackBytes += line.cells.shapingRetentionBytes\n            while (scrollback.size > maxScrollbackLines || (scrollback.isNotEmpty() && scrollbackBytes > maxScrollbackBytes)) {\n                scrollbackBytes -= scrollback.removeFirst().cells.shapingRetentionBytes\n            }\n")
@@ -368,6 +365,42 @@ def emulator(text):
         private fun saveShell() {
             catchUp()
             savedShell = currentLines.toList()
+        }
+
+        /**
+         * The piece just handed over ended with the `l` that leaves the alternate screen (see [WriteCuts.afterExit]): the library shows the
+         * shell's screen again, with none of the links, prompts or kept wraps it had (the switch damages the whole screen, and any resize in
+         * between cleared the library's continuation flags). The mirror is caught up with the cells the library holds now, and each row gets
+         * back the segments whose cells still hold the text they had in [savedShell] and the wrap the copy kept for it.
+         */
+        private fun restoreShell() {
+            catchUp()
+            val shell = savedShell ?: return
+            savedShell = null
+            semanticSegmentTexts.clear()
+            currentLines = currentLines.mapIndexedTo(ArrayList(currentLines.size)) { row, line ->
+                val saved = shell.getOrNull(row) ?: return@mapIndexedTo line
+                val kept = saved.wrapKept && (!line.softWrapped || line.wrapKept) && line.cells.text() == saved.cells.text()
+                val wrapped = line.softWrapped || kept
+                val segments = saved.semanticSegments.filter { segment ->
+                    isValidCellRange(segment.startCol, segment.endCol, line.cells.size) &&
+                        isValidCellRange(segment.startCol, segment.endCol, saved.cells.size) &&
+                        if (segment.startCol < segment.endCol) {
+                            cellText(line.cells, segment.startCol, segment.endCol) == cellText(saved.cells, segment.startCol, segment.endCol)
+                        } else {
+                            line.cells.text() == saved.cells.text()
+                        }
+                }
+                val restored = if (wrapped == line.softWrapped && kept == line.wrapKept && segments == line.semanticSegments) {
+                    line
+                } else {
+                    line.copy(softWrapped = wrapped, wrapKept = kept, semanticSegments = segments)
+                }
+                for (segment in segments) storeSegmentText(row, segment, restored)
+                restored
+            }
+            if (currentLines.isNotEmpty()) scrollbackWrap.top(currentLines[0].softWrapped)
+            _snapshot.value = buildSnapshot()
         }
 
         /**
@@ -496,6 +529,7 @@ def emulator(text):
                     writeRegionFix()
                     answerQuery()
                     if (writeCuts.beforeEntry) saveShell()
+                    if (writeCuts.afterExit) restoreShell()
                 }
                 if (to >= end) return
                 from = to

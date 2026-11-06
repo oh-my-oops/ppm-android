@@ -63,10 +63,15 @@ class ScrollRegionTest {
         override fun close() = emulator.close()
     }
 
-    /** What the library is given of [text] when nothing is added to it: the same bytes, in writes that each end before the h of an `enter`, where the shell's screen is kept. */
+    /** What the library is given of [text] when nothing is added to it: the same bytes, in writes that end before the `h` of an `enter` and after an `leave`. */
     private fun cutAtEntries(text: String): List<String> {
         val pieces = text.split(enter)
-        return pieces.mapIndexed { i, piece -> (if (i > 0) "h" else "") + piece + (if (i < pieces.lastIndex) "$esc[?1049" else "") }
+        return pieces
+            .mapIndexed { i, piece -> (if (i > 0) "h" else "") + piece + (if (i < pieces.lastIndex) "$esc[?1049" else "") }
+            .flatMap { piece ->
+                val parts = piece.split(leave)
+                parts.mapIndexed { i, part -> part + (if (i < parts.lastIndex) leave else "") }.filter { it.isNotEmpty() }
+            }
     }
 
     /** What vim writes: the alternate screen, a region of the first [height] rows that it leaves set, some drawing, and the way out. */

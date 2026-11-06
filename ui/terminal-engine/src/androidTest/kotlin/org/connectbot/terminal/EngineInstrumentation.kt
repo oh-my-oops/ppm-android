@@ -290,7 +290,7 @@ class EngineInstrumentation : Instrumentation() {
             Triple("plain text over row 2", "$esc[2;1HXYZ", 5),
             Triple("plain text over row 2, then EL", "$esc[2;1HXYZ$esc[K", 5),
             Triple("RIS", "${esc}c", 0),
-            Triple("alternate screen, in and out", "$esc[?1049hALT$esc[?1049l", 0),
+            Triple("alternate screen, in and out", "$esc[?1049hALT$esc[?1049l", 6),
             Triple("SU 2", "$esc[2S", 6),
             Triple("SD 2", "$esc[2T", 5),
             Triple("CR and text over the last row", "\r____", 6),

@@ -311,6 +311,10 @@ internal object ResizeChecks {
             val url = { n: Int -> listOf("https://l$n.test/") }
             expect("Wraps of the history after two more", s.history().wraps().take(3), listOf("A".repeat(40) to true, "B".repeat(5) to false, "link1" to false))
             expect("Links of the history after them", s.history().links().take(3), listOf(emptyList(), emptyList(), url(1)))
+            s.resize(8, 40)
+            s.write("$ESC[?1049l")
+            expect("Wraps of the shell's screen after leaving the alternate screen", s.screen().wraps().take(6), listOf("A".repeat(40) to true, "B".repeat(5) to false, "link1" to false, "link2" to false, "link3" to false, "$" to false))
+            expect("Links of the shell's screen after leaving the alternate screen", s.screen().links().take(6), listOf(emptyList(), emptyList(), url(1), url(2), url(3), emptyList()))
         }
     }
 

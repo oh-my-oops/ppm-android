@@ -473,6 +473,56 @@ class WriteCutsTest {
         assertFalse(scanner.beforeEntry)
     }
 
+    /** The cuts of the chunks given one after another to one scanner that stand just past an `l` that leaves the alternate screen. */
+    private fun exits(direct: Boolean, vararg chunks: String): List<Int> {
+        val scanner = WriteCuts()
+        val found = mutableListOf<Int>()
+        var base = 0
+        for (chunk in chunks) {
+            val data = bytes(chunk)
+            val buffer = ByteBuffer.allocateDirect(data.size + 1).apply { put(data) }
+            var from = 0
+            while (true) {
+                val cut = if (direct) scanner.next(buffer, from, data.size) else scanner.next(data, from, data.size)
+                if (cut < 0) {
+                    assertFalse(scanner.afterExit)
+                    break
+                }
+                if (scanner.afterExit) {
+                    assertFalse(scanner.beforeEntry)
+                    found += base + cut
+                }
+                from = cut
+            }
+            base += data.size
+        }
+        return found
+    }
+
+    private fun exits(vararg chunks: String) = exits(false, *chunks).also { assertEquals(it, exits(true, *chunks)) }
+
+    @Test fun `a write is cut just past the l that leaves the alternate screen, and only when the alternate screen was up`() {
+        val prefix = "ls\r\n$esc[?1049hdraw$esc[?1049l"
+        assertEquals(listOf(prefix.length), exits("$prefix$esc[H"))
+        assertEquals(listOf(prefix.length), exits(prefix))
+        assertEquals(emptyList<Int>(), exits("ls\r\n$esc[?1049l$esc[?1047l"))
+    }
+
+    @Test fun `leaving the alternate screen is a cut once, and again after it is entered again, wherever the writes are split`() {
+        val enter = "$esc[?1049h"
+        val leave = "$esc[?1049l"
+        val enter1047 = "$esc[?1047h"
+        val leave1047 = "$esc[?1047l"
+        val parts = listOf("a", enter, "b", enter, "c", leave, "d", leave, "e", leave1047, "f", enter1047, "g", leave1047, " end")
+        val starts = parts.runningFold(0) { at, part -> at + part.length }
+        val expected = listOf(starts[5] + leave.length, starts[13] + leave1047.length)
+        val stream = parts.joinToString("")
+        assertEquals(expected, exits(stream))
+        for (split in 0..stream.length) {
+            assertEquals("split at $split", expected, exits(stream.substring(0, split), stream.substring(split)))
+        }
+    }
+
     @Test fun `each place the parser is in the middle of something defers the bytes until it is out`() {
         val cases = listOf(
             "$esc[1;" to "2H",

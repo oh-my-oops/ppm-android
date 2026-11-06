@@ -142,7 +142,7 @@ class StaleLinksTest {
         Triple("plain text over row 2", "$escape[2;1HXYZ", 5),
         Triple("plain text over row 2, then EL", "$escape[2;1HXYZ$escape[K", 5),
         Triple("RIS", "${escape}c", 0),
-        Triple("alternate screen, in and out", "$escape[?1049hALT$escape[?1049l", 0),
+        Triple("alternate screen, in and out", "$escape[?1049hALT$escape[?1049l", 6),
         Triple("SU 2", "$escape[2S", 6),
         Triple("SD 2", "$escape[2T", 5),
         Triple("CR and text over the last row", "\r____", 6),

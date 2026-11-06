@@ -39,7 +39,9 @@ import java.nio.ByteBuffer
  * screen's rows, and a taller screen took them back as the shell's. The emulator keeps the shell's screen itself from the moment the
  * alternate one is entered, and that moment is the last one the library's screen is the shell's: the `h` of `CSI ? 1049 h` (or 1047) makes
  * the switch as it is read, so the write is cut right before it ([beforeEntry]) and the emulator reads the screen then
- * (`TerminalEmulatorImpl.saveShell`).
+ * (`TerminalEmulatorImpl.saveShell`). And the `l` of `CSI ? 1049 l` (or 1047) puts the shell's screen back, with its whole-screen damage
+ * wiping its links and prompts and any resize in between having cleared its wraps, so the write is cut right after that `l` ([afterExit])
+ * and the emulator puts them back from the copy (`TerminalEmulatorImpl.restoreShell`).
  *
  * Everything follows libvterm's own parser, in UTF-8 mode, which is the one the JNI sets: no 8-bit controls (so a lone 0x9c ends nothing),
  * NUL and DEL ignored wherever they are, CAN and SUB cancel anything open, ESC starts over and stays pending until the byte that completes
@@ -72,6 +74,10 @@ internal class WriteCuts(rows: Int = 24) {
 
     /** The cut [next] last returned stands just before the `h` that makes the library switch to the alternate screen, and is not one of the others. */
     var beforeEntry = false
+        private set
+
+    /** The cut [next] last returned stands just past the `l` that makes the library switch back to the shell's screen. */
+    var afterExit = false
         private set
 
     /** That cut has been made and the `h` after it has not been read yet: the next byte is not cut before again. */
@@ -127,6 +133,9 @@ internal class WriteCuts(rows: Int = 24) {
         hidden = WHOLE
         onAlternate = false
         origin = false
+        beforeEntry = false
+        afterExit = false
+        entryCut = false
     }
 
     /**
@@ -215,6 +224,7 @@ internal class WriteCuts(rows: Int = 24) {
      */
     fun next(bytes: ByteArray, from: Int, to: Int): Int {
         beforeEntry = false
+        afterExit = false
         queriedColors = 0
         queriedMode = 0
         var i = from
@@ -285,6 +295,7 @@ internal class WriteCuts(rows: Int = 24) {
     /** [next] over the first [to] bytes of a direct buffer, by absolute index: the buffer's position and limit are not read or moved. */
     fun next(buffer: ByteBuffer, from: Int, to: Int): Int {
         beforeEntry = false
+        afterExit = false
         queriedColors = 0
         queriedMode = 0
         var i = from
@@ -359,10 +370,7 @@ internal class WriteCuts(rows: Int = 24) {
 
             CSI_LEADER -> csiLeader(c)
             CSI_ARGUMENTS -> csiArguments(c)
-            CSI_INTERMEDIATE -> {
-                csiIntermediate(c)
-                return queriedMode != 0
-            }
+            CSI_INTERMEDIATE -> csiIntermediate(c)
 
             // `ESC P`, then bytes up to the first one that can end a command (0x40 to 0x7e); BEL and ESC end nothing here.
             DCS_COMMAND -> if (c in FINAL_FIRST..FINAL_LAST) state = STRING
@@ -391,7 +399,7 @@ internal class WriteCuts(rows: Int = 24) {
 
             OSC_8, OSC_OTHER, STRING -> return endOfString(c, hoisted)
         }
-        return false
+        return queriedMode != 0 || afterExit
     }
 
     /**
@@ -561,6 +569,7 @@ internal class WriteCuts(rows: Int = 24) {
         onAlternate = false
         shown = hidden
         hidden = WHOLE
+        afterExit = true
     }
 
     /** DECSTR: the screen shown has no region, the library has none either, and the origin mode is off. */
