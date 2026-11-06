@@ -805,6 +805,36 @@ class WriteCutsTest {
         }
     }
 
+    @Test fun `mouse tracking and wheel reports follow xterm and libvterm protocols and resets`() {
+        val cuts = scanner(24, "")
+        assertFalse(cuts.mouseTracking)
+        assertNull(cuts.wheelReport(down = true, row = 4, col = 52))
+
+        // SGR mouse tracking (?1000;1006h): 1-based coords, 64 up / 65 down, M terminator.
+        val sgr = scanner(24, "$esc[?1000;1006h")
+        assertTrue(sgr.mouseTracking)
+        assertEquals(1006, sgr.mouseProtocol)
+        assertEquals("$esc[<65;53;5M", String(sgr.wheelReport(down = true, row = 4, col = 52)!!, Charsets.US_ASCII))
+        assertEquals("$esc[<64;53;5M", String(sgr.wheelReport(down = false, row = 4, col = 52)!!, Charsets.US_ASCII))
+        // Modifiers: Shift (1 -> +4), Alt (2 -> +8), Ctrl (4 -> +16).
+        assertEquals("$esc[<81;1;1M", String(sgr.wheelReport(down = true, row = 0, col = 0, modifiers = 4)!!, Charsets.US_ASCII))
+        assertEquals("$esc[<72;10;20M", String(sgr.wheelReport(down = false, row = 19, col = 9, modifiers = 2)!!, Charsets.US_ASCII))
+
+        // urxvt (?1002;1015h) and default X10 (?1003h after ?1006l).
+        val rxvt = scanner(24, "$esc[?1002;1015h")
+        assertEquals("$esc[97;53;5M", String(rxvt.wheelReport(down = true, row = 4, col = 52)!!, Charsets.US_ASCII))
+        val x10 = scanner(24, "$esc[?1003;1006h$esc[?1006l")
+        assertEquals(0, x10.mouseProtocol)
+        assertEquals("$esc[M" + (0x41 + 0x20).toChar() + (53 + 0x20).toChar() + (5 + 0x20).toChar(), String(x10.wheelReport(down = true, row = 4, col = 52)!!, Charsets.ISO_8859_1))
+
+        // DECSTR (!p), RIS (ESC c) and ?1000l turn mouse tracking off.
+        assertFalse(scanner(24, "$esc[?1000;1006h$esc[?1000l").mouseTracking)
+        assertFalse(scanner(24, "$esc[?1002;1006h$esc[!p").mouseTracking)
+        val ris = scanner(24, "$esc[?1003;1006h${esc}c")
+        assertFalse(ris.mouseTracking)
+        assertEquals(0, ris.mouseProtocol)
+    }
+
     @Test fun `random streams are cut in the same places whatever the chunks, the array or the buffer, a byte at a time or not`() {
         val random = Random(2026)
         val pieces = listOf(

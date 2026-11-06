@@ -1,5 +1,6 @@
 package org.connectbot.terminal
 
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -87,5 +88,54 @@ class TerminalTouchSelectionTest {
         assertTrue(dragSelects(touchSelect = true, singleTouch = true))
         assertFalse("a second finger is the web's multi-touch, which it ignores", dragSelects(touchSelect = true, singleTouch = false))
         assertFalse("select mode off leaves a drag to scroll", dragSelects(touchSelect = false, singleTouch = true))
+    }
+
+    @Test
+    fun `selection auto-scroll stays still inside the viewport and matches xterm outside it`() {
+        // Inside 0..height (including the 40 dp edge band termlib used to scroll in): 0 rows.
+        assertEquals(0, selectionAutoScrollRows(y = 0f, height = 500f, maxThresholdPx = 100f))
+        assertEquals(0, selectionAutoScrollRows(y = 20f, height = 500f, maxThresholdPx = 100f))
+        assertEquals(0, selectionAutoScrollRows(y = 480f, height = 500f, maxThresholdPx = 100f))
+        assertEquals(0, selectionAutoScrollRows(y = 500f, height = 500f, maxThresholdPx = 100f))
+
+        // Above the top edge (y < 0): positive rows into history, up to 15 rows/tick at 50 dp (100 px at 2x density).
+        assertEquals(1, selectionAutoScrollRows(y = -1f, height = 500f, maxThresholdPx = 100f))
+        assertEquals(2, selectionAutoScrollRows(y = -6f, height = 500f, maxThresholdPx = 100f))
+        // At y = -25 (-0.25 * 14 = -3.5), JS Math.round(-3.5) is -3 -> -(-1 + -3) = 4.
+        assertEquals(4, selectionAutoScrollRows(y = -25f, height = 500f, maxThresholdPx = 100f))
+        assertEquals(8, selectionAutoScrollRows(y = -48f, height = 500f, maxThresholdPx = 100f))
+        assertEquals(15, selectionAutoScrollRows(y = -100f, height = 500f, maxThresholdPx = 100f))
+        assertEquals(15, selectionAutoScrollRows(y = -300f, height = 500f, maxThresholdPx = 100f))
+
+        // Below the bottom edge (y > height): negative rows towards the live bottom, down to -15 rows/tick.
+        assertEquals(-1, selectionAutoScrollRows(y = 501f, height = 500f, maxThresholdPx = 100f))
+        assertEquals(-2, selectionAutoScrollRows(y = 506f, height = 500f, maxThresholdPx = 100f))
+        // At y = 525 (+0.25 * 14 = +3.5), JS Math.round(+3.5) is +4 -> -(1 + 4) = -5.
+        assertEquals(-5, selectionAutoScrollRows(y = 525f, height = 500f, maxThresholdPx = 100f))
+        assertEquals(-8, selectionAutoScrollRows(y = 550f, height = 500f, maxThresholdPx = 100f))
+        assertEquals(-15, selectionAutoScrollRows(y = 600f, height = 500f, maxThresholdPx = 100f))
+
+        // Clamping the endpoint to start-of-top-row / end-of-bottom-row outside the viewport.
+        assertEquals(Offset(0f, 0f), selectionAutoScrollPoint(Offset(140f, -12f), 800f, 500f))
+        assertEquals(Offset(800f, 500f), selectionAutoScrollPoint(Offset(140f, 512f), 800f, 500f))
+        assertEquals(Offset(140f, 250f), selectionAutoScrollPoint(Offset(140f, 250f), 800f, 500f))
+    }
+
+    @Test
+    fun `touch scroll and wheel steps match xterm row steps and scrollback sensitivity`() {
+        assertEquals(0 to 12f, touchScrollLines(12f, 25f))
+        assertEquals(2 to 5f, touchScrollLines(55f, 25f))
+        assertEquals(-2 to -5f, touchScrollLines(-55f, 25f))
+
+        assertEquals(0, wheelScrollSteps(0f))
+        assertEquals(1, wheelScrollSteps(1f))
+        assertEquals(-1, wheelScrollSteps(-1f))
+        assertEquals(1, wheelScrollSteps(0.2f))
+        assertEquals(-3, wheelScrollSteps(-2.8f))
+
+        assertEquals(3, wheelScrollbackLines(-1f, altPressed = false))
+        assertEquals(15, wheelScrollbackLines(-1f, altPressed = true))
+        assertEquals(-3, wheelScrollbackLines(1f, altPressed = false))
+        assertEquals(-15, wheelScrollbackLines(1f, altPressed = true))
     }
 }

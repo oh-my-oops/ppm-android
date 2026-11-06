@@ -72,6 +72,12 @@ internal class WriteCuts(rows: Int = 24) {
     var origin = false
         private set
 
+    /** Whether a mouse-tracking mode with wheel events (`?1000`, `?1002` or `?1003`) is on, and the encoding protocol (`0` X10, `1005` UTF-8, `1006` SGR, `1015` rxvt). */
+    var mouseTracking = false
+        private set
+    var mouseProtocol = 0
+        private set
+
     /** The cut [next] last returned stands just before the `h` that makes the library switch to the alternate screen, and is not one of the others. */
     var beforeEntry = false
         private set
@@ -133,6 +139,8 @@ internal class WriteCuts(rows: Int = 24) {
         hidden = WHOLE
         onAlternate = false
         origin = false
+        mouseTracking = false
+        mouseProtocol = 0
         beforeEntry = false
         afterExit = false
         entryCut = false
@@ -212,6 +220,40 @@ internal class WriteCuts(rows: Int = 24) {
         val hi = HEX[(byte ushr 4) and 0x0F]
         val lo = HEX[byte and 0x0F]
         out.append(hi).append(lo).append(hi).append(lo)
+    }
+
+    /**
+     * What xterm.js and libvterm (`output_mouse` in `state.c`) send for one wheel step at 0-based [row] and [col] while a mouse-tracking
+     * mode (`?1000`, `?1002` or `?1003`) is on, or null when mouse tracking is off. [down] is true for scrolling down into the document
+     * (wheel button 5, code 65) and false for scrolling up (wheel button 4, code 64); [modifiers] uses libvterm's bits (`1` Shift, `2` Alt,
+     * `4` Ctrl), shifted into `0x04 / 0x08 / 0x10`.
+     */
+    fun wheelReport(down: Boolean, row: Int, col: Int, modifiers: Int = 0): ByteArray? {
+        if (!mouseTracking) return null
+        val code = (if (down) 0x41 else 0x40) or ((modifiers and 0x07) shl 2)
+        val x = col.coerceAtLeast(0) + 1
+        val y = row.coerceAtLeast(0) + 1
+        return when (mouseProtocol) {
+            1006 -> "$CSI<$code;$x;${y}M".toByteArray(Charsets.US_ASCII)
+            1015 -> "$CSI${code + 0x20};$x;${y}M".toByteArray(Charsets.US_ASCII)
+            1005 -> {
+                val uX = x.coerceAtMost(0x7ff - 0x20)
+                val uY = y.coerceAtMost(0x7ff - 0x20)
+                ("${CSI}M" + (code + 0x20).toChar() + (uX + 0x20).toChar() + (uY + 0x20).toChar()).toByteArray(Charsets.UTF_8)
+            }
+            else -> {
+                val bX = x.coerceAtMost(0xff - 0x20)
+                val bY = y.coerceAtMost(0xff - 0x20)
+                byteArrayOf(
+                    ESC_BYTE,
+                    LEFT_BRACKET,
+                    'M'.code.toByte(),
+                    (code + 0x20).toByte(),
+                    (bX + 0x20).toByte(),
+                    (bY + 0x20).toByte(),
+                )
+            }
+        }
     }
 
     /**
@@ -548,8 +590,11 @@ internal class WriteCuts(rows: Int = 24) {
     private fun setModes(on: Boolean) {
         for (i in 0 until argCount) {
             if (args[i] == MISSING) continue
-            when ((args[i] and MASK).toInt()) {
+            val mode = (args[i] and MASK).toInt()
+            when (mode) {
                 6 -> origin = on
+                1000, 1002, 1003 -> mouseTracking = on
+                1005, 1006, 1015 -> mouseProtocol = if (on) mode else 0
                 1047, 1049 -> if (on) enterAlternate() else leaveAlternate()
             }
         }
@@ -572,11 +617,12 @@ internal class WriteCuts(rows: Int = 24) {
         afterExit = true
     }
 
-    /** DECSTR: the screen shown has no region, the library has none either, and the origin mode is off. */
+    /** DECSTR: the screen shown has no region, the library has none either, and the origin and mouse-tracking modes are off. */
     private fun softReset() {
         shown = WHOLE
         held = WHOLE
         origin = false
+        mouseTracking = false
     }
 
     /** RIS: neither screen has a region. The library goes on showing the screen it showed (its parser leaves that to the next mode). */
@@ -585,6 +631,8 @@ internal class WriteCuts(rows: Int = 24) {
         hidden = WHOLE
         held = WHOLE
         origin = false
+        mouseTracking = false
+        mouseProtocol = 0
     }
 
     private companion object {

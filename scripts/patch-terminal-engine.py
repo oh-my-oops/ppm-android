@@ -560,6 +560,21 @@ def emulator(text):
             onKeyboardInput(answer)
         }
 
+        /** Whether a mouse-tracking mode with wheel events (`?1000`, `?1002` or `?1003`) is on, or the alternate screen is active. */
+        internal val isMouseTracking: Boolean
+            get() = synchronized(damageLock) { writeCuts.mouseTracking }
+
+        internal val isAlternateScreen: Boolean
+            get() = synchronized(damageLock) { isAltScreenActive || writeCuts.onAlternate }
+
+        /** Sends one wheel step at 0-based [row] and [col] when mouse tracking is on, in the protocol the stream asked for. */
+        internal fun dispatchWheel(down: Boolean, row: Int, col: Int, modifiers: Int = 0): Unit = commands.call {
+            val report = synchronized(damageLock) {
+                if (isClosed) null else writeCuts.wheelReport(down, row.coerceIn(0, rows - 1), col.coerceIn(0, cols - 1), modifiers)
+            } ?: return@call
+            onKeyboardInput(report)
+        }
+
         /**
          * libvterm's `request_dec_mode` in `state.c` answers `0` ("not recognised") for `47` and `1049`, and `1` or `2` for `1047`.
          * [WriteCuts] cuts at all three and [answerQuery] sends xterm.js's reply after the piece, so the library's own reply during the
@@ -889,6 +904,62 @@ def touch_select(text):
     # a handle grab or a link. Upstream turns a drag into a scroll, and the app's old select mode (one cell at the
     # cursor, `isSelecting` left on) therefore showed nothing at all.
     text = replace(text, "    val currentKeyboardEnabled by rememberUpdatedState(keyboardEnabled)\n", "    val currentKeyboardEnabled by rememberUpdatedState(keyboardEnabled)\n    val currentTouchSelect by rememberUpdatedState(touchSelect)\n")
+    old_auto_scroll = """                        fun startAutoScroll() {
+                            if (autoScrollJob != null) return
+                            autoScrollJob = launch {
+                                var fractionalRows = 0f
+                                while (true) {
+                                    delay(16)
+                                    val velocity = selectionAutoScrollVelocity(
+                                        autoScrollPointer.y,
+                                        size.height.toFloat(),
+                                        with(density) { SELECTION_AUTO_SCROLL_EDGE.toPx() },
+                                    )
+                                    if (velocity == 0f) {
+                                        fractionalRows = 0f
+                                        continue
+                                    }
+                                    fractionalRows += abs(velocity) * 0.016f
+                                    val rows = fractionalRows.toInt()
+                                    if (rows == 0) continue
+                                    fractionalRows -= rows
+                                    val previous = screenState.scrollbackPosition
+                                    screenState.scrollBy(if (velocity > 0f) rows else -rows)
+                                    if (screenState.scrollbackPosition != previous) {
+                                        autoScrolled = true
+                                        onAutoScroll?.invoke()
+                                    }
+                                }
+                            }
+                        }
+                        fun selectAt(position: Offset, time: Long) {
+                            val target = selectionPoint(position)"""
+    new_auto_scroll = """                        fun startAutoScroll() {
+                            if (autoScrollJob != null) return
+                            autoScrollJob = launch {
+                                val maxThresholdPx = with(density) { SELECTION_AUTO_SCROLL_MAX_THRESHOLD.toPx() }
+                                while (true) {
+                                    delay(SELECTION_AUTO_SCROLL_INTERVAL_MS)
+                                    val rows = selectionAutoScrollRows(
+                                        autoScrollPointer.y,
+                                        size.height.toFloat(),
+                                        maxThresholdPx,
+                                    )
+                                    if (rows == 0) continue
+                                    val previous = screenState.scrollbackPosition
+                                    screenState.scrollBy(rows)
+                                    if (screenState.scrollbackPosition != previous) {
+                                        scrollOffset.snapTo(screenState.scrollbackPosition * baseCharHeight)
+                                        autoScrolled = true
+                                        onAutoScroll?.invoke()
+                                    }
+                                }
+                            }
+                        }
+                        fun selectAt(position: Offset, time: Long) {
+                            val clamped = selectionAutoScrollPoint(position, size.width.toFloat(), size.height.toFloat())
+                            val target = selectionPoint(clamped, edgeReach = isFinger && clamped == position)"""
+    text = replace(text, old_auto_scroll, new_auto_scroll)
     marker = "                        scrollJob?.cancel()\n\n                        // 1a. Check for double-tap to start word selection\n"
     text = replace(text, marker, """                        // Select mode: the cell the finger came down on anchors a character selection that the drag extends.
                         fun beginTouchSelection() {
@@ -906,13 +977,153 @@ def touch_select(text):
                             startAutoScroll()
                         }
 """ + marker)
-    text = replace(text, "                        val isDoubleTap = (down.uptimeMillis", "                        val isDoubleTap = !currentTouchSelect && (down.uptimeMillis")
-    text = replace(text, "                        val longPressJob = if (gestureType == GestureType.Undetermined) {", "                        val longPressJob = if (gestureType == GestureType.Undetermined && !currentTouchSelect) {")
+    text = replace(text, "                        val isDoubleTap = (down.uptimeMillis", "                        val isDoubleTap = !currentTouchSelect && !terminalEmulator.isMouseTracking && (down.uptimeMillis")
+    text = replace(text, "                        val longPressJob = if (gestureType == GestureType.Undetermined) {", "                        val longPressJob = if (gestureType == GestureType.Undetermined && !currentTouchSelect && !terminalEmulator.isMouseTracking) {")
     text = replace(
         text,
         "                                    selectionManager.endSelection()\n                                }\n                            }\n",
         "                                    selectionManager.endSelection()\n                                }\n                                if (currentKeyboardEnabled) focusRequester.requestFocus()\n                            }\n",
     )
+    text = replace(text, "                        var pendingPageDrag = 0f\n", "                        var pendingPageDrag = 0f\n                        var pendingTouchScroll = 0f\n")
+    text = replace(text, """                                        if (gestureType == GestureType.Page) {
+                                            // Include movement accumulated during touch slop and the zoom grace period.
+                                            pendingPageDrag = -panAccumulator.y + dragAmount.y
+                                        }""", """                                        if (gestureType == GestureType.Page) {
+                                            // Include movement accumulated during touch slop and the zoom grace period.
+                                            pendingPageDrag = -panAccumulator.y + dragAmount.y
+                                        }
+                                        if (gestureType == GestureType.Scroll) {
+                                            pendingTouchScroll = -panAccumulator.y + dragAmount.y
+                                        }""")
+    old_scroll = """                                    GestureType.Scroll -> {
+                                        // Update scroll offset using total pan from the start of the gesture
+                                        // to avoid stuttering from stale scrollOffset.value.
+                                        val currentMaxScroll =
+                                            screenState.snapshot.scrollback.size * baseCharHeight
+                                        val newOffset = (initialScrollOffset + panAccumulator.y)
+                                            .coerceIn(0f, currentMaxScroll)
+
+                                        // Cancel any ongoing scroll or fling and snap to the new position.
+                                        // Using launch with cancel ensures the latest snap always wins.
+                                        scrollJob?.cancel()
+                                        scrollJob = launch {
+                                            scrollOffset.snapTo(newOffset)
+                                        }
+
+                                        // Update terminal buffer scrollback position
+                                        val scrolledLines =
+                                            (newOffset / baseCharHeight).toInt()
+                                        screenState.scrollBy(scrolledLines - screenState.scrollbackPosition)
+                                    }"""
+    new_scroll = """                                    GestureType.Scroll -> {
+                                        val mouseTracking = terminalEmulator.isMouseTracking
+                                        val altScreen = terminalEmulator.isAlternateScreen || screenState.snapshot.alternateScreen
+                                        if (mouseTracking || altScreen) {
+                                            scrollJob?.cancel()
+                                            if (singleTouch && baseCharHeight > 0f && baseCharWidth > 0f) {
+                                                pendingTouchScroll -= dragAmount.y
+                                                val (lines, remainder) = touchScrollLines(pendingTouchScroll, baseCharHeight)
+                                                pendingTouchScroll = remainder
+                                                if (lines != 0) {
+                                                    val down = lines > 0
+                                                    if (mouseTracking) {
+                                                        val row = (change.position.y / baseCharHeight).toInt().coerceIn(0, screenState.snapshot.rows - 1)
+                                                        val col = (change.position.x / baseCharWidth).toInt().coerceIn(0, screenState.snapshot.cols - 1)
+                                                        repeat(abs(lines)) {
+                                                            terminalEmulator.commands.execute { terminalEmulator.dispatchWheel(down, row, col) }
+                                                        }
+                                                    } else {
+                                                        val key = if (down) VTermKey.DOWN else VTermKey.UP
+                                                        repeat(abs(lines)) {
+                                                            terminalEmulator.commands.execute { terminalEmulator.dispatchKey(0, key) }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            // Update scroll offset using total pan from the start of the gesture
+                                            // to avoid stuttering from stale scrollOffset.value.
+                                            val currentMaxScroll =
+                                                screenState.snapshot.scrollback.size * baseCharHeight
+                                            val newOffset = (initialScrollOffset + panAccumulator.y)
+                                                .coerceIn(0f, currentMaxScroll)
+
+                                            // Cancel any ongoing scroll or fling and snap to the new position.
+                                            // Using launch with cancel ensures the latest snap always wins.
+                                            scrollJob?.cancel()
+                                            scrollJob = launch {
+                                                scrollOffset.snapTo(newOffset)
+                                            }
+
+                                            // Update terminal buffer scrollback position
+                                            val scrolledLines =
+                                                (newOffset / baseCharHeight).toInt()
+                                            screenState.scrollBy(scrolledLines - screenState.scrollbackPosition)
+                                        }
+                                    }"""
+    text = replace(text, old_scroll, new_scroll)
+    old_fling = """                            GestureType.Scroll -> {
+                                // Apply fling animation
+                                val velocity = velocityTracker.calculateVelocity()
+                                scrollJob?.cancel()
+                                scrollJob = launch {
+                                    scrollOffset.animateDecay(
+                                        initialVelocity = velocity.y,
+                                        animationSpec = splineBasedDecay(density),
+                                    ) {
+                                        // Update terminal buffer during animation
+                                        val scrolledLines =
+                                            (value / baseCharHeight).toInt()
+                                        screenState.scrollBy(scrolledLines - screenState.scrollbackPosition)
+                                    }
+                                }
+                            }"""
+    new_fling = """                            GestureType.Scroll -> {
+                                // Apply fling animation
+                                val velocity = velocityTracker.calculateVelocity()
+                                scrollJob?.cancel()
+                                if (terminalEmulator.isMouseTracking) {
+                                    // xterm.js touch inertia omits clientX/clientY and emits a malformed NaN wheel report; stop cleanly on lift.
+                                } else if (terminalEmulator.isAlternateScreen || screenState.snapshot.alternateScreen) {
+                                    if (baseCharHeight > 0f && velocity.y != 0f) {
+                                        scrollJob = launch {
+                                            var lastValue = 0f
+                                            var remainder = pendingTouchScroll
+                                            Animatable(0f).animateDecay(
+                                                initialVelocity = -velocity.y,
+                                                animationSpec = splineBasedDecay(density),
+                                            ) {
+                                                if (terminalEmulator.isMouseTracking || (!terminalEmulator.isAlternateScreen && !screenState.snapshot.alternateScreen)) {
+                                                    return@animateDecay
+                                                }
+                                                remainder += value - lastValue
+                                                lastValue = value
+                                                val (lines, nextRemainder) = touchScrollLines(remainder, baseCharHeight)
+                                                remainder = nextRemainder
+                                                if (lines != 0) {
+                                                    val key = if (lines > 0) VTermKey.DOWN else VTermKey.UP
+                                                    repeat(abs(lines)) {
+                                                        terminalEmulator.commands.execute { terminalEmulator.dispatchKey(0, key) }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    scrollJob = launch {
+                                        scrollOffset.animateDecay(
+                                            initialVelocity = velocity.y,
+                                            animationSpec = splineBasedDecay(density),
+                                        ) {
+                                            // Update terminal buffer during animation
+                                            val scrolledLines =
+                                                (value / baseCharHeight).toInt()
+                                            screenState.scrollBy(scrolledLines - screenState.scrollbackPosition)
+                                        }
+                                    }
+                                }
+                            }"""
+    text = replace(text, old_fling, new_fling)
     return replace(text, "                                        gestureType = if (pagingCandidate && singleTouch &&", """                                        gestureType = if (dragSelects(currentTouchSelect, singleTouch)) {
                                             beginTouchSelection()
                                             GestureType.Selection
@@ -925,7 +1136,7 @@ def web_links(text):
     # opens it only for a mouse click that went down and came up on it, and draws an OSC 8 cell dashed all the time. Upstream
     # underlines every URL it detects all the time and opens one on any tap, a finger's included, which is what scrolling through
     # output with a thumb does all day.
-    text = replace(text, "import androidx.compose.ui.input.pointer.PointerType\n", "import androidx.compose.ui.input.pointer.PointerEventType\nimport androidx.compose.ui.input.pointer.PointerIcon\nimport androidx.compose.ui.input.pointer.PointerType\nimport androidx.compose.ui.input.pointer.pointerHoverIcon\n")
+    text = replace(text, "import androidx.compose.ui.input.pointer.PointerType\n", "import androidx.compose.ui.input.pointer.PointerEventType\nimport androidx.compose.ui.input.pointer.PointerIcon\nimport androidx.compose.ui.input.pointer.PointerType\nimport androidx.compose.ui.input.pointer.isAltPressed\nimport androidx.compose.ui.input.pointer.isCtrlPressed\nimport androidx.compose.ui.input.pointer.isShiftPressed\nimport androidx.compose.ui.input.pointer.pointerHoverIcon\n")
     text = replace(text, "import androidx.compose.ui.unit.TextUnit\n", "import androidx.compose.ui.unit.IntOffset\nimport androidx.compose.ui.unit.TextUnit\n")
     # An OSC 8 link asks before it opens, as the web's own default does (`confirm(...)`); a plain URL opens at once.
     text = replace(text, "    touchSelect: Boolean = false,\n) {\n    require(minimumContrastRatio.isFinite() && minimumContrastRatio in 1.0..21.0)", "    touchSelect: Boolean = false,\n    onOsc8HyperlinkClick: ((String) -> Unit)? = null,\n) {\n    require(minimumContrastRatio.isFinite() && minimumContrastRatio in 1.0..21.0)", 2)
@@ -951,6 +1162,39 @@ def web_links(text):
                         while (true) {
                             val event = awaitPointerEvent()
                             val change = event.changes.firstOrNull() ?: continue
+                            if (event.type == PointerEventType.Scroll && baseCharWidth > 0f && baseCharHeight > 0f) {
+                                val deltaY = change.scrollDelta.y
+                                if (deltaY != 0f) {
+                                    change.consume()
+                                    val shift = event.keyboardModifiers.isShiftPressed
+                                    val alt = event.keyboardModifiers.isAltPressed
+                                    val ctrl = event.keyboardModifiers.isCtrlPressed
+                                    if (terminalEmulator.isMouseTracking && !shift) {
+                                        val steps = wheelScrollSteps(deltaY)
+                                        val down = steps > 0
+                                        val row = (change.position.y / baseCharHeight).toInt().coerceIn(0, screenState.snapshot.rows - 1)
+                                        val col = (change.position.x / baseCharWidth).toInt().coerceIn(0, screenState.snapshot.cols - 1)
+                                        val mods = (if (alt) ControlKeys.ALT else 0) or (if (ctrl) ControlKeys.CTRL else 0)
+                                        repeat(abs(steps)) {
+                                            terminalEmulator.commands.execute { terminalEmulator.dispatchWheel(down, row, col, mods) }
+                                        }
+                                    } else if ((terminalEmulator.isAlternateScreen || screenState.snapshot.alternateScreen) && !shift) {
+                                        val steps = wheelScrollSteps(deltaY)
+                                        val key = if (steps > 0) VTermKey.DOWN else VTermKey.UP
+                                        repeat(abs(steps)) {
+                                            terminalEmulator.commands.execute { terminalEmulator.dispatchKey(0, key) }
+                                        }
+                                    } else if (!terminalEmulator.isAlternateScreen && !screenState.snapshot.alternateScreen) {
+                                        val lines = wheelScrollbackLines(deltaY, alt)
+                                        if (lines != 0) {
+                                            screenState.scrollBy(lines)
+                                            val syncedOffset = screenState.scrollbackPosition * baseCharHeight
+                                            scope.launch { scrollOffset.snapTo(syncedOffset) }
+                                        }
+                                    }
+                                }
+                                continue
+                            }
                             if (change.type != PointerType.Mouse) continue
                             hoverCell = if (event.type == PointerEventType.Exit) null else cellAt(change.position)
                         }
