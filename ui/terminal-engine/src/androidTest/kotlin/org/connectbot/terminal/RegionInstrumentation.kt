@@ -174,7 +174,8 @@ internal object RegionChecks {
             while (true) {
                 val cut = scanner.next(bytes, start, to)
                 val end = if (cut < 0) to else cut
-                native.writeInput(bytes, start, end - start)
+                // A cut just before the `h` of an entry into the alternate screen can stand where the piece began, and an empty one is not handed over.
+                if (end > start) native.writeInput(bytes, start, end - start)
                 if (cut >= 0) {
                     val fix = scanner.regionFix(row, column)
                     if (fix != null) {

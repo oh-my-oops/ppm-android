@@ -1,6 +1,8 @@
 package org.connectbot.terminal
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito.doAnswer
@@ -263,15 +265,243 @@ class ResizeWrapTest {
 
     // ---------------------------------------------------------------- the alternate screen
 
-    @Test fun `with the alternate screen up a resize pushes the rows of the alternate screen into the history, each with its own flag, and the shell's are not in it`() {
+    @Test fun `with the alternate screen up a resize pushes the shell's rows into the history, each with its own flag, and the alternate screen's are not in it`() {
         Rig(6, 10).use { rig ->
             rig.write("A".repeat(10) + "BBBBB\r\np2\r\np3\r\n$ ")
             rig.write("$escape[H$escape[?1049h" + "ALTALTALTA" + "LT\r\nALT2")
             rig.resize(3, 10)
-            // The library pushes what is on the screen it shows, not the primary screen's rows that no longer fit (the wrapped line is one).
-            assertEquals(listOf("ALTALTALTA" to true, "LT" to false), rig.history().wraps())
-            // And it clears the flags of the screen it shows; none is carried for the alternate screen, whose rows the pushes do not account for.
+            // The library pushes the rows of the shell's screen that no longer fit (the wrapped line is the first), but reads them from the screen it shows.
+            assertEquals(listOf("AAAAAAAAAA" to true, "BBBBB" to false), rig.history().wraps())
+            // The screen shown is the alternate one, whose flags the library clears and none is carried for: its rows are not the pushed ones.
             assertEquals(listOf("ALTALTALTA" to false, "LT" to false, "ALT2" to false), rig.screen().wraps())
+        }
+    }
+
+    // ---------------------------------------------------------------- the shell's screen under the alternate screen
+
+    private val shell = (0..9).joinToString("\r\n") { "P$it" } + "\r\n$ "
+    private val shellScreen = (0..9).map { "P$it" } + "$"
+    private val altScreen = "$escape[H" + (0..9).joinToString("\r\n") { "ALT$it" }
+
+    @Test fun `a screen shrunk and grown again under the alternate screen is the shell's own when the alternate screen is left`() {
+        Rig(11, 12).use { rig ->
+            rig.write(shell)
+            rig.write("$escape[?1049h$altScreen")
+            rig.resize(6, 12)
+            rig.resize(11, 12)
+            rig.write("$escape[?1049l")
+            // The library read the rows it pushed from the alternate screen: the shell's first five rows came back as ALT0 to ALT4.
+            assertEquals(shellScreen, rig.screen().texts())
+            assertEquals(emptyList<String>(), rig.history().texts())
+        }
+    }
+
+    @Test fun `the same when the shell's output and the escape that enters the alternate screen are one write, as a replay is`() {
+        Rig(11, 12).use { rig ->
+            rig.write(shell + "$escape[?1049h$altScreen")
+            rig.resize(6, 12)
+            rig.resize(11, 12)
+            rig.write("$escape[?1049l")
+            assertEquals(shellScreen, rig.screen().texts())
+        }
+    }
+
+    @Test fun `the shell's rows are in the history while the screen is shorter, and the alternate screen is left`() {
+        Rig(11, 12).use { rig ->
+            rig.write(shell + "$escape[?1049h$altScreen")
+            rig.resize(6, 12)
+            assertEquals((0..4).map { "P$it" }, rig.history().texts())
+            rig.write("$escape[?1049l")
+            assertEquals(listOf("P5", "P6", "P7", "P8", "P9", "$"), rig.screen().texts())
+            assertEquals((0..4).map { "P$it" }, rig.history().texts())
+            // They are lines of the history like any other: no row of the screen, and no wrap kept for a screen.
+            assertTrue(rig.history().all { it.row == -1 && !it.wrapKept })
+        }
+    }
+
+    @Test fun `a screen shrunk twice under the alternate screen gives back all it took when it grows`() {
+        Rig(11, 12).use { rig ->
+            rig.write(shell + "$escape[?1049h$altScreen")
+            rig.resize(8, 12)
+            rig.resize(4, 12)
+            assertEquals((0..6).map { "P$it" }, rig.history().texts())
+            rig.resize(9, 12)
+            rig.write("$escape[?1049l")
+            assertEquals((2..9).map { "P$it" } + "$", rig.screen().texts())
+            assertEquals(listOf("P0", "P1"), rig.history().texts())
+        }
+    }
+
+    @Test fun `the enter is the same in two writes, wherever they split it`() {
+        val enter = "$escape[?1049h"
+        for (split in 1 until enter.length) {
+            Rig(11, 12).use { rig ->
+                rig.write(shell + enter.substring(0, split))
+                rig.write(enter.substring(split) + altScreen)
+                rig.resize(6, 12)
+                rig.resize(11, 12)
+                rig.write("$escape[?1049l")
+                assertEquals("split after $split", shellScreen, rig.screen().texts())
+                // The piece before an h that begins a write is empty, and is not handed to the library.
+                assertTrue("split after $split", rig.vterm.writes.none { it.isEmpty() })
+            }
+        }
+    }
+
+    @Test fun `the mode 1047 enters the alternate screen too, and the other arguments of the mode do not matter`() {
+        for ((enter, leave) in listOf("?1047h" to "?1047l", "?25;1049h" to "?1049l", "?1049;25h" to "?1049l", "?1047;1049h" to "?1047l")) {
+            Rig(11, 12).use { rig ->
+                rig.write(shell + "$escape[" + enter + altScreen)
+                rig.resize(6, 12)
+                rig.resize(11, 12)
+                rig.write("$escape[" + leave)
+                assertEquals(enter, shellScreen, rig.screen().texts())
+            }
+        }
+    }
+
+    @Test fun `entering the alternate screen again keeps the shell's rows of the first time, not the alternate screen's`() {
+        Rig(11, 12).use { rig ->
+            rig.write(shell + "$escape[?1049h$altScreen")
+            rig.write("$escape[?1049h$altScreen")
+            rig.resize(6, 12)
+            rig.resize(11, 12)
+            rig.write("$escape[?1049l")
+            assertEquals(shellScreen, rig.screen().texts())
+        }
+    }
+
+    @Test fun `each visit to the alternate screen keeps the shell's rows as they are when it is entered`() {
+        Rig(6, 10).use { rig ->
+            rig.write("a0\r\na1\r\na2\r\na3\r\na4\r\n$ ")
+            rig.write("$escape[?1049h$escape[Halt")
+            rig.resize(3, 10)
+            rig.resize(6, 10)
+            rig.write("$escape[?1049l")
+            assertEquals(listOf("a0", "a1", "a2", "a3", "a4", "$"), rig.screen().texts())
+            // The shell goes on, and scrolls once; the next visit starts from that screen.
+            rig.write("b0\r\nb1")
+            assertEquals(listOf("a1", "a2", "a3", "a4", "$ b0", "b1"), rig.screen().texts())
+            rig.write("$escape[?1049h$escape[Halt")
+            rig.resize(3, 10)
+            assertEquals(listOf("a0", "a1", "a2", "a3"), rig.history().texts())
+            rig.resize(6, 10)
+            rig.write("$escape[?1049l")
+            assertEquals(listOf("a1", "a2", "a3", "a4", "$ b0", "b1"), rig.screen().texts())
+            assertEquals(listOf("a0"), rig.history().texts())
+        }
+    }
+
+    @Test fun `once the alternate screen is left a resize pushes what the screen shows, whatever the screen was when it was entered`() {
+        Rig(6, 10).use { rig ->
+            rig.write("a0\r\na1\r\na2\r\na3\r\na4\r\n$ $escape[?1049h${escape}[Halt$escape[?1049l")
+            rig.write("\r\nb0\r\nb1\r\nb2")
+            assertEquals(listOf("a3", "a4", "$", "b0", "b1", "b2"), rig.screen().texts())
+            rig.resize(3, 10)
+            assertEquals(listOf("a0", "a1", "a2", "a3", "a4", "$"), rig.history().texts())
+        }
+    }
+
+    @Test fun `the rows the shell had under the alternate screen keep their wraps and links in the history`() {
+        Rig(8, 40).use { rig ->
+            rig.write("A".repeat(40) + "B".repeat(5) + "\r\n" + link(1) + "\r\n" + link(2) + "\r\n" + link(3) + "\r\n$ ")
+            rig.write("$escape[?1049h$escape[Halt")
+            rig.resize(4, 40)
+            val url = { n: Int -> listOf("https://l$n.test/") }
+            assertEquals(listOf("A".repeat(40) to true, "B".repeat(5) to false), rig.history().wraps())
+            assertEquals(listOf(emptyList<String?>(), emptyList()), rig.history().links())
+            rig.resize(8, 40)
+            rig.resize(3, 40)
+            assertEquals(listOf("A".repeat(40) to true, "B".repeat(5) to false, "link1" to false), rig.history().wraps().take(3))
+            assertEquals(listOf(emptyList<String?>(), emptyList(), url(1)), rig.history().links().take(3))
+        }
+    }
+
+    @Test fun `a row of the shell's screen that goes into the history carries no kept wrap there, as no row in it does`() {
+        Rig(6, 10).use { rig ->
+            rig.write("A".repeat(10) + "BBBBB\r\np2\r\np3\r\n$ ")
+            // The screen lets its blank bottom row go: the library clears the flag of the first row and the emulator keeps it.
+            rig.resize(5, 10)
+            assertTrue(rig.screen()[0].wrapKept)
+            rig.write("$escape[?1049h$escape[Halt")
+            rig.resize(3, 10)
+            assertEquals(listOf("AAAAAAAAAA" to true, "BBBBB" to false), rig.history().wraps())
+            assertTrue(rig.history().none { it.wrapKept })
+        }
+    }
+
+    @Test fun `a resize in columns under the alternate screen drops the shell's wraps, as it does when the shell is shown, and the rows pushed by the same resize keep theirs`() {
+        Rig(6, 10).use { rig ->
+            rig.write("A".repeat(10) + "BBBBB\r\np2\r\np3\r\n$ " + "$escape[?1049h$escape[Halt")
+            rig.resize(6, 12)
+            rig.resize(3, 12)
+            assertEquals(listOf("AAAAAAAAAA" to false, "BBBBB" to false), rig.history().wraps())
+        }
+        Rig(6, 10).use { rig ->
+            rig.write("A".repeat(10) + "BBBBB\r\np2\r\np3\r\n$ " + "$escape[?1049h$escape[Halt")
+            rig.resize(3, 12)
+            assertEquals(listOf("AAAAAAAAAA" to true, "BBBBB" to false), rig.history().wraps())
+        }
+    }
+
+    @Test fun `the row on top of the shell's screen after a resize under the alternate screen is pushed by the next line feed with the flag it had`() {
+        Rig(6, 10).use { rig ->
+            rig.write("xx\r\n" + "A".repeat(10) + "BBBBB\r\np3\r\n$ " + "$escape[?1047h$escape[Halt")
+            rig.resize(4, 10)
+            rig.write("$escape[?1047l$escape[4;1H\r\n")
+            assertEquals(listOf("xx" to false, "AAAAAAAAAA" to true), rig.history().wraps())
+        }
+    }
+
+    private val savedShellField = TerminalEmulatorImpl::class.java.getDeclaredField("savedShell").apply { isAccessible = true }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun savedShell(rig: Rig) = savedShellField.get(rig.emulator) as List<TerminalLine>?
+
+    @Test fun `the shell's screen is kept for as long as the alternate screen is up, laid out as the library lays out the one it keeps, and let go of when it is left`() {
+        Rig(11, 12).use { rig ->
+            assertNull(savedShell(rig))
+            rig.write(shell)
+            assertNull(savedShell(rig))
+            rig.write("$escape[?1049h$altScreen")
+            assertEquals(shellScreen, savedShell(rig)!!.texts())
+            rig.resize(6, 12)
+            assertEquals(listOf("P5", "P6", "P7", "P8", "P9", "$"), savedShell(rig)!!.texts())
+            assertEquals(List(6) { it }, savedShell(rig)!!.map { it.row })
+            rig.resize(11, 12)
+            assertEquals(shellScreen, savedShell(rig)!!.texts())
+            rig.write("$escape[?1049l")
+            assertNull(savedShell(rig))
+        }
+    }
+
+    @Test fun `a reset lets go of the shell's screen, as the library it was kept for is gone`() {
+        Rig(11, 12).use { rig ->
+            rig.write(shell + "$escape[?1049h$altScreen")
+            assertEquals(shellScreen, savedShell(rig)!!.texts())
+            rig.emulator.reset()
+            assertNull(savedShell(rig))
+        }
+    }
+
+    @Test fun `rows kept for an alternate screen that the library is not showing are not pushed`() {
+        Rig(6, 10).use { rig ->
+            rig.write("a0\r\na1\r\na2\r\na3\r\na4\r\n$ ")
+            // The scan cannot take something for an entry that the library does not, here: the copy is put in by hand.
+            savedShellField.set(rig.emulator, List(6) { TerminalLine.empty(it, 10) })
+            rig.resize(3, 10)
+            assertEquals(listOf("a0", "a1", "a2"), rig.history().texts())
+        }
+    }
+
+    @Test fun `a resize in columns under the alternate screen leaves the shell's text as it is`() {
+        Rig(11, 12).use { rig ->
+            rig.write(shell + "$escape[?1049h$altScreen")
+            rig.resize(11, 9)
+            rig.resize(6, 9)
+            rig.resize(11, 12)
+            rig.write("$escape[?1049l")
+            assertEquals(shellScreen, rig.screen().texts())
         }
     }
 

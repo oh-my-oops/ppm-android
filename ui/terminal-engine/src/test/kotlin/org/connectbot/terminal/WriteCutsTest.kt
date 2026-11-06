@@ -319,14 +319,158 @@ class WriteCutsTest {
     @Test fun `a difference the caller has not put right is a cut just past the next sequence, a plain one too, in an array or a buffer`() {
         for (direct in listOf(false, true)) {
             val scanner = WriteCuts(30)
-            fun cut(text: String): Int {
+            fun cut(text: String, from: Int = 0): Int {
                 val data = bytes(text)
-                return if (direct) scanner.next(ByteBuffer.allocateDirect(data.size).put(data), 0, data.size) else scanner.next(data, 0, data.size)
+                return if (direct) scanner.next(ByteBuffer.allocateDirect(data.size).put(data), from, data.size) else scanner.next(data, from, data.size)
             }
             // The alternate screen is entered with the region of the shell's set, and nobody writes the fix: the screen shown is not the one the library holds.
-            assertEquals("$esc[1;18r$esc[?1049h".length, cut("$esc[1;18r$esc[?1049h"))
+            // The first cut stands before the h, where the library still shows the shell's screen; the one that the region asks for is just past it.
+            val enter = "$esc[1;18r$esc[?1049h"
+            val before = cut(enter)
+            assertEquals(if (direct) "buffer" else "array", enter.length - 1, before)
+            assertEquals(if (direct) "buffer" else "array", enter.length, cut(enter, before))
             assertEquals(if (direct) "buffer" else "array", "$esc[2J".length, cut("$esc[2Jtext"))
         }
+    }
+
+    // ---------------------------------------------------------------- the alternate screen is entered
+
+    /** The cuts of the chunks given one after another to one scanner that stand before an `h` that enters the alternate screen, as indexes in the whole stream. */
+    private fun entries(direct: Boolean, vararg chunks: String): List<Int> {
+        val scanner = WriteCuts()
+        val found = mutableListOf<Int>()
+        var base = 0
+        for (chunk in chunks) {
+            val data = bytes(chunk)
+            val buffer = ByteBuffer.allocateDirect(data.size + 1).apply { put(data) }
+            var from = 0
+            while (true) {
+                val cut = if (direct) scanner.next(buffer, from, data.size) else scanner.next(data, from, data.size)
+                if (cut < 0) {
+                    assertFalse(scanner.beforeEntry)
+                    break
+                }
+                if (scanner.beforeEntry) found += base + cut
+                from = cut
+            }
+            base += data.size
+        }
+        return found
+    }
+
+    private fun entries(vararg chunks: String) = entries(false, *chunks).also { assertEquals(it, entries(true, *chunks)) }
+
+    @Test fun `a write is cut just before the h that enters the alternate screen, while the library still shows the shell's`() {
+        val before = "ls\r\n$esc[?1049".length
+        assertEquals(listOf(before), entries("ls\r\n$esc[?1049h$esc[H"))
+        assertEquals(listOf(before), entries("ls\r\n$esc[?1049h"))
+    }
+
+    @Test fun `the scan goes on with that h, which is not cut before again, and the alternate screen is entered once it is read`() {
+        val data = bytes("a$esc[?1049hb")
+        val scanner = WriteCuts()
+        val cut = scanner.next(data, 0, data.size)
+        assertEquals("a$esc[?1049".length, cut)
+        assertTrue(scanner.beforeEntry)
+        assertFalse(scanner.onAlternate)
+        assertEquals(-1, scanner.next(data, cut, data.size))
+        assertFalse(scanner.beforeEntry)
+        assertTrue(scanner.onAlternate)
+    }
+
+    @Test fun `every argument of the mode counts for an entry, in any place, and only 1047 and 1049 are one`() {
+        for (args in listOf("1049", "1047", "25;1049", "1049;25", "1;1047;3", ";1049", "1049;", "1049:1", "25:1049", "01049", "0001047", "1049;1049", "0;0;1049", "21474836471049")) {
+            val stream = "$esc[?" + args + "h"
+            assertEquals(args, listOf(stream.length - 1), entries(stream))
+        }
+        for (args in listOf("47", "1048", "25", "1", "1000", "2004", "10490", "104", "4", "10491", "", ";", "47;1048", "0", "2147483647", "2147483648")) {
+            assertEquals(args, emptyList<Int>(), entries("$esc[?" + args + "h"))
+        }
+    }
+
+    @Test fun `only a question mark as the one leader, and no intermediate byte, makes an entry`() {
+        for (stream in listOf(
+            "$esc[1049h", "$esc[>1049h", "$esc[=1049h", "$esc[<1049h", "$esc[??1049h", "$esc[?>1049h", "$esc[>?1049h",
+            "$esc[?1049 h", "$esc[?1049!h", "$esc[?1049\$h", "$esc[?1049\"h", "$esc[?1049/h", "$esc[?1049l", "$esc[?1047l",
+        )) {
+            assertEquals(stream.visible(), emptyList<Int>(), entries(stream))
+        }
+    }
+
+    @Test fun `controls and NUL or DEL before the h are run first, and the cut is right before the h`() {
+        for (stream in listOf("$esc[?1049\u0000h", "$esc[?1049\u007fh", "$esc[?1049\rh", "$esc[?1049\u0007h", "$esc[?10\n49\u0000\u007fh")) {
+            assertEquals(stream.visible(), listOf(stream.length - 1), entries(stream))
+        }
+        // Not once CAN, SUB or an ESC has ended the sequence.
+        for (stream in listOf("$esc[?1049\u0018h", "$esc[?1049\u001ah", "$esc[?1049$esc[?25h", "$esc[?10?49h")) {
+            assertEquals(stream.visible(), emptyList<Int>(), entries(stream))
+        }
+    }
+
+    @Test fun `an entry is a cut once, however many times the alternate screen is entered while it is up, and again after it is left`() {
+        val enter = "$esc[?1049h"
+        val leave = "$esc[?1049l"
+        val enter1047 = "$esc[?1047h"
+        val parts = listOf("a", enter, "b", enter, "c", enter1047, "d", leave, "e", enter1047, "f", "$esc[?1047l", enter)
+        val starts = parts.runningFold(0) { at, part -> at + part.length }
+        // The first enter, the 1047 after the leave and the last enter, each cut before its h; the two made while the screen is up are not.
+        val expected = listOf(starts[1] + enter.length - 1, starts[9] + enter1047.length - 1, starts[12] + enter.length - 1)
+        assertEquals(expected, entries(parts.joinToString("")))
+    }
+
+    @Test fun `an entry is found wherever the writes are split, even with the h alone in the next write`() {
+        val stream = "ab$esc[3;8r" + "$esc[?1049h" + "draw$esc[2;5r" + "$esc[?1049l" + "$esc]8;;u\u0007x" + "$esc[?25;1047h" + "$esc[1;9r" + "$esc[?1047l" + "$esc[?1049h end"
+        val whole = entries(stream)
+        assertEquals(3, whole.size)
+        for (split in 0..stream.length) {
+            assertEquals("split at $split", whole, entries(stream.substring(0, split), stream.substring(split)))
+        }
+        for (first in 0..stream.length step 3) for (second in first..stream.length step 4) {
+            assertEquals("split at $first and $second", whole, entries(stream.substring(0, first), stream.substring(first, second), stream.substring(second)))
+        }
+        // A write that is nothing but the h: the cut is at its start, and the piece before it is empty.
+        val alone = entries("$esc[?1049", "h")
+        assertEquals(listOf("$esc[?1049".length), alone)
+    }
+
+    @Test fun `no other cut says it stands before an entry`() {
+        val scanner = WriteCuts(30)
+        val link = bytes("$esc]8;;https://a.test/\u0007")
+        assertEquals(link.size, scanner.next(link, 0, link.size))
+        assertFalse(scanner.beforeEntry)
+        val region = bytes("$esc[3;8r$esc[?1049h")
+        var at = 0
+        val said = mutableListOf<Pair<Int, Boolean>>()
+        while (true) {
+            val cut = scanner.next(region, at, region.size)
+            if (cut < 0) break
+            said += cut to scanner.beforeEntry
+            scanner.regionFix(4, 6)
+            at = cut
+        }
+        // Before the h, which the entry is; then just past it, where the shell's region is put right, which is not.
+        assertEquals(listOf(region.size - 1 to true, region.size to false), said)
+    }
+
+    @Test fun `the bytes the region needs are not given at an entry's cut, where the parser is in the middle of a sequence`() {
+        val scanner = WriteCuts(30)
+        val data = bytes("$esc[3;8r$esc[?1049h")
+        val cut = scanner.next(data, 0, data.size)
+        assertTrue(scanner.beforeEntry)
+        assertNull(scanner.regionFix(4, 6))
+        assertEquals(data.size, scanner.next(data, cut, data.size))
+        assertEquals("$esc[r$cursor", String(scanner.regionFix(4, 6)!!, Charsets.ISO_8859_1))
+    }
+
+    @Test fun `a reset forgets that an entry was cut, and the h that follows is only a character`() {
+        val scanner = WriteCuts(30)
+        val data = bytes("$esc[?1049h")
+        val cut = scanner.next(data, 0, data.size)
+        assertTrue(scanner.beforeEntry)
+        scanner.reset(30)
+        assertEquals(-1, scanner.next(data, cut, data.size))
+        assertFalse(scanner.onAlternate)
+        assertFalse(scanner.beforeEntry)
     }
 
     @Test fun `each place the parser is in the middle of something defers the bytes until it is out`() {
@@ -500,6 +644,18 @@ class WriteCutsTest {
         assertTrue(scanner.onAlternate)
         assertEquals(3, scanner.heldTop)
         assertEquals(10, scanner.heldBottom)
+    }
+
+    @Test fun `an entry is looked for among as many arguments as the scan holds, and a longer mode that has none is no entry and no error`() {
+        val many = (1..40).joinToString(";") { "0" }
+        assertEquals(emptyList<Int>(), entries("$esc[?" + many + "h"))
+        // The first sixteen are read, the rest are not kept.
+        val sixteenth = (1..15).joinToString(";") { "0" } + ";1049;" + many
+        assertEquals(listOf("$esc[?".length + sixteenth.length), entries("$esc[?" + sixteenth + "h"))
+        val seventeenth = (1..16).joinToString(";") { "0" } + ";1049"
+        assertEquals(emptyList<Int>(), entries("$esc[?" + seventeenth + "h"))
+        // Text with an h in it, where nothing is open, is not an entry either, nor is an h inside a string after one.
+        assertEquals(emptyList<Int>(), entries("$esc[?1049l hello $esc]0;hello\u0007$esc[?25h"))
     }
 
     @Test fun `only a question mark as the one leader, and no intermediate byte, makes a mode`() {

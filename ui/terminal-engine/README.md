@@ -63,9 +63,26 @@ The added APIs are:
   (a scroll, a new colour scheme, after which the library gives every cell in the new colours, or one rectangle that only
   covers the row does not end it). Limits: a resize in columns drops the flags of the
   screen, since the rows are cut or padded and no longer break where they did (porting xterm's reflow, which joins them again,
-  is a later commit); with the alternate screen up, a resize pushes the alternate screen's rows into the history, each with
-  its own flag, as the library does, and the shell's rows under it are not kept, so a visit to the alternate screen forgets
-  the wraps kept through an earlier resize (the mirror holds one screen).
+  is a later commit).
+- The shell's screen under the alternate screen. libvterm keeps the shell's screen aside while `less` or vim has the alternate one up,
+  but a resize then pushes the top rows of the *shell's* screen into the history and reads their cells through the screen it shows (the
+  alternate one), so the history was given the alternate screen's rows and a screen made taller again took them back as the shell's: a
+  shell that read `P0..P9` came back from `less` and a few resizes reading `ALT0..ALT4 P5..P9`. The library switches screens before it
+  tells the callback, so the shell's screen can be read from it only until then. `WriteCuts` ends a piece just *before* the `h` of a
+  `CSI ? Pm h` with 1047 or 1049 among its arguments (`beforeEntry`; not 47, which is no mode of this libvterm), and there the
+  emulator catches the mirror up and keeps its lines, with cells, wraps and links (`saveShell`, `savedShell`). A resize while the
+  alternate screen is up gives the history those lines instead of the cells the callback carries (`pushedShellRow`: the library
+  names a pushed row only by its number, which is the count of pushes of that resize), and lays the copy out as the library lays out the
+  screen it keeps (`ResizedRows` with that resize's pushes and pops, the flags kept for a resize in rows only), so what a taller
+  screen takes back is the true row. The alternate screen's own rows are cut on a shrink and stay at the top on a grow, as in the
+  library; the copy is dropped when that screen is left and when the emulator is reset. A write that holds an entry is therefore
+  handed to the library in one more piece (an empty one is not handed over: the sequence was split between two writes and the cut
+  is where the second begins), which is one more `writeInput` for anything that counts them. `ResizeWrapTest` pins the behaviour (the round trip,
+  a replay written as one, an entry split at every point, 1047 and `?25;1049`, two shrinks and a grow, wraps and links in the history,
+  columns, a second visit), `WriteCutsTest` the cut, and `verifyShellUnderAlternateScreen` the same flows through the real library.
+  The traces of `ResizeDiff` are the library's and do not change with it. Limits: leaving the alternate screen does not put the
+  copy's links, wraps and kept wraps back on the mirror, which holds what the library shows, the cells alone (a later commit);
+  libvterm puts the cursor `?1049l` restores back unclamped, so after a shrink with the screen up it can lie outside the screen.
 - `emulator.getTextBetweenRows(start, endExclusive)` and `emulator.getScreenText()`:
   non-mutating reads that join soft wraps, preserve indentation and strip blank line tails.
   Range indices refer to currently retained history, so eviction/reset invalidates saved
@@ -146,7 +163,8 @@ The added APIs are:
   the rest of the screen's segments shift up as the rows do (`ResizedRows.newRowOf`), and a taller screen brings back the
   links of the rows it takes from the history (`resizeRestored`, `storeSegmentText`). A resize in columns cuts a link at the new
   width, as before; with the alternate screen up a grow keeps its links where they are and a shrink keeps none, since what the
-  library discarded there is not told by the pushes. `SegmentScrollTest` feeds the emulator libvterm's order of callbacks;
+  library discarded there is not told by the pushes (the shell's rows go into the history with their own links, from the copy kept
+  for them, and that is the only place they are). `SegmentScrollTest` feeds the emulator libvterm's order of callbacks;
   `verifyLinksAcrossScrolls` runs it through the real JNI.
 - An OSC 8 link goes away with the cells it was written over. libvterm says where a link is when it ends, but what text is
   there the emulator can only read from the library's screen, which it did when it caught up with the write (a frame later, or

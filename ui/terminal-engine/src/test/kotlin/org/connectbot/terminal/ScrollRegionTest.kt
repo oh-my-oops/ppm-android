@@ -63,6 +63,12 @@ class ScrollRegionTest {
         override fun close() = emulator.close()
     }
 
+    /** What the library is given of [text] when nothing is added to it: the same bytes, in writes that each end before the h of an `enter`, where the shell's screen is kept. */
+    private fun cutAtEntries(text: String): List<String> {
+        val pieces = text.split(enter)
+        return pieces.mapIndexed { i, piece -> (if (i > 0) "h" else "") + piece + (if (i < pieces.lastIndex) "$esc[?1049" else "") }
+    }
+
     /** What vim writes: the alternate screen, a region of the first [height] rows that it leaves set, some drawing, and the way out. */
     private fun vim(height: Int) =
         "$enter$esc[22;0;0t$esc[>4;2m$esc[?1h$esc=$esc[1;" + height + "r$esc[H$esc[2J~\r\n~\r\n~$esc[?25l$esc[?25h" +
@@ -140,7 +146,7 @@ class ScrollRegionTest {
         Rig(18, 20).use { rig ->
             val flow = "\$ vim\r\n" + vim(18) + "\$ "
             rig.write(flow)
-            assertEquals(listOf(flow), rig.writes)
+            assertEquals(cutAtEntries(flow), rig.writes)
             assertTrue(scrollsAtTheBottom(rig, 18))
         }
     }
@@ -241,11 +247,11 @@ class ScrollRegionTest {
         Rig(10, 20).use { rig ->
             val session = "ls\r\n$esc[31mred$esc[m\r\n$esc[2J$esc[H" + enter + "less\r\n$esc[2J" + leave + "$esc]0;title\u0007\$ " + enter + leave
             rig.write(session)
-            assertEquals(listOf(session), rig.writes)
+            assertEquals(cutAtEntries(session), rig.writes)
             rig.resize(14, 20)
             rig.resize(14, 24)
             rig.resize(10, 20)
-            assertEquals(listOf(session), rig.writes)
+            assertEquals(cutAtEntries(session), rig.writes)
         }
     }
 
@@ -262,7 +268,9 @@ class ScrollRegionTest {
             val before = rig.writes.size
             rig.resize(14, 20)
             rig.write(enter + leave)
-            assertEquals(before + 1, rig.writes.size)
+            // The write is cut before the h of the enter, and nothing is added to either piece.
+            assertEquals(before + 2, rig.writes.size)
+            assertEquals(cutAtEntries(enter + leave), rig.writes.takeLast(2))
             assertTrue(scrollsAtTheBottom(rig, 14))
         }
         Rig(10, 20).use { rig ->
@@ -294,7 +302,9 @@ class ScrollRegionTest {
         Rig(30, 20).use { rig ->
             val flow = vim(18)
             rig.write(flow)
-            val added = rig.writes.drop(1)
+            // The flow up to the h of the enter, the rest of it, and what is added at the end of the leave.
+            assertEquals(cutAtEntries(flow), rig.writes.take(2))
+            val added = rig.writes.drop(2)
             assertEquals(1, added.size)
             assertTrue(added.joinToString(), Regex("\u001b\\[r\u001b\\[\\d+;\\d+H").matches(added.single()))
             assertFalse(added.single().contains("n") || added.single().contains("c"))
@@ -304,9 +314,10 @@ class ScrollRegionTest {
     @Test fun `a write that is cut where the library's region stops being the shell's is cut once, at the end of the sequence`() {
         Rig(30, 20).use { rig ->
             rig.write("a" + vim(18) + "b")
-            assertEquals(3, rig.writes.size)
-            assertEquals("a" + vim(18), rig.writes[0])
-            assertEquals("b", rig.writes[2])
+            // Before the h of the enter, then the rest of vim, then the fix at the end of the leave, then what follows it.
+            assertEquals(4, rig.writes.size)
+            assertEquals(cutAtEntries("a" + vim(18)), rig.writes.take(2))
+            assertEquals("b", rig.writes[3])
         }
     }
 
@@ -348,7 +359,7 @@ class ScrollRegionTest {
             rig.write("x")
             rig.write(enter + leave)
             // The new library holds no region, so entering and leaving the alternate screen writes nothing to it.
-            assertEquals(listOf("x", enter + leave), rig.writes)
+            assertEquals(listOf("x") + cutAtEntries(enter + leave), rig.writes)
         }
     }
 }

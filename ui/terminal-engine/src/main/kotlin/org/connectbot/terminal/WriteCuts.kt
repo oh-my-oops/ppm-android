@@ -34,6 +34,13 @@ import java.nio.ByteBuffer
  * the main one). libvterm says nothing to the colour queries and answers `0` ("not recognised") to `47` and `1049`. Ending a piece at each
  * such query lets the emulator send [queryAnswer] right after the piece's own libvterm replies, in the order the queries arrived.
  *
+ * **The shell's screen.** libvterm keeps both screens but shows one, and the only rows of the other it ever hands over are the ones a resize
+ * pushes into the history, read through the screen it shows. A resize with the alternate screen up therefore gave the history the alternate
+ * screen's rows, and a taller screen took them back as the shell's. The emulator keeps the shell's screen itself from the moment the
+ * alternate one is entered, and that moment is the last one the library's screen is the shell's: the `h` of `CSI ? 1049 h` (or 1047) makes
+ * the switch as it is read, so the write is cut right before it ([beforeEntry]) and the emulator reads the screen then
+ * (`TerminalEmulatorImpl.saveShell`).
+ *
  * Everything follows libvterm's own parser, in UTF-8 mode, which is the one the JNI sets: no 8-bit controls (so a lone 0x9c ends nothing),
  * NUL and DEL ignored wherever they are, CAN and SUB cancel anything open, ESC starts over and stays pending until the byte that completes
  * it, and the other controls run and change nothing (BEL ends a string). A string (OSC, DCS, APC, PM, SOS) ends at BEL or ESC \ and an ESC
@@ -62,6 +69,13 @@ internal class WriteCuts(rows: Int = 24) {
         private set
     var origin = false
         private set
+
+    /** The cut [next] last returned stands just before the `h` that makes the library switch to the alternate screen, and is not one of the others. */
+    var beforeEntry = false
+        private set
+
+    /** That cut has been made and the `h` after it has not been read yet: the next byte is not cut before again. */
+    private var entryCut = false
 
     /** The region the library has, as it would answer a DECRQSS: the first row counted from 1 and the last row. */
     val heldTop: Int get() = held.top + 1
@@ -195,9 +209,12 @@ internal class WriteCuts(rows: Int = 24) {
      * The index of the first cut in [from] until [to], or -1 when there is none. A cut stands just past the last byte of an OSC 8, just past
      * a colour or alternate-screen query (`OSC 10 / 11 / 12 ; ?`, `CSI ? 47 / 1047 / 1049 $ p`), and just past the byte after which the
      * library's region is not the one the screen shown has and the parser is between sequences (the caller then asks for [regionFix] and
-     * [queryAnswer]). The scan goes on from the state it stopped in, so the next call takes the bytes after the last one given, or from the cut.
+     * [queryAnswer]); and just *before* the `h` that makes the library switch to the alternate screen, [beforeEntry] then being true: the last
+     * moment the library's screen is the shell's, which it never is again until the alternate screen is left (see [entersAlternate]). The scan goes
+     * on from the state it stopped in, so the next call takes the bytes after the last one given, or from the cut, which for that one is the `h`.
      */
     fun next(bytes: ByteArray, from: Int, to: Int): Int {
+        beforeEntry = false
         queriedColors = 0
         queriedMode = 0
         var i = from
@@ -214,10 +231,35 @@ internal class WriteCuts(rows: Int = 24) {
                     continue
                 }
             }
-            if (step(bytes[i].toInt() and 0xFF) || (shown != held && idle())) return i + 1
+            val b = bytes[i].toInt() and 0xFF
+            if (entersAlternate(b)) return i
+            if (step(b) || (shown != held && idle())) return i + 1
             i++
         }
         return -1
+    }
+
+    /**
+     * Whether [b], the next byte, is the `h` that ends a `CSI ? Pm h` with 1047 or 1049 among its arguments while the library shows the shell's
+     * screen: `set_dec_mode` switches the screen as it reads that `h`, so a write handed over up to here is the last the library reads of
+     * the shell's, and what it holds can be read from it. True once for that byte, which is the one the next scan starts with and goes through
+     * [step] like any other. The same arguments and the same leader and intermediates that [setModes] takes.
+     */
+    private fun entersAlternate(b: Int): Boolean {
+        if (entryCut) {
+            entryCut = false
+            return false
+        }
+        if (b != 'h'.code || state != CSI_ARGUMENTS || onAlternate || leaders != 1 || firstLeader != '?'.code) return false
+        for (i in 0..minOf(argIndex, MAX_ARGS - 1)) {
+            val mode = (args[i] and MASK).toInt()
+            if (mode == 1047 || mode == 1049) {
+                entryCut = true
+                beforeEntry = true
+                return true
+            }
+        }
+        return false
     }
 
     /**
@@ -242,6 +284,7 @@ internal class WriteCuts(rows: Int = 24) {
 
     /** [next] over the first [to] bytes of a direct buffer, by absolute index: the buffer's position and limit are not read or moved. */
     fun next(buffer: ByteBuffer, from: Int, to: Int): Int {
+        beforeEntry = false
         queriedColors = 0
         queriedMode = 0
         var i = from
@@ -256,7 +299,9 @@ internal class WriteCuts(rows: Int = 24) {
                     continue
                 }
             }
-            if (step(buffer.get(i).toInt() and 0xFF) || (shown != held && idle())) return i + 1
+            val b = buffer.get(i).toInt() and 0xFF
+            if (entersAlternate(b)) return i
+            if (step(b) || (shown != held && idle())) return i + 1
             i++
         }
         return -1

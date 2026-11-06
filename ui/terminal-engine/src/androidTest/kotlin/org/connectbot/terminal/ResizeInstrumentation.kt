@@ -48,6 +48,9 @@ internal object ResizeChecks {
 
         fun write(text: String) = emulator.writeInput(text.toByteArray(Charsets.UTF_8))
 
+        /** What a reconnect does: the shell's buffer, written as one. */
+        fun replay(text: String) = emulator.writeReplay(text.toByteArray(Charsets.UTF_8))
+
         fun resize(rows: Int, cols: Int) = emulator.resize(rows, cols, cols * 10, rows * 20)
 
         fun history(): List<TerminalLine> { emulator.getBufferSnapshot(); return emulator.snapshot.value.scrollback }
@@ -60,6 +63,8 @@ internal object ResizeChecks {
     private fun List<TerminalLine>.wraps() = map { it.text.replace('\u0000', ' ').trimEnd() to it.softWrapped }
 
     private fun List<TerminalLine>.links() = map { line -> line.semanticSegments.filter { it.semanticType == SemanticType.HYPERLINK }.map { it.metadata } }
+
+    private fun List<TerminalLine>.texts() = map { it.text.replace('\u0000', ' ').trimEnd() }
 
     private fun <T> expect(what: String, actual: T, expected: T) = check(actual == expected) { "$what: $actual, not $expected" }
 
@@ -188,9 +193,11 @@ internal object ResizeChecks {
             s.write("A".repeat(10) + "BBBBB\r\np2\r\np3\r\n$ ")
             s.write("$ESC[H$ESC[?1049h" + "ALTALTALTA" + "LT\r\nALT2")
             s.resize(3, 10)
-            expect("History after a resize with the alternate screen up", s.history().wraps(), listOf("ALTALTALTA" to true, "LT" to false))
+            // The library reads the rows it pushes from the screen it shows, which is the alternate one: the history is given the shell's own.
+            expect("History after a resize with the alternate screen up", s.history().wraps(), listOf("AAAAAAAAAA" to true, "BBBBB" to false))
             expect("Screen after it", s.screen().wraps(), listOf("ALTALTALTA" to false, "LT" to false, "ALT2" to false))
         }
+        verifyShellUnderAlternateScreen()
         Screen(4, 40).use { s ->
             s.write((0..5).joinToString("\r\n") { "h$it" } + "\r\n$ $ESC[H$ESC[?1049h" + link(1) + "\r\n" + link(2))
             expect("History before the alternate screen grew", s.history().wraps().map { it.first }, listOf("h0", "h1", "h2"))
@@ -213,6 +220,97 @@ internal object ResizeChecks {
             expect("Links of the alternate screen after it grew", s.screen().links(), listOf(url(1), url(2), url(3), emptyList(), emptyList(), emptyList(), emptyList(), emptyList()))
             s.resize(4, 40)
             expect("Links of the alternate screen after it shrank", s.screen().links(), List(4) { emptyList<String?>() })
+        }
+    }
+
+    private val shell = (0..9).joinToString("\r\n") { "P$it" } + "\r\n$ "
+    private val shellScreen = (0..9).map { "P$it" } + "$"
+    private val altScreen = "$ESC[H" + (0..9).joinToString("\r\n") { "ALT$it" }
+
+    /**
+     * `ResizeWrapTest`'s cases of the shell's screen under the alternate screen, on the real library: what a screen shrunk and grown again under the
+     * alternate screen gives back (the shell's own rows, where the library alone gave back the alternate screen's), with the shell's output and the
+     * entry written as one, as a replay is, and with the entry split between two writes.
+     */
+    private fun verifyShellUnderAlternateScreen() {
+        Screen(11, 12).use { s ->
+            s.write(shell)
+            s.write("$ESC[?1049h$altScreen")
+            s.resize(6, 12)
+            expect("History after a shrink with the alternate screen up", s.history().texts(), (0..4).map { "P$it" })
+            s.resize(11, 12)
+            s.write("$ESC[?1049l")
+            expect("Shell's screen after the alternate screen is left", s.screen().texts(), shellScreen)
+            expect("History after it", s.history().texts(), emptyList())
+        }
+        Screen(11, 12).use { s ->
+            s.replay(shell + "$ESC[?1049h$altScreen")
+            s.resize(6, 12)
+            s.resize(11, 12)
+            s.write("$ESC[?1049l")
+            expect("Shell's screen after a replay that ends on the alternate screen", s.screen().texts(), shellScreen)
+        }
+        for (split in 1 until "$ESC[?1049h".length) {
+            Screen(11, 12).use { s ->
+                s.write(shell + "$ESC[?1049h".substring(0, split))
+                s.write("$ESC[?1049h".substring(split) + altScreen)
+                s.resize(6, 12)
+                s.resize(11, 12)
+                s.write("$ESC[?1049l")
+                expect("Shell's screen after an entry split after $split", s.screen().texts(), shellScreen)
+            }
+        }
+        for ((enter, leave) in listOf("?1047h" to "?1047l", "?25;1049h" to "?1049l")) {
+            Screen(11, 12).use { s ->
+                s.write(shell + "$ESC[" + enter + altScreen)
+                s.resize(6, 12)
+                s.resize(11, 12)
+                s.write("$ESC[" + leave)
+                expect("Shell's screen after $enter", s.screen().texts(), shellScreen)
+            }
+        }
+        Screen(11, 12).use { s ->
+            s.write(shell + "$ESC[?1049h$altScreen")
+            s.resize(8, 12)
+            s.resize(4, 12)
+            expect("History after two shrinks", s.history().texts(), (0..6).map { "P$it" })
+            s.resize(9, 12)
+            s.write("$ESC[?1049l")
+            expect("Screen after the screen grew and the alternate screen was left", s.screen().texts(), (2..9).map { "P$it" } + "$")
+            expect("History after it", s.history().texts(), listOf("P0", "P1"))
+        }
+        Screen(11, 12).use { s ->
+            s.write(shell + "$ESC[?1049h$altScreen")
+            s.resize(11, 9)
+            s.resize(6, 9)
+            s.resize(11, 12)
+            s.write("$ESC[?1049l")
+            expect("Shell's screen after resizes in columns under the alternate screen", s.screen().texts(), shellScreen)
+        }
+        Screen(6, 10).use { s ->
+            s.write("a0\r\na1\r\na2\r\na3\r\na4\r\n$ ")
+            s.write("$ESC[?1049h$ESC[Halt")
+            s.resize(3, 10)
+            s.resize(6, 10)
+            s.write("$ESC[?1049l")
+            s.write("b0\r\nb1")
+            s.write("$ESC[?1049h$ESC[Halt")
+            s.resize(3, 10)
+            expect("History after the second visit", s.history().texts(), listOf("a0", "a1", "a2", "a3"))
+            s.resize(6, 10)
+            s.write("$ESC[?1049l")
+            expect("Screen after it", s.screen().texts(), listOf("a1", "a2", "a3", "a4", "$ b0", "b1"))
+        }
+        Screen(8, 40).use { s ->
+            s.write("A".repeat(40) + "B".repeat(5) + "\r\n" + link(1) + "\r\n" + link(2) + "\r\n" + link(3) + "\r\n$ ")
+            s.write("$ESC[?1049h$ESC[Halt")
+            s.resize(4, 40)
+            expect("History after a shrink with the alternate screen up", s.history().wraps(), listOf("A".repeat(40) to true, "B".repeat(5) to false))
+            s.resize(8, 40)
+            s.resize(3, 40)
+            val url = { n: Int -> listOf("https://l$n.test/") }
+            expect("Wraps of the history after two more", s.history().wraps().take(3), listOf("A".repeat(40) to true, "B".repeat(5) to false, "link1" to false))
+            expect("Links of the history after them", s.history().links().take(3), listOf(emptyList(), emptyList(), url(1)))
         }
     }
 

@@ -202,6 +202,7 @@ def emulator(text):
             resizePushes = -1
             writeCuts.reset(rows)
             unrecordedLinks.clear()
+            savedShell = null
             damagePosted = false
             nextSnapshotNanos = System.nanoTime()
             cursorMoved = false
@@ -274,6 +275,9 @@ def emulator(text):
     text = replace(text, "    private val scrollback = ArrayDeque<TerminalLine>()\n",
                    "    private val scrollback = ArrayDeque<TerminalLine>()\n    private var scrollbackBytes = 0L\n    private val scrollbackWrap = ScrollbackWrap()\n")
     text = replace(text, "softWrapped = softWrapped, semanticSegments = line0Segments)", "softWrapped = wrapped, semanticSegments = line0Segments)")
+    # The shell's screen kept for the alternate screen to give back (savedShell) is not wanted once that screen is left.
+    text = replace(text, "                            imageStore.switchScreen(value.value)\n                            isAltScreenActive = value.value\n",
+                   "                            imageStore.switchScreen(value.value)\n                            isAltScreenActive = value.value\n                            if (!value.value) savedShell = null\n")
     text = replace(text,
                    "            scrollback.add(line)\n            if (scrollback.size > maxScrollbackLines) {\n                scrollback.removeFirst()\n            }\n",
                    "            scrollback.add(line)\n            scrollbackBytes += line.cells.shapingRetentionBytes\n            while (scrollback.size > maxScrollbackLines || (scrollback.isNotEmpty() && scrollbackBytes > maxScrollbackBytes)) {\n                scrollbackBytes -= scrollback.removeFirst().cells.shapingRetentionBytes\n            }\n")
@@ -320,9 +324,9 @@ def emulator(text):
         /**
          * The screen as the library laid it out when it resized it (see [ResizedRows]); called once [rows] and [cols] are the new size, with the
          * mirror still the old screen. Each row goes with the line it is, with its links, their texts, its prompt and its wrap, and a row that came
-         * back from the history with what that line was pushed with. The alternate screen is another case: what the library keeps of it is not told
-         * (the rows it pushes are the screen shown, which is not the shell's), so nothing moves there when it grows or stays as tall, and nothing is
-         * carried when it shrinks.
+         * back from the history with what that line was pushed with. The alternate screen is another case: the library lays it out with no pushes
+         * and pops, so nothing moves there when it grows or stays as tall, and nothing is carried when it shrinks. The pushes and pops of that
+         * resize are the shell's screen's, which is [savedShell] and is laid out as the one the library keeps.
          */
         private fun remapScreen(oldRows: Int, oldCols: Int, pushed: Int, restored: List<TerminalLine>) {
             val alternate = isAltScreenActive
@@ -338,7 +342,44 @@ def emulator(text):
             semanticSegmentTexts.putAll(texts)
             // The rows that came back have the segments they were pushed with, over the text their cells hold now.
             for (row in 0 until moved.popped) currentLines[row].let { line -> line.semanticSegments.forEach { storeSegmentText(row, it, line) } }
-            if (!alternate) scrollbackWrap.top(currentLines[0].softWrapped)
+            if (!alternate) {
+                scrollbackWrap.top(currentLines[0].softWrapped)
+            } else {
+                val shell = savedShell?.let { ResizedRows(oldRows, rows, pushed, restored.size).remap(it, restored, keepFlags = cols == oldCols) }
+                savedShell = shell
+                if (shell != null) scrollbackWrap.top(shell[0].softWrapped)
+            }
+        }
+
+        /**
+         * The shell's screen, as the mirror had it when the alternate screen was entered (see [saveShell]) and laid out through every resize
+         * since as the library lays out the one it keeps; null until then, and from the moment the alternate screen is left. The library
+         * shows the alternate screen, and the shell's rows are told to nobody but as the rows a resize pushes, which it reads from the screen
+         * it shows: the history was given the alternate screen's rows, and a taller screen took them back as the shell's. [pushedShellRow]
+         * gives those pushes the rows that were pushed.
+         */
+        private var savedShell: List<TerminalLine>? = null
+
+        /**
+         * The library is about to switch to the alternate screen and the piece just handed over ended before the `h` that does it (see
+         * [WriteCuts]): its screen is the shell's, for the last time until the alternate one is left. The mirror is caught up with it, and its
+         * rows, with their wraps and links, are kept.
+         */
+        private fun saveShell() {
+            catchUp()
+            savedShell = currentLines.toList()
+        }
+
+        /**
+         * The row of the shell's screen the resize in progress pushes with this call, while the alternate screen is up, as the history takes
+         * it: the library hands over that row's number and the cells of the screen it shows. Null when there is none (then it is a row like
+         * any other); counts the push as [scrolledOutSegments] does for those.
+         */
+        private fun pushedShellRow(): TerminalLine? {
+            if (resizePushes < 0 || !isAltScreenActive) return null
+            val row = savedShell?.getOrNull(resizePushes) ?: return null
+            resizePushes++
+            return row.copy(row = -1, wrapKept = false)
         }
 
         /** What a push does to the rows: every row's segments move up one, and the bottom row has none. */
@@ -432,25 +473,29 @@ def emulator(text):
          * Hands the library a write in pieces that each end right after an OSC 8, and puts the links the piece made on the screen with the
          * text under them. libvterm says where a link is when it ends, but what is under it the emulator can only read from the library's
          * screen, and the rest of the write may already have replaced those cells: the link was then shown over the text that is there now
-         * (a replay is one write, and live output arrives in writes the snapshot has not caught up with). [write] must hand on exactly the
-         * bytes from [from] until [to].
+         * (a replay is one write, and live output arrives in writes the snapshot has not caught up with). A piece also ends just before the `h`
+         * that enters the alternate screen, where the shell's screen is kept (see [saveShell]); when the sequence was split between two writes
+         * that is where the second begins, and the piece is empty. [write] must hand on exactly the bytes from [from] until [to].
          */
         private inline fun writeInPieces(start: Int, end: Int, next: (from: Int) -> Int, write: (from: Int, to: Int) -> Unit) {
             var from = start
             while (true) {
                 val cut = next(from)
                 val to = if (cut < 0) end else cut
-                inWrite = true
-                try {
-                    write(from, to)
-                } finally {
-                    inWrite = false
+                if (cut < 0 || to > from) {
+                    inWrite = true
+                    try {
+                        write(from, to)
+                    } finally {
+                        inWrite = false
+                    }
                 }
                 endScrollBatch()
                 if (cut >= 0) {
                     recordLinkTexts()
                     writeRegionFix()
                     answerQuery()
+                    if (writeCuts.beforeEntry) saveShell()
                 }
                 if (to >= end) return
                 from = to
@@ -550,6 +595,19 @@ def emulator(text):
                    "            val wrapped = pushedRowWrapped(softWrapped)\n"
                    "            val line0Segments = scrolledOutSegments(cellList)\n"
                    "            shiftSegmentsUp()\n")
+    # With the alternate screen up the library reads the rows a resize pushes from the screen it shows, so what it hands over is the alternate screen's
+    # (see savedShell): the history is given the shell's own rows instead, and its flags and links with them.
+    text = replace(text,
+                   "            val wrapped = pushedRowWrapped(softWrapped)\n"
+                   "            val line0Segments = scrolledOutSegments(cellList)\n"
+                   "            shiftSegmentsUp()\n\n"
+                   "            val line = TerminalLine(row = -1, cells = cellList, softWrapped = wrapped, semanticSegments = line0Segments)\n",
+                   "            val line = pushedShellRow() ?: run {\n"
+                   "                val wrapped = pushedRowWrapped(softWrapped)\n"
+                   "                val line0Segments = scrolledOutSegments(cellList)\n"
+                   "                shiftSegmentsUp()\n"
+                   "                TerminalLine(row = -1, cells = cellList, softWrapped = wrapped, semanticSegments = line0Segments)\n"
+                   "            }\n")
     text = replace(text, "        synchronized(damageLock) {\n            if (\n                dest.startCol == 0 && src.startCol == 0 &&",
                    "        synchronized(damageLock) {\n            val segmentsMoved = segmentsMovedByPushes(dest, src)\n            if (\n                dest.startCol == 0 && src.startCol == 0 &&")
     text = replace(text, "                        updated[destRow] = previous[srcRow].copy(row = destRow)\n",
@@ -609,8 +667,12 @@ def emulator(text):
         }
         val updatedSegments = (line.semanticSegments + newSegment).sortedBy { it.startCol }
     '''), "            "))
+    # The snapshot worker's way in is the one a test holds back to say when the mirror catches up; the catch-up the emulator makes of its own accord
+    # (the shell's screen, kept as the library leaves it: see saveShell) is not the worker's, so it is a function of its own.
     text = replace(text, "    fun processPendingUpdates(): Unit = synchronized(damageLock) {\n        if (isClosed) return@synchronized\n        // Collect pending changes\n",
-                   "    fun processPendingUpdates(): Unit = synchronized(damageLock) {\n        if (isClosed) return@synchronized\n"
+                   "    fun processPendingUpdates(): Unit = catchUp()\n\n"
+                   "    /** The mirror caught up with the library: what [processPendingUpdates] does, which the snapshot worker asks for and the emulator, when it needs it, does not wait for. */\n"
+                   "    private fun catchUp(): Unit = synchronized(damageLock) {\n        if (isClosed) return@synchronized\n"
                    "        recordLinkTexts()\n"
                    "        // Collect pending changes\n")
     # The library clears every row's wrap flag and moves rows to and from the history (see ResizedRows): the mirror is caught up with it first,
