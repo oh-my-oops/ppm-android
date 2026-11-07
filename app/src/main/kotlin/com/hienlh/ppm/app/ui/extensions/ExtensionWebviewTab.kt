@@ -31,7 +31,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.git.GitGraphNativePanelBody
+import com.hienlh.ppm.app.ui.git.GitInsightsNativePanelBody
 import com.hienlh.ppm.design.FileIcons
+import com.hienlh.ppm.state.git.GIT_INSIGHTS_VIEW_TYPES
 import com.hienlh.ppm.design.LocalIconFramework
 import com.hienlh.ppm.design.LocalPpmTheme
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -109,7 +111,7 @@ fun ExtensionWebviewBody(
     // Auto-recover when panel is missing (e.g. page reload or server restart)
     LaunchedEffect(panel == null, viewTypeMeta, contributions != null, retryAttempt, failed) {
         if (panel != null || viewTypeMeta.isNullOrEmpty() || contributions == null || failed) return@LaunchedEffect
-        val cmd = if (viewTypeMeta.endsWith(".view")) viewTypeMeta else "$viewTypeMeta.view"
+        val cmd = if (viewTypeMeta.contains(".")) viewTypeMeta else "$viewTypeMeta.view"
         if (retryAttempt == 0) {
             retryAttempt = 1
             model.dispatchExtCommand(cmd, recovery = true)
@@ -124,7 +126,7 @@ fun ExtensionWebviewBody(
     }
 
     val resolvedViewType = panel?.viewType ?: viewTypeMeta
-    if (resolvedViewType == "git-graph.view") {
+    if (resolvedViewType == "git-graph.view" || resolvedViewType in GIT_INSIGHTS_VIEW_TYPES) {
         if (panel == null) {
             ExtensionLoadingOrFailedView(
                 title = tab.title,
@@ -133,7 +135,7 @@ fun ExtensionWebviewBody(
                     if (!viewTypeMeta.isNullOrEmpty()) {
                         retryAttempt = 1
                         failed = false
-                        val cmd = if (viewTypeMeta.endsWith(".view")) viewTypeMeta else "$viewTypeMeta.view"
+                        val cmd = if (viewTypeMeta.contains(".")) viewTypeMeta else "$viewTypeMeta.view"
                         model.dispatchExtCommand(cmd, recovery = true)
                     }
                 },
@@ -141,12 +143,22 @@ fun ExtensionWebviewBody(
             )
             return
         }
-        GitGraphNativePanelBody(
-            model = model,
-            tab = tab,
-            panel = panel,
-            modifier = modifier,
-        )
+        if (resolvedViewType == "git-graph.view") {
+            GitGraphNativePanelBody(
+                model = model,
+                tab = tab,
+                panel = panel,
+                modifier = modifier,
+            )
+        } else if (resolvedViewType != null) {
+            GitInsightsNativePanelBody(
+                model = model,
+                tab = tab,
+                panel = panel,
+                viewType = resolvedViewType,
+                modifier = modifier,
+            )
+        }
         return
     }
 
@@ -191,7 +203,7 @@ fun ExtensionWebviewBody(
                 if (!viewTypeMeta.isNullOrEmpty()) {
                     retryAttempt = 1
                     failed = false
-                    val cmd = if (viewTypeMeta.endsWith(".view")) viewTypeMeta else "$viewTypeMeta.view"
+                    val cmd = if (viewTypeMeta.contains(".")) viewTypeMeta else "$viewTypeMeta.view"
                     model.dispatchExtCommand(cmd, recovery = true)
                 }
             },

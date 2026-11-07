@@ -509,11 +509,52 @@ internal fun EditableFileCodeView(
         }
 
         if (blameEnabled && !docState.isDirty && activeBlameCommit != null && !path.isNullOrBlank()) {
+            val resolvedProjectRoot = remember(project, model.projects, model.gitDiscovery[project], model.gitChosenRepoPath[project]) {
+                val projInfo = model.projects.firstOrNull { it.name == project }
+                if (projInfo != null && project != null) {
+                    com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(
+                        model.gitDiscovery[project],
+                        model.gitChosenRepoPath[project],
+                    )?.path ?: projInfo.path
+                } else {
+                    project
+                }
+            }
             InlineBlameAnnotationStrip(
                 commit = activeBlameCommit,
                 detail = activeLineDetail,
                 filePath = path,
-                projectPath = project,
+                projectPath = resolvedProjectRoot,
+                onActionCommand = { actionCmd, actionArgs ->
+                    val root = actionArgs.getOrNull(0) ?: resolvedProjectRoot
+                    val targetFile = actionArgs.getOrNull(1) ?: path
+                    when (actionCmd) {
+                        "ppm.blame.fileHistory" -> if (!root.isNullOrBlank()) {
+                            model.dispatchExtCommand(
+                                "git-graph.fileHistory",
+                                listOf(
+                                    kotlinx.serialization.json.JsonPrimitive(root),
+                                    kotlinx.serialization.json.JsonPrimitive(targetFile),
+                                ),
+                            )
+                        }
+                        "ppm.blame.blameFile" -> if (!root.isNullOrBlank()) {
+                            model.dispatchExtCommand(
+                                "git-graph.blame",
+                                listOf(
+                                    kotlinx.serialization.json.JsonPrimitive(root),
+                                    kotlinx.serialization.json.JsonPrimitive(targetFile),
+                                ),
+                            )
+                        }
+                        "ppm.blame.showInGraph" -> if (!root.isNullOrBlank()) {
+                            model.dispatchExtCommand(
+                                "git-graph.view",
+                                listOf(kotlinx.serialization.json.JsonPrimitive(root)),
+                            )
+                        }
+                    }
+                },
             )
         }
 
