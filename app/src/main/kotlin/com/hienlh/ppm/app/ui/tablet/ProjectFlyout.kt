@@ -60,6 +60,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.positionOnScreen
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -76,6 +77,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ProjectWindowActivity
 import com.hienlh.ppm.app.ui.PROJECT_SORTS
 import com.hienlh.ppm.app.ui.PpmTextField
 import com.hienlh.ppm.app.ui.closedByConnectionLost
@@ -212,9 +214,15 @@ private fun Flyout(model: AppModel, drag: RowDrag, modifier: Modifier, onDismiss
     }
     val shape = RoundedCornerShape(12.dp)
 
+    val context = LocalContext.current
     fun open(project: ProjectInfo) {
         onDismiss()
         model.scope.launch { model.openProject(project.name) }
+    }
+
+    fun openInNewWindow(project: ProjectInfo) {
+        onDismiss()
+        runCatching { ProjectWindowActivity.open(context, model, project.name, adjacent = true) }
     }
 
     fun openHighlighted() {
@@ -350,6 +358,7 @@ private fun Flyout(model: AppModel, drag: RowDrag, modifier: Modifier, onDismiss
                         onHover = { highlight = index },
                         onDrop = ::drop,
                         onOpen = { open(project) },
+                        onOpenInNewWindow = { openInNewWindow(project) },
                         onActions = { onDismiss(); model.projectActions = project },
                     )
                 }
@@ -392,6 +401,7 @@ private fun ProjectRow(
     onHover: () -> Unit,
     onDrop: () -> Unit,
     onOpen: () -> Unit,
+    onOpenInNewWindow: () -> Unit,
     onActions: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
@@ -482,6 +492,11 @@ private fun ProjectRow(
                 )
             }
         }
+        com.hienlh.ppm.app.ui.osexplorer.HostExplorerButton(
+            ProductIcon.ExternalLink,
+            "Open ${project.name} in new window",
+            onClick = onOpenInNewWindow,
+        )
         com.hienlh.ppm.app.ui.osexplorer.HostExplorerButton(ProductIcon.MoreHorizontal, "Actions for ${project.name}", onClick = onActions)
         model.projectOpenedAt[project.name]?.let {
             RelativeTime(Instant.ofEpochMilli(it), ppmText(10f, lineHeight = 15f).copy(color = tokens.text3.color), Modifier.padding(end = 8.dp))

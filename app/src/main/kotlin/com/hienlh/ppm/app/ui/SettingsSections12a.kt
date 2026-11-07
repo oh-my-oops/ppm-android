@@ -135,6 +135,13 @@ import com.hienlh.ppm.state.settings.removeExcludePattern
 import com.hienlh.ppm.state.settings.validateDeviceName
 import com.hienlh.ppm.state.settings.validatePasswordChange
 import com.hienlh.ppm.state.settings.validateQueryAuditInputs
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import com.hienlh.ppm.app.ui.shell.LearnPpmDialog
+import com.hienlh.ppm.app.ui.shell.PreviousExitCrashCard
+import com.hienlh.ppm.app.ui.shell.inspectLatestCrashOrAnrExit
+import com.hienlh.ppm.state.shell.OnboardingEvidence
+import com.hienlh.ppm.state.shell.OnboardingState
+import com.hienlh.ppm.state.shell.applySuggestedPromptToDraft
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -347,12 +354,25 @@ internal fun ChangePasswordBlock(
 @Composable
 private fun AboutBlock(model: AppModel) {
     val tokens = LocalPpmTokens.current
+    val context = LocalContext.current
     val api = model.api
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
     var upgrading by remember { mutableStateOf(false) }
     var availableVersion by remember { mutableStateOf<String?>(null) }
     var statusNote by remember { mutableStateOf<String?>(null) }
+    var learnPpmOpen by remember { mutableStateOf(false) }
+    var onboardingState by remember {
+        mutableStateOf(
+            OnboardingState(active = true).mergeEvidence(
+                OnboardingEvidence(
+                    hasProjectSelected = model.selectedProject != null,
+                    chatSessionCount = model.sessions.size,
+                ),
+            ),
+        )
+    }
+    var crashExitInfo by remember { mutableStateOf(inspectLatestCrashOrAnrExit(context)) }
 
     LaunchedEffect(api) {
         if (api == null) return@LaunchedEffect
@@ -445,11 +465,63 @@ private fun AboutBlock(model: AppModel) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 BasicText("PPM Android App", style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text.color))
-                BasicText(
-                    "v${BuildConfig.VERSION_NAME}",
-                    style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text3.color),
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    SettingsButton(
+                        label = "Learn PPM",
+                        modifier = Modifier.testTag("settings-learn-ppm-btn"),
+                        onClick = { learnPpmOpen = true },
+                    )
+                    BasicText(
+                        "v${BuildConfig.VERSION_NAME}",
+                        style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text3.color),
+                    )
+                }
             }
+        }
+        crashExitInfo?.let { info ->
+            PreviousExitCrashCard(
+                crashInfo = info,
+                onCopyReport = { md ->
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    cm?.setPrimaryClip(ClipData.newPlainText("PPM Crash Report", md))
+                    model.toast(ErrorToastMessage("Crash report copied", "You can paste it into Report Bug.", kind = ErrorToastMessage.Kind.INFO))
+                },
+                onDismiss = { crashExitInfo = null },
+            )
+        }
+        if (learnPpmOpen) {
+            LearnPpmDialog(
+                state = onboardingState,
+                onStateChange = { onboardingState = it },
+                onRefreshEvidence = {
+                    onboardingState = onboardingState.mergeEvidence(
+                        OnboardingEvidence(
+                            hasProjectSelected = model.selectedProject != null,
+                            chatSessionCount = model.sessions.size,
+                        ),
+                    )
+                },
+                onInsertSuggestedPrompt = { prompt ->
+                    val activeTab = model.activeTab
+                    val chat = activeTab?.let { model.chat(it.id) }
+                    if (chat != null) {
+                        val updated = applySuggestedPromptToDraft(chat.draft.text.toString(), prompt)
+                        chat.draft.setTextAndPlaceCursorAtEnd(updated)
+                        model.toast(
+                            ErrorToastMessage(
+                                "Prompt inserted into composer",
+                                "Review the prompt in your chat composer before sending.",
+                                kind = ErrorToastMessage.Kind.INFO,
+                            ),
+                        )
+                    }
+                    learnPpmOpen = false
+                },
+                onDismiss = { learnPpmOpen = false },
+            )
         }
     }
 }
