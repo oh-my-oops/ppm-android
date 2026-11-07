@@ -9,11 +9,21 @@ import java.time.format.DateTimeParseException
 import kotlin.math.roundToLong
 
 /** `GET /api/info` — public, answered before sign-in. */
-data class ServerInfo(val version: String, val deviceName: String?, val tunnelActive: Boolean) {
+data class ServerInfo(
+    val version: String,
+    val deviceName: String?,
+    val tunnelActive: Boolean,
+    val minimalMode: Boolean = false,
+) {
     companion object {
         fun from(json: JsonElement): ServerInfo? {
             val version = json["version"].string ?: return null
-            return ServerInfo(version, json["device_name"].string, json["tunnel_active"].bool ?: false)
+            return ServerInfo(
+                version = version,
+                deviceName = json["device_name"].string,
+                tunnelActive = json["tunnel_active"].bool ?: false,
+                minimalMode = json["minimal_mode"].bool ?: json["minimalMode"].bool ?: false,
+            )
         }
     }
 }

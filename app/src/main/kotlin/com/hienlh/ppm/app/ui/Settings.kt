@@ -77,7 +77,11 @@ import kotlinx.serialization.json.put
  * the servers it connects to, which the web has no need of, and Voice Input.
  */
 @Composable
-fun SettingsTab(model: AppModel) = SettingsBody(model, backReturnsToList = true)
+fun SettingsTab(model: AppModel) {
+    val requested = model.requestedSettingsCategory
+    val initial = requested?.let(SettingsCategory::resolveOrDefault)
+    SettingsBody(model, initialCategory = initial, backReturnsToList = true)
+}
 
 /**
  * Settings in a floating window (settings-window-content.tsx): the open category rides on the
@@ -85,7 +89,8 @@ fun SettingsTab(model: AppModel) = SettingsBody(model, backReturnsToList = true)
  */
 @Composable
 fun SettingsWindowContent(model: AppModel, win: WindowRuntimeState) {
-    val category = SettingsCategory.entries.firstOrNull { it.id == win.payload["category"].string }
+    val raw = win.payload["category"].string ?: model.requestedSettingsCategory
+    val category = raw?.let(SettingsCategory::resolveOrDefault)
     SettingsBody(model, initialCategory = category, onCategoryChange = { next ->
         model.windows?.setPayload(win.id, buildJsonObject { put("category", next.id) })
     })
@@ -99,16 +104,20 @@ fun SettingsWindowContent(model: AppModel, win: WindowRuntimeState) {
  * list back over it.
  */
 @Composable
-private fun SettingsBody(
+internal fun SettingsBody(
     model: AppModel,
     initialCategory: SettingsCategory? = null,
     backReturnsToList: Boolean = false,
     onCategoryChange: (SettingsCategory) -> Unit = {},
 ) {
-    var category by rememberSaveable { mutableStateOf(initialCategory ?: SettingsCategory.Appearance) }
-    var showList by rememberSaveable { mutableStateOf(initialCategory == null) }
+    val minimalMode = model.info?.minimalMode == true
+    var category by rememberSaveable(initialCategory) {
+        mutableStateOf(initialCategory ?: SettingsCategory.General)
+    }
+    var showList by rememberSaveable(initialCategory) { mutableStateOf(initialCategory == null) }
     val select: (SettingsCategory) -> Unit = {
         category = it
+        model.requestedSettingsCategory = null
         // Also cleared from the rail: should the body narrow later, a stale list would cover the pane just picked.
         showList = false
         onCategoryChange(it)
@@ -117,10 +126,10 @@ private fun SettingsBody(
         val split = maxWidth >= SPLIT_WIDTH
         BackHandler(enabled = backReturnsToList && !split && !showList) { showList = true }
         Row(Modifier.fillMaxSize()) {
-            if (split) SettingsRail(category, select)
+            if (split) SettingsRail(category, minimalMode, select)
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 SettingsPane(model, category, split, onBack = { showList = true })
-                if (showList && !split) SettingsIndex(select)
+                if (showList && !split) SettingsIndex(minimalMode, select)
             }
         }
     }
@@ -129,19 +138,48 @@ private fun SettingsBody(
 /** `@[640px]`: the body's width from which the rail shows. */
 private val SPLIT_WIDTH = 640.dp
 
-enum class SettingsCategory(val id: String, val label: String, val subtitle: String, val icon: ProductIcon, val group: SettingsGroup) {
-    Appearance("appearance", "Appearance", "Theme", ProductIcon.Palette, SettingsGroup.Core),
-    Servers("servers", "Servers", "The PPM servers this app connects to", ProductIcon.HardDrive, SettingsGroup.Core),
-    Voice("voice", "Voice Input", "Speech to text for the chat box", ProductIcon.Mic, SettingsGroup.Ai),
+enum class SettingsCategory(
+    val id: String,
+    val label: String,
+    val subtitle: String,
+    val icon: ProductIcon,
+    val group: SettingsGroup,
+    val minimalSafe: Boolean = false,
+) {
+    // Core
+    General("general", "General", "Device name, screen wake, password, about", ProductIcon.Settings, SettingsGroup.Core, minimalSafe = true),
+    Appearance("appearance", "Appearance", "Theme, tab style, word wrap, explorer skin", ProductIcon.Palette, SettingsGroup.Core, minimalSafe = true),
+    Servers("servers", "Servers", "The PPM servers this app connects to", ProductIcon.HardDrive, SettingsGroup.Core, minimalSafe = true),
+    Voice("voice", "Voice Input", "Speech to text for the chat box", ProductIcon.Mic, SettingsGroup.Core, minimalSafe = true),
+    Shortcuts("shortcuts", "Keyboard Shortcuts", "Hardware keyboard bindings", ProductIcon.Code, SettingsGroup.Core, minimalSafe = true),
+    Files("files", "File Filters", "Explorer & search exclude patterns", ProductIcon.FolderTree, SettingsGroup.Core, minimalSafe = false),
+
+    // Advanced
+    QueryAudit("query-audit", "Query Audit Log", "SQL history retention & size cap", ProductIcon.ScrollText, SettingsGroup.Advanced, minimalSafe = false),
+    LanguageServers("language-servers", "Language Servers", "Editor code intelligence", ProductIcon.Code, SettingsGroup.Advanced, minimalSafe = false),
+    DatabaseDrivers("database-drivers", "Database Drivers", "On-demand database engines", ProductIcon.Database, SettingsGroup.Advanced, minimalSafe = false),
+    RemoteDesktop("remote-desktop", "Remote Desktop", "MediaMTX WebRTC relay", ProductIcon.Monitor, SettingsGroup.Advanced, minimalSafe = false),
+    ;
+
+    companion object {
+        /** Resolves [raw] by category `id` or falls back to [General]. */
+        fun resolveOrDefault(raw: String?): SettingsCategory {
+            if (raw.isNullOrBlank()) return General
+            return entries.firstOrNull { it.id.equals(raw.trim(), ignoreCase = true) } ?: General
+        }
+    }
 }
 
 /** `SETTINGS_GROUPS`, as far as this app's categories reach: the first has no heading. */
 enum class SettingsGroup(val label: String?) {
     Core(null),
     Ai("AI & Accounts"),
+    Integrations("Integrations"),
+    Advanced("Advanced"),
     ;
 
-    val categories: List<SettingsCategory> get() = SettingsCategory.entries.filter { it.group == this }
+    fun categories(minimalMode: Boolean = false): List<SettingsCategory> =
+        SettingsCategory.entries.filter { it.group == this && (!minimalMode || it.minimalSafe) }
 }
 
 /** A group's heading, `text-[11px] font-medium uppercase tracking-wide text-muted-foreground`. */
@@ -160,7 +198,7 @@ private fun GroupHeading(label: String, modifier: Modifier) {
  * group's rows `space-y-1` under its heading (`px-2 pt-1`).
  */
 @Composable
-private fun SettingsRail(active: SettingsCategory, onSelect: (SettingsCategory) -> Unit) {
+private fun SettingsRail(active: SettingsCategory, minimalMode: Boolean, onSelect: (SettingsCategory) -> Unit) {
     val tokens = LocalPpmTokens.current
     Column(
         Modifier
@@ -171,30 +209,32 @@ private fun SettingsRail(active: SettingsCategory, onSelect: (SettingsCategory) 
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        for (group in SettingsGroup.entries) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            group.label?.let { GroupHeading(it, Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp)) }
-            for (category in group.categories) {
-                val on = category == active
-                // `px-2.5 py-2 rounded-md gap-2.5 cursor-pointer`: the active row in `bg-accent`, any
-                // other `hover:bg-accent/50 active:bg-accent`.
-                val shape = RoundedCornerShape(8.dp)
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(shape)
-                        .then(if (on) Modifier.background(tokens.panel2.color) else Modifier)
-                        .pointerHoverIcon(WebCursor.Pointer)
-                        .ppmClickable(
-                            pressedColor = tokens.panel2.color,
-                            hoverColor = if (on) Color.Transparent else tokens.panel2.opacity(0.5).color,
-                            shape = shape,
-                        ) { onSelect(category) }
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    PpmIcon(category.icon, 16.dp, (if (on) tokens.text else tokens.text2).color)
-                    BasicText(category.label, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        for (group in SettingsGroup.entries) {
+            val cats = group.categories(minimalMode)
+            if (cats.isEmpty()) continue
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                group.label?.let { GroupHeading(it, Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp)) }
+                for (category in cats) {
+                    val on = category == active
+                    val shape = RoundedCornerShape(8.dp)
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(shape)
+                            .then(if (on) Modifier.background(tokens.panel2.color) else Modifier)
+                            .pointerHoverIcon(WebCursor.Pointer)
+                            .ppmClickable(
+                                pressedColor = tokens.panel2.color,
+                                hoverColor = if (on) Color.Transparent else tokens.panel2.opacity(0.5).color,
+                                shape = shape,
+                            ) { onSelect(category) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        PpmIcon(category.icon, 16.dp, (if (on) tokens.text else tokens.text2).color)
+                        BasicText(category.label, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
         }
@@ -203,7 +243,7 @@ private fun SettingsRail(active: SettingsCategory, onSelect: (SettingsCategory) 
 
 /** `absolute inset-0 bg-background`: "Settings", then a row per category in `p-3 space-y-5`, each group under its heading (`px-1 pb-1`). */
 @Composable
-private fun SettingsIndex(onSelect: (SettingsCategory) -> Unit) {
+private fun SettingsIndex(minimalMode: Boolean, onSelect: (SettingsCategory) -> Unit) {
     val tokens = LocalPpmTokens.current
     Column(Modifier.fillMaxSize().background(tokens.bgSolid.color)) {
         BasicText(
@@ -213,37 +253,39 @@ private fun SettingsIndex(onSelect: (SettingsCategory) -> Unit) {
         )
         Separator()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-            for (group in SettingsGroup.entries) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                group.label?.let { GroupHeading(it, Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp)) }
-                for (category in group.categories) {
-                    // `px-2.5 py-3 rounded-lg gap-3 cursor-pointer`, `hover:bg-accent/50 active:bg-accent`;
-                    // the icon's tile turns `bg-accent` at once under a mouse (`group-hover:`, no transition).
-                    val shape = RoundedCornerShape(12.dp)
-                    val hover = rememberHover(instant = true)
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(shape)
-                            .pointerHoverIcon(WebCursor.Pointer)
-                            .ppmClickable(
-                                pressedColor = tokens.panel2.color,
-                                hoverColor = tokens.panel2.opacity(0.5).color,
-                                shape = shape,
-                                source = hover.source,
-                            ) { onSelect(category) }
-                            .padding(horizontal = 10.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Box(
-                            Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(tokens.panel2.mix(tokens.panel, hover.lit.toDouble()).color),
-                            contentAlignment = Alignment.Center,
-                        ) { PpmIcon(category.icon, 16.dp, tokens.text2.color) }
-                        Column(Modifier.weight(1f)) {
-                            BasicText(category.label, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            BasicText(category.subtitle, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            for (group in SettingsGroup.entries) {
+                val cats = group.categories(minimalMode)
+                if (cats.isEmpty()) continue
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    group.label?.let { GroupHeading(it, Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp)) }
+                    for (category in cats) {
+                        val shape = RoundedCornerShape(12.dp)
+                        val hover = rememberHover(instant = true)
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(shape)
+                                .pointerHoverIcon(WebCursor.Pointer)
+                                .ppmClickable(
+                                    pressedColor = tokens.panel2.color,
+                                    hoverColor = tokens.panel2.opacity(0.5).color,
+                                    shape = shape,
+                                    source = hover.source,
+                                ) { onSelect(category) }
+                                .padding(horizontal = 10.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Box(
+                                Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(tokens.panel2.mix(tokens.panel, hover.lit.toDouble()).color),
+                                contentAlignment = Alignment.Center,
+                            ) { PpmIcon(category.icon, 16.dp, tokens.text2.color) }
+                            Column(Modifier.weight(1f)) {
+                                BasicText(category.label, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                BasicText(category.subtitle, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text2.color)
                         }
-                        PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text2.color)
                     }
                 }
             }
@@ -282,9 +324,16 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
         Separator()
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 32.dp)) {
             when (category) {
+                SettingsCategory.General -> GeneralSection(model)
                 SettingsCategory.Appearance -> AppearanceSection(model)
                 SettingsCategory.Servers -> ServersSection(model)
                 SettingsCategory.Voice -> VoiceSection(model)
+                SettingsCategory.Shortcuts -> KeyboardShortcutsSection(model)
+                SettingsCategory.Files -> FilesSettingsSection(model)
+                SettingsCategory.QueryAudit -> QueryAuditSection(model)
+                SettingsCategory.LanguageServers -> LanguageServersSection(model)
+                SettingsCategory.DatabaseDrivers -> DatabaseDriversSection(model)
+                SettingsCategory.RemoteDesktop -> RemoteDesktopSettingsSection(model)
             }
         }
     }
@@ -298,30 +347,34 @@ internal fun Separator() {
 
 // Appearance
 
-/** The theme section of `appearance-settings-section.tsx`: the six themes, then Light, Dark or System. */
+/** The theme section of `appearance-settings-section.tsx`: the six themes, then Light, Dark or System, plus custom themes, wrap, tab style & explorer skin. */
 @Composable
 private fun AppearanceSection(model: AppModel) {
     val tokens = LocalPpmTokens.current
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        BasicText("Theme", style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color))
-        val active = model.theme.id
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (row in BuiltInThemes.all.chunked(2)) {
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (theme in row) {
-                        ThemeCard(theme, theme.id == active, Modifier.weight(1f).fillMaxHeight()) { model.scope.launch { model.pickTheme(theme) } }
+    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            BasicText("Theme", style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color))
+            val active = if (model.themeSelection.style == "custom") "" else model.theme.id
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (row in BuiltInThemes.all.chunked(2)) {
+                    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (theme in row) {
+                            ThemeCard(theme, theme.id == active, Modifier.weight(1f).fillMaxHeight()) { model.scope.launch { model.pickTheme(theme) } }
+                        }
+                        if (row.size == 1) Spacer(Modifier.weight(1f))
                     }
-                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for ((mode, label, icon) in THEME_MODES) {
+                    ModeButton(label, icon, model.themeSelection.mode == mode, isSystemInDarkTheme(), Modifier.weight(1f)) {
+                        model.scope.launch { model.pickThemeMode(mode) }
+                    }
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for ((mode, label, icon) in THEME_MODES) {
-                ModeButton(label, icon, model.themeSelection.mode == mode, isSystemInDarkTheme(), Modifier.weight(1f)) {
-                    model.scope.launch { model.pickThemeMode(mode) }
-                }
-            }
-        }
+        Separator()
+        AppearanceExtrasSection(model)
     }
 }
 

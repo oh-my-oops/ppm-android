@@ -38,6 +38,20 @@ data class UiPrefs(
     val sidebarTabOrder: List<String>? = null,
     /** How the Source Control panel lists changed files: `flat` or `tree`. */
     val gitStatusViewMode: String? = null,
+    /** Editor word wrap (`wordWrap`), shared across desktop clients. */
+    val wordWrap: Boolean? = null,
+    /** Tab bar style (`editorTabStyle`): `default`, `boxed` or `pill`. */
+    val editorTabStyle: String? = null,
+    /** Inline git blame in editor (`inlineBlame`). */
+    val inlineBlame: Boolean? = null,
+    /** Design Canvas floating window mode (`designWindows`). */
+    val designWindows: Boolean? = null,
+    /** Remote Desktop stats overlay (`remoteDesktopStatsVisible`). */
+    val remoteDesktopStatsVisible: Boolean? = null,
+    /** Remote Desktop warning gate dismissed (`remoteDesktopWarningDismissed`). */
+    val remoteDesktopWarningDismissed: Boolean? = null,
+    /** Jira integration enabled (`jiraEnabled`). */
+    val jiraEnabled: Boolean? = null,
 ) {
     /** The same keys as the server's, which [from] reads back: what a device keeps between starts. */
     fun toJson(): JsonObject = buildJsonObject {
@@ -52,6 +66,13 @@ data class UiPrefs(
         sidebarActiveTab?.let { put("sidebarActiveTab", it) }
         sidebarTabOrder?.let { ids -> put("sidebarTabOrder", JsonArray(ids.map(::JsonPrimitive))) }
         gitStatusViewMode?.let { put("gitStatusViewMode", it) }
+        wordWrap?.let { put("wordWrap", it) }
+        editorTabStyle?.let { put("editorTabStyle", it) }
+        inlineBlame?.let { put("inlineBlame", it) }
+        designWindows?.let { put("designWindows", it) }
+        remoteDesktopStatsVisible?.let { put("remoteDesktopStatsVisible", it) }
+        remoteDesktopWarningDismissed?.let { put("remoteDesktopWarningDismissed", it) }
+        jiraEnabled?.let { put("jiraEnabled", it) }
     }
 
     companion object {
@@ -68,10 +89,18 @@ data class UiPrefs(
             sidebarActiveTab = json["sidebarActiveTab"].string?.takeIf(::isSidebarTab),
             sidebarTabOrder = json["sidebarTabOrder"].array?.mapNotNull { it.string?.takeIf(::isSidebarTab) }?.distinct(),
             gitStatusViewMode = json["gitStatusViewMode"].string?.takeIf { it in GIT_VIEW_MODES },
+            wordWrap = json["wordWrap"].bool,
+            editorTabStyle = json["editorTabStyle"].string?.takeIf { it in EDITOR_TAB_STYLES },
+            inlineBlame = json["inlineBlame"].bool,
+            designWindows = json["designWindows"].bool,
+            remoteDesktopStatsVisible = json["remoteDesktopStatsVisible"].bool,
+            remoteDesktopWarningDismissed = json["remoteDesktopWarningDismissed"].bool,
+            jiraEnabled = json["jiraEnabled"].bool,
         )
 
         private val EXPLORER_SKINS = setOf("auto", "windows", "macos")
         private val GIT_VIEW_MODES = setOf("flat", "tree")
+        private val EDITOR_TAB_STYLES = setOf("default", "boxed", "pill")
 
         private val SIDEBAR_TABS = setOf("explorer", "git", "database", "search", "jira", "ai-resources", "history", "tunnels", "teams", "designs")
 

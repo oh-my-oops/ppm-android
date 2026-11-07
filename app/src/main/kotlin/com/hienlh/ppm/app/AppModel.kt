@@ -542,6 +542,38 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     var gitStatusViewMode by mutableStateOf("flat")
         private set
 
+    /** Desktop word wrap (`wordWrap`), shared through the server's UI prefs. */
+    var wordWrap by mutableStateOf(true)
+        private set
+
+    /** Phone-local word wrap (`mobileWordWrap`), kept on this device only. */
+    var mobileWordWrap by mutableStateOf(prefs.get("mobileWordWrap") != "false")
+        private set
+
+    /** Device-local LSP code intelligence toggle (`lspEnabled`). */
+    var lspEnabled by mutableStateOf(prefs.get("lspEnabled") != "false")
+        private set
+
+    /** Tab bar style (`editorTabStyle`): `default`, `boxed` or `pill`. */
+    var editorTabStyle by mutableStateOf("default")
+        private set
+
+    /** Inline git blame (`inlineBlame`), shared through the server's UI prefs. */
+    var inlineBlame by mutableStateOf(true)
+        private set
+
+    /** Design Canvas floating windows (`designWindows`), shared through the server's UI prefs. */
+    var designWindows by mutableStateOf(false)
+        private set
+
+    /** Jira integration toggle (`jiraEnabled`), shared through the server's UI prefs. */
+    var jiraEnabled by mutableStateOf(false)
+        private set
+
+    /** Requested Settings category when opened via deep link or `openSettings(category)`. */
+    var requestedSettingsCategory by mutableStateOf<String?>(null)
+        internal set
+
     fun setGitViewMode(mode: String) {
         if (mode != "flat" && mode != "tree") return
         gitStatusViewMode = mode
@@ -550,6 +582,101 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         scope.launch {
             quietly { client.putUiPrefs(buildJsonObject { put("gitStatusViewMode", mode) }) }
         }
+    }
+
+    fun setKeepScreenAwakePref(enabled: Boolean) {
+        keepScreenAwake = enabled
+        saveUiPrefs()
+        putUiPref { put("keepScreenAwake", enabled) }
+    }
+
+    fun setTabWrapPref(enabled: Boolean) {
+        tabWrap = enabled
+        saveUiPrefs()
+        putUiPref { put("tabWrap", enabled) }
+    }
+
+    fun setWordWrapPref(enabled: Boolean) {
+        if (wide) {
+            wordWrap = enabled
+            saveUiPrefs()
+            putUiPref { put("wordWrap", enabled) }
+        } else {
+            mobileWordWrap = enabled
+            prefs.put("mobileWordWrap", enabled.toString())
+        }
+    }
+
+    fun setEditorTabStylePref(style: String) {
+        if (style !in setOf("default", "boxed", "pill")) return
+        editorTabStyle = style
+        saveUiPrefs()
+        putUiPref { put("editorTabStyle", style) }
+    }
+
+    fun setExplorerSkinPref(skin: String) {
+        if (skin !in setOf("auto", "windows", "macos")) return
+        explorerSkin = skin
+        saveUiPrefs()
+        putUiPref { put("explorerSkin", skin) }
+    }
+
+    fun setLspEnabledPref(enabled: Boolean) {
+        lspEnabled = enabled
+        prefs.put("lspEnabled", enabled.toString())
+    }
+
+    fun setDesignWindowsPref(enabled: Boolean) {
+        designWindows = enabled
+        saveUiPrefs()
+        putUiPref { put("designWindows", enabled) }
+    }
+
+    fun setJiraEnabledPref(enabled: Boolean) {
+        jiraEnabled = enabled
+        saveUiPrefs()
+        putUiPref { put("jiraEnabled", enabled) }
+    }
+
+    fun updateDeviceNameLocal(name: String) {
+        val current = info ?: return
+        info = current.copy(deviceName = name.trim().ifEmpty { null })
+    }
+
+    /**
+     * Immediately updates the saved password token for the active server after changing the
+     * password in Settings → General so the current session stays signed in without 401.
+     */
+    fun updateActiveServerPassword(newToken: String) {
+        val trimmed = newToken.trim()
+        if (trimmed.isEmpty()) return
+        store.selected?.let { server -> store.updateToken(trimmed, server) }
+        api?.let { currentApi -> api = ApiClient(currentApi.baseUrl, trimmed) }
+    }
+
+    /** Invalidates file indexes after File Filters settings are updated. */
+    fun invalidateFileIndexes(projectName: String? = null) {
+        if (projectName != null) {
+            fileIndex?.markStale(projectName)
+        } else {
+            for (proj in projects) fileIndex?.markStale(proj.name)
+        }
+        fileTree?.reconnected()
+    }
+
+    /** Reloads keyboard shortcuts from `/api/settings/keybindings`. */
+    fun reloadKeybindings() {
+        val client = api ?: return
+        scope.launch {
+            quietly { client.keybindings() }?.let { keyBindings = KeyBindings(it) }
+        }
+    }
+
+    /** Picks an imported custom theme (`style = "custom"` + `customThemeId`). */
+    suspend fun pickCustomTheme(customThemeId: String, isDarkBase: Boolean) {
+        val previous = themeSelection
+        themeSelection = ThemeSelection("custom", if (isDarkBase) "dark" else "light", customThemeId)
+        if (!report { api?.setTheme(themeSelection) }) themeSelection = previous
     }
 
     /** This app's sections in the rail's order: those dragged into place first, then the rest as the web lists them (`resolveTabOrder`). */
@@ -1155,6 +1282,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                     prefs.sidebarActiveTab?.let { sidebarTab = it }
                     prefs.sidebarTabOrder?.let { sidebarTabOrder = it }
                     prefs.gitStatusViewMode?.let { gitStatusViewMode = it }
+                    prefs.wordWrap?.let { wordWrap = it }
+                    prefs.editorTabStyle?.let { editorTabStyle = it }
+                    prefs.inlineBlame?.let { inlineBlame = it }
+                    prefs.designWindows?.let { designWindows = it }
+                    prefs.jiraEnabled?.let { jiraEnabled = it }
                     saveUiPrefs()
                 }
                 projects
@@ -1204,6 +1336,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         sidebarTab = saved.sidebarActiveTab ?: "history"
         sidebarTabOrder = saved.sidebarTabOrder ?: emptyList()
         gitStatusViewMode = saved.gitStatusViewMode ?: "flat"
+        wordWrap = saved.wordWrap ?: true
+        editorTabStyle = saved.editorTabStyle ?: "default"
+        inlineBlame = saved.inlineBlame ?: true
+        designWindows = saved.designWindows ?: false
+        jiraEnabled = saved.jiraEnabled ?: false
     }
 
     private fun saveUiPrefs() {
@@ -1219,6 +1356,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             sidebarActiveTab = sidebarTab,
             sidebarTabOrder = sidebarTabOrder,
             gitStatusViewMode = gitStatusViewMode,
+            wordWrap = wordWrap,
+            editorTabStyle = editorTabStyle,
+            inlineBlame = inlineBlame,
+            designWindows = designWindows,
+            jiraEnabled = jiraEnabled,
         )
         prefs.put("uiPrefs.$serverKey", saved.toJson().toString())
     }
@@ -2973,18 +3115,33 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
      * open-settings.ts: Settings in a floating window on a tablet — the one already open comes
      * forward, as there is only one set of settings — and as a tab on a phone.
      */
-    fun openSettings() {
+    fun openSettings(category: String? = null) {
+        if (!category.isNullOrBlank()) {
+            requestedSettingsCategory = category
+        }
         val windows = windows
         if (!wide || windows == null) {
-            withWorkspace { it.openTab(NewTab("settings", "Settings")) }
+            withWorkspace {
+                it.openTab(
+                    NewTab(
+                        type = "settings",
+                        title = "Settings",
+                        metadata = if (!category.isNullOrBlank()) buildJsonObject { put("category", category) } else JsonObject(emptyMap()),
+                    ),
+                )
+            }
             return
         }
         val existing = windows.state.value.windows.values.firstOrNull { it.kind == WindowKind.Settings }
+        val payload = if (!category.isNullOrBlank()) buildJsonObject { put("category", category) } else null
         when {
-            existing != null -> windows.focus(existing.id)
+            existing != null -> {
+                if (payload != null) windows.setPayload(existing.id, payload)
+                windows.focus(existing.id)
+            }
             // At the cap the web's `open` raises the oldest window instead, which is not Settings.
             windows.state.value.windows.size >= MAX_WINDOWS -> actionError(TOO_MANY_WINDOWS)
-            else -> windows.open(WindowKind.Settings)
+            else -> if (payload != null) windows.open(WindowKind.Settings, payload) else windows.open(WindowKind.Settings)
         }
     }
 
