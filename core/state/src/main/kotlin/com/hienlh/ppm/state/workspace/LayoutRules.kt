@@ -124,7 +124,10 @@ fun deriveTabId(type: String, metadata: JsonObject, randomId: () -> String = ::w
         "db-connection" -> "db-connection:${m("connectionId") ?: "new-${randomId()}"}"
         "sqlite" -> "sqlite:${m("filePath") ?: "default"}"
         "extension" -> "extension:${(m("viewType") ?: "unknown").removeSuffix(".view")}"
-        "git-diff" -> "git-diff:${m("filePath") ?: "unknown"}"
+        "git-diff" -> when {
+            !m("file1").isNullOrEmpty() && !m("file2").isNullOrEmpty() -> "git-diff:compare:${m("file1")}↔${m("file2")}"
+            else -> "git-diff:${m("filePath") ?: "unknown"}"
+        }
         "branch-review" -> "branch-review:${m("projectName") ?: "unknown"}"
         "session-review" -> "session-review:${m("projectName") ?: "unknown"}:${m("sessionId") ?: "unknown"}"
         "git-review" -> "git-review:${m("projectName") ?: "unknown"}"

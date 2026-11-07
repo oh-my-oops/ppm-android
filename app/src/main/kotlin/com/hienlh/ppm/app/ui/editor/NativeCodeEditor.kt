@@ -84,7 +84,14 @@ import com.hienlh.ppm.app.ui.files.fileCodeLanguage
 import com.hienlh.ppm.app.ui.files.fileCodeReveal
 import com.hienlh.ppm.client.aiResourcesReadContent
 import com.hienlh.ppm.client.aiResourcesWriteContent
+import com.hienlh.ppm.client.gitBlame
+import com.hienlh.ppm.client.gitCommitLine
 import com.hienlh.ppm.client.writeFile
+import com.hienlh.ppm.state.editor.BlameLineDetailState
+import com.hienlh.ppm.state.editor.BlameResultState
+import com.hienlh.ppm.state.editor.isUncommittedHash
+import com.hienlh.ppm.state.editor.parseBlameLineDetail
+import com.hienlh.ppm.state.editor.parseBlameResult
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.HighlightedCode
@@ -454,6 +461,62 @@ internal fun EditableFileCodeView(
             }
         }
 
+        // Per-device Inline Blame state (Phase 07d.1)
+        val blameEnabled by SharedBlamePreference.enabled.collectAsState()
+        var blameData by remember(project, path) { mutableStateOf<BlameResultState?>(null) }
+        var activeLineDetail by remember { mutableStateOf<BlameLineDetailState?>(null) }
+        val activeCursorLineOneBased = remember(editTick) {
+            docState.session.buffer.offsetToLineCol(docState.session.selectionStart).line + 1
+        }
+        val activeBlameCommit = remember(blameData, activeCursorLineOneBased, docState.isDirty) {
+            if (!blameEnabled || docState.isDirty) return@remember null
+            val data = blameData ?: return@remember null
+            val entry = data.lines[activeCursorLineOneBased] ?: return@remember null
+            data.commits[entry.hash]
+        }
+
+        LaunchedEffect(api, project, path, blameEnabled, docState.isDirty) {
+            if (!blameEnabled || docState.isDirty || api == null || !isRelativeProjectFile || project == null || path == null) {
+                if (docState.isDirty) blameData = null
+                return@LaunchedEffect
+            }
+            delay(300L)
+            runCatching { api.gitBlame(project, path) }
+                .getOrNull()
+                ?.let { blameData = parseBlameResult(it) }
+        }
+
+        LaunchedEffect(api, project, path, blameData, activeCursorLineOneBased, activeBlameCommit) {
+            val commit = activeBlameCommit
+            if (api == null || project == null || path == null || commit == null || isUncommittedHash(commit.hash)) {
+                activeLineDetail = null
+                return@LaunchedEffect
+            }
+            val origLine = blameData?.lines?.get(activeCursorLineOneBased)?.origLine ?: activeCursorLineOneBased
+            val cacheKey = "${commit.hash}:$path:$origLine"
+            val cached = SharedBlamePreference.commitLineCache.get(cacheKey)
+            if (cached != null) {
+                activeLineDetail = cached
+                return@LaunchedEffect
+            }
+            runCatching { api.gitCommitLine(project, commit.hash, path, origLine) }
+                .getOrNull()
+                ?.let {
+                    val parsed = parseBlameLineDetail(it)
+                    SharedBlamePreference.commitLineCache.put(cacheKey, parsed)
+                    activeLineDetail = parsed
+                }
+        }
+
+        if (blameEnabled && !docState.isDirty && activeBlameCommit != null && !path.isNullOrBlank()) {
+            InlineBlameAnnotationStrip(
+                commit = activeBlameCommit,
+                detail = activeLineDetail,
+                filePath = path,
+                projectPath = project,
+            )
+        }
+
         NativeCodeEditorCanvas(
             session = docState.session,
             editTick = editTick,
@@ -467,6 +530,10 @@ internal fun EditableFileCodeView(
             revealAt = revealAt,
             lspSlot = {
                 if (isRelativeProjectFile) {
+                    InlineBlameToolbarChip(
+                        enabled = blameEnabled,
+                        onToggle = { SharedBlamePreference.setEnabled(it) },
+                    )
                     LspStatusChip(
                         enabled = lspEnabled,
                         onToggle = { DeviceLspPreference.setEnabled(it) },
@@ -614,6 +681,10 @@ internal fun NativeCodeEditorCanvas(
                     }
                     ev.isAltPressed && ev.key == Key.Z -> {
                         onToggleWrap()
+                        true
+                    }
+                    ev.isAltPressed && ev.key == Key.B -> {
+                        SharedBlamePreference.setEnabled(!SharedBlamePreference.enabled.value)
                         true
                     }
                     ev.key == Key.Tab -> {

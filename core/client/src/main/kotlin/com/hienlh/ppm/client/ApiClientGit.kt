@@ -1157,3 +1157,28 @@ suspend fun ApiClient.gitWorktreeRemove(
 suspend fun ApiClient.gitWorktreePrune(project: String, repo: GitRepo? = null) {
     call("POST", "/api/project/${ApiClient.escape(project)}/git/worktree/prune", gitRepoScope(repo), buildJsonObject {})
 }
+
+suspend fun ApiClient.gitBlame(
+    project: String,
+    path: String,
+    rev: String? = null,
+    repo: GitRepo? = null,
+): JsonElement {
+    val query = mutableListOf("path" to path)
+    if (!rev.isNullOrEmpty()) query += "rev" to rev
+    query += gitRepoScope(repo)
+    return call("GET", "/api/project/${ApiClient.escape(project)}/git/blame", query)
+}
+
+suspend fun ApiClient.gitCommitLine(
+    project: String,
+    hash: String,
+    path: String,
+    line: Int,
+    repo: GitRepo? = null,
+): JsonElement {
+    val query = mutableListOf("hash" to hash, "path" to path, "line" to "$line")
+    query += gitRepoScope(repo)
+    return call("GET", "/api/project/${ApiClient.escape(project)}/git/commit-line", query)
+}
+

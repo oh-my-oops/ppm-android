@@ -355,46 +355,92 @@ fun GitDiffViewer(
             }
         }
 
-        // 1-column unified diff body
+        // 2-column side-by-side diff on tablet (`!mobile`), 1-column unified diff on phone (`mobile`)
         val openedGaps = remember(original, modified) { mutableStateMapOf<Int, Boolean>() }
         val newLines = remember(modified) { ReviewBlocks.splitLines(modified).map(::stripDiffEol) }
 
-        val entries = remember(diff, original, modified, openedGaps.toMap()) {
-            buildUnifiedDiffEntries(diff, original, modified, newLines, openedGaps)
-        }
+        if (mobile) {
+            val entries = remember(diff, original, modified, openedGaps.toMap()) {
+                buildUnifiedDiffEntries(diff, original, modified, newLines, openedGaps)
+            }
 
-        LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth().testTag("git-diff-rows"),
-        ) {
-            items(entries, key = { it.key }) { entry ->
-                when (entry) {
-                    is UnifiedDiffEntry.Gap -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(tokens.panel2.opacity(0.45).color)
-                                .edge(Edge.Top, tokens.border.opacity(0.5).color)
-                                .edge(Edge.Bottom, tokens.border.opacity(0.5).color)
-                                .clickable { openedGaps[entry.fromNew] = true }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                                .testTag("git-diff-gap-${entry.fromNew}"),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            PpmIcon(ProductIcon.ChevronDown, size = 12.dp, tint = tokens.text3.color)
-                            BasicText(
-                                text = "${entry.count} unchanged ${if (entry.count == 1) "line" else "lines"}",
-                                style = PpmFont.sans(11, lineHeight = 14, color = tokens.text3.color),
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth().testTag("git-diff-rows"),
+            ) {
+                items(entries, key = { it.key }) { entry ->
+                    when (entry) {
+                        is UnifiedDiffEntry.Gap -> {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(tokens.panel2.opacity(0.45).color)
+                                    .edge(Edge.Top, tokens.border.opacity(0.5).color)
+                                    .edge(Edge.Bottom, tokens.border.opacity(0.5).color)
+                                    .clickable { openedGaps[entry.fromNew] = true }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    .testTag("git-diff-gap-${entry.fromNew}"),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                PpmIcon(ProductIcon.ChevronDown, size = 12.dp, tint = tokens.text3.color)
+                                BasicText(
+                                    text = "${entry.count} unchanged ${if (entry.count == 1) "line" else "lines"}",
+                                    style = PpmFont.sans(11, lineHeight = 14, color = tokens.text3.color),
+                                )
+                            }
+                        }
+                        is UnifiedDiffEntry.Rows -> {
+                            GitUnifiedDiffRows(
+                                rows = entry.rows,
+                                language = language,
+                                wordWrap = wordWrap,
+                                compact = true,
                             )
                         }
                     }
-                    is UnifiedDiffEntry.Rows -> {
-                        GitUnifiedDiffRows(
-                            rows = entry.rows,
-                            language = language,
-                            wordWrap = wordWrap,
-                            compact = mobile,
-                        )
+                }
+            }
+        } else {
+            val sbsEntries = remember(diff, original, modified, openedGaps.toMap()) {
+                com.hienlh.ppm.state.editor.buildSideBySideDiffEntries(
+                    diff = diff,
+                    original = original,
+                    modified = modified,
+                    openedGaps = openedGaps,
+                )
+            }
+
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth().testTag("git-diff-rows"),
+            ) {
+                items(sbsEntries, key = { it.key }) { entry ->
+                    when (entry) {
+                        is com.hienlh.ppm.state.editor.SideBySideDiffEntry.Gap -> {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(tokens.panel2.opacity(0.45).color)
+                                    .edge(Edge.Top, tokens.border.opacity(0.5).color)
+                                    .edge(Edge.Bottom, tokens.border.opacity(0.5).color)
+                                    .clickable { openedGaps[entry.fromNew] = true }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    .testTag("git-diff-gap-${entry.fromNew}"),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                PpmIcon(ProductIcon.ChevronDown, size = 12.dp, tint = tokens.text3.color)
+                                BasicText(
+                                    text = "${entry.count} unchanged ${if (entry.count == 1) "line" else "lines"}",
+                                    style = PpmFont.sans(11, lineHeight = 14, color = tokens.text3.color),
+                                )
+                            }
+                        }
+                        is com.hienlh.ppm.state.editor.SideBySideDiffEntry.Rows -> {
+                            com.hienlh.ppm.app.ui.editor.GitSideBySideDiffRows(
+                                rows = entry.rows,
+                                wordWrap = wordWrap,
+                            )
+                        }
                     }
                 }
             }
