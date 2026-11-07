@@ -163,6 +163,15 @@ enum class SettingsCategory(
     PpmBot("ppmbot", "PPMBot", "Telegram bot coordinator, tasks & memory", ProductIcon.BotMessageSquare, SettingsGroup.Ai, minimalSafe = false),
     Design("design", "Design", "Design Canvas apps, instructions & skills", ProductIcon.LayoutGrid, SettingsGroup.Ai, minimalSafe = false),
 
+    // Integrations
+    Notifications("notifications", "Notifications", "Push, Telegram & ntfy alert channels", ProductIcon.Bell, SettingsGroup.Integrations, minimalSafe = true),
+    RemoteAccess("remote-access", "Remote Access", "Tailscale, Public Link & Cloudflare tunnel", ProductIcon.Globe, SettingsGroup.Integrations, minimalSafe = true),
+    Cloud("cloud", "Cloud & Share", "PPM Cloud account, device link & share slug", ProductIcon.Cloud, SettingsGroup.Integrations, minimalSafe = false),
+    Proxy("proxy", "API Proxy", "Anthropic & OpenAI SDK proxy endpoint", ProductIcon.ArrowLeftRight, SettingsGroup.Integrations, minimalSafe = false),
+    Extensions("extensions", "Extensions", "Installed extensions & local dev-links", ProductIcon.Puzzle, SettingsGroup.Integrations, minimalSafe = false),
+    Jira("jira", "Jira", "Project credentials, JQL watchers & issue debug", ProductIcon.Bug, SettingsGroup.Integrations, minimalSafe = false),
+    Schedules("schedules", "Schedules", "Cron prompt & script tasks, logs & templates", ProductIcon.CalendarClock, SettingsGroup.Integrations, minimalSafe = false),
+
     // Advanced
     QueryAudit("query-audit", "Query Audit Log", "SQL history retention & size cap", ProductIcon.ScrollText, SettingsGroup.Advanced, minimalSafe = false),
     LanguageServers("language-servers", "Language Servers", "Editor code intelligence", ProductIcon.Code, SettingsGroup.Advanced, minimalSafe = false),
@@ -346,6 +355,13 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
                 SettingsCategory.AiResources -> AiResourcesSettingsSection(model)
                 SettingsCategory.PpmBot -> PpmBotSettingsSection(model)
                 SettingsCategory.Design -> DesignSettingsSection(model)
+                SettingsCategory.Notifications -> NotificationsSettingsSection(model)
+                SettingsCategory.RemoteAccess -> RemoteAccessSettingsSection(model)
+                SettingsCategory.Cloud -> CloudSettingsSection(model)
+                SettingsCategory.Proxy -> ProxySettingsSection(model)
+                SettingsCategory.Extensions -> ExtensionsSettingsSection(model)
+                SettingsCategory.Jira -> JiraSettingsSection(model)
+                SettingsCategory.Schedules -> SchedulesSettingsSection(model)
                 SettingsCategory.QueryAudit -> QueryAuditSection(model)
                 SettingsCategory.LanguageServers -> LanguageServersSection(model)
                 SettingsCategory.DatabaseDrivers -> DatabaseDriversSection(model)
