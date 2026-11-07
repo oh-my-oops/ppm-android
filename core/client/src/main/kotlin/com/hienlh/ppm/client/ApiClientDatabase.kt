@@ -561,3 +561,45 @@ suspend fun ApiClient.dbDownloadGridExportTicket(ticket: String): ByteArray {
     }
 }
 
+// ── 9d.1 Database Changeset Preview & Apply Endpoints ───────────────────────
+
+/** `POST /api/db/connections/:id/changeset/preview` — preview SQL script and FK references to deleted rows. */
+suspend fun ApiClient.dbChangesetPreview(
+    connectionId: String,
+    body: JsonObject,
+    database: String? = null,
+    path: String? = null,
+    project: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+): JsonObject =
+    (dbCall(
+        method = "POST",
+        path = "/api/db/connections/${ApiClient.escape(connectionId)}/changeset/preview",
+        query = connQuery(database, path, project),
+        body = body,
+        timeoutKind = DbRequestTimeoutKind.CATALOG,
+        loginCoordinator = loginCoordinator,
+    ) as? JsonObject) ?: buildJsonObject {}
+
+/**
+ * `POST /api/db/connections/:id/changeset/apply` — apply changeset in a single transaction
+ * (`UNBOUNDED` read timeout so row locks wait until resolved or cancelled).
+ */
+suspend fun ApiClient.dbChangesetApply(
+    connectionId: String,
+    body: JsonObject,
+    database: String? = null,
+    path: String? = null,
+    project: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+): JsonObject =
+    (dbCall(
+        method = "POST",
+        path = "/api/db/connections/${ApiClient.escape(connectionId)}/changeset/apply",
+        query = connQuery(database, path, project),
+        body = body,
+        timeoutKind = DbRequestTimeoutKind.UNBOUNDED,
+        loginCoordinator = loginCoordinator,
+    ) as? JsonObject) ?: buildJsonObject {}
+
+

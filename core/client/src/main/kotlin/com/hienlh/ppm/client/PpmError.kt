@@ -1,5 +1,7 @@
 package com.hienlh.ppm.client
 
+import kotlinx.serialization.json.JsonElement
+
 /** Everything a call to a PPM server can fail with; the message is what the UI shows. */
 sealed class PpmError(message: String) : Exception(message) {
     class InvalidUrl : PpmError("That is not a valid server address.") {
@@ -19,11 +21,22 @@ sealed class PpmError(message: String) : Exception(message) {
 
     /**
      * `{ ok: false }`: the server's message, and its machine-readable [code] when it sent one
-     * (`DB_LOGIN_REQUIRED`, `EEXIST`…).
+     * (`DB_LOGIN_REQUIRED`, `EEXIST`…). [data] carries structured failure details (e.g. 409 changeset failure).
      */
-    class Server(val status: Int, val serverMessage: String, val code: String? = null, val hint: String? = null) : PpmError(serverMessage) {
+    class Server(
+        val status: Int,
+        val serverMessage: String,
+        val code: String? = null,
+        val hint: String? = null,
+        val data: JsonElement? = null,
+    ) : PpmError(serverMessage) {
         override fun equals(other: Any?) =
-            other is Server && other.status == status && other.serverMessage == serverMessage && other.code == code && other.hint == hint
+            other is Server &&
+                other.status == status &&
+                other.serverMessage == serverMessage &&
+                other.code == code &&
+                other.hint == hint &&
+                other.data == data
 
         override fun hashCode() = status * 31 + serverMessage.hashCode()
         override fun toString() = "Server(status=$status, message=$serverMessage, code=$code)"

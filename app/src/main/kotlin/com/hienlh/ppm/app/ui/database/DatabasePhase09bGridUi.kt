@@ -68,7 +68,10 @@ import com.hienlh.ppm.client.DbDriverMissingException
 import com.hienlh.ppm.client.DbLoginCoordinator
 import com.hienlh.ppm.client.DbLoginPromptInfo
 import com.hienlh.ppm.client.PpmError
+import com.hienlh.ppm.client.dbChangesetApply
+import com.hienlh.ppm.client.dbChangesetPreview
 import com.hienlh.ppm.client.dbDownloadGridExportTicket
+import com.hienlh.ppm.client.dbGridCellTicket
 import com.hienlh.ppm.client.dbGridCount
 import com.hienlh.ppm.client.dbGridExportTicket
 import com.hienlh.ppm.client.dbGridPage
@@ -76,6 +79,7 @@ import com.hienlh.ppm.client.dbGridValues
 import com.hienlh.ppm.client.dbInstallMissingDriver
 import com.hienlh.ppm.client.dbLoginConnection
 import com.hienlh.ppm.client.dbTableSchema
+import com.hienlh.ppm.client.dbTableStructure
 import com.hienlh.ppm.client.dbUpdateConnection
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
@@ -88,13 +92,22 @@ import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.int
 import com.hienlh.ppm.protocol.long
 import com.hienlh.ppm.protocol.string
+import com.hienlh.ppm.state.database.CHANGESET_MAX_OPERATIONS
+import com.hienlh.ppm.state.database.CellChange
+import com.hienlh.ppm.state.database.CellFileResult
+import com.hienlh.ppm.state.database.ChangesetApplyResult
+import com.hienlh.ppm.state.database.ChangesetFailure
+import com.hienlh.ppm.state.database.ChangesetHistory
+import com.hienlh.ppm.state.database.ChangesetPreview
+import com.hienlh.ppm.state.database.CloneColumn
 import com.hienlh.ppm.state.database.ColumnKind
 import com.hienlh.ppm.state.database.CopyFormat
 import com.hienlh.ppm.state.database.CopySqlTarget
 import com.hienlh.ppm.state.database.DEFAULT_COPY_FORMAT
 import com.hienlh.ppm.state.database.DbCellValue
-import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.state.database.DbGridPageData
+import com.hienlh.ppm.state.database.DocumentColumn
+import com.hienlh.ppm.state.database.EMPTY_CHANGESET
 import com.hienlh.ppm.state.database.FETCH_ALL_CHUNK
 import com.hienlh.ppm.state.database.FILTER_BAND_DP
 import com.hienlh.ppm.state.database.FLOATING_PANEL_TAB_WIDTH_DP
@@ -102,62 +115,107 @@ import com.hienlh.ppm.state.database.FilterDialogRequest
 import com.hienlh.ppm.state.database.FilterRequest
 import com.hienlh.ppm.state.database.FilterText
 import com.hienlh.ppm.state.database.FilterableColumn
+import com.hienlh.ppm.state.database.FormParse
 import com.hienlh.ppm.state.database.FunnelKind
 import com.hienlh.ppm.state.database.GRID_EXPORT_FORMATS
 import com.hienlh.ppm.state.database.GRID_PAGE_SIZE
+import com.hienlh.ppm.state.database.GridChangesPayload
+import com.hienlh.ppm.state.database.GridChangeset
 import com.hienlh.ppm.state.database.GridColumnSchema
 import com.hienlh.ppm.state.database.GridFilters
 import com.hienlh.ppm.state.database.GridRect
+import com.hienlh.ppm.state.database.GridReference
 import com.hienlh.ppm.state.database.GridSelectionState
 import com.hienlh.ppm.state.database.GridSortItem
 import com.hienlh.ppm.state.database.LoadMoreDecision
+import com.hienlh.ppm.state.database.LockColumn
+import com.hienlh.ppm.state.database.NEW_ROW_PREFIX
 import com.hienlh.ppm.state.database.NO_FILTERS
+import com.hienlh.ppm.state.database.NewRow
 import com.hienlh.ppm.state.database.ResultColumnMeta
 import com.hienlh.ppm.state.database.RowCountState
 import com.hienlh.ppm.state.database.RowCountView
 import com.hienlh.ppm.state.database.SortMenuAction
+import com.hienlh.ppm.state.database.SqlSourceRow
 import com.hienlh.ppm.state.database.TITLE_BAND_DP
 import com.hienlh.ppm.state.database.TITLE_BAND_TOUCH_DP
 import com.hienlh.ppm.state.database.TableFirstPageCache
+import com.hienlh.ppm.state.database.TableRef
+import com.hienlh.ppm.state.database.TableReferences
 import com.hienlh.ppm.state.database.TableScope
 import com.hienlh.ppm.state.database.TitleIcon
+import com.hienlh.ppm.state.database.addRows
 import com.hienlh.ppm.state.database.applySortAction
+import com.hienlh.ppm.state.database.buildChangesetRequestJson
+import com.hienlh.ppm.state.database.buildGridCellTicketRequestJson
 import com.hienlh.ppm.state.database.buildGridExportRequestJson
 import com.hienlh.ppm.state.database.buildGridRequestJson
 import com.hienlh.ppm.state.database.canChooseValues
+import com.hienlh.ppm.state.database.cellFile
+import com.hienlh.ppm.state.database.changedRowCount
 import com.hienlh.ppm.state.database.classifyColumnType
+import com.hienlh.ppm.state.database.cloneValues
+import com.hienlh.ppm.state.database.collectCellData
 import com.hienlh.ppm.state.database.columnFilterState
 import com.hienlh.ppm.state.database.columnNameMatches
 import com.hienlh.ppm.state.database.computeRowCountView
 import com.hienlh.ppm.state.database.computeSelectionStats
 import com.hienlh.ppm.state.database.decodeGridFiltersJson
+import com.hienlh.ppm.state.database.deleteRows
 import com.hienlh.ppm.state.database.descriptionColumn
+import com.hienlh.ppm.state.database.detailKeyFilters
+import com.hienlh.ppm.state.database.editCells
+import com.hienlh.ppm.state.database.encodeGridFiltersJson
 import com.hienlh.ppm.state.database.filterRequest
 import com.hienlh.ppm.state.database.filterSyntax
 import com.hienlh.ppm.state.database.filterableColumns
+import com.hienlh.ppm.state.database.formEditText
+import com.hienlh.ppm.state.database.formFieldKindFor
 import com.hienlh.ppm.state.database.formatCellCopyText
 import com.hienlh.ppm.state.database.formatCellDisplayText
 import com.hienlh.ppm.state.database.formatCopy
 import com.hienlh.ppm.state.database.gridExportFileName
 import com.hienlh.ppm.state.database.hasFilters
+import com.hienlh.ppm.state.database.hasReferences
+import com.hienlh.ppm.state.database.isCellLocked
+import com.hienlh.ppm.state.database.isEmptyChangeset
+import com.hienlh.ppm.state.database.isNewRowId
 import com.hienlh.ppm.state.database.loadMoreDecision
 import com.hienlh.ppm.state.database.lookupRowsRequest
 import com.hienlh.ppm.state.database.lookupSearch
+import com.hienlh.ppm.state.database.parseChangesetApplyResult
+import com.hienlh.ppm.state.database.parseChangesetFailure
+import com.hienlh.ppm.state.database.parseChangesetPreview
 import com.hienlh.ppm.state.database.parseDbCellValue
+import com.hienlh.ppm.state.database.parseFormText
 import com.hienlh.ppm.state.database.parseGridColumnsSchema
 import com.hienlh.ppm.state.database.parseGridResponse
+import com.hienlh.ppm.state.database.parseTsvPasteChanges
+import com.hienlh.ppm.state.database.recordChange
+import com.hienlh.ppm.state.database.redoChange
+import com.hienlh.ppm.state.database.referencedRowFilters
 import com.hienlh.ppm.state.database.refusedFilters
 import com.hienlh.ppm.state.database.reloadKeepLoadedLimit
+import com.hienlh.ppm.state.database.revertRows
+import com.hienlh.ppm.state.database.rowDocumentText
 import com.hienlh.ppm.state.database.rowMarkerWidthPx
+import com.hienlh.ppm.state.database.savedText
 import com.hienlh.ppm.state.database.selectedBlock
+import com.hienlh.ppm.state.database.selectedRowIndices
 import com.hienlh.ppm.state.database.selectionHasCell
+import com.hienlh.ppm.state.database.shouldBypassSaveDialog
 import com.hienlh.ppm.state.database.sortInfoForColumn
+import com.hienlh.ppm.state.database.tableReferences
 import com.hienlh.ppm.state.database.titleIconFor
 import com.hienlh.ppm.state.database.toFunnelKind
+import com.hienlh.ppm.state.database.toGridChanges
+import com.hienlh.ppm.state.database.undoChange
 import com.hienlh.ppm.state.database.valuesRequest
 import com.hienlh.ppm.state.database.withColumnFilter
 import com.hienlh.ppm.state.database.withMultiFilter
+import com.hienlh.ppm.state.workspace.WorkspaceTab
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -172,6 +230,7 @@ import kotlinx.serialization.json.put
 private const val COPY_FORMAT_PREF_FILE = "ppm_db_grid_prefs"
 private const val COPY_FORMAT_PREF_KEY = "ppm-db-copy-format"
 private const val FETCH_ALL_DONT_ASK_KEY = "ppm-db-fetch-all-dont-ask"
+private const val SAVE_DONT_ASK_KEY = "ppm-db-save-dont-ask"
 private const val DEFAULT_COL_WIDTH_DP = 150
 private const val MIN_COL_WIDTH_DP = 64
 private const val GRID_ROW_HEIGHT_DP = 28
@@ -268,6 +327,7 @@ fun NativeDataGrid(
     onCopyColumnName: (String) -> Unit = {},
     onResizeColumn: (String, Int) -> Unit = { _, _ -> },
     onLoadMore: () -> Unit = {},
+    onCellTap: (Int, Int) -> Unit = { _, _ -> },
     onCellLongPressPhone: (Int, Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
@@ -760,6 +820,7 @@ fun NativeDataGrid(
                                                             selectedRows = emptySet(),
                                                         ),
                                                     )
+                                                    onCellTap(colIdx, rowIndex)
                                                 }
                                             },
                                         )
@@ -907,6 +968,9 @@ fun DatabaseTableTabBody(
     var schemaList by remember(cacheDbKey, schemaName, tableName) {
         mutableStateOf(cachedFirst?.schema.orEmpty())
     }
+    var structureJson by remember(cacheDbKey, schemaName, tableName) {
+        mutableStateOf<JsonObject?>(null)
+    }
     var rowCountState by remember { mutableStateOf<RowCountState?>(null) }
     var sort by remember { mutableStateOf<List<GridSortItem>>(emptyList()) }
     var filters by remember(cacheDbKey, schemaName, tableName) {
@@ -993,8 +1057,23 @@ fun DatabaseTableTabBody(
             } else {
                 null
             }
-            gridObj to colsArr
-        }.onSuccess { (gridObj, colsArr) ->
+            val structObj = if (withStructure || structureJson == null) {
+                runCatching {
+                    client.dbTableStructure(
+                        connectionId = connId,
+                        table = tableName,
+                        schema = schemaName.ifBlank { null },
+                        database = database,
+                        path = filePath,
+                        project = project,
+                        loginCoordinator = loginCoordinator,
+                    )
+                }.getOrNull()
+            } else {
+                null
+            }
+            Triple(gridObj, colsArr, structObj)
+        }.onSuccess { (gridObj, colsArr, structObj) ->
             if (seq != fetchSeq) return
             missingDriverId = null
             errorMessage = null
@@ -1003,6 +1082,7 @@ fun DatabaseTableTabBody(
             pageData = parsed
             val nextCols = if (colsArr != null) parseGridColumnsSchema(colsArr) else schemaList
             if (colsArr != null) schemaList = nextCols
+            if (structObj != null) structureJson = structObj
             if (sort.isEmpty() && !hasFilters(filters) && limit == GRID_PAGE_SIZE && nextCols.isNotEmpty()) {
                 TableFirstPageCache.write(cacheDbKey, schemaName, tableName, parsed, nextCols)
             }
@@ -1130,6 +1210,59 @@ fun DatabaseTableTabBody(
                 }
             }
         }
+    }
+
+    // SAF Save Cell to File launcher: pick file destination FIRST, then write local bytes or fetch `/grid/cell` ticket
+    var pendingCellFileReq by remember { mutableStateOf<Triple<String, Map<String, DbCellValue>, CellFileResult>?>(null) }
+    val saveCellFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("*/*"),
+    ) { uri: Uri? ->
+        val req = pendingCellFileReq
+        pendingCellFileReq = null
+        if (uri != null && req != null) {
+            val (colName, rowKeyMap, cellFileRes) = req
+            scope.launch {
+                runCatching {
+                    val bytes = when (cellFileRes) {
+                        is CellFileResult.Ready -> cellFileRes.bytes
+                        is CellFileResult.NeedsServerFetch -> {
+                            val client = api ?: error("Not connected")
+                            val ticketReq = buildGridCellTicketRequestJson(
+                                table = tableName,
+                                schema = schemaName.ifBlank { null },
+                                column = colName,
+                                key = rowKeyMap,
+                                fileName = cellFileRes.fileName,
+                            )
+                            val ticketObj = client.dbGridCellTicket(
+                                connectionId = connId,
+                                body = ticketReq,
+                                database = database,
+                                path = filePath,
+                                project = project,
+                                loginCoordinator = loginCoordinator,
+                            )
+                            val ticket = ticketObj["ticket"].string ?: error("Missing cell ticket")
+                            client.dbDownloadGridExportTicket(ticket)
+                        }
+                        is CellFileResult.Empty -> error(cellFileRes.message)
+                    }
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri)?.use { out ->
+                            out.write(bytes)
+                        } ?: error("Could not open destination file")
+                    }
+                }.onSuccess {
+                    exportStatusMessage = "Saved cell to file"
+                }.onFailure { err ->
+                    exportStatusMessage = "Save cell failed: ${err.message}"
+                }
+            }
+        }
+    }
+
+    val tableRefs = remember(structureJson, schemaName) {
+        tableReferences(structureJson, schemaName.ifBlank { "public" })
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -1426,11 +1559,110 @@ fun DatabaseTableTabBody(
                     }
                 }
             },
+            tableReferences = tableRefs,
+            onPreviewChangeset = { payload ->
+                val client = api ?: error("Not connected")
+                val body = buildChangesetRequestJson(
+                    table = tableName,
+                    schema = schemaName.ifBlank { null },
+                    payload = payload,
+                )
+                val obj = client.dbChangesetPreview(
+                    connectionId = connId,
+                    body = body,
+                    database = database,
+                    path = filePath,
+                    project = project,
+                    loginCoordinator = loginCoordinator,
+                )
+                parseChangesetPreview(obj)
+            },
+            onApplyChangeset = { payload, cascade ->
+                val client = api ?: error("Not connected")
+                val body = buildChangesetRequestJson(
+                    table = tableName,
+                    schema = schemaName.ifBlank { null },
+                    payload = payload,
+                    cascade = cascade,
+                )
+                val obj = client.dbChangesetApply(
+                    connectionId = connId,
+                    body = body,
+                    database = database,
+                    path = filePath,
+                    project = project,
+                    loginCoordinator = loginCoordinator,
+                )
+                val res = parseChangesetApplyResult(obj)
+                loadFirstPage(keepLoaded = true)
+                res
+            },
+            onSaveCellToFile = { colName, rowKeyMap, cellVal ->
+                val res = cellFile(tableName, colName, cellVal)
+                when (res) {
+                    is CellFileResult.Empty -> exportStatusMessage = res.message
+                    is CellFileResult.Ready -> {
+                        pendingCellFileReq = Triple(colName, rowKeyMap, res)
+                        saveCellFileLauncher.launch(res.fileName)
+                    }
+                    is CellFileResult.NeedsServerFetch -> {
+                        pendingCellFileReq = Triple(colName, rowKeyMap, res)
+                        saveCellFileLauncher.launch(res.fileName)
+                    }
+                }
+            },
+            onOpenQueryTab = { sql ->
+                model.openWorkspaceTab(
+                    type = "db-query",
+                    title = "$tableName.sql",
+                    metadata = buildJsonObject {
+                        put("connectionId", connId)
+                        put("connectionName", connName)
+                        if (!database.isNullOrBlank()) put("database", database)
+                        if (!filePath.isNullOrBlank()) put("filePath", filePath)
+                        if (!project.isNullOrBlank()) put("project", project)
+                        put("dbType", dbType)
+                        put("sql", sql)
+                    },
+                )
+            },
+            onOpenReferencedTableTab = { refTable, refSchema, refFilters ->
+                model.openWorkspaceTab(
+                    type = "db-table",
+                    title = refTable,
+                    metadata = buildJsonObject {
+                        put("connectionId", connId)
+                        put("connectionName", connName)
+                        if (!database.isNullOrBlank()) put("database", database)
+                        if (!filePath.isNullOrBlank()) put("filePath", filePath)
+                        if (!project.isNullOrBlank()) put("project", project)
+                        put("dbType", dbType)
+                        put("tableName", refTable)
+                        put("schema", refSchema ?: schemaName)
+                        put("readonly", readonlyEnabled)
+                        put(
+                            "filters",
+                            encodeGridFiltersJson(
+                                GridFilters(
+                                    columns = refFilters.mapValues { FilterText(it.value) },
+                                ),
+                            ),
+                        )
+                    },
+                )
+            },
         )
     }
 }
 
 private data class FunnelTarget(val column: String?) // null = Multi column filter
+private data class CellFkLookupTarget(
+    val rowIndex: Int,
+    val column: String,
+    val fkTable: String,
+    val fkSchema: String?,
+    val fkColumn: String,
+)
 
 @Composable
 internal fun DatabaseTableTabContent(
@@ -1452,6 +1684,7 @@ internal fun DatabaseTableTabContent(
     exportStatusMessage: String? = null,
     readonlyEnabled: Boolean = true,
     autoRefreshSec: Int = 0,
+    tableReferences: TableReferences = TableReferences(),
     onRefresh: (Boolean) -> Unit = {},
     onSetAutoRefreshSec: (Int) -> Unit = {},
     onToggleReadonly: (Boolean) -> Unit = {},
@@ -1469,6 +1702,25 @@ internal fun DatabaseTableTabContent(
     ) -> LookupTableRowsResult = { _, _, _, _, _ ->
         LookupTableRowsResult()
     },
+    onPreviewChangeset: suspend (GridChangesPayload) -> ChangesetPreview = { payload ->
+        ChangesetPreview(
+            statementCount = payload.totalOperations,
+            script = "-- ${payload.totalOperations} statement(s)",
+            references = emptyList(),
+        )
+    },
+    onApplyChangeset: suspend (GridChangesPayload, List<TableRef>) -> ChangesetApplyResult = { payload, cascade ->
+        ChangesetApplyResult(
+            inserted = payload.inserts.size,
+            updated = payload.updates.size,
+            deleted = payload.deletes.size,
+            cascaded = cascade.size,
+            executionTimeMs = 1,
+        )
+    },
+    onSaveCellToFile: (colName: String, rowKeyMap: Map<String, DbCellValue>, value: DbCellValue) -> Unit = { _, _, _ -> },
+    onOpenQueryTab: (String) -> Unit = {},
+    onOpenReferencedTableTab: (table: String, schema: String?, filters: Map<String, String>) -> Unit = { _, _, _ -> },
     onLoadMore: () -> Unit = {},
     onFetchAll: () -> Unit = {},
     onCountExactly: () -> Unit = {},
@@ -1478,6 +1730,7 @@ internal fun DatabaseTableTabContent(
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     val prefs = remember(context) {
         context.getSharedPreferences(COPY_FORMAT_PREF_FILE, Context.MODE_PRIVATE)
@@ -1489,6 +1742,9 @@ internal fun DatabaseTableTabContent(
     }
     var dontAskFetchAll by remember {
         mutableStateOf(prefs.getBoolean(FETCH_ALL_DONT_ASK_KEY, false))
+    }
+    var dontAskSave by remember {
+        mutableStateOf(prefs.getBoolean(SAVE_DONT_ASK_KEY, false))
     }
 
     var filters by remember(initialFilters) { mutableStateOf(initialFilters) }
@@ -1503,23 +1759,43 @@ internal fun DatabaseTableTabContent(
     var showColumnsPanel by remember { mutableStateOf(false) }
     var showFiltersPanel by remember { mutableStateOf(false) }
     var showCellDataPanel by remember { mutableStateOf(false) }
+    var showReferencesPanel by remember { mutableStateOf(false) }
+    var activeReference by remember { mutableStateOf<GridReference?>(null) }
+    var showFormView by remember { mutableStateOf(false) }
     var columnSearchQuery by remember { mutableStateOf("") }
 
     var openFunnelTarget by remember { mutableStateOf<FunnelTarget?>(null) }
     var activeFilterModal by remember { mutableStateOf<ActiveFilterModal?>(null) }
+    var cellFkLookupTarget by remember { mutableStateOf<CellFkLookupTarget?>(null) }
     var phoneFilterSheetTarget by remember { mutableStateOf<FunnelTarget?>(null) }
     var showPhoneColsAndFiltersSheet by remember { mutableStateOf(false) }
 
     var showCopyMenu by remember { mutableStateOf(false) }
     var showExportMenu by remember { mutableStateOf(false) }
     var showRefreshMenu by remember { mutableStateOf(false) }
+    var showJsonDocMenu by remember { mutableStateOf(false) }
+    var showEditRowJsonDialog by remember { mutableStateOf(false) }
+    var showAddJsonDocDialog by remember { mutableStateOf(false) }
+    var showGenerateSqlDialog by remember { mutableStateOf(false) }
     var showFetchAllConfirm by remember { mutableStateOf(false) }
     var showPhoneOverflowMenu by remember { mutableStateOf(false) }
     var phoneLongPressCell by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var phoneSheetSubmenu by remember { mutableStateOf<String?>(null) }
 
+    // Phase 09d Changeset & Editing State
+    var history by remember { mutableStateOf(ChangesetHistory()) }
+    val changeset = history.present
+    var newRowSeq by remember { mutableIntStateOf(0) }
+    var inlineEditTarget by remember { mutableStateOf<Pair<Int, Int>?>(null) } // (visColIdx, rowIdx)
+    var phoneFormRowIndex by remember { mutableStateOf<Int?>(null) }
+    var activeSavePreview by remember { mutableStateOf<ChangesetPreview?>(null) }
+    var saveDialogError by remember { mutableStateOf<String?>(null) }
+    var saveConflictFailure by remember { mutableStateOf<ChangesetFailure?>(null) }
+    var savingChanges by remember { mutableStateOf(false) }
+    var saveToastMessage by remember { mutableStateOf<String?>(null) }
+
     val columns = pageData?.columnKeys.orEmpty()
-    val rows = pageData?.rows.orEmpty()
+    val storedRows = pageData?.rows.orEmpty()
     val visibleColumns = remember(columns, hiddenColumns) {
         columns.filter { it !in hiddenColumns }
     }
@@ -1539,20 +1815,213 @@ internal fun DatabaseTableTabContent(
         )
     }
 
+    val keyCols = remember(pageData?.rowKey, schemaList) {
+        pageData?.rowKey.orEmpty().ifEmpty {
+            schemaList.filter { it.pk }.map { it.name }
+        }
+    }
+    val hasRowKey = keyCols.isNotEmpty()
+    val canEditTable = !readonlyEnabled && hasRowKey
+
+    // Combined rows: stored rows (with pending cell edits overlaid) + inserted new rows
+    val rowIds = remember(storedRows.size, changeset.inserted) {
+        List(storedRows.size) { "row_$it" } + changeset.inserted
+    }
+    val rows = remember(storedRows, columns, changeset) {
+        val modifiedStored = storedRows.mapIndexed { rIdx, baseRow ->
+            val rId = "row_$rIdx"
+            val rowEdits = changeset.cells[rId]
+            if (rowEdits.isNullOrEmpty()) baseRow
+            else columns.mapIndexed { cIdx, colName ->
+                rowEdits[colName]?.newVal ?: baseRow.getOrElse(cIdx) { DbCellValue.Null }
+            }
+        }
+        val appendedNew = changeset.inserted.map { newId ->
+            val rowEdits = changeset.cells[newId].orEmpty()
+            columns.map { colName ->
+                rowEdits[colName]?.newVal ?: DbCellValue.NoField
+            }
+        }
+        modifiedStored + appendedNew
+    }
+
+    fun rowIdAt(rowIndex: Int): String = rowIds.getOrElse(rowIndex) { "row_$rowIndex" }
+
+    fun storedValueAt(colKey: String, rowIndex: Int): DbCellValue {
+        if (rowIndex !in storedRows.indices) return DbCellValue.NoField
+        val cIdx = columns.indexOf(colKey)
+        if (cIdx < 0) return DbCellValue.Null
+        return storedRows[rowIndex].getOrElse(cIdx) { DbCellValue.Null }
+    }
+
+    fun currentValueAt(colKey: String, rowIndex: Int): DbCellValue {
+        val r = rows.getOrNull(rowIndex) ?: return DbCellValue.Null
+        val cIdx = columns.indexOf(colKey)
+        if (cIdx < 0) return DbCellValue.Null
+        return r.getOrElse(cIdx) { DbCellValue.Null }
+    }
+
+    fun currentRowMap(rowIndex: Int): Map<String, DbCellValue> {
+        val r = rows.getOrNull(rowIndex) ?: return emptyMap()
+        return columns.mapIndexed { idx, col -> col to (r.getOrElse(idx) { DbCellValue.Null }) }.toMap()
+    }
+
+    fun storedRowMap(rowIndex: Int): Map<String, DbCellValue> {
+        if (rowIndex !in storedRows.indices) return emptyMap()
+        val r = storedRows[rowIndex]
+        return columns.mapIndexed { idx, col -> col to (r.getOrElse(idx) { DbCellValue.Null }) }.toMap()
+    }
+
+    fun rowKeyMapFor(rowIndex: Int): Map<String, DbCellValue> {
+        if (rowIndex !in storedRows.indices) return emptyMap()
+        val stored = storedRows[rowIndex]
+        val out = LinkedHashMap<String, DbCellValue>()
+        for (kCol in keyCols) {
+            val cIdx = columns.indexOf(kCol)
+            if (cIdx >= 0) {
+                out[kCol] = stored.getOrElse(cIdx) { DbCellValue.Null }
+            }
+        }
+        return out
+    }
+
+    val allRowKeysMap = remember(storedRows, columns, keyCols) {
+        val map = LinkedHashMap<String, Map<String, DbCellValue>>()
+        for (rIdx in storedRows.indices) {
+            map["row_$rIdx"] = rowKeyMapFor(rIdx)
+        }
+        map
+    }
+
+    fun pushChangeset(next: GridChangeset) {
+        history = recordChange(history, next)
+    }
+
+    fun commitSingleCell(rowIndex: Int, colKey: String, newValue: DbCellValue) {
+        if (!canEditTable) return
+        val rId = rowIdAt(rowIndex)
+        val sch = schemaMap[colKey]
+        if (isCellLocked(LockColumn(pk = sch?.pk == true, autoIncrement = sch?.autoIncrement == true), rId, changeset)) {
+            return
+        }
+        val orig = if (isNewRowId(rId)) DbCellValue.NoField else storedValueAt(colKey, rowIndex)
+        val next = editCells(
+            changeset,
+            listOf(
+                CellChange(
+                    rowId = rId,
+                    col = colKey,
+                    value = newValue,
+                    key = rowKeyMapFor(rowIndex),
+                    original = orig,
+                ),
+            ),
+        )
+        pushChangeset(next)
+    }
+
+    fun insertBlankRow(): Int {
+        val newId = "$NEW_ROW_PREFIX${++newRowSeq}"
+        val next = addRows(changeset, listOf(NewRow(rowId = newId)))
+        pushChangeset(next)
+        val newIdx = storedRows.size + next.inserted.size - 1
+        selection = GridSelectionState(
+            activeCell = 0 to newIdx,
+            ranges = listOf(GridRect(0, newIdx, 1, 1)),
+        )
+        return newIdx
+    }
+
+    fun cloneSelectedRows() {
+        val targetRows = selectedRowIndices(selection, rows.size).ifEmpty {
+            listOfNotNull(selection.activeCell?.second)
+        }
+        if (targetRows.isEmpty()) return
+        val cloneCols = columns.map { col ->
+            val sch = schemaMap[col]
+            CloneColumn(name = col, pk = sch?.pk == true, autoIncrement = sch?.autoIncrement == true)
+        }
+        val toAdd = targetRows.map { rIdx ->
+            val vals = cloneValues(currentRowMap(rIdx), cloneCols)
+            NewRow(rowId = "$NEW_ROW_PREFIX${++newRowSeq}", values = vals)
+        }
+        pushChangeset(addRows(changeset, toAdd))
+    }
+
+    fun deleteSelectedRows() {
+        val targetRows = selectedRowIndices(selection, rows.size).ifEmpty {
+            listOfNotNull(selection.activeCell?.second)
+        }
+        if (targetRows.isEmpty()) return
+        pushChangeset(deleteRows(changeset, targetRows.map { rowIdAt(it) }))
+    }
+
+    fun revertSelectedRows() {
+        val targetRows = selectedRowIndices(selection, rows.size).ifEmpty {
+            listOfNotNull(selection.activeCell?.second)
+        }
+        if (targetRows.isEmpty()) return
+        pushChangeset(revertRows(changeset, targetRows.map { rowIdAt(it) }))
+    }
+
+    fun triggerSaveFlow() {
+        val payload = toGridChanges(changeset, allRowKeysMap)
+        if (payload.totalOperations == 0) {
+            saveToastMessage = "No changes to save"
+            return
+        }
+        if (payload.totalOperations > CHANGESET_MAX_OPERATIONS) {
+            saveDialogError = "Changeset exceeds maximum of $CHANGESET_MAX_OPERATIONS operations"
+            return
+        }
+        saveDialogError = null
+        saveConflictFailure = null
+        scope.launch {
+            runCatching { onPreviewChangeset(payload) }.onSuccess { preview ->
+                if (shouldBypassSaveDialog(dontAskSave, preview)) {
+                    savingChanges = true
+                    runCatching { onApplyChangeset(payload, emptyList()) }.onSuccess { res ->
+                        savingChanges = false
+                        history = ChangesetHistory()
+                        saveToastMessage = savedText(res)
+                    }.onFailure { err ->
+                        savingChanges = false
+                        activeSavePreview = preview
+                        saveDialogError = err.message ?: "Save failed"
+                        if (err is PpmError.Server) {
+                            saveConflictFailure = parseChangesetFailure(err.data)
+                        }
+                    }
+                } else {
+                    activeSavePreview = preview
+                }
+            }.onFailure { err ->
+                saveDialogError = err.message ?: "Failed to preview changes"
+            }
+        }
+    }
+
     val selectionStats = remember(selection, visibleColumns, rows, columns) {
         if (pageData == null) null
         else {
             val visColIndices = columns.indices.filter { columns[it] !in hiddenColumns }
             computeSelectionStats(selection, visibleColumns.size, rows.size) { visCol, r ->
                 val rawCol = visColIndices.getOrElse(visCol) { 0 }
-                pageData.cellAt(rawCol, r)
+                rows.getOrNull(r)?.getOrNull(rawCol) ?: DbCellValue.Null
             }
+        }
+    }
+
+    val dialect = remember(dbType) {
+        when (dbType.lowercase()) {
+            "mysql", "mariadb" -> "mysql"
+            "sqlite" -> "sqlite"
+            else -> "postgres"
         }
     }
 
     fun copySelectionInFormat(format: CopyFormat) {
         val data = pageData ?: return
-        val visColIndices = columns.indices.filter { columns[it] !in hiddenColumns }
         val block = if (selection.isEmpty) {
             selectedBlock(
                 GridSelectionState(ranges = listOf(GridRect(0, 0, visibleColumns.size, rows.size))),
@@ -1563,15 +2032,9 @@ internal fun DatabaseTableTabContent(
             selectedBlock(selection, visibleColumns.size, rows.size)
         }
         val copyCols = block.columns.mapNotNull { visIdx -> visibleColumns.getOrNull(visIdx) }
-        val copyRows = block.rows.map { rIdx -> data.rowAsMap(rIdx) }
-        val dialect = when (dbType.lowercase()) {
-            "mysql", "mariadb" -> "mysql"
-            "sqlite" -> "sqlite"
-            else -> "postgres"
-        }
-        val keyCols = data.rowKey.ifEmpty {
-            schemaList.filter { it.pk }.map { it.name }.ifEmpty { listOfNotNull(columns.firstOrNull()) }
-        }
+        val copyRows = block.rows.map { rIdx -> currentRowMap(rIdx) }
+        val copyStored = block.rows.map { rIdx -> storedRowMap(rIdx).ifEmpty { currentRowMap(rIdx) } }
+        val effectiveKeys = keyCols.ifEmpty { listOfNotNull(columns.firstOrNull()) }
         val text = formatCopy(
             format = format,
             columns = copyCols,
@@ -1580,12 +2043,15 @@ internal fun DatabaseTableTabContent(
                 table = tableName,
                 schema = schemaName.ifBlank { null },
                 dialect = dialect,
-                keyColumns = keyCols,
+                keyColumns = effectiveKeys,
                 kinds = columnKinds,
             ),
+            storedRows = copyStored,
         )
         copyPlainToClipboard(context, "PPM Grid Copy", text)
     }
+
+    val changedCount = remember(changeset) { changedRowCount(changeset) }
 
     BoxWithConstraints(
         modifier = Modifier
@@ -1666,10 +2132,30 @@ internal fun DatabaseTableTabContent(
                         )
                         SettingsButton(label = "Copy ▾", onClick = { showCopyMenu = !showCopyMenu })
                         SettingsButton(label = "Export ▾", onClick = { showExportMenu = !showExportMenu })
+                        SettingsButton(
+                            label = "Generate SQL",
+                            modifier = Modifier.testTag("db-generate-sql-btn"),
+                            onClick = {
+                                showPhoneOverflowMenu = false
+                                showGenerateSqlDialog = true
+                            },
+                        )
+                        if (hasReferences(tableReferences)) {
+                            SettingsButton(
+                                label = "References",
+                                primary = showReferencesPanel || activeReference != null,
+                                modifier = Modifier.testTag("db-references-panel-btn"),
+                                onClick = {
+                                    showPhoneOverflowMenu = false
+                                    showReferencesPanel = !showReferencesPanel
+                                },
+                            )
+                        }
                         SettingsButton(label = "Columns (${visibleColumns.size}/${columns.size})", onClick = { showColumnsPanel = !showColumnsPanel })
                         SettingsButton(
                             label = if (readonlyEnabled) "🔒 Read-only" else "✏️ Editable",
                             primary = !readonlyEnabled,
+                            modifier = Modifier.testTag("db-readonly-toggle-btn"),
                             onClick = { onToggleReadonly(!readonlyEnabled) },
                         )
                     }
@@ -1701,6 +2187,84 @@ internal fun DatabaseTableTabContent(
                             },
                         )
                     }
+                    if (!readonlyEnabled && hasRowKey) {
+                        SettingsButton(
+                            label = if (changedCount > 0) "Save ($changedCount)" else "Save",
+                            primary = changedCount > 0,
+                            modifier = Modifier.testTag("db-save-changes-btn"),
+                            onClick = { triggerSaveFlow() },
+                        )
+                        SettingsButton(
+                            label = "+ Insert row",
+                            modifier = Modifier.testTag("db-insert-row-btn"),
+                            onClick = {
+                                val rIdx = insertBlankRow()
+                                inlineEditTarget = 0 to rIdx
+                            },
+                        )
+                        SettingsButton(
+                            label = "Clone row",
+                            modifier = Modifier.testTag("db-clone-row-btn"),
+                            onClick = { cloneSelectedRows() },
+                        )
+                        SettingsButton(
+                            label = "Delete row",
+                            modifier = Modifier.testTag("db-delete-row-btn"),
+                            onClick = { deleteSelectedRows() },
+                        )
+                        SettingsButton(
+                            label = "Edit cell",
+                            modifier = Modifier.testTag("db-edit-cell-btn"),
+                            onClick = {
+                                val act = selection.activeCell ?: (0 to 0)
+                                inlineEditTarget = act
+                            },
+                        )
+                        SettingsButton(
+                            label = "Set NULL",
+                            modifier = Modifier.testTag("db-set-null-btn"),
+                            onClick = {
+                                val act = selection.activeCell ?: return@SettingsButton
+                                val col = visibleColumns.getOrNull(act.first) ?: return@SettingsButton
+                                commitSingleCell(act.second, col, DbCellValue.Null)
+                            },
+                        )
+                        SettingsButton(
+                            label = "Revert row",
+                            modifier = Modifier.testTag("db-revert-row-btn"),
+                            onClick = { revertSelectedRows() },
+                        )
+                        if (!isEmptyChangeset(changeset)) {
+                            SettingsButton(
+                                label = "Revert all",
+                                modifier = Modifier.testTag("db-revert-all-btn"),
+                                onClick = { pushChangeset(EMPTY_CHANGESET) },
+                            )
+                        }
+                        SettingsButton(
+                            label = "Undo",
+                            enabled = history.past.isNotEmpty(),
+                            modifier = Modifier.testTag("db-undo-btn"),
+                            onClick = { history = undoChange(history) },
+                        )
+                        SettingsButton(
+                            label = "Redo",
+                            enabled = history.future.isNotEmpty(),
+                            modifier = Modifier.testTag("db-redo-btn"),
+                            onClick = { history = redoChange(history) },
+                        )
+                        SettingsButton(
+                            label = "JSON doc ▾",
+                            modifier = Modifier.testTag("db-json-doc-menu-btn"),
+                            onClick = { showJsonDocMenu = !showJsonDocMenu },
+                        )
+                    }
+                    SettingsButton(
+                        label = if (showFormView) "Grid view" else "Form view",
+                        primary = showFormView,
+                        modifier = Modifier.testTag("db-form-view-toggle-btn"),
+                        onClick = { showFormView = !showFormView },
+                    )
                     SettingsButton(
                         label = "Copy ▾",
                         modifier = Modifier.testTag("db-copy-menu-btn"),
@@ -1710,6 +2274,11 @@ internal fun DatabaseTableTabContent(
                         label = "Export ▾",
                         modifier = Modifier.testTag("db-export-menu-btn"),
                         onClick = { showExportMenu = !showExportMenu },
+                    )
+                    SettingsButton(
+                        label = "Generate SQL",
+                        modifier = Modifier.testTag("db-generate-sql-btn"),
+                        onClick = { showGenerateSqlDialog = !showGenerateSqlDialog },
                     )
                     SettingsButton(
                         label = "Columns (${visibleColumns.size}/${columns.size})",
@@ -1730,6 +2299,14 @@ internal fun DatabaseTableTabContent(
                         modifier = Modifier.testTag("db-cell-data-panel-btn"),
                         onClick = { showCellDataPanel = !showCellDataPanel },
                     )
+                    if (hasReferences(tableReferences)) {
+                        SettingsButton(
+                            label = "References",
+                            primary = showReferencesPanel || activeReference != null,
+                            modifier = Modifier.testTag("db-references-panel-btn"),
+                            onClick = { showReferencesPanel = !showReferencesPanel },
+                        )
+                    }
                     SettingsButton(
                         label = if (readonlyEnabled) "🔒 Read-only" else "✏️ Editable",
                         primary = !readonlyEnabled,
@@ -1755,6 +2332,37 @@ internal fun DatabaseTableTabContent(
                             )
                         }
                     }
+                }
+            }
+
+            // JSON Document Dropdown Menu (`Edit row as JSON` / `Add JSON document(s)`)
+            if (showJsonDocMenu) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(tokens.panel.color)
+                        .cssBorder(tokens.border.color, sides = CssSides.Bottom)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .testTag("db-json-doc-dropdown"),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    SettingsButton(
+                        label = "Edit row as JSON document",
+                        modifier = Modifier.testTag("db-open-edit-row-json-btn"),
+                        onClick = {
+                            showJsonDocMenu = false
+                            showEditRowJsonDialog = true
+                        },
+                    )
+                    SettingsButton(
+                        label = "Add JSON document(s)",
+                        modifier = Modifier.testTag("db-open-add-json-doc-btn"),
+                        onClick = {
+                            showJsonDocMenu = false
+                            showAddJsonDocDialog = true
+                        },
+                    )
                 }
             }
 
@@ -1924,7 +2532,8 @@ internal fun DatabaseTableTabContent(
                 }
             }
 
-            if (exportStatusMessage != null) {
+            val statusNote = saveToastMessage ?: exportStatusMessage
+            if (statusNote != null) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1933,10 +2542,189 @@ internal fun DatabaseTableTabContent(
                         .testTag("db-grid-export-status"),
                 ) {
                     BasicText(
-                        exportStatusMessage,
+                        statusNote,
                         style = ppmText(11f, kind = FontKind.MONO, lineHeight = 14f).copy(color = tokens.accent.color),
                     )
                 }
+            }
+
+            // 9d.1 Save Changes Preview & CASCADE Dialog
+            val savePreview = activeSavePreview
+            if (savePreview != null) {
+                GridSaveDialog(
+                    preview = savePreview,
+                    defaultSchema = schemaName.ifBlank { "public" },
+                    dontAskAgainInitial = dontAskSave,
+                    saving = savingChanges,
+                    errorMessage = saveDialogError,
+                    conflictFailure = saveConflictFailure,
+                    onConfirmSave = { cascade, nextDontAsk ->
+                        dontAskSave = nextDontAsk
+                        prefs.edit().putBoolean(SAVE_DONT_ASK_KEY, nextDontAsk).apply()
+                        val payload = toGridChanges(changeset, allRowKeysMap)
+                        savingChanges = true
+                        saveDialogError = null
+                        saveConflictFailure = null
+                        scope.launch {
+                            runCatching { onApplyChangeset(payload, cascade) }.onSuccess { res ->
+                                savingChanges = false
+                                activeSavePreview = null
+                                history = ChangesetHistory()
+                                saveToastMessage = savedText(res)
+                            }.onFailure { err ->
+                                savingChanges = false
+                                saveDialogError = err.message ?: "Save failed"
+                                if (err is PpmError.Server) {
+                                    saveConflictFailure = parseChangesetFailure(err.data)
+                                }
+                            }
+                        }
+                    },
+                    onOpenScript = { sql ->
+                        onOpenQueryTab(sql)
+                    },
+                    onClose = {
+                        activeSavePreview = null
+                        saveDialogError = null
+                        saveConflictFailure = null
+                    },
+                )
+            }
+
+            // 9d.2 Tablet Inline Cell Editor Bar
+            val editTarget = inlineEditTarget
+            if (!mobile && editTarget != null && canEditTable) {
+                val editCol = visibleColumns.getOrNull(editTarget.first)
+                val editRowIdx = editTarget.second
+                if (editCol != null && editRowIdx in rows.indices) {
+                    val sch = schemaMap[editCol]
+                    val colKind = columnKinds[editCol] ?: ColumnKind.TEXT
+                    val curVal = currentValueAt(editCol, editRowIdx)
+                    val fkTable = sch?.fkTable
+                    val fkCol = sch?.fkColumn ?: "id"
+                    TabletInlineCellEditorBar(
+                        columnName = editCol,
+                        columnType = sch?.type.orEmpty(),
+                        fieldKind = formFieldKindFor(colKind),
+                        nullable = sch?.nullable != false,
+                        hasFk = !fkTable.isNullOrBlank(),
+                        initialText = formEditText(curVal),
+                        onCommitValue = { nextVal ->
+                            commitSingleCell(editRowIdx, editCol, nextVal)
+                            inlineEditTarget = null
+                        },
+                        onOpenFkPicker = {
+                            if (!fkTable.isNullOrBlank()) {
+                                cellFkLookupTarget = CellFkLookupTarget(
+                                    rowIndex = editRowIdx,
+                                    column = editCol,
+                                    fkTable = fkTable,
+                                    fkSchema = sch.fkSchema,
+                                    fkColumn = fkCol,
+                                )
+                            }
+                        },
+                        onJumpToFkRow = if (!fkTable.isNullOrBlank() && curVal != DbCellValue.Null && curVal != DbCellValue.NoField) {
+                            {
+                                val f = referencedRowFilters(fkCol, curVal, colKind)
+                                if (f != null) {
+                                    onOpenReferencedTableTab(fkTable, sch.fkSchema, f)
+                                }
+                            }
+                        } else {
+                            null
+                        },
+                        onCancel = { inlineEditTarget = null },
+                    )
+                }
+            }
+
+            // 9d.4 JSON Document Dialogs
+            if (showEditRowJsonDialog) {
+                val activeRowIdx = selection.activeCell?.second ?: 0
+                if (activeRowIdx in rows.indices) {
+                    val docCols = columns.map { col ->
+                        val sch = schemaMap[col]
+                        DocumentColumn(key = col, pk = sch?.pk == true, autoIncrement = sch?.autoIncrement == true)
+                    }
+                    val curMap = currentRowMap(activeRowIdx)
+                    EditRowJsonDialog(
+                        rowId = rowIdAt(activeRowIdx),
+                        columns = docCols,
+                        currentRow = curMap,
+                        storedRow = storedRowMap(activeRowIdx),
+                        key = rowKeyMapFor(activeRowIdx),
+                        changeset = changeset,
+                        initialJsonText = rowDocumentText(columns, curMap),
+                        onApplyChanges = { changes ->
+                            pushChangeset(editCells(changeset, changes))
+                        },
+                        onClose = { showEditRowJsonDialog = false },
+                    )
+                }
+            }
+
+            if (showAddJsonDocDialog) {
+                val docCols = columns.map { col ->
+                    val sch = schemaMap[col]
+                    DocumentColumn(key = col, pk = sch?.pk == true, autoIncrement = sch?.autoIncrement == true)
+                }
+                AddJsonDocumentDialog(
+                    columns = docCols,
+                    nextRowId = { "$NEW_ROW_PREFIX${++newRowSeq}" },
+                    onAddRows = { added ->
+                        pushChangeset(addRows(changeset, added))
+                    },
+                    onClose = { showAddJsonDocDialog = false },
+                )
+            }
+
+            // 9d.4 Generate SQL Dialog
+            if (showGenerateSqlDialog) {
+                val targetRows = selectedRowIndices(selection, rows.size).ifEmpty { rows.indices.toList() }
+                val sqlRows = targetRows.map { rIdx ->
+                    val cur = currentRowMap(rIdx)
+                    val st = storedRowMap(rIdx).ifEmpty { cur }
+                    SqlSourceRow(values = cur, where = st)
+                }
+                GenerateSqlDialog(
+                    columns = columns,
+                    keyColumns = keyCols,
+                    rows = sqlRows,
+                    target = CopySqlTarget(
+                        table = tableName,
+                        schema = schemaName.ifBlank { null },
+                        dialect = dialect,
+                        keyColumns = keyCols,
+                        kinds = columnKinds,
+                    ),
+                    onCopySql = { sql -> copyPlainToClipboard(context, "Generated SQL", sql) },
+                    onOpenInQueryTab = { sql -> onOpenQueryTab(sql) },
+                    onClose = { showGenerateSqlDialog = false },
+                )
+            }
+
+            // Cell FK Value Picker Dialog (when picking an FK value for a cell edit)
+            val fkCellTarget = cellFkLookupTarget
+            if (fkCellTarget != null) {
+                DictionaryLookupDialog(
+                    fkTable = fkCellTarget.fkTable,
+                    fkSchema = fkCellTarget.fkSchema,
+                    fkColumn = fkCellTarget.fkColumn,
+                    kind = columnKinds[fkCellTarget.column] ?: ColumnKind.OTHER,
+                    onLoadLookup = { search, chosenDesc ->
+                        onLoadLookup(fkCellTarget.fkTable, fkCellTarget.fkSchema, fkCellTarget.fkColumn, search, chosenDesc)
+                    },
+                    onSubmit = { filterExpr ->
+                        val rawPicked = filterExpr.substringBefore(",").removePrefix("=").trim().removeSurrounding("\"")
+                        val colKind = columnKinds[fkCellTarget.column] ?: ColumnKind.TEXT
+                        val parsed = parseFormText(rawPicked, formFieldKindFor(colKind))
+                        val nextVal = if (parsed is FormParse.Valid) parsed.value else DbCellValue.Text(rawPicked)
+                        commitSingleCell(fkCellTarget.rowIndex, fkCellTarget.column, nextVal)
+                        inlineEditTarget = null
+                    },
+                    onClose = { cellFkLookupTarget = null },
+                )
             }
 
             // Funnel Dropdown Strip (opened from filter row ▽ or Filters side panel ▽)
@@ -2049,57 +2837,173 @@ internal fun DatabaseTableTabContent(
                 )
             }
 
-            // 2. Main Grid + Columns Panel + Filters Panel + Cell Data Panel
+            // 2. Main Grid + Side Panels + Master/Detail Split View
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                Row(modifier = Modifier.fillMaxSize()) {
-                    // Docked Columns Panel when wide enough
-                    if (showColumnsPanel && !floatSidePanels) {
-                        GridColumnsSidePanel(
-                            columns = columns,
-                            schemaMap = schemaMap,
-                            hiddenColumns = hiddenColumns,
-                            searchQuery = columnSearchQuery,
-                            onSearchQueryChange = { columnSearchQuery = it },
-                            onToggleColumn = { col ->
-                                hiddenColumns = if (col in hiddenColumns) hiddenColumns - col else hiddenColumns + col
-                            },
-                            onShowAll = { hiddenColumns = emptySet() },
-                            modifier = Modifier.width(240.dp).fillMaxHeight(),
-                        )
-                    }
-
-                    // 2D Data Grid
-                    Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                        if (loading && pageData == null) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                BasicText(
-                                    "Loading table data…",
-                                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
-                                )
-                            }
-                        } else {
-                            NativeDataGrid(
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        // Docked Columns Panel when wide enough
+                        if (showColumnsPanel && !floatSidePanels) {
+                            GridColumnsSidePanel(
                                 columns = columns,
-                                rows = rows,
                                 schemaMap = schemaMap,
                                 hiddenColumns = hiddenColumns,
-                                sort = sort,
+                                searchQuery = columnSearchQuery,
+                                onSearchQueryChange = { columnSearchQuery = it },
+                                onToggleColumn = { col ->
+                                    hiddenColumns = if (col in hiddenColumns) hiddenColumns - col else hiddenColumns + col
+                                },
+                                onShowAll = { hiddenColumns = emptySet() },
+                                modifier = Modifier.width(240.dp).fillMaxHeight(),
+                            )
+                        }
+
+                        // 2D Data Grid or Tablet Form View
+                        Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                            if (loading && pageData == null) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    BasicText(
+                                        "Loading table data…",
+                                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
+                                    )
+                                }
+                            } else if (showFormView && !mobile) {
+                                val formRowIdx = (selection.activeCell?.second ?: 0).coerceIn(0, (rows.size - 1).coerceAtLeast(0))
+                                DatabaseFormView(
+                                    columns = visibleColumns,
+                                    schemaMap = schemaMap,
+                                    dbType = dbType,
+                                    rowIndex = formRowIdx,
+                                    rowCount = rows.size,
+                                    rowId = rowIdAt(formRowIdx),
+                                    changeset = changeset,
+                                    readonly = !canEditTable,
+                                    valueAt = { colKey -> currentValueAt(colKey, formRowIdx) },
+                                    onNavigateRow = { nextIdx ->
+                                        selection = selection.copy(
+                                            activeCell = (selection.activeCell?.first ?: 0) to nextIdx,
+                                            ranges = listOf(GridRect(selection.activeCell?.first ?: 0, nextIdx, 1, 1)),
+                                        )
+                                    },
+                                    onEditCell = { colKey, nextVal ->
+                                        commitSingleCell(formRowIdx, colKey, nextVal)
+                                    },
+                                    onOpenFkPicker = { colKey, sch ->
+                                        val fkT = sch.fkTable ?: return@DatabaseFormView
+                                        cellFkLookupTarget = CellFkLookupTarget(
+                                            rowIndex = formRowIdx,
+                                            column = colKey,
+                                            fkTable = fkT,
+                                            fkSchema = sch.fkSchema,
+                                            fkColumn = sch.fkColumn ?: "id",
+                                        )
+                                    },
+                                    onJumpToFkRow = { _, sch, v ->
+                                        val fkT = sch.fkTable ?: return@DatabaseFormView
+                                        val fkC = sch.fkColumn ?: "id"
+                                        val f = referencedRowFilters(fkC, v, classifyColumnType(dbType, sch.type))
+                                        if (f != null) onOpenReferencedTableTab(fkT, sch.fkSchema, f)
+                                    },
+                                    onCloseFormView = { showFormView = false },
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            } else {
+                                NativeDataGrid(
+                                    columns = columns,
+                                    rows = rows,
+                                    schemaMap = schemaMap,
+                                    hiddenColumns = hiddenColumns,
+                                    sort = sort,
+                                    filters = filters,
+                                    filterableCols = filterableCols,
+                                    serverFilterErrors = serverFilterErrors,
+                                    selection = selection,
+                                    columnWidthsDp = columnWidthsDp,
+                                    hasMore = pageData?.hasMore == true,
+                                    loadingMore = loadingMore,
+                                    newRowsCount = changeset.inserted.size,
+                                    rowEditStatus = { rIdx ->
+                                        val rId = rowIdAt(rIdx)
+                                        GridRowEditStatus(
+                                            isInserted = isNewRowId(rId),
+                                            isDeleted = rId in changeset.deleted,
+                                            modifiedColumns = changeset.cells[rId]?.keys.orEmpty(),
+                                        )
+                                    },
+                                    onSelectionChange = { selection = it },
+                                    onSortAction = onSortAction,
+                                    onCopyColumnName = { colName ->
+                                        copyPlainToClipboard(context, "Column Name", colName)
+                                    },
+                                    onResizeColumn = { col, w -> columnWidthsDp[col] = w },
+                                    onChangeFilters = { next ->
+                                        updateFilters(next)
+                                    },
+                                    onOpenChooseValues = { col, kind ->
+                                        activeFilterModal = ActiveFilterModal.ChooseValue(col, kind)
+                                    },
+                                    onOpenLookup = { col, kind, fkTable, fkSchema, fkCol ->
+                                        activeFilterModal = ActiveFilterModal.FkLookup(col, kind, fkTable, fkSchema, fkCol)
+                                    },
+                                    onOpenFunnelFor = { col ->
+                                        openFunnelTarget = if (openFunnelTarget?.column == col && openFunnelTarget != null) {
+                                            null
+                                        } else {
+                                            FunnelTarget(col)
+                                        }
+                                    },
+                                    onPhoneOpenColumnSheet = { col ->
+                                        phoneFilterSheetTarget = FunnelTarget(col)
+                                    },
+                                    onLoadMore = onLoadMore,
+                                    onCellTap = { visColIdx, rowIdx ->
+                                        if (mobile) {
+                                            phoneFormRowIndex = rowIdx
+                                        } else if (canEditTable && selection.activeCell == (visColIdx to rowIdx)) {
+                                            inlineEditTarget = visColIdx to rowIdx
+                                        }
+                                    },
+                                    onCellLongPressPhone = { visColIdx, rowIdx ->
+                                        selection = selection.copy(
+                                            activeCell = visColIdx to rowIdx,
+                                            ranges = listOf(GridRect(visColIdx, rowIdx, 1, 1)),
+                                        )
+                                        phoneSheetSubmenu = null
+                                        phoneLongPressCell = visColIdx to rowIdx
+                                    },
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+
+                            // Tablet Selection Stats Pill (`Rows: X · Count: Y · Sum: Z`)
+                            if (!mobile && selectionStats != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(10.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(tokens.panel2.color)
+                                        .cssBorder(tokens.border.color)
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                        .testTag("db-selection-stats-pill"),
+                                ) {
+                                    val sumPart = if (selectionStats.sum != null) " · Sum: ${selectionStats.sum}" else ""
+                                    BasicText(
+                                        "Rows: ${selectionStats.rows} · Count: ${selectionStats.count}$sumPart",
+                                        style = ppmText(11f, FontWeight.Medium, FontKind.MONO, lineHeight = 14f)
+                                            .copy(color = tokens.text.color),
+                                    )
+                                }
+                            }
+                        }
+
+                        // Docked Filters Panel when wide enough
+                        if (showFiltersPanel && !floatSidePanels) {
+                            FiltersSidePanel(
                                 filters = filters,
                                 filterableCols = filterableCols,
-                                serverFilterErrors = serverFilterErrors,
-                                selection = selection,
-                                columnWidthsDp = columnWidthsDp,
-                                hasMore = pageData?.hasMore == true,
-                                loadingMore = loadingMore,
-                                onSelectionChange = { selection = it },
-                                onSortAction = onSortAction,
-                                onCopyColumnName = { colName ->
-                                    copyPlainToClipboard(context, "Column Name", colName)
-                                },
-                                onResizeColumn = { col, w -> columnWidthsDp[col] = w },
-                                onChangeFilters = { next ->
-                                    updateFilters(next)
-                                },
+                                schemaMap = schemaMap,
+                                serverErrors = serverFilterErrors,
+                                onChangeFilters = { updateFilters(it) },
                                 onOpenChooseValues = { col, kind ->
                                     activeFilterModal = ActiveFilterModal.ChooseValue(col, kind)
                                 },
@@ -2107,88 +3011,145 @@ internal fun DatabaseTableTabContent(
                                     activeFilterModal = ActiveFilterModal.FkLookup(col, kind, fkTable, fkSchema, fkCol)
                                 },
                                 onOpenFunnelFor = { col ->
-                                    openFunnelTarget = if (openFunnelTarget?.column == col && openFunnelTarget != null) {
-                                        null
-                                    } else {
-                                        FunnelTarget(col)
-                                    }
+                                    openFunnelTarget = FunnelTarget(col)
                                 },
-                                onPhoneOpenColumnSheet = { col ->
-                                    phoneFilterSheetTarget = FunnelTarget(col)
-                                },
-                                onLoadMore = onLoadMore,
-                                onCellLongPressPhone = { visColIdx, rowIdx ->
-                                    selection = selection.copy(
-                                        activeCell = visColIdx to rowIdx,
-                                        ranges = listOf(GridRect(visColIdx, rowIdx, 1, 1)),
-                                    )
-                                    phoneSheetSubmenu = null
-                                    phoneLongPressCell = visColIdx to rowIdx
-                                },
-                                modifier = Modifier.fillMaxSize(),
+                                onClose = { showFiltersPanel = false },
+                                modifier = Modifier.width(260.dp).fillMaxHeight(),
                             )
                         }
 
-                        // Tablet Selection Stats Pill (`Rows: X · Count: Y · Sum: Z`)
-                        if (!mobile && selectionStats != null) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(10.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(tokens.panel2.color)
-                                    .cssBorder(tokens.border.color)
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
-                                    .testTag("db-selection-stats-pill"),
-                            ) {
-                                val sumPart = if (selectionStats.sum != null) " · Sum: ${selectionStats.sum}" else ""
-                                BasicText(
-                                    "Rows: ${selectionStats.rows} · Count: ${selectionStats.count}$sumPart",
-                                    style = ppmText(11f, FontWeight.Medium, FontKind.MONO, lineHeight = 14f)
-                                        .copy(color = tokens.text.color),
-                                )
+                        // Docked References Panel when wide enough
+                        if (showReferencesPanel && !floatSidePanels) {
+                            ReferencesSidePanel(
+                                references = tableReferences,
+                                activeReference = activeReference,
+                                defaultSchema = schemaName.ifBlank { "public" },
+                                onSelectReference = { activeReference = it },
+                                onClose = { showReferencesPanel = false },
+                                modifier = Modifier.width(260.dp).fillMaxHeight(),
+                            )
+                        }
+
+                        // Docked Cell Data Panel when wide enough
+                        if (showCellDataPanel && !floatSidePanels) {
+                            val cellSel = remember(selection, visibleColumns, rows) {
+                                collectCellData(selection, visibleColumns, visibleColumns, rows.size) { c, r ->
+                                    val colKey = visibleColumns.getOrElse(c) { "" }
+                                    currentValueAt(colKey, r)
+                                }
+                            }
+                            val single = cellSel.cells.singleOrNull()
+                            DatabaseCellDataSidePanel(
+                                cells = cellSel.cells,
+                                columnKeys = visibleColumns,
+                                columnNames = visibleColumns,
+                                valueAt = { c, r ->
+                                    val colKey = visibleColumns.getOrElse(c) { "" }
+                                    currentValueAt(colKey, r)
+                                },
+                                canEditSingleCell = canEditTable && single != null && !isCellLocked(
+                                    LockColumn(
+                                        pk = schemaMap[single.columnKey]?.pk == true,
+                                        autoIncrement = schemaMap[single.columnKey]?.autoIncrement == true,
+                                    ),
+                                    rowIdAt(single.row),
+                                    changeset,
+                                ),
+                                onApplySingleCellEdit = { nextVal ->
+                                    if (single != null) {
+                                        commitSingleCell(single.row, single.columnKey, nextVal)
+                                    }
+                                },
+                                onSaveCellToFile = {
+                                    if (single != null) {
+                                        onSaveCellToFile(single.columnKey, rowKeyMapFor(single.row), single.value)
+                                    }
+                                },
+                                onCopyText = { txt -> copyPlainToClipboard(context, "Cell Data", txt) },
+                                onClose = { showCellDataPanel = false },
+                                modifier = Modifier.width(280.dp).fillMaxHeight(),
+                            )
+                        }
+                    }
+
+                    // 9d.4 Master/Detail Split Pane below Master Grid (45% bottom height on phone)
+                    val detailRef = activeReference
+                    if (detailRef != null) {
+                        val masterRows = remember(selection, rows.size) {
+                            selectedRowIndices(selection, rows.size).ifEmpty {
+                                listOfNotNull(selection.activeCell?.second)
                             }
                         }
-                    }
-
-                    // Docked Filters Panel when wide enough
-                    if (showFiltersPanel && !floatSidePanels) {
-                        FiltersSidePanel(
-                            filters = filters,
-                            filterableCols = filterableCols,
-                            schemaMap = schemaMap,
-                            serverErrors = serverFilterErrors,
-                            onChangeFilters = { updateFilters(it) },
-                            onOpenChooseValues = { col, kind ->
-                                activeFilterModal = ActiveFilterModal.ChooseValue(col, kind)
-                            },
-                            onOpenLookup = { col, kind, fkTable, fkSchema, fkCol ->
-                                activeFilterModal = ActiveFilterModal.FkLookup(col, kind, fkTable, fkSchema, fkCol)
-                            },
-                            onOpenFunnelFor = { col ->
-                                openFunnelTarget = FunnelTarget(col)
-                            },
-                            onClose = { showFiltersPanel = false },
-                            modifier = Modifier.width(260.dp).fillMaxHeight(),
-                        )
-                    }
-
-                    // Docked Cell Data Panel when wide enough
-                    if (showCellDataPanel && !floatSidePanels) {
-                        val active = selection.activeCell
-                        val activeColName = active?.let { visibleColumns.getOrNull(it.first) }
-                        val rawColIdx = activeColName?.let { columns.indexOf(it) } ?: -1
-                        val activeVal = if (active != null && rawColIdx >= 0) {
-                            pageData?.cellAt(rawColIdx, active.second) ?: DbCellValue.Null
-                        } else {
-                            DbCellValue.Null
+                        val detailFiltersMap = remember(detailRef, masterRows, rows) {
+                            detailKeyFilters(
+                                ref = detailRef,
+                                selectedMasterRows = masterRows,
+                                masterValue = { colName, r -> currentValueAt(colName, r) },
+                            )
                         }
-                        GridCellDataSidePanel(
-                            columnName = activeColName,
-                            value = activeVal,
-                            onClose = { showCellDataPanel = false },
-                            modifier = Modifier.width(260.dp).fillMaxHeight(),
-                        )
+                        Column(
+                            modifier = (if (mobile) Modifier.fillMaxHeight(0.45f) else Modifier.height(200.dp))
+                                .fillMaxWidth()
+                                .background(tokens.panel.color)
+                                .cssBorder(tokens.accent.color, sides = CssSides.Top)
+                                .padding(8.dp)
+                                .testTag("db-master-detail-pane"),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column {
+                                    BasicText(
+                                        "Detail: ${detailRef.targetTable} (${detailFiltersMap.entries.joinToString(", ") { "${it.key}: ${it.value}" }})",
+                                        style = ppmText(11f, FontWeight.SemiBold, FontKind.MONO, lineHeight = 14f)
+                                            .copy(color = tokens.text.color),
+                                        modifier = Modifier.testTag("db-master-detail-header"),
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    SettingsButton(
+                                        label = "Open in tab",
+                                        modifier = Modifier.testTag("db-master-detail-open-tab-btn"),
+                                        onClick = {
+                                            onOpenReferencedTableTab(
+                                                detailRef.targetTable,
+                                                detailRef.targetSchema,
+                                                detailFiltersMap,
+                                            )
+                                        },
+                                    )
+                                    SettingsButton(
+                                        label = "✕",
+                                        modifier = Modifier.testTag("db-master-detail-close-btn"),
+                                        onClick = { activeReference = null },
+                                    )
+                                }
+                            }
+                            if (masterRows.isEmpty() || detailFiltersMap.values.all { it == "NULL" }) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize().testTag("db-master-detail-empty"),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    BasicText(
+                                        "Select a master row with a non-NULL key to view related rows in ${detailRef.targetTable}.",
+                                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+                                    )
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier.fillMaxSize().testTag("db-master-detail-active"),
+                                    contentAlignment = Alignment.CenterStart,
+                                ) {
+                                    BasicText(
+                                        "Filtering ${detailRef.targetTable} where ${detailFiltersMap.entries.joinToString(" AND ") { "${it.key} ${it.value}" }}",
+                                        style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.accent.color),
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -2236,23 +3197,61 @@ internal fun DatabaseTableTabContent(
                     )
                 }
 
-                // Floating Cell Data Panel when tab width < 860 dp
-                if (showCellDataPanel && floatSidePanels) {
-                    val active = selection.activeCell
-                    val activeColName = active?.let { visibleColumns.getOrNull(it.first) }
-                    val rawColIdx = activeColName?.let { columns.indexOf(it) } ?: -1
-                    val activeVal = if (active != null && rawColIdx >= 0) {
-                        pageData?.cellAt(rawColIdx, active.second) ?: DbCellValue.Null
-                    } else {
-                        DbCellValue.Null
-                    }
-                    GridCellDataSidePanel(
-                        columnName = activeColName,
-                        value = activeVal,
-                        onClose = { showCellDataPanel = false },
+                // Floating References Panel when tab width < 860 dp
+                if (showReferencesPanel && floatSidePanels) {
+                    ReferencesSidePanel(
+                        references = tableReferences,
+                        activeReference = activeReference,
+                        defaultSchema = schemaName.ifBlank { "public" },
+                        onSelectReference = { activeReference = it },
+                        onClose = { showReferencesPanel = false },
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
                             .width(260.dp)
+                            .fillMaxHeight(),
+                    )
+                }
+
+                // Floating Cell Data Panel when tab width < 860 dp
+                if (showCellDataPanel && floatSidePanels) {
+                    val cellSel = remember(selection, visibleColumns, rows) {
+                        collectCellData(selection, visibleColumns, visibleColumns, rows.size) { c, r ->
+                            val colKey = visibleColumns.getOrElse(c) { "" }
+                            currentValueAt(colKey, r)
+                        }
+                    }
+                    val single = cellSel.cells.singleOrNull()
+                    DatabaseCellDataSidePanel(
+                        cells = cellSel.cells,
+                        columnKeys = visibleColumns,
+                        columnNames = visibleColumns,
+                        valueAt = { c, r ->
+                            val colKey = visibleColumns.getOrElse(c) { "" }
+                            currentValueAt(colKey, r)
+                        },
+                        canEditSingleCell = canEditTable && single != null && !isCellLocked(
+                            LockColumn(
+                                pk = schemaMap[single.columnKey]?.pk == true,
+                                autoIncrement = schemaMap[single.columnKey]?.autoIncrement == true,
+                            ),
+                            rowIdAt(single.row),
+                            changeset,
+                        ),
+                        onApplySingleCellEdit = { nextVal ->
+                            if (single != null) {
+                                commitSingleCell(single.row, single.columnKey, nextVal)
+                            }
+                        },
+                        onSaveCellToFile = {
+                            if (single != null) {
+                                onSaveCellToFile(single.columnKey, rowKeyMapFor(single.row), single.value)
+                            }
+                        },
+                        onCopyText = { txt -> copyPlainToClipboard(context, "Cell Data", txt) },
+                        onClose = { showCellDataPanel = false },
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .width(280.dp)
                             .fillMaxHeight(),
                     )
                 }
@@ -2316,16 +3315,63 @@ internal fun DatabaseTableTabContent(
                     }
                 }
 
+                // 9d.5 Phone Row Form Bottom Sheet (opened when tapping a cell or + New row on phone)
+                val activePhoneRow = phoneFormRowIndex
+                if (mobile && activePhoneRow != null && activePhoneRow in rows.indices) {
+                    Box(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                        PhoneRowFormSheet(
+                            rowIndex = activePhoneRow,
+                            rowCount = rows.size,
+                            rowId = rowIdAt(activePhoneRow),
+                            columns = columns,
+                            schemaMap = schemaMap,
+                            dbType = dbType,
+                            changeset = changeset,
+                            readonly = !canEditTable,
+                            valueAt = { colKey -> currentValueAt(colKey, activePhoneRow) },
+                            onCommitField = { rIdx, colKey, nextVal ->
+                                commitSingleCell(rIdx, colKey, nextVal)
+                            },
+                            onNavigateRow = { nextIdx ->
+                                phoneFormRowIndex = nextIdx.coerceIn(0, (rows.size - 1).coerceAtLeast(0))
+                            },
+                            onDeleteRow = {
+                                pushChangeset(deleteRows(changeset, listOf(rowIdAt(activePhoneRow))))
+                                phoneFormRowIndex = null
+                            },
+                            onRevertRow = {
+                                pushChangeset(revertRows(changeset, listOf(rowIdAt(activePhoneRow))))
+                            },
+                            onOpenFkPicker = { colKey, sch ->
+                                val fkT = sch.fkTable ?: return@PhoneRowFormSheet
+                                cellFkLookupTarget = CellFkLookupTarget(
+                                    rowIndex = activePhoneRow,
+                                    column = colKey,
+                                    fkTable = fkT,
+                                    fkSchema = sch.fkSchema,
+                                    fkColumn = sch.fkColumn ?: "id",
+                                )
+                            },
+                            onJumpToFkRow = { _, sch, v ->
+                                val fkT = sch.fkTable ?: return@PhoneRowFormSheet
+                                val fkC = sch.fkColumn ?: "id"
+                                val f = referencedRowFilters(fkC, v, classifyColumnType(dbType, sch.type))
+                                if (f != null) onOpenReferencedTableTab(fkT, sch.fkSchema, f)
+                            },
+                            onSaveChanges = {
+                                phoneFormRowIndex = null
+                                triggerSaveFlow()
+                            },
+                            onClose = { phoneFormRowIndex = null },
+                        )
+                    }
+                }
+
                 // Phone Long-Press Cell Bottom Sheet Menu (with in-place submenu + Back)
                 val phoneCell = phoneLongPressCell
                 if (mobile && phoneCell != null) {
                     val colName = visibleColumns.getOrNull(phoneCell.first).orEmpty()
-                    val rawColIdx = columns.indexOf(colName)
-                    val cellVal = if (rawColIdx >= 0) {
-                        pageData?.cellAt(rawColIdx, phoneCell.second) ?: DbCellValue.Null
-                    } else {
-                        DbCellValue.Null
-                    }
+                    val cellVal = currentValueAt(colName, phoneCell.second)
                     Column(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -2375,8 +3421,16 @@ internal fun DatabaseTableTabContent(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 SettingsButton(
-                                    label = "Copy cell",
+                                    label = "Edit row",
                                     primary = true,
+                                    modifier = Modifier.testTag("db-phone-edit-row-btn"),
+                                    onClick = {
+                                        phoneFormRowIndex = phoneCell.second
+                                        phoneLongPressCell = null
+                                    },
+                                )
+                                SettingsButton(
+                                    label = "Copy cell",
                                     modifier = Modifier.testTag("db-phone-copy-cell-btn"),
                                     onClick = {
                                         copyPlainToClipboard(context, colName, formatCellCopyText(cellVal))
@@ -2419,8 +3473,14 @@ internal fun DatabaseTableTabContent(
                 ) {
                     SettingsButton(
                         label = "+ New row",
+                        enabled = canEditTable,
                         modifier = Modifier.testTag("db-phone-new-row-btn"),
-                        onClick = {},
+                        onClick = {
+                            if (canEditTable) {
+                                val rIdx = insertBlankRow()
+                                phoneFormRowIndex = rIdx
+                            }
+                        },
                     )
                     SettingsButton(
                         label = "Filters",
@@ -2429,10 +3489,11 @@ internal fun DatabaseTableTabContent(
                         onClick = { showPhoneColsAndFiltersSheet = !showPhoneColsAndFiltersSheet },
                     )
                     SettingsButton(
-                        label = "Save",
-                        primary = true,
+                        label = if (changedCount > 0) "Save ($changedCount)" else "Save",
+                        primary = changedCount > 0,
+                        enabled = canEditTable,
                         modifier = Modifier.testTag("db-phone-save-btn"),
-                        onClick = {},
+                        onClick = { triggerSaveFlow() },
                     )
                 }
             }

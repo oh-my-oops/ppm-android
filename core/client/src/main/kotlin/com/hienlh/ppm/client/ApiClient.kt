@@ -333,7 +333,13 @@ class ApiClient(val baseUrl: HttpUrl, val token: String) {
                 throw PpmError.BadResponse(if (status == 200) NOT_PPM else "The server answered HTTP $status.")
             }
             if (json["ok"].bool != true) {
-                throw PpmError.Server(status, json["error"].string ?: "The server answered HTTP $status.", json["code"].string, json["hint"].string)
+                throw PpmError.Server(
+                    status = status,
+                    serverMessage = json["error"].string ?: "The server answered HTTP $status.",
+                    code = json["code"].string,
+                    hint = json["hint"].string,
+                    data = json["data"]?.takeIf { it !is JsonNull },
+                )
             }
             return json["data"] ?: JsonNull
         }
