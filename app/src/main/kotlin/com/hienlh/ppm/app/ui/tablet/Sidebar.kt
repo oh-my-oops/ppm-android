@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -129,11 +130,18 @@ fun Sidebar(model: AppModel) {
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                     NavSectionRail(model, Modifier.edge(Edge.Right, tokens.border.color))
                     Box(Modifier.weight(1f).fillMaxHeight()) {
-                        when (model.sidebarSection) {
-                            "teams" -> GroupList(model)
-                            "explorer" -> com.hienlh.ppm.app.ui.files.ExplorerBody(model)
-                            "search" -> com.hienlh.ppm.app.ui.files.SearchBody(model)
-                            "git" -> com.hienlh.ppm.app.ui.git.GitStatusPanel(model)
+                        val sec = model.sidebarSection
+                        when {
+                            sec == "teams" -> GroupList(model)
+                            sec == "explorer" -> com.hienlh.ppm.app.ui.files.ExplorerBody(model)
+                            sec == "search" -> com.hienlh.ppm.app.ui.files.SearchBody(model)
+                            sec == "git" -> com.hienlh.ppm.app.ui.git.GitStatusPanel(model)
+                            sec.startsWith("ext:") -> {
+                                val viewId = sec.removePrefix("ext:")
+                                val contribs = model.extensions?.contributions?.collectAsState()?.value
+                                val viewName = contribs?.views?.values?.flatten()?.firstOrNull { it.id == viewId }?.name ?: viewId
+                                com.hienlh.ppm.app.ui.extensions.ExtensionTreeViewPanel(model, viewId, viewName)
+                            }
                             else -> HistorySection(model)
                         }
                     }
@@ -342,6 +350,14 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
                     NavItem(ProductIcon.BotMessageSquare, "Chat History", active, badge = model.unread(model.selectedProject, unread).size) {
                         model.pickSidebarSection(section)
                     }
+                }
+            }
+            val contribs = model.extensions?.contributions?.collectAsState()?.value
+            for (view in contribs?.views?.get("sidebar").orEmpty().filter { it.type != "webview" }) {
+                val secId = "ext:${view.id}"
+                val active = model.sidebarSection == secId
+                NavItem(ProductIcon.Puzzle, view.name, active, badge = 0) {
+                    model.pickSidebarSection(secId)
                 }
             }
         }

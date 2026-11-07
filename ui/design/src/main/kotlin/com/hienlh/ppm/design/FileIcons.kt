@@ -3,6 +3,7 @@ package com.hienlh.ppm.design
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.util.Base64
 import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
@@ -147,6 +148,52 @@ class FileIcons private constructor(private val context: Context) {
                 null
             }
         }
+    }
+
+    /**
+     * Resolves [names] for an extension webview (`__ppm.fileIcons` in `webview-file-icons.ts`),
+     * returning `(iconsMap, cssRules)` with inline `data:image/svg+xml;base64,...` rules for only
+     * the glyphs needed by [names].
+     */
+    suspend fun webviewFileIcons(
+        names: List<String>,
+        framework: IconFramework? = null,
+    ): Pair<Map<String, String>, String> {
+        val table = tables()
+        val icons = LinkedHashMap<String, String>()
+        val needed = LinkedHashSet<String>()
+        for (name in names) {
+            val glyph = table.file(name, framework)
+            icons[name] = glyph
+            needed.add(glyph)
+        }
+        val rules = withContext(Dispatchers.IO) {
+            val sb = StringBuilder()
+            for (glyph in needed) {
+                val darkBytes = runCatching {
+                    context.assets.open("file-icons/dark/$glyph.svg").use { it.readBytes() }
+                }.getOrNull()
+                if (darkBytes != null) {
+                    val b64 = Base64.encodeToString(darkBytes, Base64.NO_WRAP)
+                    sb.append(".vsi-").append(glyph)
+                        .append("{background-image:url(\"data:image/svg+xml;base64,")
+                        .append(b64).append("\")}\n")
+                }
+                if (glyph in table.light) {
+                    val lightBytes = runCatching {
+                        context.assets.open("file-icons/light/$glyph.svg").use { it.readBytes() }
+                    }.getOrNull()
+                    if (lightBytes != null) {
+                        val b64 = Base64.encodeToString(lightBytes, Base64.NO_WRAP)
+                        sb.append(":root[data-ppm-theme=\"light\"] .vsi-").append(glyph)
+                            .append("{background-image:url(\"data:image/svg+xml;base64,")
+                            .append(b64).append("\")}\n")
+                    }
+                }
+            }
+            sb.toString().trimEnd()
+        }
+        return icons to rules
     }
 
     companion object {

@@ -183,6 +183,9 @@ class ApiClient(val baseUrl: HttpUrl, val token: String) {
     /** The app-wide socket: running and unread sessions, file changes, and other broadcasts. */
     fun globalSocketUrl(): String = socketUrl("/ws/global", emptyList())
 
+    /** The extension host socket (`/ws/extensions`). */
+    fun extensionSocketUrl(): String = socketUrl("/ws/extensions", emptyList())
+
     /** A group's feed as it is written, and the client's `message` and `stop`. */
     fun groupSocketUrl(project: String, groupId: String): String =
         socketUrl("/ws/project/${escape(project)}/group/${escape(groupId)}", emptyList())

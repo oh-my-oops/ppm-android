@@ -39,6 +39,7 @@ import com.hienlh.ppm.app.ui.DropdownAboveEnd
 import com.hienlh.ppm.app.ui.MenuItem
 import com.hienlh.ppm.app.ui.ThemeSwatch
 import com.hienlh.ppm.app.ui.UpgradeButton
+import com.hienlh.ppm.app.ui.extensions.ExtensionStatusBarItems
 import com.hienlh.ppm.app.ui.screenKeptAwake
 import com.hienlh.ppm.app.ui.windows.WindowDock
 import com.hienlh.ppm.client.ApiClient
@@ -81,12 +82,14 @@ fun StatusBar(model: AppModel) {
                 Row(Modifier.clipToBounds(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     GitStatus(model, text, narrow)
                     DockToggle(model, text)
+                    ExtensionStatusBarItems(model, "left")
                 }
             },
             // The floating windows' taskbar takes the free middle.
             dock = if (model.windowState.windows.isNotEmpty()) ({ WindowDock(model) }) else null,
             right = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ExtensionStatusBarItems(model, "right")
                     if (model.screenKeptAwake()) Awake(text)
                     model.api?.let { Resources(it, text) }
                     ThemePicker(model, text, compact)

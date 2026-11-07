@@ -1,6 +1,7 @@
 package com.hienlh.ppm.web
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.graphics.Color
 import android.view.ViewGroup
 import android.webkit.RenderProcessGoneDetail
@@ -9,11 +10,15 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -22,12 +27,27 @@ class FrameChannel {
     internal var view: WebView? = null
 
     /** Posts [envelope] to the frame; false when there is no frame to post to. */
-    fun post(envelope: JsonObject): Boolean {
+    fun post(envelope: JsonElement): Boolean {
         val view = view ?: return false
         view.evaluateJavascript("window.ppmSend && window.ppmSend($envelope)", null)
         return true
     }
 }
+
+private const val EXTENSION_HOST_ORIGIN = "https://appassets.androidplatform.net"
+
+fun webViewMajorVersion(context: Context): Int? {
+    val pkg = try {
+        WebViewCompat.getCurrentWebViewPackage(context)
+    } catch (_: Throwable) {
+        null
+    } ?: return null
+    val ver = pkg.versionName ?: return null
+    return ver.substringBefore('.').toIntOrNull()
+}
+
+fun isWebViewModernEnough(context: Context, minMajor: Int = 80): Boolean =
+    webViewMajorVersion(context)?.let { it >= minMajor } ?: true
 
 /** The relay object the host page gets, under PPM's origin only. */
 private const val HOST_OBJECT = "ppmHost"
@@ -129,6 +149,128 @@ private fun hostPage(src: String): String {
     if (frame.contentWindow) frame.contentWindow.postMessage(message, "*");
   };
   frame.src = $frameSrc;
+  document.body.appendChild(frame);
+})();
+</script></body></html>"""
+}
+
+/**
+ * Sandboxed `<iframe sandbox="allow-scripts">` surface for extension webviews (e.g. Git Graph)
+ * whose HTML arrives via `webview:html` (`srcdoc`).
+ *
+ * Host page runs at [EXTENSION_HOST_ORIGIN] (`https://appassets.androidplatform.net`) and bridges
+ * `window.parent.postMessage` <-> [HOST_OBJECT] / `window.ppmSend`.
+ */
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+fun ExtensionWebviewSurface(
+    srcDoc: String,
+    title: String,
+    bgHex: String,
+    channel: FrameChannel,
+    onMessage: (String) -> Unit,
+    onFrameLoad: () -> Unit,
+    onCrash: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val message by rememberUpdatedState(onMessage)
+    val loaded by rememberUpdatedState(onFrameLoad)
+    val crashed by rememberUpdatedState(onCrash)
+    var lastSrcDoc by remember { mutableStateOf(srcDoc) }
+
+    AndroidView(
+        factory = { context ->
+            WebView(context).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                runCatching { setBackgroundColor(Color.parseColor(bgHex)) }
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.allowFileAccess = false
+                settings.allowContentAccess = false
+                webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+                        request.isForMainFrame
+
+                    override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                        if (channel.view === view) channel.view = null
+                        crashed()
+                        return true
+                    }
+                }
+                if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+                    WebViewCompat.addWebMessageListener(
+                        this,
+                        HOST_OBJECT,
+                        setOf(EXTENSION_HOST_ORIGIN),
+                    ) { _, posted, _, isMainFrame, _ ->
+                        val data = posted.data
+                        if (isMainFrame && data != null) {
+                            if (data == LOAD_SIGNAL) loaded() else message(data)
+                        }
+                    }
+                }
+                channel.view = this
+                lastSrcDoc = srcDoc
+                loadDataWithBaseURL(
+                    "$EXTENSION_HOST_ORIGIN/",
+                    hostSrcDocPage(srcDoc, title, bgHex),
+                    "text/html",
+                    "utf-8",
+                    null,
+                )
+            }
+        },
+        update = { view ->
+            runCatching { view.setBackgroundColor(Color.parseColor(bgHex)) }
+            if (srcDoc != lastSrcDoc) {
+                lastSrcDoc = srcDoc
+                val escaped = JsonPrimitive(srcDoc).toString().replace("</", "<\\/")
+                view.evaluateJavascript(
+                    "if (window.ppmSetSrcDoc) window.ppmSetSrcDoc($escaped);",
+                    null,
+                )
+            }
+        },
+        modifier = modifier,
+        onRelease = { view ->
+            if (channel.view === view) channel.view = null
+            view.destroy()
+        },
+    )
+}
+
+private fun hostSrcDocPage(srcDoc: String, title: String, bgHex: String): String {
+    val frameDoc = JsonPrimitive(srcDoc).toString().replace("</", "<\\/")
+    val frameTitle = JsonPrimitive(title).toString().replace("</", "<\\/")
+    val safeBg = bgHex.replace(Regex("[^#a-zA-Z0-9(),.%\\s-]"), "")
+    return """<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{margin:0;height:100%;overflow:hidden;background:$safeBg}iframe{display:block;width:100%;height:100%;border:0;background:$safeBg}</style>
+</head><body><script>
+(function () {
+  var host = window.$HOST_OBJECT;
+  if (!host) return;
+  var frame = document.createElement("iframe");
+  frame.title = $frameTitle;
+  frame.setAttribute("sandbox", "allow-scripts");
+  frame.setAttribute("referrerpolicy", "no-referrer");
+  window.addEventListener("message", function (event) {
+    if (!frame.contentWindow || event.source !== frame.contentWindow) return;
+    var text;
+    try { text = JSON.stringify(event.data); } catch (e) { return; }
+    if (typeof text === "string" && text.length <= $MAX_RELAY_CHARS) host.postMessage(text);
+  });
+  frame.addEventListener("load", function () { host.postMessage("$LOAD_SIGNAL"); });
+  window.ppmSend = function (message) {
+    if (frame.contentWindow) frame.contentWindow.postMessage(message, "*");
+  };
+  window.ppmSetSrcDoc = function (doc) {
+    frame.srcdoc = doc;
+  };
+  frame.srcdoc = $frameDoc;
   document.body.appendChild(frame);
 })();
 </script></body></html>"""

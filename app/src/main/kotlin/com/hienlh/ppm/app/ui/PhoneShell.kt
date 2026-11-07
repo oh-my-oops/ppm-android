@@ -48,6 +48,7 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -894,7 +895,7 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                 ) { PpmIcon(ProductIcon.X, 16.dp, tokens.text.color) }
             }
             val sections = model.sidebarSections
-            val shown = section?.takeIf { it in sections } ?: sections.first()
+            val shown = section?.takeIf { it in sections || it.startsWith("ext:") } ?: sections.first()
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 val list = model.sidebarList
                 val search = model.sidebarSearch
@@ -905,6 +906,11 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                     com.hienlh.ppm.app.ui.files.SearchBody(model, onNavigate = onClose)
                 } else if (shown == "git") {
                     com.hienlh.ppm.app.ui.git.GitStatusPanel(model, onNavigate = onClose)
+                } else if (shown.startsWith("ext:")) {
+                    val viewId = shown.removePrefix("ext:")
+                    val contribs = model.extensions?.contributions?.collectAsState()?.value
+                    val viewName = contribs?.views?.values?.flatten()?.firstOrNull { it.id == viewId }?.name ?: viewId
+                    com.hienlh.ppm.app.ui.extensions.ExtensionTreeViewPanel(model, viewId, viewName)
                 } else if (shown == "teams" && model.currentProject != null) {
                     GroupList(model, onNavigate = onClose)
                 } else if (shown == "history" && list != null && search != null) {

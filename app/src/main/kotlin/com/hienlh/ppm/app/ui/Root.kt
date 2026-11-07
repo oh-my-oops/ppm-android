@@ -48,6 +48,7 @@ import com.hienlh.ppm.app.FocusAnchor
 import com.hienlh.ppm.app.FocusStartAnchor
 import com.hienlh.ppm.app.LightboxRequest
 import com.hienlh.ppm.app.leavesTextOnTap
+import com.hienlh.ppm.app.ui.extensions.ExtensionOverlays
 import com.hienlh.ppm.app.ui.tablet.TabletShell
 import com.hienlh.ppm.design.ImageViewer
 import com.hienlh.ppm.design.LocalIconFramework
@@ -156,6 +157,7 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
                 model.projectActions?.let { project -> key(model.api, project.name) { com.hienlh.ppm.app.ui.projects.ProjectActionsDialog(model, project) } }
                 if (model.addingProject) key(model.api) { com.hienlh.ppm.app.ui.projects.AddProjectDialog(model) }
                 Dialogs(model)
+                ExtensionOverlays(model)
                 model.explorerSheetPath?.let { com.hienlh.ppm.app.ui.osexplorer.HostExplorerSheet(model, it) }
                 model.agentSheet?.let { AgentSessionSheet(model, it) }
                 model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }

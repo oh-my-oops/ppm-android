@@ -459,6 +459,11 @@ fun GitStatusPanel(
         onNavigate?.invoke()
     }
 
+    fun openGitGraph() {
+        model.dispatchExtCommand("git-graph.view")
+        onNavigate?.invoke()
+    }
+
     fun openBranchReview() {
         model.openBranchReviewTab(project)
         onNavigate?.invoke()
@@ -499,6 +504,17 @@ fun GitStatusPanel(
                     size = 14.dp,
                     tint = tokens.text2.color,
                 )
+            }
+            // Git Graph button
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .clickable(onClick = ::openGitGraph)
+                    .testTag("git-graph-button"),
+                contentAlignment = Alignment.Center,
+            ) {
+                PpmIcon(ProductIcon.GitBranch, size = 14.dp, tint = tokens.text2.color)
             }
             // History button
             Box(

@@ -557,7 +557,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     /** The section shown: the one opened last, or the rail's first when that is one this app has not (the drawer's fallback). */
     val sidebarSection: String
-        get() = sidebarTab.takeIf { it in SIDEBAR_SECTIONS } ?: sidebarSections.first()
+        get() = sidebarTab.takeIf { it in SIDEBAR_SECTIONS || it.startsWith("ext:") } ?: sidebarSections.first()
 
     /** The open server's OS (`/api/system/host`), kept per server so the first frame already knows it. */
     var hostPlatform by mutableStateOf<String?>(null)
@@ -633,6 +633,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     /** The app-wide socket of the open server: running and unread sessions. */
     var events by mutableStateOf<GlobalEvents?>(null)
+        private set
+
+    /** The extension host socket (`/ws/extensions`) and state store. */
+    var extensions by mutableStateOf<com.hienlh.ppm.state.extensions.ExtensionClient?>(null)
         private set
 
     /** Each project's branch and how far it is from its upstream, for the tablet's status bar (the web's git `meta`). */
@@ -898,6 +902,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         closeWorkspace()
         events?.stop()
         events = null
+        extensions?.stop()
+        extensions = null
         api = null
         slashItems = null
         fileIndex = null
@@ -959,6 +965,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         )
         openWorkspace(api)
         startEvents(api)
+        startExtensions(api)
         scope.launch { readAddresses(api) }
         coroutineScope {
             launch { loadTheme() }
@@ -1242,6 +1249,130 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         events.start()
     }
 
+    private fun startExtensions(api: ApiClient) {
+        val ext = com.hienlh.ppm.state.extensions.ExtensionClient(api, scope)
+        ext.onWebviewCreated = { msg ->
+            val slug = ext.coordinator.viewSlug(msg.viewType)
+            val projName = msg.projectName ?: projects.firstOrNull { it.path == msg.projectPath }?.name
+            val existingTab = openTabs.map { it.first }.firstOrNull { t ->
+                t.type == "extension" &&
+                    ext.coordinator.viewSlug(t.metaString("viewType").orEmpty()) == slug &&
+                    (projName == null || t.projectId == projName || t.metaString("projectName") == projName)
+            }
+            if (existingTab != null) {
+                patchTabMetadata(
+                    existingTab.id,
+                    "panelId" to JsonPrimitive(msg.panelId),
+                    "viewType" to JsonPrimitive(msg.viewType),
+                    "extensionId" to JsonPrimitive(msg.extensionId),
+                    *(if (projName != null) arrayOf("projectName" to JsonPrimitive(projName)) else emptyArray()),
+                )
+                if (!ext.coordinator.consumeRecovery(slug)) {
+                    activate(existingTab.id)
+                }
+            } else if (!ext.coordinator.isRecentlyClosed(slug, projName)) {
+                val isLocal = ext.coordinator.takeLocalDispatch(slug, msg.projectPath)
+                if (isLocal) {
+                    withWorkspace { store ->
+                        store.openTab(
+                            NewTab(
+                                type = "extension",
+                                title = msg.title,
+                                projectId = projName ?: selectedProject,
+                                closable = true,
+                                metadata = buildJsonObject {
+                                    put("panelId", msg.panelId)
+                                    put("viewType", msg.viewType)
+                                    put("extensionId", msg.extensionId)
+                                    if (projName != null) put("projectName", projName)
+                                },
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+        ext.onTabOpen = { msg ->
+            val targetProject = msg.projectId
+                ?: (msg.metadata["projectName"] as? JsonPrimitive)?.contentOrNull
+                ?: selectedProject
+            if (msg.tabType == "git-review" && targetProject != null) {
+                val selObj = msg.metadata["select"] as? JsonObject
+                val path = (selObj?.get("path") as? JsonPrimitive)?.contentOrNull
+                    ?: (msg.metadata["filePath"] as? JsonPrimitive)?.contentOrNull
+                val repo = (selObj?.get("repo") as? JsonPrimitive)?.contentOrNull
+                openGitReview(targetProject, path, repo)
+            } else {
+                withWorkspace { store ->
+                    store.openTab(
+                        NewTab(
+                            type = msg.tabType,
+                            title = msg.title,
+                            projectId = targetProject,
+                            closable = msg.closable,
+                            metadata = JsonObject(msg.metadata),
+                        ),
+                    )
+                }
+            }
+        }
+        ext.onProjectSwitch = { projName ->
+            if (projects.any { it.name == projName }) {
+                scope.launch { openProject(projName) }
+            }
+        }
+        ext.onNotification = { msg ->
+            val kind = when (msg.level) {
+                "error" -> ErrorToastMessage.Kind.ERROR
+                "warn" -> ErrorToastMessage.Kind.WARNING
+                else -> ErrorToastMessage.Kind.INFO
+            }
+            val firstAction = msg.actions.firstOrNull()
+            toast(
+                ErrorToastMessage(
+                    title = msg.message,
+                    action = firstAction?.let { label ->
+                        ErrorToastMessage.Action(label) {
+                            ext.sendNotificationAction(msg.id, label)
+                        }
+                    },
+                    kind = kind,
+                ),
+            )
+        }
+        this.extensions = ext
+        ext.start()
+    }
+
+    /**
+     * Dispatches an extension command (`ext-command-dispatch.ts`), automatically passing the active
+     * project's path (or chosen git repository path for git commands) when [args] is null.
+     */
+    fun dispatchExtCommand(
+        command: String,
+        args: List<JsonElement>? = null,
+        recovery: Boolean = false,
+    ) {
+        val ext = extensions ?: return
+        val proj = currentProject
+        val runsGit = command == "git-graph.view" || command.startsWith("git-graph.") || command.startsWith("git.")
+        val projectPath = if (proj != null) {
+            if (runsGit) {
+                com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(
+                    gitDiscovery[proj.name],
+                    gitChosenRepoPath[proj.name],
+                )?.path ?: proj.path
+            } else {
+                proj.path
+            }
+        } else {
+            null
+        }
+        ext.coordinator.recordCommandDispatch(command, projectPath, recovery)
+        val effectiveArgs = args ?: if (projectPath != null) listOf(JsonPrimitive(projectPath)) else emptyList()
+        ext.sendCommand(command, effectiveArgs)
+    }
+
     /** How many times the app has come to the front: each restarts the reconnect pill's clocks. */
     var resumes by mutableIntStateOf(0)
         private set
@@ -1277,6 +1408,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         for (tab in chats.values) tab.controller?.resumed()
         for (group in groupChats.values) group.chat.wake()
         events?.wake()
+        extensions?.wake()
         refreshWorkspace()
         updater.becameActive()
         val readAt = sessionsReadAt ?: return
@@ -2916,7 +3048,20 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         prefs.put("voiceEngine", engine.id)
     }
 
+    private fun onTabClosing(tabId: String) {
+        val tab = tabOf(tabId) ?: return
+        if (tab.type == "extension") {
+            val viewType = tab.metaString("viewType")
+            val projName = tab.metaString("projectName") ?: tab.projectId
+            extensions?.coordinator?.recordWebviewClosed(viewType, projName)
+            tab.metaString("panelId")?.takeIf { it.isNotEmpty() }?.let { extPanelId ->
+                extensions?.closeWebview(extPanelId)
+            }
+        }
+    }
+
     fun closeTab(tabId: String, panelId: String? = panelOf(tabId)) {
+        onTabClosing(tabId)
         workspace?.closeTab(tabId, panelId)
     }
 
@@ -3066,7 +3211,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     private fun closeAll(panelId: String, ids: List<String>) {
         val store = workspace ?: return
-        for (id in ids) store.closeTab(id, panelId)
+        for (id in ids) {
+            onTabClosing(id)
+            store.closeTab(id, panelId)
+        }
     }
 
     /** A deleted session's tabs go with it, wherever they are. */

@@ -136,13 +136,13 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
     var selected by remember { mutableIntStateOf(0) }
     var activeGroups by remember { mutableStateOf(emptySet<PaletteGroup>()) }
     val bindings = model.keyBindings
-    val actions = remember(model, bindings) {
+    val extContribs = model.extensions?.contributions?.collectAsState()?.value
+    val actions = remember(model, bindings, extContribs) {
         fun run(action: () -> Unit): () -> Unit = {
             onDismiss()
             action()
         }
-        // The web's `builtIn` in its order, less the actions of features this app does not have yet.
-        listOf(
+        val builtIn = listOf(
             action("New AI Chat", ProductIcon.MessageSquare, "ai assistant claude", formatShortcut(bindings.binding("open-chat")), run { model.newChat() }),
             // A terminal tab in the focused panel (the first on a phone), as the web opens it; the terminal panel is the nav bar's and Ctrl+`'s.
             action("New Terminal", ProductIcon.Terminal, "bash shell console", formatShortcut(bindings.binding("open-terminal")), run { model.openTerminal(inDock = false) }),
@@ -150,6 +150,34 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
             action("Settings", ProductIcon.Settings, "config preferences theme", formatShortcut(bindings.binding("open-settings")), run { model.openSettings() }),
             action("Open File Explorer", ProductIcon.AppWindow, "open file explorer finder browse files folders disk drive window", null, run { model.openExplorer() }),
         )
+        val extItems = extContribs?.commands.orEmpty().map { cmd ->
+            val label = if (!cmd.category.isNullOrEmpty()) "${cmd.category}: ${cmd.title}" else cmd.title
+            val icon = when (cmd.icon) {
+                "git-branch", "git-compare" -> ProductIcon.GitBranch
+                "history" -> ProductIcon.History
+                "users" -> ProductIcon.Users
+                "list-ordered" -> ProductIcon.ListOrdered
+                "refresh" -> ProductIcon.RefreshCw
+                "edit" -> ProductIcon.Pencil
+                "trash" -> ProductIcon.Trash2
+                "plus" -> ProductIcon.Plus
+                "search" -> ProductIcon.Search
+                "database" -> ProductIcon.Database
+                "terminal" -> ProductIcon.Terminal
+                "settings" -> ProductIcon.Settings
+                "file-code" -> ProductIcon.FileCode
+                "globe" -> ProductIcon.Globe
+                else -> ProductIcon.Puzzle
+            }
+            action(
+                label = label,
+                icon = icon,
+                words = "${cmd.command} ${cmd.title} ${cmd.category.orEmpty()}",
+                shortcut = null,
+                run = run { model.dispatchExtCommand(cmd.command) },
+            )
+        }
+        builtIn + extItems
     }
     val text = query.text.toString()
     val typed = remember(text) { PaletteQuery(text) }

@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.app.ui.extensions.ExtensionIcons
+import com.hienlh.ppm.app.ui.extensions.ExtensionWebviewBody
 import com.hienlh.ppm.app.ui.files.FileBody
 import com.hienlh.ppm.app.ui.git.BranchReviewBody
 import com.hienlh.ppm.app.ui.git.GitDiffBody
@@ -60,6 +62,7 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
         "branch-review" -> BranchReviewBody(model, tab)
         "git-log" -> GitLogBody(model, tab)
         "git-diff" -> GitDiffBody(model, tab)
+        "extension" -> ExtensionWebviewBody(model, tab)
         else -> {
             TabPlaceholder(tabTypeIcon(tab.type), tab.title, "This tab is not in the Android app yet.")
         }
@@ -137,6 +140,8 @@ fun TabIcon(tab: WorkspaceTab, tint: Rgba, size: Dp = 16.dp, line: IconLine? = n
     val provider = tab.metaString("providerId") ?: "claude"
     if (tab.type == "chat" && ProviderLogos.has(provider)) {
         ProviderLogo(provider, size, tint.color)
+    } else if (tab.type == "extension") {
+        PpmIcon(ExtensionIcons.viewTypeIcon(null, tab.metaString("viewType")), size, tint.color)
     } else {
         PpmIcon(tabTypeIcon(tab.type), size, tint.color)
     }
