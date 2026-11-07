@@ -7,11 +7,14 @@ import com.hienlh.ppm.protocol.int
 import com.hienlh.ppm.protocol.long
 import com.hienlh.ppm.protocol.obj
 import com.hienlh.ppm.protocol.string
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.io.IOException
 
 /** One repository under a project. [relative] is `.` when it is the project folder itself. */
 data class GitRepo(val path: String, val name: String, val relative: String)
@@ -46,6 +49,38 @@ data class GitBranchStatus(
     val untracked: List<String> = emptyList(),
 )
 
+/** One hunk summary (`ChangeBlock`) in `GET /git/changes`. */
+data class ChangeBlock(
+    val id: String,
+    val index: Int = 0,
+    val oldStart: Int = 1,
+    val oldLines: Int = 1,
+    val newStart: Int = 1,
+    val newLines: Int = 1,
+    val added: Int = 0,
+    val removed: Int = 0,
+) {
+    companion object {
+        fun from(json: JsonElement?, fallbackIndex: Int = 0): ChangeBlock? {
+            json?.string?.let { id ->
+                return ChangeBlock(id = id, index = fallbackIndex)
+            }
+            val obj = json.obj ?: return null
+            val id = obj["id"].string ?: return null
+            return ChangeBlock(
+                id = id,
+                index = obj["index"].int ?: fallbackIndex,
+                oldStart = obj["oldStart"].int ?: 1,
+                oldLines = obj["oldLines"].int ?: 0,
+                newStart = obj["newStart"].int ?: 1,
+                newLines = obj["newLines"].int ?: 0,
+                added = obj["added"].int ?: 0,
+                removed = obj["removed"].int ?: 0,
+            )
+        }
+    }
+}
+
 /** One side of a changed file (`staged` or `unstaged`) in `GET /git/changes`. */
 data class ChangeSide(
     val status: String,
@@ -53,17 +88,33 @@ data class ChangeSide(
     val removed: Int,
     val blocks: List<String>,
     val whole: String? = null,
+    val changeBlocks: List<ChangeBlock> = blocks.mapIndexed { idx, id ->
+        ChangeBlock(
+            id = id,
+            index = idx,
+            oldStart = idx * 10 + 1,
+            oldLines = 1,
+            newStart = idx * 10 + 1,
+            newLines = 1,
+            added = if (idx == 0) added else 0,
+            removed = if (idx == 0) removed else 0,
+        )
+    },
 ) {
     companion object {
         fun from(json: JsonElement?, fallbackStatus: String = "M"): ChangeSide? {
             val obj = json.obj ?: return null
             val status = obj["status"].string ?: fallbackStatus
+            val parsedBlocks = obj["blocks"].array.orEmpty().mapIndexedNotNull { idx, el ->
+                ChangeBlock.from(el, idx)
+            }
             return ChangeSide(
                 status = status,
                 added = obj["added"].int ?: 0,
                 removed = obj["removed"].int ?: 0,
-                blocks = obj["blocks"].array.orEmpty().mapNotNull { it.string ?: it.obj?.get("id")?.string },
+                blocks = parsedBlocks.map { it.id },
                 whole = obj["whole"].string,
+                changeBlocks = parsedBlocks,
             )
         }
     }
@@ -76,6 +127,17 @@ data class ChangedFile(
     val staged: ChangeSide? = null,
     val unstaged: ChangeSide? = null,
     val conflict: String? = null,
+    val x: String = when {
+        conflict != null -> "U"
+        staged != null -> staged.status
+        else -> "."
+    },
+    val y: String = when {
+        conflict != null -> "U"
+        unstaged != null -> unstaged.status
+        else -> "."
+    },
+    val untracked: Boolean = staged == null && unstaged?.status == "A",
 ) {
     companion object {
         fun from(json: JsonElement?): ChangedFile? {
@@ -106,8 +168,119 @@ data class ChangedFile(
                 staged = ChangeSide.from(obj["staged"], stagedFallback),
                 unstaged = ChangeSide.from(obj["unstaged"], unstagedFallback),
                 conflict = conflict,
+                x = if (obj["x"] != null) x else if (conflict != null) "U" else stagedFallback.takeIf { obj["staged"] != null } ?: ".",
+                y = if (obj["y"] != null) y else if (conflict != null) "U" else unstagedFallback.takeIf { obj["unstaged"] != null } ?: ".",
+                untracked = if (obj["untracked"] != null) untracked else (obj["staged"] == null && unstagedFallback == "A" && obj["unstaged"] != null),
             )
         }
+    }
+}
+
+/** One line in a [ChangeHunk] (`" "` context, `"+"` addition, `"-"` deletion). */
+data class ChangeLine(
+    val kind: String,
+    val text: String,
+    val noNewline: Boolean = false,
+) {
+    companion object {
+        fun from(json: JsonElement?): ChangeLine? {
+            val obj = json.obj ?: return null
+            val kind = obj["kind"].string ?: obj["type"].string ?: return null
+            return ChangeLine(
+                kind = kind,
+                text = obj["text"].string ?: obj["content"].string ?: "",
+                noNewline = obj["noNewline"].bool ?: false,
+            )
+        }
+    }
+}
+
+/** One hunk with lines in `GET /git/changes/file`. */
+data class ChangeHunk(
+    val id: String,
+    val index: Int = 0,
+    val oldStart: Int = 1,
+    val oldLines: Int = 0,
+    val newStart: Int = 1,
+    val newLines: Int = 0,
+    val added: Int = 0,
+    val removed: Int = 0,
+    val heading: String = "",
+    val lines: List<ChangeLine> = emptyList(),
+) {
+    fun toChangeBlock(): ChangeBlock = ChangeBlock(
+        id = id,
+        index = index,
+        oldStart = oldStart,
+        oldLines = oldLines,
+        newStart = newStart,
+        newLines = newLines,
+        added = added,
+        removed = removed,
+    )
+
+    companion object {
+        fun from(json: JsonElement?, fallbackIndex: Int = 0): ChangeHunk? {
+            val obj = json.obj ?: return null
+            val id = obj["id"].string ?: return null
+            return ChangeHunk(
+                id = id,
+                index = obj["index"].int ?: fallbackIndex,
+                oldStart = obj["oldStart"].int ?: 1,
+                oldLines = obj["oldLines"].int ?: 0,
+                newStart = obj["newStart"].int ?: 1,
+                newLines = obj["newLines"].int ?: 0,
+                added = obj["added"].int ?: 0,
+                removed = obj["removed"].int ?: 0,
+                heading = obj["heading"].string ?: "",
+                lines = obj["lines"].array.orEmpty().mapNotNull(ChangeLine::from),
+            )
+        }
+    }
+}
+
+/** One side with hunks and lines in `GET /git/changes/file`. */
+data class ChangeSideDetail(
+    val hunks: List<ChangeHunk> = emptyList(),
+    val whole: String? = null,
+    val added: Int = 0,
+    val removed: Int = 0,
+) {
+    companion object {
+        fun from(json: JsonElement?): ChangeSideDetail? {
+            val obj = json.obj ?: return null
+            return ChangeSideDetail(
+                hunks = obj["hunks"].array.orEmpty().mapIndexedNotNull { idx, el -> ChangeHunk.from(el, idx) },
+                whole = obj["whole"].string,
+                added = obj["added"].int ?: 0,
+                removed = obj["removed"].int ?: 0,
+            )
+        }
+    }
+}
+
+/** Full file detail for the Review changes tab (`GET /git/changes/file`). */
+data class FileChangeDetail(
+    val path: String,
+    val oldPath: String? = null,
+    val x: String = ".",
+    val y: String = ".",
+    val untracked: Boolean = false,
+    val conflict: Boolean = false,
+    val staged: ChangeSideDetail? = null,
+    val unstaged: ChangeSideDetail? = null,
+) {
+    companion object {
+        fun from(json: JsonElement?): FileChangeDetail = FileChangeDetail(
+            path = json["path"].string ?: "",
+            oldPath = json["oldPath"].string,
+            x = json["x"].string ?: ".",
+            y = json["y"].string ?: ".",
+            untracked = json["untracked"].bool ?: false,
+            conflict = json["conflict"].bool ?: false,
+            staged = ChangeSideDetail.from(json["staged"]),
+            unstaged = ChangeSideDetail.from(json["unstaged"]),
+        )
     }
 }
 
@@ -388,7 +561,7 @@ data class GitRef(
     }
 }
 
-/** Branch entry in `GET /git/branches`. */
+/** Branch entry in `GET /git/branches` and `GET /git/graph`. */
 data class GitBranch(
     val name: String,
     val current: Boolean,
@@ -396,6 +569,8 @@ data class GitBranch(
     val tracking: String? = null,
     val ahead: Int? = null,
     val behind: Int? = null,
+    val remote: Boolean = false,
+    val remotes: List<String> = emptyList(),
 ) {
     companion object {
         fun from(json: JsonElement?): GitBranch? {
@@ -408,8 +583,125 @@ data class GitBranch(
                 tracking = obj["tracking"].string,
                 ahead = obj["ahead"].int,
                 behind = obj["behind"].int,
+                remote = obj["remote"].bool ?: false,
+                remotes = obj["remotes"].array.orEmpty().mapNotNull { it.string },
             )
         }
+    }
+}
+
+/** One changed file in `GET /git/branch-diff`. */
+data class BranchDiffFile(
+    val path: String,
+    val oldPath: String? = null,
+    val status: String,
+    val additions: Int,
+    val deletions: Int,
+    val binary: Boolean,
+    val blob: String,
+) {
+    companion object {
+        fun from(json: JsonElement?): BranchDiffFile? {
+            val obj = json.obj ?: return null
+            val path = obj["path"].string ?: return null
+            return BranchDiffFile(
+                path = path,
+                oldPath = obj["oldPath"].string,
+                status = obj["status"].string ?: "M",
+                additions = obj["additions"].int ?: 0,
+                deletions = obj["deletions"].int ?: 0,
+                binary = obj["binary"].bool ?: false,
+                blob = obj["blob"].string ?: "",
+            )
+        }
+    }
+}
+
+/** Result of `GET /git/branch-diff`. */
+data class BranchDiff(
+    val base: String,
+    val head: String,
+    val mode: String,
+    val mergeBase: String,
+    val headCommit: String,
+    val omitted: Int,
+    val files: List<BranchDiffFile>,
+) {
+    companion object {
+        fun from(json: JsonElement?): BranchDiff = BranchDiff(
+            base = json["base"].string ?: "",
+            head = json["head"].string ?: "",
+            mode = json["mode"].string ?: "three-dot",
+            mergeBase = json["mergeBase"].string ?: "",
+            headCommit = json["headCommit"].string ?: "",
+            omitted = json["omitted"].int ?: 0,
+            files = json["files"].array.orEmpty().mapNotNull(BranchDiffFile::from),
+        )
+    }
+}
+
+/** Commit entry in `GET /git/graph`. */
+data class GitCommit(
+    val hash: String,
+    val abbreviatedHash: String,
+    val subject: String,
+    val body: String = "",
+    val authorName: String,
+    val authorEmail: String = "",
+    val authorDate: String,
+    val parents: List<String> = emptyList(),
+    val refs: List<String> = emptyList(),
+) {
+    companion object {
+        fun from(json: JsonElement?): GitCommit? {
+            val obj = json.obj ?: return null
+            val hash = obj["hash"].string ?: return null
+            return GitCommit(
+                hash = hash,
+                abbreviatedHash = obj["abbreviatedHash"].string ?: hash.take(7),
+                subject = obj["subject"].string ?: "",
+                body = obj["body"].string ?: "",
+                authorName = obj["authorName"].string ?: "",
+                authorEmail = obj["authorEmail"].string ?: "",
+                authorDate = obj["authorDate"].string ?: "",
+                parents = obj["parents"].array.orEmpty().mapNotNull { it.string },
+                refs = obj["refs"].array.orEmpty().mapNotNull { it.string },
+            )
+        }
+    }
+}
+
+/** Result of `GET /git/graph`. */
+data class GitGraphData(
+    val commits: List<GitCommit>,
+    val branches: List<GitBranch>,
+    val head: String,
+) {
+    companion object {
+        fun from(json: JsonElement?): GitGraphData = GitGraphData(
+            commits = json["commits"].array.orEmpty().mapNotNull(GitCommit::from),
+            branches = json["branches"].array.orEmpty().mapNotNull(GitBranch::from),
+            head = json["head"].string ?: "",
+        )
+    }
+}
+
+/** Both sides of a single-file diff (`GET /git/file-full-diff`). */
+data class FileFullDiff(
+    val original: String,
+    val modified: String,
+    val binary: Boolean,
+    val originalSize: Long?,
+    val modifiedSize: Long?,
+) {
+    companion object {
+        fun from(json: JsonElement?): FileFullDiff = FileFullDiff(
+            original = json["original"].string ?: "",
+            modified = json["modified"].string ?: "",
+            binary = json["binary"].bool ?: false,
+            originalSize = json["originalSize"].long,
+            modifiedSize = json["modifiedSize"].long,
+        )
     }
 }
 
@@ -580,12 +872,120 @@ suspend fun ApiClient.gitDiscardHunks(
     path: String,
     hunks: List<HunkSelectionItem>,
     repo: GitRepo? = null,
-) {
+): DiscardRecord {
     val body = buildJsonObject {
         put("path", path)
         put("hunks", JsonArray(hunks.map { it.toJson() }))
     }
-    call("POST", "/api/project/${ApiClient.escape(project)}/git/discard-hunks", gitRepoScope(repo), body)
+    return DiscardRecord.from(call("POST", "/api/project/${ApiClient.escape(project)}/git/discard-hunks", gitRepoScope(repo), body))
+}
+
+suspend fun ApiClient.gitFileChanges(
+    project: String,
+    path: String,
+    oldPath: String? = null,
+    repo: GitRepo? = null,
+): FileChangeDetail {
+    val query = buildList {
+        add("path" to path)
+        if (!oldPath.isNullOrEmpty()) add("oldPath" to oldPath)
+        addAll(gitRepoScope(repo))
+    }
+    return FileChangeDetail.from(call("GET", "/api/project/${ApiClient.escape(project)}/git/changes/file", query))
+}
+
+suspend fun ApiClient.gitBranchDiff(
+    project: String,
+    base: String,
+    head: String,
+    mode: String = "three-dot",
+    repo: GitRepo? = null,
+): BranchDiff {
+    val query = buildList {
+        add("base" to base)
+        add("head" to head)
+        if (mode != "three-dot") add("mode" to mode)
+        addAll(gitRepoScope(repo))
+    }
+    return BranchDiff.from(call("GET", "/api/project/${ApiClient.escape(project)}/git/branch-diff", query))
+}
+
+suspend fun ApiClient.gitGraph(
+    project: String,
+    max: Int = 100,
+    skip: Int = 0,
+    repo: GitRepo? = null,
+): GitGraphData {
+    val query = listOf("max" to "$max", "skip" to "$skip") + gitRepoScope(repo)
+    return GitGraphData.from(call("GET", "/api/project/${ApiClient.escape(project)}/git/graph", query))
+}
+
+suspend fun ApiClient.gitFileFullDiff(
+    project: String,
+    file: String,
+    ref: String = "HEAD",
+    ref2: String? = null,
+    text: Boolean = false,
+    repo: GitRepo? = null,
+): FileFullDiff {
+    val query = buildList {
+        add("file" to file)
+        if (ref.isNotEmpty()) add("ref" to ref)
+        if (!ref2.isNullOrEmpty()) add("ref2" to ref2)
+        if (text) add("text" to "1")
+        addAll(gitRepoScope(repo))
+    }
+    return FileFullDiff.from(call("GET", "/api/project/${ApiClient.escape(project)}/git/file-full-diff", query))
+}
+
+suspend fun ApiClient.gitDiff(
+    project: String,
+    ref1: String? = null,
+    ref2: String? = null,
+    repo: GitRepo? = null,
+): String {
+    val query = buildList {
+        if (!ref1.isNullOrEmpty()) add("ref1" to ref1)
+        if (!ref2.isNullOrEmpty()) add("ref2" to ref2)
+        addAll(gitRepoScope(repo))
+    }
+    return call("GET", "/api/project/${ApiClient.escape(project)}/git/diff", query)["diff"].string ?: ""
+}
+
+suspend fun ApiClient.filesCompare(project: String, file1: String, file2: String): Pair<String, String> {
+    val data = call("GET", "/api/project/${ApiClient.escape(project)}/files/compare", listOf("file1" to file1, "file2" to file2))
+    return (data["original"].string ?: "") to (data["modified"].string ?: "")
+}
+
+suspend fun ApiClient.gitFileBlob(
+    project: String,
+    file: String,
+    ref: String = "HEAD",
+    repo: GitRepo? = null,
+): RawFile {
+    val query = listOf("file" to file, "ref" to ref) + gitRepoScope(repo)
+    val request = request("GET", "/api/project/${ApiClient.escape(project)}/git/file-blob", query)
+    val response = try {
+        PpmHttp.getClient.newCall(request).await()
+    } catch (error: IOException) {
+        throw PpmError.Unreachable(describe(error))
+    }
+    return withContext(Dispatchers.IO) {
+        response.use {
+            try {
+                if (!it.isSuccessful) {
+                    try {
+                        ApiClient.unwrap(it.code, it.header("Content-Type"), it.body.string())
+                    } catch (_: PpmError.BadResponse) {
+                    }
+                    throw PpmError.Server(it.code, "The server answered HTTP ${it.code}.")
+                }
+                RawFile(it.body.bytes(), it.header("Content-Type"))
+            } catch (error: IOException) {
+                throw PpmError.Unreachable(describe(error))
+            }
+        }
+    }
 }
 
 suspend fun ApiClient.gitCommit(

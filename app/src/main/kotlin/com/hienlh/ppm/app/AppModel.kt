@@ -645,6 +645,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     private val gitRepoChoices = com.hienlh.ppm.state.git.GitRepoChoices(prefs)
     val gitChosenRepoPath = mutableStateMapOf<String, String>()
 
+    /** Device-local reviewed blob map per `(project, base, head)` (`ppm:branch-review:*`). */
+    val branchReviewStore = com.hienlh.ppm.state.git.BranchReviewStore(prefs)
+
     /** Most recent `GET /git/changes` payload per project. */
     val gitChangesCache = mutableStateMapOf<String, com.hienlh.ppm.client.GitChanges>()
 

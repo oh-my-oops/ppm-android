@@ -19,6 +19,10 @@ import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.ui.files.FileBody
+import com.hienlh.ppm.app.ui.git.BranchReviewBody
+import com.hienlh.ppm.app.ui.git.GitDiffBody
+import com.hienlh.ppm.app.ui.git.GitLogBody
+import com.hienlh.ppm.app.ui.git.GitReviewBody
 import com.hienlh.ppm.design.FileIcon
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.LucideIcon
@@ -52,6 +56,10 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
         "group" -> GroupChatBody(model, tab)
         "terminal" -> TerminalBody(model, tab)
         "editor" -> FileBody(model, tab)
+        "git-review" -> GitReviewBody(model, tab)
+        "branch-review" -> BranchReviewBody(model, tab)
+        "git-log" -> GitLogBody(model, tab)
+        "git-diff" -> GitDiffBody(model, tab)
         else -> {
             TabPlaceholder(tabTypeIcon(tab.type), tab.title, "This tab is not in the Android app yet.")
         }

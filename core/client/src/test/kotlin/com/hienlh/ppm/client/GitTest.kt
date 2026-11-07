@@ -289,4 +289,101 @@ class GitTest {
         assertEquals(null, worktrees[0].branch)
         assertTrue(worktrees[0].isLocked)
     }
+
+    @Test
+    fun `parses Phase 08b routes gitFileChanges, gitBranchDiff, gitGraph, gitFileFullDiff, gitDiff, and filesCompare`() = withServer(
+        ok(
+            """
+            {
+              "path":"src/App.kt","x":"M","y":"M","untracked":false,"conflict":false,
+              "staged":{
+                "added":1,"removed":0,
+                "hunks":[
+                  {"id":"s-hunk-1","index":0,"oldStart":1,"oldLines":1,"newStart":1,"newLines":2,"added":1,"removed":0,"heading":"","lines":[
+                    {"kind":" ","text":"package demo"},
+                    {"kind":"+","text":"import kotlin.math.max"}
+                  ]}
+                ]
+              },
+              "unstaged":{
+                "added":1,"removed":1,
+                "hunks":[
+                  {"id":"u-hunk-1","index":0,"oldStart":5,"oldLines":1,"newStart":6,"newLines":1,"added":1,"removed":1,"heading":"fun main()","lines":[
+                    {"kind":"-","text":"println(1)"},
+                    {"kind":"+","text":"println(2)"}
+                  ]}
+                ]
+              }
+            }
+            """.trimIndent(),
+        ),
+        ok(
+            """
+            {
+              "base":"main","head":"feat/review","mode":"three-dot",
+              "mergeBase":"abc1111","headCommit":"def2222","omitted":2,
+              "files":[
+                {"path":"src/App.kt","status":"M","additions":10,"deletions":3,"binary":false,"blob":"blob-app-1"},
+                {"path":"logo.png","status":"A","additions":0,"deletions":0,"binary":true,"blob":"blob-logo-1"}
+              ]
+            }
+            """.trimIndent(),
+        ),
+        ok(
+            """
+            {
+              "head":"def2222000",
+              "commits":[
+                {"hash":"def2222000","abbreviatedHash":"def2222","subject":"feat: add review","body":"","authorName":"Dev","authorEmail":"dev@test","authorDate":"2026-11-07T10:00:00Z","parents":["abc1111000"],"refs":["HEAD -> feat/review","tag: v1.0"]}
+              ],
+              "branches":[
+                {"name":"feat/review","current":true,"remote":false,"commitHash":"def2222000","ahead":1,"behind":0,"remotes":["origin"]}
+              ]
+            }
+            """.trimIndent(),
+        ),
+        ok(
+            """
+            {"original":"old text","modified":"new text","binary":false,"originalSize":8,"modifiedSize":8}
+            """.trimIndent(),
+        ),
+        ok("""{"diff":"diff --git a/a.kt b/a.kt\n@@ -1 +1 @@\n-old\n+new"}"""),
+        ok("""{"original":"left","modified":"right"}"""),
+    ) { server, api ->
+        val detail = api.gitFileChanges("s4-git", "src/App.kt")
+        assertEquals("src/App.kt", detail.path)
+        assertEquals(1, detail.staged?.hunks?.size)
+        assertEquals("s-hunk-1", detail.staged?.hunks?.get(0)?.id)
+        assertEquals("u-hunk-1", detail.unstaged?.hunks?.get(0)?.id)
+        assertEquals(2, detail.unstaged?.hunks?.get(0)?.lines?.size)
+
+        val branchDiff = api.gitBranchDiff("s4-git", "main", "feat/review")
+        assertEquals("abc1111", branchDiff.mergeBase)
+        assertEquals("def2222", branchDiff.headCommit)
+        assertEquals(2, branchDiff.omitted)
+        assertEquals(2, branchDiff.files.size)
+        assertEquals("blob-app-1", branchDiff.files[0].blob)
+        assertTrue(branchDiff.files[1].binary)
+
+        val graph = api.gitGraph("s4-git", max = 100, skip = 0)
+        assertEquals("def2222000", graph.head)
+        assertEquals(1, graph.commits.size)
+        assertEquals(listOf("HEAD -> feat/review", "tag: v1.0"), graph.commits[0].refs)
+        assertEquals(listOf("origin"), graph.branches[0].remotes)
+
+        val fullDiff = api.gitFileFullDiff("s4-git", "src/App.kt", ref = "abc1111", ref2 = "def2222")
+        assertEquals("old text", fullDiff.original)
+        assertEquals("new text", fullDiff.modified)
+
+        val rawDiff = api.gitDiff("s4-git", ref1 = "HEAD~1")
+        assertTrue(rawDiff.contains("+new"))
+
+        val compared = api.filesCompare("s4-git", "a.kt", "b.kt")
+        assertEquals("left" to "right", compared)
+
+        assertEquals("/api/project/s4-git/git/changes/file?path=src%2FApp.kt", server.takeRequest().target)
+        assertEquals("/api/project/s4-git/git/branch-diff?base=main&head=feat%2Freview", server.takeRequest().target)
+        assertEquals("/api/project/s4-git/git/graph?max=100&skip=0", server.takeRequest().target)
+        assertEquals("/api/project/s4-git/git/file-full-diff?file=src%2FApp.kt&ref=abc1111&ref2=def2222", server.takeRequest().target)
+    }
 }
