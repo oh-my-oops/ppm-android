@@ -54,6 +54,8 @@ import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.IconFramework
 import com.hienlh.ppm.design.PpmTheme
 import com.hienlh.ppm.design.ViewerImage
+import com.hienlh.ppm.state.files.FileDocumentClassifier
+import com.hienlh.ppm.state.files.FileDocumentViewer
 import com.hienlh.ppm.protocol.ChatDraft
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatReply
@@ -1876,9 +1878,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             return
         }
         withWorkspace { store ->
+            val isSqlite = line == null && FileDocumentClassifier.classify(path) == FileDocumentViewer.SQLITE
             val id = store.openTab(
                 NewTab(
-                    type = "editor",
+                    type = if (isSqlite) "sqlite" else "editor",
                     title = path.split('/', '\\').last(),
                     projectId = project,
                     metadata = buildJsonObject {

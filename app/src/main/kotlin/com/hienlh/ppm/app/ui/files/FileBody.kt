@@ -89,6 +89,10 @@ private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean,
         FileMediaView(model, tab)
         return
     }
+    if (viewer == FileDocumentViewer.SQLITE) {
+        com.hienlh.ppm.app.ui.database.SqliteViewerTabBody(model, tab)
+        return
+    }
     if (viewer !in setOf(FileDocumentViewer.TEXT, FileDocumentViewer.MARKDOWN, FileDocumentViewer.CSV, FileDocumentViewer.IMAGE, FileDocumentViewer.PDF, FileDocumentViewer.DOCX)) {
         TabPlaceholder(ProductIcon.FileCode.vector, tab.title, "This file viewer is not in the Android app yet.")
         return

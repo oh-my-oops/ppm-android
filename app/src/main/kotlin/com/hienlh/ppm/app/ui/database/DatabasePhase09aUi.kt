@@ -423,6 +423,61 @@ fun DatabaseSidebarPane(
                 )
                 onNavigate()
             },
+            onOpenObjectStructure = { item ->
+                val cur = currentDb ?: return@DatabaseSidebarContent
+                val conn = connections.firstOrNull { it.id == cur.conn } ?: return@DatabaseSidebarContent
+                val dbParam = tabDatabaseParam(cur, conn)
+                model.openWorkspaceTab(
+                    type = "db-structure",
+                    title = "${item.name} · Structure",
+                    metadata = buildJsonObject {
+                        put("connectionId", conn.id)
+                        put("connectionName", conn.name)
+                        if (dbParam != null) put("database", dbParam)
+                        put("dbType", conn.type)
+                        put("tableName", item.name)
+                        if (item.schema != null) put("schema", item.schema)
+                        put("readonly", conn.readonly == 1)
+                    },
+                )
+                onNavigate()
+            },
+            onNewTable = {
+                val cur = currentDb ?: focusedDb ?: return@DatabaseSidebarContent
+                val conn = connections.firstOrNull { it.id == cur.conn } ?: return@DatabaseSidebarContent
+                val dbParam = tabDatabaseParam(cur, conn)
+                model.openWorkspaceTab(
+                    type = "db-structure",
+                    title = "New table · Structure",
+                    metadata = buildJsonObject {
+                        put("connectionId", conn.id)
+                        put("connectionName", conn.name)
+                        if (dbParam != null) put("database", dbParam)
+                        put("dbType", conn.type)
+                        put("newTable", true)
+                        if (selectedSchema != null) put("schema", selectedSchema)
+                    },
+                )
+                onNavigate()
+            },
+            onOpenImpExp = { mode, tableName ->
+                val cur = currentDb ?: focusedDb
+                val conn = connections.firstOrNull { it.id == cur?.conn } ?: connections.firstOrNull()
+                val dbParam = if (cur != null && conn != null) tabDatabaseParam(cur, conn) else null
+                model.openWorkspaceTab(
+                    type = "db-impexp",
+                    title = if (mode == "import") "Import" else "Export",
+                    metadata = buildJsonObject {
+                        put("impexpId", "default")
+                        if (conn != null) put("connectionId", conn.id)
+                        if (dbParam != null) put("database", dbParam)
+                        if (selectedSchema != null) put("schema", selectedSchema)
+                        if (mode != null) put("mode", mode)
+                        if (tableName != null) put("tableName", tableName)
+                    },
+                )
+                onNavigate()
+            },
         )
     }
 }
@@ -472,6 +527,9 @@ internal fun DatabaseSidebarContent(
     onShowMoreInGroup: (String) -> Unit = {},
     onOpenObjectData: (DbObjectItem) -> Unit = {},
     onOpenObjectSql: (DbObjectItem) -> Unit = {},
+    onOpenObjectStructure: (DbObjectItem) -> Unit = {},
+    onNewTable: () -> Unit = {},
+    onOpenImpExp: (mode: String?, tableName: String?) -> Unit = { _, _ -> },
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -547,11 +605,24 @@ internal fun DatabaseSidebarContent(
                     style = ppmText(13f, FontWeight.SemiBold, lineHeight = 18f).copy(color = tokens.text.color),
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 SettingsButton(
                     label = "+ Query",
                     modifier = Modifier.testTag("db-new-query-btn"),
                     onClick = onNewQuery,
+                )
+                SettingsButton(
+                    label = "+ Table",
+                    modifier = Modifier.testTag("db-new-table-btn"),
+                    onClick = onNewTable,
+                )
+                SettingsButton(
+                    label = "Imp/Exp",
+                    modifier = Modifier.testTag("db-open-impexp-btn"),
+                    onClick = { onOpenImpExp(null, null) },
                 )
                 SettingsButton(
                     label = "+ Folder",
@@ -1072,6 +1143,22 @@ internal fun DatabaseSidebarContent(
                                                 formatRowEstimate(est),
                                                 style = ppmText(10f, kind = FontKind.MONO, lineHeight = 13f).copy(color = tokens.text3.color),
                                             )
+                                        }
+                                        if (row.expandable) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(tokens.panel.color)
+                                                    .clickable { onOpenObjectStructure(item) }
+                                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                                                    .testTag("db-obj-structure-${item.name}"),
+                                            ) {
+                                                BasicText(
+                                                    "Struct",
+                                                    style = ppmText(9f, FontWeight.SemiBold, kind = FontKind.MONO, lineHeight = 12f)
+                                                        .copy(color = tokens.text2.color),
+                                                )
+                                            }
                                         }
                                         Box(
                                             modifier = Modifier

@@ -20,11 +20,15 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
 import java.io.IOException
+import java.io.InputStream
 import java.util.concurrent.TimeUnit
 
 // ── 9a.1 Database Client Timeouts, 428 Login Coordinator & Events ───────────
@@ -735,6 +739,226 @@ suspend fun ApiClient.dbQueryHistory(
         loginCoordinator = loginCoordinator,
     ) as? JsonObject) ?: buildJsonObject {}
 }
+
+// ── 9f.1–9f.4 Structure Preview / Apply & Import / Export Endpoints ─────────
+
+private val DB_OCTET_STREAM = "application/octet-stream".toMediaType()
+
+/** Maximum upload size for Import (`IMPORT_MAX_FILE_BYTES = 128 MB`). */
+const val DB_IMPORT_MAX_FILE_BYTES: Long = 128L * 1024L * 1024L
+
+/** `POST /api/db/connections/:id/structure/preview` — preview DDL statements, warnings, and recreate flag. */
+suspend fun ApiClient.dbStructurePreview(
+    connectionId: String,
+    body: JsonObject,
+    database: String? = null,
+    path: String? = null,
+    project: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+): JsonObject =
+    (dbCall(
+        method = "POST",
+        path = "/api/db/connections/${ApiClient.escape(connectionId)}/structure/preview",
+        query = connQuery(database, path, project),
+        body = body,
+        timeoutKind = DbRequestTimeoutKind.CATALOG,
+        loginCoordinator = loginCoordinator,
+    ) as? JsonObject) ?: buildJsonObject {}
+
+/**
+ * `POST /api/db/connections/:id/structure/apply` — apply DDL change (`UNBOUNDED` read timeout so
+ * large table rebuilds/ALTERs never time out client-side).
+ */
+suspend fun ApiClient.dbStructureApply(
+    connectionId: String,
+    body: JsonObject,
+    database: String? = null,
+    path: String? = null,
+    project: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+): JsonObject =
+    (dbCall(
+        method = "POST",
+        path = "/api/db/connections/${ApiClient.escape(connectionId)}/structure/apply",
+        query = connQuery(database, path, project),
+        body = body,
+        timeoutKind = DbRequestTimeoutKind.UNBOUNDED,
+        loginCoordinator = loginCoordinator,
+    ) as? JsonObject) ?: buildJsonObject {}
+
+/** `POST /api/db/connections/:id/impexp/export` — start a multi-table or query export job. */
+suspend fun ApiClient.dbImpExpExport(
+    connectionId: String,
+    body: JsonObject,
+    database: String? = null,
+    path: String? = null,
+    project: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+): String {
+    val obj = dbCall(
+        method = "POST",
+        path = "/api/db/connections/${ApiClient.escape(connectionId)}/impexp/export",
+        query = connQuery(database, path, project),
+        body = body,
+        timeoutKind = DbRequestTimeoutKind.CATALOG,
+        loginCoordinator = loginCoordinator,
+    ) as? JsonObject
+    return obj?.get("jobId")?.string.orEmpty()
+}
+
+/** `POST /api/db/connections/:id/impexp/import` — start an import job from uploaded files. */
+suspend fun ApiClient.dbImpExpImport(
+    connectionId: String,
+    body: JsonObject,
+    database: String? = null,
+    path: String? = null,
+    project: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+): String {
+    val obj = dbCall(
+        method = "POST",
+        path = "/api/db/connections/${ApiClient.escape(connectionId)}/impexp/import",
+        query = connQuery(database, path, project),
+        body = body,
+        timeoutKind = DbRequestTimeoutKind.CATALOG,
+        loginCoordinator = loginCoordinator,
+    ) as? JsonObject
+    return obj?.get("jobId")?.string.orEmpty()
+}
+
+/**
+ * `PUT /api/db/impexp/uploads?name=` — uploads a file with a raw `PUT` body (not multipart),
+ * enforcing `<= 128 MB` (`DB_IMPORT_MAX_FILE_BYTES`) before and during streaming, and reporting
+ * upload progress via [onProgress].
+ */
+suspend fun ApiClient.dbImpExpUploadRaw(
+    fileName: String,
+    knownSize: Long = -1L,
+    openStream: () -> InputStream,
+    onProgress: (uploadedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
+): JsonObject {
+    if (knownSize == 0L) {
+        throw PpmError.Server(400, "$fileName is empty")
+    }
+    if (knownSize > DB_IMPORT_MAX_FILE_BYTES) {
+        throw PpmError.Server(
+            413,
+            "$fileName is larger than ${DB_IMPORT_MAX_FILE_BYTES / (1024 * 1024)} MB, the most one file can be",
+        )
+    }
+
+    val streamingBody = object : RequestBody() {
+        override fun contentType(): MediaType = DB_OCTET_STREAM
+        override fun contentLength(): Long = if (knownSize > 0L) knownSize else -1L
+
+        override fun writeTo(sink: BufferedSink) {
+            openStream().use { input ->
+                val buf = ByteArray(64 * 1024)
+                var totalWritten = 0L
+                while (true) {
+                    val read = input.read(buf)
+                    if (read <= 0) break
+                    totalWritten += read
+                    if (totalWritten > DB_IMPORT_MAX_FILE_BYTES) {
+                        throw IOException(
+                            "$fileName is larger than ${DB_IMPORT_MAX_FILE_BYTES / (1024 * 1024)} MB, the most one file can be",
+                        )
+                    }
+                    sink.write(buf, 0, read)
+                    onProgress(totalWritten, knownSize)
+                }
+                if (totalWritten == 0L) {
+                    throw IOException("$fileName is empty")
+                }
+            }
+        }
+    }
+
+    val request = Request.Builder()
+        .url(url("/api/db/impexp/uploads", listOf("name" to fileName)))
+        .put(streamingBody)
+        .header("Authorization", "Bearer $token")
+        .header("Accept", "application/json")
+        .header("x-ppm-client", PpmHttp.CLIENT_NAME)
+        .build()
+
+    val httpClient = dbClientForTimeout(DbRequestTimeoutKind.UNBOUNDED)
+    val response = try {
+        httpClient.newCall(request).await()
+    } catch (error: IOException) {
+        val msg = error.message.orEmpty()
+        if (msg.contains("is larger than") || msg.contains("is empty")) {
+            throw PpmError.Server(413, msg)
+        }
+        throw PpmError.Unreachable(describe(error))
+    }
+    return withContext(Dispatchers.IO) {
+        response.use { res ->
+            val text = try {
+                res.body.string()
+            } catch (error: IOException) {
+                throw PpmError.Unreachable(describe(error))
+            }
+            (ApiClient.unwrap(res.code, res.header("Content-Type"), text) as? JsonObject) ?: buildJsonObject {}
+        }
+    }
+}
+
+/** `POST /api/db/impexp/uploads/:id/preview` — preview the first 100 rows of an uploaded file. */
+suspend fun ApiClient.dbImpExpUploadPreview(
+    uploadId: String,
+    body: JsonObject,
+): JsonObject =
+    (dbCall(
+        method = "POST",
+        path = "/api/db/impexp/uploads/${ApiClient.escape(uploadId)}/preview",
+        body = body,
+        timeoutKind = DbRequestTimeoutKind.UNBOUNDED,
+    ) as? JsonObject) ?: buildJsonObject {}
+
+/** `DELETE /api/db/impexp/uploads/:id` — remove an uploaded file. */
+suspend fun ApiClient.dbImpExpDeleteUpload(uploadId: String) {
+    dbCall(
+        method = "DELETE",
+        path = "/api/db/impexp/uploads/${ApiClient.escape(uploadId)}",
+        timeoutKind = DbRequestTimeoutKind.CATALOG,
+    )
+}
+
+/** `GET /api/db/impexp/jobs/:id?since=n` — poll an Import/Export job's status and incremental messages. */
+suspend fun ApiClient.dbImpExpJobStatus(
+    jobId: String,
+    since: Int = 0,
+): JsonObject {
+    val q = if (since > 0) listOf("since" to since.toString()) else emptyList()
+    return (dbCall(
+        method = "GET",
+        path = "/api/db/impexp/jobs/${ApiClient.escape(jobId)}",
+        query = q,
+        timeoutKind = DbRequestTimeoutKind.CATALOG,
+    ) as? JsonObject) ?: buildJsonObject {}
+}
+
+/** `POST /api/db/impexp/jobs/:id/stop` — cancel a running Import/Export job. */
+suspend fun ApiClient.dbImpExpStopJob(jobId: String): JsonObject =
+    (dbCall(
+        method = "POST",
+        path = "/api/db/impexp/jobs/${ApiClient.escape(jobId)}/stop",
+        timeoutKind = DbRequestTimeoutKind.CATALOG,
+    ) as? JsonObject) ?: buildJsonObject {}
+
+/** `POST /api/db/impexp/jobs/:id/download` — issue a single-use download ticket for an exported file. */
+suspend fun ApiClient.dbImpExpDownloadTicket(
+    jobId: String,
+    fileName: String,
+): JsonObject =
+    (dbCall(
+        method = "POST",
+        path = "/api/db/impexp/jobs/${ApiClient.escape(jobId)}/download",
+        body = buildJsonObject { put("name", fileName) },
+        timeoutKind = DbRequestTimeoutKind.CATALOG,
+    ) as? JsonObject) ?: buildJsonObject {}
+
 
 
 
