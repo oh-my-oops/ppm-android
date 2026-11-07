@@ -97,6 +97,9 @@ class GlobalEvents(
     private val agentListeners = LinkedHashSet<(AgentTranscriptFrame) -> Unit>()
     private val logsLinesListeners = LinkedHashSet<(JsonElement) -> Unit>()
     private val logsIssuesListeners = LinkedHashSet<() -> Unit>()
+    private val designHistoryListeners = LinkedHashSet<(String, String) -> Unit>()
+    private val designCommentsListeners = LinkedHashSet<(String, String) -> Unit>()
+    private val designCheckListeners = LinkedHashSet<(String, String, String?, Boolean) -> Unit>()
     private var socket: SocketConnection? = null
 
     /** Reads the socket, or waits to connect again. */
@@ -218,6 +221,23 @@ class GlobalEvents(
         return { logsIssuesListeners -= listener }
     }
 
+    fun onDesignHistoryChanged(listener: (projectName: String, slug: String) -> Unit): () -> Unit {
+        designHistoryListeners += listener
+        return { designHistoryListeners -= listener }
+    }
+
+    fun onDesignCommentsChanged(listener: (projectName: String, slug: String) -> Unit): () -> Unit {
+        designCommentsListeners += listener
+        return { designCommentsListeners -= listener }
+    }
+
+    fun onDesignCheckRequest(
+        listener: (projectName: String, slug: String, requestId: String?, screenshot: Boolean) -> Unit,
+    ): () -> Unit {
+        designCheckListeners += listener
+        return { designCheckListeners -= listener }
+    }
+
     // Frames
 
     internal fun handle(frame: JsonElement) {
@@ -255,6 +275,23 @@ class GlobalEvents(
                 AgentTranscriptFrame.from(frame)?.let { agent -> agentListeners.toList().forEach { it(agent) } }
             "logs:lines" -> logsLinesListeners.toList().forEach { it(frame) }
             "logs:issues-changed" -> logsIssuesListeners.toList().forEach { it() }
+            "design:history_changed" -> {
+                val proj = frame["projectName"].string ?: return
+                val slug = frame["slug"].string ?: return
+                designHistoryListeners.toList().forEach { it(proj, slug) }
+            }
+            "design:comments_changed" -> {
+                val proj = frame["projectName"].string ?: return
+                val slug = frame["slug"].string ?: return
+                designCommentsListeners.toList().forEach { it(proj, slug) }
+            }
+            "design:check_request" -> {
+                val proj = frame["projectName"].string ?: return
+                val slug = frame["slug"].string ?: return
+                val reqId = frame["requestId"].string
+                val screenshot = frame["screenshot"].bool ?: false
+                designCheckListeners.toList().forEach { it(proj, slug, reqId, screenshot) }
+            }
         }
     }
 

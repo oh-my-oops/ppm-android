@@ -908,6 +908,8 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                     com.hienlh.ppm.app.ui.git.GitStatusPanel(model, onNavigate = onClose)
                 } else if (shown == "database") {
                     com.hienlh.ppm.app.ui.database.DatabaseSidebarPane(model, onNavigate = onClose)
+                } else if (shown == "designs") {
+                    com.hienlh.ppm.app.ui.design.DesignsSidebarPane(model, onNavigate = onClose)
                 } else if (shown == "tunnels") {
                     com.hienlh.ppm.app.ui.tunnels.PortForwardingPanel(model, onNavigate = onClose)
                 } else if (shown.startsWith("ext:")) {
@@ -939,6 +941,7 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                                 "search" -> ProductIcon.Search
                                 "git" -> ProductIcon.GitBranch
                                 "database" -> ProductIcon.Database
+                                "designs" -> ProductIcon.Palette
                                 "teams" -> ProductIcon.Users
                                 "tunnels" -> ProductIcon.Globe
                                 else -> ProductIcon.BotMessageSquare
@@ -948,6 +951,7 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                                 "search" -> "Search"
                                 "git" -> "Git"
                                 "database" -> "DB"
+                                "designs" -> "Designs"
                                 "teams" -> "Teams"
                                 "tunnels" -> "Ports"
                                 else -> "History"

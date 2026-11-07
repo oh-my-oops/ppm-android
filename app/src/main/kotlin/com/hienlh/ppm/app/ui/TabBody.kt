@@ -76,6 +76,7 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
         "branch-review" -> BranchReviewBody(model, tab)
         "git-log" -> GitLogBody(model, tab)
         "git-diff" -> GitDiffBody(model, tab)
+        "design" -> com.hienlh.ppm.app.ui.design.DesignTabBody(model, tab)
         "extension" -> ExtensionWebviewBody(model, tab)
         else -> {
             TabPlaceholder(tabTypeIcon(tab.type), tab.title, "This tab is not in the Android app yet.")
@@ -123,6 +124,7 @@ internal fun TabPlaceholder(icon: ImageVector, title: String, detail: String) {
 
 /** A tab's title as its tab bar shows it: a chat's comes from the session list, which carries a rename made anywhere. */
 fun tabTitle(model: AppModel, tab: WorkspaceTab): String {
+    if (tab.type == "design") return tab.title.ifEmpty { tab.metaString("designSlug") ?: "Design" }
     val chat = model.chat(tab.id) ?: return tab.title.ifEmpty { if (tab.type == "chat") "New Chat" else tab.type }
     return model.title(chat, chat.controller?.state?.value?.title)
 }

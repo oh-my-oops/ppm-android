@@ -2695,7 +2695,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
      */
     private fun syncChats(state: WorkspaceState) {
         val live = HashMap<String, WorkspaceTab>()
-        for (panel in state.panels.values) for (tab in panel.tabs) if (tab.type == "chat") live[tab.id] = tab
+        for (panel in state.panels.values) for (tab in panel.tabs) if (tab.type == "chat" || tab.type == "design") live[tab.id] = tab
         for ((id, chat) in chats.toList()) {
             val tab = live[id]
             // A tab that went to another session is a new chat; one that got the session its first message made is the same.
@@ -2733,6 +2733,23 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                     )
                     chat.tookPendingMessage = true
                     chat.focusOnShow = true
+                }
+                tab.metaString("pendingImageDataUrl")?.takeIf { it.startsWith("data:image/") && it.contains(";base64,") }?.let { dataUrl ->
+                    val mediaType = dataUrl.substringAfter("data:").substringBefore(";base64,")
+                    val b64 = dataUrl.substringAfter(";base64,")
+                    if (b64.isNotEmpty()) {
+                        chat.attachments += ComposerAttachment(
+                            id = java.util.UUID.randomUUID().toString(),
+                            name = tab.metaString("pendingImageName") ?: "design-screenshot.jpg",
+                            isImage = true,
+                            status = ComposerAttachment.Status.READY,
+                            mediaType = mediaType,
+                            probed = true,
+                            imageData = com.hienlh.ppm.protocol.InlineImage(b64, mediaType),
+                        )
+                        chat.tookPendingMessage = true
+                        chat.focusOnShow = true
+                    }
                 }
                 chat.clientCommand = { text -> runClientCommand(chat, text) }
                 chat.closeMic = { voice.closeFor(chat) }
@@ -3255,6 +3272,104 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** Opens the Port Forwarding sidebar section. */
     fun openPortForwarding() {
         pickSidebarSection("tunnels")
+    }
+
+    /**
+     * Opens or focuses a Design Mode tab (`open-design-tab.ts`), popping it out into a floating
+     * window on tablet when [designWindows] is enabled.
+     */
+    fun openDesignTab(
+        slug: String,
+        title: String,
+        projectName: String? = selectedProject,
+        sessionId: String? = null,
+        providerId: String? = null,
+        fresh: Boolean = false,
+    ) {
+        val proj = projectName ?: selectedProject ?: return
+        val tabId = "design:$slug"
+        withWorkspace { store ->
+            val state = store.state.value
+            // Check if already in a floating window panel
+            for ((panelId, panel) in state.panels) {
+                if (!isWindowPanelId(panelId)) continue
+                val existing = panel.tabs.firstOrNull { it.id == tabId }
+                if (existing != null) {
+                    val winId = panelId.removePrefix("window:")
+                    windows?.focus(winId)
+                    store.setActiveTab(tabId, panelId)
+                    return@withWorkspace
+                }
+            }
+            // Check if already in a grid panel
+            for ((panelId, panel) in state.panels) {
+                if (panelId !in state.gridPanelIds) continue
+                val existing = panel.tabs.firstOrNull { it.id == tabId }
+                if (existing != null) {
+                    if (wide && designWindows) {
+                        store.popOutTab(tabId, panelId)
+                    } else {
+                        activate(tabId, panelId)
+                    }
+                    return@withWorkspace
+                }
+            }
+            val meta = buildJsonObject {
+                put("designSlug", slug)
+                put("projectName", proj)
+                if (!sessionId.isNullOrBlank()) put("sessionId", sessionId)
+                if (!providerId.isNullOrBlank()) put("providerId", providerId)
+                if (fresh) put("fresh", true)
+            }
+            store.openTab(
+                NewTab(
+                    type = "design",
+                    title = title.ifBlank { slug },
+                    projectId = proj,
+                    metadata = meta,
+                ),
+            )
+            if (!sessionId.isNullOrBlank()) events?.markRead(sessionId)
+            if (wide && designWindows) {
+                val afterState = store.state.value
+                val hostPanelId = afterState.gridPanelIds.firstOrNull { pid ->
+                    afterState.panels[pid]?.tabs?.any { it.id == tabId } == true
+                }
+                if (hostPanelId != null) {
+                    store.popOutTab(tabId, hostPanelId)
+                }
+            }
+        }
+    }
+
+    /**
+     * "Build in new chat" handoff (`design-tab.tsx`): opens a fresh chat tab with [prompt]
+     * pre-filled in its composer and optional [screenshotDataUrl] attached inline.
+     */
+    fun openBuildInNewChatTab(
+        projectName: String,
+        title: String,
+        prompt: String,
+        screenshotDataUrl: String? = null,
+        screenshotFilename: String = "design.jpg",
+    ) {
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = "chat",
+                    title = "Build: $title",
+                    projectId = projectName,
+                    metadata = buildJsonObject {
+                        put("projectName", projectName)
+                        put("pendingMessage", prompt)
+                        if (!screenshotDataUrl.isNullOrBlank()) {
+                            put("pendingImageDataUrl", screenshotDataUrl)
+                            put("pendingImageName", screenshotFilename)
+                        }
+                    },
+                ),
+            )
+        }
     }
 
     /** Opens a forwarded port or URL in a web-preview tab. */
@@ -3876,7 +3991,7 @@ internal fun filePathTab(path: String, projectName: String?) = NewTab(
 private val DOCK_POSITIONS = setOf("bottom", "left", "right")
 
 /** The sidebar sections this app has, in the web's order (`BUILTIN_SIDEBAR_TABS`). */
-private val SIDEBAR_SECTIONS = listOf("explorer", "search", "git", "database", "history", "teams", "tunnels")
+private val SIDEBAR_SECTIONS = listOf("explorer", "search", "git", "database", "designs", "history", "teams", "tunnels")
 
 private val PROJECT_SORT_MODES = setOf("recent", "priority", "name")
 
