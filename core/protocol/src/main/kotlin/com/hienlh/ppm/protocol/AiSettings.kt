@@ -19,6 +19,8 @@ data class AiSettings(
     val newChatProviderMode: String?,
     val shareProviderContext: Boolean?,
     val providers: Map<String, AiProviderSettings>,
+    val ppmTools: Map<String, Boolean> = emptyMap(),
+    val leftoverProcessesIdleMinutes: Int? = null,
 ) {
     /** `providerTabs`: every configured provider but the mock one, in the server's order. */
     val providerTabs: List<String>
@@ -31,11 +33,17 @@ data class AiSettings(
     companion object {
         fun from(value: JsonElement?): AiSettings? {
             val providers = value["providers"].obj ?: return null
+            val rawTools = value["ppm_tools"].obj
+            val ppmTools = buildMap {
+                rawTools?.forEach { (k, v) -> v.bool?.let { put(k, it) } }
+            }
             return AiSettings(
                 defaultProvider = value["default_provider"].string.orEmpty(),
                 newChatProviderMode = value["new_chat_provider_mode"].string,
                 shareProviderContext = value["share_provider_context"].bool,
                 providers = providers.mapValues { (_, provider) -> AiProviderSettings.from(provider) },
+                ppmTools = ppmTools,
+                leftoverProcessesIdleMinutes = value["leftover_processes_idle_minutes"].int,
             )
         }
     }
@@ -99,6 +107,12 @@ object AiSettingsPatch {
     fun defaultProvider(providerId: String): JsonObject = buildJsonObject { put("default_provider", providerId) }
 
     fun shareProviderContext(on: Boolean): JsonObject = buildJsonObject { put("share_provider_context", on) }
+
+    fun ppmTool(tool: String, on: Boolean): JsonObject =
+        buildJsonObject { put("ppm_tools", buildJsonObject { put(tool, on) }) }
+
+    fun leftoverIdleMinutes(minutes: Int): JsonObject =
+        buildJsonObject { put("leftover_processes_idle_minutes", minutes) }
 
     fun provider(providerId: String, fields: Map<String, JsonElement>): JsonObject =
         buildJsonObject { put("providers", buildJsonObject { put(providerId, JsonObject(fields)) }) }

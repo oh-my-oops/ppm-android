@@ -294,7 +294,7 @@ private class AiSettingsState(private val model: AppModel) {
  * saves as it changes, a field as it loses the focus.
  */
 @Composable
-private fun AiSettingsSection(model: AppModel) {
+internal fun AiSettingsSection(model: AppModel) {
     val tokens = LocalPpmTokens.current
     val state = remember(model) { AiSettingsState(model) }
     val scope = rememberCoroutineScope()
@@ -383,7 +383,7 @@ private fun ProviderSettings(
     CssColumn(Modifier.fillMaxWidth(), gap = 6.dp) {
         if (unavailable != null) UnavailableBox(provider, unavailable, state.probing, retryProbe)
         // Codex's sign-ins live with the Claude ones in Settings, Accounts.
-        if (provider == "codex") CodexAccountsLink { model.openSettings() }
+        if (provider == "codex") CodexAccountsLink { model.openSettings("accounts") }
         val models = state.models
         if (models.isNotEmpty()) {
             val target = rememberLabelTarget()
@@ -931,7 +931,7 @@ private fun TokenLimitSelect(label: String, field: TokenField, disabled: Boolean
  * again; each one's own sign-in comes with the MCP sign-in dialog.
  */
 @Composable
-private fun McpSignInList(model: AppModel, modifier: Modifier) {
+internal fun McpSignInList(model: AppModel, modifier: Modifier) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     val scope = rememberCoroutineScope()
@@ -993,11 +993,7 @@ private fun McpSignInList(model: AppModel, modifier: Modifier) {
         }
         for (server in pending) {
             McpSignInRow(server, mobile) {
-                model.toast(ErrorToastMessage(
-                    "MCP sign-in is not in the app yet",
-                    "Sign in to ${server.name} from PPM in a browser for now.",
-                    kind = ErrorToastMessage.Kind.INFO,
-                ))
+                model.openMcpSignIn(null, server.name)
             }
         }
     }

@@ -174,8 +174,7 @@ fun CodexUsagePanel(
                     selecting = selectingId == account.id,
                     planLabel = codexPlanLabel(account.planType),
                     reauthHint = if (account.signedOut) CODEX_SIGNED_OUT_HINT else null,
-                    // Only a ChatGPT sign-in is renewed in place, and that is Settings' until 12b.
-                    onReauth = if (account.type == "chatgpt") { _ -> model.openSettings() } else null,
+                    onReauth = if (account.type == "chatgpt") { _ -> model.openSettings("accounts") } else null,
                     dailyGuard = guard?.let { CardDailyGuard(account.dailyGuardEnabled, it) },
                     onDailyGuardToggle = guard?.let { { change { data.toggleDailyGuard(account.id, account.dailyGuardEnabled) } } },
                     dailyGuardToggling = state.togglingId == account.id,

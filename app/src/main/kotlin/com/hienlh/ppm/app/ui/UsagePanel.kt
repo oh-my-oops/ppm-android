@@ -229,8 +229,7 @@ fun ClaudeUsagePanel(
                     onSelect = if (onSelectAccount != null) ::select else null,
                     unselectableReason = claudeUnselectableReason(info, entry, now),
                     selecting = selectingId == entry.accountId,
-                    // Signing an account in again is Settings' until this app has the dialog.
-                    onReauth = { model.openSettings() },
+                    onReauth = { model.openSettings("accounts") },
                 )
             }
         }

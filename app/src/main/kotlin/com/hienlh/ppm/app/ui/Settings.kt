@@ -154,6 +154,15 @@ enum class SettingsCategory(
     Shortcuts("shortcuts", "Keyboard Shortcuts", "Hardware keyboard bindings", ProductIcon.Code, SettingsGroup.Core, minimalSafe = true),
     Files("files", "File Filters", "Explorer & search exclude patterns", ProductIcon.FolderTree, SettingsGroup.Core, minimalSafe = false),
 
+    // AI & Accounts
+    Ai("ai", "AI Provider", "Default provider, models, effort & budgets", ProductIcon.Sparkles, SettingsGroup.Ai, minimalSafe = true),
+    Tools("tools", "Tools", "Built-in PPM tools exposed to AI chats", ProductIcon.Wrench, SettingsGroup.Ai, minimalSafe = true),
+    Accounts("accounts", "Accounts", "Claude & Codex accounts, OAuth, rotation", ProductIcon.Users, SettingsGroup.Ai, minimalSafe = true),
+    Mcp("mcp", "MCP Servers", "Model Context Protocol servers & sign-in", ProductIcon.Plug, SettingsGroup.Ai, minimalSafe = true),
+    AiResources("ai-resources", "AI Resources", "Skills, agents, commands & MCP configs", ProductIcon.Layers, SettingsGroup.Ai, minimalSafe = false),
+    PpmBot("ppmbot", "PPMBot", "Telegram bot coordinator, tasks & memory", ProductIcon.BotMessageSquare, SettingsGroup.Ai, minimalSafe = false),
+    Design("design", "Design", "Design Canvas apps, instructions & skills", ProductIcon.LayoutGrid, SettingsGroup.Ai, minimalSafe = false),
+
     // Advanced
     QueryAudit("query-audit", "Query Audit Log", "SQL history retention & size cap", ProductIcon.ScrollText, SettingsGroup.Advanced, minimalSafe = false),
     LanguageServers("language-servers", "Language Servers", "Editor code intelligence", ProductIcon.Code, SettingsGroup.Advanced, minimalSafe = false),
@@ -330,6 +339,13 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
                 SettingsCategory.Voice -> VoiceSection(model)
                 SettingsCategory.Shortcuts -> KeyboardShortcutsSection(model)
                 SettingsCategory.Files -> FilesSettingsSection(model)
+                SettingsCategory.Ai -> AiProviderSettingsSection(model)
+                SettingsCategory.Tools -> ToolsSettingsSection(model)
+                SettingsCategory.Accounts -> AccountsSettingsSection(model)
+                SettingsCategory.Mcp -> McpSettingsSection(model)
+                SettingsCategory.AiResources -> AiResourcesSettingsSection(model)
+                SettingsCategory.PpmBot -> PpmBotSettingsSection(model)
+                SettingsCategory.Design -> DesignSettingsSection(model)
                 SettingsCategory.QueryAudit -> QueryAuditSection(model)
                 SettingsCategory.LanguageServers -> LanguageServersSection(model)
                 SettingsCategory.DatabaseDrivers -> DatabaseDriversSection(model)
