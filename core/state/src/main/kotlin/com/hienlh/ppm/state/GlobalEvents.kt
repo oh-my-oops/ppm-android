@@ -95,6 +95,8 @@ class GlobalEvents(
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
     private val readyListeners = LinkedHashSet<() -> Unit>()
     private val agentListeners = LinkedHashSet<(AgentTranscriptFrame) -> Unit>()
+    private val logsLinesListeners = LinkedHashSet<(JsonElement) -> Unit>()
+    private val logsIssuesListeners = LinkedHashSet<() -> Unit>()
     private var socket: SocketConnection? = null
 
     /** Reads the socket, or waits to connect again. */
@@ -206,6 +208,16 @@ class GlobalEvents(
         return { agentListeners -= listener }
     }
 
+    fun onLogsLines(listener: (JsonElement) -> Unit): () -> Unit {
+        logsLinesListeners += listener
+        return { logsLinesListeners -= listener }
+    }
+
+    fun onLogsIssuesChanged(listener: () -> Unit): () -> Unit {
+        logsIssuesListeners += listener
+        return { logsIssuesListeners -= listener }
+    }
+
     // Frames
 
     internal fun handle(frame: JsonElement) {
@@ -241,6 +253,8 @@ class GlobalEvents(
             "session:file-changes" -> SessionFileChangesPush.from(frame)?.let { onSessionFileChanges?.invoke(it) }
             "agent-transcript:events", "agent-transcript:error", "agent-activity" ->
                 AgentTranscriptFrame.from(frame)?.let { agent -> agentListeners.toList().forEach { it(agent) } }
+            "logs:lines" -> logsLinesListeners.toList().forEach { it(frame) }
+            "logs:issues-changed" -> logsIssuesListeners.toList().forEach { it() }
         }
     }
 

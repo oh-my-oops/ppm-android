@@ -377,6 +377,8 @@ private fun WindowContent(model: AppModel, win: WindowRuntimeState) {
     when (win.kind) {
         WindowKind.Explorer -> com.hienlh.ppm.app.ui.osexplorer.HostExplorerWindow(model, win)
         WindowKind.Settings -> SettingsWindowContent(model, win)
+        WindowKind.SystemMonitor -> com.hienlh.ppm.app.ui.sysmon.SystemMonitorWindowContent(model, win)
+        WindowKind.Logs -> com.hienlh.ppm.app.ui.logs.LogsWindowContent(model, win)
         WindowKind.TabHost -> TabHostWindowContent(model, win)
         WindowKind.AgentSession -> {
             val payload = remember(win.payload) { AgentSessionPayload.from(win.payload) }

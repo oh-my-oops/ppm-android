@@ -52,6 +52,8 @@ import kotlin.math.max
 fun TabBody(model: AppModel, tab: WorkspaceTab) {
     when (tab.type) {
         "settings" -> SettingsTab(model)
+        "system-monitor" -> com.hienlh.ppm.app.ui.sysmon.SystemMonitorTabBody(model, tab)
+        "logs" -> com.hienlh.ppm.app.ui.logs.LogsTabBody(model, tab)
         "chat" -> model.chat(tab.id)?.let { chat -> key(chat) { ChatPane(model, chat) } }
         "session-review" -> SessionReviewBody(model, tab)
         "web-preview" -> WebPreviewBody(model, tab)

@@ -91,7 +91,7 @@ fun StatusBar(model: AppModel) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     ExtensionStatusBarItems(model, "right")
                     if (model.screenKeptAwake()) Awake(text)
-                    model.api?.let { Resources(it, text) }
+                    model.api?.let { Resources(it, text) { model.openSystemMonitor() } }
                     ThemePicker(model, text, compact)
                     UpgradeButton(model, text, prefix = !compact)
                 }
@@ -232,7 +232,7 @@ private fun Awake(text: TextStyle) {
  * until the first sample, and while the app is in the background the stream is let go.
  */
 @Composable
-private fun Resources(api: ApiClient, text: TextStyle) {
+private fun Resources(api: ApiClient, text: TextStyle, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     var sample by remember(api) { mutableStateOf<ResourceSample?>(null) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -264,7 +264,18 @@ private fun Resources(api: ApiClient, text: TextStyle) {
     }
     // `toFixed`: a point whatever the locale.
     val mem = if (current.memoryUsedMB < 1024) "%.0fM".format(Locale.ROOT, current.memoryUsedMB) else "%.1fG".format(Locale.ROOT, current.memoryUsedMB / 1024)
-    Row(Modifier.padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .ppmClickable(
+                pressedColor = tokens.panel2.opacity(0.4).color,
+                hoverColor = tokens.panel2.opacity(0.4).color,
+                onClickLabel = "System Monitor",
+                onClick = onClick,
+            )
+            .padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         BasicText("CPU %.0f%%".format(Locale.ROOT, current.cpu), style = text.copy(color = cpu.color), maxLines = 1)
         BasicText("MEM $mem", style = text.copy(color = tokens.text2.color), maxLines = 1)
     }

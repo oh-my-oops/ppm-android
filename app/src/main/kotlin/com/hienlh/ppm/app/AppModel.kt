@@ -49,6 +49,7 @@ import com.hienlh.ppm.client.setTag
 import com.hienlh.ppm.client.uiPrefs
 import com.hienlh.ppm.client.updateTag
 import com.hienlh.ppm.client.webFile
+import com.hienlh.ppm.client.logsIssuesSummary
 import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.IconFramework
 import com.hienlh.ppm.design.PpmTheme
@@ -639,6 +640,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     var extensions by mutableStateOf<com.hienlh.ppm.state.extensions.ExtensionClient?>(null)
         private set
 
+    /** Likely PPM bug count from `/api/logs/issues/summary` for the Logs footer badge. */
+    var logsLikelyBugs by mutableIntStateOf(0)
+
     /** Each project's branch and how far it is from its upstream, for the tablet's status bar (the web's git `meta`). */
     val gitBranches = mutableStateMapOf<String, GitBranchStatus>()
 
@@ -992,6 +996,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 if (this@AppModel.api !== api) return@launch
                 localUrl = url
                 prefs.put("localUrl.$serverKey", url)
+            }
+            launch {
+                val summaryJson = quietly { api.logsIssuesSummary() } ?: return@launch
+                if (this@AppModel.api !== api) return@launch
+                logsLikelyBugs = com.hienlh.ppm.state.logs.LogIssuesSummary.from(summaryJson).likelyBugs
             }
         }
     }
@@ -2979,6 +2988,61 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         }
     }
 
+    /** Opens System Monitor in a floating window on tablet or as a tab on phone. */
+    fun openSystemMonitor(tab: String = "overview") {
+        val windows = windows
+        val payload = buildJsonObject { put("sysmonTab", tab) }
+        if (!wide || windows == null) {
+            withWorkspace { it.openTab(NewTab("system-monitor", "System Monitor", metadata = payload)) }
+            return
+        }
+        val existing = windows.state.value.windows.values.firstOrNull { it.kind == WindowKind.SystemMonitor }
+        when {
+            existing != null -> {
+                windows.setPayload(existing.id, payload)
+                windows.focus(existing.id)
+            }
+            windows.state.value.windows.size >= MAX_WINDOWS -> actionError(TOO_MANY_WINDOWS)
+            else -> windows.open(WindowKind.SystemMonitor, payload)
+        }
+    }
+
+    /** Opens Logs in a floating window on tablet or as a tab on phone. */
+    fun openLogs(view: String = "logs") {
+        val windows = windows
+        val payload = buildJsonObject { put("logsView", view) }
+        if (!wide || windows == null) {
+            withWorkspace { it.openTab(NewTab("logs", "Logs", metadata = payload)) }
+            return
+        }
+        val existing = windows.state.value.windows.values.firstOrNull { it.kind == WindowKind.Logs }
+        when {
+            existing != null -> {
+                windows.setPayload(existing.id, payload)
+                windows.focus(existing.id)
+            }
+            windows.state.value.windows.size >= MAX_WINDOWS -> actionError(TOO_MANY_WINDOWS)
+            else -> windows.open(WindowKind.Logs, payload)
+        }
+    }
+
+    /** Opens the Port Forwarding sidebar section. */
+    fun openPortForwarding() {
+        pickSidebarSection("tunnels")
+    }
+
+    /** Opens a forwarded port or URL in a web-preview tab. */
+    fun openWebPreviewTab(url: String, port: Int? = null, via: String = "cloudflare") {
+        val title = if (port != null) "localhost:$port" else buildTitleFromUrl("web-preview", url)
+        val meta = buildJsonObject {
+            put("url", url)
+            put("currentUrl", url)
+            put("via", via)
+            if (port != null) put("port", port)
+        }
+        withWorkspace { it.openTab(NewTab(type = "web-preview", title = title, metadata = meta)) }
+    }
+
     /** close-window.ts: a window's ×, Escape on its titlebar; a detached tab goes back to the grid. */
     fun closeWindow(id: String) {
         workspace?.closeWindow(id)
@@ -3573,7 +3637,7 @@ internal fun filePathTab(path: String, projectName: String?) = NewTab(
 private val DOCK_POSITIONS = setOf("bottom", "left", "right")
 
 /** The sidebar sections this app has, in the web's order (`BUILTIN_SIDEBAR_TABS`). */
-private val SIDEBAR_SECTIONS = listOf("explorer", "search", "git", "history", "teams")
+private val SIDEBAR_SECTIONS = listOf("explorer", "search", "git", "history", "teams", "tunnels")
 
 private val PROJECT_SORT_MODES = setOf("recent", "priority", "name")
 

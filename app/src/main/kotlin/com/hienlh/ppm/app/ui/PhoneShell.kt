@@ -906,6 +906,8 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                     com.hienlh.ppm.app.ui.files.SearchBody(model, onNavigate = onClose)
                 } else if (shown == "git") {
                     com.hienlh.ppm.app.ui.git.GitStatusPanel(model, onNavigate = onClose)
+                } else if (shown == "tunnels") {
+                    com.hienlh.ppm.app.ui.tunnels.PortForwardingPanel(model, onNavigate = onClose)
                 } else if (shown.startsWith("ext:")) {
                     val viewId = shown.removePrefix("ext:")
                     val contribs = model.extensions?.contributions?.collectAsState()?.value
@@ -935,6 +937,7 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                                 "search" -> ProductIcon.Search
                                 "git" -> ProductIcon.GitBranch
                                 "teams" -> ProductIcon.Users
+                                "tunnels" -> ProductIcon.Globe
                                 else -> ProductIcon.BotMessageSquare
                             },
                             when (id) {
@@ -942,6 +945,7 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                                 "search" -> "Search"
                                 "git" -> "Git"
                                 "teams" -> "Teams"
+                                "tunnels" -> "Ports"
                                 else -> "History"
                             },
                             active = id == shown,
@@ -950,26 +954,47 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                     }
                 }
                 Column(Modifier.fillMaxWidth().line(top = true, tokens.border.color).padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                        .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openExplorer() }.padding(vertical = 10.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        PpmIcon(ProductIcon.FolderTree, 16.dp, tokens.text3.color)
-                        BasicText("Files", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
-                    }
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .ppmClickable(pressedColor = tokens.panel2.color) {
-                                onClose()
-                                model.openSettings()
-                            }
-                            .padding(vertical = 10.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        PpmIcon(ProductIcon.Settings, 16.dp, tokens.text3.color)
-                        BasicText("Settings", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(
+                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                                .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openExplorer() }
+                                .padding(vertical = 10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            PpmIcon(ProductIcon.FolderTree, 16.dp, tokens.text3.color)
+                            BasicText("Files", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
+                        }
+                        Column(
+                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                                .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openSystemMonitor() }
+                                .padding(vertical = 10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            PpmIcon(ProductIcon.Activity, 16.dp, tokens.text3.color)
+                            BasicText("Monitor", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
+                        }
+                        Column(
+                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                                .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openLogs() }
+                                .padding(vertical = 10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            PpmIcon(ProductIcon.ScrollText, 16.dp, if (model.logsLikelyBugs > 0) tokens.error.color else tokens.text3.color)
+                            BasicText("Logs", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
+                        }
+                        Column(
+                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                                .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openSettings() }
+                                .padding(vertical = 10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            PpmIcon(ProductIcon.Settings, 16.dp, tokens.text3.color)
+                            BasicText("Settings", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
+                        }
                     }
                     // `mt-2 border-t border-border px-1 text-[11px]`, there with or without the version.
                     Box(Modifier.fillMaxWidth().padding(top = 8.dp).line(top = true, tokens.border.color).padding(horizontal = 4.dp)) {

@@ -149,6 +149,10 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
             action("Voice Input", ProductIcon.Mic, "speech microphone dictate voice", formatShortcut(bindings.binding("voice-input")), run { model.toggleVoiceInput() }),
             action("Settings", ProductIcon.Settings, "config preferences theme", formatShortcut(bindings.binding("open-settings")), run { model.openSettings() }),
             action("Open File Explorer", ProductIcon.AppWindow, "open file explorer finder browse files folders disk drive window", null, run { model.openExplorer() }),
+            action("System Monitor", ProductIcon.Activity, "cpu memory ram disk network gpu processes services monitor", null, run { model.openSystemMonitor() }),
+            action("Logs", ProductIcon.ScrollText, "logs output console errors warnings tail", null, run { model.openLogs() }),
+            action("Report Bug", ProductIcon.Bug, "bug report github issue crash", null, run { model.openLogs("report") }),
+            action("Forward a Port", ProductIcon.Globe, "port forward tunnel tailscale cloudflare preview", null, run { model.openPortForwarding() }),
         )
         val extItems = extContribs?.commands.orEmpty().map { cmd ->
             val label = if (!cmd.category.isNullOrEmpty()) "${cmd.category}: ${cmd.title}" else cmd.title

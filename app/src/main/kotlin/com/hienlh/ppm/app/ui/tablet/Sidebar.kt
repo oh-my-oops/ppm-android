@@ -136,6 +136,7 @@ fun Sidebar(model: AppModel) {
                             sec == "explorer" -> com.hienlh.ppm.app.ui.files.ExplorerBody(model)
                             sec == "search" -> com.hienlh.ppm.app.ui.files.SearchBody(model)
                             sec == "git" -> com.hienlh.ppm.app.ui.git.GitStatusPanel(model)
+                            sec == "tunnels" -> com.hienlh.ppm.app.ui.tunnels.PortForwardingPanel(model)
                             sec.startsWith("ext:") -> {
                                 val viewId = sec.removePrefix("ext:")
                                 val contribs = model.extensions?.contributions?.collectAsState()?.value
@@ -346,6 +347,8 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
                     }
                 } else if (section == "teams") {
                     NavItem(ProductIcon.Users, "Teams", active, badge = 0, featureBadge = FeatureBadgeKind.BETA) { model.pickSidebarSection(section) }
+                } else if (section == "tunnels") {
+                    NavItem(ProductIcon.Globe, "Port Forwarding", active, badge = 0) { model.pickSidebarSection(section) }
                 } else {
                     NavItem(ProductIcon.BotMessageSquare, "Chat History", active, badge = model.unread(model.selectedProject, unread).size) {
                         model.pickSidebarSection(section)
@@ -368,6 +371,8 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
         ) {
             NotificationBell(model)
             FooterUtil(ProductIcon.FolderTree, "File Explorer") { model.openExplorer() }
+            FooterUtil(ProductIcon.Activity, "System Monitor") { model.openSystemMonitor() }
+            FooterUtil(ProductIcon.ScrollText, "Logs", dot = model.logsLikelyBugs > 0) { model.openLogs() }
             FooterUtil(ProductIcon.Settings, "Settings") { model.openSettings() }
         }
     }
@@ -446,7 +451,7 @@ private fun NavTile(icon: ProductIcon, label: String, active: Boolean, badge: In
 
 /** A footer utility (`size-8 rounded-[7px]`, a 16 px icon in the subtle colour, lit as a section is). */
 @Composable
-private fun FooterUtil(icon: ProductIcon, label: String, onClick: () -> Unit) {
+private fun FooterUtil(icon: ProductIcon, label: String, dot: Boolean = false, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(7.dp)
     val hover = rememberHover()
@@ -457,7 +462,19 @@ private fun FooterUtil(icon: ProductIcon, label: String, onClick: () -> Unit) {
             .semantics { contentDescription = label }
             .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, shape = shape, onClickLabel = label, source = hover.source, onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { PpmIcon(icon, 16.dp, tokens.text.mix(tokens.text3, hover.lit.toDouble()).color) }
+    ) {
+        PpmIcon(icon, 16.dp, tokens.text.mix(tokens.text3, hover.lit.toDouble()).color)
+        if (dot) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 5.dp, end = 5.dp)
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(tokens.error.color),
+            )
+        }
+    }
 }
 
 /** The rail's width, and the top bar's height, which the tab bars share. */
