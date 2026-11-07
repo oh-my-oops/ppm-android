@@ -54,6 +54,7 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
         "settings" -> SettingsTab(model)
         "system-monitor" -> com.hienlh.ppm.app.ui.sysmon.SystemMonitorTabBody(model, tab)
         "logs" -> com.hienlh.ppm.app.ui.logs.LogsTabBody(model, tab)
+        "remote-desktop" -> com.hienlh.ppm.app.ui.remotedesktop.RemoteDesktopTab(model, tab.id)
         "chat" -> model.chat(tab.id)?.let { chat -> key(chat) { ChatPane(model, chat) } }
         "session-review" -> SessionReviewBody(model, tab)
         "web-preview" -> WebPreviewBody(model, tab)
@@ -183,5 +184,6 @@ fun tabTypeIcon(type: String): ImageVector = when (type) {
     "android" -> ProductIcon.Smartphone.vector
     "web-preview" -> ProductIcon.Globe.vector
     "logs" -> ProductIcon.ScrollText.vector
+    "remote-desktop" -> ProductIcon.Monitor.vector
     else -> ProductIcon.Puzzle.vector
 }

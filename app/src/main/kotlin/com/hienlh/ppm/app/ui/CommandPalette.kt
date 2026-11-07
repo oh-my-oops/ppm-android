@@ -149,6 +149,7 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
             action("Voice Input", ProductIcon.Mic, "speech microphone dictate voice", formatShortcut(bindings.binding("voice-input")), run { model.toggleVoiceInput() }),
             action("Settings", ProductIcon.Settings, "config preferences theme", formatShortcut(bindings.binding("open-settings")), run { model.openSettings() }),
             action("Open File Explorer", ProductIcon.AppWindow, "open file explorer finder browse files folders disk drive window", null, run { model.openExplorer() }),
+            action("Remote Desktop", ProductIcon.Monitor, "remote desktop screen share vnc viewer display", null, run { model.openRemoteDesktop() }),
             action("System Monitor", ProductIcon.Activity, "cpu memory ram disk network gpu processes services monitor", null, run { model.openSystemMonitor() }),
             action("Logs", ProductIcon.ScrollText, "logs output console errors warnings tail", null, run { model.openLogs() }),
             action("Report Bug", ProductIcon.Bug, "bug report github issue crash", null, run { model.openLogs("report") }),

@@ -3026,6 +3026,21 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         }
     }
 
+    /** Opens Remote Desktop in a floating window on tablet or as a tab on phone (`open-remote-desktop.ts`). */
+    fun openRemoteDesktop() {
+        val windows = windows
+        if (!wide || windows == null) {
+            withWorkspace { it.openTab(NewTab("remote-desktop", "Remote Desktop")) }
+            return
+        }
+        val existing = windows.state.value.windows.values.firstOrNull { it.kind == WindowKind.RemoteDesktop }
+        when {
+            existing != null -> windows.focus(existing.id)
+            windows.state.value.windows.size >= MAX_WINDOWS -> actionError(TOO_MANY_WINDOWS)
+            else -> windows.open(WindowKind.RemoteDesktop)
+        }
+    }
+
     /** Opens the Port Forwarding sidebar section. */
     fun openPortForwarding() {
         pickSidebarSection("tunnels")

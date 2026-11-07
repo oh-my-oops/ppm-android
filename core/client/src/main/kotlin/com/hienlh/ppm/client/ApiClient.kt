@@ -191,7 +191,7 @@ class ApiClient(val baseUrl: HttpUrl, val token: String) {
         socketUrl("/ws/project/${escape(project)}/group/${escape(groupId)}", emptyList())
 
     /** Sockets authenticate by `?token=` only: the server reads no header on upgrade. */
-    private fun socketUrl(path: String, query: List<Pair<String, String>>): String {
+    internal fun socketUrl(path: String, query: List<Pair<String, String>>): String {
         val http = url(path, query + ("token" to token)).toString()
         return if (http.startsWith("https:")) "wss:" + http.removePrefix("https:") else "ws:" + http.removePrefix("http:")
     }
