@@ -417,3 +417,129 @@ suspend fun ApiClient.dbObjectSql(
         loginCoordinator = loginCoordinator,
     ) as? JsonObject) ?: buildJsonObject {}
 }
+
+// ── 9b.1–9b.5 Database Grid, Count & Quick Export Endpoints ─────────────────
+
+/** `GET /api/db/connections/:id/schema?table=&schema=` — column schema metadata for a table. */
+suspend fun ApiClient.dbTableSchema(
+    connectionId: String,
+    table: String,
+    schema: String? = null,
+    database: String? = null,
+    path: String? = null,
+    project: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+): JsonArray {
+    val q = connQuery(database, path, project).toMutableList()
+    q += "table" to table
+    if (!schema.isNullOrBlank()) q += "schema" to schema
+    return (dbCall(
+        method = "GET",
+        path = "/api/db/connections/${ApiClient.escape(connectionId)}/schema",
+        query = q,
+        loginCoordinator = loginCoordinator,
+    ) as? JsonArray) ?: JsonArray(emptyList())
+}
+
+/** `POST /api/db/connections/:id/grid` — fetch one page of table rows (300 s read timeout). */
+suspend fun ApiClient.dbGridPage(
+    connectionId: String,
+    body: JsonObject,
+    database: String? = null,
+    path: String? = null,
+    project: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+): JsonObject =
+    (dbCall(
+        method = "POST",
+        path = "/api/db/connections/${ApiClient.escape(connectionId)}/grid",
+        query = connQuery(database, path, project),
+        body = body,
+        timeoutKind = DbRequestTimeoutKind.GRID_STREAM,
+        loginCoordinator = loginCoordinator,
+    ) as? JsonObject) ?: buildJsonObject {}
+
+/** `POST /api/db/connections/:id/grid/count` — background or exact (`exact = true`) row count. */
+suspend fun ApiClient.dbGridCount(
+    connectionId: String,
+    body: JsonObject,
+    exact: Boolean = false,
+    database: String? = null,
+    path: String? = null,
+    project: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+): JsonObject =
+    (dbCall(
+        method = "POST",
+        path = "/api/db/connections/${ApiClient.escape(connectionId)}/grid/count",
+        query = connQuery(database, path, project),
+        body = body,
+        timeoutKind = DbRequestTimeoutKind.COUNT,
+        countLimitSec = if (exact) 120 else 10,
+        loginCoordinator = loginCoordinator,
+    ) as? JsonObject) ?: buildJsonObject {}
+
+/** `POST /api/db/connections/:id/grid/export` — start a streaming table export and receive a single-use ticket. */
+suspend fun ApiClient.dbGridExportTicket(
+    connectionId: String,
+    body: JsonObject,
+    database: String? = null,
+    path: String? = null,
+    project: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+): JsonObject =
+    (dbCall(
+        method = "POST",
+        path = "/api/db/connections/${ApiClient.escape(connectionId)}/grid/export",
+        query = connQuery(database, path, project),
+        body = body,
+        timeoutKind = DbRequestTimeoutKind.GRID_STREAM,
+        loginCoordinator = loginCoordinator,
+    ) as? JsonObject) ?: buildJsonObject {}
+
+/** `POST /api/db/connections/:id/grid/cell` — request a single-use ticket to download a truncated binary cell whole. */
+suspend fun ApiClient.dbGridCellTicket(
+    connectionId: String,
+    body: JsonObject,
+    database: String? = null,
+    path: String? = null,
+    project: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+): JsonObject =
+    (dbCall(
+        method = "POST",
+        path = "/api/db/connections/${ApiClient.escape(connectionId)}/grid/cell",
+        query = connQuery(database, path, project),
+        body = body,
+        timeoutKind = DbRequestTimeoutKind.GRID_STREAM,
+        loginCoordinator = loginCoordinator,
+    ) as? JsonObject) ?: buildJsonObject {}
+
+/**
+ * `GET /api/db/grid-export/:ticket` — downloads the exported file directly via OkHttp in a single GET
+ * without using Android's `DownloadManager` (which probes/retries and would consume the single-use 30 s ticket).
+ */
+suspend fun ApiClient.dbDownloadGridExportTicket(ticket: String): ByteArray {
+    val request = Request.Builder()
+        .url(url("/api/db/grid-export/${ApiClient.escape(ticket)}", emptyList()))
+        .get()
+        .header("Authorization", "Bearer $token")
+        .header("x-ppm-client", PpmHttp.CLIENT_NAME)
+        .build()
+    val httpClient = dbClientForTimeout(DbRequestTimeoutKind.GRID_STREAM)
+    val response = try {
+        httpClient.newCall(request).await()
+    } catch (error: IOException) {
+        throw PpmError.Unreachable(describe(error))
+    }
+    return withContext(Dispatchers.IO) {
+        response.use { res ->
+            if (!res.isSuccessful) {
+                val text = runCatching { res.body.string() }.getOrDefault("")
+                ApiClient.unwrap(res.code, res.header("Content-Type"), text)
+            }
+            res.body.bytes()
+        }
+    }
+}
+
