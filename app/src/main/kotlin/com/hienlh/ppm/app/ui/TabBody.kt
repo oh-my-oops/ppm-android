@@ -65,6 +65,8 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
         "ai-resource" -> com.hienlh.ppm.app.ui.editor.AiResourceEditorBody(model, tab)
         "problems" -> com.hienlh.ppm.app.ui.editor.ProblemsTabBody(model, tab)
         "conflict-editor" -> com.hienlh.ppm.app.ui.editor.ConflictEditorTabBody(model, tab)
+        "db-connection" -> com.hienlh.ppm.app.ui.database.DbConnectionFormTabBody(model, tab)
+        "db-sql" -> com.hienlh.ppm.app.ui.database.DbSqlObjectTabBody(model, tab)
         "git-review" -> GitReviewBody(model, tab)
         "branch-review" -> BranchReviewBody(model, tab)
         "git-log" -> GitLogBody(model, tab)

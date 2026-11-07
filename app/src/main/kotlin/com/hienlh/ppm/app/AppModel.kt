@@ -2271,6 +2271,24 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         }
     }
 
+    fun openWorkspaceTab(
+        type: String,
+        title: String,
+        metadata: JsonObject = buildJsonObject {},
+        projectId: String? = selectedProject,
+    ) {
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = type,
+                    title = title,
+                    projectId = projectId,
+                    metadata = metadata,
+                ),
+            )
+        }
+    }
+
     fun notifyGitChanged(project: String) {
         gitChanged.tryEmit(project)
     }
@@ -3831,7 +3849,7 @@ internal fun filePathTab(path: String, projectName: String?) = NewTab(
 private val DOCK_POSITIONS = setOf("bottom", "left", "right")
 
 /** The sidebar sections this app has, in the web's order (`BUILTIN_SIDEBAR_TABS`). */
-private val SIDEBAR_SECTIONS = listOf("explorer", "search", "git", "history", "teams", "tunnels")
+private val SIDEBAR_SECTIONS = listOf("explorer", "search", "git", "database", "history", "teams", "tunnels")
 
 private val PROJECT_SORT_MODES = setOf("recent", "priority", "name")
 

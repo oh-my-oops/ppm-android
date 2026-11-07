@@ -136,6 +136,7 @@ fun Sidebar(model: AppModel) {
                             sec == "explorer" -> com.hienlh.ppm.app.ui.files.ExplorerBody(model)
                             sec == "search" -> com.hienlh.ppm.app.ui.files.SearchBody(model)
                             sec == "git" -> com.hienlh.ppm.app.ui.git.GitStatusPanel(model)
+                            sec == "database" -> com.hienlh.ppm.app.ui.database.DatabaseSidebarPane(model)
                             sec == "tunnels" -> com.hienlh.ppm.app.ui.tunnels.PortForwardingPanel(model)
                             sec.startsWith("ext:") -> {
                                 val viewId = sec.removePrefix("ext:")
@@ -343,6 +344,10 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
                     NavItem(ProductIcon.Search, "Search", active, badge = 0) { model.pickSidebarSection(section) }
                 } else if (section == "git") {
                     NavItem(ProductIcon.GitBranch, "Git", active, badge = model.gitChangeCount(model.selectedProject)) {
+                        model.pickSidebarSection(section)
+                    }
+                } else if (section == "database") {
+                    NavItem(ProductIcon.Database, "Database", active, badge = 0) {
                         model.pickSidebarSection(section)
                     }
                 } else if (section == "teams") {
