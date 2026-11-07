@@ -967,6 +967,16 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                         }
                         Column(
                             Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                                .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openAndroid() }
+                                .padding(vertical = 10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            PpmIcon(ProductIcon.Smartphone, 16.dp, tokens.text3.color)
+                            BasicText("Android", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
+                        }
+                        Column(
+                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
                                 .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openRemoteDesktop() }
                                 .padding(vertical = 10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,

@@ -3041,6 +3041,28 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         }
     }
 
+    /** Opens or focuses the Android Device / Emulator Controller workspace tab (`open-android.ts`). */
+    fun openAndroid() {
+        withWorkspace { store ->
+            for ((panelId, panel) in store.state.value.panels) {
+                val existing = panel.tabs.firstOrNull { it.type == "android" }
+                if (existing != null) {
+                    activate(existing.id, panelId)
+                    return@withWorkspace
+                }
+            }
+            store.openTab(NewTab("android", "Android"))
+        }
+    }
+
+    /** Updates an `"android"` tab's pinned `avdId` metadata and tab title (`android-tab.tsx`). */
+    fun updateAndroidTabDevice(tabId: String, avdId: String?, title: String) {
+        val store = workspace ?: return
+        store.updateTab(tabId) {
+            it.copy(title = title).withMetadata("avdId" to avdId?.let(::JsonPrimitive))
+        }
+    }
+
     /** Opens the Port Forwarding sidebar section. */
     fun openPortForwarding() {
         pickSidebarSection("tunnels")

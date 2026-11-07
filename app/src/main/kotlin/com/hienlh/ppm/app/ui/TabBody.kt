@@ -55,6 +55,7 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
         "system-monitor" -> com.hienlh.ppm.app.ui.sysmon.SystemMonitorTabBody(model, tab)
         "logs" -> com.hienlh.ppm.app.ui.logs.LogsTabBody(model, tab)
         "remote-desktop" -> com.hienlh.ppm.app.ui.remotedesktop.RemoteDesktopTab(model, tab.id)
+        "android" -> com.hienlh.ppm.app.ui.androiddevice.AndroidTabBody(model, tab)
         "chat" -> model.chat(tab.id)?.let { chat -> key(chat) { ChatPane(model, chat) } }
         "session-review" -> SessionReviewBody(model, tab)
         "web-preview" -> WebPreviewBody(model, tab)
