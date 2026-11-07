@@ -67,10 +67,12 @@ import com.hienlh.ppm.app.ui.SettingsTextInput
 import com.hienlh.ppm.client.DbDriverMissingException
 import com.hienlh.ppm.client.DbLoginCoordinator
 import com.hienlh.ppm.client.DbLoginPromptInfo
+import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.client.dbDownloadGridExportTicket
 import com.hienlh.ppm.client.dbGridCount
 import com.hienlh.ppm.client.dbGridExportTicket
 import com.hienlh.ppm.client.dbGridPage
+import com.hienlh.ppm.client.dbGridValues
 import com.hienlh.ppm.client.dbInstallMissingDriver
 import com.hienlh.ppm.client.dbLoginConnection
 import com.hienlh.ppm.client.dbTableSchema
@@ -94,14 +96,22 @@ import com.hienlh.ppm.state.database.DbCellValue
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.state.database.DbGridPageData
 import com.hienlh.ppm.state.database.FETCH_ALL_CHUNK
+import com.hienlh.ppm.state.database.FILTER_BAND_DP
 import com.hienlh.ppm.state.database.FLOATING_PANEL_TAB_WIDTH_DP
+import com.hienlh.ppm.state.database.FilterDialogRequest
+import com.hienlh.ppm.state.database.FilterRequest
+import com.hienlh.ppm.state.database.FilterText
+import com.hienlh.ppm.state.database.FilterableColumn
+import com.hienlh.ppm.state.database.FunnelKind
 import com.hienlh.ppm.state.database.GRID_EXPORT_FORMATS
 import com.hienlh.ppm.state.database.GRID_PAGE_SIZE
 import com.hienlh.ppm.state.database.GridColumnSchema
+import com.hienlh.ppm.state.database.GridFilters
 import com.hienlh.ppm.state.database.GridRect
 import com.hienlh.ppm.state.database.GridSelectionState
 import com.hienlh.ppm.state.database.GridSortItem
 import com.hienlh.ppm.state.database.LoadMoreDecision
+import com.hienlh.ppm.state.database.NO_FILTERS
 import com.hienlh.ppm.state.database.ResultColumnMeta
 import com.hienlh.ppm.state.database.RowCountState
 import com.hienlh.ppm.state.database.RowCountView
@@ -109,27 +119,45 @@ import com.hienlh.ppm.state.database.SortMenuAction
 import com.hienlh.ppm.state.database.TITLE_BAND_DP
 import com.hienlh.ppm.state.database.TITLE_BAND_TOUCH_DP
 import com.hienlh.ppm.state.database.TableFirstPageCache
+import com.hienlh.ppm.state.database.TableScope
 import com.hienlh.ppm.state.database.TitleIcon
 import com.hienlh.ppm.state.database.applySortAction
 import com.hienlh.ppm.state.database.buildGridExportRequestJson
 import com.hienlh.ppm.state.database.buildGridRequestJson
+import com.hienlh.ppm.state.database.canChooseValues
 import com.hienlh.ppm.state.database.classifyColumnType
+import com.hienlh.ppm.state.database.columnFilterState
 import com.hienlh.ppm.state.database.columnNameMatches
 import com.hienlh.ppm.state.database.computeRowCountView
 import com.hienlh.ppm.state.database.computeSelectionStats
+import com.hienlh.ppm.state.database.decodeGridFiltersJson
+import com.hienlh.ppm.state.database.descriptionColumn
+import com.hienlh.ppm.state.database.filterRequest
+import com.hienlh.ppm.state.database.filterSyntax
+import com.hienlh.ppm.state.database.filterableColumns
 import com.hienlh.ppm.state.database.formatCellCopyText
 import com.hienlh.ppm.state.database.formatCellDisplayText
 import com.hienlh.ppm.state.database.formatCopy
 import com.hienlh.ppm.state.database.gridExportFileName
+import com.hienlh.ppm.state.database.hasFilters
 import com.hienlh.ppm.state.database.loadMoreDecision
+import com.hienlh.ppm.state.database.lookupRowsRequest
+import com.hienlh.ppm.state.database.lookupSearch
+import com.hienlh.ppm.state.database.parseDbCellValue
 import com.hienlh.ppm.state.database.parseGridColumnsSchema
 import com.hienlh.ppm.state.database.parseGridResponse
+import com.hienlh.ppm.state.database.refusedFilters
 import com.hienlh.ppm.state.database.reloadKeepLoadedLimit
 import com.hienlh.ppm.state.database.rowMarkerWidthPx
 import com.hienlh.ppm.state.database.selectedBlock
 import com.hienlh.ppm.state.database.selectionHasCell
 import com.hienlh.ppm.state.database.sortInfoForColumn
 import com.hienlh.ppm.state.database.titleIconFor
+import com.hienlh.ppm.state.database.toFunnelKind
+import com.hienlh.ppm.state.database.valuesRequest
+import com.hienlh.ppm.state.database.withColumnFilter
+import com.hienlh.ppm.state.database.withMultiFilter
+import kotlinx.serialization.json.JsonArray
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -226,6 +254,15 @@ fun NativeDataGrid(
     loadingMore: Boolean = false,
     newRowsCount: Int = 0,
     rowEditStatus: (Int) -> GridRowEditStatus = { GridRowEditStatus() },
+    showFilterRow: Boolean = true,
+    filters: GridFilters = NO_FILTERS,
+    filterableCols: List<FilterableColumn> = emptyList(),
+    serverFilterErrors: Map<String, String> = emptyMap(),
+    onChangeFilters: (GridFilters) -> Unit = {},
+    onOpenChooseValues: (String, ColumnKind) -> Unit = { _, _ -> },
+    onOpenLookup: (String, ColumnKind, String, String?, String) -> Unit = { _, _, _, _, _ -> },
+    onOpenFunnelFor: (String?) -> Unit = {},
+    onPhoneOpenColumnSheet: ((String) -> Unit)? = null,
     onSelectionChange: (GridSelectionState) -> Unit = {},
     onSortAction: (String, SortMenuAction) -> Unit = { _, _ -> },
     onCopyColumnName: (String) -> Unit = {},
@@ -341,14 +378,18 @@ fun NativeDataGrid(
                             .background(if (isColSelected) gridColors.bgHeaderSelected else gridColors.bgHeader)
                             .cssBorder(gridColors.borderColor, sides = CssSides.End)
                             .clickable {
-                                onSelectionChange(
-                                    selection.copy(
-                                        selectedColumns = setOf(visIdx),
-                                        selectedRows = emptySet(),
-                                        ranges = emptyList(),
-                                        activeCell = visIdx to 0,
-                                    ),
-                                )
+                                if (mobile && onPhoneOpenColumnSheet != null) {
+                                    onPhoneOpenColumnSheet(colName)
+                                } else {
+                                    onSelectionChange(
+                                        selection.copy(
+                                            selectedColumns = setOf(visIdx),
+                                            selectedRows = emptySet(),
+                                            ranges = emptyList(),
+                                            activeCell = visIdx to 0,
+                                        ),
+                                    )
+                                }
                             }
                             .testTag("grid-col-header-$colName"),
                         contentAlignment = Alignment.CenterStart,
@@ -402,7 +443,11 @@ fun NativeDataGrid(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
                                     .clickable {
-                                        openHeaderMenuCol = if (openHeaderMenuCol == colName) null else colName
+                                        if (mobile && onPhoneOpenColumnSheet != null) {
+                                            onPhoneOpenColumnSheet(colName)
+                                        } else {
+                                            openHeaderMenuCol = if (openHeaderMenuCol == colName) null else colName
+                                        }
                                     }
                                     .padding(horizontal = 4.dp, vertical = 2.dp)
                                     .testTag("grid-col-menu-btn-$colName"),
@@ -503,6 +548,90 @@ fun NativeDataGrid(
                         openHeaderMenuCol = null
                     },
                 )
+            }
+        }
+
+        // 1b. Tablet DBGate Filter Row (scrolls horizontally in lockstep with column headers and grid cells)
+        if (!mobile && showFilterRow && visibleColumns.isNotEmpty()) {
+            val kindByCol = remember(filterableCols) {
+                filterableCols.associate { it.name to it.kind }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(FILTER_BAND_DP.dp)
+                    .background(gridColors.bgHeader)
+                    .cssBorder(gridColors.borderColor, sides = CssSides.Bottom)
+                    .testTag("db-tablet-filter-row"),
+            ) {
+                // Left gutter filter icon / clear-all button
+                Box(
+                    modifier = Modifier
+                        .width(markerWidthDp)
+                        .fillMaxHeight()
+                        .background(gridColors.bgHeader)
+                        .cssBorder(gridColors.borderColor, sides = CssSides.End)
+                        .clickable(enabled = hasFilters(filters)) {
+                            onChangeFilters(NO_FILTERS)
+                        }
+                        .testTag("grid-filter-row-corner"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText(
+                        if (hasFilters(filters)) "▽×" else "▽",
+                        style = rowNumStyle.copy(
+                            color = if (hasFilters(filters)) gridColors.accentColor else gridColors.textLight,
+                        ),
+                    )
+                }
+
+                // Horizontally scrollable filter cells aligned 1:1 with visible columns
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .horizontalScroll(horizontalScroll),
+                ) {
+                    visibleColumns.forEach { colName ->
+                        val colWidthDp = (columnWidthsDp[colName] ?: DEFAULT_COL_WIDTH_DP).coerceAtLeast(MIN_COL_WIDTH_DP)
+                        val colSchema = schemaMap[colName]
+                        val colKind = kindByCol[colName] ?: ColumnKind.OTHER
+                        val fkTable = colSchema?.fkTable
+                        val fkCol = colSchema?.fkColumn ?: "id"
+                        val currentFilter = filters.columns[colName]
+
+                        Box(
+                            modifier = Modifier
+                                .width(colWidthDp.dp)
+                                .fillMaxHeight()
+                                .background(gridColors.bgHeader)
+                                .cssBorder(gridColors.borderColor, sides = CssSides.End)
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            FilterCellBox(
+                                tagSuffix = colName,
+                                value = currentFilter?.text.orEmpty(),
+                                off = currentFilter?.off == true,
+                                serverError = serverFilterErrors[colName],
+                                read = { txt -> columnFilterState(FilterText(txt), colKind) },
+                                onCommit = { txt -> onChangeFilters(withColumnFilter(filters, colName, txt)) },
+                                onOpenChooseValues = if (fkTable == null && canChooseValues(colKind)) {
+                                    { onOpenChooseValues(colName, colKind) }
+                                } else {
+                                    null
+                                },
+                                onOpenLookup = if (fkTable != null) {
+                                    { onOpenLookup(colName, colKind, fkTable, colSchema.fkSchema, fkCol) }
+                                } else {
+                                    null
+                                },
+                                onToggleFunnel = { onOpenFunnelFor(colName) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -780,6 +909,10 @@ fun DatabaseTableTabBody(
     }
     var rowCountState by remember { mutableStateOf<RowCountState?>(null) }
     var sort by remember { mutableStateOf<List<GridSortItem>>(emptyList()) }
+    var filters by remember(cacheDbKey, schemaName, tableName) {
+        mutableStateOf(decodeGridFiltersJson(meta["filters"]?.string))
+    }
+    var serverFilterErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var loading by remember { mutableStateOf(cachedFirst == null) }
     var loadingMore by remember { mutableStateOf(false) }
     var fetchingAllCount by remember { mutableStateOf<Int?>(null) }
@@ -787,6 +920,23 @@ fun DatabaseTableTabBody(
     var missingDriverId by remember { mutableStateOf<String?>(null) }
     var readonlyEnabled by remember { mutableStateOf(meta["readonly"]?.bool ?: true) }
     var autoRefreshSec by remember { mutableIntStateOf(0) }
+
+    val schemaMapForBody = remember(schemaList) { schemaList.associateBy { it.name } }
+    val columnNames = pageData?.columnKeys.orEmpty()
+    val filterableCols = remember(columnNames, schemaList, filters.columns.keys, dbType) {
+        val names = when {
+            columnNames.isNotEmpty() -> columnNames
+            schemaList.isNotEmpty() -> schemaList.map { it.name }
+            else -> filters.columns.keys.toList()
+        }
+        val schemaForFilter = names.map { col ->
+            schemaMapForBody[col] ?: GridColumnSchema(name = col, type = "")
+        }
+        filterableColumns(schemaForFilter, dbType)
+    }
+    val activeFilterReq = remember(filters, filterableCols) {
+        filterRequest(filters, filterableCols)
+    }
 
     // 428 Login Coordinator
     var activeLoginPrompt by remember { mutableStateOf<DbLoginPromptInfo?>(null) }
@@ -816,6 +966,8 @@ fun DatabaseTableTabBody(
             table = tableName,
             schema = schemaName.ifBlank { null },
             sort = sort,
+            filters = activeFilterReq.toFiltersJsonArray(),
+            anyColumn = activeFilterReq.toAnyColumnJsonArray(),
             offset = 0,
             limit = limit,
         )
@@ -846,11 +998,12 @@ fun DatabaseTableTabBody(
             if (seq != fetchSeq) return
             missingDriverId = null
             errorMessage = null
+            serverFilterErrors = emptyMap()
             val parsed = parseGridResponse(gridObj, countKey = countKey)
             pageData = parsed
             val nextCols = if (colsArr != null) parseGridColumnsSchema(colsArr) else schemaList
             if (colsArr != null) schemaList = nextCols
-            if (sort.isEmpty() && limit == GRID_PAGE_SIZE && nextCols.isNotEmpty()) {
+            if (sort.isEmpty() && !hasFilters(filters) && limit == GRID_PAGE_SIZE && nextCols.isNotEmpty()) {
                 TableFirstPageCache.write(cacheDbKey, schemaName, tableName, parsed, nextCols)
             }
             if (!parsed.hasMore) {
@@ -894,14 +1047,29 @@ fun DatabaseTableTabBody(
             if (err is DbDriverMissingException) {
                 missingDriverId = err.driverId
             }
+            if (err is PpmError.Server) {
+                val blamed = refusedFilters(activeFilterReq, err.status, err.message ?: "Filter refused").orEmpty()
+                if (blamed.isNotEmpty()) {
+                    serverFilterErrors = blamed
+                }
+            }
             errorMessage = err.message ?: "Failed to load table data"
         }
         if (seq == fetchSeq) loading = false
     }
 
+    var initialLoadCompleted by remember { mutableStateOf(false) }
+
     LaunchedEffect(api, connId, database, tableName, schemaName) {
         if (api != null) {
             loadFirstPage(withStructure = true)
+            initialLoadCompleted = true
+        }
+    }
+
+    LaunchedEffect(activeFilterReq) {
+        if (initialLoadCompleted && api != null) {
+            loadFirstPage()
         }
     }
 
@@ -936,6 +1104,8 @@ fun DatabaseTableTabBody(
                         columns = cols,
                         formatId = formatId,
                         sort = sort,
+                        filters = activeFilterReq.toFiltersJsonArray(),
+                        anyColumn = activeFilterReq.toAnyColumnJsonArray(),
                     )
                     val ticketObj = api.dbGridExportTicket(
                         connectionId = connId,
@@ -998,6 +1168,8 @@ fun DatabaseTableTabBody(
             schemaList = schemaList,
             rowCountView = computeRowCountView(pageData, rowCountState),
             sort = sort,
+            initialFilters = filters,
+            serverFilterErrors = serverFilterErrors,
             loading = loading,
             loadingMore = loadingMore,
             fetchingAllCount = fetchingAllCount,
@@ -1029,6 +1201,91 @@ fun DatabaseTableTabBody(
                 sort = nextSort
                 scope.launch { loadFirstPage() }
             },
+            onFiltersChanged = { nextFilters ->
+                filters = nextFilters
+                serverFilterErrors = emptyMap()
+            },
+            onLoadValues = { colName, _, searchText ->
+                val client = api
+                if (client == null) {
+                    LookupValueListResult(error = "Not connected")
+                } else {
+                    val reqData = valuesRequest(
+                        scope = TableScope(table = tableName, schema = schemaName.ifBlank { null }),
+                        column = colName,
+                        search = searchText,
+                        filters = filters,
+                        columns = filterableCols,
+                    )
+                    runCatching {
+                        client.dbGridValues(
+                            connectionId = connId,
+                            body = reqData.toJsonObject(),
+                            database = database,
+                            path = filePath,
+                            project = project,
+                            loginCoordinator = loginCoordinator,
+                        )
+                    }.fold(
+                        onSuccess = { obj ->
+                            val valsArr = obj["values"] as? JsonArray
+                            val list = valsArr?.map { el -> parseDbCellValue(el) }.orEmpty()
+                            LookupValueListResult(
+                                values = list,
+                                hasMore = obj["hasMore"].bool == true,
+                            )
+                        },
+                        onFailure = { err ->
+                            LookupValueListResult(error = err.message ?: "Failed to load values")
+                        },
+                    )
+                }
+            },
+            onLoadLookup = { fkTable, fkSchema, fkCol, searchText, chosenDesc ->
+                val client = api
+                if (client == null) {
+                    LookupTableRowsResult(error = "Not connected")
+                } else {
+                    runCatching {
+                        val fkSchemaArr = client.dbTableSchema(
+                            connectionId = connId,
+                            table = fkTable,
+                            schema = fkSchema?.ifBlank { null },
+                            database = database,
+                            path = filePath,
+                            project = project,
+                            loginCoordinator = loginCoordinator,
+                        )
+                        val fkSchemaCols = parseGridColumnsSchema(fkSchemaArr)
+                        val fkFilterableCols = filterableColumns(fkSchemaCols, dbType)
+                        val descCol = descriptionColumn(fkFilterableCols, fkCol, chosenDesc)
+                        val searchCols = fkFilterableCols.filter { it.name == fkCol || it.name == descCol }
+                            .ifEmpty { fkFilterableCols }
+                        val reqJson = lookupRowsRequest(
+                            scope = TableScope(table = fkTable, schema = fkSchema?.ifBlank { null }),
+                            keyColumn = fkCol,
+                            anyColumn = lookupSearch(searchText, searchCols).orEmpty(),
+                        )
+                        val gridObj = client.dbGridPage(
+                            connectionId = connId,
+                            body = reqJson,
+                            database = database,
+                            path = filePath,
+                            project = project,
+                            loginCoordinator = loginCoordinator,
+                        )
+                        val parsed = parseGridResponse(gridObj, countKey = "$fkTable:${fkSchema.orEmpty()}")
+                        val rowsList = parsed.rows.indices.map { idx -> parsed.rowAsMap(idx) }
+                        LookupTableRowsResult(
+                            columns = fkFilterableCols,
+                            rows = rowsList,
+                            hasMore = parsed.hasMore,
+                        )
+                    }.getOrElse { err ->
+                        LookupTableRowsResult(error = err.message ?: "Failed to load lookup rows")
+                    }
+                }
+            },
             onLoadMore = {
                 val cur = pageData ?: return@DatabaseTableTabContent
                 val client = api ?: return@DatabaseTableTabContent
@@ -1040,6 +1297,8 @@ fun DatabaseTableTabBody(
                         table = tableName,
                         schema = schemaName.ifBlank { null },
                         sort = sort,
+                        filters = activeFilterReq.toFiltersJsonArray(),
+                        anyColumn = activeFilterReq.toAnyColumnJsonArray(),
                         offset = cur.rows.size,
                         limit = GRID_PAGE_SIZE,
                     )
@@ -1083,6 +1342,8 @@ fun DatabaseTableTabBody(
                             table = tableName,
                             schema = schemaName.ifBlank { null },
                             sort = sort,
+                            filters = activeFilterReq.toFiltersJsonArray(),
+                            anyColumn = activeFilterReq.toAnyColumnJsonArray(),
                             offset = cur.rows.size,
                             limit = FETCH_ALL_CHUNK,
                         )
@@ -1125,6 +1386,8 @@ fun DatabaseTableTabBody(
                         table = tableName,
                         schema = schemaName.ifBlank { null },
                         sort = sort,
+                        filters = activeFilterReq.toFiltersJsonArray(),
+                        anyColumn = activeFilterReq.toAnyColumnJsonArray(),
                     )
                     runCatching {
                         client.dbGridCount(
@@ -1167,6 +1430,8 @@ fun DatabaseTableTabBody(
     }
 }
 
+private data class FunnelTarget(val column: String?) // null = Multi column filter
+
 @Composable
 internal fun DatabaseTableTabContent(
     tableName: String,
@@ -1177,6 +1442,8 @@ internal fun DatabaseTableTabContent(
     schemaList: List<GridColumnSchema>,
     rowCountView: RowCountView?,
     sort: List<GridSortItem> = emptyList(),
+    initialFilters: GridFilters = NO_FILTERS,
+    serverFilterErrors: Map<String, String> = emptyMap(),
     loading: Boolean = false,
     loadingMore: Boolean = false,
     fetchingAllCount: Int? = null,
@@ -1189,6 +1456,19 @@ internal fun DatabaseTableTabContent(
     onSetAutoRefreshSec: (Int) -> Unit = {},
     onToggleReadonly: (Boolean) -> Unit = {},
     onSortAction: (String, SortMenuAction) -> Unit = { _, _ -> },
+    onFiltersChanged: (GridFilters) -> Unit = {},
+    onLoadValues: suspend (column: String, kind: ColumnKind, search: String) -> LookupValueListResult = { _, _, _ ->
+        LookupValueListResult()
+    },
+    onLoadLookup: suspend (
+        fkTable: String,
+        fkSchema: String?,
+        fkColumn: String,
+        search: String,
+        chosenDescription: String?,
+    ) -> LookupTableRowsResult = { _, _, _, _, _ ->
+        LookupTableRowsResult()
+    },
     onLoadMore: () -> Unit = {},
     onFetchAll: () -> Unit = {},
     onCountExactly: () -> Unit = {},
@@ -1211,12 +1491,24 @@ internal fun DatabaseTableTabContent(
         mutableStateOf(prefs.getBoolean(FETCH_ALL_DONT_ASK_KEY, false))
     }
 
+    var filters by remember(initialFilters) { mutableStateOf(initialFilters) }
+    fun updateFilters(next: GridFilters) {
+        filters = next
+        onFiltersChanged(next)
+    }
+
     var selection by remember { mutableStateOf(GridSelectionState()) }
     var hiddenColumns by remember { mutableStateOf<Set<String>>(emptySet()) }
     val columnWidthsDp = remember { mutableStateMapOf<String, Int>() }
     var showColumnsPanel by remember { mutableStateOf(false) }
+    var showFiltersPanel by remember { mutableStateOf(false) }
     var showCellDataPanel by remember { mutableStateOf(false) }
     var columnSearchQuery by remember { mutableStateOf("") }
+
+    var openFunnelTarget by remember { mutableStateOf<FunnelTarget?>(null) }
+    var activeFilterModal by remember { mutableStateOf<ActiveFilterModal?>(null) }
+    var phoneFilterSheetTarget by remember { mutableStateOf<FunnelTarget?>(null) }
+    var showPhoneColsAndFiltersSheet by remember { mutableStateOf(false) }
 
     var showCopyMenu by remember { mutableStateOf(false) }
     var showExportMenu by remember { mutableStateOf(false) }
@@ -1239,6 +1531,12 @@ internal fun DatabaseTableTabContent(
             val declared = schemaMap[col]?.type.orEmpty()
             classifyColumnType(dbType, declared)
         }
+    }
+    val filterableCols = remember(columns, schemaMap, dbType) {
+        filterableColumns(
+            columns.map { col -> schemaMap[col] ?: GridColumnSchema(name = col, type = "") },
+            dbType,
+        )
     }
 
     val selectionStats = remember(selection, visibleColumns, rows, columns) {
@@ -1418,6 +1716,13 @@ internal fun DatabaseTableTabContent(
                         primary = showColumnsPanel,
                         modifier = Modifier.testTag("db-columns-panel-btn"),
                         onClick = { showColumnsPanel = !showColumnsPanel },
+                    )
+                    val activeFilterCount = (if (filters.multi != null) 1 else 0) + filters.columns.size
+                    SettingsButton(
+                        label = if (activeFilterCount > 0) "Filters ($activeFilterCount)" else "Filters",
+                        primary = showFiltersPanel || hasFilters(filters),
+                        modifier = Modifier.testTag("db-filters-panel-btn"),
+                        onClick = { showFiltersPanel = !showFiltersPanel },
                     )
                     SettingsButton(
                         label = "Cell data",
@@ -1634,7 +1939,117 @@ internal fun DatabaseTableTabContent(
                 }
             }
 
-            // 2. Main Grid + Columns Panel + Cell Data Panel
+            // Funnel Dropdown Strip (opened from filter row ▽ or Filters side panel ▽)
+            val funnelTarget = openFunnelTarget
+            if (funnelTarget != null) {
+                val targetCol = funnelTarget.column
+                val fKind = if (targetCol == null) {
+                    FunnelKind.MULTI
+                } else {
+                    val cKind = columnKinds[targetCol] ?: ColumnKind.OTHER
+                    filterSyntax(cKind).toFunnelKind()
+                }
+                FunnelDropdownBar(
+                    targetLabel = targetCol ?: "All columns",
+                    tagSuffix = targetCol ?: "multi",
+                    funnelKind = fKind,
+                    onWriteFilter = { text ->
+                        val next = if (targetCol == null) {
+                            withMultiFilter(filters, text)
+                        } else {
+                            withColumnFilter(filters, targetCol, text)
+                        }
+                        updateFilters(next)
+                    },
+                    onOpenDialog = { req ->
+                        activeFilterModal = when (req) {
+                            is FilterDialogRequest.ConditionDialog -> ActiveFilterModal.SetFilter(targetCol, req)
+                            is FilterDialogRequest.LinesDialog -> ActiveFilterModal.MultiValues(targetCol)
+                        }
+                    },
+                    onClose = { openFunnelTarget = null },
+                )
+            }
+
+            // Active Filter Dialogs (SetFilter / FilterMultipleValues / ChooseValue / FkLookup)
+            when (val modal = activeFilterModal) {
+                is ActiveFilterModal.SetFilter -> {
+                    SetFilterDialog(
+                        column = modal.column,
+                        request = modal.request,
+                        onSubmit = { text ->
+                            val next = if (modal.column == null) {
+                                withMultiFilter(filters, text)
+                            } else {
+                                withColumnFilter(filters, modal.column, text)
+                            }
+                            updateFilters(next)
+                        },
+                        onClose = { activeFilterModal = null },
+                    )
+                }
+                is ActiveFilterModal.MultiValues -> {
+                    FilterMultipleValuesDialog(
+                        column = modal.column,
+                        onSubmit = { text ->
+                            val next = if (modal.column == null) {
+                                withMultiFilter(filters, text)
+                            } else {
+                                withColumnFilter(filters, modal.column, text)
+                            }
+                            updateFilters(next)
+                        },
+                        onClose = { activeFilterModal = null },
+                    )
+                }
+                is ActiveFilterModal.ChooseValue -> {
+                    ValueLookupDialog(
+                        column = modal.column,
+                        kind = modal.kind,
+                        onLoadValues = { search -> onLoadValues(modal.column, modal.kind, search) },
+                        onSubmit = { text ->
+                            updateFilters(withColumnFilter(filters, modal.column, text))
+                        },
+                        onClose = { activeFilterModal = null },
+                    )
+                }
+                is ActiveFilterModal.FkLookup -> {
+                    DictionaryLookupDialog(
+                        fkTable = modal.fkTable,
+                        fkSchema = modal.fkSchema,
+                        fkColumn = modal.fkColumn,
+                        kind = modal.kind,
+                        onLoadLookup = { search, chosenDesc ->
+                            onLoadLookup(modal.fkTable, modal.fkSchema, modal.fkColumn, search, chosenDesc)
+                        },
+                        onSubmit = { text ->
+                            updateFilters(withColumnFilter(filters, modal.column, text))
+                        },
+                        onClose = { activeFilterModal = null },
+                    )
+                }
+                null -> Unit
+            }
+
+            // Phone Filter Chips Bar above grid
+            if (mobile) {
+                PhoneFilterChipsBar(
+                    filters = filters,
+                    filterableCols = filterableCols,
+                    sort = sort,
+                    hiddenCount = hiddenColumns.size,
+                    serverErrors = serverFilterErrors,
+                    onOpenColumnSheet = { col ->
+                        phoneFilterSheetTarget = FunnelTarget(col)
+                    },
+                    onOpenColumnsAndFiltersSheet = {
+                        showPhoneColsAndFiltersSheet = true
+                    },
+                    onChangeFilters = { updateFilters(it) },
+                )
+            }
+
+            // 2. Main Grid + Columns Panel + Filters Panel + Cell Data Panel
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 Row(modifier = Modifier.fillMaxSize()) {
                     // Docked Columns Panel when wide enough
@@ -1669,6 +2084,9 @@ internal fun DatabaseTableTabContent(
                                 schemaMap = schemaMap,
                                 hiddenColumns = hiddenColumns,
                                 sort = sort,
+                                filters = filters,
+                                filterableCols = filterableCols,
+                                serverFilterErrors = serverFilterErrors,
                                 selection = selection,
                                 columnWidthsDp = columnWidthsDp,
                                 hasMore = pageData?.hasMore == true,
@@ -1679,6 +2097,25 @@ internal fun DatabaseTableTabContent(
                                     copyPlainToClipboard(context, "Column Name", colName)
                                 },
                                 onResizeColumn = { col, w -> columnWidthsDp[col] = w },
+                                onChangeFilters = { next ->
+                                    updateFilters(next)
+                                },
+                                onOpenChooseValues = { col, kind ->
+                                    activeFilterModal = ActiveFilterModal.ChooseValue(col, kind)
+                                },
+                                onOpenLookup = { col, kind, fkTable, fkSchema, fkCol ->
+                                    activeFilterModal = ActiveFilterModal.FkLookup(col, kind, fkTable, fkSchema, fkCol)
+                                },
+                                onOpenFunnelFor = { col ->
+                                    openFunnelTarget = if (openFunnelTarget?.column == col && openFunnelTarget != null) {
+                                        null
+                                    } else {
+                                        FunnelTarget(col)
+                                    }
+                                },
+                                onPhoneOpenColumnSheet = { col ->
+                                    phoneFilterSheetTarget = FunnelTarget(col)
+                                },
                                 onLoadMore = onLoadMore,
                                 onCellLongPressPhone = { visColIdx, rowIdx ->
                                     selection = selection.copy(
@@ -1712,6 +2149,28 @@ internal fun DatabaseTableTabContent(
                                 )
                             }
                         }
+                    }
+
+                    // Docked Filters Panel when wide enough
+                    if (showFiltersPanel && !floatSidePanels) {
+                        FiltersSidePanel(
+                            filters = filters,
+                            filterableCols = filterableCols,
+                            schemaMap = schemaMap,
+                            serverErrors = serverFilterErrors,
+                            onChangeFilters = { updateFilters(it) },
+                            onOpenChooseValues = { col, kind ->
+                                activeFilterModal = ActiveFilterModal.ChooseValue(col, kind)
+                            },
+                            onOpenLookup = { col, kind, fkTable, fkSchema, fkCol ->
+                                activeFilterModal = ActiveFilterModal.FkLookup(col, kind, fkTable, fkSchema, fkCol)
+                            },
+                            onOpenFunnelFor = { col ->
+                                openFunnelTarget = FunnelTarget(col)
+                            },
+                            onClose = { showFiltersPanel = false },
+                            modifier = Modifier.width(260.dp).fillMaxHeight(),
+                        )
                     }
 
                     // Docked Cell Data Panel when wide enough
@@ -1752,6 +2211,31 @@ internal fun DatabaseTableTabContent(
                     )
                 }
 
+                // Floating Filters Panel when tab width < 860 dp
+                if (showFiltersPanel && floatSidePanels) {
+                    FiltersSidePanel(
+                        filters = filters,
+                        filterableCols = filterableCols,
+                        schemaMap = schemaMap,
+                        serverErrors = serverFilterErrors,
+                        onChangeFilters = { updateFilters(it) },
+                        onOpenChooseValues = { col, kind ->
+                            activeFilterModal = ActiveFilterModal.ChooseValue(col, kind)
+                        },
+                        onOpenLookup = { col, kind, fkTable, fkSchema, fkCol ->
+                            activeFilterModal = ActiveFilterModal.FkLookup(col, kind, fkTable, fkSchema, fkCol)
+                        },
+                        onOpenFunnelFor = { col ->
+                            openFunnelTarget = FunnelTarget(col)
+                        },
+                        onClose = { showFiltersPanel = false },
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .width(260.dp)
+                            .fillMaxHeight(),
+                    )
+                }
+
                 // Floating Cell Data Panel when tab width < 860 dp
                 if (showCellDataPanel && floatSidePanels) {
                     val active = selection.activeCell
@@ -1771,6 +2255,65 @@ internal fun DatabaseTableTabContent(
                             .width(260.dp)
                             .fillMaxHeight(),
                     )
+                }
+
+                // Phone Column Filter & Sort Bottom Sheet
+                val phoneSheetTarget = phoneFilterSheetTarget
+                if (mobile && phoneSheetTarget != null) {
+                    Box(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                        PhoneColumnFilterSheet(
+                            column = phoneSheetTarget.column,
+                            filters = filters,
+                            filterableCols = filterableCols,
+                            schemaMap = schemaMap,
+                            sort = sort,
+                            serverErrors = serverFilterErrors,
+                            onChangeFilters = { updateFilters(it) },
+                            onSortAction = onSortAction,
+                            onCopyColumnName = { colName ->
+                                copyPlainToClipboard(context, "Column Name", colName)
+                            },
+                            onHideColumn = { colName ->
+                                hiddenColumns = hiddenColumns + colName
+                            },
+                            onOpenDialog = { col, req ->
+                                activeFilterModal = when (req) {
+                                    is FilterDialogRequest.ConditionDialog -> ActiveFilterModal.SetFilter(col, req)
+                                    is FilterDialogRequest.LinesDialog -> ActiveFilterModal.MultiValues(col)
+                                }
+                            },
+                            onOpenChooseValues = { col, kind ->
+                                activeFilterModal = ActiveFilterModal.ChooseValue(col, kind)
+                            },
+                            onOpenLookup = { col, kind, fkTable, fkSchema, fkCol ->
+                                activeFilterModal = ActiveFilterModal.FkLookup(col, kind, fkTable, fkSchema, fkCol)
+                            },
+                            onClose = { phoneFilterSheetTarget = null },
+                        )
+                    }
+                }
+
+                // Phone Columns & Filters Bottom Sheet
+                if (mobile && showPhoneColsAndFiltersSheet) {
+                    Box(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                        PhoneColumnsAndFiltersSheet(
+                            tableName = tableName,
+                            columns = columns,
+                            hiddenColumns = hiddenColumns,
+                            schemaMap = schemaMap,
+                            filters = filters,
+                            filterableCols = filterableCols,
+                            onToggleColumnVisibility = { col ->
+                                hiddenColumns = if (col in hiddenColumns) hiddenColumns - col else hiddenColumns + col
+                            },
+                            onShowAllColumns = { hiddenColumns = emptySet() },
+                            onChangeFilters = { updateFilters(it) },
+                            onOpenColumnFilterSheet = { col ->
+                                phoneFilterSheetTarget = FunnelTarget(col)
+                            },
+                            onClose = { showPhoneColsAndFiltersSheet = false },
+                        )
+                    }
                 }
 
                 // Phone Long-Press Cell Bottom Sheet Menu (with in-place submenu + Back)
@@ -1881,8 +2424,9 @@ internal fun DatabaseTableTabContent(
                     )
                     SettingsButton(
                         label = "Filters",
+                        primary = showPhoneColsAndFiltersSheet || hasFilters(filters),
                         modifier = Modifier.testTag("db-phone-filters-btn"),
-                        onClick = {},
+                        onClick = { showPhoneColsAndFiltersSheet = !showPhoneColsAndFiltersSheet },
                     )
                     SettingsButton(
                         label = "Save",

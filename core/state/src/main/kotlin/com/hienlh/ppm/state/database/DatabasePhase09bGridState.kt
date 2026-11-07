@@ -200,6 +200,7 @@ data class GridColumnSchema(
     val defaultValue: String? = null,
     val autoIncrement: Boolean = false,
     val fkTable: String? = null,
+    val fkSchema: String? = null,
     val fkColumn: String? = null,
 )
 
@@ -270,6 +271,7 @@ fun parseGridColumnsSchema(arr: JsonArray): List<GridColumnSchema> =
             defaultValue = (o["defaultValue"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull,
             autoIncrement = (o["autoIncrement"] as? JsonPrimitive)?.booleanOrNull == true,
             fkTable = (fkObj?.get("table") as? JsonPrimitive)?.contentOrNull,
+            fkSchema = (fkObj?.get("schema") as? JsonPrimitive)?.contentOrNull,
             fkColumn = (fkObj?.get("column") as? JsonPrimitive)?.contentOrNull,
         )
     }

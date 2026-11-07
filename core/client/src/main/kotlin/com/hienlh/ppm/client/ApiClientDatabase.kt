@@ -479,6 +479,24 @@ suspend fun ApiClient.dbGridCount(
         loginCoordinator = loginCoordinator,
     ) as? JsonObject) ?: buildJsonObject {}
 
+/** `POST /api/db/connections/:id/grid/values` — fetch up to 100 distinct values for a column ("Choose value" dialog). */
+suspend fun ApiClient.dbGridValues(
+    connectionId: String,
+    body: JsonObject,
+    database: String? = null,
+    path: String? = null,
+    project: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+): JsonObject =
+    (dbCall(
+        method = "POST",
+        path = "/api/db/connections/${ApiClient.escape(connectionId)}/grid/values",
+        query = connQuery(database, path, project),
+        body = body,
+        timeoutKind = DbRequestTimeoutKind.GRID_STREAM,
+        loginCoordinator = loginCoordinator,
+    ) as? JsonObject) ?: buildJsonObject {}
+
 /** `POST /api/db/connections/:id/grid/export` — start a streaming table export and receive a single-use ticket. */
 suspend fun ApiClient.dbGridExportTicket(
     connectionId: String,

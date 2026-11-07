@@ -1,0 +1,4823 @@
+[
+  {
+    "type": "column",
+    "text": "NULL",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "null",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT NULL",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "not   null",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ > 5}",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "$$ > 5"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NULL",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "null",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT NULL",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "not   null",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ > 5}",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "$$ > 5"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NULL",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "null",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT NULL",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "not   null",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ > 5}",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "$$ > 5"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NULL",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "null",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT NULL",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "not   null",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ > 5}",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "$$ > 5"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NULL",
+    "kind": "datetime",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "null",
+    "kind": "datetime",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT NULL",
+    "kind": "datetime",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "not   null",
+    "kind": "datetime",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ > 5}",
+    "kind": "datetime",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "$$ > 5"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NULL",
+    "kind": "datetimetz",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "null",
+    "kind": "datetimetz",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT NULL",
+    "kind": "datetimetz",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "not   null",
+    "kind": "datetimetz",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ > 5}",
+    "kind": "datetimetz",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "$$ > 5"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NULL",
+    "kind": "time",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "null",
+    "kind": "time",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT NULL",
+    "kind": "time",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "not   null",
+    "kind": "time",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ > 5}",
+    "kind": "time",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "$$ > 5"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NULL",
+    "kind": "binary",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "null",
+    "kind": "binary",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT NULL",
+    "kind": "binary",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "not   null",
+    "kind": "binary",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ > 5}",
+    "kind": "binary",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "$$ > 5"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NULL",
+    "kind": "json",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "null",
+    "kind": "json",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT NULL",
+    "kind": "json",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "not   null",
+    "kind": "json",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ > 5}",
+    "kind": "json",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "$$ > 5"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NULL",
+    "kind": "other",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "null",
+    "kind": "other",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT NULL",
+    "kind": "other",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "not   null",
+    "kind": "other",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ > 5}",
+    "kind": "other",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "$$ > 5"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": []
+    }
+  },
+  {
+    "type": "column",
+    "text": "   \n\t",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": []
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ in ('a}', 'b, c')}",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "$$ in ('a}', 'b, c')"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{\"x}\" = $$}",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "\"x}\" = $$"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{`a}` = $$}",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "`a}` = $$"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{coalesce($$, {fn now()}) > 1}",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "coalesce($$, {fn now()}) > 1"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ = 'it''s'}",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "$$ = 'it''s'"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ > 1} {$$ < 9}, NULL",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "$$ > 1"
+          },
+          {
+            "op": "rawSql",
+            "sql": "$$ < 9"
+          }
+        ],
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ > 1; drop table t}",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "An SQL condition may not contain \";\"",
+        "start": 7,
+        "end": 8
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "{$$ = ';'}",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "rawSql",
+            "sql": "$$ = ';'"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "{  }",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "The SQL condition is empty",
+        "start": 0,
+        "end": 4
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "a {$$ > 1",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Missing closing }",
+        "start": 2,
+        "end": 9
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "canada",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "canada"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "+canada",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "canada"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "'new york'",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "new york"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "\"new york\"",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "new york"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "'a, b'",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "a, b"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "'it''s'",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "it's"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "\"say \"\"hi\"\"\"",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "say \"hi\""
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "\"it's\"",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "it's"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "don't",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "don't"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "5\"",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "5\""
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "^ca",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "startsWith",
+            "value": "ca"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "$da",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "endsWith",
+            "value": "da"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "~ca",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notContains",
+            "value": "ca"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "!^ca",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notStartsWith",
+            "value": "ca"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "!$da",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notEndsWith",
+            "value": "da"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "=active",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": "active"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "!=active",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "ne",
+            "value": "active"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "<>active",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "ne",
+            "value": "active"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "=''",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": ""
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "<b",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "lt",
+            "value": "b"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">b",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "gt",
+            "value": "b"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "<=b",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "le",
+            "value": "b"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">=b",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "ge",
+            "value": "b"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">= b",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "ge",
+            "value": "b"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "^ 'new y'",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "startsWith",
+            "value": "new y"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "='new york'",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": "new york"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "!$\"a b\"",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notEndsWith",
+            "value": "a b"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "EMPTY",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isEmpty"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "empty",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isEmpty"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT EMPTY",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notEmpty"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "'NULL'",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "NULL"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "'EMPTY'",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "EMPTY"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT 'EMPTY'",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "NOT"
+          },
+          {
+            "op": "contains",
+            "value": "EMPTY"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "=NULL",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": "NULL"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "TRUE",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "TRUE"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "TODAY",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "TODAY"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "NOT"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT x",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "NOT"
+          },
+          {
+            "op": "contains",
+            "value": "x"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "ca*",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "ca*"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "*",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "*"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2021-02-15 23:15",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "2021-02-15"
+          },
+          {
+            "op": "contains",
+            "value": "23:15"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "^10:",
+    "kind": "time",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "startsWith",
+            "value": "10:"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "EMPTY",
+    "kind": "json",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isEmpty"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "=5",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": "5"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "canada lake, usa",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "canada"
+          },
+          {
+            "op": "contains",
+            "value": "lake"
+          }
+        ],
+        [
+          {
+            "op": "contains",
+            "value": "usa"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "a,b c",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "a"
+          }
+        ],
+        [
+          {
+            "op": "contains",
+            "value": "b"
+          },
+          {
+            "op": "contains",
+            "value": "c"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "  a ,\tb\nc  ",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "a"
+          }
+        ],
+        [
+          {
+            "op": "contains",
+            "value": "b"
+          },
+          {
+            "op": "contains",
+            "value": "c"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "^a, ^b",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "startsWith",
+            "value": "a"
+          }
+        ],
+        [
+          {
+            "op": "startsWith",
+            "value": "b"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "=\"active\",=\"pending\"",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "in",
+            "values": [
+              "active",
+              "pending"
+            ]
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "x, =a, y, =b",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "contains",
+            "value": "x"
+          }
+        ],
+        [
+          {
+            "op": "in",
+            "values": [
+              "a",
+              "b"
+            ]
+          }
+        ],
+        [
+          {
+            "op": "contains",
+            "value": "y"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "='a',NULL,='b'",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "in",
+            "values": [
+              "a",
+              "b"
+            ]
+          }
+        ],
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "=\"active\",\"pending\"",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": "active"
+          }
+        ],
+        [
+          {
+            "op": "contains",
+            "value": "pending"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "=a",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": "a"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "=a b, =c",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": "a"
+          },
+          {
+            "op": "contains",
+            "value": "b"
+          }
+        ],
+        [
+          {
+            "op": "eq",
+            "value": "c"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">=",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Expected a value after \">=\"",
+        "start": 0,
+        "end": 2
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "a >=",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Expected a value after \">=\"",
+        "start": 2,
+        "end": 4
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "a >= , b",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Expected a value after \">=\"",
+        "start": 2,
+        "end": 4
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": ">=   ",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Expected a value after \">=\"",
+        "start": 0,
+        "end": 2
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "a 'new york",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Missing closing '",
+        "start": 2,
+        "end": 11
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "\"abc",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Missing closing \"",
+        "start": 0,
+        "end": 4
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": ",a",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Expected a value before \",\"",
+        "start": 0,
+        "end": 1
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "  , a",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Expected a value before \",\"",
+        "start": 2,
+        "end": 3
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "a,,b",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Expected a value before \",\"",
+        "start": 2,
+        "end": 3
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "a, ,b",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Expected a value before \",\"",
+        "start": 3,
+        "end": 4
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "a,",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Expected a value after \",\"",
+        "start": 1,
+        "end": 2
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "a ,  ",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Expected a value after \",\"",
+        "start": 2,
+        "end": 3
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "'a'b",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Expected a space or a comma",
+        "start": 3,
+        "end": 4
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "{x}{y}",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Expected a space or a comma",
+        "start": 3,
+        "end": 4
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "={x}",
+    "kind": "text",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": "{x}"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "5",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": 5
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "=5",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": 5
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "!=5",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "ne",
+            "value": 5
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "<>5",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "ne",
+            "value": 5
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">5",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "gt",
+            "value": 5
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">=5",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "ge",
+            "value": 5
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "<5",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "lt",
+            "value": 5
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "<=5",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "le",
+            "value": 5
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "1,2,3",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "in",
+            "values": [
+              1,
+              2,
+              3
+            ]
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">=5 <=10",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "ge",
+            "value": 5
+          },
+          {
+            "op": "le",
+            "value": 10
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">= 5 <= 10",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "ge",
+            "value": 5
+          },
+          {
+            "op": "le",
+            "value": 10
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "-2.5",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": -2.5
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">-5",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "gt",
+            "value": -5
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ".5",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": 0.5
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "5.",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": 5
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "1e3",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": 1000
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "1.50000000000000000000",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": 1.5
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "0.000",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": 0
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "=\"5\",=\"6\"",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "in",
+            "values": [
+              5,
+              6
+            ]
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "9007199254740991",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": 9007199254740991
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "9007199254740993",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": "9007199254740993"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "12345678901234567890",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": "12345678901234567890"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "123456789012345",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": 123456789012345
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "0.1234567890123456",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": "0.1234567890123456"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "0.123456789012345",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": 0.123456789012345
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "1e20",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": 100000000000000000000
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "1.5e300",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": 1.5e+300
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "123456789012345678e-2",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": "123456789012345678e-2"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "-9007199254740991",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": -9007199254740991
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "007",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": 7
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "1e400",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": "1e400"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "1e-400",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "eq",
+            "value": "1e-400"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "abc",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "\"abc\" is not a number",
+        "start": 0,
+        "end": 3
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": ">=abc",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "\"abc\" is not a number",
+        "start": 2,
+        "end": 5
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "5 x",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "\"x\" is not a number",
+        "start": 2,
+        "end": 3
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "0x10",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "\"0x10\" is not a number",
+        "start": 0,
+        "end": 4
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "EMPTY",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "\"EMPTY\" is not a number",
+        "start": 0,
+        "end": 5
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT EMPTY",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "\"NOT\" is not a number",
+        "start": 0,
+        "end": 3
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "'NULL'",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "\"NULL\" is not a number",
+        "start": 0,
+        "end": 6
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "+5",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "\"+\" does not work on number columns",
+        "start": 0,
+        "end": 1
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "^5",
+    "kind": "number",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "\"^\" does not work on number columns",
+        "start": 0,
+        "end": 1
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "TRUE",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isTrue"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "true",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isTrue"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "=TRUE",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isTrue"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "'1'",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isTrue"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "FALSE",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isFalse"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "=0",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isFalse"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "\"false\"",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isFalse"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "TRUE, NULL",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "isTrue"
+          }
+        ],
+        [
+          {
+            "op": "isNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "yes",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "\"yes\" is not TRUE or FALSE",
+        "start": 0,
+        "end": 3
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "<>TRUE",
+    "kind": "boolean",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "\"<>\" does not work on boolean columns",
+        "start": 0,
+        "end": 2
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "NOT NULL, {length($$) > 10}",
+    "kind": "binary",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ],
+        [
+          {
+            "op": "rawSql",
+            "sql": "length($$) > 10"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "abc",
+    "kind": "binary",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "A binary column can only be filtered with NULL, NOT NULL or an SQL condition in braces",
+        "start": 0,
+        "end": 3
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "NULL =x",
+    "kind": "binary",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "A binary column can only be filtered with NULL, NOT NULL or an SQL condition in braces",
+        "start": 5,
+        "end": 7
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "2021",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-01-01 00:00:00",
+            "to": "2022-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2021-02",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-02-01 00:00:00",
+            "to": "2021-03-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2021-02-15",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-02-15 00:00:00",
+            "to": "2021-02-16 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2021-02-15 23:15",
+    "kind": "datetime",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-02-15 23:15:00",
+            "to": "2021-02-15 23:16:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2021-02-15 23:15:51",
+    "kind": "datetime",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-02-15 23:15:51",
+            "to": "2021-02-15 23:15:52",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2021-12",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-12-01 00:00:00",
+            "to": "2022-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2021-12-31",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-12-31 00:00:00",
+            "to": "2022-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2021-02-28",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-02-28 00:00:00",
+            "to": "2021-03-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2024-02-29",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-02-29 00:00:00",
+            "to": "2024-03-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2024-02-15 10:00:00.5",
+    "kind": "datetime",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-02-15 10:00:00.5",
+            "to": "2024-02-15 10:00:00.6",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2024-02-15 10:00:00.999",
+    "kind": "datetime",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-02-15 10:00:00.999",
+            "to": "2024-02-15 10:00:01.000",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2024-12-31 23:59:59.999999",
+    "kind": "datetime",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-12-31 23:59:59.999999",
+            "to": "2025-01-01 00:00:00.000000",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2021-02-15T23:15",
+    "kind": "datetime",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-02-15 23:15:00",
+            "to": "2021-02-15 23:16:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "=2021",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-01-01 00:00:00",
+            "to": "2022-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">2021",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2022-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">=2021",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "<2021",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "to": "2021-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "<=2021",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "to": "2022-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "<>2021",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "to": "2021-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ],
+        [
+          {
+            "op": "dateRange",
+            "from": "2022-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "!=2021-02-15",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "to": "2021-02-15 00:00:00",
+            "offset": "+00:00"
+          }
+        ],
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-02-16 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">=2024-01-01 <2024-02-01",
+    "kind": "datetime",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-01-01 00:00:00",
+            "offset": "+00:00"
+          },
+          {
+            "op": "dateRange",
+            "to": "2024-02-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">= 2021-02-15 23:15:51 <2021-02-16",
+    "kind": "datetime",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-02-15 23:15:51",
+            "offset": "+00:00"
+          },
+          {
+            "op": "dateRange",
+            "to": "2021-02-16 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2021-02-15 >23:15",
+    "kind": "datetime",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "\"23:15\" is not a date — use 2021, 2021-02, 2021-02-15 or 2021-02-15 23:15",
+        "start": 12,
+        "end": 17
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "<>2021 <>2023",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "to": "2021-01-01 00:00:00",
+            "offset": "+00:00"
+          },
+          {
+            "op": "dateRange",
+            "to": "2023-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ],
+        [
+          {
+            "op": "dateRange",
+            "to": "2021-01-01 00:00:00",
+            "offset": "+00:00"
+          },
+          {
+            "op": "dateRange",
+            "from": "2024-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ],
+        [
+          {
+            "op": "dateRange",
+            "from": "2022-01-01 00:00:00",
+            "offset": "+00:00"
+          },
+          {
+            "op": "dateRange",
+            "to": "2023-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ],
+        [
+          {
+            "op": "dateRange",
+            "from": "2022-01-01 00:00:00",
+            "offset": "+00:00"
+          },
+          {
+            "op": "dateRange",
+            "from": "2024-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "9999",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "9999-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "<=9999",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "notNull"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">9999",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Nothing comes after the year 9999",
+        "start": 0,
+        "end": 5
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "0099",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "0099-01-01 00:00:00",
+            "to": "0100-01-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "0000-02",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "0000-02-01 00:00:00",
+            "to": "0000-03-01 00:00:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2021-02-29",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "\"2021-02-29\" is not a date — use 2021, 2021-02, 2021-02-15 or 2021-02-15 23:15",
+        "start": 0,
+        "end": 10
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "abc",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "\"abc\" is not a date — use 2021, 2021-02, 2021-02-15 or 2021-02-15 23:15",
+        "start": 0,
+        "end": 3
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "2024-02-15T10:00:00.500Z",
+    "kind": "datetimetz",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-02-15 10:00:00.500",
+            "to": "2024-02-15 10:00:00.501",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2024-02-15T17:00+07:00",
+    "kind": "datetimetz",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-02-15 10:00:00",
+            "to": "2024-02-15 10:01:00",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2024-02-15 01:30:00-05:30",
+    "kind": "datetimetz",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-02-15 07:00:00",
+            "to": "2024-02-15 07:00:01",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2024-01-01 10:00:00.123456+07",
+    "kind": "datetimetz",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-01-01 03:00:00.123456",
+            "to": "2024-01-01 03:00:00.123457",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2024-01-01 08:30:00+0530",
+    "kind": "datetimetz",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-01-01 03:00:00",
+            "to": "2024-01-01 03:00:01",
+            "offset": "+00:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2021-02-15",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-02-15 00:00:00",
+            "to": "2021-02-16 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">2021-02-15 23:15",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-02-15 23:16:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2021-01",
+    "kind": "datetimetz",
+    "zone": "America/New_York",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2021-01-01 00:00:00",
+            "to": "2021-02-01 00:00:00",
+            "offset": "-05:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "<2021-06-01",
+    "kind": "datetimetz",
+    "zone": "Asia/Kolkata",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "to": "2021-06-01 00:00:00",
+            "offset": "+05:30"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2024-03-30",
+    "kind": "datetimetz",
+    "zone": "Europe/Berlin",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-03-30 00:00:00",
+            "to": "2024-03-31 00:00:00",
+            "offset": "+01:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2024-03-31",
+    "kind": "datetimetz",
+    "zone": "Europe/Berlin",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-03-31 00:00:00",
+            "offset": "+01:00"
+          },
+          {
+            "op": "dateRange",
+            "to": "2024-04-01 00:00:00",
+            "offset": "+02:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2024-03",
+    "kind": "datetimetz",
+    "zone": "Europe/Berlin",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-03-01 00:00:00",
+            "offset": "+01:00"
+          },
+          {
+            "op": "dateRange",
+            "to": "2024-04-01 00:00:00",
+            "offset": "+02:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "<>2024-10-27",
+    "kind": "datetimetz",
+    "zone": "Europe/Berlin",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "to": "2024-10-27 00:00:00",
+            "offset": "+02:00"
+          }
+        ],
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-10-28 00:00:00",
+            "offset": "+01:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "2024-07",
+    "kind": "datetimetz",
+    "zone": "Europe/Berlin",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-07-01 00:00:00",
+            "to": "2024-08-01 00:00:00",
+            "offset": "+02:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "TODAY",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T08:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2026-10-01 00:00:00",
+            "to": "2026-10-02 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "YESTERDAY",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T08:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2026-09-30 00:00:00",
+            "to": "2026-10-01 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "TOMORROW",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T08:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2026-10-02 00:00:00",
+            "to": "2026-10-03 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "TODAY",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T20:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2026-10-02 00:00:00",
+            "to": "2026-10-03 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "TODAY",
+    "kind": "datetimetz",
+    "zone": "America/New_York",
+    "nowIso": "2026-10-01T01:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2026-09-30 00:00:00",
+            "to": "2026-10-01 00:00:00",
+            "offset": "-04:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "THIS WEEK",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T08:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2026-09-28 00:00:00",
+            "to": "2026-10-05 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "LAST WEEK",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T08:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2026-09-21 00:00:00",
+            "to": "2026-09-28 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NEXT WEEK",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T08:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2026-10-05 00:00:00",
+            "to": "2026-10-12 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "THIS MONTH",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T08:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2026-10-01 00:00:00",
+            "to": "2026-11-01 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "LAST MONTH",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T08:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2026-09-01 00:00:00",
+            "to": "2026-10-01 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "NEXT MONTH",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T08:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2026-11-01 00:00:00",
+            "to": "2026-12-01 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "THIS YEAR",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T08:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2026-01-01 00:00:00",
+            "to": "2027-01-01 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "LAST YEAR",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T08:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2025-01-01 00:00:00",
+            "to": "2026-01-01 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "next year",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T08:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2027-01-01 00:00:00",
+            "to": "2028-01-01 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">=THIS MONTH",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T08:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2026-10-01 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": ">LAST WEEK <=TOMORROW",
+    "kind": "datetimetz",
+    "zone": "Asia/Ho_Chi_Minh",
+    "nowIso": "2026-10-01T08:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2026-09-28 00:00:00",
+            "offset": "+07:00"
+          },
+          {
+            "op": "dateRange",
+            "to": "2026-10-03 00:00:00",
+            "offset": "+07:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "THIS MONTH",
+    "kind": "datetimetz",
+    "zone": "Europe/Berlin",
+    "nowIso": "2024-03-15T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "anyOf": [
+        [
+          {
+            "op": "dateRange",
+            "from": "2024-03-01 00:00:00",
+            "offset": "+01:00"
+          },
+          {
+            "op": "dateRange",
+            "to": "2024-04-01 00:00:00",
+            "offset": "+02:00"
+          }
+        ]
+      ]
+    }
+  },
+  {
+    "type": "column",
+    "text": "THIS",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Expected WEEK, MONTH or YEAR after THIS",
+        "start": 0,
+        "end": 4
+      }
+    }
+  },
+  {
+    "type": "column",
+    "text": "last day",
+    "kind": "date",
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "Expected WEEK, MONTH or YEAR after LAST",
+        "start": 0,
+        "end": 4
+      }
+    }
+  },
+  {
+    "type": "anyColumn",
+    "text": "abc",
+    "columns": [
+      {
+        "name": "name",
+        "kind": "text"
+      },
+      {
+        "name": "qty",
+        "kind": "number"
+      },
+      {
+        "name": "born",
+        "kind": "date"
+      },
+      {
+        "name": "active",
+        "kind": "boolean"
+      }
+    ],
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "groups": [
+        {
+          "column": "name",
+          "anyOf": [
+            [
+              {
+                "op": "contains",
+                "value": "abc"
+              }
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "type": "anyColumn",
+    "text": "2026-09-27",
+    "columns": [
+      {
+        "name": "name",
+        "kind": "text"
+      },
+      {
+        "name": "qty",
+        "kind": "number"
+      },
+      {
+        "name": "born",
+        "kind": "date"
+      },
+      {
+        "name": "active",
+        "kind": "boolean"
+      }
+    ],
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "groups": [
+        {
+          "column": "name",
+          "anyOf": [
+            [
+              {
+                "op": "contains",
+                "value": "2026-09-27"
+              }
+            ]
+          ]
+        },
+        {
+          "column": "born",
+          "anyOf": [
+            [
+              {
+                "op": "dateRange",
+                "from": "2026-09-27 00:00:00",
+                "to": "2026-09-28 00:00:00",
+                "offset": "+00:00"
+              }
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "type": "anyColumn",
+    "text": "1",
+    "columns": [
+      {
+        "name": "name",
+        "kind": "text"
+      },
+      {
+        "name": "qty",
+        "kind": "number"
+      },
+      {
+        "name": "born",
+        "kind": "date"
+      },
+      {
+        "name": "active",
+        "kind": "boolean"
+      }
+    ],
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": true,
+      "groups": [
+        {
+          "column": "name",
+          "anyOf": [
+            [
+              {
+                "op": "contains",
+                "value": "1"
+              }
+            ]
+          ]
+        },
+        {
+          "column": "qty",
+          "anyOf": [
+            [
+              {
+                "op": "eq",
+                "value": 1
+              }
+            ]
+          ]
+        },
+        {
+          "column": "active",
+          "anyOf": [
+            [
+              {
+                "op": "isTrue"
+              }
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "type": "anyColumn",
+    "text": "~abc",
+    "columns": [
+      {
+        "name": "qty",
+        "kind": "number"
+      },
+      {
+        "name": "born",
+        "kind": "date"
+      }
+    ],
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "No column can read this filter",
+        "start": 0,
+        "end": 4
+      }
+    }
+  },
+  {
+    "type": "anyColumn",
+    "text": "a, {$$ > 5}",
+    "columns": [
+      {
+        "name": "name",
+        "kind": "text"
+      },
+      {
+        "name": "qty",
+        "kind": "number"
+      }
+    ],
+    "zone": "UTC",
+    "nowIso": "2026-10-01T12:00:00.000Z",
+    "expected": {
+      "ok": false,
+      "error": {
+        "message": "An SQL condition only works in one column's own filter",
+        "start": 3,
+        "end": 11
+      }
+    }
+  }
+]
