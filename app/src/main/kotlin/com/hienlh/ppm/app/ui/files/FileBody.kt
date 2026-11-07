@@ -165,9 +165,29 @@ private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean,
                     if (viewer == FileDocumentViewer.DOCX) key(state.revision) { FileDocxView(model, state.content!!) }
                     else if (viewer == FileDocumentViewer.CSV && csvTable) FileCsvView(state.content!!, wrap)
                     else if (viewer == FileDocumentViewer.MARKDOWN && preview) FileMarkdownView(model, project, state.content!!)
-                    else FileCodeView(state.content!!,
-                        fileCodeLanguage(path, tab.metaString("inlineLanguage") ?: tab.metaString("language")),
-                        wrap, line, end, reveal)
+                    else if (!ownsController || tab.metadata["readOnly"].bool == true) {
+                        FileCodeView(
+                            state.content!!,
+                            fileCodeLanguage(path, tab.metaString("inlineLanguage") ?: tab.metaString("language")),
+                            wrap, line, end, reveal,
+                        )
+                    } else {
+                        com.hienlh.ppm.app.ui.editor.EditableFileCodeView(
+                            model = model,
+                            project = project,
+                            path = path,
+                            initialContent = state.content!!,
+                            initialLanguage = fileCodeLanguage(path, tab.metaString("inlineLanguage") ?: tab.metaString("language")),
+                            wrap = wrap,
+                            onToggleWrap = { wrap = !wrap },
+                            lineNumber = line,
+                            endLine = end,
+                            revealAt = reveal,
+                            isUntitled = tab.metadata["isUntitled"].bool == true,
+                            readOnly = buffer != null && tab.metadata["isUntitled"].bool != true,
+                            onDirtyChange = { isDirty -> controller?.setDirty(isDirty) },
+                        )
+                    }
                 }
             }
         }
