@@ -18,8 +18,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -109,17 +115,41 @@ fun HostPathPicker(model: AppModel, mode: HostPickerMode, root: String = "~", ac
                 }
                 Row(Modifier.weight(1f)) {
                     if (!mobile) Column(Modifier.width(144.dp).fillMaxHeight().cssScrollY().padding(8.dp)) {
-                        for ((name, target) in listOf("Home" to "~", "Desktop" to "~/Desktop", "Documents" to "~/Documents", "Downloads" to "~/Downloads")) {
-                            BasicText(name, Modifier.fillMaxWidth().ppmClickable { session.go(target) }.padding(8.dp), style = ppmText(12f).copy(color = tokens.text2.color))
+                        for ((name, target, icon) in listOf(
+                            Triple("Home", "~", ProductIcon.Home),
+                            Triple("Desktop", "~/Desktop", ProductIcon.Monitor),
+                            Triple("Documents", "~/Documents", ProductIcon.FileText),
+                            Triple("Downloads", "~/Downloads", ProductIcon.Download),
+                        )) {
+                            val active = state.currentDirectory.endsWith(name)
+                            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
+                                .background(if (active) tokens.accent.opacity(.1).color else androidx.compose.ui.graphics.Color.Transparent)
+                                .ppmClickable { session.go(target) }.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                PpmIcon(icon, 14.dp, (if (active) tokens.accent else tokens.text2).color)
+                                BasicText(name, style = ppmText(12f).copy(color = (if (active) tokens.accent else tokens.text2).color))
+                            }
                         }
-                        if (recent.isNotEmpty()) BasicText("Recent", Modifier.padding(8.dp), style = ppmText(10f).copy(color = tokens.text3.color))
-                        for (target in recent) BasicText(target.substringAfterLast('/').substringAfterLast('\\'),
-                            Modifier.fillMaxWidth().ppmClickable { session.go(target) }.padding(8.dp), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            style = ppmText(12f).copy(color = tokens.text2.color))
+                        if (recent.isNotEmpty()) BasicText("Recent", Modifier.padding(start = 8.dp, top = 12.dp, bottom = 4.dp),
+                            style = ppmText(10f, FontWeight.Medium).copy(color = tokens.text3.color))
+                        for (target in recent) Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
+                            .ppmClickable { session.go(target) }.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PpmIcon(ProductIcon.Clock, 12.dp, tokens.text2.color)
+                            BasicText(target.substringAfterLast('/').substringAfterLast('\\'), Modifier.weight(1f),
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, style = ppmText(12f).copy(color = tokens.text2.color))
+                        }
                     }
                     Column(Modifier.weight(1f).fillMaxHeight()) {
                         if (creating) Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            PpmTextField(newName, "Folder name", Modifier.weight(1f), focusRequester = newFocus,
+                            PpmTextField(newName, "Folder name", Modifier.weight(1f).onPreviewKeyEvent {
+                                if (it.type != KeyEventType.KeyDown || newName.composition != null) false
+                                else when (it.key) {
+                                    Key.Enter, Key.NumPadEnter -> { create(); true }
+                                    Key.Escape -> { creating = false; true }
+                                    else -> false
+                                }
+                            }, focusRequester = newFocus,
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), onKeyboardAction = { create() })
                             HostExplorerButton(ProductIcon.Check, "Create folder", !busy) { create() }
                             HostExplorerButton(ProductIcon.X, "Cancel create", !busy) { creating = false }
@@ -133,16 +163,21 @@ fun HostPathPicker(model: AppModel, mode: HostPickerMode, root: String = "~", ac
                         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                             items(entries, key = { it.path }) { entry ->
                                 val selectable = if (entry.isDirectory) mode != HostPickerMode.FILE else mode != HostPickerMode.FOLDER
+                                val isSelected = entry.path == selected
                                 Row(Modifier.fillMaxWidth().heightIn(min = if (mobile) 44.dp else 30.dp)
-                                    .background(if (entry.path == selected) tokens.accent.opacity(.12).color else androidx.compose.ui.graphics.Color.Transparent)
+                                    .background(if (isSelected) tokens.accent.opacity(.1).color else androidx.compose.ui.graphics.Color.Transparent)
                                     .alpha(if (selectable) 1f else .4f).combinedClickable(enabled = selectable || entry.isDirectory,
                                         onClick = { if (entry.isDirectory && mode == HostPickerMode.FILE) session.go(entry.path) else selected = entry.path },
                                         onDoubleClick = { if (entry.isDirectory) session.go(entry.path) }).padding(horizontal = 12.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     HostEntryIcon(entry, Modifier.size(16.dp))
                                     BasicText(entry.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                        style = ppmText(12f, if (entry.isDirectory) FontWeight.Medium else FontWeight.Normal).copy(color = tokens.text2.color))
-                                    BasicText(hostDisplaySize(entry.size), style = ppmText(10f).copy(color = tokens.text3.color))
+                                        style = ppmText(12f, if (entry.isDirectory) FontWeight.Medium else FontWeight.Normal)
+                                            .copy(color = (if (isSelected) tokens.accent else tokens.text).color))
+                                    BasicText(hostDisplaySize(entry.size), Modifier.width(56.dp),
+                                        style = ppmText(10f).copy(color = tokens.text3.color, textAlign = TextAlign.End))
+                                    BasicText(hostModified(entry.modified), Modifier.width(56.dp),
+                                        style = ppmText(10f).copy(color = tokens.text3.color, textAlign = TextAlign.End))
                                 }
                             }
                             if (entries.isEmpty() && !state.loading) item {
@@ -158,6 +193,9 @@ fun HostPathPicker(model: AppModel, mode: HostPickerMode, root: String = "~", ac
                     HostExplorerButton(if (prefs.showHidden) ProductIcon.Eye else ProductIcon.EyeOff, "Show hidden files", active = prefs.showHidden) {
                         session.preferences.update(prefs.copy(showHidden = !prefs.showHidden))
                     }
+                    if (accept.isNotEmpty()) BasicText(accept.joinToString(", "),
+                        Modifier.background(tokens.surfaceHover.color, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+                        style = ppmText(10f).copy(color = tokens.text3.color))
                     PpmTextField(filter, "Filter…", Modifier.weight(1f), desktopStyle = ppmText(11f))
                     HostDialogButton("Cancel", onClick = onCancel)
                     HostDialogButton("Select", selected != null && !busy) {

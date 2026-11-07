@@ -236,7 +236,7 @@ internal fun hostDisplaySize(bytes: Long?): String = when {
     else -> String.format(Locale.US, "%.2f GB", bytes / (1024.0 * 1024 * 1024))
 }
 
-private fun hostModified(iso: String): String {
+internal fun hostModified(iso: String): String {
     val age = runCatching { (System.currentTimeMillis() - Instant.parse(iso).toEpochMilli()) / 60_000 }.getOrNull() ?: return ""
     return when { age < 1 -> "now"; age < 60 -> "${age}m ago"; age < 1440 -> "${age / 60}h ago"; else -> "${age / 1440}d ago" }
 }
