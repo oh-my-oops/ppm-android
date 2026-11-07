@@ -63,6 +63,7 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
         "terminal" -> TerminalBody(model, tab)
         "editor" -> FileBody(model, tab)
         "ai-resource" -> com.hienlh.ppm.app.ui.editor.AiResourceEditorBody(model, tab)
+        "problems" -> com.hienlh.ppm.app.ui.editor.ProblemsTabBody(model, tab)
         "git-review" -> GitReviewBody(model, tab)
         "branch-review" -> BranchReviewBody(model, tab)
         "git-log" -> GitLogBody(model, tab)

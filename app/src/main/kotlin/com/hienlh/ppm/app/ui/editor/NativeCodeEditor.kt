@@ -35,6 +35,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -299,6 +300,46 @@ internal fun EditableFileCodeView(
     var conflictVisible by remember { mutableStateOf(false) }
     var latestDiskContent by remember { mutableStateOf(initialContent) }
 
+    // Per-device LSP bridge (Phase 07c)
+    val lspEnabled by DeviceLspPreference.enabled.collectAsState()
+    val isRelativeProjectFile = !project.isNullOrBlank() && !path.isNullOrBlank() &&
+        !isUntitled && !path.startsWith("/") && !Regex("^[A-Za-z]:[/\\\\]").containsMatchIn(path)
+    val clientUri = remember(project, path) { allocateClientUri() }
+    val lspBridge = remember(api, project, isRelativeProjectFile, lspEnabled) {
+        if (api != null && lspEnabled && isRelativeProjectFile && project != null) {
+            ProjectLspBridge(api, project, scope)
+        } else {
+            null
+        }
+    }
+    val lspStatus = if (lspBridge != null && path != null) {
+        lspBridge.statusFlow(path).collectAsState().value
+    } else {
+        null
+    }
+    val lspDiagnostics = if (lspBridge != null && path != null) {
+        lspBridge.diagnosticsFlow(path).collectAsState().value
+    } else {
+        emptyList()
+    }
+
+    DisposableEffect(lspBridge, path) {
+        if (lspBridge != null && !path.isNullOrBlank()) {
+            lspBridge.openDocument(path, clientUri, docState.session.buffer.toString())
+        }
+        onDispose {
+            if (lspBridge != null && !path.isNullOrBlank()) {
+                lspBridge.closeDocument(path)
+            }
+        }
+    }
+
+    LaunchedEffect(editTick, lspBridge, path) {
+        if (lspBridge != null && !path.isNullOrBlank() && editTick > 0L) {
+            lspBridge.changeDocument(path, docState.session.buffer.toString())
+        }
+    }
+
     // React to incoming server content (`file:changed` or manual refresh)
     LaunchedEffect(initialContent) {
         latestDiskContent = initialContent
@@ -320,6 +361,7 @@ internal fun EditableFileCodeView(
             client.writeFile(project, targetPath, textToSave)
         }.onSuccess {
             docState.markSaved(textToSave)
+            lspBridge?.saveDocument(targetPath, textToSave)
             conflictVisible = false
             onDirtyChange(docState.isDirty)
             editTick++
@@ -423,6 +465,19 @@ internal fun EditableFileCodeView(
             lineNumber = lineNumber,
             endLine = endLine,
             revealAt = revealAt,
+            lspSlot = {
+                if (isRelativeProjectFile) {
+                    LspStatusChip(
+                        enabled = lspEnabled,
+                        onToggle = { DeviceLspPreference.setEnabled(it) },
+                        status = lspStatus,
+                        diagnostics = lspDiagnostics,
+                        onInstall = if (lspBridge != null) {
+                            { serverId -> lspBridge.installServer(serverId) }
+                        } else null,
+                    )
+                }
+            },
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
     }
@@ -440,6 +495,7 @@ internal fun NativeCodeEditorCanvas(
     lineNumber: Long? = null,
     endLine: Long? = null,
     revealAt: String? = null,
+    lspSlot: @Composable () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalPpmTokens.current
@@ -679,6 +735,7 @@ internal fun NativeCodeEditorCanvas(
                         style = ppmText(10f, kind = FontKind.MONO).copy(color = colors.text2.color),
                     )
                 }
+                lspSlot()
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 SettingsButton(

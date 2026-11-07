@@ -180,6 +180,18 @@ suspend fun ApiClient.lspGlobalInstall(serverId: String): JsonElement =
         body = buildJsonObject { put("serverId", serverId) },
     )
 
+/** Install a language server scoped to a project's toolchain (`POST /api/project/:name/lsp/install`). */
+suspend fun ApiClient.lspProjectInstall(projectName: String, serverId: String): JsonElement =
+    call(
+        "POST",
+        "/api/project/${ApiClient.escape(projectName)}/lsp/install",
+        body = buildJsonObject { put("serverId", serverId) },
+    )
+
+/** Open a channel-based [SocketConnection] to `/ws/project/:name/lsp?token=…`. */
+fun ApiClient.openLspConnection(projectName: String): SocketConnection =
+    SocketConnection(socketUrl("/ws/project/${ApiClient.escape(projectName)}/lsp", emptyList()))
+
 /** Uninstall a PPM-installed language server (`POST /api/lsp/uninstall`). */
 suspend fun ApiClient.lspGlobalUninstall(serverId: String): JsonElement =
     call(
