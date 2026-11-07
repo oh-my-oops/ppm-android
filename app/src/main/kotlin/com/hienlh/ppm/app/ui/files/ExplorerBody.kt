@@ -54,6 +54,8 @@ fun ExplorerBody(model: AppModel, onNavigate: () -> Unit = {}) {
         actionsForNode = { node -> transfers?.actionsForNode(node).orEmpty() },
         dropModifier = { directory -> transfers?.dropModifier(directory) ?: Modifier },
         transferStatus = { transfers?.let { ExplorerTransferStatus(it) } },
+        gitFileStatuses = model.gitFileStatuses[project].orEmpty(),
+        gitFolderStatuses = model.gitFolderStatuses[project].orEmpty(),
         onOpenTerminal = model.currentProject?.path?.let { root ->
             { directory ->
                 model.openTerminalAt(absoluteProjectPath(root, directory), project)

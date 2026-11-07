@@ -537,6 +537,20 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     var sidebarTabOrder by mutableStateOf<List<String>>(emptyList())
         private set
 
+    /** How Source Control lists changed files (`flat` or `tree`), shared through the server's UI prefs. */
+    var gitStatusViewMode by mutableStateOf("flat")
+        private set
+
+    fun setGitViewMode(mode: String) {
+        if (mode != "flat" && mode != "tree") return
+        gitStatusViewMode = mode
+        saveUiPrefs()
+        val client = api ?: return
+        scope.launch {
+            quietly { client.putUiPrefs(buildJsonObject { put("gitStatusViewMode", mode) }) }
+        }
+    }
+
     /** This app's sections in the rail's order: those dragged into place first, then the rest as the web lists them (`resolveTabOrder`). */
     val sidebarSections: List<String>
         get() = (sidebarTabOrder.filter { it in SIDEBAR_SECTIONS } + SIDEBAR_SECTIONS).distinct()
@@ -624,8 +638,40 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** Each project's branch and how far it is from its upstream, for the tablet's status bar (the web's git `meta`). */
     val gitBranches = mutableStateMapOf<String, GitBranchStatus>()
 
+    /** Discovered git repositories per project (`GET /git/repos`). */
+    val gitDiscovery = mutableStateMapOf<String, com.hienlh.ppm.client.GitRepos>()
+
+    /** User-chosen repo path per project for multi-repo projects (`ppm-git-repo-choice`). */
+    private val gitRepoChoices = com.hienlh.ppm.state.git.GitRepoChoices(prefs)
+    val gitChosenRepoPath = mutableStateMapOf<String, String>()
+
+    /** Most recent `GET /git/changes` payload per project. */
+    val gitChangesCache = mutableStateMapOf<String, com.hienlh.ppm.client.GitChanges>()
+
+    /** Explorer file git status letter (`M`, `A`, `D`, `R`, `C`, `U`) per project. */
+    val gitFileStatuses = mutableStateMapOf<String, Map<String, String>>()
+
+    /** Explorer folder aggregate git status letter per project. */
+    val gitFolderStatuses = mutableStateMapOf<String, Map<String, String>>()
+
+    /** Shared commit draft sync across devices (`GET / PUT /git/commit-draft` + `/ws/global`). */
+    val commitDrafts = com.hienlh.ppm.state.git.CommitDraftSync(scope)
+
+    /** Project whose BranchPicker modal is currently open (`StatusBar` or `GitBranchRow`). */
+    var branchPickerProject by mutableStateOf<String?>(null)
+        private set
+
+    fun openBranchPicker(project: String) {
+        branchPickerProject = project
+    }
+
+    fun closeBranchPicker() {
+        branchPickerProject = null
+    }
+
     /** The projects PPM just wrote to a repository of (`git:changed`). */
     private val gitChanged = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    val gitChangedEvents: kotlinx.coroutines.flow.SharedFlow<String> get() = gitChanged
 
     /** Whether the app is in front (the web's `document.hidden`, inverted). */
     var windowVisible = true
@@ -1089,6 +1135,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                     prefs.mcpSignInDismissed?.let { mcpSignInDismissed = it }
                     prefs.sidebarActiveTab?.let { sidebarTab = it }
                     prefs.sidebarTabOrder?.let { sidebarTabOrder = it }
+                    prefs.gitStatusViewMode?.let { gitStatusViewMode = it }
                     saveUiPrefs()
                 }
                 projects
@@ -1137,6 +1184,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         mcpSignInDismissed = saved.mcpSignInDismissed ?: emptyList()
         sidebarTab = saved.sidebarActiveTab ?: "history"
         sidebarTabOrder = saved.sidebarTabOrder ?: emptyList()
+        gitStatusViewMode = saved.gitStatusViewMode ?: "flat"
     }
 
     private fun saveUiPrefs() {
@@ -1151,6 +1199,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             mcpSignInDismissed = mcpSignInDismissed,
             sidebarActiveTab = sidebarTab,
             sidebarTabOrder = sidebarTabOrder,
+            gitStatusViewMode = gitStatusViewMode,
         )
         prefs.put("uiPrefs.$serverKey", saved.toJson().toString())
     }
@@ -1169,11 +1218,16 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         }
         events.isShown = { id -> windowVisible && activeSessionId == id }
         events.onGitChanged = { gitChanged.tryEmit(it) }
+        events.onGitCommitDraft = { project, repoPath, message, _, clientId ->
+            val repo = com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(gitDiscovery[project], gitChosenRepoPath[project])
+            commitDrafts.onRemoteDraft(project, repoPath, message, clientId, repo)
+        }
         // A change only marks the list stale; it is read again when a picker shows it.
         events.onFileChanged = { project, path ->
             fileIndex?.markStale(project)
             fileTree?.onFileChanged(project, path)
             documents.values.forEach { it.fileChanged(project, path) }
+            gitChanged.tryEmit(project)
         }
         events.onIndexChanged = { fileIndex?.rebuilt(it) }
         events.onSessionFileChanges = { push ->
@@ -1785,6 +1839,156 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         }
     }
 
+    /** Sidebar badge count for Source Control (`selectChangeCount`). */
+    fun gitChangeCount(project: String?): Int {
+        if (project == null) return 0
+        gitChangesCache[project]?.let { return it.files.size }
+        val status = gitBranches[project] ?: return 0
+        return status.staged.size + status.unstaged.size + status.untracked.size
+    }
+
+    suspend fun loadGitRepos(project: String, force: Boolean = false) {
+        val client = api ?: return
+        if (!force && project in gitDiscovery) {
+            gitRepoChoices.chosen(project)?.let { gitChosenRepoPath[project] = it }
+            return
+        }
+        val repos = quietly { client.gitRepos(project) } ?: return
+        if (this.api === client) {
+            gitDiscovery[project] = repos
+            val saved = gitRepoChoices.chosen(project)
+            if (saved != null) gitChosenRepoPath[project] = saved
+        }
+    }
+
+    fun chooseGitRepo(project: String, repoPath: String) {
+        gitRepoChoices.choose(project, repoPath)
+        gitChosenRepoPath[project] = repoPath
+        gitChangesCache.remove(project)
+        gitChanged.tryEmit(project)
+    }
+
+    fun applyGitStatus(project: String, repo: com.hienlh.ppm.client.GitRepo?, status: GitBranchStatus) {
+        val rebased = com.hienlh.ppm.state.git.GitRepoScope.rebaseStatusPaths(status, repo)
+        gitBranches[project] = rebased
+        val files = com.hienlh.ppm.state.git.GitChangesView.buildFileStatusMap(rebased)
+        gitFileStatuses[project] = files
+        gitFolderStatuses[project] = com.hienlh.ppm.state.git.GitChangesView.buildFolderStatusMap(files)
+    }
+
+    fun applyGitChanges(project: String, repo: com.hienlh.ppm.client.GitRepo?, changes: com.hienlh.ppm.client.GitChanges) {
+        gitChangesCache[project] = changes
+        applyGitStatus(project, repo, com.hienlh.ppm.state.git.GitChangesView.changesToStatus(changes))
+    }
+
+    fun openGitReview(project: String, path: String? = null, repo: String? = null) {
+        val select = if (!path.isNullOrEmpty() || !repo.isNullOrEmpty()) {
+            buildJsonObject {
+                if (!path.isNullOrEmpty()) put("path", path)
+                if (!repo.isNullOrEmpty()) put("repo", repo)
+                put("at", System.currentTimeMillis())
+            }
+        } else {
+            null
+        }
+        withWorkspace { store ->
+            val id = store.openTab(
+                NewTab(
+                    type = "git-review",
+                    title = "Review changes",
+                    projectId = project,
+                    metadata = buildJsonObject {
+                        put("projectName", project)
+                        if (select != null) put("select", select)
+                    },
+                ),
+            )
+            if (id.isNotEmpty() && select != null) patchTabMetadata(id, "select" to select)
+        }
+    }
+
+    fun openGitConflictTab(project: String, filePath: String) {
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = "conflict-editor",
+                    title = "Conflict: ${filePath.split('/', '\\').last()}",
+                    projectId = project,
+                    metadata = buildJsonObject {
+                        put("filePath", filePath)
+                        put("projectName", project)
+                    },
+                ),
+            )
+        }
+    }
+
+    fun openGitDiffFileTab(project: String, filePath: String) {
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = "git-diff",
+                    title = "Diff: ${filePath.split('/', '\\').last()}",
+                    projectId = project,
+                    metadata = buildJsonObject {
+                        put("filePath", filePath)
+                        put("projectName", project)
+                    },
+                ),
+            )
+        }
+    }
+
+    fun openProjectEditorTab(project: String, filePath: String) {
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = "editor",
+                    title = filePath.split('/', '\\').last().ifEmpty { filePath },
+                    projectId = project,
+                    metadata = buildJsonObject {
+                        put("filePath", filePath)
+                        put("projectName", project)
+                    },
+                ),
+            )
+        }
+    }
+
+    fun openGitHistoryTab(project: String) {
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = "git-log",
+                    title = "Commits",
+                    projectId = project,
+                    metadata = buildJsonObject {
+                        put("projectName", project)
+                    },
+                ),
+            )
+        }
+    }
+
+    fun openBranchReviewTab(project: String) {
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = "branch-review",
+                    title = "Review branch",
+                    projectId = project,
+                    metadata = buildJsonObject {
+                        put("projectName", project)
+                    },
+                ),
+            )
+        }
+    }
+
+    fun notifyGitChanged(project: String) {
+        gitChanged.tryEmit(project)
+    }
+
     /**
      * Keeps [project]'s branch in [gitBranches] while the status bar shows it (`useGitChangesPoller`):
      * read every 10 s, and 300 ms after PPM writes to the repository, so a burst of writes costs one
@@ -1792,11 +1996,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
      */
     suspend fun watchGit(project: String) {
         val api = api ?: return
-        val repo = quietly { api.gitRepos(project) }?.resolved ?: return
+        loadGitRepos(project)
         suspend fun read() {
+            val discovery = gitDiscovery[project] ?: quietly { api.gitRepos(project) } ?: return
+            val repo = com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(discovery, gitChosenRepoPath[project]) ?: return
             // A failed read keeps the branch last shown.
             val status = quietly { api.gitStatus(project, repo) } ?: return
-            if (this.api === api) gitBranches[project] = status
+            if (this.api === api) applyGitStatus(project, repo, status)
         }
         coroutineScope {
             launch {
@@ -3216,7 +3422,7 @@ internal fun filePathTab(path: String, projectName: String?) = NewTab(
 private val DOCK_POSITIONS = setOf("bottom", "left", "right")
 
 /** The sidebar sections this app has, in the web's order (`BUILTIN_SIDEBAR_TABS`). */
-private val SIDEBAR_SECTIONS = listOf("explorer", "search", "history", "teams")
+private val SIDEBAR_SECTIONS = listOf("explorer", "search", "git", "history", "teams")
 
 private val PROJECT_SORT_MODES = setOf("recent", "priority", "name")
 

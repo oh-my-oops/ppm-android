@@ -903,6 +903,8 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                     com.hienlh.ppm.app.ui.files.ExplorerBody(model, onNavigate = onClose)
                 } else if (shown == "search") {
                     com.hienlh.ppm.app.ui.files.SearchBody(model, onNavigate = onClose)
+                } else if (shown == "git") {
+                    com.hienlh.ppm.app.ui.git.GitStatusPanel(model, onNavigate = onClose)
                 } else if (shown == "teams" && model.currentProject != null) {
                     GroupList(model, onNavigate = onClose)
                 } else if (shown == "history" && list != null && search != null) {
@@ -922,8 +924,20 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                     for (id in sections) {
                         val teams = id == "teams"
                         DrawerTabSlot(
-                            when (id) { "explorer" -> ProductIcon.FolderOpen; "search" -> ProductIcon.Search; "teams" -> ProductIcon.Users; else -> ProductIcon.BotMessageSquare },
-                            when (id) { "explorer" -> "Explorer"; "search" -> "Search"; "teams" -> "Teams"; else -> "History" },
+                            when (id) {
+                                "explorer" -> ProductIcon.FolderOpen
+                                "search" -> ProductIcon.Search
+                                "git" -> ProductIcon.GitBranch
+                                "teams" -> ProductIcon.Users
+                                else -> ProductIcon.BotMessageSquare
+                            },
+                            when (id) {
+                                "explorer" -> "Explorer"
+                                "search" -> "Search"
+                                "git" -> "Git"
+                                "teams" -> "Teams"
+                                else -> "History"
+                            },
                             active = id == shown,
                             badge = if (teams) FeatureBadgeKind.BETA else null,
                         ) { onSection(id) }

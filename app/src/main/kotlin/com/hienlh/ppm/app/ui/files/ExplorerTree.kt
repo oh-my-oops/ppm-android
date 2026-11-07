@@ -64,6 +64,8 @@ fun ExplorerTree(
     entryDrops: ExplorerEntryDrops? = null,
     dropModifier: @Composable (directory: String) -> Modifier = { Modifier },
     transferStatus: @Composable () -> Unit = {},
+    gitFileStatuses: Map<String, String> = emptyMap(),
+    gitFolderStatuses: Map<String, String> = emptyMap(),
 ) {
     val state by tree.state.collectAsState()
     // Flatten only when directory content/expansion changes, never for each selection or spinner.
@@ -209,7 +211,8 @@ fun ExplorerTree(
                         onSubmit = { if (tree.state.value.project == commands?.project) commands?.let { session.submit(display.edit, field.text.toString(), it) } },
                         onCancel = session::cancelEdit, onEdit = session::edited)
                     is ExplorerDisplayRow.Node -> ExplorerTreeItem(display.row, tree, state, visiblePaths, selected,
-                        onOpenFile, onOpenTerminal, onOpenExplorer, actionsForNode, commands, session, busy, ::create, dragOver, entryDrops?.root, dropModifier, dropTint)
+                        onOpenFile, onOpenTerminal, onOpenExplorer, actionsForNode, commands, session, busy, ::create, dragOver, entryDrops?.root, dropModifier, dropTint,
+                        gitStatus = if (display.row.node.isDirectory) gitFolderStatuses[display.row.node.path] else gitFileStatuses[display.row.node.path])
                 }
             }
             }

@@ -149,7 +149,13 @@ private fun GitStatus(model: AppModel, text: TextStyle, narrow: Boolean) {
     val git = model.gitBranches[project] ?: return
     val branch = git.branch ?: return
     val synced = git.tracking != null && git.ahead == 0 && git.behind == 0
-    Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(
+        Modifier
+            .ppmClickable { model.openBranchPicker(project) }
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         Row(Modifier.weight(1f, fill = false), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             PpmIcon(ProductIcon.GitBranch, 12.dp, tokens.accent.color)
             BasicText(branch, Modifier.widthIn(max = 140.dp), style = text.copy(color = tokens.accent.color), maxLines = 1, overflow = TextOverflow.Ellipsis)

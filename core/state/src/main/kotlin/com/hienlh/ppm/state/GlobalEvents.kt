@@ -80,6 +80,9 @@ class GlobalEvents(
     /** PPM wrote to a repository of this project (`git:changed`): a commit, a checkout, a push. */
     var onGitChanged: ((project: String) -> Unit)? = null
 
+    /** A commit draft was updated or cleared on this project (`git:commit-draft`). */
+    var onGitCommitDraft: ((project: String, repo: String?, message: String, updatedAt: String?, clientId: String?) -> Unit)? = null
+
     /** A file of this project changed on disk (`file:changed`). */
     var onFileChanged: ((project: String, path: String?) -> Unit)? = null
 
@@ -224,6 +227,15 @@ class GlobalEvents(
             // Every phase from now on carries the new id, so the old one's `idle` never comes.
             "session:migrated" -> frame["oldSessionId"].string?.let { _running.value -= it }
             "git:changed" -> frame["projectName"].string?.let { onGitChanged?.invoke(it) }
+            "git:commit-draft" -> frame["projectName"].string?.let { proj ->
+                onGitCommitDraft?.invoke(
+                    proj,
+                    frame["repo"].string,
+                    frame["message"].string ?: "",
+                    frame["updatedAt"].string,
+                    frame["clientId"].string,
+                )
+            }
             "file:changed" -> frame["projectName"].string?.let { onFileChanged?.invoke(it, frame["path"].string) }
             "files:index-changed" -> frame["projectName"].string?.let { onIndexChanged?.invoke(it) }
             "session:file-changes" -> SessionFileChangesPush.from(frame)?.let { onSessionFileChanges?.invoke(it) }

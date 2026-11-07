@@ -30,6 +30,7 @@ internal fun ExplorerTreeItem(
     projectRoot: String? = null,
     dropModifier: @Composable (String) -> Modifier = { Modifier },
     dropTint: ExplorerDropSite? = null,
+    gitStatus: String? = null,
 ) {
     val node = row.node
     val expanded = node.path in state.expandedPaths
@@ -57,6 +58,7 @@ internal fun ExplorerTreeItem(
                 },
                 onMenu = { menuAt = it },
                 dropOver = dropOver,
+                gitStatus = gitStatus,
                 dragSource = Modifier.explorerRowDragSource(
                     // The whole selection when this row is one of several selected, as the web's `dragAbsolutePaths`; else the row alone.
                     ExplorerRowDrag(

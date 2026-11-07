@@ -49,6 +49,16 @@ fun CornerChrome(model: AppModel, mobile: Boolean, modifier: Modifier = Modifier
             model.info?.deviceName?.takeIf { it.isNotEmpty() }?.let { DeviceNameBadge(it, Modifier.align(Alignment.TopStart)) }
             if (model.screenKeptAwake()) ScreenAwakePill(Modifier.align(Alignment.TopCenter))
         }
+        model.branchPickerProject?.let { proj ->
+            val repo = com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(model.gitDiscovery[proj], model.gitChosenRepoPath[proj])
+            com.hienlh.ppm.app.ui.git.GitBranchPickerModal(
+                model = model,
+                project = proj,
+                repo = repo,
+                onClose = { model.closeBranchPicker() },
+                onChanged = { model.notifyGitChanged(proj) },
+            )
+        }
     }
 }
 

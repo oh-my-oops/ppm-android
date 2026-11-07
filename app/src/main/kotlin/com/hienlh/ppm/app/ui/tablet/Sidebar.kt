@@ -133,6 +133,7 @@ fun Sidebar(model: AppModel) {
                             "teams" -> GroupList(model)
                             "explorer" -> com.hienlh.ppm.app.ui.files.ExplorerBody(model)
                             "search" -> com.hienlh.ppm.app.ui.files.SearchBody(model)
+                            "git" -> com.hienlh.ppm.app.ui.git.GitStatusPanel(model)
                             else -> HistorySection(model)
                         }
                     }
@@ -331,6 +332,10 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
                     NavItem(ProductIcon.FolderOpen, "Explorer", active, badge = 0) { model.pickSidebarSection(section) }
                 } else if (section == "search") {
                     NavItem(ProductIcon.Search, "Search", active, badge = 0) { model.pickSidebarSection(section) }
+                } else if (section == "git") {
+                    NavItem(ProductIcon.GitBranch, "Git", active, badge = model.gitChangeCount(model.selectedProject)) {
+                        model.pickSidebarSection(section)
+                    }
                 } else if (section == "teams") {
                     NavItem(ProductIcon.Users, "Teams", active, badge = 0, featureBadge = FeatureBadgeKind.BETA) { model.pickSidebarSection(section) }
                 } else {

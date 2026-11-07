@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -21,14 +23,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isMetaPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.app.ui.git.gitStatusRgba
 import com.hienlh.ppm.design.FileIcon
+import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
@@ -44,10 +50,11 @@ private class ClickKeys { var toggle = false; var range = false }
 internal fun ExplorerTreeRow(
     row: FileTreeRow, expanded: Boolean, loading: Boolean, selected: Boolean, focused: Boolean, cut: Boolean = false,
     onClick: (toggle: Boolean, range: Boolean) -> Unit, onMenu: (Offset) -> Unit,
-    dropOver: Boolean = false, dragSource: Modifier = Modifier,
+    dropOver: Boolean = false, dragSource: Modifier = Modifier, gitStatus: String? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val node = row.node
+    val statusColor = remember(gitStatus, tokens) { gitStatusRgba(gitStatus, tokens) }
     val keys = remember { ClickKeys() }
     val menu by rememberUpdatedState(onMenu)
     val openMenu: (Offset) -> Unit = { at ->
@@ -94,8 +101,26 @@ internal fun ExplorerTreeRow(
         TruncatedText(
             AnnotatedString(node.name),
             ppmText(13f, if (node.isDirectory && expanded) FontWeight.Medium else FontWeight.Normal, lineHeight = 18f).copy(
-                color = when { selected -> tokens.text.color; node.isIgnored -> tokens.textDim.color; node.isDirectory && expanded -> tokens.text.color; else -> tokens.text2.color }),
+                color = statusColor ?: when { selected -> tokens.text.color; node.isIgnored -> tokens.textDim.color; node.isDirectory && expanded -> tokens.text.color; else -> tokens.text2.color },
+                textDecoration = if (!node.isDirectory && gitStatus == "D") TextDecoration.LineThrough else TextDecoration.None,
+            ),
             Modifier.weight(1f),
         )
+        if (statusColor != null && gitStatus != null) {
+            if (node.isDirectory) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .background(statusColor, CircleShape)
+                        .testTag("explorer-git-dot-${node.path}"),
+                )
+            } else {
+                BasicText(
+                    text = gitStatus,
+                    style = ppmText(10f, FontWeight.SemiBold, FontKind.MONO, lineHeight = 14f).copy(color = statusColor),
+                    modifier = Modifier.testTag("explorer-git-status-${node.path}"),
+                )
+            }
+        }
     }
 }

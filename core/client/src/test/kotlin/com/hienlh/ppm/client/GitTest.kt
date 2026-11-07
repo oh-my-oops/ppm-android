@@ -5,9 +5,10 @@ import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** `routes/git.ts`: which repository a project's git runs in, and the branch the status bar shows. */
+/** `routes/git.ts`: which repository a project's git runs in, the branch the status bar shows, and Source Control routes. */
 class GitTest {
     private fun <T> withServer(vararg responses: MockResponse, block: suspend (MockWebServer, ApiClient) -> T): T = runBlocking {
         val server = MockWebServer()
@@ -29,7 +30,7 @@ class GitTest {
     ) { server, api ->
         val repo = api.gitRepos("my web").resolved
         assertEquals(GitRepo("/w/web", "web", "."), repo)
-        assertEquals(GitBranchStatus("main", 2, 0, "origin/main"), api.gitStatus("my web", repo))
+        assertEquals(GitBranchStatus("main", 2, 0, "origin/main", untracked = listOf("a")), api.gitStatus("my web", repo))
         assertEquals("/api/project/my%20web/git/repos", server.takeRequest().target)
         assertEquals("/api/project/my%20web/git/status", server.takeRequest().target)
     }
@@ -50,5 +51,242 @@ class GitTest {
         val two = GitRepos(false, listOf(GitRepo("/w/a", "a", "a"), GitRepo("/w/b", "b", "b")))
         assertNull(two.resolved)
         assertNull(GitRepos(false, emptyList()).resolved)
+    }
+
+    @Test
+    fun `parses changes hunks refs stashes worktrees and actions with repo scope`() = withServer(
+        ok(
+            """
+            {
+              "branch": {"head":"feat/sc","oid":"1234567890abcdef","upstream":"origin/feat/sc","upstreamGone":false,"ahead":3,"behind":1},
+              "operation": {"kind":"rebase","head":"abc1234","step":2,"total":5},
+              "lastCommit": {"hash":"1234567890abcdef","shortHash":"1234567","subject":"feat: add sc","date":"2026-11-07T00:00:00Z","hasParent":true,"pushed":false},
+              "files": [
+                {"path":"src/App.kt","staged":{"status":"M","added":4,"removed":1,"blocks":["add","change"]},"unstaged":{"status":"M","added":2,"removed":0,"blocks":["add"]}},
+                {"path":"CONFLICT.md","conflict":"UU"}
+              ],
+              "truncated": false,
+              "stashes": 2
+            }
+            """.trimIndent(),
+        ),
+        ok(
+            """
+            {
+              "path": "src/App.kt",
+              "binary": false,
+              "hunks": [
+                {
+                  "index": 0,
+                  "header": "@@ -1,2 +1,3 @@",
+                  "oldStart": 1,
+                  "oldLines": 2,
+                  "newStart": 1,
+                  "newLines": 3,
+                  "id": "hunk-0",
+                  "lines": [
+                    {"type":" ","content":"package app","oldNumber":1,"newNumber":1},
+                    {"type":"+","content":"import kotlin.test.*","newNumber":2}
+                  ]
+                }
+              ]
+            }
+            """.trimIndent(),
+        ),
+        ok("""{"staged":true}"""),
+        ok("""{"id":"disc-1","createdAt":100,"files":["src/App.kt"],"skipped":[]}"""),
+        ok("""{"hash":"abcdef1234567"}"""),
+        ok(
+            """
+            [
+              {"name":"main","kind":"branch","hash":"1111111","shortHash":"1111111","subject":"init","author":"Alice","date":"2026-11-07T00:00:00Z","current":true,"upstream":"origin/main","upstreamGone":false,"ahead":0,"behind":0}
+            ]
+            """.trimIndent(),
+        ),
+        ok(
+            """
+            [
+              {"index":0,"hash":"aaaa111","message":"WIP on main","date":"2026-11-07T00:00:00Z"}
+            ]
+            """.trimIndent(),
+        ),
+        ok(
+            """
+            [
+              {"path":"/work/ppm","head":"1111111","branch":"main","isMain":true,"isLocked":false,"prunable":false}
+            ]
+            """.trimIndent(),
+        ),
+    ) { server, api ->
+        val nestedRepo = GitRepo("/work/ppm/apps/mobile", "mobile", "apps/mobile")
+        val changes = api.gitChanges("ppm", nestedRepo)
+        assertEquals("feat/sc", changes.branch.head)
+        assertEquals("rebase", changes.operation?.kind)
+        assertEquals(2, changes.operation?.step)
+        assertEquals("1234567", changes.lastCommit?.shortHash)
+        assertEquals(2, changes.files.size)
+        assertEquals(4, changes.files[0].staged?.added)
+        assertEquals("UU", changes.files[1].conflict)
+        assertEquals(2, changes.stashes)
+
+        val hunks = api.gitHunks("ppm", "src/App.kt", "worktree", nestedRepo)
+        assertEquals(1, hunks.hunks.size)
+        assertEquals("hunk-0", hunks.hunks[0].id)
+        assertEquals(2, hunks.hunks[0].lines.size)
+
+        api.gitStageHunks("ppm", "src/App.kt", listOf(HunkSelectionItem(0, "hunk-0", listOf(1))), nestedRepo)
+        val discard = api.gitDiscard("ppm", listOf("src/App.kt"), nestedRepo)
+        assertEquals("disc-1", discard.id)
+
+        val commit = api.gitCommit("ppm", "feat: commit", amend = false, signoff = true, repo = nestedRepo)
+        assertEquals("abcdef1234567", commit.hash)
+
+        val refs = api.gitRefs("ppm", nestedRepo)
+        assertEquals(1, refs.size)
+        assertTrue(refs[0].current)
+
+        val stashes = api.gitStashes("ppm", nestedRepo)
+        assertEquals(1, stashes.size)
+        assertEquals("WIP on main", stashes[0].message)
+
+        val worktrees = api.gitWorktrees("ppm", nestedRepo)
+        assertEquals(1, worktrees.size)
+        assertTrue(worktrees[0].isMain)
+
+        assertEquals("/api/project/ppm/git/changes?repo=%2Fwork%2Fppm%2Fapps%2Fmobile", server.takeRequest().target)
+        assertEquals("/api/project/ppm/git/hunks?path=src%2FApp.kt&scope=worktree&repo=%2Fwork%2Fppm%2Fapps%2Fmobile", server.takeRequest().target)
+        val stageHunksReq = server.takeRequest()
+        assertEquals("/api/project/ppm/git/stage-hunks?repo=%2Fwork%2Fppm%2Fapps%2Fmobile", stageHunksReq.target)
+        assertTrue(stageHunksReq.body?.utf8()?.contains(""""lines":[1]""") == true)
+    }
+
+    @Test
+    fun `parses server wire format for gitChanges, gitHunks, gitDiscard undo envelope, gitStash envelope, gitRefs, and gitWorktrees`() = withServer(
+        ok(
+            """
+            {
+              "branch": {"head":"main","oid":"ff1802272c2536b0eeb12285cb05bc5d7b874b75","upstream":null,"upstreamGone":false,"ahead":0,"behind":0,"hasRemote":false},
+              "operation": null,
+              "files": [
+                {
+                  "path": "src/App.kt",
+                  "x": ".",
+                  "y": "M",
+                  "untracked": false,
+                  "conflict": false,
+                  "staged": null,
+                  "unstaged": {
+                    "blocks": [{"id":"1f2ca95832d8a1ee4d0cde66ca6e09e0","index":0,"oldStart":1,"oldLines":3,"newStart":1,"newLines":4,"added":2,"removed":1}],
+                    "added": 2,
+                    "removed": 1
+                  }
+                },
+                {
+                  "path": "README.md",
+                  "x": "?",
+                  "y": "?",
+                  "untracked": true,
+                  "conflict": false,
+                  "staged": null,
+                  "unstaged": {
+                    "blocks": [{"id":"17fff46245253863bc28cbc79bb2b88a","index":0,"oldStart":0,"oldLines":0,"newStart":1,"newLines":1,"added":1,"removed":0}],
+                    "added": 1,
+                    "removed": 0
+                  }
+                }
+              ],
+              "stashes": 0,
+              "lastCommit": {"hash":"ff1802272c2536b0eeb12285cb05bc5d7b874b75","subject":"chore: initial commit","author":"Test User","date":"2026-11-07T19:14:05+07:00","pushed":false,"hasParent":false},
+              "truncated": false
+            }
+            """.trimIndent(),
+        ),
+        ok(
+            """
+            {
+              "filePath": "src/App.kt",
+              "scope": "worktree",
+              "hunks": [
+                {
+                  "oldStart": 1,
+                  "oldLines": 3,
+                  "newStart": 1,
+                  "newLines": 4,
+                  "heading": "fun main()",
+                  "lines": [
+                    {"kind": " ", "text": "line 1"},
+                    {"kind": "-", "text": "line 2"},
+                    {"kind": "+", "text": "line 2 modified"}
+                  ],
+                  "id": "1f2ca95832d8a1ee4d0cde66ca6e09e0"
+                }
+              ],
+              "binary": false
+            }
+            """.trimIndent(),
+        ),
+        ok(
+            """
+            {
+              "discarded": ["src/App.kt"],
+              "undo": {"id":"undo-99","createdAt":1700000000000,"kind":"files","paths":["src/App.kt"],"skipped":[]}
+            }
+            """.trimIndent(),
+        ),
+        ok(
+            """
+            {
+              "stashed": true,
+              "stash": {"index":0,"hash":"bbbb222","message":"WIP on main","date":"2026-11-07T10:00:00Z"}
+            }
+            """.trimIndent(),
+        ),
+        ok(
+            """
+            [
+              {"refName":"refs/heads/main","name":"main","type":"branch","current":true,"hash":"ff18022","shortHash":"ff18022","subject":"init","author":"Alice","date":"2026-11-07T00:00:00Z","upstream":null,"ahead":0,"behind":0,"gone":true}
+            ]
+            """.trimIndent(),
+        ),
+        ok(
+            """
+            [
+              {"path":"/tmp/ppm-s3-git-repo","branch":"","head":"ff18022","isMain":true,"isBare":false,"isDetached":true,"locked":true,"prunable":false}
+            ]
+            """.trimIndent(),
+        ),
+    ) { _, api ->
+        val changes = api.gitChanges("s3-git")
+        assertEquals(false, changes.branch.hasRemote)
+        assertEquals(2, changes.files.size)
+        assertEquals("M", changes.files[0].unstaged?.status)
+        assertEquals(listOf("1f2ca95832d8a1ee4d0cde66ca6e09e0"), changes.files[0].unstaged?.blocks)
+        assertEquals("A", changes.files[1].unstaged?.status)
+        assertEquals(null, changes.files[0].conflict)
+
+        val hunks = api.gitHunks("s3-git", "src/App.kt")
+        assertEquals("src/App.kt", hunks.path)
+        assertEquals("@@ -1,3 +1,4 @@ fun main()", hunks.hunks[0].header)
+        assertEquals(1, hunks.hunks[0].lines[0].oldNumber)
+        assertEquals(1, hunks.hunks[0].lines[0].newNumber)
+        assertEquals(2, hunks.hunks[0].lines[1].oldNumber)
+        assertEquals(null, hunks.hunks[0].lines[1].newNumber)
+        assertEquals(null, hunks.hunks[0].lines[2].oldNumber)
+        assertEquals(2, hunks.hunks[0].lines[2].newNumber)
+
+        val discard = api.gitDiscard("s3-git", listOf("src/App.kt"))
+        assertEquals("undo-99", discard.id)
+        assertEquals(listOf("src/App.kt"), discard.files)
+
+        val stash = api.gitStash("s3-git")
+        assertEquals("bbbb222", stash.hash)
+
+        val refs = api.gitRefs("s3-git")
+        assertEquals("branch", refs[0].kind)
+        assertTrue(refs[0].upstreamGone)
+
+        val worktrees = api.gitWorktrees("s3-git")
+        assertEquals(null, worktrees[0].branch)
+        assertTrue(worktrees[0].isLocked)
     }
 }
