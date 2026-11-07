@@ -275,6 +275,26 @@ fun DatabaseSidebarPane(
                 )
                 onNavigate()
             },
+            onNewQuery = {
+                val cur = currentDb ?: focusedDb
+                val conn = connections.firstOrNull { it.id == cur?.conn } ?: connections.firstOrNull()
+                val existingTabs = model.layout?.panels?.values?.flatMap { it.tabs }.orEmpty()
+                val qNum = com.hienlh.ppm.state.database.nextQueryNumber(existingTabs)
+                val dbParam = if (cur != null && conn != null) tabDatabaseParam(cur, conn) else null
+                model.openWorkspaceTab(
+                    type = "db-query",
+                    title = "Query $qNum",
+                    metadata = com.hienlh.ppm.state.database.queryTabMetadata(
+                        sql = "",
+                        queryNumber = qNum,
+                        connectionId = conn?.id,
+                        connectionName = conn?.name,
+                        dbType = conn?.type,
+                        database = dbParam,
+                    ),
+                )
+                onNavigate()
+            },
             onEditConnection = { conn ->
                 model.openWorkspaceTab(
                     type = "db-connection",
@@ -435,6 +455,7 @@ internal fun DatabaseSidebarContent(
     structuresMap: Map<String, List<DbColumnRefItem>>,
     shownPerGroup: Map<String, Int>,
     onNewConnection: () -> Unit = {},
+    onNewQuery: () -> Unit = {},
     onEditConnection: (TreeConnection) -> Unit = {},
     onCreateEmptyFolder: (String) -> Unit = {},
     onToggleFolder: (String) -> Unit = {},
@@ -527,6 +548,11 @@ internal fun DatabaseSidebarContent(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SettingsButton(
+                    label = "+ Query",
+                    modifier = Modifier.testTag("db-new-query-btn"),
+                    onClick = onNewQuery,
+                )
                 SettingsButton(
                     label = "+ Folder",
                     modifier = Modifier.testTag("db-new-folder-btn"),

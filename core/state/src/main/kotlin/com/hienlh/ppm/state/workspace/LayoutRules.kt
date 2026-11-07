@@ -118,8 +118,8 @@ fun deriveTabId(type: String, metadata: JsonObject, randomId: () -> String = ::w
         }
         "chat" -> "chat:${m("providerId") ?: "default"}/${m("sessionId") ?: randomId()}"
         "terminal" -> "terminal:${m("terminalIndex") ?: 1}"
-        // Database tab ids (`dbTabId`, src/web/lib/db-tabs.ts) come with the database phase. Until
-        // then the app opens none, and the ones the web opened keep the ids they have.
+        // Database tab ids (`dbTabId`, src/web/lib/db-tabs.ts) come with the database phase.
+        "db-query" -> "db-query:${(metadata["queryId"] as? JsonPrimitive)?.takeIf { it.isString && it.content.isNotEmpty() }?.content ?: randomId()}"
         "db-impexp" -> "db-impexp:${(metadata["impexpId"] as? JsonPrimitive)?.takeIf { it.isString && it.content.isNotEmpty() }?.content ?: randomId()}"
         "db-connection" -> "db-connection:${m("connectionId") ?: "new-${randomId()}"}"
         "sqlite" -> "sqlite:${m("filePath") ?: "default"}"

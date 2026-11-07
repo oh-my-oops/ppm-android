@@ -142,6 +142,7 @@ import com.hienlh.ppm.state.workspace.WorkspaceCache
 import com.hienlh.ppm.state.workspace.WorkspaceState
 import com.hienlh.ppm.state.workspace.WorkspaceStore
 import com.hienlh.ppm.state.workspace.WorkspaceTab
+import com.hienlh.ppm.state.workspace.openAiQueryTab
 import com.hienlh.ppm.state.workspace.openAiTab
 import com.hienlh.ppm.state.workspace.openAiUrlTab
 import com.hienlh.ppm.state.workspace.resolveFileNavigation
@@ -2011,6 +2012,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                     prefs.put("terminal.$serverKey.ppm:terminal-session:$id", terminal.terminalId)
                 }
             },
+            openQuery = { queryReq ->
+                inChatProject(chat.project) { store ->
+                    store.openAiQueryTab(queryReq.query, sessionId)
+                }
+            },
             frame = { if (wide) "Desktop" else "Phone" },
         )
     }
@@ -3543,6 +3549,19 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         val store = workspace ?: return
         if (tabOf(tabId) == null) return
         store.updateTab(tabId) { it.withMetadata(*changes) }
+    }
+
+    internal fun updateTabTitleAndMetadata(
+        tabId: String,
+        title: String? = null,
+        vararg changes: Pair<String, JsonElement?>,
+    ) {
+        val store = workspace ?: return
+        if (tabOf(tabId) == null) return
+        store.updateTab(tabId) { tab ->
+            val withMeta = tab.withMetadata(*changes)
+            if (title != null) withMeta.copy(title = title) else withMeta
+        }
     }
 
     /**

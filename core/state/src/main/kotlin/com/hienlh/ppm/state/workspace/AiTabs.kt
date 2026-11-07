@@ -171,6 +171,45 @@ fun WorkspaceStore.openAiTab(target: AiTabTarget, sessionId: String): String {
     }
 }
 
+/**
+ * Opens a new `db-query` tab beside the chat showing [sessionId] (`openAiQueryTab` in `open-ai-tab.ts`).
+ * Never reuses an existing Query tab and never sets `runOnOpen`, so the user always inspects the
+ * AI-generated SQL before pressing Run.
+ */
+fun WorkspaceStore.openAiQueryTab(query: kotlinx.serialization.json.JsonObject, sessionId: String): String {
+    val st = state.value
+    val placement = chooseAiTabPlacement(st.grid, st.panels, st.focusedPanelId, mobile, sessionId) { false }
+    if (placement !is AiTabPlacement.Open) {
+        throw IllegalStateException("PPM has no panel to open the tab in")
+    }
+    val allTabs = st.panels.values.flatMap { it.tabs }
+    var maxQueryNum = 0
+    for (t in allTabs) {
+        if (t.type == "db-query") {
+            val n = (t.metadata["queryNumber"] as? JsonPrimitive)?.content?.toIntOrNull()
+            if (n != null && n > maxQueryNum) maxQueryNum = n
+        }
+    }
+    val queryNumber = maxQueryNum + 1
+    val sql = (query["sql"] as? JsonPrimitive)?.content.orEmpty()
+    val queryId = webRandomId()
+    val metadata = buildJsonObject {
+        query["connectionId"]?.let { put("connectionId", it) }
+        query["connectionName"]?.let { put("connectionName", it) }
+        query["dbType"]?.let { put("dbType", it) }
+        (query["database"] as? JsonPrimitive)?.takeIf { it.isString && it.content.isNotEmpty() }?.let { put("database", it) }
+        (query["connectionColor"] as? JsonPrimitive)?.takeIf { it.isString && it.content.isNotEmpty() }?.let { put("connectionColor", it) }
+        put("queryId", queryId)
+        put("queryNumber", queryNumber)
+        put("currentSql", sql)
+        put("openedSql", sql)
+    }
+    val tabId = openTab(NewTab("db-query", "Query $queryNumber", st.currentProject, metadata), placement.panelId)
+    if (tabId.isEmpty()) throw IllegalStateException("PPM could not open the tab")
+    if (placement.split) splitPanel(SplitDirection.Right, tabId, placement.panelId)
+    return tabId
+}
+
 /** Brings a tab that is already open to where the placement wants it: in front, moved or split out. */
 internal fun WorkspaceStore.showExistingTab(placement: AiTabPlacement) {
     when (placement) {

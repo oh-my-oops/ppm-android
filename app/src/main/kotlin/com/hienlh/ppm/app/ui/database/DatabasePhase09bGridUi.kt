@@ -1726,6 +1726,7 @@ internal fun DatabaseTableTabContent(
     onCountExactly: () -> Unit = {},
     onStartQuickExport: (String, List<String>) -> Unit = { _, _ -> },
     onInstallMissingDriver: (String) -> Unit = {},
+    onChangesetDirtyChanged: (Boolean) -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -1785,6 +1786,9 @@ internal fun DatabaseTableTabContent(
     // Phase 09d Changeset & Editing State
     var history by remember { mutableStateOf(ChangesetHistory()) }
     val changeset = history.present
+    LaunchedEffect(changeset) {
+        onChangesetDirtyChanged(!isEmptyChangeset(changeset))
+    }
     var newRowSeq by remember { mutableIntStateOf(0) }
     var inlineEditTarget by remember { mutableStateOf<Pair<Int, Int>?>(null) } // (visColIdx, rowIdx)
     var phoneFormRowIndex by remember { mutableStateOf<Int?>(null) }

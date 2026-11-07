@@ -68,6 +68,7 @@ fun TabBody(model: AppModel, tab: WorkspaceTab) {
         "database" -> com.hienlh.ppm.app.ui.database.DatabaseTableTabBody(model, tab)
         "db-connection" -> com.hienlh.ppm.app.ui.database.DbConnectionFormTabBody(model, tab)
         "db-sql" -> com.hienlh.ppm.app.ui.database.DbSqlObjectTabBody(model, tab)
+        "db-query" -> com.hienlh.ppm.app.ui.database.DatabaseQueryTabBody(model, tab)
         "git-review" -> GitReviewBody(model, tab)
         "branch-review" -> BranchReviewBody(model, tab)
         "git-log" -> GitLogBody(model, tab)

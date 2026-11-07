@@ -602,4 +602,139 @@ suspend fun ApiClient.dbChangesetApply(
         loginCoordinator = loginCoordinator,
     ) as? JsonObject) ?: buildJsonObject {}
 
+// ── 9e.1–9e.5 Database Query Script Stream, Cancel & History Endpoints ──────
+
+/**
+ * `POST /api/db/connections/:id/query/script` — executes a SQL script and streams NDJSON
+ * (`application/x-ndjson`) events line-by-line with an `UNBOUNDED` read timeout (`0 s`).
+ * Supports HTTP 428 (`DB_LOGIN_REQUIRED`) replay via [loginCoordinator] and exposes the active
+ * OkHttp [okhttp3.Call] via [onCallCreated] so `Stop` or tab disposal can abort the stream.
+ */
+suspend fun ApiClient.dbQueryScriptStream(
+    connectionId: String,
+    body: JsonObject,
+    database: String? = null,
+    path: String? = null,
+    project: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+    onCallCreated: (okhttp3.Call) -> Unit = {},
+    onEventLine: suspend (String) -> Unit,
+) {
+    val reqBody = body.toString().toRequestBody(DB_JSON_MEDIA)
+    val request = Request.Builder()
+        .url(url("/api/db/connections/${ApiClient.escape(connectionId)}/query/script", connQuery(database, path, project)))
+        .post(reqBody)
+        .header("Authorization", "Bearer $token")
+        .header("Accept", "application/x-ndjson, application/json")
+        .header("x-ppm-client", PpmHttp.CLIENT_NAME)
+        .build()
+
+    val httpClient = dbClientForTimeout(DbRequestTimeoutKind.UNBOUNDED)
+
+    suspend fun executeStreamOnce() {
+        val call = httpClient.newCall(request)
+        onCallCreated(call)
+        val response = try {
+            call.await()
+        } catch (error: IOException) {
+            throw PpmError.Unreachable(describe(error))
+        }
+        withContext(Dispatchers.IO) {
+            response.use { res ->
+                if (!res.isSuccessful) {
+                    val text = runCatching { res.body.string() }.getOrDefault("")
+                    if (res.code == 401) throw PpmError.Unauthorized()
+                    val json = WireJson.parseOrNull(text)
+                    if (res.code == 428 && json != null && json["code"].string == "DB_LOGIN_REQUIRED") {
+                        val loginObj = json["login"] as? JsonObject
+                        val prompt = DbLoginPromptInfo(
+                            connectionId = loginObj?.get("connectionId")?.int,
+                            name = loginObj?.get("name")?.string.orEmpty(),
+                            type = loginObj?.get("type")?.string ?: "postgres",
+                            user = loginObj?.get("user")?.string.orEmpty(),
+                            askUser = loginObj?.get("askUser")?.bool == true,
+                        )
+                        throw DbLoginRequiredException(prompt, json["error"].string ?: "Database login required")
+                    }
+                    if (res.code == 424 && json != null && json["code"].string == "DB_DRIVER_MISSING") {
+                        val driverObj = json["driver"] as? JsonObject
+                        val driverId = driverObj?.get("id")?.string ?: json["driverId"].string ?: "unknown"
+                        val driverLabel = driverObj?.get("label")?.string ?: driverId
+                        throw DbDriverMissingException(
+                            driverId = driverId,
+                            driverLabel = driverLabel,
+                            message = json["error"].string ?: "Database driver $driverLabel is not installed.",
+                        )
+                    }
+                    ApiClient.unwrap(res.code, res.header("Content-Type"), text)
+                    return@use
+                }
+                val source = res.body.source()
+                while (!source.exhausted()) {
+                    val line = source.readUtf8Line() ?: break
+                    val trimmed = line.trim()
+                    if (trimmed.isNotEmpty()) {
+                        onEventLine(trimmed)
+                    }
+                }
+            }
+        }
+    }
+
+    try {
+        executeStreamOnce()
+    } catch (loginReq: DbLoginRequiredException) {
+        if (loginCoordinator != null && loginCoordinator.awaitLogin(loginReq.prompt)) {
+            executeStreamOnce()
+        } else {
+            throw loginReq
+        }
+    }
+}
+
+/** `POST /api/db/connections/:id/query/cancel` — requests server-side cancellation for [runId]. */
+suspend fun ApiClient.dbQueryCancel(
+    connectionId: String,
+    runId: String,
+    database: String? = null,
+    path: String? = null,
+    project: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+): Boolean {
+    val body = buildJsonObject { put("runId", runId) }
+    val res = dbCall(
+        method = "POST",
+        path = "/api/db/connections/${ApiClient.escape(connectionId)}/query/cancel",
+        query = connQuery(database, path, project),
+        body = body,
+        timeoutKind = DbRequestTimeoutKind.CATALOG,
+        loginCoordinator = loginCoordinator,
+    ) as? JsonObject
+    return res?.get("stopped")?.bool == true
+}
+
+/** `GET /api/db/connections/:id/history?search=&offset=` — fetches per-connection SQL query history. */
+suspend fun ApiClient.dbQueryHistory(
+    connectionId: String,
+    search: String = "",
+    offset: Int = 0,
+    database: String? = null,
+    loginCoordinator: DbLoginCoordinator? = null,
+): JsonObject {
+    val q = buildList {
+        if (!database.isNullOrBlank()) add("database" to database)
+        val trimmed = search.trim()
+        if (trimmed.isNotEmpty()) add("search" to trimmed)
+        if (offset > 0) add("offset" to offset.toString())
+    }
+    return (dbCall(
+        method = "GET",
+        path = "/api/db/connections/${ApiClient.escape(connectionId)}/history",
+        query = q,
+        timeoutKind = DbRequestTimeoutKind.CATALOG,
+        loginCoordinator = loginCoordinator,
+    ) as? JsonObject) ?: buildJsonObject {}
+}
+
+
 

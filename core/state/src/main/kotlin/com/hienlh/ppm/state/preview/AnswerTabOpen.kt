@@ -26,7 +26,7 @@ fun tabOpenRefusal(request: TabOpenRequest): String? = when (request) {
         !isHtmlFile(request.filePath) -> "the PPM Android app can show only HTML pages so far"
         else -> null
     }
-    is TabOpenRequest.Query -> "the PPM Android app cannot open database queries yet"
+    is TabOpenRequest.Query -> null
     is TabOpenRequest.Terminal -> null
     is TabOpenRequest.Other -> "the PPM Android app does not know the ${request.tool ?: "requested"} tool"
 }
@@ -37,8 +37,9 @@ fun tabOpenRefusal(request: TabOpenRequest): String? = when (request) {
  * answer — a silent device would leave the AI waiting for the server's timeout.
  *
  * [openFile] opens (or brings back) the file's tab beside the chat and says which preview shows
- * it; [openUrl] opens a web-preview tab; [openTerminal] attaches to the server's terminal.
- * Each throws, with what to tell the AI, when it cannot. A terminal never waits for a preview.
+ * it; [openUrl] opens a web-preview tab; [openTerminal] attaches to the server's terminal;
+ * [openQuery] opens a database Query tab without running the script.
+ * Each throws, with what to tell the AI, when it cannot. A terminal or query never waits for a preview.
  * [frame] is the device frame the page is seen in: "Phone" in the phone layout, else "Desktop".
  */
 suspend fun answerTabOpen(
@@ -51,6 +52,9 @@ suspend fun answerTabOpen(
     openTerminal: suspend (TabOpenRequest.Terminal) -> Unit = {
         throw UnsupportedOperationException("the PPM Android app has no terminal yet")
     },
+    openQuery: suspend (TabOpenRequest.Query) -> Unit = {
+        throw UnsupportedOperationException("the PPM Android app cannot open database queries yet")
+    },
 ): TabOpenAnswer {
     tabOpenRefusal(request)?.let { return TabOpenAnswer(opened = false, error = it) }
     val ticket = try {
@@ -61,6 +65,10 @@ suspend fun answerTabOpen(
             }
             is TabOpenRequest.Terminal -> {
                 openTerminal(request)
+                return TabOpenAnswer(opened = true)
+            }
+            is TabOpenRequest.Query -> {
+                openQuery(request)
                 return TabOpenAnswer(opened = true)
             }
             is TabOpenRequest.File -> openFile(AiTabTarget(request.tool, request.filePath, request.projectName, request.line))
