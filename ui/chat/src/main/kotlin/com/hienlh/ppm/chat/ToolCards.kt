@@ -47,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -66,6 +67,7 @@ import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.TextCursorRegion
 import com.hienlh.ppm.design.ThemeTokens
 import com.hienlh.ppm.design.TruncatedText
+import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
@@ -603,10 +605,13 @@ private fun ToolDetails(name: String, input: JsonElement, toolUseId: String? = n
                 // `hover:underline`, at once.
                 val hover = rememberHover(instant = true)
                 Row(
-                    Modifier.ppmClickable(pressedColor = tokens.surfaceHover.color, source = hover.source) { runCatching { uriHandler.openUri(url) } },
+                    Modifier
+                        .pointerHoverIcon(WebCursor.Pointer, overrideDescendants = true)
+                        .ppmClickable(pressedColor = Color.Transparent, source = hover.source) { runCatching { uriHandler.openUri(url) } },
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    PpmIcon(ProductIcon.Globe, 12.dp, tokens.accent.color, Modifier.padding(top = 2.dp))
+                    PpmIcon(ProductIcon.Globe, 12.dp, tokens.accent.color)
                     BasicText(
                         remember(url) { if (BREAK in url) url else breakAnywhere(url) },
                         style = monoText.copy(color = tokens.accent.color, textDecoration = if (hover.lit > 0f) TextDecoration.Underline else null),

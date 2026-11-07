@@ -2,17 +2,26 @@ package com.hienlh.ppm.app.ui
 
 import android.view.PointerIcon
 import android.view.View
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.moveTo
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performMouseInput
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.chat.FirstSendView
+import com.hienlh.ppm.chat.ToolCardView
+import com.hienlh.ppm.state.ToolBlock
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -98,5 +107,36 @@ class PathChipCursorTest {
         show(ide)
 
         assertEquals(icon(PointerIcon.TYPE_HAND), cursorAt(name()) { it / 2f })
+    }
+
+    @Test
+    fun `a WebFetch tool card URL shows the hand cursor and opens its link when clicked`() {
+        var opened: String? = null
+        val url = "https://example.com/docs"
+        compose.setContent {
+            view = LocalView.current
+            CompositionLocalProvider(LocalUriHandler provides object : UriHandler {
+                override fun openUri(uri: String) {
+                    opened = uri
+                }
+            }) {
+                ToolCardView(
+                    tool = ToolBlock(
+                        toolUseId = "u1",
+                        name = "WebFetch",
+                        input = buildJsonObject {
+                            put("url", url)
+                            put("prompt", "Read the docs")
+                        },
+                    ),
+                    completed = true,
+                )
+            }
+        }
+        compose.onNodeWithText("WebFetch", substring = true).performClick()
+        val link = compose.onAllNodes(hasClickAction())[1]
+        assertEquals(icon(PointerIcon.TYPE_HAND), cursorAt(link) { it / 2f })
+        link.performClick()
+        assertEquals(url, opened)
     }
 }
