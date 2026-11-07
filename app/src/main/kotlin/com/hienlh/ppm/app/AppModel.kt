@@ -2176,6 +2176,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         applyGitStatus(project, repo, com.hienlh.ppm.state.git.GitChangesView.changesToStatus(changes))
     }
 
+    fun refreshGitStatus(project: String? = selectedProject) {
+        val target = project ?: selectedProject ?: return
+        gitChanged.tryEmit(target)
+    }
+
     fun openGitReview(project: String, path: String? = null, repo: String? = null) {
         val select = if (!path.isNullOrEmpty() || !repo.isNullOrEmpty()) {
             buildJsonObject {

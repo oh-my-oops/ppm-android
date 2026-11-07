@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ui.git.GitGraphNativePanelBody
 import com.hienlh.ppm.design.FileIcons
 import com.hienlh.ppm.design.LocalIconFramework
 import com.hienlh.ppm.design.LocalPpmTheme
@@ -120,6 +121,33 @@ fun ExtensionWebviewBody(
             retryAttempt += 1
             model.dispatchExtCommand(cmd, recovery = true)
         }
+    }
+
+    val resolvedViewType = panel?.viewType ?: viewTypeMeta
+    if (resolvedViewType == "git-graph.view") {
+        if (panel == null) {
+            ExtensionLoadingOrFailedView(
+                title = tab.title,
+                failed = failed,
+                onRetry = {
+                    if (!viewTypeMeta.isNullOrEmpty()) {
+                        retryAttempt = 1
+                        failed = false
+                        val cmd = if (viewTypeMeta.endsWith(".view")) viewTypeMeta else "$viewTypeMeta.view"
+                        model.dispatchExtCommand(cmd, recovery = true)
+                    }
+                },
+                modifier = modifier,
+            )
+            return
+        }
+        GitGraphNativePanelBody(
+            model = model,
+            tab = tab,
+            panel = panel,
+            modifier = modifier,
+        )
+        return
     }
 
     if (!isWebViewModernEnough(context)) {
