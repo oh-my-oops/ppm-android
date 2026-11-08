@@ -311,7 +311,7 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
         }
     }
 
-    suspend fun loadStructure(targetTable: String = structure?.table ?: initialTableName) {
+    suspend fun loadStructure(targetTable: String = structure?.name ?: initialTableName) {
         val client = api ?: return
         if (targetTable.isBlank()) return
         loading = true
@@ -456,7 +456,7 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
                     project = project,
                     loginCoordinator = loginCoordinator,
                 )
-                parseStructurePreview(obj, defaultDialect = dialect) ?: error("Invalid structure preview response")
+                parseStructurePreview(obj) ?: error("Invalid structure preview response")
             },
             onApplyChange = { change, sql, allowRecreate ->
                 val client = api ?: error("Not connected")
@@ -506,11 +506,10 @@ internal fun DatabaseStructureTabContent(
     onOpenQueryTab: (sql: String, title: String) -> Unit = { _, _ -> },
     onPreviewChange: suspend (StructureChange) -> StructurePreview = {
         StructurePreview(
-            dialect = dialect,
-            transactionalDdl = dialect != "mysql",
-            recreate = false,
-            statements = emptyList(),
             sql = "-- DDL preview",
+            statements = emptyList(),
+            recreate = false,
+            transactional = dialect != "mysql",
         )
     },
     onApplyChange: suspend (change: StructureChange, sql: String, allowRecreate: Boolean) -> JsonObject = { _, _, _ ->
@@ -616,7 +615,7 @@ internal fun DatabaseStructureTabContent(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val titleLabel = if (isNewTable) "New table (${draftModel.name})" else (structure?.table ?: draftModel.name)
+            val titleLabel = if (isNewTable) "New table (${draftModel.name})" else (structure?.name ?: draftModel.name)
             BasicText(
                 "$titleLabel · Structure",
                 style = ppmText(12f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.text.color),
@@ -634,12 +633,12 @@ internal fun DatabaseStructureTabContent(
                 SettingsButton(
                     label = "Data ↗",
                     modifier = Modifier.testTag("db-structure-open-data-btn"),
-                    onClick = { onOpenDataTab(structure.table, structure.schema) },
+                    onClick = { onOpenDataTab(structure.name, structure.schema) },
                 )
                 SettingsButton(
                     label = "SQL ↗",
                     modifier = Modifier.testTag("db-structure-open-sql-btn"),
-                    onClick = { onOpenSqlTab(structure.table, structure.schema, structure.kind) },
+                    onClick = { onOpenSqlTab(structure.name, structure.schema, structure.kind) },
                 )
             }
             if (canEdit) {
@@ -797,10 +796,10 @@ internal fun DatabaseStructureTabContent(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             SettingsButton(
-                                label = "${if (draftModel.withoutRowId) "☑" else "☐"} WITHOUT ROWID",
-                                primary = draftModel.withoutRowId,
+                                label = "${if (draftModel.withoutRowid) "☑" else "☐"} WITHOUT ROWID",
+                                primary = draftModel.withoutRowid,
                                 modifier = Modifier.testTag("db-structure-without-rowid-checkbox"),
-                                onClick = { draftModel = draftModel.copy(withoutRowId = !draftModel.withoutRowId) },
+                                onClick = { draftModel = draftModel.copy(withoutRowid = !draftModel.withoutRowid) },
                             )
                             SettingsButton(
                                 label = "${if (draftModel.strict) "☑" else "☐"} STRICT",
@@ -1266,52 +1265,6 @@ internal fun DatabaseStructureTabContent(
                                     },
                                 )
                             }
-                        }
-                    }
-                }
-            }
-
-            // 7. Dependencies Section
-            val deps = structure?.dependencies.orEmpty()
-            if (deps.isNotEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(tokens.panel.color)
-                        .cssBorder(tokens.border.color)
-                        .padding(10.dp)
-                        .testTag("db-structure-section-dependencies"),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    BasicText(
-                        "DEPENDENCIES (${deps.size})",
-                        style = ppmText(11f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tokens.text2.color),
-                    )
-                    for (dep in deps) {
-                        val obj = dep.`object`
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    if (obj.kind == "table" || obj.kind == "view" || obj.kind == "matview") {
-                                        onOpenDataTab(obj.name, obj.schema)
-                                    } else {
-                                        onOpenSqlTab(obj.name, obj.schema, obj.kind)
-                                    }
-                                }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                                .testTag("db-structure-dep-link-${obj.name}"),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            BasicText(
-                                if (dep.direction == "uses") "Uses →" else "Used by ←",
-                                style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text3.color),
-                            )
-                            BasicText(
-                                "${obj.name} (${obj.kind})",
-                                style = ppmText(12f, FontWeight.Medium, FontKind.MONO).copy(color = tokens.accent.color),
-                            )
                         }
                     }
                 }
@@ -2072,7 +2025,7 @@ fun StructureSaveDialog(
                         BasicText("⚠ $w", style = ppmText(11f).copy(color = tokens.warning.color))
                     }
                 }
-                if (!curPreview.transactionalDdl) {
+                if (!curPreview.transactional) {
                     BasicText(
                         "Note: MySQL commits each DDL statement on its own; earlier statements cannot be rolled back if a later one fails.",
                         style = ppmText(11f).copy(color = tokens.warning.color),
@@ -2115,10 +2068,10 @@ fun StructureSaveDialog(
             val curFailure = failure
             if (curFailure != null) {
                 val reports = remember(curPreview, curFailure) {
-                    if (curPreview != null && curPreview.statements.isNotEmpty()) {
+                    if (curPreview != null) {
                         statementReports(curPreview, curFailure)
                     } else {
-                        statementReports(curFailure)
+                        emptyList()
                     }
                 }
                 Column(
@@ -2308,9 +2261,9 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
                 }
                 break
             }
-            val next = parseImpExpJobStatus(obj, sinceOffset = since)
+            val next = parseImpExpJobStatus(obj)
             val prevMessages = jobStatus?.messages.orEmpty()
-            val mergedMessages = (prevMessages + next.messages).distinctBy { it.id }
+            val mergedMessages = prevMessages + next.messages
             since = next.messageCount
             jobStatus = next.copy(messages = mergedMessages)
             if (next.state != "running" && next.state != "queued") break
@@ -2400,17 +2353,13 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
                         openStream = { bytes.inputStream() },
                     )
                 }.onSuccess { resObj ->
-                    val uploadId = resObj["uploadId"]?.string ?: resObj["id"]?.string
-                    val sources = (resObj["sources"] as? kotlinx.serialization.json.JsonArray)
-                        ?.mapNotNull { (it as? JsonPrimitive)?.string }
-                        .orEmpty()
+                    val id = resObj["id"]?.string
                     form = patchUpload(
                         form,
                         localId = localId,
                         state = "ready",
                         progress = 1.0,
-                        uploadId = uploadId,
-                        sources = sources,
+                        id = id,
                     )
                 }.onFailure { err ->
                     form = patchUpload(
@@ -2438,10 +2387,10 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
             if (form.sourceType != "database" && form.sourceType != "query") {
                 val u = form.uploads.firstOrNull { it.localId == row.uploadLocalId }
                     ?: error("Upload missing")
-                val uidStr = u.uploadId ?: error("Upload not ready")
+                val uidStr = u.id ?: error("Upload not ready")
                 val body = uploadPreviewRequest(form, row)
                 val obj = client.dbImpExpUploadPreview(uidStr, body)
-                withContext(Dispatchers.Default) { parseImportPreview(obj, source = row.source) }
+                withContext(Dispatchers.Default) { parseImportPreview(obj) }
             } else {
                 val cid = form.sourceDb.connectionId ?: error("No source connection")
                 val reqJson = buildGridRequestJson(
@@ -2461,8 +2410,6 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
                 withContext(Dispatchers.Default) {
                     val page = parseGridResponse(gridObj, countKey = row.source)
                     ImportPreviewResult(
-                        sources = listOf(row.source),
-                        source = row.source,
                         columns = page.columnKeys,
                         rows = page.rows.indices.map { page.rowAsMap(it) },
                     )
@@ -2513,10 +2460,8 @@ internal fun DatabaseImpExpTabContent(
     jobError: String? = null,
     onFormChange: (ImpExpForm) -> Unit = {},
     onPickUploadFiles: () -> Unit = {},
-    onPreviewRow: suspend (ImpExpRow) -> ImportPreviewResult = { row ->
+    onPreviewRow: suspend (ImpExpRow) -> ImportPreviewResult = { _ ->
         ImportPreviewResult(
-            sources = listOf(row.source),
-            source = row.source,
             columns = listOf("id", "name"),
             rows = listOf(mapOf("id" to DbCellValue.Num("1", 1.0), "name" to DbCellValue.Text("Alice"))),
         )
@@ -2566,6 +2511,7 @@ internal fun DatabaseImpExpTabContent(
     var configuringRow by remember { mutableStateOf<ImpExpRow?>(null) }
     var configureSourceCols by remember { mutableStateOf<List<String>>(emptyList()) }
     var previewDialogResult by remember { mutableStateOf<ImportPreviewResult?>(null) }
+    var previewDialogTitle by remember { mutableStateOf("") }
     var shownLevels by remember { mutableStateOf(DEFAULT_SHOWN_LEVELS) }
     var msgFilterText by remember { mutableStateOf("") }
     var preserveLogs by remember { mutableStateOf(false) }
@@ -3090,7 +3036,10 @@ internal fun DatabaseImpExpTabContent(
                                 modifier = Modifier.testTag("db-impexp-row-preview-btn-${row.source}"),
                                 onClick = {
                                     scope.launch {
-                                        runCatching { onPreviewRow(row) }.onSuccess { previewDialogResult = it }
+                                        runCatching { onPreviewRow(row) }.onSuccess {
+                                            previewDialogTitle = row.sourceLabel
+                                            previewDialogResult = it
+                                        }
                                     }
                                 },
                             )
@@ -3134,18 +3083,9 @@ internal fun DatabaseImpExpTabContent(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         BasicText(
-                            "JOB ${jobStatus.state.uppercase()} (${formatImpExpDuration(jobStatus.startedAt, jobStatus.finishedAt)})",
+                            "JOB ${jobStatus.state.uppercase()} (${formatImpExpDuration(jobStatus.startedAt, jobStatus.endedAt)})",
                             style = ppmText(11f, FontWeight.SemiBold, FontKind.MONO).copy(color = tokens.text.color),
                         )
-                        val zip = jobStatus.zipFile
-                        if (zip != null) {
-                            SettingsButton(
-                                label = "⬇ Download ${zip.name}",
-                                primary = true,
-                                modifier = Modifier.testTag("db-impexp-download-zip"),
-                                onClick = { onDownloadOutputFile(zip) },
-                            )
-                        }
                         for (f in jobStatus.files) {
                             SettingsButton(
                                 label = "⬇ ${f.name}",
@@ -3207,11 +3147,11 @@ internal fun DatabaseImpExpTabContent(
                     ) {
                         for (m in filteredMsgs) {
                             BasicText(
-                                "${messageClock(m.at)} [${m.level.uppercase()}]${if (!m.item.isNullOrEmpty()) " [${m.item}]" else ""} ${m.text}",
+                                "${messageClock(m.time)} [${m.level.uppercase()}] ${m.text}",
                                 style = ppmText(11f, kind = FontKind.MONO).copy(
                                     color = when (m.level) {
                                         "error" -> tokens.error.color
-                                        "warn" -> tokens.warning.color
+                                        "warning" -> tokens.warning.color
                                         else -> tokens.text2.color
                                     },
                                 ),
@@ -3357,7 +3297,7 @@ internal fun DatabaseImpExpTabContent(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     BasicText(
-                        "Preview · ${prevRes.source} (${prevRes.rows.size} rows)",
+                        "Preview · $previewDialogTitle (${prevRes.rows.size} rows)",
                         style = ppmText(13f, FontWeight.SemiBold).copy(color = tokens.text.color),
                     )
                     SettingsButton(

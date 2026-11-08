@@ -39,7 +39,6 @@ import kotlinx.serialization.json.put
 // ── 9f.1 Database Structure Models (`src/shared/db-structure.ts`, `structure-model.ts`) ──
 
 data class DbStructureColumn(
-    val ordinal: Int,
     val name: String,
     val type: String,
     val nullable: Boolean,
@@ -47,11 +46,8 @@ data class DbStructureColumn(
     val generated: Boolean = false,
     val computedExpression: String? = null,
     val autoIncrement: Boolean = false,
-    val unsigned: Boolean? = null,
-    val zeroFill: Boolean? = null,
     val comment: String? = null,
     val collation: String? = null,
-    val charset: String? = null,
     val computedStored: Boolean = false,
     val onUpdate: String? = null,
     val identity: String? = null,
@@ -67,9 +63,8 @@ data class DbPrimaryKey(
 
 data class DbIndexKey(
     val column: String? = null,
-    val order: String = "ASC", // "ASC" | "DESC"
     val expression: String? = null,
-    val descending: Boolean = order.equals("DESC", ignoreCase = true),
+    val descending: Boolean = false,
     val nulls: String? = null,
     val length: Int? = null,
     val opclass: String? = null,
@@ -85,10 +80,7 @@ data class DbIndex(
     val method: String? = null,
     val keys: List<DbIndexKey> = emptyList(),
     val where: String? = null,
-) {
-    val type: String? get() = method
-    val filter: String? get() = where
-}
+)
 
 data class DbUniqueConstraint(
     val name: String?,
@@ -100,26 +92,18 @@ data class DbForeignKey(
     val schema: String? = null,
     val table: String = "",
     val columns: List<String>,
-    val referencedSchema: String?,
-    val referencedTable: String,
-    val referencedColumns: List<String>,
-    val onUpdate: String? = null,
-    val onDelete: String? = null,
-) {
-    val refSchema: String? get() = referencedSchema
-    val refTable: String get() = referencedTable
-    val refColumns: List<String> get() = referencedColumns
-    val sourceSchema: String? get() = schema
-    val sourceTable: String get() = table
-}
+    val refSchema: String?,
+    val refTable: String,
+    val refColumns: List<String>,
+    val onUpdate: String = "NO ACTION",
+    val onDelete: String = "NO ACTION",
+)
 
 data class DbCheckConstraint(
     val name: String?,
     val expression: String,
     val column: String? = null,
 ) {
-    val definition: String get() = expression
-
     fun toJsonObject(): JsonObject = buildJsonObject {
         put("name", name?.takeIf { it.isNotEmpty() }?.let(::JsonPrimitive) ?: JsonNull)
         put("expression", expression)
@@ -127,34 +111,14 @@ data class DbCheckConstraint(
     }
 }
 
-data class DbTrigger(
-    val name: String,
-    val timing: String,
-    val events: List<String>,
-    val definition: String? = null,
-)
-
-data class DbStructureObjectRef(
-    val schema: String?,
-    val name: String,
-    val kind: String = "table", // "table" | "view" | "matview" | "procedure" | "function" | "trigger" | "sequence"
-)
-
-data class DbDependency(
-    val direction: String, // "uses" | "usedBy"
-    val `object`: DbStructureObjectRef,
-    val via: String? = null,
-)
-
 data class DbTableStructure(
-    val database: String? = null,
     val schema: String? = null,
-    val table: String,
+    val name: String,
     val kind: String = "table", // "table" | "view" | "matview" | "foreign"
     val comment: String? = null,
     val engine: String? = null,
-    val withoutRowId: Boolean? = null,
-    val strict: Boolean? = null,
+    val withoutRowid: Boolean = false,
+    val strict: Boolean = false,
     val columns: List<DbStructureColumn> = emptyList(),
     val primaryKey: DbPrimaryKey? = null,
     val indexes: List<DbIndex> = emptyList(),
@@ -162,15 +126,9 @@ data class DbTableStructure(
     val foreignKeys: List<DbForeignKey> = emptyList(),
     val references: List<DbForeignKey> = emptyList(),
     val checks: List<DbCheckConstraint> = emptyList(),
-    val triggers: List<DbTrigger> = emptyList(),
-    val dependencies: List<DbDependency> = emptyList(),
     val rowKey: List<String> = emptyList(),
     val rowKeyIsRowid: Boolean = false,
-) {
-    val name: String get() = table
-    val withoutRowid: Boolean get() = withoutRowId == true
-    val referencedBy: List<DbForeignKey> get() = references
-}
+)
 
 private fun JsonObject.strOrNull(key: String): String? =
     (this[key] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull
@@ -185,47 +143,37 @@ private fun JsonObject.strList(key: String): List<String> =
     ((this[key] as? JsonArray).orEmpty()).mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p !is JsonNull }?.contentOrNull }
 
 fun parseDbForeignKey(obj: JsonObject, defaultRefTable: String? = null): DbForeignKey? {
-    val sourceSchema = obj.strOrNull("sourceSchema") ?: obj.strOrNull("schema")
-    val sourceTable = obj.strOrNull("sourceTable") ?: obj.strOrNull("table") ?: ""
-    val referencedSchema = obj.strOrNull("refSchema") ?: obj.strOrNull("referencedSchema")
-    val referencedTable = obj.strOrNull("refTable") ?: obj.strOrNull("referencedTable") ?: defaultRefTable ?: return null
-    val cols = obj.strList("columns")
-    val refCols = obj.strList("refColumns").ifEmpty { obj.strList("referencedColumns") }
+    val refTable = obj.strOrNull("refTable") ?: defaultRefTable ?: return null
     return DbForeignKey(
         name = obj.strOrNull("name"),
-        schema = sourceSchema,
-        table = sourceTable,
-        columns = cols,
-        referencedSchema = referencedSchema,
-        referencedTable = referencedTable,
-        referencedColumns = refCols,
-        onUpdate = obj.strOrNull("onUpdate"),
-        onDelete = obj.strOrNull("onDelete"),
+        schema = obj.strOrNull("schema"),
+        table = obj.strOrNull("table") ?: "",
+        columns = obj.strList("columns"),
+        refSchema = obj.strOrNull("refSchema"),
+        refTable = refTable,
+        refColumns = obj.strList("refColumns"),
+        onUpdate = obj.strOrNull("onUpdate") ?: "NO ACTION",
+        onDelete = obj.strOrNull("onDelete") ?: "NO ACTION",
     )
 }
 
 fun parseDbTableStructure(json: JsonObject): DbTableStructure {
-    val table = json.strOrNull("name") ?: json.strOrNull("table").orEmpty()
-    val columns = ((json["columns"] as? JsonArray).orEmpty()).mapIndexedNotNull { idx, el ->
-        val c = el as? JsonObject ?: return@mapIndexedNotNull null
-        val name = c.strOrNull("name") ?: return@mapIndexedNotNull null
+    val name = json.strOrNull("name").orEmpty()
+    val columns = ((json["columns"] as? JsonArray).orEmpty()).mapNotNull { el ->
+        val c = el as? JsonObject ?: return@mapNotNull null
+        val colName = c.strOrNull("name") ?: return@mapNotNull null
         val computedExpr = c.strOrNull("computedExpression")
-            ?: c.strOrNull("generated")?.takeIf { it != "true" && it != "false" }
         val isGenerated = c.boolOrNull("generated") ?: !computedExpr.isNullOrEmpty()
         DbStructureColumn(
-            ordinal = c.intOrNull("ordinalPosition") ?: c.intOrNull("ordinal") ?: (idx + 1),
-            name = name,
+            name = colName,
             type = c.strOrNull("type").orEmpty(),
             nullable = c.boolOrNull("nullable") ?: true,
             defaultValue = c.strOrNull("defaultValue"),
             generated = isGenerated,
             computedExpression = computedExpr,
             autoIncrement = c.boolOrNull("autoIncrement") ?: false,
-            unsigned = c.boolOrNull("unsigned"),
-            zeroFill = c.boolOrNull("zerofill") ?: c.boolOrNull("zeroFill"),
             comment = c.strOrNull("comment"),
             collation = c.strOrNull("collation"),
-            charset = c.strOrNull("charset"),
             computedStored = c.boolOrNull("computedStored") ?: false,
             onUpdate = c.strOrNull("onUpdate"),
             identity = c.strOrNull("identity"),
@@ -242,17 +190,16 @@ fun parseDbTableStructure(json: JsonObject): DbTableStructure {
 
     val indexes = ((json["indexes"] as? JsonArray).orEmpty()).mapNotNull { el ->
         val idxObj = el as? JsonObject ?: return@mapNotNull null
-        val name = idxObj.strOrNull("name") ?: return@mapNotNull null
+        val idxName = idxObj.strOrNull("name") ?: return@mapNotNull null
         val idxCols = idxObj.strList("columns")
         val parsedKeys = ((idxObj["keys"] as? JsonArray).orEmpty()).mapNotNull { kEl ->
             val kObj = kEl as? JsonObject ?: return@mapNotNull null
             val col = kObj.strOrNull("column")
             val expr = kObj.strOrNull("expression")?.takeIf { it != "true" && it != "false" }
             if (col == null && expr == null) return@mapNotNull null
-            val desc = kObj.boolOrNull("descending") ?: (kObj.strOrNull("order") == "DESC")
+            val desc = kObj.boolOrNull("descending") ?: false
             DbIndexKey(
                 column = col,
-                order = if (desc) "DESC" else "ASC",
                 expression = expr,
                 descending = desc,
                 nulls = kObj.strOrNull("nulls"),
@@ -261,16 +208,16 @@ fun parseDbTableStructure(json: JsonObject): DbTableStructure {
             )
         }
         val keys = parsedKeys.ifEmpty {
-            idxCols.map { col -> DbIndexKey(column = col, order = "ASC", expression = null, descending = false) }
+            idxCols.map { col -> DbIndexKey(column = col, expression = null, descending = false) }
         }
         DbIndex(
-            name = name,
+            name = idxName,
             unique = idxObj.boolOrNull("unique") ?: false,
             primary = idxObj.boolOrNull("primary") ?: false,
             columns = idxCols.ifEmpty { keys.mapNotNull { it.column } },
-            method = idxObj.strOrNull("method") ?: idxObj.strOrNull("type"),
+            method = idxObj.strOrNull("method"),
             keys = keys,
-            where = idxObj.strOrNull("where") ?: idxObj.strOrNull("filter"),
+            where = idxObj.strOrNull("where"),
         )
     }
 
@@ -286,14 +233,13 @@ fun parseDbTableStructure(json: JsonObject): DbTableStructure {
         (el as? JsonObject)?.let(::parseDbForeignKey)
     }
 
-    val referencesJson = (json["references"] as? JsonArray) ?: (json["referencedBy"] as? JsonArray)
-    val references = referencesJson.orEmpty().mapNotNull { el ->
-        (el as? JsonObject)?.let { parseDbForeignKey(it, defaultRefTable = table) }
+    val references = ((json["references"] as? JsonArray).orEmpty()).mapNotNull { el ->
+        (el as? JsonObject)?.let { parseDbForeignKey(it, defaultRefTable = name) }
     }
 
     val checks = ((json["checks"] as? JsonArray).orEmpty()).mapNotNull { el ->
         val chObj = el as? JsonObject ?: return@mapNotNull null
-        val expr = chObj.strOrNull("expression") ?: chObj.strOrNull("definition") ?: return@mapNotNull null
+        val expr = chObj.strOrNull("expression") ?: return@mapNotNull null
         DbCheckConstraint(
             name = chObj.strOrNull("name"),
             expression = expr,
@@ -301,42 +247,14 @@ fun parseDbTableStructure(json: JsonObject): DbTableStructure {
         )
     }
 
-    val triggers = ((json["triggers"] as? JsonArray).orEmpty()).mapNotNull { el ->
-        val trObj = el as? JsonObject ?: return@mapNotNull null
-        val trName = trObj.strOrNull("name") ?: return@mapNotNull null
-        DbTrigger(
-            name = trName,
-            timing = trObj.strOrNull("timing").orEmpty(),
-            events = trObj.strList("events"),
-            definition = trObj.strOrNull("definition"),
-        )
-    }
-
-    val dependencies = ((json["dependencies"] as? JsonArray).orEmpty()).mapNotNull { el ->
-        val depObj = el as? JsonObject ?: return@mapNotNull null
-        val dir = depObj.strOrNull("direction") ?: return@mapNotNull null
-        val objJson = depObj["object"] as? JsonObject ?: return@mapNotNull null
-        val objName = objJson.strOrNull("name") ?: return@mapNotNull null
-        DbDependency(
-            direction = dir,
-            `object` = DbStructureObjectRef(
-                schema = objJson.strOrNull("schema"),
-                name = objName,
-                kind = objJson.strOrNull("kind") ?: "table",
-            ),
-            via = depObj.strOrNull("via"),
-        )
-    }
-
     return DbTableStructure(
-        database = json.strOrNull("database"),
         schema = json.strOrNull("schema"),
-        table = table,
+        name = name,
         kind = json.strOrNull("kind") ?: "table",
         comment = json.strOrNull("comment"),
         engine = json.strOrNull("engine"),
-        withoutRowId = json.boolOrNull("withoutRowid") ?: json.boolOrNull("withoutRowId"),
-        strict = json.boolOrNull("strict"),
+        withoutRowid = json.boolOrNull("withoutRowid") ?: false,
+        strict = json.boolOrNull("strict") ?: false,
         columns = columns,
         primaryKey = primaryKey,
         indexes = indexes,
@@ -344,8 +262,6 @@ fun parseDbTableStructure(json: JsonObject): DbTableStructure {
         foreignKeys = foreignKeys,
         references = references,
         checks = checks,
-        triggers = triggers,
-        dependencies = dependencies,
         rowKey = json.strList("rowKey"),
         rowKeyIsRowid = json.boolOrNull("rowKeyIsRowid") ?: false,
     )
@@ -370,8 +286,8 @@ data class StructureColumnRow(
 data class StructureForeignKeyRow(
     val constraintName: String,
     val columns: String,
-    val referencedSchema: String?,
-    val referencedTable: String,
+    val refSchema: String?,
+    val refTable: String,
     val referencedLabel: String,
     val onUpdate: String,
     val onDelete: String,
@@ -379,16 +295,17 @@ data class StructureForeignKeyRow(
 
 fun columnRows(structure: DbTableStructure): List<StructureColumnRow> {
     val pkSet = structure.primaryKey?.columns?.toSet().orEmpty()
-    return structure.columns.map { col ->
+    return structure.columns.mapIndexed { idx, col ->
+        val split = splitMysqlType(col)
         StructureColumnRow(
-            ordinal = col.ordinal,
+            ordinal = idx + 1,
             name = col.name,
             dataType = col.type,
             notNull = !col.nullable,
             isPrimaryKey = col.name in pkSet,
             isAutoIncrement = col.autoIncrement,
-            isUnsigned = col.unsigned == true,
-            isZeroFill = col.zeroFill == true,
+            isUnsigned = split.isUnsigned,
+            isZeroFill = split.isZeroFill,
             defaultValue = col.defaultValue.orEmpty(),
             computedExpression = if (col.generated) col.computedExpression.orEmpty() else "",
             comment = col.comment.orEmpty(),
@@ -398,18 +315,18 @@ fun columnRows(structure: DbTableStructure): List<StructureColumnRow> {
 
 fun foreignKeyRow(fk: DbForeignKey, currentSchema: String?): StructureForeignKeyRow {
     val pairText = fk.columns.mapIndexed { i, col ->
-        "$col -> ${fk.referencedColumns.getOrNull(i) ?: "?"}"
+        "$col -> ${fk.refColumns.getOrNull(i) ?: "?"}"
     }.joinToString(", ")
-    val showSchema = fk.referencedSchema != null && fk.referencedSchema != currentSchema
-    val referencedLabel = if (showSchema) "${fk.referencedSchema}.${fk.referencedTable}" else fk.referencedTable
+    val showSchema = fk.refSchema != null && fk.refSchema != currentSchema
+    val referencedLabel = if (showSchema) "${fk.refSchema}.${fk.refTable}" else fk.refTable
     return StructureForeignKeyRow(
         constraintName = fk.name.orEmpty(),
         columns = pairText,
-        referencedSchema = fk.referencedSchema,
-        referencedTable = fk.referencedTable,
+        refSchema = fk.refSchema,
+        refTable = fk.refTable,
         referencedLabel = referencedLabel,
-        onUpdate = fk.onUpdate.orEmpty(),
-        onDelete = fk.onDelete.orEmpty(),
+        onUpdate = fk.onUpdate,
+        onDelete = fk.onDelete,
     )
 }
 
@@ -424,12 +341,6 @@ fun columnNames(columns: List<DbStructureColumn>, indices: Set<Int>): String {
 
 fun columnDefinition(col: DbStructureColumn, isPrimaryKey: Boolean): String {
     val parts = mutableListOf(col.name, col.type)
-    if (col.unsigned == true && !Regex("""\bunsigned\b""", RegexOption.IGNORE_CASE).containsMatchIn(col.type)) {
-        parts += "UNSIGNED"
-    }
-    if (col.zeroFill == true && !Regex("""\bzerofill\b""", RegexOption.IGNORE_CASE).containsMatchIn(col.type)) {
-        parts += "ZEROFILL"
-    }
     if (isPrimaryKey) parts += "PRIMARY KEY"
     if (!col.nullable) parts += "NOT NULL"
     if (col.autoIncrement) parts += "AUTO_INCREMENT"
@@ -600,7 +511,7 @@ data class TableModel(
     val name: String,
     val comment: String = "",
     val tableEngine: String = "",
-    val withoutRowId: Boolean = false,
+    val withoutRowid: Boolean = false,
     val strict: Boolean = false,
     val columns: List<TableModelColumn> = emptyList(),
     val primaryKey: TableModelPrimaryKey? = null,
@@ -610,7 +521,6 @@ data class TableModel(
     val checks: List<DbCheckConstraint> = emptyList(),
 ) {
     val engine: String? get() = tableEngine.trim().ifEmpty { null }
-    val withoutRowid: Boolean get() = withoutRowId
 
     fun toJsonObject(): JsonObject = buildJsonObject {
         put("schema", schema?.let(::JsonPrimitive) ?: JsonNull)
@@ -636,7 +546,7 @@ data class TableModel(
         )
         put("comment", comment.ifEmpty { null }?.let(::JsonPrimitive) ?: JsonNull)
         put("engine", engine?.let(::JsonPrimitive) ?: JsonNull)
-        put("withoutRowid", withoutRowId)
+        put("withoutRowid", withoutRowid)
         put("strict", strict)
     }
 }
@@ -651,11 +561,11 @@ fun parseTableModel(obj: JsonObject?, defaultDialect: String = "postgres"): Tabl
     val fksArr = obj["foreignKeys"] as? JsonArray ?: return null
     val checksArr = obj["checks"] as? JsonArray ?: return null
 
-    val dialect = obj.strOrNull("dialect")?.takeIf { it.isNotBlank() } ?: defaultDialect
+    val dialect = defaultDialect
     val schema = obj.strOrNull("schema")
     val comment = obj.strOrNull("comment").orEmpty()
-    val engine = (obj.strOrNull("engine") ?: obj.strOrNull("tableEngine")).orEmpty()
-    val withoutRowId = (obj.boolOrNull("withoutRowid") == true) || (obj.boolOrNull("withoutRowId") == true)
+    val engine = obj.strOrNull("engine").orEmpty()
+    val withoutRowid = obj.boolOrNull("withoutRowid") == true
     val strict = obj.boolOrNull("strict") == true
 
     val columns = colsArr.mapNotNull { el ->
@@ -664,11 +574,11 @@ fun parseTableModel(obj: JsonObject?, defaultDialect: String = "postgres"): Tabl
         TableModelColumn(
             id = c.strOrNull("id")?.takeIf { it.isNotBlank() } ?: "c:$cName",
             name = cName,
-            dataType = c.strOrNull("type") ?: c.strOrNull("dataType") ?: "text",
+            dataType = c.strOrNull("type") ?: "text",
             notNull = c.boolOrNull("notNull") == true,
             autoIncrement = c.boolOrNull("autoIncrement") == true,
-            isUnsigned = (c.boolOrNull("unsigned") == true) || (c.boolOrNull("isUnsigned") == true),
-            isZeroFill = (c.boolOrNull("zerofill") == true) || (c.boolOrNull("isZeroFill") == true),
+            isUnsigned = c.boolOrNull("unsigned") == true,
+            isZeroFill = c.boolOrNull("zerofill") == true,
             defaultValue = c.strOrNull("defaultValue").orEmpty(),
             computedExpression = c.strOrNull("computedExpression").orEmpty(),
             computedStored = c.boolOrNull("computedStored") == true,
@@ -682,10 +592,10 @@ fun parseTableModel(obj: JsonObject?, defaultDialect: String = "postgres"): Tabl
 
     val pkObj = obj["primaryKey"] as? JsonObject
     val primaryKey = if (pkObj != null) {
-        val pkCols = pkObj.strList("columns").ifEmpty { pkObj.strList("columnIds") }
+        val pkCols = pkObj.strList("columns")
         if (pkCols.isNotEmpty()) {
             TableModelPrimaryKey(
-                constraintName = pkObj.strOrNull("name") ?: pkObj.strOrNull("constraintName").orEmpty(),
+                constraintName = pkObj.strOrNull("name").orEmpty(),
                 columnIds = pkCols,
                 id = pkObj.strOrNull("id")?.takeIf { it.isNotBlank() } ?: "pk",
             )
@@ -700,7 +610,7 @@ fun parseTableModel(obj: JsonObject?, defaultDialect: String = "postgres"): Tabl
         val iObj = el as? JsonObject ?: return@mapNotNull null
         val iCols = (iObj["columns"] as? JsonArray)?.mapNotNull { kEl ->
             val kObj = kEl as? JsonObject ?: return@mapNotNull null
-            val desc = (kObj.boolOrNull("descending") == true) || (kObj.strOrNull("order")?.equals("DESC", ignoreCase = true) == true)
+            val desc = kObj.boolOrNull("descending") == true
             TableModelIndexColumn(
                 columnId = kObj.strOrNull("columnId"),
                 order = if (desc) "DESC" else "ASC",
@@ -710,21 +620,21 @@ fun parseTableModel(obj: JsonObject?, defaultDialect: String = "postgres"): Tabl
                 opclass = kObj.strOrNull("opclass"),
             )
         }.orEmpty()
-        val cName = iObj.strOrNull("name") ?: iObj.strOrNull("constraintName").orEmpty()
+        val cName = iObj.strOrNull("name").orEmpty()
         TableModelIndex(
             id = iObj.strOrNull("id")?.takeIf { it.isNotBlank() } ?: "i:$cName",
             constraintName = cName,
-            isUnique = (iObj.boolOrNull("unique") == true) || (iObj.boolOrNull("isUnique") == true),
-            indexType = iObj.strOrNull("method") ?: iObj.strOrNull("indexType").orEmpty(),
-            filter = iObj.strOrNull("where") ?: iObj.strOrNull("filter").orEmpty(),
+            isUnique = iObj.boolOrNull("unique") == true,
+            indexType = iObj.strOrNull("method").orEmpty(),
+            filter = iObj.strOrNull("where").orEmpty(),
             columns = iCols,
         )
     }
 
     val uniques = uniquesArr.mapNotNull { el ->
         val uObj = el as? JsonObject ?: return@mapNotNull null
-        val uName = uObj.strOrNull("name") ?: uObj.strOrNull("constraintName").orEmpty()
-        val uCols = uObj.strList("columns").ifEmpty { uObj.strList("columnIds") }
+        val uName = uObj.strOrNull("name").orEmpty()
+        val uCols = uObj.strList("columns")
         TableModelUnique(
             id = uObj.strOrNull("id")?.takeIf { it.isNotBlank() } ?: "u:$uName",
             constraintName = uName,
@@ -734,18 +644,18 @@ fun parseTableModel(obj: JsonObject?, defaultDialect: String = "postgres"): Tabl
 
     val foreignKeys = fksArr.mapNotNull { el ->
         val fkObj = el as? JsonObject ?: return@mapNotNull null
-        val fkName = fkObj.strOrNull("name") ?: fkObj.strOrNull("constraintName").orEmpty()
-        val fkCols = fkObj.strList("columns").ifEmpty { fkObj.strList("columnIds") }
-        val refCols = fkObj.strList("refColumns").ifEmpty { fkObj.strList("referencedColumns") }
+        val fkName = fkObj.strOrNull("name").orEmpty()
+        val fkCols = fkObj.strList("columns")
+        val refCols = fkObj.strList("refColumns")
         TableModelForeignKey(
             id = fkObj.strOrNull("id")?.takeIf { it.isNotBlank() } ?: "f:$fkName",
             constraintName = fkName,
             columnIds = fkCols,
-            referencedSchema = fkObj.strOrNull("refSchema") ?: fkObj.strOrNull("referencedSchema"),
-            referencedTable = fkObj.strOrNull("refTable") ?: fkObj.strOrNull("referencedTable").orEmpty(),
+            referencedSchema = fkObj.strOrNull("refSchema"),
+            referencedTable = fkObj.strOrNull("refTable").orEmpty(),
             referencedColumns = refCols,
-            onUpdateAction = fkObj.strOrNull("onUpdate") ?: fkObj.strOrNull("onUpdateAction").orEmpty(),
-            onDeleteAction = fkObj.strOrNull("onDelete") ?: fkObj.strOrNull("onDeleteAction").orEmpty(),
+            onUpdateAction = fkObj.strOrNull("onUpdate").orEmpty(),
+            onDeleteAction = fkObj.strOrNull("onDelete").orEmpty(),
         )
     }
 
@@ -765,7 +675,7 @@ fun parseTableModel(obj: JsonObject?, defaultDialect: String = "postgres"): Tabl
         name = name,
         comment = comment,
         tableEngine = engine,
-        withoutRowId = withoutRowId,
+        withoutRowid = withoutRowid,
         strict = strict,
         columns = columns,
         primaryKey = primaryKey,
@@ -895,8 +805,8 @@ fun splitMysqlType(col: DbStructureColumn): SplitMysqlTypeResult {
             .replace(MULTI_SPACE_RE, " ")
             .trim()
     }
-    val isZeroFill = col.zeroFill == true || zeroFillInType
-    val isUnsigned = col.unsigned == true || unsignedInType || isZeroFill
+    val isZeroFill = zeroFillInType
+    val isUnsigned = unsignedInType || isZeroFill
     return SplitMysqlTypeResult(
         dataType = dataType,
         isUnsigned = isUnsigned,
@@ -926,8 +836,8 @@ fun modelFromStructure(structure: DbTableStructure, dialect: String = "postgres"
         } else {
             SplitMysqlTypeResult(
                 dataType = col.type,
-                isUnsigned = col.unsigned == true,
-                isZeroFill = col.zeroFill == true,
+                isUnsigned = false,
+                isZeroFill = false,
             )
         }
         TableModelColumn(
@@ -970,7 +880,7 @@ fun modelFromStructure(structure: DbTableStructure, dialect: String = "postgres"
                 val known = key.column != null && idByName.containsKey(key.column)
                 TableModelIndexColumn(
                     columnId = if (known) colId(key.column!!) else null,
-                    order = key.order,
+                    order = if (key.descending) "DESC" else "ASC",
                     expression = if (known) null else (key.expression ?: key.column),
                     nulls = key.nulls,
                     length = key.length,
@@ -993,22 +903,22 @@ fun modelFromStructure(structure: DbTableStructure, dialect: String = "postgres"
             id = if (fk.name != null) "fk:${fk.name}" else "fk#$i",
             constraintName = fk.name.orEmpty(),
             columnIds = fk.columns.map(colId),
-            referencedSchema = fk.referencedSchema,
-            referencedTable = fk.referencedTable,
-            referencedColumns = fk.referencedColumns.toList(),
-            onUpdateAction = fk.onUpdate.orEmpty(),
-            onDeleteAction = fk.onDelete.orEmpty(),
+            referencedSchema = fk.refSchema,
+            referencedTable = fk.refTable,
+            referencedColumns = fk.refColumns.toList(),
+            onUpdateAction = fk.onUpdate,
+            onDeleteAction = fk.onDelete,
         )
     }
 
     return TableModel(
         dialect = dialect,
         schema = structure.schema,
-        name = structure.table,
+        name = structure.name,
         comment = structure.comment.orEmpty(),
         tableEngine = structure.engine.orEmpty(),
-        withoutRowId = structure.withoutRowid == true,
-        strict = structure.strict == true,
+        withoutRowid = structure.withoutRowid,
+        strict = structure.strict,
         columns = columns,
         primaryKey = primaryKey,
         indexes = indexes,
@@ -1054,7 +964,7 @@ fun newTableModel(dialect: String, schema: String?): TableModel {
         name = "new_table",
         comment = "",
         tableEngine = "",
-        withoutRowId = false,
+        withoutRowid = false,
         strict = false,
         columns = listOf(first),
         primaryKey = TableModelPrimaryKey(constraintName = "", columnIds = listOf(first.id), id = "pk"),
@@ -1200,7 +1110,7 @@ fun sameTableModel(a: TableModel, b: TableModel): Boolean {
         trimOrEmpty(a.name) != trimOrEmpty(b.name) ||
         a.comment != b.comment ||
         trimOrEmpty(a.tableEngine) != trimOrEmpty(b.tableEngine) ||
-        a.withoutRowId != b.withoutRowId ||
+        a.withoutRowid != b.withoutRowid ||
         a.strict != b.strict
     ) {
         return false
@@ -1609,11 +1519,10 @@ fun modelColumnDefinitions(model: TableModel, selectedIds: Set<String>): String 
     }
     val fakeStructure = DbTableStructure(
         schema = model.schema,
-        table = model.name,
+        name = model.name,
         kind = "table",
-        columns = cols.mapIndexed { i, c ->
+        columns = cols.map { c ->
             DbStructureColumn(
-                ordinal = i + 1,
                 name = c.name,
                 type = c.dataType,
                 nullable = !c.notNull,
@@ -1621,8 +1530,6 @@ fun modelColumnDefinitions(model: TableModel, selectedIds: Set<String>): String 
                 generated = c.computedExpression.isNotEmpty(),
                 computedExpression = c.computedExpression.ifEmpty { null },
                 autoIncrement = c.autoIncrement,
-                unsigned = c.isUnsigned,
-                zeroFill = c.isZeroFill,
                 comment = c.comment.ifEmpty { null },
             )
         },
@@ -1900,20 +1807,16 @@ fun backupTableName(table: String, atEpochMillis: Long = System.currentTimeMilli
 
 data class StructureStatement(
     val sql: String,
-    val recreatesTable: Boolean = false,
     val phase: String? = null, // "before" | "after" | null
 )
 
 data class StructurePreview(
-    val dialect: String = "",
-    val transactionalDdl: Boolean = true,
-    val recreate: Boolean = false,
-    val statements: List<StructureStatement> = emptyList(),
     val sql: String = "",
+    val statements: List<StructureStatement> = emptyList(),
+    val recreate: Boolean = false,
     val warnings: List<String> = emptyList(),
-) {
-    val transactional: Boolean get() = transactionalDdl
-}
+    val transactional: Boolean = true,
+)
 
 data class StructureFailure(
     val statement: String = "",
@@ -1921,10 +1824,6 @@ data class StructureFailure(
     val applied: Int = 0,
     val total: Int = 0,
     val error: String = "",
-    val failedIndex: Int = index,
-    val ranCount: Int = applied,
-    val rolledBack: Boolean = false,
-    val statements: List<String> = emptyList(),
 )
 
 enum class StatementOutcome(val wire: String, val label: String) {
@@ -1942,8 +1841,7 @@ data class StatementReport(
     val outcome: StatementOutcome,
 )
 
-fun parseStructurePreview(json: JsonObject, defaultDialect: String = ""): StructurePreview? {
-    val dialect = json.strOrNull("dialect") ?: defaultDialect
+fun parseStructurePreview(json: JsonObject): StructurePreview? {
     val sql = (json["sql"] as? JsonPrimitive)?.contentOrNull ?: return null
     val statementsArr = json["statements"] as? JsonArray ?: return null
     val statements = mutableListOf<StructureStatement>()
@@ -1955,7 +1853,6 @@ fun parseStructurePreview(json: JsonObject, defaultDialect: String = ""): Struct
                 if (phase != null && phase != "before" && phase != "after") return null
                 statements += StructureStatement(
                     sql = stmtSql,
-                    recreatesTable = el.boolOrNull("recreatesTable") ?: false,
                     phase = phase,
                 )
             }
@@ -1966,63 +1863,35 @@ fun parseStructurePreview(json: JsonObject, defaultDialect: String = ""): Struct
             else -> return null
         }
     }
-    val transactional = json.boolOrNull("transactional")
-        ?: json.boolOrNull("transactionalDdl")
-        ?: (if (dialect.isNotEmpty()) dialect != "mysql" else true)
     return StructurePreview(
-        dialect = dialect,
-        transactionalDdl = transactional,
-        recreate = json.boolOrNull("recreate") ?: false,
-        statements = statements,
         sql = sql,
+        statements = statements,
+        recreate = json.boolOrNull("recreate") ?: false,
         warnings = json.strList("warnings"),
+        transactional = json.boolOrNull("transactional") ?: true,
     )
 }
 
 fun newerPreviewOf(payload: JsonObject?): StructurePreview? {
     if (payload == null) return null
     val d = (payload["data"] as? JsonObject) ?: (payload["preview"] as? JsonObject) ?: payload
-    val hasRecreate = d.boolOrNull("recreate") != null
-    val hasTransactional = d.boolOrNull("transactional") != null || d.boolOrNull("transactionalDdl") != null
-    if (!hasRecreate || !hasTransactional) return null
+    if (d.boolOrNull("recreate") == null || d.boolOrNull("transactional") == null) return null
     return parseStructurePreview(d)
 }
 
 fun failureOf(payload: JsonObject?): StructureFailure? {
     if (payload == null) return null
     val d = (payload["data"] as? JsonObject) ?: payload
-    val index = d.intOrNull("index")
-    val statement = d.strOrNull("statement")
-    if (index != null && statement != null) {
-        val applied = d.intOrNull("applied") ?: 0
-        val total = d.intOrNull("total") ?: 0
-        return StructureFailure(
-            statement = statement,
-            index = index,
-            applied = applied,
-            total = total,
-            error = d.strOrNull("error") ?: payload.strOrNull("error").orEmpty(),
-            failedIndex = index,
-            ranCount = applied,
-            rolledBack = d.boolOrNull("rolledBack") ?: false,
-            statements = d.strList("statements"),
-        )
-    }
-    val error = d.strOrNull("error") ?: payload.strOrNull("error") ?: return null
-    val failedIndex = d.intOrNull("failedIndex") ?: return null
-    val statements = d.strList("statements")
-    if (statements.isEmpty()) return null
-    val ranCount = d.intOrNull("ranCount") ?: 0
+    val index = d.intOrNull("index") ?: return null
+    val statement = d.strOrNull("statement") ?: return null
+    val applied = d.intOrNull("applied") ?: return null
+    val total = d.intOrNull("total") ?: return null
     return StructureFailure(
-        statement = statements.getOrElse(failedIndex) { "" },
-        index = failedIndex,
-        applied = ranCount,
-        total = statements.size,
-        error = error,
-        failedIndex = failedIndex,
-        ranCount = ranCount,
-        rolledBack = d.boolOrNull("rolledBack") ?: false,
-        statements = statements,
+        statement = statement,
+        index = index,
+        applied = applied,
+        total = total,
+        error = d.strOrNull("error") ?: payload.strOrNull("error").orEmpty(),
     )
 }
 
@@ -2055,16 +1924,6 @@ fun statementReports(preview: StructurePreview, failure: StructureFailure): List
         before + commitReport + after
     }
 }
-
-fun statementReports(failure: StructureFailure): List<StatementReport> =
-    failure.statements.mapIndexed { index, sql ->
-        val outcome = when {
-            index == failure.failedIndex -> StatementOutcome.FAILED
-            index < failure.ranCount -> if (failure.rolledBack) StatementOutcome.ROLLED_BACK else StatementOutcome.RAN
-            else -> StatementOutcome.SKIPPED
-        }
-        StatementReport(index = index, sql = sql, outcome = outcome)
-    }
 
 // ── 9f.3 Database Import / Export (`src/shared/db-impexp.ts`, `impexp-state.ts`) ──
 
@@ -2303,58 +2162,18 @@ data class ImpExpJobItemStatus(
     val state: String, // "queued" | "running" | "done" | "error" | "stopped"
     val rowsRead: Long = 0L,
     val rowsWritten: Long = 0L,
-    val totalRows: Long? = null,
     val error: String? = null,
-) {
-    constructor(
-        source: String,
-        target: String,
-        state: String,
-        rowsProcessed: Long,
-        totalRows: Long? = null,
-        error: String? = null,
-    ) : this(
-        source = source,
-        target = target,
-        state = state,
-        rowsRead = rowsProcessed,
-        rowsWritten = rowsProcessed,
-        totalRows = totalRows,
-        error = error,
-    )
-
-    val rowsProcessed: Long get() = if (rowsWritten > 0L) rowsWritten else rowsRead
-}
+)
 
 data class ImpExpMessage(
-    val id: Int = 0,
     val time: Long = 0L,
     val level: String, // "info" | "warning" | "error" | "debug"
-    val item: String? = null,
     val text: String,
-) {
-    constructor(
-        id: Int,
-        at: Long,
-        level: String,
-        item: String? = null,
-        text: String,
-        @Suppress("UNUSED_PARAMETER") legacy: Unit = Unit,
-    ) : this(
-        id = id,
-        time = at,
-        level = level,
-        item = item,
-        text = text,
-    )
-
-    val at: Long get() = time
-}
+)
 
 data class ImpExpOutputFile(
     val name: String,
     val size: Long,
-    val mimeType: String = "application/octet-stream",
 )
 
 data class ImpExpJobStatus(
@@ -2363,157 +2182,75 @@ data class ImpExpJobStatus(
     val state: String, // "running" | "done" | "error" | "stopped"
     val startedAt: Long,
     val endedAt: Long? = null,
-    val currentItem: String? = null,
     val items: List<ImpExpJobItemStatus> = emptyList(),
     val messages: List<ImpExpMessage> = emptyList(),
     val messageCount: Int = messages.size,
     val files: List<ImpExpOutputFile> = emptyList(),
-    val zipFile: ImpExpOutputFile? = null,
-) {
-    constructor(
-        id: String,
-        kind: String,
-        state: String,
-        startedAt: Long,
-        finishedAt: Long? = null,
-        currentItem: String? = null,
-        items: List<ImpExpJobItemStatus> = emptyList(),
-        messages: List<ImpExpMessage> = emptyList(),
-        nextMessageId: Int = messages.size,
-        files: List<ImpExpOutputFile> = emptyList(),
-        zipFile: ImpExpOutputFile? = null,
-        @Suppress("UNUSED_PARAMETER") legacy: Unit = Unit,
-    ) : this(
-        id = id,
-        kind = kind,
-        state = state,
-        startedAt = startedAt,
-        endedAt = finishedAt,
-        currentItem = currentItem,
-        items = items,
-        messages = messages,
-        messageCount = nextMessageId,
-        files = files,
-        zipFile = zipFile,
-    )
-
-    val finishedAt: Long? get() = endedAt
-    val nextMessageId: Int get() = messageCount
-}
+)
 
 data class ImportPreviewResult(
-    val sources: List<String> = emptyList(),
-    val source: String = "",
     val columns: List<String>,
     val rows: List<Map<String, DbCellValue>>,
     val warnings: List<String> = emptyList(),
-    val truncated: Boolean = false,
 )
 
-fun parseImpExpJobStatus(json: JsonObject, sinceOffset: Int = 0): ImpExpJobStatus {
+fun parseImpExpJobStatus(json: JsonObject): ImpExpJobStatus {
     val items = ((json["items"] as? JsonArray).orEmpty()).mapNotNull { el ->
         val o = el as? JsonObject ?: return@mapNotNull null
-        val rowsRead = (o["rowsRead"] as? JsonPrimitive)?.longOrNull
-            ?: (o["rowsProcessed"] as? JsonPrimitive)?.longOrNull
-            ?: 0L
-        val rowsWritten = (o["rowsWritten"] as? JsonPrimitive)?.longOrNull
-            ?: (o["rowsProcessed"] as? JsonPrimitive)?.longOrNull
-            ?: 0L
         ImpExpJobItemStatus(
             source = o.strOrNull("source").orEmpty(),
             target = o.strOrNull("target").orEmpty(),
             state = o.strOrNull("state") ?: "queued",
-            rowsRead = rowsRead,
-            rowsWritten = rowsWritten,
-            totalRows = (o["totalRows"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.longOrNull,
+            rowsRead = (o["rowsRead"] as? JsonPrimitive)?.longOrNull ?: 0L,
+            rowsWritten = (o["rowsWritten"] as? JsonPrimitive)?.longOrNull ?: 0L,
             error = o.strOrNull("error"),
         )
     }
-    val messages = ((json["messages"] as? JsonArray).orEmpty()).mapIndexedNotNull { idx, el ->
-        val o = el as? JsonObject ?: return@mapIndexedNotNull null
-        val msgId = o.intOrNull("id") ?: (sinceOffset + idx + 1)
-        val msgTime = (o["time"] as? JsonPrimitive)?.longOrNull
-            ?: (o["at"] as? JsonPrimitive)?.longOrNull
-            ?: 0L
-        val rawLevel = o.strOrNull("level") ?: "info"
-        val normLevel = if (rawLevel == "warn") "warning" else rawLevel
+    val messages = ((json["messages"] as? JsonArray).orEmpty()).mapNotNull { el ->
+        val o = el as? JsonObject ?: return@mapNotNull null
         ImpExpMessage(
-            id = msgId,
-            time = msgTime,
-            level = normLevel,
-            item = o.strOrNull("item"),
+            time = (o["time"] as? JsonPrimitive)?.longOrNull ?: 0L,
+            level = o.strOrNull("level") ?: "info",
             text = o.strOrNull("text").orEmpty(),
         )
     }
     val files = ((json["files"] as? JsonArray).orEmpty()).mapNotNull { el ->
         val o = el as? JsonObject ?: return@mapNotNull null
-        val name = o.strOrNull("name").orEmpty()
-        val defaultMime = if (name.lowercase().endsWith(".zip")) "application/zip" else "application/octet-stream"
         ImpExpOutputFile(
-            name = name,
+            name = o.strOrNull("name").orEmpty(),
             size = (o["size"] as? JsonPrimitive)?.longOrNull ?: 0L,
-            mimeType = o.strOrNull("mimeType") ?: defaultMime,
-        )
-    }
-    val zipObj = json["zipFile"] as? JsonObject
-    val zipFile = zipObj?.let {
-        ImpExpOutputFile(
-            name = it.strOrNull("name").orEmpty(),
-            size = (it["size"] as? JsonPrimitive)?.longOrNull ?: 0L,
-            mimeType = it.strOrNull("mimeType") ?: "application/zip",
         )
     }
     val endedAt = (json["endedAt"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.longOrNull
-        ?: (json["finishedAt"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.longOrNull
-    val messageCount = json.intOrNull("messageCount")
-        ?: json.intOrNull("nextMessageId")
-        ?: (sinceOffset + messages.size)
+    val messageCount = json.intOrNull("messageCount") ?: messages.size
     return ImpExpJobStatus(
         id = json.strOrNull("id").orEmpty(),
         kind = json.strOrNull("kind") ?: "export",
         state = json.strOrNull("state") ?: "running",
         startedAt = (json["startedAt"] as? JsonPrimitive)?.longOrNull ?: System.currentTimeMillis(),
         endedAt = endedAt,
-        currentItem = json.strOrNull("currentItem"),
         items = items,
         messages = messages,
         messageCount = messageCount,
         files = files,
-        zipFile = zipFile,
     )
 }
 
-fun parseImportPreview(json: JsonObject, source: String = ""): ImportPreviewResult {
-    val sources = json.strList("sources")
-    val srcName = json.strOrNull("source") ?: source
+fun parseImportPreview(json: JsonObject): ImportPreviewResult {
     val columns = json.strList("columns")
     val rows = ((json["rows"] as? JsonArray).orEmpty()).mapNotNull { el ->
-        when (el) {
-            is JsonArray -> {
-                val rowMap = LinkedHashMap<String, DbCellValue>()
-                columns.forEachIndexed { idx, col ->
-                    val cellEl = el.getOrNull(idx) ?: JsonNull
-                    rowMap[col] = parseDbCellValue(cellEl)
-                }
-                rowMap
-            }
-            is JsonObject -> {
-                val rowMap = LinkedHashMap<String, DbCellValue>()
-                for ((k, v) in el) {
-                    rowMap[k] = parseDbCellValue(v)
-                }
-                rowMap
-            }
-            else -> null
+        val arr = el as? JsonArray ?: return@mapNotNull null
+        val rowMap = LinkedHashMap<String, DbCellValue>()
+        columns.forEachIndexed { idx, col ->
+            val cellEl = arr.getOrNull(idx) ?: JsonNull
+            rowMap[col] = parseDbCellValue(cellEl)
         }
+        rowMap
     }
     return ImportPreviewResult(
-        sources = sources,
-        source = srcName,
         columns = columns,
         rows = rows,
         warnings = json.strList("warnings"),
-        truncated = json.boolOrNull("truncated") ?: false,
     )
 }
 
@@ -2535,8 +2272,7 @@ data class ImpExpUpload(
     val format: String?, // ImportFileFormat?
     val state: String, // "uploading" | "ready" | "error"
     val progress: Double = 0.0,
-    val uploadId: String? = null,
-    val sources: List<String> = emptyList(),
+    val id: String? = null,
     val error: String? = null,
 )
 
@@ -2546,7 +2282,6 @@ data class ImpExpRow(
     val source: String,
     val sourceLabel: String,
     val uploadLocalId: String? = null,
-    val sheetName: String? = null,
     val target: String = "",
     val action: String = "createTable", // ImportAction
     val columnMap: List<ColumnMapEntry>? = null,
@@ -2665,32 +2400,27 @@ private fun syncQueryRows(form: ImpExpForm, title: String = form.queryTitle): Li
 }
 
 private fun syncUploadRows(form: ImpExpForm, uploads: List<ImpExpUpload> = form.uploads): List<ImpExpRow> {
-    val prevByKey = form.rows
+    val prevByLocalId = form.rows
         .filter { it.uploadLocalId != null }
-        .associateBy { "${it.uploadLocalId}:${it.sheetName ?: ""}" }
+        .associateBy { it.uploadLocalId!! }
     val template = form.rows.firstOrNull { isTemplateSource(it.source) } ?: templateRow()
     val next = mutableListOf(template)
     for (u in uploads) {
-        val sheets = if (u.sources.isNotEmpty()) u.sources else listOf<String?>(null)
-        for (sheet in sheets) {
-            val key = "${u.localId}:${sheet ?: ""}"
-            val prev = prevByKey[key]
-            val source = if (!sheet.isNullOrEmpty()) importSourceName(sheet) else importSourceName(u.fileName)
-            val label = if (!sheet.isNullOrEmpty()) "${u.fileName} · $sheet" else u.fileName
-            next += if (prev != null) {
-                prev.copy(source = source, sourceLabel = label)
-            } else {
-                ImpExpRow(
-                    id = uid("row"),
-                    checked = true,
-                    source = source,
-                    sourceLabel = label,
-                    uploadLocalId = u.localId,
-                    sheetName = sheet,
-                    target = template.target,
-                    action = template.action,
-                )
-            }
+        val prev = prevByLocalId[u.localId]
+        val source = importSourceName(u.fileName)
+        val label = u.fileName
+        next += if (prev != null) {
+            prev.copy(source = source, sourceLabel = label)
+        } else {
+            ImpExpRow(
+                id = uid("row"),
+                checked = true,
+                source = source,
+                sourceLabel = label,
+                uploadLocalId = u.localId,
+                target = template.target,
+                action = template.action,
+            )
         }
     }
     return next
@@ -2905,8 +2635,7 @@ fun patchUpload(
     localId: String,
     state: String? = null,
     progress: Double? = null,
-    uploadId: String? = null,
-    sources: List<String>? = null,
+    id: String? = null,
     error: String? = null,
 ): ImpExpForm {
     val uploads = form.uploads.map { u ->
@@ -2914,8 +2643,7 @@ fun patchUpload(
             u.copy(
                 state = state ?: u.state,
                 progress = progress ?: u.progress,
-                uploadId = uploadId ?: u.uploadId,
-                sources = sources ?: u.sources,
+                id = id ?: u.id,
                 error = error ?: u.error,
             )
         } else u
@@ -2993,7 +2721,7 @@ fun runBlocker(form: ImpExpForm, targetReadonly: Boolean = false): String? {
         for (row in rows) {
             val u = row.uploadLocalId?.let { uploadById[it] } ?: return "Upload for \"${row.sourceLabel}\" is missing"
             if (u.state == "uploading") return "Wait for \"${u.fileName}\" to finish uploading"
-            if (u.state == "error" || u.uploadId == null) return u.error ?: "\"${u.fileName}\" failed to upload"
+            if (u.state == "error" || u.id == null) return u.error ?: "\"${u.fileName}\" failed to upload"
             if (u.format != null && u.format != form.sourceType) {
                 return "\"${u.fileName}\" is not a ${form.sourceType.uppercase()} file"
             }
@@ -3089,7 +2817,7 @@ fun importRequest(form: ImpExpForm): JsonObject {
                     val u = r.uploadLocalId?.let { uploadById[it] }
                     add(
                         buildJsonObject {
-                            put("upload", u?.uploadId.orEmpty())
+                            put("upload", u?.id.orEmpty())
                             put("source", r.source)
                             put("target", rowTarget(form, r))
                             put("action", r.action)
@@ -3144,21 +2872,15 @@ fun filterMessages(
     filterText: String,
 ): List<ImpExpMessage> {
     val q = filterText.trim().lowercase()
-    val expandedLevels = buildSet {
-        addAll(levels)
-        if ("warning" in levels) add("warn")
-        if ("warn" in levels) add("warning")
-    }
     return messages.filter { m ->
-        if (m.level !in expandedLevels) return@filter false
+        if (m.level !in levels) return@filter false
         if (q.isEmpty()) return@filter true
-        val itemMatch = m.item?.lowercase()?.contains(q) == true
-        itemMatch || m.text.lowercase().contains(q)
+        m.text.lowercase().contains(q)
     }
 }
 
-fun formatImpExpDuration(startedAt: Long, finishedAt: Long? = null, now: Long = System.currentTimeMillis()): String {
-    val ms = max(0L, (finishedAt ?: now) - startedAt)
+fun formatImpExpDuration(startedAt: Long, endedAt: Long? = null, now: Long = System.currentTimeMillis()): String {
+    val ms = max(0L, (endedAt ?: now) - startedAt)
     if (ms == 0L) return "0"
     if (ms < 1000L) return "${ms} ms"
     if (ms < 10_000L) return String.format(Locale.US, "%.1f s", ms / 1000.0)
@@ -3168,21 +2890,18 @@ fun formatImpExpDuration(startedAt: Long, finishedAt: Long? = null, now: Long = 
 private val CLOCK_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("HH:mm:ss", Locale.US)
 
-fun messageClock(at: Long): String =
-    CLOCK_FORMATTER.withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(at))
+fun messageClock(time: Long): String =
+    CLOCK_FORMATTER.withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(time))
 
 fun messageLines(messages: List<ImpExpMessage>): String =
     messages.joinToString("\n") { m ->
-        val itemPart = if (!m.item.isNullOrEmpty()) " [${m.item}]" else ""
-        "${messageClock(m.time)} ${m.level.uppercase()}$itemPart ${m.text}"
+        "${messageClock(m.time)} ${m.level.uppercase()} ${m.text}"
     }
 
 fun levelCounts(messages: List<ImpExpMessage>): Map<String, Int> {
-    val counts = mutableMapOf("debug" to 0, "info" to 0, "warning" to 0, "error" to 0, "warn" to 0)
+    val counts = mutableMapOf("debug" to 0, "info" to 0, "warning" to 0, "error" to 0)
     for (m in messages) {
-        val norm = if (m.level == "warn") "warning" else m.level
-        counts[norm] = (counts[norm] ?: 0) + 1
-        if (norm == "warning") counts["warn"] = counts["warning"] ?: 0
+        counts[m.level] = (counts[m.level] ?: 0) + 1
     }
     return counts
 }
@@ -3223,7 +2942,6 @@ fun startingStatus(
         kind = if (isImportForm(form)) "import" else "export",
         state = "running",
         startedAt = now,
-        currentItem = items.firstOrNull()?.source,
         items = items,
         messages = preserved,
         messageCount = preserved.size,

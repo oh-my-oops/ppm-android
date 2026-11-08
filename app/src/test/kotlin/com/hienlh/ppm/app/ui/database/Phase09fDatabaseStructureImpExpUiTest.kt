@@ -13,14 +13,12 @@ import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
-import com.hienlh.ppm.state.database.DbDependency
 import com.hienlh.ppm.state.database.DbForeignKey
 import com.hienlh.ppm.state.database.DbIndex
 import com.hienlh.ppm.state.database.DbIndexKey
 import com.hienlh.ppm.state.database.DbObjectItem
 import com.hienlh.ppm.state.database.DbPrimaryKey
 import com.hienlh.ppm.state.database.DbStructureColumn
-import com.hienlh.ppm.state.database.DbStructureObjectRef
 import com.hienlh.ppm.state.database.DbTableStructure
 import com.hienlh.ppm.state.database.DbUniqueConstraint
 import com.hienlh.ppm.state.database.ImpExpDatabase
@@ -53,15 +51,14 @@ class Phase09fDatabaseStructureImpExpUiTest {
     val rules: RuleChain = withComposeActivity(composeRule)
 
     private val sampleStructure = DbTableStructure(
-        database = "shop",
         schema = null,
-        table = "employees",
+        name = "employees",
         kind = "table",
         comment = "Staff directory",
         engine = "InnoDB",
         columns = listOf(
-            DbStructureColumn(ordinal = 1, name = "id", type = "int unsigned", nullable = false, autoIncrement = true),
-            DbStructureColumn(ordinal = 2, name = "email", type = "varchar(255)", nullable = false),
+            DbStructureColumn(name = "id", type = "int unsigned", nullable = false, autoIncrement = true),
+            DbStructureColumn(name = "email", type = "varchar(255)", nullable = false),
         ),
         primaryKey = DbPrimaryKey(name = "PRIMARY", columns = listOf("id")),
         indexes = listOf(
@@ -70,7 +67,7 @@ class Phase09fDatabaseStructureImpExpUiTest {
                 unique = false,
                 primary = false,
                 method = "BTREE",
-                keys = listOf(DbIndexKey(column = "email", order = "ASC")),
+                keys = listOf(DbIndexKey(column = "email", descending = false)),
             ),
         ),
         uniques = listOf(
@@ -82,17 +79,11 @@ class Phase09fDatabaseStructureImpExpUiTest {
                 schema = null,
                 table = "employees",
                 columns = listOf("id"),
-                referencedSchema = null,
-                referencedTable = "employees",
-                referencedColumns = listOf("id"),
+                refSchema = null,
+                refTable = "employees",
+                refColumns = listOf("id"),
                 onUpdate = "CASCADE",
                 onDelete = "RESTRICT",
-            ),
-        ),
-        dependencies = listOf(
-            DbDependency(
-                direction = "usedBy",
-                `object` = DbStructureObjectRef(schema = null, name = "active_employees_view", kind = "view"),
             ),
         ),
     )
@@ -117,14 +108,13 @@ class Phase09fDatabaseStructureImpExpUiTest {
                     onOpenDataTab = { tbl, _ -> openedDataTable = tbl },
                     onPreviewChange = {
                         StructurePreview(
-                            dialect = "mysql",
-                            transactionalDdl = false,
-                            recreate = true,
-                            statements = listOf(
-                                StructureStatement("ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2)", recreatesTable = true),
-                            ),
                             sql = "ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2);",
+                            statements = listOf(
+                                StructureStatement("ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2)"),
+                            ),
+                            recreate = true,
                             warnings = listOf("Recreates table employees"),
+                            transactional = false,
                         )
                     },
                     onApplyChange = { _, sql, _ ->
@@ -280,20 +270,21 @@ class Phase09fDatabaseStructureImpExpUiTest {
                                 kind = "export",
                                 state = "done",
                                 startedAt = 1000L,
-                                finishedAt = 2200L,
+                                endedAt = 2200L,
                                 items = listOf(
                                     ImpExpJobItemStatus(
                                         source = "users",
                                         target = "users.csv",
                                         state = "done",
-                                        rowsProcessed = 120L,
+                                        rowsRead = 120L,
+                                        rowsWritten = 120L,
                                     ),
                                 ),
                                 messages = listOf(
-                                    ImpExpMessage(id = 1, at = 1500L, level = "info", item = "users", text = "Exported 120 rows"),
+                                    ImpExpMessage(time = 1500L, level = "info", text = "Exported 120 rows"),
                                 ),
                                 files = listOf(
-                                    ImpExpOutputFile(name = "users.csv", size = 4096L, mimeType = "text/csv"),
+                                    ImpExpOutputFile(name = "users.csv", size = 4096L),
                                 ),
                             )
                         },

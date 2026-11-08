@@ -18,7 +18,6 @@ class DatabasePhase09fStructureImpExpStateTest {
         val rawStructure = Json.parseToJsonElement(
             """
             {
-              "database": "shop",
               "schema": null,
               "name": "employees",
               "kind": "table",
@@ -29,18 +28,14 @@ class DatabasePhase09fStructureImpExpStateTest {
               "rowKeyIsRowid": false,
               "columns": [
                 {
-                  "ordinalPosition": 1,
                   "name": "id",
                   "type": "int unsigned zerofill",
                   "nullable": false,
                   "autoIncrement": true,
-                  "unsigned": true,
-                  "zerofill": true,
                   "generated": false,
                   "computedExpression": null
                 },
                 {
-                  "ordinalPosition": 2,
                   "name": "email",
                   "type": "varchar(255)",
                   "nullable": false,
@@ -49,14 +44,12 @@ class DatabasePhase09fStructureImpExpStateTest {
                   "generated": false
                 },
                 {
-                  "ordinalPosition": 3,
                   "name": "manager_id",
                   "type": "int unsigned",
                   "nullable": true,
                   "generated": false
                 },
                 {
-                  "ordinalPosition": 4,
                   "name": "email_domain",
                   "type": "varchar(255)",
                   "nullable": true,
@@ -127,12 +120,6 @@ class DatabasePhase09fStructureImpExpStateTest {
                   "expression": "email <> ''",
                   "column": "email"
                 }
-              ],
-              "dependencies": [
-                {
-                  "direction": "usedBy",
-                  "object": { "schema": null, "name": "active_employees_view", "kind": "view" }
-                }
               ]
             }
             """.trimIndent(),
@@ -140,7 +127,6 @@ class DatabasePhase09fStructureImpExpStateTest {
 
         val structure = parseDbTableStructure(rawStructure)
         assertEquals("employees", structure.name)
-        assertEquals("employees", structure.table)
         assertEquals("InnoDB", structure.engine)
         assertEquals(4, structure.columns.size)
         assertFalse(structure.columns[0].computedStored)
@@ -152,12 +138,39 @@ class DatabasePhase09fStructureImpExpStateTest {
         assertEquals(1, structure.checks.size)
         assertEquals("email <> ''", structure.checks[0].expression)
 
+        // Non-server fallback keys are ignored by parseDbTableStructure
+        val nonServerStructure = parseDbTableStructure(
+            Json.parseToJsonElement(
+                """
+                {
+                  "table": "wrong_name",
+                  "withoutRowId": true,
+                  "columns": [{ "name": "c", "type": "int", "nullable": false, "generated": "a + b" }],
+                  "indexes": [{ "name": "ix", "unique": false, "primary": false, "type": "HASH", "filter": "c > 0", "keys": [{ "column": "c", "order": "DESC" }] }],
+                  "foreignKeys": [{ "name": "fk", "columns": ["c"], "referencedTable": "other", "referencedColumns": ["id"] }],
+                  "referencedBy": [{ "name": "ref_fk", "table": "child", "columns": ["p_id"], "refColumns": ["id"] }],
+                  "checks": [{ "name": "chk", "definition": "c > 0" }]
+                }
+                """.trimIndent(),
+            ).jsonObject,
+        )
+        assertEquals("", nonServerStructure.name)
+        assertFalse(nonServerStructure.withoutRowid)
+        assertFalse(nonServerStructure.columns[0].generated)
+        assertNull(nonServerStructure.columns[0].computedExpression)
+        assertNull(nonServerStructure.indexes[0].method)
+        assertNull(nonServerStructure.indexes[0].where)
+        assertFalse(nonServerStructure.indexes[0].keys[0].descending)
+        assertTrue(nonServerStructure.foreignKeys.isEmpty())
+        assertTrue(nonServerStructure.references.isEmpty())
+        assertTrue(nonServerStructure.checks.isEmpty())
+
         // ownIndexes filters out PRIMARY and the index backing uq_email
         val ownIdx = ownIndexes(structure)
         assertEquals(1, ownIdx.size)
         assertEquals("idx_manager_desc", ownIdx[0].name)
         assertEquals("BTREE", ownIdx[0].method)
-        assertEquals("DESC", ownIdx[0].keys[0].order)
+        assertTrue(ownIdx[0].keys[0].descending)
 
         // ownIndexes matches named uniques by name only, and unnamed uniques by columns regardless of DESC/where (db-table-model.ts:120)
         val sqliteUniquesStructure = structure.copy(
@@ -174,7 +187,7 @@ class DatabasePhase09fStructureImpExpStateTest {
                     unique = true,
                     primary = false,
                     columns = listOf("manager_id"),
-                    keys = listOf(DbIndexKey(column = "manager_id", order = "DESC", descending = true)),
+                    keys = listOf(DbIndexKey(column = "manager_id", descending = true)),
                     where = "manager_id IS NOT NULL",
                 ),
             ),
@@ -328,7 +341,7 @@ class DatabasePhase09fStructureImpExpStateTest {
 
         // Server 400 StructureApplyFailure payload: { statement, index, applied, total }
         val pgPreview = StructurePreview(
-            transactionalDdl = true,
+            transactional = true,
             recreate = false,
             statements = listOf(
                 StructureStatement("ALTER TABLE t ADD a int"),
@@ -353,7 +366,16 @@ class DatabasePhase09fStructureImpExpStateTest {
         assertEquals(StatementOutcome.FAILED, pgReports[1].outcome)
         assertEquals(StatementOutcome.SKIPPED, pgReports[2].outcome)
 
-        val mysqlPreview = pgPreview.copy(transactionalDdl = false)
+        // Non-server failureOf fallback shape (`failedIndex` + `statements`) is rejected
+        assertNull(
+            failureOf(
+                Json.parseToJsonElement(
+                    """{ "error": "boom", "failedIndex": 0, "ranCount": 0, "statements": ["ALTER TABLE t ADD a int"] }""",
+                ).jsonObject,
+            ),
+        )
+
+        val mysqlPreview = pgPreview.copy(transactional = false)
         val mysqlFailJson = Json.parseToJsonElement(
             """
             {
@@ -431,7 +453,7 @@ class DatabasePhase09fStructureImpExpStateTest {
             localId = "up-1",
             state = "ready",
             progress = 1.0,
-            uploadId = "srv-up-1",
+            id = "srv-up-1",
         )
         val fileRows = activeRows(impForm)
         assertEquals(1, fileRows.size)
@@ -475,13 +497,20 @@ class DatabasePhase09fStructureImpExpStateTest {
                 }
                 """.trimIndent(),
             ).jsonObject,
-            source = "customers.csv",
         )
         assertEquals(listOf("customer_id"), previewResp.columns)
         assertEquals(2, previewResp.rows.size)
         assertEquals("101", (previewResp.rows[0]["customer_id"] as DbCellValue.Num).rawText)
         assertEquals(DbCellValue.Null, previewResp.rows[1]["customer_id"])
         assertEquals(listOf("Skipped column name"), previewResp.warnings)
+
+        // Non-server rows-as-object entries in preview are ignored
+        val previewObjRows = parseImportPreview(
+            Json.parseToJsonElement(
+                """{ "columns": ["customer_id"], "rows": [{ "customer_id": 101 }], "warnings": [] }""",
+            ).jsonObject,
+        )
+        assertTrue(previewObjRows.rows.isEmpty())
 
         // Import job request wire shape: { format, options, schema, files: [{ upload, source, target, action, columns }] }
         val impReq = importRequest(impForm)
@@ -529,17 +558,39 @@ class DatabasePhase09fStructureImpExpStateTest {
                 }
                 """.trimIndent(),
             ).jsonObject,
-            sinceOffset = 2,
         )
         assertEquals("stopped", statusResp.state)
         assertEquals(2500L, statusResp.endedAt)
         assertEquals(3, statusResp.messageCount)
         assertEquals(500L, statusResp.items[0].rowsRead)
         assertEquals(400L, statusResp.items[0].rowsWritten)
-        assertEquals(3, statusResp.messages[0].id)
         assertEquals("warning", statusResp.messages[0].level)
         assertEquals(2500L, statusResp.messages[0].time)
-        assertEquals(1, levelCounts(statusResp.messages)["warn"])
+        assertEquals(1, levelCounts(statusResp.messages)["warning"])
+
+        // Non-server job status fallback fields (`finishedAt`, `nextMessageId`, `rowsProcessed`, `at`) are ignored
+        val nonServerJobStatus = parseImpExpJobStatus(
+            Json.parseToJsonElement(
+                """
+                {
+                  "id": "job-100",
+                  "kind": "export",
+                  "state": "done",
+                  "startedAt": 1000,
+                  "finishedAt": 9999,
+                  "nextMessageId": 42,
+                  "items": [{ "source": "users", "target": "users.csv", "state": "done", "rowsProcessed": 77 }],
+                  "messages": [{ "level": "info", "text": "Done", "at": 8888 }],
+                  "files": []
+                }
+                """.trimIndent(),
+            ).jsonObject,
+        )
+        assertNull(nonServerJobStatus.endedAt)
+        assertEquals(1, nonServerJobStatus.messageCount)
+        assertEquals(0L, nonServerJobStatus.items[0].rowsRead)
+        assertEquals(0L, nonServerJobStatus.items[0].rowsWritten)
+        assertEquals(0L, nonServerJobStatus.messages[0].time)
     }
 }
 
