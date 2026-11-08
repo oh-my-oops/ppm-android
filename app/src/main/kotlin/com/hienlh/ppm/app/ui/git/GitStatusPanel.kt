@@ -360,7 +360,7 @@ fun GitStatusPanel(
 
     fun handleCommit(amend: Boolean, signoff: Boolean, andPush: Boolean) {
         val msg = commitMessage.trim()
-        if (msg.isEmpty() || api == null) return
+        if ((!amend && msg.isEmpty()) || (amend && msg.isEmpty() && totals.filesStaged == 0) || api == null) return
         val key = when {
             andPush -> "commit-push"
             amend -> "amend"

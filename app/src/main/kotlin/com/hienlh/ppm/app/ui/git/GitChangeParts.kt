@@ -841,10 +841,11 @@ internal fun GitCommitComposer(
         onDispose { onInputFocusChanged?.invoke(false) }
     }
 
-    val canSend = GitChangesView.canCommit(totals, message, operation, amend = false, hasLastCommit = lastCommit != null)
-    val canAmend = GitChangesView.canCommit(totals, message, operation, amend = true, hasLastCommit = lastCommit != null)
-    val canUndo = lastCommit != null && !lastCommit.pushed && lastCommit.hasParent && operation == null
-    val label = GitChangesView.commitLabel(totals, amend = false)
+    val rewritable = lastCommit != null && !lastCommit.pushed
+    val canSend = GitChangesView.canCommit(totals, message, operation, amend = false)
+    val canAmend = rewritable && (totals.filesStaged > 0 || message.trim().isNotEmpty()) && (operation == null || operation.kind == "merge")
+    val canUndo = rewritable && lastCommit.hasParent && operation == null
+    val label = GitChangesView.commitLabel(totals)
     val hint = GitChangesView.commitHint(totals, message)
     val committing = busyAction == "commit" || busyAction == "commit-push" || busyAction == "amend"
 

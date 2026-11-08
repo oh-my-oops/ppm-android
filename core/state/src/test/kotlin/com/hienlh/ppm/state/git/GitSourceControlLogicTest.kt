@@ -108,20 +108,61 @@ class GitSourceControlLogicTest {
         assertFalse(GitChangesView.hasConflictMarkers("normal text"))
 
         val totalsWithConflict = GitChangesView.changeTotals(listOf(stagedFile, partialFile, untrackedFile, conflictFile))
-        assertEquals(4, totalsWithConflict.total)
-        assertEquals(2, totalsWithConflict.staged)
-        assertEquals(2, totalsWithConflict.unstaged)
+        assertEquals(4, totalsWithConflict.files)
+        assertEquals(2, totalsWithConflict.filesStaged)
+        assertEquals(3, totalsWithConflict.blocksStaged)
+        assertEquals(5, totalsWithConflict.blocks)
         assertEquals(1, totalsWithConflict.conflicts)
-        assertFalse(totalsWithConflict.implicitAll)
-        assertEquals(2, totalsWithConflict.commitCount)
-        assertEquals("Resolve 1 conflict before committing", GitChangesView.commitHint(totalsWithConflict, "msg"))
+        assertEquals("Resolve 1 conflict to commit", GitChangesView.commitHint(totalsWithConflict, "msg"))
         assertFalse(GitChangesView.canCommit(totalsWithConflict, "msg", null))
 
-        val cleanTotals = GitChangesView.changeTotals(listOf(untrackedFile))
-        assertTrue(cleanTotals.implicitAll)
-        assertEquals(1, cleanTotals.commitCount)
-        assertEquals("Commit 1 file", GitChangesView.commitLabel(cleanTotals))
-        assertTrue(GitChangesView.canCommit(cleanTotals, "feat: add C", null))
+        // Unstaged-only files: filesStaged == 0 -> cannot commit, label is "Commit", hint tells user to tick a file or stage a block
+        val unstagedOnlyTotals = GitChangesView.changeTotals(listOf(untrackedFile))
+        assertEquals(1, unstagedOnlyTotals.files)
+        assertEquals(0, unstagedOnlyTotals.filesStaged)
+        assertEquals("Commit", GitChangesView.commitLabel(unstagedOnlyTotals))
+        assertEquals("Tick a file or stage a block to commit", GitChangesView.commitHint(unstagedOnlyTotals, "feat: add C"))
+        assertFalse(GitChangesView.canCommit(unstagedOnlyTotals, "feat: add C", null))
+
+        // Staged files: filesStaged > 0 -> can commit when message is non-empty
+        val stagedTotals = GitChangesView.changeTotals(listOf(stagedFile, partialFile))
+        assertEquals(2, stagedTotals.filesStaged)
+        assertEquals("Commit 2 files", GitChangesView.commitLabel(stagedTotals))
+        assertEquals("Write a message to commit", GitChangesView.commitHint(stagedTotals, "   "))
+        assertEquals("3 of 4 blocks staged · ⌘↵ commits", GitChangesView.commitHint(stagedTotals, "feat: commit staged"))
+        assertTrue(GitChangesView.canCommit(stagedTotals, "feat: commit staged", null))
+
+        // Amend: allowed with empty message when filesStaged > 0 and !lastCommitPushed; blocked when lastCommitPushed
+        assertTrue(
+            GitChangesView.canCommit(
+                stagedTotals,
+                "",
+                operation = null,
+                amend = true,
+                hasLastCommit = true,
+                lastCommitPushed = false,
+            ),
+        )
+        assertFalse(
+            GitChangesView.canCommit(
+                stagedTotals,
+                "feat: amend pushed",
+                operation = null,
+                amend = true,
+                hasLastCommit = true,
+                lastCommitPushed = true,
+            ),
+        )
+        assertFalse(
+            GitChangesView.canCommit(
+                unstagedOnlyTotals,
+                "",
+                operation = null,
+                amend = true,
+                hasLastCommit = true,
+                lastCommitPushed = false,
+            ),
+        )
 
         assertEquals("delete 1 new file", GitChangesView.discardSummary(listOf(untrackedFile)))
         assertEquals("revert 1 modified file and delete 1 new file", GitChangesView.discardSummary(listOf(partialFile, untrackedFile)))

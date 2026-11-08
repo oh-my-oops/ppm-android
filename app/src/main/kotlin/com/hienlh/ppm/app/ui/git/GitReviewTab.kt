@@ -266,7 +266,15 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
     }
     val conflicts = remember(files) { files.filter { it.conflict != null } }
     val totals = remember(reviews) { GitReviewModel.reviewTotals(reviews) }
-    val commitTotals = remember(files) { GitChangesView.changeTotals(files) }
+    val commitTotals = remember(reviews, totals, conflicts) {
+        ChangeTotals(
+            files = totals.files,
+            filesStaged = reviews.count { it.staged > 0 },
+            blocks = totals.blocks,
+            blocksStaged = totals.staged,
+            conflicts = conflicts.size,
+        )
+    }
 
     val focus = remember(reviews, want) { GitReviewModel.resolveFocus(reviews, want) }
     val focusedTriple = remember(reviews, focus) {
@@ -715,9 +723,9 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
     fun runCommit(amend: Boolean, signoff: Boolean, andPush: Boolean, onSuccess: (() -> Unit)? = null) {
         val client = api ?: return
         val before = changes
-        val stagedFiles = commitTotals.commitCount
+        val stagedFiles = commitTotals.filesStaged
         val msg = commitMessage.trim()
-        if (msg.isEmpty()) return
+        if ((!amend && msg.isEmpty()) || (amend && msg.isEmpty() && stagedFiles == 0)) return
         enqueue("commit", emptyList(), if (amend) "Could not amend the commit" else "Could not commit") {
             val res = client.gitCommit(projectName, msg, amend = amend, signoff = signoff, repo = repo)
             model.commitDrafts.consumed(projectName, repo, msg)

@@ -19,21 +19,23 @@ enum class CheckState {
 }
 
 data class BlockDotsResult(
+    val dots: List<Boolean>,
     val blocks: List<String>,
     val overflow: Int,
     val staged: Boolean,
 )
 
 data class ChangeTotals(
-    val total: Int,
-    val staged: Int,
-    val unstaged: Int,
+    val files: Int,
+    val filesStaged: Int,
+    val blocks: Int,
+    val blocksStaged: Int,
     val conflicts: Int,
-    /** Files that will be included if Commit is pressed right now. */
-    val commitCount: Int,
-    /** True when pressing Commit will auto-stage all files (`staged == 0`). */
-    val implicitAll: Boolean,
-)
+) {
+    val total: Int get() = files
+    val staged: Int get() = filesStaged
+    val commitCount: Int get() = filesStaged
+}
 
 /**
  * Pure derivations for the Source Control panel (`src/web/lib/git-changes-view.ts` and
@@ -114,15 +116,38 @@ object GitChangesView {
         return file.unstaged?.whole ?: file.staged?.whole
     }
 
+    private fun blockAnchor(side: String, block: com.hienlh.ppm.client.ChangeBlock): Double =
+        if (side == "staged") {
+            if (block.newLines == 0) block.newStart + 0.5 else block.newStart.toDouble()
+        } else {
+            if (block.oldLines == 0) block.oldStart + 0.5 else block.oldStart.toDouble()
+        }
+
     /** Block-dot sequence (max [max] dots, then `+N` overflow). */
     fun blockDots(file: ChangedFile, max: Int = 6): BlockDotsResult {
-        val raw = buildList {
-            file.staged?.blocks?.let(::addAll)
-            file.unstaged?.blocks?.let(::addAll)
+        val raw = mutableListOf<Pair<Double, Boolean>>()
+        fun add(name: String, side: com.hienlh.ppm.client.ChangeSide?) {
+            if (side == null) return
+            val isStaged = name == "staged"
+            if (side.whole != null || side.changeBlocks.isEmpty()) {
+                raw += 0.0 to isStaged
+            } else {
+                for (block in side.changeBlocks) {
+                    raw += blockAnchor(name, block) to isStaged
+                }
+            }
         }
-        val blocks = raw.take(max)
-        val overflow = maxOf(0, raw.size - max)
-        return BlockDotsResult(blocks = blocks, overflow = overflow, staged = file.staged != null)
+        add("staged", file.staged)
+        add("unstaged", file.unstaged)
+        val sorted = raw.sortedBy { it.first }.map { it.second }
+        val shown = sorted.take(max)
+        val overflow = maxOf(0, sorted.size - max)
+        return BlockDotsResult(
+            dots = sorted,
+            blocks = shown.map { if (it) "staged" else "unstaged" },
+            overflow = overflow,
+            staged = file.staged != null,
+        )
     }
 
     /** Whether a file has unstaged changes that can be discarded. */
@@ -142,27 +167,25 @@ object GitChangesView {
         }
 
     fun changeTotals(files: List<ChangedFile>): ChangeTotals {
-        var staged = 0
-        var unstaged = 0
+        var filesCount = 0
+        var filesStaged = 0
+        var blocks = 0
+        var blocksStaged = 0
         var conflicts = 0
-        for (f in files) {
-            if (f.conflict != null) {
-                conflicts++
-                continue
-            }
-            if (f.staged != null) staged++
-            if (f.unstaged != null) unstaged++
+        for (file in files) {
+            filesCount++
+            if (file.conflict != null) conflicts++
+            if (file.staged != null) filesStaged++
+            val dots = blockDots(file).dots
+            blocks += dots.size
+            blocksStaged += dots.count { it }
         }
-        val nonConflict = files.size - conflicts
-        val implicitAll = staged == 0 && nonConflict > 0
-        val commitCount = if (implicitAll) nonConflict else staged
         return ChangeTotals(
-            total = files.size,
-            staged = staged,
-            unstaged = unstaged,
+            files = filesCount,
+            filesStaged = filesStaged,
+            blocks = blocks,
+            blocksStaged = blocksStaged,
             conflicts = conflicts,
-            commitCount = commitCount,
-            implicitAll = implicitAll,
         )
     }
 
@@ -180,40 +203,33 @@ object GitChangesView {
     fun syncIsPrimary(mode: String?, fileCount: Int): Boolean =
         fileCount == 0 && mode != null && mode != "synced"
 
-    fun commitLabel(totals: ChangeTotals, amend: Boolean = false): String {
-        if (amend && totals.commitCount == 0) return "Amend last commit"
-        val verb = if (amend) "Amend" else "Commit"
-        val n = totals.commitCount
-        if (n == 0) return verb
-        return "$verb $n ${if (n == 1) "file" else "files"}"
-    }
+    private fun plural(n: Int, word: String): String = "$n ${if (n == 1) word else "${word}s"}"
+
+    fun commitLabel(totals: ChangeTotals, amend: Boolean = false): String =
+        if (totals.filesStaged > 0) "Commit ${plural(totals.filesStaged, "file")}" else "Commit"
 
     /** Muted hint below the Commit button explaining what will happen. */
-    fun commitHint(totals: ChangeTotals, message: String): String? {
-        if (totals.conflicts > 0) {
-            val n = totals.conflicts
-            return "Resolve $n ${if (n == 1) "conflict" else "conflicts"} before committing"
-        }
-        if (totals.total == 0) return null
-        if (message.trim().isEmpty()) return "Write a commit message above"
-        if (!totals.implicitAll && totals.unstaged > 0) {
-            return "${totals.staged} of ${totals.total} selected — unchecked files stay uncommitted"
-        }
-        return null
+    fun commitHint(totals: ChangeTotals, message: String, keys: String = "⌘↵"): String {
+        if (totals.files == 0) return "Nothing to commit"
+        if (totals.conflicts > 0) return "Resolve ${plural(totals.conflicts, "conflict")} to commit"
+        if (totals.filesStaged == 0) return "Tick a file or stage a block to commit"
+        if (message.trim().isEmpty()) return "Write a message to commit"
+        return "${totals.blocksStaged} of ${plural(totals.blocks, "block")} staged · $keys commits"
     }
 
     fun canCommit(
         totals: ChangeTotals,
         message: String,
-        operation: GitOperation?,
+        operation: GitOperation? = null,
         amend: Boolean = false,
         hasLastCommit: Boolean = false,
+        lastCommitPushed: Boolean = false,
     ): Boolean {
-        if (totals.conflicts > 0) return false
-        if (message.trim().isEmpty()) return false
         if (operation != null && operation.kind != "merge") return false
-        if (amend) return hasLastCommit && (totals.commitCount > 0 || totals.total == 0)
-        return totals.commitCount > 0
+        if (amend) {
+            return hasLastCommit && !lastCommitPushed && (totals.filesStaged > 0 || message.trim().isNotEmpty())
+        }
+        return totals.filesStaged > 0 && message.trim().isNotEmpty() && totals.conflicts == 0
     }
 
     /** Summary text for a discard confirmation modal. */
