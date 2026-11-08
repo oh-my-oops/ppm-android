@@ -67,6 +67,7 @@ import com.hienlh.ppm.client.logsSetIssuesAuto
 import com.hienlh.ppm.client.logsUndismissAllIssues
 import com.hienlh.ppm.client.queryLogs
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.LucideIcon
 import com.hienlh.ppm.design.PpmIcon
@@ -119,6 +120,7 @@ fun LogsAppBody(
     initialIssues: LogIssuesResult? = null,
 ) {
     val tokens = LocalPpmTokens.current
+    val phone = LocalPpmMobile.current
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -412,7 +414,7 @@ fun LogsAppBody(
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (activeView == "logs") {
                     val followShape = RoundedCornerShape(6.dp)
@@ -441,41 +443,29 @@ fun LogsAppBody(
                                 .copy(color = if (follow) Color(0xFF22C55E) else tokens.text2.color),
                         )
                     }
+                }
+                if (!phone) {
                     Box(
                         Modifier
-                            .height(26.dp)
+                            .size(32.dp)
                             .clip(RoundedCornerShape(6.dp))
-                            .background(tokens.panel2.color)
-                            .ppmClickable { utc = !utc }
-                            .padding(horizontal = 7.dp),
+                            .background(if (prefsOpen) tokens.accent.opacity(0.12).color else Color.Transparent)
+                            .ppmClickable { prefsOpen = !prefsOpen }
+                            .semantics { contentDescription = "Logs preferences" }
+                            .testTag("logs-prefs-toggle"),
                         contentAlignment = Alignment.Center,
                     ) {
-                        BasicText(
-                            if (utc) "UTC" else localOffsetLabel(),
-                            style = ppmText(10f, kind = FontKind.MONO, lineHeight = 14f).copy(color = tokens.text2.color),
+                        PpmIcon(
+                            ProductIcon.Settings,
+                            16.dp,
+                            if (prefsOpen) tokens.accent.color else tokens.text2.color,
                         )
                     }
-                }
-                Box(
-                    Modifier
-                        .size(26.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(if (prefsOpen) tokens.accent.opacity(0.12).color else Color.Transparent)
-                        .ppmClickable { prefsOpen = !prefsOpen }
-                        .semantics { contentDescription = "Logs preferences" }
-                        .testTag("logs-prefs-toggle"),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    PpmIcon(
-                        ProductIcon.Settings,
-                        14.dp,
-                        if (prefsOpen) tokens.accent.color else tokens.text2.color,
-                    )
                 }
             }
         }
 
-        if (prefsOpen) {
+        if (prefsOpen && !phone) {
             Row(
                 Modifier
                     .fillMaxWidth()

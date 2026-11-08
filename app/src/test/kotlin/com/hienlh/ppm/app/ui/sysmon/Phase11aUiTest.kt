@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.logs.LogsAppBody
@@ -626,9 +627,11 @@ class Phase11aUiTest {
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
             assertEquals(hitsWhileHidden, summaryHits.get())
 
-            // 4. Mount LogsAppBody, open preferences, and toggle "Red dot on the Logs button for a likely bug"
+            // 4. Mount LogsAppBody, verify header has no UTC/offset chip, 32dp prefs button on tablet,
+            // open preferences, and toggle "Red dot on the Logs button for a likely bug"
+            val phoneMode = androidx.compose.runtime.mutableStateOf(false)
             composeRule.setContent {
-                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = phoneMode.value) {
                     LogsAppBody(
                         model = model,
                         initialView = "logs",
@@ -638,11 +641,24 @@ class Phase11aUiTest {
                 }
             }
             assertEquals(1, model.openLogsWindowCount)
+            // No UTC or localOffsetLabel chip in header before opening preferences
+            composeRule.onNodeWithText("UTC").assertDoesNotExist()
+            composeRule.onNodeWithText(localOffsetLabel()).assertDoesNotExist()
+            val prefsBtnBounds = composeRule.onNodeWithTag("logs-prefs-toggle").fetchSemanticsNode().boundsInRoot
+            val expected32dp = with(composeRule.density) { 32.dp.toPx() }
+            assertEquals(expected32dp, prefsBtnBounds.width, 1f)
+            assertEquals(expected32dp, prefsBtnBounds.height, 1f)
             composeRule.onNodeWithTag("logs-prefs-toggle").performClick()
             composeRule.onNodeWithText("Red dot on the Logs button for a likely bug").assertIsDisplayed()
             composeRule.onNodeWithTag("logs-prefs-badge-switch").performClick()
             assertEquals(false, model.logsBadge)
             assertEquals(0, model.logsLikelyBugs)
+
+            // 5. On phone layout, neither the preferences button nor the preferences row is shown
+            phoneMode.value = true
+            composeRule.waitForIdle()
+            composeRule.onNodeWithTag("logs-prefs-toggle").assertDoesNotExist()
+            composeRule.onNodeWithTag("logs-prefs").assertDoesNotExist()
         } finally {
             server.close()
         }
