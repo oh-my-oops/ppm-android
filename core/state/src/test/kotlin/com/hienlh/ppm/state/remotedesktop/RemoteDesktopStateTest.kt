@@ -228,4 +228,25 @@ class RemoteDesktopStateTest {
         assertTrue(queue.offer(byteArrayOf(20), isKeyframe = true))
         assertEquals(false, queue.waitingForKeyframe)
     }
+
+    @Test
+    fun `BoundedVideoFrameQueue offer keyframe clears everything queued before it`() {
+        val queue = BoundedVideoFrameQueue(capacity = 8)
+        // [K1, d x 7] fills capacity = 8
+        assertTrue(queue.offer(byteArrayOf(0x01), isKeyframe = true))
+        for (i in 1..7) {
+            assertTrue(queue.offer(byteArrayOf((0x10 + i).toByte()), isKeyframe = false))
+        }
+        assertEquals(8, queue.size)
+
+        // Offering K2 must clear [K1, d x 7] so only [K2] remains
+        assertTrue(queue.offer(byteArrayOf(0x02), isKeyframe = true))
+        assertEquals(1, queue.size)
+        assertEquals(7, queue.droppedDeltas)
+        val polled = queue.poll()
+        assertNotNull(polled)
+        assertTrue(polled!!.isKeyframe)
+        assertEquals(0x02.toByte(), polled.bytes[0])
+        assertNull(queue.poll())
+    }
 }

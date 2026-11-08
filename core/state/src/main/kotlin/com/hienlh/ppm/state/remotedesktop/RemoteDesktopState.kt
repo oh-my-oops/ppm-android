@@ -348,7 +348,7 @@ class BoundedVideoFrameQueue(val capacity: Int = 8) {
                 queue.addLast(QueuedVideoFrame(bytes, offset, length, false))
                 return true
             }
-            while (queue.size >= capacity) {
+            while (queue.isNotEmpty()) {
                 val removed = queue.removeFirst()
                 if (!removed.isKeyframe) droppedDeltas++
             }
