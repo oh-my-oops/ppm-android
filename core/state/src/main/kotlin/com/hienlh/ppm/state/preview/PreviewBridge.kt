@@ -70,6 +70,7 @@ class PreviewBridge(private val post: (JsonObject) -> Boolean) {
                 if (issues.size < MAX_BRIDGE_ISSUES) issues += RuntimeIssue(message.kind, message.message, message.source, message.line)
             is BridgeChildMessage.CheckResult -> checks[message.requestId]?.complete(Result.success(message.report))
             is BridgeChildMessage.CheckError -> checks[message.requestId]?.complete(Result.failure(IllegalStateException(message.message)))
+            else -> Unit
         }
     }
 

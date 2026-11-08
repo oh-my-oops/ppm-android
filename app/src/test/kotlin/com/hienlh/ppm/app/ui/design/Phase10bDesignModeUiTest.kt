@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.hienlh.ppm.app.withComposeActivity
+import com.hienlh.ppm.client.filenameFromContentDisposition
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.state.design.CommentAnchor
@@ -73,15 +74,14 @@ class Phase10bDesignModeUiTest {
 
         val comments = listOf(
             DesignComment(
-                id = "c-1",
+                id = "a1b2c3d4e5f6",
                 number = 1,
                 file = "index.html",
                 anchor = CommentAnchor(
-                    selector = "section.hero > h1",
-                    ppmId = "ppm-1",
+                    file = "index.html",
+                    ppmId = 1,
                     tag = "h1",
-                    xPct = 40.0,
-                    yPct = 20.0,
+                    cssPath = "section.hero > h1",
                 ),
                 body = "Increase heading contrast",
                 resolved = false,
@@ -90,7 +90,7 @@ class Phase10bDesignModeUiTest {
             ),
         )
         val pinRects = mapOf(
-            "c-1" to PinRect(id = "c-1", found = false),
+            "a1b2c3d4e5f6" to PinRect(id = "a1b2c3d4e5f6", found = false),
         )
 
         val tweakDefs = listOf(
@@ -146,11 +146,9 @@ class Phase10bDesignModeUiTest {
                         slug = "pitch-deck",
                         activeVariant = "index.html",
                         pickedElement = PickedElement(
-                            selector = "section.hero > h1",
-                            ppmId = "ppm-1",
+                            cssPath = "section.hero > h1",
+                            ppmId = 1,
                             tag = "h1",
-                            xPct = 40.0,
-                            yPct = 20.0,
                             rect = ElementRect(10.0, 20.0, 200.0, 40.0),
                         ),
                         comments = comments,
@@ -230,11 +228,13 @@ class Phase10bDesignModeUiTest {
         composeRule.onNodeWithContentDescription("Restore").performClick()
         assertEquals("snap-1", restoredSnapId)
 
-        // 5. Export panel assertions: ZIP, HTML, Print, and Slides PPTX
+        // 5. Export panel assertions: ZIP, HTML, Print, and Slides PPTX + filename sanitisation
         activePanel = "export"
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Download ZIP (.zip)").assertIsDisplayed()
         composeRule.onNodeWithText("Export Slide Deck (.pptx)").performClick()
         assertTrue(exportedPptx)
+        assertEquals("pitch-deck.zip", filenameFromContentDisposition("""attachment; filename="../../evil.zip"""", "pitch-deck.zip"))
+        assertEquals("hero-v2.zip", filenameFromContentDisposition("""attachment; filename="hero-v2.zip"""", "pitch-deck.zip"))
     }
 }
