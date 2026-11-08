@@ -168,6 +168,7 @@ import com.hienlh.ppm.state.androiddevice.pointerToDevice
 import com.hienlh.ppm.state.androiddevice.shouldDecodeAndroidAccessUnit
 import com.hienlh.ppm.state.androiddevice.validateAvdName
 import com.hienlh.ppm.state.androiddevice.validateAvdRam
+import com.hienlh.ppm.state.androiddevice.validateAvdSdCard
 import com.hienlh.ppm.state.androiddevice.validateAvdStorage
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import kotlinx.coroutines.CancellationException
@@ -738,6 +739,7 @@ internal fun AndroidAvdCreateDialog(
     var selectedProfileId by remember { mutableStateOf("") }
     var ramMbText by remember { mutableStateOf(AvdLimits.RAM_DEFAULT_MB.toString()) }
     var storageMbText by remember { mutableStateOf(AvdLimits.STORAGE_DEFAULT_MB.toString()) }
+    var sdCardMbText by remember { mutableStateOf(AvdLimits.SD_CARD_DEFAULT_MB.toString()) }
     var submitting by remember { mutableStateOf(false) }
     var submitError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -781,11 +783,13 @@ internal fun AndroidAvdCreateDialog(
             onRamChange = { ramMbText = it },
             storageMbText = storageMbText,
             onStorageChange = { storageMbText = it },
+            sdCardMbText = sdCardMbText,
+            onSdCardChange = { sdCardMbText = it },
             loading = loadError == null && (images == null || profiles == null),
             error = submitError ?: loadError,
             submitting = submitting,
             onDismiss = onDismiss,
-            onSubmit = { validName, imgId, profId, ram, storage ->
+            onSubmit = { validName, imgId, profId, ram, storage, sdCard ->
                 scope.launch {
                     submitting = true
                     submitError = null
@@ -796,6 +800,7 @@ internal fun AndroidAvdCreateDialog(
                             deviceProfile = profId,
                             ramMb = ram,
                             storageMb = storage,
+                            sdCardMb = sdCard,
                         )
                         onCreated(validName)
                     } catch (e: CancellationException) {
@@ -854,11 +859,13 @@ internal fun AndroidAvdCreateFormContent(
     onRamChange: (String) -> Unit,
     storageMbText: String,
     onStorageChange: (String) -> Unit,
+    sdCardMbText: String = AvdLimits.SD_CARD_DEFAULT_MB.toString(),
+    onSdCardChange: (String) -> Unit = {},
     loading: Boolean,
     error: String?,
     submitting: Boolean,
     onDismiss: () -> Unit,
-    onSubmit: (name: String, systemImage: String, deviceProfile: String, ramMb: Int, storageMb: Int) -> Unit,
+    onSubmit: (name: String, systemImage: String, deviceProfile: String, ramMb: Int, storageMb: Int, sdCardMb: Int?) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
     val nameErr = if (name.isEmpty()) null else validateAvdName(name, existingNames)
@@ -874,9 +881,15 @@ internal fun AndroidAvdCreateFormContent(
     } else {
         validateAvdStorage(storageVal)
     }
+    val sdCardVal = if (sdCardMbText.isBlank()) null else sdCardMbText.toIntOrNull()
+    val sdCardErr = if (sdCardMbText.isNotBlank() && sdCardVal == null) {
+        "SD card must be between ${AvdLimits.SD_CARD_MIN_MB} and ${AvdLimits.SD_CARD_MAX_MB} MB"
+    } else {
+        validateAvdSdCard(sdCardVal)
+    }
     val canSubmit = !loading && !submitting &&
         name.isNotEmpty() && nameErr == null &&
-        ramErr == null && storageErr == null &&
+        ramErr == null && storageErr == null && sdCardErr == null &&
         selectedImageId.isNotBlank() && selectedProfileId.isNotBlank()
 
     val compatibleImages = remember(images) { images.filter { it.hostCompatible } }
@@ -1058,10 +1071,20 @@ internal fun AndroidAvdCreateFormContent(
                         tag = "avd-storage-input",
                     )
                 }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    BasicText("SD card (MB)", style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color))
+                    DialogTextInput(
+                        value = sdCardMbText,
+                        onValueChange = onSdCardChange,
+                        placeholder = "512",
+                        numeric = true,
+                        tag = "avd-sdcard-input",
+                    )
+                }
             }
-            if (ramErr != null || storageErr != null) {
+            if (ramErr != null || storageErr != null || sdCardErr != null) {
                 BasicText(
-                    ramErr ?: storageErr.orEmpty(),
+                    ramErr ?: storageErr ?: sdCardErr.orEmpty(),
                     style = ppmText(11f, lineHeight = 14f).copy(color = tokens.error.color),
                     modifier = Modifier.testTag("avd-limits-error"),
                 )
@@ -1086,7 +1109,7 @@ internal fun AndroidAvdCreateFormContent(
                 tag = "avd-create-submit",
                 onClick = {
                     if (canSubmit && ramVal != null && storageVal != null) {
-                        onSubmit(name, selectedImageId, selectedProfileId, ramVal, storageVal)
+                        onSubmit(name, selectedImageId, selectedProfileId, ramVal, storageVal, sdCardVal)
                     }
                 },
             )

@@ -260,6 +260,19 @@ class AndroidDeviceStateTest {
         assertNull(validateAvdStorage(131072))
         assertNotNull(validateAvdStorage(512))
         assertNotNull(validateAvdStorage(262144))
+
+        // SD card range: 0..32768 MB (src/shared/android-avd.ts:29)
+        assertEquals(0, AvdLimits.SD_CARD_MIN_MB)
+        assertEquals(32768, AvdLimits.SD_CARD_MAX_MB)
+        assertEquals(512, AvdLimits.SD_CARD_DEFAULT_MB)
+        assertNull(validateAvdSdCard(null))
+        assertNull(validateAvdSdCard(0))
+        assertNull(validateAvdSdCard(32))
+        assertNull(validateAvdSdCard(512))
+        assertNull(validateAvdSdCard(32768))
+        assertNotNull(validateAvdSdCard(-1))
+        assertNotNull(validateAvdSdCard(32769))
+        assertNotNull(validateAvdSdCard(65536))
     }
 
     @Test

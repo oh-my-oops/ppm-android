@@ -214,6 +214,7 @@ class Phase11cUiTest {
                 var name = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("_invalid") }
                 var ram = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("2048") }
                 var storage = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("6144") }
+                var sdCard = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("512") }
                 AndroidAvdCreateFormContent(
                     name = name.value,
                     onNameChange = { name.value = it },
@@ -228,11 +229,13 @@ class Phase11cUiTest {
                     onRamChange = { ram.value = it },
                     storageMbText = storage.value,
                     onStorageChange = { storage.value = it },
+                    sdCardMbText = sdCard.value,
+                    onSdCardChange = { sdCard.value = it },
                     loading = false,
                     error = null,
                     submitting = false,
                     onDismiss = {},
-                    onSubmit = { n, img, prof, r, s -> submitted = listOf(n, img, prof, r, s) },
+                    onSubmit = { n, img, prof, r, s, sd -> submitted = listOfNotNull(n, img, prof, r, s, sd) },
                 )
             }
         }
@@ -244,10 +247,19 @@ class Phase11cUiTest {
 
         rule.onNodeWithTag("avd-name-input").performTextReplacement("Pixel_9_API_35")
         rule.onNodeWithTag("avd-create-submit").assertIsEnabled()
+
+        // Out-of-range SD card (> 32768) shows avd-limits-error and disables submit
+        rule.onNodeWithTag("avd-sdcard-input").performTextReplacement("65536")
+        rule.onNodeWithTag("avd-limits-error").assertIsDisplayed()
+        rule.onNodeWithTag("avd-create-submit").assertIsNotEnabled()
+
+        // Valid SD card in 0..32768 (e.g. 0 MB) enables submit
+        rule.onNodeWithTag("avd-sdcard-input").performTextReplacement("0")
+        rule.onNodeWithTag("avd-create-submit").assertIsEnabled()
         rule.onNodeWithTag("avd-create-submit").performClick()
 
         assertEquals(
-            listOf("Pixel_9_API_35", "system-images;android-35;google_apis;x86_64", "pixel_9", 2048, 6144),
+            listOf("Pixel_9_API_35", "system-images;android-35;google_apis;x86_64", "pixel_9", 2048, 6144, 0),
             submitted,
         )
     }

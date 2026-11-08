@@ -517,8 +517,8 @@ object AvdLimits {
     const val STORAGE_MIN_MB = 1024
     const val STORAGE_MAX_MB = 131072
     const val STORAGE_DEFAULT_MB = 6144
-    const val SD_CARD_MIN_MB = 64
-    const val SD_CARD_MAX_MB = 65536
+    const val SD_CARD_MIN_MB = 0
+    const val SD_CARD_MAX_MB = 32768
     const val SD_CARD_DEFAULT_MB = 512
 }
 
