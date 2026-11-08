@@ -386,7 +386,7 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
             }
             FooterUtil(ProductIcon.Monitor, "Remote Desktop") { model.openRemoteDesktop() }
             FooterUtil(ProductIcon.Activity, "System Monitor") { model.openSystemMonitor() }
-            FooterUtil(ProductIcon.ScrollText, "Logs", dot = model.logsLikelyBugs > 0) { model.openLogs() }
+            FooterUtil(ProductIcon.ScrollText, "Logs", dot = model.showLogsBadgeDot) { model.openLogs() }
             FooterUtil(ProductIcon.Settings, "Settings") { model.openSettings() }
         }
     }

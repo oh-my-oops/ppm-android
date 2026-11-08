@@ -49,6 +49,7 @@ import com.hienlh.ppm.client.setTag
 import com.hienlh.ppm.client.uiPrefs
 import com.hienlh.ppm.client.updateTag
 import com.hienlh.ppm.client.webFile
+import com.hienlh.ppm.client.fullResourceSamples
 import com.hienlh.ppm.client.logsIssuesSummary
 import com.hienlh.ppm.client.androidCapabilities
 import com.hienlh.ppm.design.GalleryImage
@@ -175,6 +176,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withContext
@@ -761,6 +763,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     var projectOpenedAt by mutableStateOf(emptyMap<String, Long>())
         private set
 
+    /** Device-local `logsBadge` preference (`use-logs-badge.ts`): when false, `/api/logs/issues/summary` is never called. */
+    var logsBadge by mutableStateOf(true)
+
     init {
         restoreUiPrefs()
     }
@@ -781,6 +786,88 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     /** Likely PPM bug count from `/api/logs/issues/summary` for the Logs footer badge. */
     var logsLikelyBugs by mutableIntStateOf(0)
+
+    val showLogsBadgeDot: Boolean
+        get() = logsBadge && info?.minimalMode != true && logsLikelyBugs > 0
+
+    var sharedMetricsSnapshot by mutableStateOf<com.hienlh.ppm.state.sysmon.MetricsSnapshot?>(null)
+    var sharedMetricsHistory by mutableStateOf<List<com.hienlh.ppm.state.sysmon.MetricsHistoryPoint>>(emptyList())
+    var sharedMetricsTickCount by mutableIntStateOf(0)
+    var sharedMetricsConnected by mutableStateOf(false)
+    internal val resourceTierTracker = com.hienlh.ppm.state.sysmon.ResourceStreamTierTracker()
+    private var resourceStreamJob: Job? = null
+
+    fun retainResourceMonitor(wantProcesses: Boolean): () -> Unit {
+        applyResourceReconcile(resourceTierTracker.retain(wantProcesses))
+        var released = false
+        return {
+            if (!released) {
+                released = true
+                applyResourceReconcile(resourceTierTracker.release(wantProcesses))
+            }
+        }
+    }
+
+    private fun applyResourceReconcile(action: com.hienlh.ppm.state.sysmon.StreamReconcileAction) {
+        when (action) {
+            com.hienlh.ppm.state.sysmon.StreamReconcileAction.NoOp -> {}
+            com.hienlh.ppm.state.sysmon.StreamReconcileAction.Disconnect -> {
+                resourceStreamJob?.cancel()
+                resourceStreamJob = null
+                sharedMetricsConnected = false
+            }
+            is com.hienlh.ppm.state.sysmon.StreamReconcileAction.Connect -> {
+                resourceStreamJob?.cancel()
+                val currentApi = api ?: return
+                val wantProc = action.wantProcesses
+                sharedMetricsTickCount = 0
+                resourceStreamJob = scope.launch {
+                    while (isActive) {
+                        try {
+                            currentApi.fullResourceSamples(processes = wantProc).collect { sampleJson ->
+                                val parsed = com.hienlh.ppm.state.sysmon.MetricsSnapshot.from(sampleJson) ?: return@collect
+                                sharedMetricsSnapshot = parsed
+                                sharedMetricsHistory = com.hienlh.ppm.state.sysmon.SysMonRingBuffer.appendSnapshot(sharedMetricsHistory, parsed)
+                                sharedMetricsTickCount += 1
+                                sharedMetricsConnected = true
+                            }
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (_: PpmError.Unauthorized) {
+                            sharedMetricsConnected = false
+                            return@launch
+                        } catch (_: Exception) {
+                            sharedMetricsConnected = false
+                        }
+                        delay(5_000)
+                    }
+                }
+            }
+        }
+    }
+
+    fun updateLogsBadge(enabled: Boolean) {
+        logsBadge = enabled
+        prefs.put("logsBadge.$serverKey", enabled.toString())
+        if (enabled && info?.minimalMode != true) {
+            refreshLogsIssuesSummary()
+        } else {
+            logsLikelyBugs = 0
+        }
+    }
+
+    fun refreshLogsIssuesSummary() {
+        if (!logsBadge || info?.minimalMode == true) {
+            logsLikelyBugs = 0
+            return
+        }
+        val currentApi = api ?: return
+        scope.launch {
+            val summaryJson = quietly { currentApi.logsIssuesSummary() } ?: return@launch
+            if (this@AppModel.api !== currentApi || !logsBadge || info?.minimalMode == true) return@launch
+            logsLikelyBugs = com.hienlh.ppm.state.logs.LogIssuesSummary.from(summaryJson).likelyBugs
+        }
+    }
 
     /** Each project's branch and how far it is from its upstream, for the tablet's status bar (the web's git `meta`). */
     val gitBranches = mutableStateMapOf<String, GitBranchStatus>()
@@ -1055,6 +1142,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             canGoBack = false
         }
         closeWorkspace()
+        resourceStreamJob?.cancel()
+        resourceStreamJob = null
+        resourceTierTracker.reset()
+        sharedMetricsSnapshot = null
+        sharedMetricsHistory = emptyList()
+        sharedMetricsTickCount = 0
+        sharedMetricsConnected = false
         events?.stop()
         events = null
         extensions?.stop()
@@ -1150,8 +1244,12 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 prefs.put("localUrl.$serverKey", url)
             }
             launch {
+                if (!logsBadge || info?.minimalMode == true) {
+                    logsLikelyBugs = 0
+                    return@launch
+                }
                 val summaryJson = quietly { api.logsIssuesSummary() } ?: return@launch
-                if (this@AppModel.api !== api) return@launch
+                if (this@AppModel.api !== api || !logsBadge || info?.minimalMode == true) return@launch
                 logsLikelyBugs = com.hienlh.ppm.state.logs.LogIssuesSummary.from(summaryJson).likelyBugs
             }
             launch {
@@ -1371,6 +1469,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         inlineBlame = saved.inlineBlame ?: true
         designWindows = saved.designWindows ?: false
         jiraEnabled = saved.jiraEnabled ?: false
+        logsBadge = prefs.get("logsBadge.$serverKey")?.toBooleanStrictOrNull() ?: true
     }
 
     private fun saveUiPrefs() {
@@ -1425,6 +1524,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             for (chat in chats.values) {
                 if (chat.project == push.projectName && chat.session?.id == push.sessionId) chat.sessionChanges?.push(push.files, push.gone)
             }
+        }
+        events.onLogsIssuesChanged {
+            refreshLogsIssuesSummary()
         }
         this.events = events
         events.start()

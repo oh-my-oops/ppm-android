@@ -49,6 +49,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.client.logsGithubDuplicates
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import com.hienlh.ppm.app.ui.PpmTextField
 import com.hienlh.ppm.app.ui.tablet.Edge
 import com.hienlh.ppm.app.ui.tablet.edge
@@ -123,8 +127,9 @@ fun LogsAppBody(
     var loading by remember { mutableStateOf(initialResult == null) }
     var follow by remember { mutableStateOf(true) }
     var utc by remember { mutableStateOf(false) }
-    var pausedLines by remember { mutableStateOf<List<LogEntry>>(emptyList()) }
-    var pausedTitles by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    val liveBuffer = remember { LogsLiveFeedBuffer() }
+    var pausedCount by remember { mutableIntStateOf(0) }
+    var reloads by remember { mutableIntStateOf(0) }
 
     var issuesResult by remember { mutableStateOf(initialIssues ?: LogIssuesResult()) }
     var issuesLoading by remember { mutableStateOf(false) }
@@ -146,14 +151,7 @@ fun LogsAppBody(
             ),
         )
     }
-    var envPairs by remember {
-        mutableStateOf(
-            listOf(
-                "PPM" to "Android Client",
-                "OS" to "Android ${android.os.Build.VERSION.RELEASE}",
-            ),
-        )
-    }
+    var envPairs by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var envLoaded by remember { mutableStateOf(false) }
     var draftingAi by remember { mutableStateOf(false) }
     var bannerError by remember { mutableStateOf<String?>(null) }
@@ -168,6 +166,10 @@ fun LogsAppBody(
             loading = false
             return
         }
+        if (before == null) {
+            model.events?.sendIfOpen("""{"type":"logs:subscribe"}""")
+            liveBuffer.beginPageRead()
+        }
         loading = true
         try {
             val from = rangeStart(range, System.currentTimeMillis())
@@ -175,12 +177,23 @@ fun LogsAppBody(
             val json = api.queryLogs(pairs)
             val parsed = LogQueryResult.from(json)
             result = if (before != null) {
-                parsed.copy(entries = parsed.entries + result.entries)
+                val have = result.entries.take(DEDUPE_TAIL).map { it.id }.toSet()
+                val older = parsed.entries.filterNot { it.id in have }
+                result.copy(
+                    entries = older + result.entries,
+                    hasMore = parsed.hasMore,
+                    titles = parsed.titles + result.titles,
+                    reachMissed = parsed.reachMissed,
+                )
             } else {
-                parsed
+                liveBuffer.finishPageRead(parsed, filter)
             }
             bannerError = null
+        } catch (e: CancellationException) {
+            liveBuffer.cancelPageRead()
+            throw e
         } catch (e: Exception) {
+            liveBuffer.cancelPageRead()
             bannerError = e.message ?: "Failed to query logs"
         } finally {
             loading = false
@@ -194,7 +207,11 @@ fun LogsAppBody(
             val json = api.logsIssues()
             val parsed = LogIssuesResult.from(json)
             issuesResult = parsed
-            model.logsLikelyBugs = parsed.issues.count { !it.dismissed && it.cls == "bug" }
+            if (model.logsBadge && model.info?.minimalMode != true) {
+                model.logsLikelyBugs = parsed.issues.count { !it.dismissed && it.cls == "bug" }
+            }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             bannerError = e.message ?: "Failed to load log issues"
         } finally {
@@ -202,8 +219,38 @@ fun LogsAppBody(
         }
     }
 
-    LaunchedEffect(model.api, filter, range) {
-        if (initialResult == null || filter != DEFAULT_LOG_FILTER || range != "1h") {
+    // Live tail via GlobalEvents: subscribe BEFORE the page read, resubscribe and re-read on global_ready.
+    DisposableEffect(model.events) {
+        val ev = model.events
+        var unsubLines: (() -> Unit)? = null
+        var unsubIssues: (() -> Unit)? = null
+        var unsubReady: (() -> Unit)? = null
+        if (ev != null) {
+            ev.sendIfOpen("""{"type":"logs:subscribe"}""")
+            unsubReady = ev.onGlobalReady {
+                ev.sendIfOpen("""{"type":"logs:subscribe"}""")
+                reloads += 1
+            }
+            unsubLines = ev.onLogsLines { msg ->
+                val incoming = msg["entries"].array.orEmpty().mapNotNull(LogEntry::from)
+                val incomingTitles = msg["titles"].obj?.mapNotNull { (k, v) -> v.string?.let { k to it } }?.toMap().orEmpty()
+                result = liveBuffer.onLiveBatch(result, incoming, incomingTitles, filter, follow)
+                pausedCount = liveBuffer.pausedMatchingCount(result, filter)
+            }
+            unsubIssues = ev.onLogsIssuesChanged {
+                scope.launch { loadIssues() }
+            }
+        }
+        onDispose {
+            unsubReady?.invoke()
+            unsubLines?.invoke()
+            unsubIssues?.invoke()
+            ev?.sendIfOpen("""{"type":"logs:unsubscribe"}""")
+        }
+    }
+
+    LaunchedEffect(model.api, filter, range, reloads) {
+        if (reloads > 0 || initialResult == null || filter != DEFAULT_LOG_FILTER || range != "1h") {
             loadLogs()
         }
     }
@@ -212,34 +259,16 @@ fun LogsAppBody(
         val api = model.api ?: return envPairs
         val envJson = try {
             api.logsEnvironment()
-        } catch (e: kotlinx.coroutines.CancellationException) {
+        } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
             null
         }
         if (envJson != null) {
-            val list = mutableListOf<Pair<String, String>>()
-            val arr = envJson.array
-            if (arr != null) {
-                for (item in arr) {
-                    val pair = item.array ?: continue
-                    val k = pair.getOrNull(0)?.string ?: continue
-                    val v = pair.getOrNull(1)?.string ?: continue
-                    list += k to v
-                }
-            } else {
-                envJson.obj?.let { envObj ->
-                    envObj["ppm"]?.string?.let { list += "PPM" to it }
-                    envObj["os"]?.string?.let { list += "Host OS" to it }
-                    envObj["bun"]?.string?.let { list += "Bun" to it }
-                }
-            }
-            list += "Client" to "PPM Android (${android.os.Build.MODEL})"
-            if (list.isNotEmpty()) {
-                envPairs = list
-                envLoaded = true
-                return list
-            }
+            val list = parseLogsEnvironment(envJson)
+            envPairs = list
+            envLoaded = true
+            return list
         }
         return envPairs
     }
@@ -252,41 +281,10 @@ fun LogsAppBody(
         launch { loadEnvironment() }
     }
 
-    // Live tail via GlobalEvents
-    DisposableEffect(model.events, follow, filter) {
-        val ev = model.events
-        var unsubLines: (() -> Unit)? = null
-        var unsubIssues: (() -> Unit)? = null
-        if (ev != null) {
-            ev.sendIfOpen("""{"type":"logs:subscribe"}""")
-            unsubLines = ev.onLogsLines { msg ->
-                val incoming = msg["entries"].array.orEmpty().mapNotNull(LogEntry::from)
-                val incomingTitles = msg["titles"].obj?.mapNotNull { (k, v) -> v.string?.let { k to it } }?.toMap().orEmpty()
-                if (follow) {
-                    result = applyLiveEntries(result, incoming, incomingTitles, filter)
-                } else {
-                    pausedLines = (pausedLines + incoming).takeLast(MAX_KEEP)
-                    pausedTitles = pausedTitles + incomingTitles
-                }
-            }
-            unsubIssues = ev.onLogsIssuesChanged {
-                scope.launch { loadIssues() }
-            }
-        }
-        onDispose {
-            unsubLines?.invoke()
-            unsubIssues?.invoke()
-            ev?.sendIfOpen("""{"type":"logs:unsubscribe"}""")
-        }
-    }
-
     fun resumeFollow() {
         follow = true
-        if (pausedLines.isNotEmpty()) {
-            result = applyLiveEntries(result, pausedLines, pausedTitles, filter)
-            pausedLines = emptyList()
-            pausedTitles = emptyMap()
-        }
+        result = liveBuffer.resumeFollow(result, filter)
+        pausedCount = 0
     }
 
     fun draftWithAi(targetSnippets: List<ReportSnippet>, note: String = "") {
@@ -336,6 +334,8 @@ fun LogsAppBody(
                 res?.get("expected")?.string?.takeIf { it.isNotBlank() }?.let { ex ->
                     expectedField.edit { replace(0, length, ex) }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 bannerError = e.message ?: "AI draft failed"
             } finally {
@@ -422,7 +422,7 @@ fun LogsAppBody(
                                 .background(if (follow) Color(0xFF22C55E) else tokens.text2.color),
                         )
                         BasicText(
-                            if (follow) "Live" else if (pausedLines.isNotEmpty()) "Paused (+${pausedLines.size})" else "Paused",
+                            if (follow) "Live" else if (pausedCount > 0) "Paused (+$pausedCount)" else "Paused",
                             style = ppmText(11f, FontWeight.Medium, lineHeight = 15f)
                                 .copy(color = if (follow) Color(0xFF22C55E) else tokens.text2.color),
                         )
@@ -474,6 +474,7 @@ fun LogsAppBody(
                     filter = filter,
                     range = range,
                     utc = utc,
+                    follow = follow,
                     onFilterChange = { filter = it },
                     onRangeChange = { range = it },
                     onLoadEarlier = {
@@ -540,6 +541,7 @@ fun LogsAppBody(
                     },
                 )
                 "report" -> LogsReportPane(
+                    model = model,
                     titleField = titleField,
                     whatField = whatField,
                     stepsField = stepsField,
@@ -632,6 +634,7 @@ private fun LogsStreamPane(
     filter: LogFilter,
     range: String,
     utc: Boolean,
+    follow: Boolean = true,
     onFilterChange: (LogFilter) -> Unit,
     onRangeChange: (String) -> Unit,
     onLoadEarlier: () -> Unit,
@@ -652,6 +655,13 @@ private fun LogsStreamPane(
     val searchCompiled = remember(filter) { compileLogSearch(filter) }
     val rows = remember(result.entries) { foldRepeats(result.entries) }
     val dividers = remember(rows, result.restarts) { restartDividers(rows, result.restarts) }
+    val lastEntryId = rows.lastOrNull()?.entry?.id
+    LaunchedEffect(follow, lastEntryId, rows.size) {
+        if (follow && rows.isNotEmpty()) {
+            val targetIdx = (rows.size - 1 + (if (result.hasMore) 1 else 0) + dividers.size).coerceAtLeast(0)
+            runCatching { listState.scrollToItem(targetIdx) }
+        }
+    }
 
     Box(Modifier.fillMaxSize().testTag("logs-stream-pane")) {
         Column(Modifier.fillMaxSize()) {
@@ -1297,6 +1307,7 @@ private fun LogsIssuesPane(
 
 @Composable
 private fun LogsReportPane(
+    model: AppModel,
     titleField: TextFieldState,
     whatField: TextFieldState,
     stepsField: TextFieldState,
@@ -1316,6 +1327,7 @@ private fun LogsReportPane(
     val tokens = LocalPpmTokens.current
     var mode by remember { mutableStateOf("write") } // "write" | "preview"
     var copied by remember { mutableStateOf(false) }
+    var duplicates by remember { mutableStateOf<List<Pair<Int, String>>>(emptyList()) }
 
     val fields = ReportFields(
         title = titleField.text.toString(),
@@ -1324,13 +1336,28 @@ private fun LogsReportPane(
         steps = stepsField.text.toString(),
         expected = expectedField.text.toString(),
     )
-    val compiledBody = remember(fields, snippets, environment, redact) {
-        reportBody(fields, snippets, environment, redact, mark = false)
+    val prepared = remember(fields, snippets, environment, redact) {
+        prepareIssueReport(fields, snippets, environment, redact)
     }
-    val ghUrl = remember(fields.title, labels, compiledBody) {
-        val full = issueUrl(fields.title.ifBlank { "Bug report" }, labels, compiledBody)
-        if (full.length <= ISSUE_URL_LIMIT) full
-        else issueUrl(fields.title.ifBlank { "Bug report" }, labels, compiledBody.take(3500) + "\n\n_(Truncated to fit URL limit)_")
+    val compiledBody = prepared.body
+    val ghUrl = prepared.openUrl
+
+    LaunchedEffect(prepared.duplicateQuery, model.api) {
+        duplicates = emptyList()
+        val dq = prepared.duplicateQuery ?: return@LaunchedEffect
+        val api = model.api ?: return@LaunchedEffect
+        delay(700L)
+        try {
+            val res = api.logsGithubDuplicates(dq)
+            duplicates = res["items"].array.orEmpty().mapNotNull { item ->
+                val num = item["number"]?.toString()?.toIntOrNull() ?: return@mapNotNull null
+                val t = item["title"].string ?: return@mapNotNull null
+                num to t
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
     }
 
     Column(
@@ -1411,7 +1438,7 @@ private fun LogsReportPane(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 BasicText(
-                    "# ${fields.title.ifBlank { "Bug report" }}",
+                    "# ${prepared.redactedTitle.ifBlank { "Bug report" }}",
                     style = ppmText(15f, FontWeight.Bold, lineHeight = 20f).copy(color = tokens.text.color),
                 )
                 BasicText(
@@ -1524,7 +1551,15 @@ private fun LogsReportPane(
                     .height(38.dp)
                     .clip(btnShape)
                     .background(tokens.accent.color)
-                    .ppmClickable(shape = btnShape) { onOpenGithub(ghUrl) }
+                    .ppmClickable(shape = btnShape) {
+                        if (prepared.bodyOverLimit) {
+                            onCopyMarkdown(compiledBody)
+                            model.toast(ErrorToastMessage("Body copied. Paste it into the issue that just opened.", kind = ErrorToastMessage.Kind.SUCCESS))
+                        } else {
+                            model.toast(ErrorToastMessage("Opened the new issue on GitHub. Check it there, then press Submit.", kind = ErrorToastMessage.Kind.SUCCESS))
+                        }
+                        onOpenGithub(ghUrl)
+                    }
                     .testTag("report-open-github-btn"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
@@ -1532,7 +1567,7 @@ private fun LogsReportPane(
                 PpmIcon(ProductIcon.ExternalLink, 14.dp, tokens.accentFg.color)
                 Spacer(Modifier.width(6.dp))
                 BasicText(
-                    "Open GitHub issue",
+                    if (prepared.bodyOverLimit) "Open issue (copies body)" else "Open GitHub issue",
                     style = ppmText(12f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.accentFg.color),
                 )
             }
@@ -1544,7 +1579,7 @@ private fun LogsReportPane(
                     .background(tokens.panel2.color)
                     .cssBorder(tokens.border.color, btnShape)
                     .ppmClickable(shape = btnShape) {
-                        onCopyMarkdown(reportMarkdown(fields.title, compiledBody))
+                        onCopyMarkdown(reportMarkdown(prepared.redactedTitle, compiledBody))
                         copied = true
                     }
                     .testTag("report-copy-md-btn"),

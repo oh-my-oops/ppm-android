@@ -68,6 +68,10 @@ import com.hienlh.ppm.state.tunnels.SetupState
 import com.hienlh.ppm.state.tunnels.TailscaleAvailability
 import com.hienlh.ppm.state.tunnels.TunnelEntry
 import com.hienlh.ppm.state.tunnels.TunnelsModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -106,6 +110,8 @@ fun PortForwardingPanel(
             val data = api.tunnelsList(force)
             tunnels = TunnelsModel.parseList(data)
             error = null
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             error = e.message ?: "Failed to load tunnels"
         } finally {
@@ -123,6 +129,8 @@ fun PortForwardingPanel(
                 if (ts.available && initialTailscale == null) {
                     via = "tailscale"
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 tailscale = TailscaleAvailability(available = false, reason = "Could not check Tailscale on the host")
             }
@@ -132,6 +140,8 @@ fun PortForwardingPanel(
                 val res = api.namedTunnelStatus()
                 cloudflare = NamedTunnelStatus.from(res)
                 cloudflareError = false
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 cloudflareError = true
             }
@@ -140,14 +150,21 @@ fun PortForwardingPanel(
         cfJob.join()
     }
 
-    LaunchedEffect(model.api) {
-        if (initialTunnels == null) {
-            fetchTunnels()
-            fetchSetup()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(model.api, lifecycle) {
+        if (model.api == null) {
+            loading = false
+            return@LaunchedEffect
         }
-        while (isActive) {
-            delay(10_000L)
-            if (model.api != null) fetchTunnels()
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            if (initialTunnels == null) {
+                fetchTunnels()
+                fetchSetup()
+            }
+            while (isActive) {
+                delay(10_000L)
+                if (model.api != null) fetchTunnels()
+            }
         }
     }
 
@@ -172,6 +189,8 @@ fun PortForwardingPanel(
                     model.openWebPreviewTab(url = url, port = p, via = viaResult)
                     onNavigate()
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 error = e.message ?: "Failed to start tunnel"
             } finally {
@@ -188,6 +207,8 @@ fun PortForwardingPanel(
             try {
                 api.tunnelStop(pid)
                 fetchTunnels()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 error = e.message ?: "Failed to stop tunnel"
             } finally {

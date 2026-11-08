@@ -997,6 +997,21 @@ object AppRowsModel {
             }
         }
     }
+
+    /**
+     * Port of `groupForApp` (`apps-panel.tsx:30-41`): `rootPid` is null on purpose because an app
+     * can have multiple roots, so `buildGroupKillRequests` kills each member individually.
+     */
+    fun groupForApp(app: AppRowData): ProcessGroup = ProcessGroup(
+        key = "app:${app.id}",
+        label = app.name,
+        rootPid = null,
+        cpu = app.cpu,
+        ramMB = app.ramMB,
+        count = app.processCount,
+        ppm = false,
+        pids = app.memberPids,
+    )
 }
 
 // ── Services tab pure logic ────────────────────────────────────────────
@@ -1098,6 +1113,94 @@ object ServicesModel {
             running = scoped.count { it.running },
             failed = scoped.count { it.failed },
         )
+    }
+
+    data class ServiceConfirmWording(val title: String, val body: String, val cta: String)
+
+    val CONFIRMED_ACTIONS: Set<String> = setOf("stop", "restart", "disable")
+
+    fun needsConfirm(action: String): Boolean = action in CONFIRMED_ACTIONS
+
+    fun confirmWordingFor(manager: String, service: ServiceInfo, action: String): ServiceConfirmWording? {
+        val unit = service.unit
+        return when (manager) {
+            "scm" -> when (action) {
+                "stop" -> ServiceConfirmWording("Stop service", "Stop $unit? Windows refuses if other running services depend on it.", "Stop")
+                "restart" -> ServiceConfirmWording("Restart service", "Restart $unit? It will be briefly unavailable.", "Restart")
+                "disable" -> ServiceConfirmWording("Disable at boot", "$unit will no longer start automatically (startup type Manual). It keeps running now.", "Disable")
+                else -> null
+            }
+            "launchd" -> when (action) {
+                "stop" -> ServiceConfirmWording("Stop job", "Stop $unit? launchd starts it again when something needs it, or by itself if it keeps it alive.", "Stop")
+                "restart" -> ServiceConfirmWording("Restart job", "Restart $unit? It will be briefly unavailable.", "Restart")
+                "disable" -> if (service.scope == "user") {
+                    ServiceConfirmWording("Disable at login", "$unit will no longer load at login. It keeps running now.", "Disable")
+                } else {
+                    ServiceConfirmWording("Disable at boot", "$unit will no longer start at boot. It keeps running now.", "Disable")
+                }
+                else -> null
+            }
+            else -> when (action) {
+                "stop" -> ServiceConfirmWording("Stop service", "Stop $unit? Anything depending on it stops too.", "Stop")
+                "restart" -> ServiceConfirmWording("Restart service", "Restart $unit? It will be briefly unavailable.", "Restart")
+                "disable" -> ServiceConfirmWording("Disable at boot", "$unit will no longer start at boot. It keeps running now.", "Disable")
+                else -> null
+            }
+        }
+    }
+}
+
+fun tabNeedsProcesses(tab: String): Boolean =
+    tab == "processes" || tab == "apps" || tab == "services"
+
+sealed interface StreamReconcileAction {
+    data object NoOp : StreamReconcileAction
+    data object Disconnect : StreamReconcileAction
+    data class Connect(val wantProcesses: Boolean) : StreamReconcileAction
+}
+
+class ResourceStreamTierTracker {
+    var refCount: Int = 0
+        private set
+    var processesRefCount: Int = 0
+        private set
+    var connected: Boolean = false
+        private set
+    var connectedProcesses: Boolean = false
+        private set
+
+    fun retain(wantProcesses: Boolean): StreamReconcileAction {
+        refCount += 1
+        if (wantProcesses) processesRefCount += 1
+        return reconcile()
+    }
+
+    fun release(wantProcesses: Boolean): StreamReconcileAction {
+        refCount = (refCount - 1).coerceAtLeast(0)
+        if (wantProcesses) processesRefCount = (processesRefCount - 1).coerceAtLeast(0)
+        return reconcile()
+    }
+
+    fun reset() {
+        refCount = 0
+        processesRefCount = 0
+        connected = false
+        connectedProcesses = false
+    }
+
+    private fun reconcile(): StreamReconcileAction {
+        val wanted = processesRefCount > 0
+        if (refCount == 0) {
+            if (!connected) return StreamReconcileAction.NoOp
+            connected = false
+            return StreamReconcileAction.Disconnect
+        }
+        if (!connected || connectedProcesses != wanted) {
+            connected = true
+            connectedProcesses = wanted
+            return StreamReconcileAction.Connect(wanted)
+        }
+        return StreamReconcileAction.NoOp
     }
 }
 

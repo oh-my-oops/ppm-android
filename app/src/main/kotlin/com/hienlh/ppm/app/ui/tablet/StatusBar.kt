@@ -54,6 +54,7 @@ import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.ResourceSample
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -91,7 +92,7 @@ fun StatusBar(model: AppModel) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     ExtensionStatusBarItems(model, "right")
                     if (model.screenKeptAwake()) Awake(text)
-                    model.api?.let { Resources(it, text) { model.openSystemMonitor() } }
+                    model.api?.let { Resources(model, text) { model.openSystemMonitor() } }
                     ThemePicker(model, text, compact)
                     UpgradeButton(model, text, prefix = !compact)
                 }
@@ -232,38 +233,30 @@ private fun Awake(text: TextStyle) {
  * until the first sample, and while the app is in the background the stream is let go.
  */
 @Composable
-private fun Resources(api: ApiClient, text: TextStyle, onClick: () -> Unit) {
+private fun Resources(model: AppModel, text: TextStyle, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
-    var sample by remember(api) { mutableStateOf<ResourceSample?>(null) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(api, lifecycle) {
+    LaunchedEffect(model.api, lifecycle) {
+        if (model.api == null) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            launch {
-                while (true) {
-                    try {
-                        api.resourceSamples().collect { sample = it }
-                    } catch (error: CancellationException) {
-                        throw error
-                    } catch (_: PpmError.Unauthorized) {
-                        sample = null
-                        return@launch
-                    } catch (_: Exception) {
-                        // Read again shortly, as an EventSource reconnects.
-                    }
-                    sample = null
-                    delay(5_000)
-                }
+            val release = model.retainResourceMonitor(wantProcesses = false)
+            try {
+                awaitCancellation()
+            } finally {
+                release()
             }
         }
     }
-    val current = sample ?: return
+    val snap = model.sharedMetricsSnapshot ?: return
+    val cpuTotal = snap.system.cpu.total
+    val memoryUsedMB = snap.system.mem.usedMB
     val cpu = when {
-        current.cpu > 80 -> tokens.error
-        current.cpu > 50 -> tokens.warning
+        cpuTotal > 80 -> tokens.error
+        cpuTotal > 50 -> tokens.warning
         else -> tokens.success
     }
     // `toFixed`: a point whatever the locale.
-    val mem = if (current.memoryUsedMB < 1024) "%.0fM".format(Locale.ROOT, current.memoryUsedMB) else "%.1fG".format(Locale.ROOT, current.memoryUsedMB / 1024)
+    val mem = if (memoryUsedMB < 1024) "%.0fM".format(Locale.ROOT, memoryUsedMB) else "%.1fG".format(Locale.ROOT, memoryUsedMB / 1024)
     Row(
         Modifier
             .clip(RoundedCornerShape(6.dp))
@@ -276,7 +269,7 @@ private fun Resources(api: ApiClient, text: TextStyle, onClick: () -> Unit) {
             .padding(horizontal = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        BasicText("CPU %.0f%%".format(Locale.ROOT, current.cpu), style = text.copy(color = cpu.color), maxLines = 1)
+        BasicText("CPU %.0f%%".format(Locale.ROOT, cpuTotal), style = text.copy(color = cpu.color), maxLines = 1)
         BasicText("MEM $mem", style = text.copy(color = tokens.text2.color), maxLines = 1)
     }
 }

@@ -1022,7 +1022,7 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            PpmIcon(ProductIcon.ScrollText, 16.dp, if (model.logsLikelyBugs > 0) tokens.error.color else tokens.text3.color)
+                            PpmIcon(ProductIcon.ScrollText, 16.dp, if (model.showLogsBadgeDot) tokens.error.color else tokens.text3.color)
                             BasicText("Logs", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
                         }
                         Column(

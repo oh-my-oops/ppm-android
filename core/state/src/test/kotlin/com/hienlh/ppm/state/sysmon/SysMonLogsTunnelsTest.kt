@@ -235,4 +235,122 @@ class SysMonLogsTunnelsTest {
             TunnelsModel.cloudflareSetup(NamedTunnelStatus(mode = "named", hostname = "dev.example.com")),
         )
     }
+
+    @Test
+    fun `groupForApp sets rootPid null so buildGroupKillRequests kills every member individually`() {
+        val processes = listOf(
+            ProcessInfo(pid = 100, ppid = 1, name = "chrome", cpu = 10.0, ramMB = 200.0, startedAt = 10L),
+            ProcessInfo(pid = 101, ppid = 100, name = "chrome-gpu", cpu = 5.0, ramMB = 150.0, startedAt = 11L),
+            ProcessInfo(pid = 102, ppid = 1, name = "chrome-broker", cpu = 2.0, ramMB = 50.0, startedAt = 12L),
+        )
+        val app = AppInfo(id = "chromium.desktop", name = "Chromium", pids = listOf(100, 102))
+        val row = AppRowsModel.buildAppRows(listOf(app), processes).single()
+        val group = AppRowsModel.groupForApp(row)
+        assertNull(group.rootPid)
+        assertEquals("app:chromium.desktop", group.key)
+        assertEquals(setOf(100, 101, 102), group.pids.toSet())
+
+        val members = group.pids.mapNotNull { pid -> processes.firstOrNull { it.pid == pid } }
+        val reqs = ProcessTableModel.buildGroupKillRequests(group, members)
+        assertEquals(3, reqs.size)
+        assertTrue(reqs.all { !it.tree })
+        assertEquals(setOf(100, 101, 102), reqs.map { it.pid }.toSet())
+    }
+
+    @Test
+    fun `ServicesModel confirmWordingFor matches systemd launchd and scm wording and ResourceStreamTierTracker switches tiers`() {
+        val sysSvc = ServiceInfo(unit = "nginx.service", scope = "system", running = true, enabled = true)
+        val userSvc = ServiceInfo(unit = "com.example.agent", scope = "user", running = true, enabled = true)
+
+        assertFalse(ServicesModel.needsConfirm("start"))
+        assertFalse(ServicesModel.needsConfirm("enable"))
+        assertTrue(ServicesModel.needsConfirm("stop"))
+        assertTrue(ServicesModel.needsConfirm("restart"))
+        assertTrue(ServicesModel.needsConfirm("disable"))
+
+        val systemdStop = ServicesModel.confirmWordingFor("systemd", sysSvc, "stop")!!
+        assertEquals("Stop service", systemdStop.title)
+        assertEquals("Stop nginx.service? Anything depending on it stops too.", systemdStop.body)
+
+        val launchdUserDisable = ServicesModel.confirmWordingFor("launchd", userSvc, "disable")!!
+        assertEquals("Disable at login", launchdUserDisable.title)
+        assertEquals("com.example.agent will no longer load at login. It keeps running now.", launchdUserDisable.body)
+
+        val launchdSysDisable = ServicesModel.confirmWordingFor("launchd", sysSvc, "disable")!!
+        assertEquals("Disable at boot", launchdSysDisable.title)
+
+        val scmStop = ServicesModel.confirmWordingFor("scm", sysSvc, "stop")!!
+        assertEquals("Stop nginx.service? Windows refuses if other running services depend on it.", scmStop.body)
+
+        assertFalse(tabNeedsProcesses("overview"))
+        assertFalse(tabNeedsProcesses("performance"))
+        assertTrue(tabNeedsProcesses("processes"))
+        assertTrue(tabNeedsProcesses("apps"))
+        assertTrue(tabNeedsProcesses("services"))
+
+        val tracker = ResourceStreamTierTracker()
+        assertEquals(StreamReconcileAction.Connect(false), tracker.retain(wantProcesses = false))
+        assertEquals(StreamReconcileAction.NoOp, tracker.retain(wantProcesses = false))
+        assertEquals(StreamReconcileAction.Connect(true), tracker.retain(wantProcesses = true))
+        assertEquals(StreamReconcileAction.Connect(false), tracker.release(wantProcesses = true))
+        assertEquals(StreamReconcileAction.NoOp, tracker.release(wantProcesses = false))
+        assertEquals(StreamReconcileAction.Disconnect, tracker.release(wantProcesses = false))
+    }
+
+    @Test
+    fun `parseLogsEnvironment prepareIssueReport and LogsLiveFeedBuffer match web logs behaviour`() {
+        // 1. parseLogsEnvironment parses Array<[string,string]> only
+        val envArr = json.parseToJsonElement("""[["PPM","0.9.90"],["Runtime","Bun 1.2"]]""")
+        assertEquals(listOf("PPM" to "0.9.90", "Runtime" to "Bun 1.2"), parseLogsEnvironment(envArr))
+        val envObj = json.parseToJsonElement("""{"ppm":"0.9.90","os":"linux"}""")
+        assertTrue(parseLogsEnvironment(envObj).isEmpty())
+
+        // 2. prepareIssueReport redacts title + duplicateQuery and omits body from openUrl when over 8192 chars
+        val redact = RedactOptions(home = true, email = true, chats = true, projects = listOf("secret-proj"))
+        val longLine = "x".repeat(9000)
+        val snip = ReportSnippet(
+            id = "s1",
+            src = "server",
+            rows = foldRepeats(listOf(LogEntry(id = "e1", ts = 1000L, lv = "error", src = "server", tag = "ppm", msg = longLine))),
+        )
+        val prep = prepareIssueReport(
+            fields = ReportFields(
+                title = "Crash in /home/alice/secret-proj for alice@example.com",
+                labels = listOf("bug"),
+                what = "Failed at /home/alice",
+            ),
+            snippets = listOf(snip),
+            environment = listOf("PPM" to "0.9.90"),
+            redact = redact,
+        )
+        assertFalse(prep.redactedTitle.contains("alice"))
+        assertFalse(prep.redactedTitle.contains("secret-proj"))
+        assertEquals(prep.redactedTitle, prep.duplicateQuery)
+        assertTrue(prep.bodyOverLimit)
+        assertFalse(prep.openUrl.contains("body="))
+        assertTrue(prep.body.contains(longLine))
+
+        // 3. LogsLiveFeedBuffer holds in-flight lines during page read and merges by id without duplicates
+        val buf = LogsLiveFeedBuffer()
+        buf.beginPageRead()
+        val liveDuringFetch = listOf(
+            LogEntry(id = "2", ts = 2000L, lv = "info", src = "server", tag = "ppm", msg = "second"),
+            LogEntry(id = "3", ts = 3000L, lv = "error", src = "server", tag = "ppm", msg = "third"),
+        )
+        val interim = buf.onLiveBatch(LogQueryResult(), liveDuringFetch, mapOf("s1" to "Chat 1"), DEFAULT_LOG_FILTER, follow = true)
+        assertTrue(interim.entries.isEmpty())
+
+        val page = LogQueryResult(
+            entries = listOf(
+                LogEntry(id = "1", ts = 1000L, lv = "info", src = "server", tag = "ppm", msg = "first"),
+                LogEntry(id = "2", ts = 2000L, lv = "info", src = "server", tag = "ppm", msg = "second"),
+            ),
+            matched = 2,
+            inRange = 2,
+            fromTs = 500L,
+        )
+        val merged = buf.finishPageRead(page, DEFAULT_LOG_FILTER)
+        assertEquals(listOf("1", "2", "3"), merged.entries.map { it.id })
+        assertEquals("Chat 1", merged.titles["s1"])
+    }
 }

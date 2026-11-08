@@ -354,9 +354,140 @@ class Phase11aUiTest {
             assertTrue(snippets[0]["lines"].array.orEmpty().isNotEmpty())
             assertEquals("Claude stream crash on token parse", draftJson["note"].string)
             val envArr = draftJson["environment"].array.orEmpty()
-            assertEquals(4, envArr.size)
+            assertEquals(3, envArr.size)
             assertEquals("PPM", envArr[0].array.orEmpty()[0].string)
             assertEquals("0.9.90", envArr[0].array.orEmpty()[1].string)
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `KillConfirmDialog defaults includeTree to false shows CPU RAM has no Force Stop and posts to kill endpoint`() {
+        val killBodies = CopyOnWriteArrayList<String>()
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                val body = request.body?.utf8().orEmpty()
+                return when {
+                    target.endsWith("/api/system/resources/kill") -> {
+                        killBodies += body
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{"pid":201,"killed":[201]}}""")
+                            .build()
+                    }
+                    else -> {
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{}}""")
+                            .build()
+                    }
+                }
+            }
+        }
+        server.start()
+        try {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val model = AppModel(context)
+            model.api = ApiClient(server.url("/"), "tok")
+
+            val snapshot = MetricsSnapshot(
+                ts = 10_000L,
+                processes = listOf(
+                    ProcessInfo(pid = 201, ppid = 1, name = "node", command = "node server.js", cpu = 25.0, ramMB = 256.0, startedAt = 1234L),
+                ),
+                groups = listOf(
+                    ProcessGroup(key = "node-grp", label = "Node Server", rootPid = 201, cpu = 25.0, ramMB = 256.0, count = 1, ppm = false, pids = listOf(201)),
+                ),
+            )
+
+            composeRule.setContent {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    SystemMonitorBody(
+                        model = model,
+                        initialTab = "processes",
+                        initialSnapshot = snapshot,
+                    )
+                }
+            }
+
+            // Expand group or switch to flat to click single process kill
+            composeRule.onNodeWithTag("proc-mode-flat").performClick()
+            composeRule.onNodeWithTag("proc-kill-201").performClick()
+            composeRule.onNodeWithTag("kill-confirm-dialog").assertIsDisplayed()
+            composeRule.onNodeWithText("CPU 25.0% · RAM 256 MB").assertIsDisplayed()
+            composeRule.onNodeWithText("Force Stop").assertDoesNotExist()
+            composeRule.onNodeWithTag("sysmon-kill-confirm-ok").performClick()
+
+            composeRule.waitUntil(5_000) { killBodies.isNotEmpty() && model.toasts.any { it.message.title == "Ended node (201)" } }
+            val killJson = WireJson.parse(killBodies.first())
+            assertEquals(201, killJson["pid"].int)
+            assertEquals(false, killJson["tree"]?.toString()?.toBooleanStrictOrNull())
+            assertTrue(model.toasts.any { it.message.title == "Ended node (201)" })
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `ServicesPanel confirms stop restart and disable before calling systemServiceAction`() {
+        val actionPaths = CopyOnWriteArrayList<String>()
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                if (request.method == "POST" && target.contains("/api/system/services/")) {
+                    actionPaths += target
+                }
+                return MockResponse.Builder()
+                    .addHeader("Content-Type", "application/json")
+                    .body("""{"ok":true,"data":{"supported":true,"manager":"systemd","services":[{"unit":"nginx.service","scope":"system","description":"Nginx web server","activeState":"active","subState":"running","running":true,"failed":false,"enabled":true}]}}""")
+                    .build()
+            }
+        }
+        server.start()
+        try {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val model = AppModel(context)
+            model.api = ApiClient(server.url("/"), "tok")
+
+            val services = ServicesSnapshot(
+                supported = true,
+                manager = "systemd",
+                services = listOf(
+                    ServiceInfo(
+                        unit = "nginx.service",
+                        scope = "system",
+                        description = "Nginx web server",
+                        activeState = "active",
+                        subState = "running",
+                        running = true,
+                        enabled = true,
+                    ),
+                ),
+            )
+
+            composeRule.setContent {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    SystemMonitorBody(
+                        model = model,
+                        initialTab = "services",
+                        initialServices = services,
+                    )
+                }
+            }
+
+            composeRule.onNodeWithTag("service-stop-nginx.service").performClick()
+            // Must not call API before confirming!
+            assertTrue(actionPaths.isEmpty())
+            composeRule.onNodeWithTag("sysmon-service-confirm").assertIsDisplayed()
+            composeRule.onNodeWithText("Stop nginx.service? Anything depending on it stops too.").assertIsDisplayed()
+            composeRule.onNodeWithTag("sysmon-service-confirm-ok").performClick()
+
+            composeRule.waitUntil(5_000) { actionPaths.isNotEmpty() }
+            assertTrue(actionPaths.first().endsWith("/api/system/services/system/nginx.service/stop"))
         } finally {
             server.close()
         }
