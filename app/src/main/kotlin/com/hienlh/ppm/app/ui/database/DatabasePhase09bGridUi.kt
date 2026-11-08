@@ -198,6 +198,7 @@ import com.hienlh.ppm.state.database.refusedFilters
 import com.hienlh.ppm.state.database.reloadKeepLoadedLimit
 import com.hienlh.ppm.state.database.revertRows
 import com.hienlh.ppm.state.database.rowDocumentText
+import com.hienlh.ppm.state.database.rowIdForRowKey
 import com.hienlh.ppm.state.database.rowMarkerWidthPx
 import com.hienlh.ppm.state.database.savedText
 import com.hienlh.ppm.state.database.selectedBlock
@@ -1824,16 +1825,35 @@ internal fun DatabaseTableTabContent(
             schemaList.filter { it.pk }.map { it.name }
         }
     }
-    val hasRowKey = keyCols.isNotEmpty()
+    val hasRowKey = keyCols.isNotEmpty() && keyCols.all { it in columns }
     val canEditTable = !readonlyEnabled && hasRowKey
 
-    // Combined rows: stored rows (with pending cell edits overlaid) + inserted new rows
-    val rowIds = remember(storedRows.size, changeset.inserted) {
-        List(storedRows.size) { "row_$it" } + changeset.inserted
+    fun rowKeyMapFor(rowIndex: Int): Map<String, DbCellValue> {
+        if (rowIndex !in storedRows.indices) return emptyMap()
+        val stored = storedRows[rowIndex]
+        val out = LinkedHashMap<String, DbCellValue>()
+        for (kCol in keyCols) {
+            val cIdx = columns.indexOf(kCol)
+            if (cIdx >= 0) {
+                out[kCol] = stored.getOrElse(cIdx) { DbCellValue.Null }
+            }
+        }
+        return out
     }
-    val rows = remember(storedRows, columns, changeset) {
+
+    val storedRowIds = remember(storedRows, columns, keyCols) {
+        List(storedRows.size) { rIdx ->
+            rowIdForRowKey(rowKeyMapFor(rIdx), keyCols, rIdx)
+        }
+    }
+
+    // Combined rows: stored rows (with pending cell edits overlaid) + inserted new rows
+    val rowIds = remember(storedRowIds, changeset.inserted) {
+        storedRowIds + changeset.inserted
+    }
+    val rows = remember(storedRows, storedRowIds, columns, changeset) {
         val modifiedStored = storedRows.mapIndexed { rIdx, baseRow ->
-            val rId = "row_$rIdx"
+            val rId = storedRowIds.getOrElse(rIdx) { "row_$rIdx" }
             val rowEdits = changeset.cells[rId]
             if (rowEdits.isNullOrEmpty()) baseRow
             else columns.mapIndexed { cIdx, colName ->
@@ -1876,23 +1896,13 @@ internal fun DatabaseTableTabContent(
         return columns.mapIndexed { idx, col -> col to (r.getOrElse(idx) { DbCellValue.Null }) }.toMap()
     }
 
-    fun rowKeyMapFor(rowIndex: Int): Map<String, DbCellValue> {
-        if (rowIndex !in storedRows.indices) return emptyMap()
-        val stored = storedRows[rowIndex]
-        val out = LinkedHashMap<String, DbCellValue>()
-        for (kCol in keyCols) {
-            val cIdx = columns.indexOf(kCol)
-            if (cIdx >= 0) {
-                out[kCol] = stored.getOrElse(cIdx) { DbCellValue.Null }
-            }
-        }
-        return out
-    }
-
-    val allRowKeysMap = remember(storedRows, columns, keyCols) {
+    val allRowKeysMap = remember(storedRows, storedRowIds, columns, keyCols) {
         val map = LinkedHashMap<String, Map<String, DbCellValue>>()
         for (rIdx in storedRows.indices) {
-            map["row_$rIdx"] = rowKeyMapFor(rIdx)
+            val keyMap = rowKeyMapFor(rIdx)
+            val rId = storedRowIds.getOrElse(rIdx) { "row_$rIdx" }
+            map[rId] = keyMap
+            map["row_$rIdx"] = keyMap
         }
         map
     }
@@ -1957,7 +1967,8 @@ internal fun DatabaseTableTabContent(
             listOfNotNull(selection.activeCell?.second)
         }
         if (targetRows.isEmpty()) return
-        pushChangeset(deleteRows(changeset, targetRows.map { rowIdAt(it) }))
+        val keysByRowId = targetRows.associate { rIdx -> rowIdAt(rIdx) to rowKeyMapFor(rIdx) }
+        pushChangeset(deleteRows(changeset, targetRows.map { rowIdAt(it) }, keysByRowId))
     }
 
     fun revertSelectedRows() {
@@ -1970,6 +1981,10 @@ internal fun DatabaseTableTabContent(
 
     fun triggerSaveFlow() {
         val payload = toGridChanges(changeset, allRowKeysMap)
+        if (payload.hasMissingRowKey) {
+            saveDialogError = "Cannot save: missing primary key for one or more rows"
+            return
+        }
         if (payload.totalOperations == 0) {
             saveToastMessage = "No changes to save"
             return
@@ -2521,7 +2536,7 @@ internal fun DatabaseTableTabContent(
                         onClick = { onInstallMissingDriver(missingDriverId) },
                     )
                 }
-            } else if (errorMessage != null) {
+            } else if (errorMessage != null || (saveDialogError != null && activeSavePreview == null)) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -2530,7 +2545,7 @@ internal fun DatabaseTableTabContent(
                         .testTag("db-grid-error-banner"),
                 ) {
                     BasicText(
-                        errorMessage,
+                        errorMessage ?: saveDialogError.orEmpty(),
                         style = ppmText(11f, lineHeight = 15f).copy(color = tokens.error.color),
                     )
                 }
@@ -2566,6 +2581,10 @@ internal fun DatabaseTableTabContent(
                         dontAskSave = nextDontAsk
                         prefs.edit().putBoolean(SAVE_DONT_ASK_KEY, nextDontAsk).apply()
                         val payload = toGridChanges(changeset, allRowKeysMap)
+                        if (payload.hasMissingRowKey) {
+                            saveDialogError = "Cannot save: missing primary key for one or more rows"
+                            return@GridSaveDialog
+                        }
                         savingChanges = true
                         saveDialogError = null
                         saveConflictFailure = null
@@ -3340,7 +3359,14 @@ internal fun DatabaseTableTabContent(
                                 phoneFormRowIndex = nextIdx.coerceIn(0, (rows.size - 1).coerceAtLeast(0))
                             },
                             onDeleteRow = {
-                                pushChangeset(deleteRows(changeset, listOf(rowIdAt(activePhoneRow))))
+                                val rId = rowIdAt(activePhoneRow)
+                                pushChangeset(
+                                    deleteRows(
+                                        changeset,
+                                        listOf(rId),
+                                        mapOf(rId to rowKeyMapFor(activePhoneRow)),
+                                    ),
+                                )
                                 phoneFormRowIndex = null
                             },
                             onRevertRow = {

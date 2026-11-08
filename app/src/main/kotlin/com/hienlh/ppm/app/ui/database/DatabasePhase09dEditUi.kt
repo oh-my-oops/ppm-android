@@ -173,9 +173,16 @@ fun GridSaveDialog(
                     style = ppmText(11f, FontWeight.SemiBold, lineHeight = 15f).copy(color = tokens.error.color),
                 )
                 if (conflictFailure != null) {
+                    val stmtIdx = conflictFailure.statementIndex
+                    val stmtPart = if (stmtIdx != null) {
+                        "Statement ${stmtIdx + 1} of ${conflictFailure.statementCount}"
+                    } else {
+                        "Commit (${conflictFailure.statementCount} statement${if (conflictFailure.statementCount == 1) "" else "s"})"
+                    }
                     val affectedNote = conflictFailure.affected?.let { " (affected $it rows)" }.orEmpty()
+                    val sqlNote = conflictFailure.sql?.let { ": $it" }.orEmpty()
                     BasicText(
-                        "Statement #${conflictFailure.statementIndex + 1} (${conflictFailure.kind})$affectedNote: ${conflictFailure.sql}",
+                        "$stmtPart$affectedNote$sqlNote",
                         style = ppmText(10f, kind = FontKind.MONO, lineHeight = 14f).copy(color = tokens.text.color),
                         modifier = Modifier.testTag("db-save-conflict-sql"),
                     )
@@ -209,7 +216,7 @@ fun GridSaveDialog(
                             label = "Check all",
                             modifier = Modifier.testTag("db-save-cascade-check-all"),
                             onClick = {
-                                checkedCascade = preview.references.map { refKey(it.table) }.toSet()
+                                checkedCascade = preview.references.map { refKey(it) }.toSet()
                             },
                         )
                         SettingsButton(
@@ -220,7 +227,7 @@ fun GridSaveDialog(
                     }
                 }
                 for (ref in preview.references) {
-                    val key = refKey(ref.table)
+                    val key = refKey(ref)
                     val checked = key in checkedCascade
                     Row(
                         modifier = Modifier
@@ -231,7 +238,7 @@ fun GridSaveDialog(
                                 checkedCascade = if (checked) checkedCascade - key else checkedCascade + key
                             }
                             .padding(horizontal = 6.dp, vertical = 4.dp)
-                            .testTag("db-save-cascade-item-${ref.table.name}"),
+                            .testTag("db-save-cascade-item-${ref.table}"),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -247,9 +254,11 @@ fun GridSaveDialog(
                                 style = ppmText(11f, FontWeight.SemiBold, FontKind.MONO, lineHeight = 14f)
                                     .copy(color = tokens.text.color),
                             )
-                            if (ref.paths.isNotEmpty()) {
+                            val helpParts = refPaths(ref) +
+                                (if (ref.cascadesInDb) listOf("ON DELETE CASCADE in the database already") else emptyList())
+                            if (helpParts.isNotEmpty()) {
                                 BasicText(
-                                    refPaths(ref),
+                                    helpParts.joinToString(" · "),
                                     style = ppmText(10f, kind = FontKind.MONO, lineHeight = 13f)
                                         .copy(color = tokens.text3.color),
                                 )

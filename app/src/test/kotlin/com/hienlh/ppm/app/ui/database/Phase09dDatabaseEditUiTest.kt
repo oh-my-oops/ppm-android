@@ -1,5 +1,8 @@
 package com.hienlh.ppm.app.ui.database
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -11,8 +14,6 @@ import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
-import com.hienlh.ppm.state.database.ChangesetPreview
-import com.hienlh.ppm.state.database.ChangesetReference
 import com.hienlh.ppm.state.database.DbCellValue
 import com.hienlh.ppm.state.database.DbGridPageData
 import com.hienlh.ppm.state.database.GridChangesPayload
@@ -23,6 +24,9 @@ import com.hienlh.ppm.state.database.RowCountView
 import com.hienlh.ppm.state.database.RowTotal
 import com.hienlh.ppm.state.database.TableRef
 import com.hienlh.ppm.state.database.TableReferences
+import com.hienlh.ppm.state.database.parseChangesetPreview
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -83,6 +87,7 @@ class Phase09dDatabaseEditUiTest {
         var previewCalls = 0
         var lastAppliedChanges: GridChangesPayload? = null
         var lastCascades: List<TableRef> = emptyList()
+        var currentPage by mutableStateOf(samplePage)
 
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
@@ -91,7 +96,7 @@ class Phase09dDatabaseEditUiTest {
                     schemaName = "public",
                     connectionName = "Payroll Prod",
                     dbType = "postgres",
-                    pageData = samplePage,
+                    pageData = currentPage,
                     schemaList = sampleSchema,
                     rowCountView = RowCountView(
                         text = "Rows: 2",
@@ -102,17 +107,24 @@ class Phase09dDatabaseEditUiTest {
                     readonlyEnabled = false,
                     onPreviewChangeset = { payload ->
                         previewCalls += 1
-                        ChangesetPreview(
-                            statementCount = payload.totalOperations,
-                            script = "UPDATE \"public\".\"invoices\" SET \"name\" = 'Alice Updated' WHERE \"id\" = 1;\nDELETE FROM \"public\".\"invoices\" WHERE \"id\" = 2;",
-                            references = listOf(
-                                ChangesetReference(
-                                    table = TableRef("public", "invoice_lines"),
-                                    count = 3,
-                                    paths = listOf("invoices.id -> invoice_lines.invoice_id"),
-                                    script = "DELETE FROM \"public\".\"invoice_lines\" WHERE \"invoice_id\" = 2;",
-                                ),
-                            ),
+                        parseChangesetPreview(
+                            Json.parseToJsonElement(
+                                """
+                                {
+                                  "statementCount": ${payload.totalOperations},
+                                  "script": "UPDATE \"public\".\"invoices\" SET \"name\" = 'Alice Updated' WHERE \"id\" = 1;\nDELETE FROM \"public\".\"invoices\" WHERE \"id\" = 2;",
+                                  "references": [
+                                    {
+                                      "schema": "public",
+                                      "table": "invoice_lines",
+                                      "paths": [["invoice_lines", "invoices"]],
+                                      "cascadesInDb": false,
+                                      "script": "DELETE FROM \"public\".\"invoice_lines\" WHERE \"invoice_id\" = 2;"
+                                    }
+                                  ]
+                                }
+                                """.trimIndent(),
+                            ) as JsonObject,
                         )
                     },
                     onApplyChangeset = { payload, cascades ->
@@ -121,18 +133,11 @@ class Phase09dDatabaseEditUiTest {
                         throw PpmError.Server(
                             status = 409,
                             code = "CONFLICT",
-                            serverMessage = "Concurrent modification detected (0 rows affected)",
+                            serverMessage = "Statement 1 of 2 failed: The row was changed or deleted by someone else since it was loaded. Nothing was saved. Reload to see its current values.",
                             data = buildJsonObject {
                                 put("statementIndex", 0)
-                                put("kind", "update")
+                                put("statementCount", 2)
                                 put("sql", "UPDATE \"public\".\"invoices\" SET \"name\" = 'Alice Updated' WHERE \"id\" = 1")
-                                put(
-                                    "table",
-                                    buildJsonObject {
-                                        put("schema", "public")
-                                        put("name", "invoices")
-                                    },
-                                )
                                 put("affected", 0)
                             },
                         )
@@ -151,9 +156,14 @@ class Phase09dDatabaseEditUiTest {
         composeRule.onNodeWithTag("db-insert-row-btn").performClick()
         composeRule.onNodeWithTag("db-inline-cancel-btn").performClick()
 
-        // Select row 1 ("Bob") via row gutter and delete it
+        // Select row 1 ("Bob", id = 2) via row gutter and delete it
         composeRule.onNodeWithTag("grid-row-marker-1").performClick()
         composeRule.onNodeWithTag("db-delete-row-btn").performClick()
+
+        // Re-sort rows (Bob moves to row 0, Alice moves to row 1) BEFORE saving (C1 verification)
+        composeRule.runOnIdle {
+            currentPage = samplePage.copy(rows = samplePage.rows.reversed())
+        }
 
         // Click Save (2)
         composeRule.onNodeWithTag("db-save-changes-btn").assertIsDisplayed()
@@ -170,10 +180,13 @@ class Phase09dDatabaseEditUiTest {
         composeRule.onNodeWithTag("db-save-error-banner").assertIsDisplayed()
         composeRule.onNodeWithTag("db-save-conflict-sql").assertIsDisplayed()
         assertEquals(1, lastAppliedChanges?.updates?.size)
+        assertEquals(mapOf("id" to DbCellValue.Num("1", 1.0)), lastAppliedChanges?.updates?.first()?.key)
+        assertEquals(mapOf("name" to DbCellValue.Text("Alice")), lastAppliedChanges?.updates?.first()?.original)
         assertEquals(1, lastAppliedChanges?.deletes?.size)
+        assertEquals(mapOf("id" to DbCellValue.Num("2", 2.0)), lastAppliedChanges?.deletes?.first())
         assertEquals(0, lastAppliedChanges?.inserts?.size) // untouched new row was omitted!
         assertEquals(1, lastCascades.size)
-        assertEquals("invoice_lines", lastCascades.first().name)
+        assertEquals("invoice_lines", lastCascades.first().table)
     }
 
     @Test
