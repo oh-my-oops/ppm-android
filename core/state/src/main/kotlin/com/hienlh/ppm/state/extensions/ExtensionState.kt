@@ -706,6 +706,43 @@ window.addEventListener("message",function(e){
         return names.mapNotNull { it.string }.take(MAX_ICON_NAMES)
     }
 
+    /**
+     * Builds the exact `__ppm.fileIcons` reply expected by `webview-file-icons.ts` (`FileIconsAnswer`):
+     * `icons: [[name, "vsi-…"]]` and `rules: [[cls, css]]`.
+     */
+    fun fileIconsAnswer(
+        icons: List<Pair<String, String>>,
+        rules: List<Pair<String, String>>,
+    ): JsonObject = buildJsonObject {
+        put("command", FILE_ICONS_COMMAND)
+        put(
+            "icons",
+            buildJsonArray {
+                for ((name, cls) in icons) {
+                    add(
+                        buildJsonArray {
+                            add(JsonPrimitive(name))
+                            add(JsonPrimitive(cls))
+                        },
+                    )
+                }
+            },
+        )
+        put(
+            "rules",
+            buildJsonArray {
+                for ((cls, css) in rules) {
+                    add(
+                        buildJsonArray {
+                            add(JsonPrimitive(cls))
+                            add(JsonPrimitive(css))
+                        },
+                    )
+                }
+            },
+        )
+    }
+
     fun mergeTreeChildren(
         nodes: List<TreeItemUI>,
         parentId: String,

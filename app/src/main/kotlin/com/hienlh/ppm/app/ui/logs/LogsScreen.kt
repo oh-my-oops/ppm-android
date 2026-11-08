@@ -154,6 +154,7 @@ fun LogsAppBody(
             ),
         )
     }
+    var envLoaded by remember { mutableStateOf(false) }
     var draftingAi by remember { mutableStateOf(false) }
     var bannerError by remember { mutableStateOf<String?>(null) }
 
@@ -209,7 +210,14 @@ fun LogsAppBody(
 
     suspend fun loadEnvironment(): List<Pair<String, String>> {
         val api = model.api ?: return envPairs
-        runCatching { api.logsEnvironment() }.getOrNull()?.let { envJson ->
+        val envJson = try {
+            api.logsEnvironment()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        if (envJson != null) {
             val list = mutableListOf<Pair<String, String>>()
             val arr = envJson.array
             if (arr != null) {
@@ -229,6 +237,7 @@ fun LogsAppBody(
             list += "Client" to "PPM Android (${android.os.Build.MODEL})"
             if (list.isNotEmpty()) {
                 envPairs = list
+                envLoaded = true
                 return list
             }
         }
@@ -286,7 +295,7 @@ fun LogsAppBody(
         draftingAi = true
         scope.launch {
             try {
-                val activeEnv = if (envPairs.size <= 1) loadEnvironment() else envPairs
+                val activeEnv = if (!envLoaded) loadEnvironment() else envPairs
                 val snippetsJson = kotlinx.serialization.json.JsonArray(
                     targetSnippets.map { s ->
                         buildJsonObject {

@@ -139,6 +139,22 @@ class ExtensionStateTest {
 
         val iconsMsg = Json.parseToJsonElement("""{"command":"__ppm.fileIcons","names":["App.tsx","README.md"]}""")
         assertEquals(listOf("App.tsx", "README.md"), ExtensionWebviewBridge.fileIconsRequest(iconsMsg))
+
+        val answer = ExtensionWebviewBridge.fileIconsAnswer(
+            icons = listOf("App.tsx" to "vsi-file-type-reactts", "__proto__" to "vsi-default-file"),
+            rules = listOf("vsi-file-type-reactts" to ".vsi-file-type-reactts { background-image: url(\"data:...\"); }\n"),
+        )
+        assertEquals("__ppm.fileIcons", (answer["command"] as JsonPrimitive).content)
+        val ansIcons = answer["icons"] as kotlinx.serialization.json.JsonArray
+        assertEquals(2, ansIcons.size)
+        val firstPair = ansIcons[0] as kotlinx.serialization.json.JsonArray
+        assertEquals("App.tsx", (firstPair[0] as JsonPrimitive).content)
+        assertEquals("vsi-file-type-reactts", (firstPair[1] as JsonPrimitive).content)
+        val ansRules = answer["rules"] as kotlinx.serialization.json.JsonArray
+        assertEquals(1, ansRules.size)
+        val firstRule = ansRules[0] as kotlinx.serialization.json.JsonArray
+        assertEquals("vsi-file-type-reactts", (firstRule[0] as JsonPrimitive).content)
+        assertTrue((firstRule[1] as JsonPrimitive).content.startsWith(".vsi-file-type-reactts"))
     }
 
     @Test

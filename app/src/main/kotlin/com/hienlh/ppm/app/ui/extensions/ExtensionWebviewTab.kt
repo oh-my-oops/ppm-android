@@ -284,20 +284,11 @@ fun ExtensionWebviewBody(
             }
             val iconNames = ExtensionWebviewBridge.fileIconsRequest(data)
             if (iconNames != null) {
-                scope.launch {
-                    val (iconsMap, cssRules) = FileIcons.get(context).webviewFileIcons(iconNames, framework)
-                    channel.post(
-                        buildJsonObject {
-                            put("command", ExtensionWebviewBridge.FILE_ICONS_COMMAND)
-                            put(
-                                "icons",
-                                buildJsonObject {
-                                    for ((k, v) in iconsMap) put(k, v)
-                                },
-                            )
-                            put("rules", cssRules)
-                        },
-                    )
+                if (iconNames.isNotEmpty()) {
+                    scope.launch {
+                        val (icons, rules) = FileIcons.get(context).webviewFileIcons(iconNames, framework)
+                        channel.post(ExtensionWebviewBridge.fileIconsAnswer(icons, rules))
+                    }
                 }
                 return@ExtensionWebviewSurface
             }
