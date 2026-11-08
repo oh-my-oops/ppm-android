@@ -44,6 +44,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -76,6 +78,7 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.string
@@ -1274,7 +1277,6 @@ private fun ProcessesPanel(
     var expandedGroups by remember { mutableStateOf(emptySet<String>()) }
     var killTarget by remember { mutableStateOf<KillTarget?>(null) }
     var detailsPid by remember { mutableStateOf<Int?>(null) }
-    var menuGroup by remember { mutableStateOf<ProcessGroup?>(null) }
     var menuProc by remember { mutableStateOf<ProcessInfo?>(null) }
     var signalSubmenuOpen by remember { mutableStateOf(false) }
 
@@ -1493,29 +1495,31 @@ private fun ProcessesPanel(
                                 PerformanceDevices.formatRam(g.ramMB),
                                 style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color),
                             )
-                            if (!isProtected && members.isNotEmpty()) {
-                                Box(
-                                    Modifier
-                                        .size(22.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .ppmClickable { killTarget = KillTarget.GroupTarget(g, members) }
-                                        .testTag("proc-group-kill-${g.key}"),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    PpmIcon(ProductIcon.X, 13.dp, tokens.error.color)
-                                }
+                            val groupKillTooltip = if (isProtected) {
+                                "Protected: this app contains a PPM or OS-critical process — cannot be ended as a whole."
                             } else {
-                                Spacer(Modifier.width(22.dp))
+                                "End ${g.label} (${g.count} processes)"
                             }
                             Box(
                                 Modifier
                                     .size(22.dp)
+                                    .alpha(if (isProtected || members.isEmpty()) 0.4f else 1f)
                                     .clip(RoundedCornerShape(4.dp))
-                                    .ppmClickable { menuGroup = g }
-                                    .testTag("proc-group-menu-${g.key}"),
+                                    .webTitle(groupKillTooltip)
+                                    .ppmClickable(enabled = !isProtected && members.isNotEmpty()) {
+                                        killTarget = KillTarget.GroupTarget(g, members)
+                                    }
+                                    .semantics {
+                                        contentDescription = "End ${g.label} and its ${g.count} processes"
+                                    }
+                                    .testTag("proc-group-kill-${g.key}"),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                PpmIcon(ProductIcon.MoreVertical, 13.dp, tokens.text2.color)
+                                PpmIcon(
+                                    ProductIcon.X,
+                                    13.dp,
+                                    if (isProtected || members.isEmpty()) tokens.text2.color else tokens.error.color,
+                                )
                             }
                         }
                     }
@@ -1608,52 +1612,6 @@ private fun ProcessesPanel(
                             }
                         }
                     }
-                }
-            }
-        }
-    }
-
-    val targetGroup = menuGroup
-    if (targetGroup != null) {
-        val members = targetGroup.pids.mapNotNull { byPid[it] }
-        val isProtected = ProcessTableModel.isGroupProtected(members)
-        Dialog(onDismissRequest = { menuGroup = null }) {
-            val shape = RoundedCornerShape(tokens.rad.dp)
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .ppmShadow(tokens.shadowPanel, shape)
-                    .clip(shape)
-                    .background(tokens.panel2.over(tokens.bgSolid).color)
-                    .cssBorder(tokens.border.color, shape)
-                    .padding(12.dp)
-                    .testTag("proc-group-menu"),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .alpha(if (isProtected) 0.5f else 1f)
-                        .clip(RoundedCornerShape(6.dp))
-                        .ppmClickable(enabled = !isProtected && members.isNotEmpty()) {
-                            menuGroup = null
-                            killTarget = KillTarget.GroupTarget(targetGroup, members)
-                        }
-                        .padding(horizontal = 10.dp, vertical = 8.dp)
-                        .testTag("proc-group-menu-end-application"),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    BasicText(
-                        "End application",
-                        style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.error.color),
-                    )
-                }
-                if (isProtected) {
-                    BasicText(
-                        "One of this app's processes is protected, so PPM will not end it.",
-                        Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text2.color),
-                    )
                 }
             }
         }
