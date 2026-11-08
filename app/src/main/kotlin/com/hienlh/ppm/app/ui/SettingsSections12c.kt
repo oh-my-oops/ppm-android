@@ -138,6 +138,7 @@ import com.hienlh.ppm.state.settings.PushStatusState
 import com.hienlh.ppm.state.settings.ScheduleLogBufferState
 import com.hienlh.ppm.state.settings.ScheduleProjectOption
 import com.hienlh.ppm.state.settings.ScheduleRowState
+import com.hienlh.ppm.state.settings.TAILSCALE_POLL_MS
 import com.hienlh.ppm.state.settings.TailscaleState
 import com.hienlh.ppm.state.settings.TailscaleStepId
 import com.hienlh.ppm.state.settings.TelegramNotifyState
@@ -178,6 +179,7 @@ import com.hienlh.ppm.state.settings.parseSchedulesList
 import com.hienlh.ppm.state.settings.parseTailscaleState
 import com.hienlh.ppm.state.settings.parseTelegramNotifyStatus
 import com.hienlh.ppm.state.settings.scheduleFormProblems
+import com.hienlh.ppm.state.settings.tailscaleNeedsPolling
 import com.hienlh.ppm.state.settings.tailscaleServiceUrl
 import com.hienlh.ppm.state.settings.validateNtfyTopic
 import com.hienlh.ppm.state.settings.validateTailscaleServiceName
@@ -767,13 +769,13 @@ internal fun RemoteAccessSettingsSection(
         }
     }
 
-    // Tailscale login polling while `starting` or `waiting` (`tailscale-settings-section.tsx`)
-    val tailscaleLoginActive = tailscale.login.state == "starting" || tailscale.login.state == "waiting"
-    LaunchedEffect(api, tailscaleLoginActive) {
+    // Tailscale state polling every 4s while visible and `tailscaleNeedsPolling(tailscale)` (`tailscale-settings-section.tsx:34, 110`)
+    val tailscalePolling = tailscaleNeedsPolling(tailscale)
+    LaunchedEffect(api, tailscalePolling) {
         val client = api ?: return@LaunchedEffect
-        if (!tailscaleLoginActive) return@LaunchedEffect
-        while (tailscale.login.state == "starting" || tailscale.login.state == "waiting") {
-            delay(1_500L)
+        if (!tailscalePolling) return@LaunchedEffect
+        while (tailscaleNeedsPolling(tailscale)) {
+            delay(TAILSCALE_POLL_MS)
             val fresh = runCatchingNonCancelled { parseTailscaleState(client.tailscaleGetState()) }.getOrNull() ?: continue
             tailscale = fresh
         }

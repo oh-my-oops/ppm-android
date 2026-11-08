@@ -348,6 +348,17 @@ fun blockingTailscaleSetupStep(s: TailscaleState): TailscaleStepId? {
     return if (step == TailscaleStepId.Service) null else step
 }
 
+/**
+ * Mirrors `POLL_MS = 4000` and `needsPolling(s)` in `src/web/components/settings/tailscale/tailscale-settings-section.tsx:34, 39-43`.
+ */
+const val TAILSCALE_POLL_MS: Long = 4_000L
+
+fun tailscaleNeedsPolling(s: TailscaleState): Boolean =
+    s.login.state == "starting" ||
+        s.login.state == "waiting" ||
+        currentTailscaleSetupStep(s) != null ||
+        (s.enabled && !s.service.approved)
+
 private val SERVICE_NAME_REGEX = Regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 /**

@@ -118,6 +118,12 @@ class SettingsIntegrationsStateTest {
             service = TailscaleServiceInfo(name = "ppm", url = "https://ppm.tail123.ts.net", defined = true, approved = true, advertised = true, pointsAtPpm = true),
         )
         assertNull(currentTailscaleSetupStep(s7))
+        assertEquals(4_000L, TAILSCALE_POLL_MS)
+        assertTrue(tailscaleNeedsPolling(s0))
+        assertTrue(tailscaleNeedsPolling(s6))
+        assertFalse(tailscaleNeedsPolling(s7))
+        assertTrue(tailscaleNeedsPolling(s7.copy(service = s7.service.copy(approved = false))))
+        assertTrue(tailscaleNeedsPolling(s7.copy(login = TailscaleLoginState(state = "waiting"))))
         assertTrue(isConnectedViaAddress("https://ppm.tail123.ts.net:3210", "ppm.tail123.ts.net."))
         assertFalse(isConnectedViaAddress("http://192.168.1.10:3210", "100.64.0.1"))
     }
