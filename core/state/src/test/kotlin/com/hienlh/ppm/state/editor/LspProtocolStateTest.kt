@@ -208,8 +208,18 @@ class LspProtocolStateTest {
         // Round-trip back from 0-based UTF-16 LspPosition to EditorBuffer offset
         assertEquals(cursorOffset, lspPositionToOffset(buffer, lspPos))
 
-        // Default completion word range replaces `targetSymbol` even without explicit textEdit
-        val replaceRange = defaultCompletionReplaceOffsets(buffer, cursorOffset)
-        assertEquals("targetSymbol", buffer.substring(replaceRange.first, replaceRange.last))
+        // Default completion word range (`getWordUntilPosition`) ends at the cursor: on `my|Helper` it covers `my` only
+        val midWordText = "const x = myHelper;"
+        val midWordBuf = EditorBuffer(midWordText)
+        val afterMyOffset = midWordText.indexOf("myHelper") + "my".length
+        val midWordRange = defaultCompletionReplaceOffsets(midWordBuf, afterMyOffset)
+        assertEquals("my", midWordBuf.substring(midWordRange.first, midWordRange.last))
+
+        // Word with non-ASCII letters (`chào|`) covers the whole `chào` up to the cursor
+        val vnText = "const chào = 1;"
+        val vnBuf = EditorBuffer(vnText)
+        val afterChaoOffset = vnText.indexOf("chào") + "chào".length
+        val vnRange = defaultCompletionReplaceOffsets(vnBuf, afterChaoOffset)
+        assertEquals("chào", vnBuf.substring(vnRange.first, vnRange.last))
     }
 }

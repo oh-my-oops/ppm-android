@@ -94,27 +94,28 @@ fun lspPositionToOffset(buffer: EditorBuffer, position: LspPosition): Int {
     return buffer.lineColToOffset(row, col)
 }
 
-private fun Char.isLspWordChar(): Boolean = isLetterOrDigit() || this == '_' || this == '$'
+private const val MONACO_USUAL_WORD_SEPARATORS = "`~!@#$%^&*()-=+[{]}\\|;:'\",.<>/?"
+
+private fun Char.isMonacoWordChar(): Boolean =
+    !isWhitespace() && MONACO_USUAL_WORD_SEPARATORS.indexOf(this) < 0
 
 /**
  * Port of `completionRange` fallback (`model.getWordUntilPosition(position)`) in
  * `src/web/lib/lsp/lsp-responses.ts:166-184`: when a completion item has no explicit `textEdit`,
- * replace the word surrounding [cursorOffset] on the same line.
+ * replace the word prefix ending at [cursorOffset] on the same line using Monaco's default word
+ * definition (everything except whitespace and [MONACO_USUAL_WORD_SEPARATORS]).
  */
 fun defaultCompletionReplaceOffsets(buffer: EditorBuffer, cursorOffset: Int): IntRange {
     val pos = offsetToLspPosition(buffer, cursorOffset)
     val lineText = buffer.line(pos.line)
     val col = pos.character.coerceIn(0, lineText.length)
     var wordStart = col
-    while (wordStart > 0 && lineText[wordStart - 1].isLspWordChar()) {
+    while (wordStart > 0 && lineText[wordStart - 1].isMonacoWordChar()) {
         wordStart--
     }
-    var wordEnd = col
-    while (wordEnd < lineText.length && lineText[wordEnd].isLspWordChar()) {
-        wordEnd++
-    }
+    wordStart = utf16ColumnToCharOffset(lineText, wordStart)
     val lineStartOffset = buffer.lineStart(pos.line)
-    return (lineStartOffset + wordStart)..(lineStartOffset + wordEnd)
+    return (lineStartOffset + wordStart)..(lineStartOffset + col)
 }
 
 // ── Kind Tables (Mapped by Name, Never Raw Number Offset) ──────────────────
