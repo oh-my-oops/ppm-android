@@ -292,10 +292,12 @@ class Phase11aUiTest {
                     processCount = 1,
                 ),
                 groups = listOf(
-                    ProcessGroup(key = "node-grp", label = "Node Server", rootPid = 201, cpu = 25.0, ramMB = 256.0, count = 1, ppm = false, pids = listOf(201)),
+                    ProcessGroup(key = "node-grp", label = "Node Server", rootPid = 201, cpu = 25.0, ramMB = 256.0, count = 1, ppm = true, pids = listOf(201)),
+                    ProcessGroup(key = "prot-grp", label = "PPM Core", rootPid = 100, cpu = 5.0, ramMB = 128.0, count = 1, ppm = true, pids = listOf(100)),
                 ),
                 processes = listOf(
-                    ProcessInfo(pid = 201, ppid = 1, name = "node", command = "node server.js", cpu = 25.0, ramMB = 256.0, startedAt = 1234L),
+                    ProcessInfo(pid = 201, ppid = 1, name = "node", command = "node server.js", cpu = 25.0, ramMB = 256.0, ppm = true, startedAt = 1234L),
+                    ProcessInfo(pid = 100, ppid = 1, name = "ppm", command = "ppm start", cpu = 5.0, ramMB = 128.0, ppm = true, protected = true, startedAt = 1000L),
                 ),
             )
             val entries = listOf(
@@ -342,13 +344,25 @@ class Phase11aUiTest {
                 }
             }
 
-            // B4: Open KillConfirmDialog and click Stop (default signal TERM)
-            composeRule.onNodeWithTag("proc-group-kill-node-grp").performClick()
+            // B4 / 11a.3: Group menu "End application" opens KillConfirmDialog; no signal chips, no Signal button, no PPM workspace note
+            composeRule.onNodeWithTag("proc-group-menu-node-grp").performClick()
+            composeRule.onNodeWithText("End application").assertIsDisplayed()
+            composeRule.onNodeWithTag("proc-group-menu-end-application").performClick()
             composeRule.onNodeWithTag("kill-confirm-dialog").assertIsDisplayed()
-            composeRule.onNodeWithTag("signal-chip-TERM").assertIsDisplayed()
-            composeRule.onNodeWithTag("kill-confirm-signal-btn").performClick()
+            composeRule.onNodeWithTag("signal-chip-TERM").assertDoesNotExist()
+            composeRule.onNodeWithTag("kill-confirm-signal-btn").assertDoesNotExist()
+            composeRule.onNodeWithText("This process belongs to a PPM workspace or terminal.").assertDoesNotExist()
+            composeRule.onNodeWithText("Cancel").performClick()
 
-            composeRule.waitUntil(5_000) { signalBodies.isNotEmpty() }
+            // Send signal from process row menu ("Send signal" -> "Terminate (SIGTERM)")
+            composeRule.onNodeWithTag("proc-mode-flat").performClick()
+            composeRule.onNodeWithTag("proc-menu-201").performClick()
+            composeRule.onNodeWithTag("proc-menu-send-signal").performClick()
+            composeRule.onNodeWithTag("proc-menu-signal-TERM").performClick()
+
+            composeRule.waitUntil(5_000) {
+                signalBodies.isNotEmpty() && model.toasts.any { it.message.title == "Sent SIGTERM to node (201)" }
+            }
             val sigJson = WireJson.parse(signalBodies.first())
             assertEquals("TERM", sigJson["signal"].string)
             assertEquals(201, sigJson["pid"].int)
@@ -376,6 +390,12 @@ class Phase11aUiTest {
             composeRule.onNodeWithTag("report-duplicates-box").performScrollTo()
             composeRule.onNodeWithText("Open issues that look like this one:").assertIsDisplayed()
             composeRule.onNodeWithText("#42 Claude stream crash on token parse").assertIsDisplayed()
+
+            // Protected group row menu shows "End application" and protected note
+            composeRule.onNodeWithTag("proc-mode-grouped").performClick()
+            composeRule.onNodeWithTag("proc-group-menu-prot-grp").performClick()
+            composeRule.onNodeWithText("End application").assertIsDisplayed()
+            composeRule.onNodeWithText("One of this app's processes is protected, so PPM will not end it.").assertIsDisplayed()
         } finally {
             server.close()
         }
