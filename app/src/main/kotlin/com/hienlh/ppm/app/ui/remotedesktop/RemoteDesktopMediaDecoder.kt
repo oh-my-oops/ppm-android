@@ -30,7 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * background decode thread with a [BoundedVideoFrameQueue], Opus audio player ([AudioTrack]),
  * MP4 stream recorder ([MediaMuxer]), and [PixelCopy] screenshot helper.
  */
-class H264SurfaceDecoder(
+open class H264SurfaceDecoder(
     private val onFrameSizeChanged: (RdSize) -> Unit = {},
     private val onStatusChanged: (String, String?) -> Unit = { _, _ -> },
     queueCapacity: Int = 8,
@@ -115,10 +115,6 @@ class H264SurfaceDecoder(
     internal val isWorkerAlive: Boolean
         get() = synchronized(lock) { workerThread?.isAlive == true }
 
-    @Volatile
-    internal var lastReleaseThreadName: String? = null
-        private set
-
     fun reset() {
         synchronized(lock) {
             if (released) return
@@ -126,15 +122,20 @@ class H264SurfaceDecoder(
             waitingForKeyframe = true
             ptsUs = 0L
             activeSpsPps = null
-            val handler = ensureWorkerLocked() ?: return
-            handler.removeCallbacksAndMessages(null)
-            handler.post {
-                synchronized(lock) {
-                    releaseCodecLocked()
-                    waitingForKeyframe = true
-                    ptsUs = 0L
-                    activeSpsPps = null
+            val handler = workerHandler
+            val thread = workerThread
+            if (handler != null && thread != null && thread.isAlive) {
+                handler.removeCallbacksAndMessages(null)
+                handler.post {
+                    synchronized(lock) {
+                        releaseCodecLocked()
+                        waitingForKeyframe = true
+                        ptsUs = 0L
+                        activeSpsPps = null
+                    }
                 }
+            } else {
+                releaseCodecLocked()
             }
         }
     }
@@ -305,8 +306,7 @@ class H264SurfaceDecoder(
         }
     }
 
-    private fun releaseCodecLocked() {
-        lastReleaseThreadName = Thread.currentThread().name
+    protected open fun releaseCodecLocked() {
         val old = codec ?: return
         codec = null
         runCatching { old.stop() }
@@ -477,12 +477,17 @@ class OpusAudioPlayer(
         synchronized(lock) {
             if (released) return
             packetQueue.clear()
-            val handler = ensureWorkerLocked() ?: return
-            handler.removeCallbacksAndMessages(null)
-            handler.post {
-                synchronized(lock) {
-                    resetLocked()
+            val handler = workerHandler
+            val thread = workerThread
+            if (handler != null && thread != null && thread.isAlive) {
+                handler.removeCallbacksAndMessages(null)
+                handler.post {
+                    synchronized(lock) {
+                        resetLocked()
+                    }
                 }
+            } else {
+                resetLocked()
             }
         }
     }

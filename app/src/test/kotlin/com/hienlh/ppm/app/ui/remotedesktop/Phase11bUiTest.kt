@@ -323,17 +323,36 @@ class Phase11bUiTest {
     }
 
     @Test
-    fun `H264SurfaceDecoder reset posts codec release to worker thread instead of caller thread`() {
-        val decoder = H264SurfaceDecoder()
+    fun `H264SurfaceDecoder and OpusAudioPlayer reset without worker releases inline and with worker posts to worker thread`() {
+        val releaseThreads = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val decoder = object : H264SurfaceDecoder() {
+            override fun releaseCodecLocked() {
+                releaseThreads += Thread.currentThread().name
+                super.releaseCodecLocked()
+            }
+        }
+        val audioPlayer = OpusAudioPlayer()
         try {
+            // Calling reset() before any worker is started must release inline and NOT spawn a HandlerThread
+            decoder.reset()
+            audioPlayer.reset()
+            assertEquals(false, decoder.isWorkerAlive)
+            assertEquals(false, audioPlayer.isWorkerAlive)
+            assertEquals(1, releaseThreads.size)
+
+            // Once the worker is alive, reset() posts releaseCodecLocked() to the worker thread
+            decoder.configure()
+            assertTrue(decoder.isWorkerAlive)
+            val beforeCount = releaseThreads.size
             decoder.reset()
             val deadline = System.currentTimeMillis() + 2_000L
-            while (decoder.lastReleaseThreadName == null && System.currentTimeMillis() < deadline) {
+            while (releaseThreads.size <= beforeCount && System.currentTimeMillis() < deadline) {
                 Thread.sleep(10L)
             }
-            assertEquals("ppm-rd-video-decoder", decoder.lastReleaseThreadName)
+            assertEquals("ppm-rd-video-decoder", releaseThreads.last())
         } finally {
             decoder.release()
+            audioPlayer.release()
         }
     }
 }
