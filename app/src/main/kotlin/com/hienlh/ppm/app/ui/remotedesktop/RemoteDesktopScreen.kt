@@ -711,6 +711,12 @@ fun RemoteDesktopViewer(
         )
     }
     val audioPlayer = remember { OpusAudioPlayer() }
+    DisposableEffect(decoder, audioPlayer) {
+        onDispose {
+            runCatching { decoder.release() }
+            runCatching { audioPlayer.release() }
+        }
+    }
     var activeSocket by remember { mutableStateOf<SocketConnection?>(null) }
     var clipboardReadJob by remember { mutableStateOf<Job?>(null) }
 

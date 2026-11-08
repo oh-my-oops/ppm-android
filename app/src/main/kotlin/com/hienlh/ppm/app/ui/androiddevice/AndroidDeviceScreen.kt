@@ -1273,12 +1273,11 @@ internal fun AndroidLiveViewer(
         activeWs?.send(jsonText)
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(decoder) {
         onDispose {
             activeWs?.close(1000, "viewer disposed")
             activeWs = null
-            decoder.attachSurface(null)
-            decoder.reset()
+            decoder.release()
         }
     }
 

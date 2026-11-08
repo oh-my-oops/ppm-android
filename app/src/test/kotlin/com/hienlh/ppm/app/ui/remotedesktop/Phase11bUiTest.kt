@@ -238,4 +238,25 @@ class Phase11bUiTest {
         assertEquals(stageBounds.width * 9f / 16f, surfaceBounds.height, 4f)
         assertTrue(surfaceBounds.height < stageBounds.height - 100f)
     }
+
+    @Test
+    fun `H264SurfaceDecoder and OpusAudioPlayer release quits worker HandlerThreads`() {
+        val decoder = H264SurfaceDecoder()
+        val audioPlayer = OpusAudioPlayer()
+
+        decoder.configure()
+        audioPlayer.decodePacket(byteArrayOf(0x01, 0x02), 0, 2)
+        assertTrue(decoder.isWorkerAlive)
+        assertTrue(audioPlayer.isWorkerAlive)
+
+        decoder.release()
+        audioPlayer.release()
+
+        val deadline = System.currentTimeMillis() + 2_000L
+        while ((decoder.isWorkerAlive || audioPlayer.isWorkerAlive) && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10L)
+        }
+        assertEquals(false, decoder.isWorkerAlive)
+        assertEquals(false, audioPlayer.isWorkerAlive)
+    }
 }

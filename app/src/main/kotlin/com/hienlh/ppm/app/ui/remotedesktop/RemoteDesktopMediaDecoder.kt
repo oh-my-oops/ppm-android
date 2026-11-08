@@ -108,6 +108,9 @@ class H264SurfaceDecoder(
         }
     }
 
+    internal val isWorkerAlive: Boolean
+        get() = synchronized(lock) { workerThread?.isAlive == true }
+
     fun reset() {
         synchronized(lock) {
             frameQueue.clear()
@@ -116,6 +119,36 @@ class H264SurfaceDecoder(
             activeSpsPps = null
             workerHandler?.removeCallbacksAndMessages(null)
             releaseCodecLocked()
+        }
+    }
+
+    fun release() {
+        synchronized(lock) {
+            frameQueue.clear()
+            waitingForKeyframe = true
+            ptsUs = 0L
+            activeSpsPps = null
+            surface = null
+            val handler = workerHandler
+            val thread = workerThread
+            workerHandler = null
+            workerThread = null
+            if (handler != null && thread != null && thread.isAlive) {
+                handler.removeCallbacksAndMessages(null)
+                val posted = handler.post {
+                    synchronized(lock) {
+                        releaseCodecLocked()
+                    }
+                    thread.quitSafely()
+                }
+                if (!posted) {
+                    releaseCodecLocked()
+                    thread.quitSafely()
+                }
+            } else {
+                releaseCodecLocked()
+                thread?.quitSafely()
+            }
         }
     }
 
@@ -386,11 +419,40 @@ class OpusAudioPlayer(private val maxPendingPackets: Int = 16) {
         }
     }
 
+    internal val isWorkerAlive: Boolean
+        get() = synchronized(lock) { workerThread?.isAlive == true }
+
     fun reset() {
         synchronized(lock) {
             packetQueue.clear()
             workerHandler?.removeCallbacksAndMessages(null)
             resetLocked()
+        }
+    }
+
+    fun release() {
+        synchronized(lock) {
+            packetQueue.clear()
+            val handler = workerHandler
+            val thread = workerThread
+            workerHandler = null
+            workerThread = null
+            if (handler != null && thread != null && thread.isAlive) {
+                handler.removeCallbacksAndMessages(null)
+                val posted = handler.post {
+                    synchronized(lock) {
+                        resetLocked()
+                    }
+                    thread.quitSafely()
+                }
+                if (!posted) {
+                    resetLocked()
+                    thread.quitSafely()
+                }
+            } else {
+                resetLocked()
+                thread?.quitSafely()
+            }
         }
     }
 
