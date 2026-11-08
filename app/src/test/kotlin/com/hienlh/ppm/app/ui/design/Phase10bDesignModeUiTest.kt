@@ -1,6 +1,6 @@
 package com.hienlh.ppm.app.ui.design
 
-import android.os.Environment
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
+import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.filenameFromContentDisposition
@@ -31,8 +32,9 @@ import com.hienlh.ppm.state.design.PinRect
 import com.hienlh.ppm.state.design.PreviewPhase
 import com.hienlh.ppm.state.design.SelectOption
 import com.hienlh.ppm.state.design.TweakDef
-import java.io.ByteArrayInputStream
-import java.io.File
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.OutputStream
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -43,6 +45,7 @@ import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -50,6 +53,7 @@ import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -355,32 +359,79 @@ class Phase10bDesignModeUiTest {
     }
 
     @Test
-    fun saveStreamToDownloadsBelowAndroid10_writesSanitizedFileToLegacyDownloadsDir() {
+    fun completeDesignSafExport_writesToSafUriAndShowsSavedToastOnlyOnSuccess() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        val payload = "PK\u0003\u0004-legacy-minSdk26-export".toByteArray(Charsets.UTF_8)
-        val written = saveStreamToDownloads(
-            context = context,
-            rawFilename = "pitch-deck.zip",
-            input = ByteArrayInputStream(payload),
-            sdkInt = 26, // Android 8.0 (minSdk 26), below Android 10 (API 29 / Q)
-        )
-        assertEquals(payload.size.toLong(), written)
-        val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-        requireNotNull(downloadsDir)
-        val savedFile = File(downloadsDir, "pitch-deck.zip")
-        assertTrue(savedFile.exists())
-        assertEquals(downloadsDir.canonicalPath, savedFile.parentFile?.canonicalPath)
-        assertArrayEquals(payload, savedFile.readBytes())
+        val resolver = context.contentResolver
+        val shadowResolver = Shadows.shadowOf(resolver)
+        val toasts = mutableListOf<ErrorToastMessage>()
 
-        // Path traversal in rawFilename falls back to safe "design-export.bin" inside downloadsDir
-        saveStreamToDownloads(
-            context = context,
-            rawFilename = "../../evil.zip",
-            input = ByteArrayInputStream(payload),
-            sdkInt = 26,
+        // 1) Succeeding SAF write: toast says "Saved ..." only after the stream finishes writing.
+        val okUri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload%2Fpitch-deck.pptx")
+        val sink = ByteArrayOutputStream()
+        var closedBeforeToast = false
+        val trackedStream = object : OutputStream() {
+            var closed = false
+            override fun write(b: Int) {
+                assertTrue("No toast may be shown before write completes", toasts.isEmpty())
+                sink.write(b)
+            }
+
+            override fun write(b: ByteArray, off: Int, len: Int) {
+                assertTrue("No toast may be shown before write completes", toasts.isEmpty())
+                sink.write(b, off, len)
+            }
+
+            override fun close() {
+                closed = true
+                super.close()
+            }
+        }
+        shadowResolver.registerOutputStream(okUri, trackedStream)
+
+        val payload = "PK\u0003\u0004-saf-create-document-pptx".toByteArray(Charsets.UTF_8)
+        val okResult = completeDesignSafExport(
+            resolver = resolver,
+            uri = okUri,
+            export = PendingDesignExport.Pptx(
+                suggestedFilename = "pitch-deck.pptx",
+                bytes = payload,
+                slideCount = 4,
+            ),
+            onToast = { msg ->
+                closedBeforeToast = trackedStream.closed
+                toasts += msg
+            },
         )
-        val fallbackFile = File(downloadsDir, "design-export.bin")
-        assertTrue(fallbackFile.exists())
-        assertEquals(downloadsDir.canonicalPath, fallbackFile.parentFile?.canonicalPath)
+        assertTrue(okResult)
+        assertTrue(closedBeforeToast)
+        assertArrayEquals(payload, sink.toByteArray())
+        assertEquals(1, toasts.size)
+        assertEquals("Saved pitch-deck.pptx", toasts.single().title)
+        assertEquals("Exported 4 slide(s).", toasts.single().description)
+
+        // 2) Failing SAF write: throws IOException -> error toast shown, never "Saved ...".
+        toasts.clear()
+        val failUri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload%2Fbroken.pptx")
+        val failingStream = object : OutputStream() {
+            override fun write(b: Int): Unit = throw IOException("No space left on device")
+            override fun write(b: ByteArray, off: Int, len: Int): Unit = throw IOException("No space left on device")
+        }
+        shadowResolver.registerOutputStream(failUri, failingStream)
+
+        val failResult = completeDesignSafExport(
+            resolver = resolver,
+            uri = failUri,
+            export = PendingDesignExport.Pptx(
+                suggestedFilename = "broken.pptx",
+                bytes = payload,
+                slideCount = 4,
+            ),
+            onToast = { toasts += it },
+        )
+        assertFalse(failResult)
+        assertEquals(1, toasts.size)
+        assertEquals("Slides export failed", toasts.single().title)
+        assertEquals("No space left on device", toasts.single().description)
+        assertEquals(ErrorToastMessage.Kind.ERROR, toasts.single().kind)
     }
 }

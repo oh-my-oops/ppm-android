@@ -1,16 +1,26 @@
 package com.hienlh.ppm.app.ui
 
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.design.BuiltInThemes
@@ -407,6 +417,8 @@ class Phase12cUiTest {
 
     @Test
     fun remoteAccessSettingsSection_surfacesServer409OnNamedTunnelSetupAndTailscaleServiceConflict() {
+        var tailscaleServiceMode = "conflict"
+        val toasts = mutableListOf<ErrorToastMessage>()
         val server = MockWebServer()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
@@ -427,7 +439,7 @@ class Phase12cUiTest {
                                 "httpsCertificates": true,
                                 "dnsSuffix": "tail123.ts.net",
                                 "device": { "name": "box", "dnsName": "box.tail123.ts.net", "ips": ["100.64.0.1"], "tags": ["tag:ppm"] },
-                                "service": { "name": "ppm", "defined": false, "approved": false, "advertised": false, "pointsAtPpm": false },
+                                "service": { "name": "ppm", "defined": false, "approved": false, "advertised": false, "target": "http://127.0.0.1:9000", "pointsAtPpm": false },
                                 "enabled": false,
                                 "ppmPort": 3210,
                                 "login": { "state": "idle", "url": null, "message": null },
@@ -468,11 +480,23 @@ class Phase12cUiTest {
                         .addHeader("Content-Type", "application/json")
                         .body("""{"ok":false,"error":"Hostname ppm.example.com is already in use"}""")
                         .build()
-                    request.method == "POST" && path == "/api/tailscale/service" -> MockResponse.Builder()
-                        .code(409)
-                        .addHeader("Content-Type", "application/json")
-                        .body("""{"ok":false,"error":"Service ppm already points to another port","code":"conflict"}""")
-                        .build()
+                    request.method == "POST" && path == "/api/tailscale/service" -> when (tailscaleServiceMode) {
+                        "conflict" -> MockResponse.Builder()
+                            .code(409)
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":false,"error":"Service ppm already points to another port","code":"conflict"}""")
+                            .build()
+                        "error500" -> MockResponse.Builder()
+                            .code(500)
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":false,"error":"tailscaled socket closed"}""")
+                            .build()
+                        else -> MockResponse.Builder()
+                            .code(500)
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":false,"error":"invalid service config"}""")
+                            .build()
+                    }
                     else -> MockResponse.Builder().code(404).build()
                 }
             }
@@ -490,11 +514,13 @@ class Phase12cUiTest {
                         RemoteAccessSettingsSection(
                             api = client,
                             currentServerUrl = "http://192.168.1.10:3210",
+                            onToast = { toasts += it },
                         )
                     }
                 }
             }
 
+            // 1) Named tunnel setup 409 -> inline error under hostname field, no toast
             composeRule.waitUntil(5_000) {
                 composeRule.onAllNodesWithTag("named-tunnel-save").fetchSemanticsNodes().isNotEmpty()
             }
@@ -505,15 +531,39 @@ class Phase12cUiTest {
             composeRule.onNodeWithTag("named-tunnel-error")
                 .assertIsDisplayed()
                 .assertTextContains("Hostname ppm.example.com is already in use")
+            assertTrue(toasts.isEmpty())
 
+            // 2) Tailscale 409 with code:"conflict" -> shows conflict dialog ("Replace svc:ppm?") and NO toast / NO inline error
             composeRule.onNodeWithTag("tailscale-service-enable").performScrollTo().performClick()
             composeRule.waitUntil(5_000) {
-                composeRule.onAllNodesWithTag("tailscale-error").fetchSemanticsNodes().isNotEmpty()
+                composeRule.onAllNodesWithTag("tailscale-service-replace").fetchSemanticsNodes().isNotEmpty()
             }
-            composeRule.onNodeWithTag("tailscale-error")
-                .assertIsDisplayed()
-                .assertTextContains("Service ppm already points to another port")
-            composeRule.onNodeWithTag("tailscale-service-replace").performScrollTo().assertIsDisplayed()
+            composeRule.onNodeWithText("Replace svc:ppm?").assertIsDisplayed()
+            composeRule.onNodeWithTag("tailscale-service-replace").assertIsDisplayed()
+            composeRule.onNodeWithTag("tailscale-error").assertDoesNotExist()
+            assertTrue(toasts.isEmpty())
+
+            // Dismiss conflict dialog
+            composeRule.onNodeWithText("Cancel").performClick()
+            composeRule.waitForIdle()
+
+            // 3) Tailscale 500 on turning on -> shows toast("Could not turn the address on", description = "tailscaled socket closed")
+            tailscaleServiceMode = "error500"
+            composeRule.onNodeWithTag("tailscale-service-enable").performScrollTo().performClick()
+            composeRule.waitUntil(5_000) { toasts.isNotEmpty() }
+            assertEquals("Could not turn the address on", toasts.last().title)
+            assertEquals("tailscaled socket closed", toasts.last().description)
+            composeRule.onNodeWithTag("tailscale-service-replace").assertDoesNotExist()
+
+            // 4) Failed rename -> shows toast("Could not rename the address", ...) and resets the name field to "ppm"
+            toasts.clear()
+            tailscaleServiceMode = "renameFail"
+            composeRule.onNodeWithTag("tailscale-service-name").performScrollTo().performTextReplacement("ppm-staging")
+            composeRule.onNodeWithTag("tailscale-service-rename").performScrollTo().performClick()
+            composeRule.waitUntil(5_000) { toasts.isNotEmpty() }
+            assertEquals("Could not rename the address", toasts.last().title)
+            assertEquals("invalid service config", toasts.last().description)
+            composeRule.onNodeWithTag("tailscale-service-name").assertTextContains("ppm")
         } finally {
             server.close()
         }
@@ -522,6 +572,25 @@ class Phase12cUiTest {
     @Test
     fun remoteAccessSettingsContent_showsLoginUrlsAndOpensBrowserOnlyOnButtonClick() {
         val openedUrls = mutableListOf<String>()
+        val terminalCmds = mutableListOf<String>()
+        var cancelledTailscale = false
+        var retriedTailscale = false
+        var closedTailscale = false
+        var cancelledNamed = false
+
+        var tailscaleLoginState by mutableStateOf(
+            TailscaleLoginState(
+                state = "starting",
+                url = null,
+            ),
+        )
+        var cfUrl by mutableStateOf<String?>(null)
+        var cfSlow by mutableStateOf(false)
+
+        // Verify pure-Kotlin QR code encoder produces a valid 29x29 version-3 QR matrix for a Tailscale login URL
+        val qrMatrix = encodeQrBitMatrix("https://login.tailscale.com/a/abc123")
+        assertEquals(29, qrMatrix.size)
+        assertTrue(qrMatrix[0][0] && qrMatrix[0][6] && qrMatrix[6][0] && qrMatrix[3][3])
 
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
@@ -530,63 +599,190 @@ class Phase12cUiTest {
                         androidx.compose.foundation.rememberScrollState(),
                     ),
                 ) {
-                    RemoteAccessSettingsContent(
-                        currentServerUrl = "http://192.168.1.10:3210",
-                        tailscale = TailscaleState(
-                            installed = true,
-                            backendState = "NeedsLogin",
-                            canManage = true,
-                            login = TailscaleLoginState(
-                                state = "waiting",
-                                url = "https://login.tailscale.com/a/abc123",
-                            ),
-                        ),
-                        publicTunnel = PublicTunnelState(enabled = false),
-                        namedTunnel = NamedTunnelState(
-                            loginState = "waiting",
-                            loginUrl = "https://dash.cloudflare.com/argotunnel?aud=xyz",
-                        ),
-                        onRunInTerminal = {},
+                    TailscaleSignInDialog(
+                        open = true,
+                        login = tailscaleLoginState,
+                        osUser = "thawngho",
+                        onRetry = { retriedTailscale = true },
+                        onCancel = { cancelledTailscale = true },
+                        onClose = { closedTailscale = true },
                         onOpenUrl = { openedUrls += it },
-                        onStartTailscaleLogin = {},
-                        onCancelTailscaleLogin = {},
-                        onConfigureTailscaleService = { _, _, _ -> },
-                        onTogglePublicTunnel = {},
-                        onStartNamedTunnelLogin = {},
-                        onCancelNamedTunnelLogin = {},
-                        onSetupNamedTunnel = {},
-                        onDisableNamedTunnel = {},
+                        onRunInTerminal = { terminalCmds += it },
+                    )
+                    NamedTunnelLoginStep(
+                        url = cfUrl,
+                        slow = cfSlow,
+                        onCancel = { cancelledNamed = true },
+                        onOpenUrl = { openedUrls += it },
                     )
                 }
             }
         }
 
-        // Neither login URL opens automatically on render
+        // 1) Initial state: Tailscale "starting" spinner & Cloudflare "url == null" waiting spinner; no URL opened automatically
         composeRule.waitForIdle()
         assertTrue(openedUrls.isEmpty())
+        composeRule.onNodeWithText("Asking Tailscale for a sign-in link…").assertIsDisplayed()
+        composeRule.onNodeWithText("Waiting for sign-in…").assertIsDisplayed()
+        composeRule.onNodeWithText("You can finish this step on your phone if that is easier.").assertIsDisplayed()
 
-        composeRule.onNodeWithTag("tailscale-login-url")
-            .performScrollTo()
-            .assertIsDisplayed()
-            .assertTextContains("https://login.tailscale.com/a/abc123")
-        composeRule.onNodeWithTag("tailscale-open-login-url")
-            .performScrollTo()
-            .performClick()
+        // 2) Tailscale "waiting" with URL -> shows QR code, "Or scan it with your phone", "Cancel sign-in", "Open sign-in page"
+        tailscaleLoginState = TailscaleLoginState(
+            state = "waiting",
+            url = "https://login.tailscale.com/a/abc123",
+        )
+        composeRule.waitForIdle()
+        assertTrue(openedUrls.isEmpty())
+        composeRule.onNodeWithText("Sign in with the account that owns your tailnet. This machine joins as soon as you finish.").assertIsDisplayed()
+        composeRule.onNodeWithTag("tailscale-qr-code").assertIsDisplayed()
+        composeRule.onNodeWithText("Or scan it with your phone").assertIsDisplayed()
+        composeRule.onNodeWithTag("tailscale-open-login-url").performClick()
         assertEquals(listOf("https://login.tailscale.com/a/abc123"), openedUrls)
 
-        composeRule.onNodeWithTag("named-tunnel-login-url")
-            .performScrollTo()
-            .assertIsDisplayed()
-            .assertTextContains("https://dash.cloudflare.com/argotunnel?aud=xyz")
-        composeRule.onNodeWithTag("named-tunnel-open-login-url")
-            .performScrollTo()
-            .performClick()
+        // 3) Tailscale "needs-approval" -> shows approval text + "Open machines"
+        tailscaleLoginState = TailscaleLoginState(state = "needs-approval")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Signed in. An admin has to approve this machine before it joins the tailnet.").assertIsDisplayed()
+        composeRule.onNodeWithTag("tailscale-open-machines").performClick()
         assertEquals(
             listOf(
                 "https://login.tailscale.com/a/abc123",
-                "https://dash.cloudflare.com/argotunnel?aud=xyz",
+                "https://login.tailscale.com/admin/machines",
             ),
             openedUrls,
         )
+
+        // 4) Tailscale "needs-operator" -> shows operator command + "Run in terminal" (which runs command and closes dialog)
+        tailscaleLoginState = TailscaleLoginState(state = "needs-operator")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("tailscale-signin-operator-code")
+            .assertIsDisplayed()
+            .assertTextContains("sudo tailscale set --operator=thawngho")
+        composeRule.onNodeWithTag("tailscale-signin-run-terminal").performClick()
+        assertEquals(listOf("sudo tailscale set --operator=thawngho"), terminalCmds)
+        assertTrue(closedTailscale)
+
+        // 5) Tailscale "error" -> shows error message + "Try again"
+        tailscaleLoginState = TailscaleLoginState(state = "error", message = "tailscale up timed out")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("tailscale up timed out").assertIsDisplayed()
+        composeRule.onNodeWithTag("tailscale-signin-retry").performClick()
+        assertTrue(retriedTailscale)
+
+        // 6) Tailscale "success" -> shows "Signed in."
+        tailscaleLoginState = TailscaleLoginState(state = "success")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Signed in.").assertIsDisplayed()
+
+        // 7) Cloudflare NamedTunnelLoginStep with URL and slow = true -> Copy icon turns to Copied check, Open link opens URL, slow banner dismisses on "Keep waiting"
+        cfUrl = "https://dash.cloudflare.com/argotunnel?aud=xyz"
+        cfSlow = true
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("named-tunnel-login-url")
+            .assertIsDisplayed()
+            .assertTextContains("https://dash.cloudflare.com/argotunnel?aud=xyz")
+        composeRule.onNodeWithTag("named-tunnel-copy-login-url")
+            .assertContentDescriptionEquals("Copy")
+            .performClick()
+        composeRule.onNodeWithTag("named-tunnel-copy-login-url")
+            .assertContentDescriptionEquals("Copied")
+        composeRule.onNodeWithTag("named-tunnel-open-login-url")
+            .assertContentDescriptionEquals("Open link")
+            .performClick()
+        assertTrue(openedUrls.contains("https://dash.cloudflare.com/argotunnel?aud=xyz"))
+
+        composeRule.onNodeWithTag("named-tunnel-slow-banner").assertIsDisplayed()
+        composeRule.onNodeWithText("Still signing in?").assertIsDisplayed()
+        composeRule.onNodeWithTag("named-tunnel-keep-waiting").performClick()
+        composeRule.onNodeWithTag("named-tunnel-slow-banner").assertDoesNotExist()
+        composeRule.onNodeWithTag("named-tunnel-cancel-login").performClick()
+        assertTrue(cancelledNamed)
     }
+
+    @Test
+    fun remoteAccessSettingsSection_pollsTailscaleOnlyWhileLifecycleResumedAndReloadsOnResume() {
+        var tailscaleReads = 0
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.url.encodedPath
+                return when {
+                    request.method == "GET" && path == "/api/tailscale/state" -> {
+                        tailscaleReads++
+                        MockResponse.Builder()
+                            .code(200)
+                            .addHeader("Content-Type", "application/json")
+                            .body(
+                                """
+                                {
+                                  "ok": true,
+                                  "data": {
+                                    "installed": true,
+                                    "backendState": "NeedsLogin",
+                                    "canManage": true,
+                                    "login": { "state": "waiting", "url": "https://login.tailscale.com/a/poll", "message": null }
+                                  }
+                                }
+                                """.trimIndent(),
+                            ).build()
+                    }
+                    request.method == "GET" && path == "/api/tunnel" -> MockResponse.Builder()
+                        .code(200)
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"active":false,"url":null,"localUrl":null,"enabled":false}}""")
+                        .build()
+                    request.method == "GET" && path == "/api/tunnel/named/status" -> MockResponse.Builder()
+                        .code(200)
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"mode":"quick","liveMode":"quick","certState":"missing","login":{"state":"idle"}}}""")
+                        .build()
+                    else -> MockResponse.Builder().code(404).build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val client = ApiClient(server.url("/"), "test-token")
+            val testOwner = TestLifecycleOwner12c(Lifecycle.State.RESUMED)
+
+            composeRule.setContent {
+                CompositionLocalProvider(LocalLifecycleOwner provides testOwner) {
+                    PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                        RemoteAccessSettingsSection(
+                            api = client,
+                            tailscalePollMs = 80L,
+                        )
+                    }
+                }
+            }
+
+            // 1) Initial load + active polling while RESUMED
+            composeRule.waitUntil(5_000) { tailscaleReads >= 2 }
+
+            // 2) Move lifecycle to STARTED (background): polling stops
+            composeRule.runOnUiThread {
+                testOwner.registry.currentState = Lifecycle.State.STARTED
+            }
+            composeRule.waitForIdle()
+            val readsAtBackground = tailscaleReads
+            Thread.sleep(250L)
+            composeRule.waitForIdle()
+            assertEquals(readsAtBackground, tailscaleReads)
+
+            // 3) Return lifecycle to RESUMED (foreground): reloads immediately on resume
+            composeRule.runOnUiThread {
+                testOwner.registry.currentState = Lifecycle.State.RESUMED
+            }
+            composeRule.waitUntil(5_000) { tailscaleReads > readsAtBackground }
+        } finally {
+            server.close()
+        }
+    }
+}
+
+private class TestLifecycleOwner12c(initialState: Lifecycle.State) : LifecycleOwner {
+    val registry = LifecycleRegistry.createUnsafe(this).apply {
+        currentState = initialState
+    }
+    override val lifecycle: Lifecycle get() = registry
 }

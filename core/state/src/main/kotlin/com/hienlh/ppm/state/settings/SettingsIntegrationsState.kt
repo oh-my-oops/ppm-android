@@ -257,10 +257,25 @@ data class TailscaleState(
 ) {
     val operatorCommand: String?
         get() = if (canManage == false && platform == "linux") {
-            "sudo tailscale set --operator=${osUser.ifBlank { "\$USER" }}"
+            tailscaleOperatorCommand(osUser)
         } else {
             null
         }
+}
+
+private val PLAIN_OPERATOR_USER_REGEX = Regex("^[\\w.@-]+$")
+
+/**
+ * Mirrors `operatorCommand(user)` in `src/web/components/settings/tailscale/tailscale-setup-steps.tsx:41-42`.
+ */
+fun tailscaleOperatorCommand(user: String): String {
+    if (user.isBlank()) return "sudo tailscale set --operator=\$USER"
+    val arg = if (PLAIN_OPERATOR_USER_REGEX.matches(user)) {
+        user
+    } else {
+        "'${user.replace("'", "'\\''")}'"
+    }
+    return "sudo tailscale set --operator=$arg"
 }
 
 fun parseTailscaleLoginSnapshot(element: JsonElement?): TailscaleLoginState {

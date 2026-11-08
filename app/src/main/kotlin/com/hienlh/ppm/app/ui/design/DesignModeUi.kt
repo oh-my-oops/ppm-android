@@ -1,16 +1,15 @@
 package com.hienlh.ppm.app.ui.design
 
-import android.content.ContentValues
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
-import android.os.Environment
 import android.print.PrintAttributes
 import android.print.PrintManager
-import android.provider.MediaStore
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
@@ -1365,6 +1364,24 @@ fun DesignTabBody(
         }
     }
 
+    var pendingSafExport by remember { mutableStateOf<PendingDesignExport?>(null) }
+    val createDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("*/*"),
+    ) { uri: Uri? ->
+        val pending = pendingSafExport
+        pendingSafExport = null
+        if (uri == null || pending == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            completeDesignSafExport(
+                resolver = context.contentResolver,
+                uri = uri,
+                export = pending,
+                api = api,
+                onToast = model::toast,
+            )
+        }
+    }
+
     // Handle incoming bridge child messages
     fun handleBridgeMessage(raw: kotlinx.serialization.json.JsonElement) {
         val msg = BridgeChildMessage.parseForNonce(raw, bridgeNonce) ?: return
@@ -1506,28 +1523,22 @@ fun DesignTabBody(
             }
             is BridgeChildMessage.SlidesData -> {
                 scope.launch {
-                    runCatching {
+                    try {
                         val pptx = withContext(Dispatchers.Default) {
                             buildPptxArchive(msg.doc, detail.summary.title)
                         }
                         val filename = filenameFromContentDisposition(null, "$slug.pptx")
-                        ByteArrayInputStream(pptx.bytes).use { stream ->
-                            saveStreamToDownloads(context, filename, stream)
-                        }
-                        pptx to filename
-                    }.onSuccess { (pptx, filename) ->
-                        val warnNote = if (pptx.warnings.isNotEmpty()) {
-                            " (${pptx.warnings.size} note(s): ${pptx.warnings.first()})"
-                        } else ""
-                        model.toast(
-                            ErrorToastMessage(
-                                "Saved $filename",
-                                "Exported ${msg.doc.slides.size} slide(s)$warnNote.",
-                                kind = ErrorToastMessage.Kind.INFO,
-                            ),
+                        pendingSafExport = PendingDesignExport.Pptx(
+                            suggestedFilename = filename,
+                            bytes = pptx.bytes,
+                            slideCount = msg.doc.slides.size,
+                            warnings = pptx.warnings,
                         )
-                    }.onFailure {
-                        model.toast(ErrorToastMessage("Slides export failed", it.message))
+                        createDocumentLauncher.launch(filename)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        model.toast(ErrorToastMessage("Slides export failed", e.message))
                     }
                 }
             }
@@ -1977,46 +1988,25 @@ fun DesignTabBody(
                                 onClose = { sidePanel = DesignSidePanel.NONE },
                                 onDownloadZip = {
                                     if (api == null) return@DesignExportPanel
-                                    scope.launch {
-                                        runCatching {
-                                            api.designStreamExport(projectName, slug, "zip") { filename, input ->
-                                                saveStreamToDownloads(context, filename, input)
-                                            }
-                                        }
-                                            .onSuccess { streamed ->
-                                                model.toast(
-                                                    ErrorToastMessage(
-                                                        "Saved ${streamed.filename}",
-                                                        "Downloaded ZIP archive (${streamed.bytesWritten} bytes).",
-                                                        kind = ErrorToastMessage.Kind.INFO,
-                                                    ),
-                                                )
-                                            }
-                                            .onFailure { model.toast(ErrorToastMessage("ZIP export failed", it.message)) }
-                                    }
+                                    val safeName = filenameFromContentDisposition(null, "$slug.zip")
+                                    pendingSafExport = PendingDesignExport.Zip(
+                                        projectName = projectName,
+                                        slug = slug,
+                                        suggestedFilename = safeName,
+                                    )
+                                    createDocumentLauncher.launch(safeName)
                                 },
                                 onDownloadHtml = {
                                     if (api == null) return@DesignExportPanel
-                                    scope.launch {
-                                        runCatching {
-                                            api.designStreamExport(projectName, slug, "html", activeVariant) { filename, input ->
-                                                saveStreamToDownloads(context, filename, input)
-                                            }
-                                        }
-                                            .onSuccess { streamed ->
-                                                val warnNote = if (streamed.warningCount > 0) {
-                                                    " (${streamed.warningCount} warning(s): ${streamed.warnings.joinToString(", ")})"
-                                                } else ""
-                                                model.toast(
-                                                    ErrorToastMessage(
-                                                        "Saved ${streamed.filename}",
-                                                        "Downloaded standalone HTML$warnNote.",
-                                                        kind = if (streamed.warningCount > 0) ErrorToastMessage.Kind.ERROR else ErrorToastMessage.Kind.INFO,
-                                                    ),
-                                                )
-                                            }
-                                            .onFailure { model.toast(ErrorToastMessage("HTML export failed", it.message)) }
-                                    }
+                                    val fallbackHtml = activeVariant.substringAfterLast('/').ifBlank { "$slug.html" }
+                                    val safeName = filenameFromContentDisposition(null, fallbackHtml)
+                                    pendingSafExport = PendingDesignExport.Html(
+                                        projectName = projectName,
+                                        slug = slug,
+                                        entry = activeVariant,
+                                        suggestedFilename = safeName,
+                                    )
+                                    createDocumentLauncher.launch(safeName)
                                 },
                                 onPrintPdf = {
                                     if (api == null) return@DesignExportPanel
@@ -3000,42 +2990,114 @@ internal suspend fun loadPreviewWithSelfHeal(
     }
 }
 
-internal fun saveStreamToDownloads(
-    context: Context,
-    rawFilename: String,
+internal sealed interface PendingDesignExport {
+    val suggestedFilename: String
+    val failureTitle: String
+
+    data class Zip(
+        val projectName: String,
+        val slug: String,
+        override val suggestedFilename: String = "$slug.zip",
+    ) : PendingDesignExport {
+        override val failureTitle: String = "ZIP export failed"
+    }
+
+    data class Html(
+        val projectName: String,
+        val slug: String,
+        val entry: String,
+        override val suggestedFilename: String = entry.substringAfterLast('/').ifBlank { "$slug.html" },
+    ) : PendingDesignExport {
+        override val failureTitle: String = "HTML export failed"
+    }
+
+    data class Pptx(
+        override val suggestedFilename: String,
+        val bytes: ByteArray,
+        val slideCount: Int,
+        val warnings: List<String> = emptyList(),
+    ) : PendingDesignExport {
+        override val failureTitle: String = "Slides export failed"
+    }
+}
+
+internal fun writeStreamToSafUri(
+    resolver: ContentResolver,
+    uri: Uri,
     input: InputStream,
-    sdkInt: Int = Build.VERSION.SDK_INT,
 ): Long {
-    val safeFilename = filenameFromContentDisposition("""filename="$rawFilename"""", "design-export.bin")
-    if (sdkInt >= Build.VERSION_CODES.Q) {
-        val resolver = context.contentResolver
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, safeFilename)
-            put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-            put(MediaStore.MediaColumns.IS_PENDING, 1)
+    val out = resolver.openOutputStream(uri)
+        ?: resolver.openOutputStream(uri, "w")
+        ?: throw IOException("Could not open output stream for $uri")
+    return out.use { stream -> input.copyTo(stream) }
+}
+
+internal suspend fun completeDesignSafExport(
+    resolver: ContentResolver,
+    uri: Uri?,
+    export: PendingDesignExport,
+    api: ApiClient? = null,
+    onToast: (ErrorToastMessage) -> Unit,
+): Boolean {
+    if (uri == null) return false
+    return try {
+        when (export) {
+            is PendingDesignExport.Zip -> {
+                val client = api ?: throw IOException("Not connected to server")
+                val streamed = client.designStreamExport(export.projectName, export.slug, "zip") { _, input ->
+                    writeStreamToSafUri(resolver, uri, input)
+                }
+                val safeName = filenameFromContentDisposition("""filename="${streamed.filename}"""", export.suggestedFilename)
+                onToast(
+                    ErrorToastMessage(
+                        "Saved $safeName",
+                        "Downloaded ZIP archive (${streamed.bytesWritten} bytes).",
+                        kind = ErrorToastMessage.Kind.INFO,
+                    ),
+                )
+            }
+            is PendingDesignExport.Html -> {
+                val client = api ?: throw IOException("Not connected to server")
+                val streamed = client.designStreamExport(export.projectName, export.slug, "html", export.entry) { _, input ->
+                    writeStreamToSafUri(resolver, uri, input)
+                }
+                val safeName = filenameFromContentDisposition("""filename="${streamed.filename}"""", export.suggestedFilename)
+                val warnNote = if (streamed.warningCount > 0) {
+                    " (${streamed.warningCount} warning(s): ${streamed.warnings.joinToString(", ")})"
+                } else ""
+                onToast(
+                    ErrorToastMessage(
+                        "Saved $safeName",
+                        "Downloaded standalone HTML$warnNote.",
+                        kind = if (streamed.warningCount > 0) ErrorToastMessage.Kind.ERROR else ErrorToastMessage.Kind.INFO,
+                    ),
+                )
+            }
+            is PendingDesignExport.Pptx -> {
+                val safeName = filenameFromContentDisposition(null, export.suggestedFilename)
+                withContext(Dispatchers.IO) {
+                    ByteArrayInputStream(export.bytes).use { input ->
+                        writeStreamToSafUri(resolver, uri, input)
+                    }
+                }
+                val warnNote = if (export.warnings.isNotEmpty()) {
+                    " (${export.warnings.size} note(s): ${export.warnings.first()})"
+                } else ""
+                onToast(
+                    ErrorToastMessage(
+                        "Saved $safeName",
+                        "Exported ${export.slideCount} slide(s)$warnNote.",
+                        kind = ErrorToastMessage.Kind.INFO,
+                    ),
+                )
+            }
         }
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            ?: throw IOException("Could not create Downloads entry for $safeFilename")
-        try {
-            val written = resolver.openOutputStream(uri)?.use { out ->
-                input.copyTo(out)
-            } ?: throw IOException("Could not open output stream for $safeFilename")
-            val doneValues = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
-            resolver.update(uri, doneValues, null, null)
-            return written
-        } catch (e: Exception) {
-            runCatching { resolver.delete(uri, null, null) }
-            throw e
-        }
-    } else {
-        val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            ?: throw IOException("Downloads directory unavailable")
-        if (!dir.exists() && !dir.mkdirs()) {
-            throw IOException("Could not create Downloads directory")
-        }
-        val target = File(dir, safeFilename)
-        return target.outputStream().use { out -> input.copyTo(out) }
+        true
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        onToast(ErrorToastMessage(export.failureTitle, e.message))
+        false
     }
 }
 

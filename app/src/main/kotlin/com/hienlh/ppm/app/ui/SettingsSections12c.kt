@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,12 +36,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.client.cloudGetAlias
@@ -113,6 +120,8 @@ import com.hienlh.ppm.client.tunnelGetStatus
 import com.hienlh.ppm.client.tunnelSetEnabled
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.PpmIcon
+import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.get
@@ -139,6 +148,7 @@ import com.hienlh.ppm.state.settings.ScheduleLogBufferState
 import com.hienlh.ppm.state.settings.ScheduleProjectOption
 import com.hienlh.ppm.state.settings.ScheduleRowState
 import com.hienlh.ppm.state.settings.TAILSCALE_POLL_MS
+import com.hienlh.ppm.state.settings.TailscaleLoginState
 import com.hienlh.ppm.state.settings.TailscaleState
 import com.hienlh.ppm.state.settings.TailscaleStepId
 import com.hienlh.ppm.state.settings.TelegramNotifyState
@@ -180,6 +190,7 @@ import com.hienlh.ppm.state.settings.parseTailscaleState
 import com.hienlh.ppm.state.settings.parseTelegramNotifyStatus
 import com.hienlh.ppm.state.settings.scheduleFormProblems
 import com.hienlh.ppm.state.settings.tailscaleNeedsPolling
+import com.hienlh.ppm.state.settings.tailscaleOperatorCommand
 import com.hienlh.ppm.state.settings.tailscaleServiceUrl
 import com.hienlh.ppm.state.settings.validateNtfyTopic
 import com.hienlh.ppm.state.settings.validateTailscaleServiceName
@@ -726,6 +737,7 @@ internal fun RemoteAccessSettingsSection(model: AppModel) {
         api = model.api,
         currentServerUrl = activeServerUrl,
         onRunInTerminal = { cmd -> model.runInTerminal(cmd) },
+        onToast = model::toast,
     )
 }
 
@@ -734,18 +746,21 @@ internal fun RemoteAccessSettingsSection(
     api: ApiClient?,
     currentServerUrl: String? = null,
     onRunInTerminal: (String) -> Unit = {},
+    onToast: (ErrorToastMessage) -> Unit = {},
+    tailscalePollMs: Long = TAILSCALE_POLL_MS,
 ) {
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
 
     var tailscale by remember { mutableStateOf(TailscaleState()) }
     var publicTunnel by remember { mutableStateOf(PublicTunnelState()) }
     var namedTunnel by remember { mutableStateOf(NamedTunnelState()) }
 
-    var tailscaleError by remember { mutableStateOf<String?>(null) }
+    var tailscaleSignInOpen by remember { mutableStateOf(false) }
     var tailscaleServiceConflict by remember { mutableStateOf(false) }
-    var publicTunnelError by remember { mutableStateOf<String?>(null) }
-    var namedTunnelError by remember { mutableStateOf<String?>(null) }
+    var serviceNameResetTick by remember { mutableIntStateOf(0) }
+    var namedTunnelHostnameError by remember { mutableStateOf<String?>(null) }
 
     suspend fun reloadAll() {
         val client = api ?: return
@@ -754,42 +769,61 @@ internal fun RemoteAccessSettingsSection(
         runCatchingNonCancelled { parseNamedTunnelState(client.namedTunnelGetStatus()) }.getOrNull()?.let { namedTunnel = it }
     }
 
-    LaunchedEffect(api) {
-        reloadAll()
+    // Reload once on initial composition and every time the lifecycle returns to RESUMED
+    // (`tailscale-settings-section.tsx:92-105`, `public-link-pane.tsx:69-73`).
+    LaunchedEffect(api, lifecycle) {
+        val client = api ?: return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            reloadAll()
+        }
     }
 
-    // Public Link polling: every 2s while starting (`enabled && !active`), 10s otherwise (`public-link-pane.tsx:58-67`)
+    // Auto-close TailscaleSignInDialog when login succeeds (`tailscale-settings-section.tsx:119-124`).
+    LaunchedEffect(tailscaleSignInOpen, tailscale.login.state) {
+        if (tailscaleSignInOpen && tailscale.login.state == "success") {
+            tailscaleSignInOpen = false
+            onToast(ErrorToastMessage("Signed in to Tailscale", kind = ErrorToastMessage.Kind.SUCCESS))
+        }
+    }
+
+    // Public Link polling: every 2s while starting (`enabled && !active`), 10s otherwise, only while RESUMED (`public-link-pane.tsx:58-67`).
     val publicTunnelStarting = publicTunnel.enabled && !publicTunnel.active
-    LaunchedEffect(api, publicTunnelStarting) {
+    LaunchedEffect(api, lifecycle, publicTunnelStarting) {
         val client = api ?: return@LaunchedEffect
         val intervalMs = if (publicTunnelStarting) 2_000L else 10_000L
-        while (true) {
-            delay(intervalMs)
-            runCatchingNonCancelled { parsePublicTunnelState(client.tunnelGetStatus()) }.getOrNull()?.let { publicTunnel = it }
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                delay(intervalMs)
+                runCatchingNonCancelled { parsePublicTunnelState(client.tunnelGetStatus()) }.getOrNull()?.let { publicTunnel = it }
+            }
         }
     }
 
-    // Tailscale state polling every 4s while visible and `tailscaleNeedsPolling(tailscale)` (`tailscale-settings-section.tsx:34, 110`)
+    // Tailscale state polling every 4s while RESUMED and `tailscaleNeedsPolling(tailscale)` (`tailscale-settings-section.tsx:34, 107-112`).
     val tailscalePolling = tailscaleNeedsPolling(tailscale)
-    LaunchedEffect(api, tailscalePolling) {
+    LaunchedEffect(api, lifecycle, tailscalePolling, tailscalePollMs) {
         val client = api ?: return@LaunchedEffect
         if (!tailscalePolling) return@LaunchedEffect
-        while (tailscaleNeedsPolling(tailscale)) {
-            delay(TAILSCALE_POLL_MS)
-            val fresh = runCatchingNonCancelled { parseTailscaleState(client.tailscaleGetState()) }.getOrNull() ?: continue
-            tailscale = fresh
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (tailscaleNeedsPolling(tailscale)) {
+                delay(tailscalePollMs)
+                val fresh = runCatchingNonCancelled { parseTailscaleState(client.tailscaleGetState()) }.getOrNull() ?: continue
+                tailscale = fresh
+            }
         }
     }
 
-    // Named Tunnel login polling while `starting`, `waiting`, or `slow` (`use-named-tunnel-setup.ts`)
+    // Named Tunnel login polling while RESUMED and `starting`, `waiting`, or `slow` (`use-named-tunnel-setup.ts`).
     val namedLoginActive = namedTunnel.loginState in setOf("starting", "waiting", "slow")
-    LaunchedEffect(api, namedLoginActive) {
+    LaunchedEffect(api, lifecycle, namedLoginActive) {
         val client = api ?: return@LaunchedEffect
         if (!namedLoginActive) return@LaunchedEffect
-        while (namedTunnel.loginState in setOf("starting", "waiting", "slow")) {
-            delay(2_000L)
-            val fresh = runCatchingNonCancelled { parseNamedTunnelState(client.namedTunnelGetStatus()) }.getOrNull() ?: continue
-            namedTunnel = fresh
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (namedTunnel.loginState in setOf("starting", "waiting", "slow")) {
+                delay(2_000L)
+                val fresh = runCatchingNonCancelled { parseNamedTunnelState(client.namedTunnelGetStatus()) }.getOrNull() ?: continue
+                namedTunnel = fresh
+            }
         }
     }
 
@@ -798,44 +832,79 @@ internal fun RemoteAccessSettingsSection(
         tailscale = tailscale,
         publicTunnel = publicTunnel,
         namedTunnel = namedTunnel,
-        tailscaleError = tailscaleError,
+        tailscaleSignInOpen = tailscaleSignInOpen,
         tailscaleServiceConflict = tailscaleServiceConflict,
-        publicTunnelError = publicTunnelError,
-        namedTunnelError = namedTunnelError,
+        serviceNameResetTick = serviceNameResetTick,
+        namedTunnelHostnameError = namedTunnelHostnameError,
+        onShowTailscaleSignIn = { tailscaleSignInOpen = true },
+        onCloseTailscaleSignIn = { tailscaleSignInOpen = false },
+        onDismissTailscaleConflict = { tailscaleServiceConflict = false },
+        onClearNamedTunnelError = {
+            namedTunnelHostnameError = null
+            if (namedTunnel.loginState in setOf("error", "timeout", "cancelled")) {
+                namedTunnel = namedTunnel.copy(loginState = "idle", loginError = null)
+            }
+        },
         onRunInTerminal = onRunInTerminal,
         onOpenUrl = { url -> runCatchingNonCancelled { uriHandler.openUri(url) } },
         onStartTailscaleLogin = {
             val client = api ?: return@RemoteAccessSettingsContent
-            tailscaleError = null
+            // Before opening: a "success" left from an earlier sign-in would close the dialog at once (`tailscale-settings-section.tsx:127-129`).
+            tailscale = tailscale.copy(
+                login = TailscaleLoginState(state = "starting", url = null, message = null),
+            )
+            tailscaleSignInOpen = true
             scope.launch {
                 runCatchingNonCancelled { applyTailscaleLoginSnapshot(tailscale, client.tailscaleStartLogin()) }
-                    .onSuccess { res ->
-                        tailscale = res
-                        if (res.login.state == "error") {
-                            tailscaleError = res.login.message ?: "Sign-in failed."
-                        }
-                    }
+                    .onSuccess { res -> tailscale = res }
                     .onFailure { err ->
                         val msg = err.message ?: "Sign-in failed."
-                        tailscaleError = msg
                         tailscale = tailscale.copy(
-                            login = tailscale.login.copy(state = "error", url = null, message = msg),
+                            login = TailscaleLoginState(state = "error", url = null, message = msg),
                         )
                     }
             }
         },
         onCancelTailscaleLogin = {
+            tailscaleSignInOpen = false
             val client = api ?: return@RemoteAccessSettingsContent
-            tailscaleError = null
             scope.launch {
                 runCatchingNonCancelled { applyTailscaleLoginSnapshot(tailscale, client.tailscaleCancelLogin()) }
                     .onSuccess { tailscale = it }
-                    .onFailure { err -> tailscaleError = err.message ?: "Could not cancel sign-in." }
+            }
+        },
+        onRenameTailscaleService = { newName ->
+            val clean = newName.trim().lowercase()
+            if (clean == tailscale.service.name || validateTailscaleServiceName(clean) != null) return@RemoteAccessSettingsContent
+            val client = api ?: return@RemoteAccessSettingsContent
+            scope.launch {
+                runCatchingNonCancelled {
+                    parseTailscaleState(client.tailscaleConfigureService(enabled = null, name = clean, replace = null))
+                }.onSuccess {
+                    tailscale = it
+                }.onFailure { err ->
+                    onToast(ErrorToastMessage("Could not rename the address", err.message))
+                    serviceNameResetTick++
+                }
             }
         },
         onConfigureTailscaleService = { enabled, name, replace ->
             val client = api ?: return@RemoteAccessSettingsContent
-            tailscaleError = null
+            if (enabled == null && name != null) {
+                val clean = name.trim().lowercase()
+                if (clean == tailscale.service.name || validateTailscaleServiceName(clean) != null) return@RemoteAccessSettingsContent
+                scope.launch {
+                    runCatchingNonCancelled {
+                        parseTailscaleState(client.tailscaleConfigureService(enabled = null, name = clean, replace = null))
+                    }.onSuccess {
+                        tailscale = it
+                    }.onFailure { err ->
+                        onToast(ErrorToastMessage("Could not rename the address", err.message))
+                        serviceNameResetTick++
+                    }
+                }
+                return@RemoteAccessSettingsContent
+            }
             scope.launch {
                 runCatchingNonCancelled {
                     parseTailscaleState(client.tailscaleConfigureService(enabled = enabled, name = name, replace = replace))
@@ -843,23 +912,18 @@ internal fun RemoteAccessSettingsSection(
                     tailscale = it
                     tailscaleServiceConflict = false
                 }.onFailure { err ->
-                    if (enabled == true && err is PpmError.Server && (err.status == 409 || err.code == "conflict")) {
+                    val code = (err as? PpmError.Server)?.code
+                    if (enabled == true && code == "conflict") {
                         tailscaleServiceConflict = true
-                    }
-                    tailscaleError = err.message ?: if (enabled == true) {
-                        "Could not turn the address on."
                     } else {
-                        "Could not turn the address off."
+                        val title = if (enabled == true) "Could not turn the address on" else "Could not turn the address off"
+                        onToast(ErrorToastMessage(title, err.message))
                     }
-                    runCatchingNonCancelled { parseTailscaleState(client.tailscaleGetState()) }
-                        .getOrNull()
-                        ?.let { tailscale = it }
                 }
             }
         },
         onTogglePublicTunnel = { enabled ->
             val previous = publicTunnel
-            publicTunnelError = null
             publicTunnel = publicTunnel.copy(enabled = enabled)
             val client = api ?: return@RemoteAccessSettingsContent
             scope.launch {
@@ -872,40 +936,35 @@ internal fun RemoteAccessSettingsSection(
                     }
                     .onFailure { err ->
                         publicTunnel = previous
-                        publicTunnelError = err.message ?: "Could not update public link."
+                        val title = if (enabled) "Could not turn the public link on" else "Could not turn the public link off"
+                        onToast(ErrorToastMessage(title, err.message))
                     }
             }
         },
         onStartNamedTunnelLogin = { relogin ->
             val client = api ?: return@RemoteAccessSettingsContent
-            namedTunnelError = null
+            namedTunnelHostnameError = null
             scope.launch {
                 runCatchingNonCancelled {
                     applyNamedTunnelLoginSnapshot(namedTunnel, client.namedTunnelStartLogin(relogin))
                 }.onSuccess { res ->
                     namedTunnel = res
-                    if (res.loginState == "error" && !res.loginError.isNullOrBlank()) {
-                        namedTunnelError = res.loginError
-                    }
                 }.onFailure { err ->
-                    val msg = err.message ?: "Could not start Cloudflare login"
-                    namedTunnelError = msg
+                    val msg = err.message ?: "Something went wrong"
                     namedTunnel = namedTunnel.copy(loginState = "error", loginError = msg)
                 }
             }
         },
         onCancelNamedTunnelLogin = {
             val client = api ?: return@RemoteAccessSettingsContent
-            namedTunnelError = null
             scope.launch {
                 runCatchingNonCancelled { applyNamedTunnelLoginSnapshot(namedTunnel, client.namedTunnelCancelLogin()) }
                     .onSuccess { namedTunnel = it }
-                    .onFailure { err -> namedTunnelError = err.message ?: "Could not cancel Cloudflare login" }
             }
         },
         onSetupNamedTunnel = { hostname ->
             val client = api ?: return@RemoteAccessSettingsContent
-            namedTunnelError = null
+            namedTunnelHostnameError = null
             scope.launch {
                 runCatchingNonCancelled { applyNamedTunnelSetupResult(namedTunnel, client.namedTunnelSetup(hostname)) }
                     .onSuccess { updated ->
@@ -918,21 +977,21 @@ internal fun RemoteAccessSettingsSection(
                             ?.let { publicTunnel = it }
                     }
                     .onFailure { err ->
-                        namedTunnelError = err.message ?: "setup failed"
+                        namedTunnelHostnameError = err.message ?: "Something went wrong"
                     }
             }
         },
         onDisableNamedTunnel = {
             val client = api ?: return@RemoteAccessSettingsContent
-            namedTunnelError = null
             scope.launch {
                 runCatchingNonCancelled { applyNamedTunnelDisableResult(namedTunnel, client.namedTunnelDisable()) }
                     .onSuccess {
                         namedTunnel = it
+                        onToast(ErrorToastMessage("Switched to a temporary address", kind = ErrorToastMessage.Kind.SUCCESS))
                         reloadAll()
                     }
                     .onFailure { err ->
-                        namedTunnelError = err.message ?: "Could not switch to temporary address"
+                        onToast(ErrorToastMessage("Could not switch to a temporary address", err.message))
                     }
             }
         },
@@ -945,14 +1004,19 @@ internal fun RemoteAccessSettingsContent(
     tailscale: TailscaleState,
     publicTunnel: PublicTunnelState,
     namedTunnel: NamedTunnelState,
-    tailscaleError: String? = null,
+    tailscaleSignInOpen: Boolean? = null,
     tailscaleServiceConflict: Boolean = false,
-    publicTunnelError: String? = null,
-    namedTunnelError: String? = null,
+    serviceNameResetTick: Int = 0,
+    namedTunnelHostnameError: String? = null,
+    onShowTailscaleSignIn: (() -> Unit)? = null,
+    onCloseTailscaleSignIn: (() -> Unit)? = null,
+    onDismissTailscaleConflict: () -> Unit = {},
+    onClearNamedTunnelError: () -> Unit = {},
     onRunInTerminal: (String) -> Unit,
     onOpenUrl: (String) -> Unit = {},
     onStartTailscaleLogin: () -> Unit,
     onCancelTailscaleLogin: () -> Unit,
+    onRenameTailscaleService: ((String) -> Unit)? = null,
     onConfigureTailscaleService: (Boolean?, String?, Boolean?) -> Unit,
     onTogglePublicTunnel: (Boolean) -> Unit,
     onStartNamedTunnelLogin: (Boolean) -> Unit,
@@ -964,9 +1028,15 @@ internal fun RemoteAccessSettingsContent(
     val context = LocalContext.current
     val currentStep = currentTailscaleSetupStep(tailscale)
     val blockingStep = blockingTailscaleSetupStep(tailscale)
-    var serviceNameDraft by remember(tailscale.service.name) { mutableStateOf(tailscale.service.name) }
+    var serviceNameDraft by remember(tailscale.service.name, serviceNameResetTick) {
+        mutableStateOf(tailscale.service.name)
+    }
     val serviceNameError = validateTailscaleServiceName(serviceNameDraft)
     var namedHostnameDraft by remember(namedTunnel.hostname) { mutableStateOf(namedTunnel.hostname.orEmpty()) }
+    var localSignInOpen by remember(tailscale.login.state) {
+        mutableStateOf(tailscale.login.state in setOf("starting", "waiting", "needs-approval", "needs-operator", "error"))
+    }
+    val effectiveSignInOpen = tailscaleSignInOpen ?: localSignInOpen
     val selfDnsName = tailscale.device?.dnsName
     val operatorCmd = tailscale.operatorCommand
     val connectedViaTailscale = isConnectedViaAddress(currentServerUrl, tailscale.service.url ?: selfDnsName)
@@ -1044,60 +1114,36 @@ internal fun RemoteAccessSettingsContent(
             }
 
             if (currentStep == TailscaleStepId.SignIn) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SettingsButton(
-                        label = "Sign In to Tailscale",
-                        primary = true,
-                        modifier = Modifier.testTag("tailscale-signin-btn"),
-                        onClick = onStartTailscaleLogin,
-                    )
-                    if (tailscale.login.state == "starting" || tailscale.login.state == "waiting") {
-                        SettingsButton(
-                            label = "Cancel",
-                            onClick = onCancelTailscaleLogin,
-                        )
-                    }
-                }
-            }
-
-            if (!tailscale.login.url.isNullOrBlank() && (tailscale.login.state == "starting" || tailscale.login.state == "waiting")) {
-                val loginUrl = tailscale.login.url!!
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(tokens.bgSolid.color)
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
+                val isLoginPending = tailscale.login.state == "starting" || tailscale.login.state == "waiting"
+                if (isLoginPending) {
                     BasicText(
-                        loginUrl,
-                        style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text.color),
-                        modifier = Modifier.testTag("tailscale-login-url"),
+                        "Waiting for you to finish signing in.",
+                        style = ppmText(11f).copy(color = tokens.text2.color),
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         SettingsButton(
-                            label = "Copy",
-                            onClick = { copyToClipboard12c(context, "Tailscale Sign-In URL", loginUrl) },
-                        )
-                        SettingsButton(
-                            label = "Open sign-in page",
+                            label = "Show sign-in link",
                             primary = true,
-                            modifier = Modifier.testTag("tailscale-open-login-url"),
-                            onClick = { onOpenUrl(loginUrl) },
+                            modifier = Modifier.testTag("tailscale-show-signin-btn"),
+                            onClick = {
+                                if (onShowTailscaleSignIn != null) onShowTailscaleSignIn() else localSignInOpen = true
+                            },
+                        )
+                    }
+                } else {
+                    val off = tailscale.backendState == "Stopped"
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SettingsButton(
+                            label = if (off) "Turn on" else "Sign in",
+                            primary = true,
+                            modifier = Modifier.testTag("tailscale-signin-btn"),
+                            onClick = {
+                                if (onShowTailscaleSignIn != null) onShowTailscaleSignIn() else localSignInOpen = true
+                                onStartTailscaleLogin()
+                            },
                         )
                     }
                 }
-            }
-
-            val displayedTailscaleError = tailscaleError
-                ?: tailscale.login.message?.takeIf { tailscale.login.state == "error" }
-            if (!displayedTailscaleError.isNullOrBlank()) {
-                BasicText(
-                    displayedTailscaleError,
-                    style = ppmText(11f).copy(color = tokens.error.color),
-                    modifier = Modifier.testTag("tailscale-error"),
-                )
             }
 
             // Service configuration
@@ -1105,7 +1151,7 @@ internal fun RemoteAccessSettingsContent(
             BasicText("Tailscale Service Name", style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text.color))
             SettingsTextInput(
                 value = serviceNameDraft,
-                onValueChange = { serviceNameDraft = it },
+                onValueChange = { serviceNameDraft = it.lowercase() },
                 placeholder = "ppm",
                 mono = true,
                 modifier = Modifier.fillMaxWidth().testTag("tailscale-service-name"),
@@ -1119,7 +1165,21 @@ internal fun RemoteAccessSettingsContent(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val isSvcEnabled = tailscale.enabled
-                val hasServiceConflict = tailscaleServiceConflict || (tailscale.service.defined && !tailscale.service.pointsAtPpm)
+                val nameChanged = serviceNameDraft.trim() != tailscale.service.name
+                if (!isSvcEnabled && nameChanged && serviceNameError == null) {
+                    SettingsButton(
+                        label = "Rename",
+                        modifier = Modifier.testTag("tailscale-service-rename"),
+                        onClick = {
+                            val trimmed = serviceNameDraft.trim()
+                            if (onRenameTailscaleService != null) {
+                                onRenameTailscaleService(trimmed)
+                            } else {
+                                onConfigureTailscaleService(null, trimmed, null)
+                            }
+                        },
+                    )
+                }
                 SettingsButton(
                     label = if (isSvcEnabled) "Update Service" else "Enable Service",
                     primary = true,
@@ -1140,14 +1200,6 @@ internal fun RemoteAccessSettingsContent(
                         },
                     )
                 }
-                if (hasServiceConflict) {
-                    SettingsButton(
-                        label = "Replace Existing",
-                        danger = true,
-                        modifier = Modifier.testTag("tailscale-service-replace"),
-                        onClick = { onConfigureTailscaleService(true, serviceNameDraft.trim(), true) },
-                    )
-                }
             }
         }
 
@@ -1166,16 +1218,9 @@ internal fun RemoteAccessSettingsContent(
                     }
                 },
             )
-            if (!publicTunnelError.isNullOrBlank()) {
-                BasicText(
-                    publicTunnelError,
-                    style = ppmText(11f).copy(color = tokens.error.color),
-                    modifier = Modifier.testTag("public-tunnel-error"),
-                )
-            }
             if (publicTunnel.enabled && !publicTunnel.active && publicTunnel.url.isNullOrBlank()) {
                 BasicText(
-                    "Starting public tunnel…",
+                    "On. Waiting for Cloudflare to hand out the link…",
                     style = ppmText(11f).copy(color = tokens.text3.color),
                     modifier = Modifier.testTag("public-tunnel-starting"),
                 )
@@ -1209,59 +1254,122 @@ internal fun RemoteAccessSettingsContent(
             if (!namedTunnel.tunnelWarning.isNullOrBlank()) {
                 BasicText(namedTunnel.tunnelWarning!!, style = ppmText(11f).copy(color = tokens.warning.color))
             }
-            val displayedNamedError = namedTunnelError ?: namedTunnel.loginError
-            if (!displayedNamedError.isNullOrBlank()) {
-                BasicText(
-                    displayedNamedError,
-                    style = ppmText(11f).copy(color = tokens.error.color),
-                    modifier = Modifier.testTag("named-tunnel-error"),
-                )
-            }
-            if (!namedTunnel.loginUrl.isNullOrBlank() && namedTunnel.loginState in setOf("starting", "waiting", "slow", "url_ready")) {
-                val cfLoginUrl = namedTunnel.loginUrl!!
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(tokens.bgSolid.color)
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    BasicText(
-                        cfLoginUrl,
-                        style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text.color),
-                        modifier = Modifier.testTag("named-tunnel-login-url"),
+
+            when (namedTunnel.loginState) {
+                "starting", "waiting", "slow", "url_ready" -> {
+                    NamedTunnelLoginStep(
+                        url = namedTunnel.loginUrl,
+                        slow = namedTunnel.loginState == "slow",
+                        onCancel = onCancelNamedTunnelLogin,
+                        onOpenUrl = onOpenUrl,
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SettingsButton(
-                            label = "Copy",
-                            onClick = { copyToClipboard12c(context, "Cloudflare Login URL", cfLoginUrl) },
+                }
+                "timeout" -> {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(tokens.bgSolid.color)
+                            .padding(10.dp)
+                            .testTag("named-tunnel-timeout-card"),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        BasicText("Sign-in link expired", style = ppmText(13f, FontWeight.SemiBold).copy(color = tokens.text.color))
+                        BasicText(
+                            "The link expires after 5 minutes unused. Press Retry to get a fresh one.",
+                            style = ppmText(11f).copy(color = tokens.text2.color),
                         )
                         SettingsButton(
-                            label = "Open",
+                            label = "Retry",
                             primary = true,
-                            modifier = Modifier.testTag("named-tunnel-open-login-url"),
-                            onClick = { onOpenUrl(cfLoginUrl) },
+                            modifier = Modifier.testTag("named-tunnel-retry-login"),
+                            onClick = { onStartNamedTunnelLogin(false) },
                         )
                     }
                 }
+                "cancelled" -> {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(tokens.bgSolid.color)
+                            .padding(10.dp)
+                            .testTag("named-tunnel-cancelled-card"),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        BasicText("Sign-in cancelled", style = ppmText(13f, FontWeight.SemiBold).copy(color = tokens.text.color))
+                        BasicText(
+                            "You cancelled the Cloudflare sign-in.",
+                            style = ppmText(11f).copy(color = tokens.text2.color),
+                        )
+                        SettingsButton(
+                            label = "Retry",
+                            primary = true,
+                            modifier = Modifier.testTag("named-tunnel-retry-login"),
+                            onClick = { onStartNamedTunnelLogin(false) },
+                        )
+                    }
+                }
+                "error" -> {
+                    val errMsg = namedTunnel.loginError ?: "Something went wrong"
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(tokens.bgSolid.color)
+                            .padding(10.dp)
+                            .testTag("named-tunnel-login-error-card"),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        BasicText("Something went wrong", style = ppmText(13f, FontWeight.SemiBold).copy(color = tokens.text.color))
+                        BasicText(
+                            errMsg,
+                            style = ppmText(11f).copy(color = tokens.error.color),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SettingsButton(
+                                label = "Close",
+                                onClick = onClearNamedTunnelError,
+                            )
+                            SettingsButton(
+                                label = "Retry",
+                                modifier = Modifier.testTag("named-tunnel-retry-login"),
+                                onClick = { onStartNamedTunnelLogin(false) },
+                            )
+                            SettingsButton(
+                                label = "Sign in again",
+                                primary = true,
+                                modifier = Modifier.testTag("named-tunnel-relogin-btn"),
+                                onClick = { onStartNamedTunnelLogin(true) },
+                            )
+                        }
+                    }
+                }
             }
+
             SettingsTextInput(
                 value = namedHostnameDraft,
-                onValueChange = { namedHostnameDraft = it },
+                onValueChange = {
+                    namedHostnameDraft = it
+                    onClearNamedTunnelError()
+                },
                 placeholder = "ppm.example.com",
                 mono = true,
                 modifier = Modifier.fillMaxWidth().testTag("named-tunnel-hostname"),
             )
+            if (!namedTunnelHostnameError.isNullOrBlank()) {
+                BasicText(
+                    namedTunnelHostnameError,
+                    style = ppmText(11f).copy(color = tokens.error.color),
+                    modifier = Modifier.testTag("named-tunnel-error"),
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SettingsButton(
                     label = if (namedTunnel.certState == "valid") "Re-login Cloudflare" else "Sign in with Cloudflare",
                     modifier = Modifier.testTag("named-tunnel-login-btn"),
                     onClick = { onStartNamedTunnelLogin(namedTunnel.certState == "valid") },
                 )
-                if (namedTunnel.loginState in setOf("starting", "waiting", "slow", "url_ready")) {
-                    SettingsButton(label = "Cancel Login", onClick = onCancelNamedTunnelLogin)
-                }
                 SettingsButton(
                     label = "Save Domain",
                     primary = true,
@@ -1279,6 +1387,38 @@ internal fun RemoteAccessSettingsContent(
                 }
             }
         }
+    }
+
+    TailscaleSignInDialog(
+        open = effectiveSignInOpen,
+        login = tailscale.login,
+        osUser = tailscale.osUser,
+        onRetry = onStartTailscaleLogin,
+        onCancel = {
+            if (onCloseTailscaleSignIn != null) onCloseTailscaleSignIn() else localSignInOpen = false
+            onCancelTailscaleLogin()
+        },
+        onClose = {
+            if (onCloseTailscaleSignIn != null) onCloseTailscaleSignIn() else localSignInOpen = false
+        },
+        onOpenUrl = onOpenUrl,
+        onRunInTerminal = onRunInTerminal,
+    )
+
+    if (tailscaleServiceConflict) {
+        val svcName = tailscale.service.name
+        val target = tailscale.service.target ?: "something else"
+        ConfirmDialog(
+            title = "Replace svc:$svcName?",
+            message = "On this machine, svc:$svcName already serves $target. Replacing it points the address at PPM, and what it served stops answering there.",
+            confirm = "Replace",
+            confirmTestTag = "tailscale-service-replace",
+            onDismiss = onDismissTailscaleConflict,
+            onConfirm = {
+                onDismissTailscaleConflict()
+                onConfigureTailscaleService(true, null, true)
+            },
+        )
     }
 
     if (confirmTurnOffTailscale) {
@@ -1323,6 +1463,389 @@ internal fun RemoteAccessSettingsContent(
                 onDisableNamedTunnel()
             },
         )
+    }
+}
+
+/**
+ * Mirrors `TailscaleSignInDialog` in `src/web/components/settings/tailscale/tailscale-sign-in-dialog.tsx`.
+ */
+@Composable
+internal fun TailscaleSignInDialog(
+    open: Boolean,
+    login: TailscaleLoginState,
+    osUser: String,
+    onRetry: () -> Unit,
+    onCancel: () -> Unit,
+    onClose: () -> Unit,
+    onOpenUrl: (String) -> Unit = {},
+    onRunInTerminal: (String) -> Unit = {},
+) {
+    if (!open) return
+    val tokens = LocalPpmTokens.current
+    val context = LocalContext.current
+    val shape = RoundedCornerShape(12.dp)
+
+    Dialog(onDismissRequest = onClose) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(tokens.panel.color)
+                .cssBorder(tokens.border.color, shape)
+                .padding(16.dp)
+                .testTag("tailscale-sign-in"),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            BasicText(
+                "Sign in to Tailscale",
+                style = ppmText(15f, FontWeight.SemiBold).copy(color = tokens.text.color),
+            )
+
+            when {
+                login.state == "waiting" && !login.url.isNullOrBlank() -> {
+                    val loginUrl = login.url!!
+                    BasicText(
+                        "Sign in with the account that owns your tailnet. This machine joins as soon as you finish.",
+                        style = ppmText(12f).copy(color = tokens.text2.color),
+                    )
+                    Column(
+                        Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        QrCodeBox(
+                            value = loginUrl,
+                            size = 168.dp,
+                            modifier = Modifier.testTag("tailscale-qr-code"),
+                        )
+                        BasicText(
+                            "Or scan it with your phone",
+                            style = ppmText(11f).copy(color = tokens.text3.color),
+                        )
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    ) {
+                        SettingsButton(
+                            label = "Cancel sign-in",
+                            modifier = Modifier.testTag("tailscale-cancel-signin"),
+                            onClick = onCancel,
+                        )
+                        SettingsButton(
+                            label = "Open sign-in page",
+                            primary = true,
+                            modifier = Modifier.testTag("tailscale-open-login-url"),
+                            onClick = { onOpenUrl(loginUrl) },
+                        )
+                    }
+                }
+                login.state == "idle" || login.state == "starting" -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        PpmIcon(ProductIcon.Loader2, 16.dp, tokens.text2.color, spinning = true)
+                        BasicText(
+                            "Asking Tailscale for a sign-in link…",
+                            style = ppmText(12f).copy(color = tokens.text2.color),
+                        )
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        SettingsButton(
+                            label = "Cancel",
+                            modifier = Modifier.testTag("tailscale-cancel-signin"),
+                            onClick = onCancel,
+                        )
+                    }
+                }
+                login.state == "success" -> {
+                    BasicText(
+                        "Signed in.",
+                        style = ppmText(12f).copy(color = tokens.text2.color),
+                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        SettingsButton(
+                            label = "Close",
+                            modifier = Modifier.testTag("tailscale-signin-close"),
+                            onClick = onClose,
+                        )
+                    }
+                }
+                login.state == "needs-approval" -> {
+                    BasicText(
+                        "Signed in. An admin has to approve this machine before it joins the tailnet.",
+                        style = ppmText(12f).copy(color = tokens.text2.color),
+                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    ) {
+                        SettingsButton(
+                            label = "Close",
+                            modifier = Modifier.testTag("tailscale-signin-close"),
+                            onClick = onClose,
+                        )
+                        SettingsButton(
+                            label = "Open machines",
+                            primary = true,
+                            modifier = Modifier.testTag("tailscale-open-machines"),
+                            onClick = { onOpenUrl("https://login.tailscale.com/admin/machines") },
+                        )
+                    }
+                }
+                login.state == "needs-operator" -> {
+                    val command = tailscaleOperatorCommand(osUser)
+                    BasicText(
+                        "Tailscale on this machine only takes changes from root and from one user it trusts. This has to be run once, with your password. PPM types it into a terminal; press Enter there, then sign in again.",
+                        style = ppmText(12f).copy(color = tokens.text2.color),
+                    )
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(tokens.bgSolid.color)
+                            .cssBorder(tokens.border.color, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BasicText(
+                            command,
+                            style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text.color),
+                            modifier = Modifier.weight(1f).testTag("tailscale-signin-operator-code"),
+                        )
+                        SettingsButton(
+                            label = "Copy",
+                            onClick = { copyToClipboard12c(context, "Tailscale Operator Command", command) },
+                        )
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    ) {
+                        SettingsButton(
+                            label = "Close",
+                            modifier = Modifier.testTag("tailscale-signin-close"),
+                            onClick = onClose,
+                        )
+                        SettingsButton(
+                            label = "Try again",
+                            modifier = Modifier.testTag("tailscale-signin-retry"),
+                            onClick = onRetry,
+                        )
+                        SettingsButton(
+                            label = "Run in terminal",
+                            primary = true,
+                            modifier = Modifier.testTag("tailscale-signin-run-terminal"),
+                            onClick = {
+                                onRunInTerminal(command)
+                                onClose()
+                            },
+                        )
+                    }
+                }
+                else -> {
+                    BasicText(
+                        login.message ?: "The sign-in was cancelled.",
+                        style = ppmText(12f).copy(color = tokens.text2.color),
+                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    ) {
+                        SettingsButton(
+                            label = "Close",
+                            modifier = Modifier.testTag("tailscale-signin-close"),
+                            onClick = onClose,
+                        )
+                        SettingsButton(
+                            label = "Try again",
+                            primary = true,
+                            modifier = Modifier.testTag("tailscale-signin-retry"),
+                            onClick = onRetry,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Mirrors `NamedTunnelLoginStep` in `src/web/components/tunnels/named-tunnel/named-tunnel-login-step.tsx`.
+ */
+@Composable
+internal fun NamedTunnelLoginStep(
+    url: String?,
+    slow: Boolean,
+    onCancel: () -> Unit,
+    onOpenUrl: (String) -> Unit = {},
+) {
+    val tokens = LocalPpmTokens.current
+    val context = LocalContext.current
+    var copied by remember { mutableStateOf(false) }
+    var bannerAcked by remember { mutableStateOf(false) }
+    val showBanner = slow && !bannerAcked
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(2_000L)
+            copied = false
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .testTag("named-tunnel-login-step"),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            BasicText(
+                "Sign in to Cloudflare",
+                style = ppmText(14f, FontWeight.SemiBold).copy(color = tokens.text.color),
+            )
+            BasicText(
+                "Open the link below to sign in — a phone works just as well.",
+                style = ppmText(12f).copy(color = tokens.text2.color),
+            )
+        }
+
+        if (!url.isNullOrBlank()) {
+            val btnShape = RoundedCornerShape(8.dp)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .clip(btnShape)
+                        .background(tokens.bgSolid.color)
+                        .cssBorder(tokens.border.color, btnShape)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    BasicText(
+                        url,
+                        style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text.color),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag("named-tunnel-login-url"),
+                    )
+                }
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .clip(btnShape)
+                        .background(tokens.bgSolid.color)
+                        .cssBorder(tokens.border.color, btnShape)
+                        .clickable {
+                            copyToClipboard12c(context, "Cloudflare Login URL", url)
+                            copied = true
+                        }
+                        .semantics { contentDescription = if (copied) "Copied" else "Copy" }
+                        .testTag("named-tunnel-copy-login-url"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    PpmIcon(
+                        if (copied) ProductIcon.Check else ProductIcon.Copy,
+                        16.dp,
+                        if (copied) tokens.success.color else tokens.text2.color,
+                    )
+                }
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .clip(btnShape)
+                        .background(tokens.bgSolid.color)
+                        .cssBorder(tokens.border.color, btnShape)
+                        .clickable { onOpenUrl(url) }
+                        .semantics { contentDescription = "Open link" }
+                        .testTag("named-tunnel-open-login-url"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    PpmIcon(ProductIcon.ExternalLink, 16.dp, tokens.text2.color)
+                }
+            }
+        } else {
+            Row(
+                Modifier.testTag("named-tunnel-login-waiting"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                PpmIcon(ProductIcon.Loader2, 16.dp, tokens.text2.color, spinning = true)
+                BasicText(
+                    "Waiting for sign-in…",
+                    style = ppmText(12f).copy(color = tokens.text2.color),
+                )
+            }
+        }
+
+        BasicText(
+            "You can finish this step on your phone if that is easier.",
+            style = ppmText(11f).copy(color = tokens.text3.color),
+        )
+
+        if (showBanner) {
+            val bannerShape = RoundedCornerShape(8.dp)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(bannerShape)
+                    .background(tokens.warning.opacity(0.1).color)
+                    .cssBorder(tokens.warning.opacity(0.3).color, bannerShape)
+                    .padding(12.dp)
+                    .testTag("named-tunnel-slow-banner"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    PpmIcon(ProductIcon.TriangleAlert, 16.dp, tokens.warning.color)
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        BasicText(
+                            "Still signing in?",
+                            style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text.color),
+                        )
+                        BasicText(
+                            "Cloudflare sometimes takes a few minutes. The process is still running — keep waiting or cancel.",
+                            style = ppmText(11f).copy(color = tokens.text2.color),
+                        )
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    SettingsButton(
+                        label = "Keep waiting",
+                        primary = true,
+                        modifier = Modifier.weight(1f).testTag("named-tunnel-keep-waiting"),
+                        onClick = { bannerAcked = true },
+                    )
+                    SettingsButton(
+                        label = "Cancel",
+                        modifier = Modifier.weight(1f).testTag("named-tunnel-cancel-login"),
+                        onClick = onCancel,
+                    )
+                }
+            }
+        } else {
+            SettingsButton(
+                label = "Cancel",
+                modifier = Modifier.fillMaxWidth().testTag("named-tunnel-cancel-login"),
+                onClick = onCancel,
+            )
+        }
     }
 }
 
