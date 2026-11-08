@@ -41,6 +41,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.client.ApiClient
+import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.client.cloudGetAlias
 import com.hienlh.ppm.client.cloudGetLoginUrl
 import com.hienlh.ppm.client.cloudGetStatus
@@ -179,6 +181,7 @@ import com.hienlh.ppm.state.settings.scheduleFormProblems
 import com.hienlh.ppm.state.settings.tailscaleServiceUrl
 import com.hienlh.ppm.state.settings.validateNtfyTopic
 import com.hienlh.ppm.state.settings.validateTailscaleServiceName
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -186,6 +189,15 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 private val PrettyJson12c = Json { prettyPrint = true }
+
+private inline fun <T> runCatchingNonCancelled(block: () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Result.failure(e)
+    }
 
 private fun copyToClipboard12c(context: Context, label: String, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
@@ -257,10 +269,10 @@ internal fun NotificationsSettingsSection(model: AppModel) {
 
     suspend fun reloadAll() {
         val client = api ?: return
-        runCatching { parseNotificationSettings(client.notificationsGetSettings()) }.getOrNull()?.let { settings = it }
-        runCatching { parsePushStatus(client.notificationsGetPush()) }.getOrNull()?.let { pushStatus = it }
-        runCatching { parseTelegramNotifyStatus(client.notificationsGetTelegram()) }.getOrNull()?.let { telegram = it }
-        runCatching { parseNtfyStatus(client.notificationsGetNtfy()) }.getOrNull()?.let { ntfy = it }
+        runCatchingNonCancelled { parseNotificationSettings(client.notificationsGetSettings()) }.getOrNull()?.let { settings = it }
+        runCatchingNonCancelled { parsePushStatus(client.notificationsGetPush()) }.getOrNull()?.let { pushStatus = it }
+        runCatchingNonCancelled { parseTelegramNotifyStatus(client.notificationsGetTelegram()) }.getOrNull()?.let { telegram = it }
+        runCatchingNonCancelled { parseNtfyStatus(client.notificationsGetNtfy()) }.getOrNull()?.let { ntfy = it }
     }
 
     LaunchedEffect(api) {
@@ -272,7 +284,7 @@ internal fun NotificationsSettingsSection(model: AppModel) {
         if (!telegram.connectActive) return@LaunchedEffect
         while (telegram.connectActive) {
             delay(2_000L)
-            val next = runCatching { parseTelegramNotifyStatus(client.notificationsGetTelegram()) }.getOrNull() ?: break
+            val next = runCatchingNonCancelled { parseTelegramNotifyStatus(client.notificationsGetTelegram()) }.getOrNull() ?: break
             telegram = next
         }
     }
@@ -287,7 +299,7 @@ internal fun NotificationsSettingsSection(model: AppModel) {
             settings = next
             val client = api ?: return@NotificationsSettingsContent
             scope.launch {
-                runCatching {
+                runCatchingNonCancelled {
                     parseNotificationSettings(client.notificationsPutSettings(next.toJsonPatch()))
                 }.onSuccess { settings = it }
             }
@@ -295,7 +307,7 @@ internal fun NotificationsSettingsSection(model: AppModel) {
         onTestPushDevice = { id ->
             val client = api ?: return@NotificationsSettingsContent
             scope.launch {
-                runCatching { client.notificationsTestPush(id) }
+                runCatchingNonCancelled { client.notificationsTestPush(id) }
                     .onSuccess { statusMessage = "Test push sent" }
                     .onFailure { statusMessage = it.message ?: "Push test failed" }
             }
@@ -303,14 +315,14 @@ internal fun NotificationsSettingsSection(model: AppModel) {
         onRemovePushDevice = { id, endpoint ->
             val client = api ?: return@NotificationsSettingsContent
             scope.launch {
-                runCatching { client.notificationsUnsubscribePush(endpoint = endpoint, id = id) }
+                runCatchingNonCancelled { client.notificationsUnsubscribePush(endpoint = endpoint, id = id) }
                 reloadAll()
             }
         },
         onSaveTelegramToken = { token ->
             val client = api ?: return@NotificationsSettingsContent
             scope.launch {
-                runCatching { client.settingsPutTelegramToken(token) }
+                runCatchingNonCancelled { client.settingsPutTelegramToken(token) }
                     .onSuccess {
                         statusMessage = "Telegram bot token saved"
                         reloadAll()
@@ -321,7 +333,7 @@ internal fun NotificationsSettingsSection(model: AppModel) {
         onTestTelegram = {
             val client = api ?: return@NotificationsSettingsContent
             scope.launch {
-                runCatching { client.settingsTestTelegram() }
+                runCatchingNonCancelled { client.settingsTestTelegram() }
                     .onSuccess { statusMessage = "Telegram test notification sent" }
                     .onFailure { statusMessage = it.message ?: "Telegram test failed" }
             }
@@ -329,12 +341,12 @@ internal fun NotificationsSettingsSection(model: AppModel) {
         onStartTelegramConnect = {
             val client = api ?: return@NotificationsSettingsContent
             scope.launch {
-                runCatching { client.notificationsStartTelegramConnect() }
+                runCatchingNonCancelled { client.notificationsStartTelegramConnect() }
                     .onSuccess { res ->
                         val url = res["url"].string ?: res.obj?.get("connect")?.obj?.get("url").string
                         reloadAll()
                         if (!url.isNullOrBlank()) {
-                            runCatching { uriHandler.openUri(url) }
+                            runCatchingNonCancelled { uriHandler.openUri(url) }
                         }
                     }
             }
@@ -342,21 +354,21 @@ internal fun NotificationsSettingsSection(model: AppModel) {
         onCancelTelegramConnect = {
             val client = api ?: return@NotificationsSettingsContent
             scope.launch {
-                runCatching { client.notificationsCancelTelegramConnect() }
+                runCatchingNonCancelled { client.notificationsCancelTelegramConnect() }
                 reloadAll()
             }
         },
         onRemoveTelegramChat = { chatId ->
             val client = api ?: return@NotificationsSettingsContent
             scope.launch {
-                runCatching { client.notificationsRemoveTelegramChat(chatId) }
+                runCatchingNonCancelled { client.notificationsRemoveTelegramChat(chatId) }
                 reloadAll()
             }
         },
         onSaveNtfy = { serverUrl, topic, token ->
             val client = api ?: return@NotificationsSettingsContent
             scope.launch {
-                runCatching { client.notificationsPutNtfy(serverUrl, topic, token) }
+                runCatchingNonCancelled { client.notificationsPutNtfy(serverUrl, topic, token) }
                     .onSuccess {
                         statusMessage = "ntfy configuration saved"
                         reloadAll()
@@ -367,7 +379,7 @@ internal fun NotificationsSettingsSection(model: AppModel) {
         onTestNtfy = {
             val client = api ?: return@NotificationsSettingsContent
             scope.launch {
-                runCatching { client.notificationsTestNtfy() }
+                runCatchingNonCancelled { client.notificationsTestNtfy() }
                     .onSuccess { statusMessage = "ntfy test notification sent" }
                     .onFailure { statusMessage = it.message ?: "ntfy test failed" }
             }
@@ -375,7 +387,7 @@ internal fun NotificationsSettingsSection(model: AppModel) {
         onRemoveNtfy = {
             val client = api ?: return@NotificationsSettingsContent
             scope.launch {
-                runCatching { client.notificationsDeleteNtfy() }
+                runCatchingNonCancelled { client.notificationsDeleteNtfy() }
                 reloadAll()
             }
         },
@@ -706,7 +718,21 @@ internal fun NotificationsSettingsContent(
 
 @Composable
 internal fun RemoteAccessSettingsSection(model: AppModel) {
-    val api = model.api
+    val activeServerUrl: String? = model.debug?.url?.toString()
+        ?: model.store.servers.value.firstOrNull { it.id == model.store.selectedId.value }?.url
+    RemoteAccessSettingsSection(
+        api = model.api,
+        currentServerUrl = activeServerUrl,
+        onRunInTerminal = { cmd -> model.runInTerminal(cmd) },
+    )
+}
+
+@Composable
+internal fun RemoteAccessSettingsSection(
+    api: ApiClient?,
+    currentServerUrl: String? = null,
+    onRunInTerminal: (String) -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
 
@@ -714,14 +740,19 @@ internal fun RemoteAccessSettingsSection(model: AppModel) {
     var publicTunnel by remember { mutableStateOf(PublicTunnelState()) }
     var namedTunnel by remember { mutableStateOf(NamedTunnelState()) }
 
+    var tailscaleError by remember { mutableStateOf<String?>(null) }
+    var tailscaleServiceConflict by remember { mutableStateOf(false) }
+    var publicTunnelError by remember { mutableStateOf<String?>(null) }
+    var namedTunnelError by remember { mutableStateOf<String?>(null) }
+
     var lastOpenedTailscaleLoginUrl by remember { mutableStateOf<String?>(null) }
     var lastOpenedNamedTunnelLoginUrl by remember { mutableStateOf<String?>(null) }
 
     suspend fun reloadAll() {
         val client = api ?: return
-        runCatching { parseTailscaleState(client.tailscaleGetState()) }.getOrNull()?.let { tailscale = it }
-        runCatching { parsePublicTunnelState(client.tunnelGetStatus()) }.getOrNull()?.let { publicTunnel = it }
-        runCatching { parseNamedTunnelState(client.namedTunnelGetStatus()) }.getOrNull()?.let { namedTunnel = it }
+        runCatchingNonCancelled { parseTailscaleState(client.tailscaleGetState()) }.getOrNull()?.let { tailscale = it }
+        runCatchingNonCancelled { parsePublicTunnelState(client.tunnelGetStatus()) }.getOrNull()?.let { publicTunnel = it }
+        runCatchingNonCancelled { parseNamedTunnelState(client.namedTunnelGetStatus()) }.getOrNull()?.let { namedTunnel = it }
     }
 
     LaunchedEffect(api) {
@@ -735,7 +766,7 @@ internal fun RemoteAccessSettingsSection(model: AppModel) {
         val intervalMs = if (publicTunnelStarting) 2_000L else 10_000L
         while (true) {
             delay(intervalMs)
-            runCatching { parsePublicTunnelState(client.tunnelGetStatus()) }.getOrNull()?.let { publicTunnel = it }
+            runCatchingNonCancelled { parsePublicTunnelState(client.tunnelGetStatus()) }.getOrNull()?.let { publicTunnel = it }
         }
     }
 
@@ -746,12 +777,12 @@ internal fun RemoteAccessSettingsSection(model: AppModel) {
         if (!tailscaleLoginActive) return@LaunchedEffect
         while (tailscale.login.state == "starting" || tailscale.login.state == "waiting") {
             delay(1_500L)
-            val fresh = runCatching { parseTailscaleState(client.tailscaleGetState()) }.getOrNull() ?: continue
+            val fresh = runCatchingNonCancelled { parseTailscaleState(client.tailscaleGetState()) }.getOrNull() ?: continue
             tailscale = fresh
             val url = fresh.login.url
             if (!url.isNullOrBlank() && url != lastOpenedTailscaleLoginUrl) {
                 lastOpenedTailscaleLoginUrl = url
-                runCatching { uriHandler.openUri(url) }
+                runCatchingNonCancelled { uriHandler.openUri(url) }
             }
         }
     }
@@ -763,114 +794,168 @@ internal fun RemoteAccessSettingsSection(model: AppModel) {
         if (!namedLoginActive) return@LaunchedEffect
         while (namedTunnel.loginState in setOf("starting", "waiting", "slow")) {
             delay(2_000L)
-            val fresh = runCatching { parseNamedTunnelState(client.namedTunnelGetStatus()) }.getOrNull() ?: continue
+            val fresh = runCatchingNonCancelled { parseNamedTunnelState(client.namedTunnelGetStatus()) }.getOrNull() ?: continue
             namedTunnel = fresh
             val url = fresh.loginUrl
             if (!url.isNullOrBlank() && url != lastOpenedNamedTunnelLoginUrl) {
                 lastOpenedNamedTunnelLoginUrl = url
-                runCatching { uriHandler.openUri(url) }
+                runCatchingNonCancelled { uriHandler.openUri(url) }
             }
         }
     }
 
-    val activeServerUrl: String? = model.debug?.url?.toString()
-        ?: model.store.servers.value.firstOrNull { it.id == model.store.selectedId.value }?.url
-
     RemoteAccessSettingsContent(
-        currentServerUrl = activeServerUrl,
+        currentServerUrl = currentServerUrl,
         tailscale = tailscale,
         publicTunnel = publicTunnel,
         namedTunnel = namedTunnel,
-        onRunInTerminal = { cmd -> model.runInTerminal(cmd) },
+        tailscaleError = tailscaleError,
+        tailscaleServiceConflict = tailscaleServiceConflict,
+        publicTunnelError = publicTunnelError,
+        namedTunnelError = namedTunnelError,
+        onRunInTerminal = onRunInTerminal,
         onStartTailscaleLogin = {
             val client = api ?: return@RemoteAccessSettingsContent
             lastOpenedTailscaleLoginUrl = null
+            tailscaleError = null
             scope.launch {
-                val res = runCatching { applyTailscaleLoginSnapshot(tailscale, client.tailscaleStartLogin()) }.getOrNull()
-                if (res != null) {
-                    tailscale = res
-                    val url = res.login.url
-                    if (!url.isNullOrBlank()) {
-                        lastOpenedTailscaleLoginUrl = url
-                        runCatching { uriHandler.openUri(url) }
+                runCatchingNonCancelled { applyTailscaleLoginSnapshot(tailscale, client.tailscaleStartLogin()) }
+                    .onSuccess { res ->
+                        tailscale = res
+                        if (res.login.state == "error") {
+                            tailscaleError = res.login.message ?: "Sign-in failed."
+                        }
+                        val url = res.login.url
+                        if (!url.isNullOrBlank()) {
+                            lastOpenedTailscaleLoginUrl = url
+                            runCatchingNonCancelled { uriHandler.openUri(url) }
+                        }
                     }
-                }
+                    .onFailure { err ->
+                        val msg = err.message ?: "Sign-in failed."
+                        tailscaleError = msg
+                        tailscale = tailscale.copy(
+                            login = tailscale.login.copy(state = "error", url = null, message = msg),
+                        )
+                    }
             }
         },
         onCancelTailscaleLogin = {
             val client = api ?: return@RemoteAccessSettingsContent
+            tailscaleError = null
             scope.launch {
-                runCatching { applyTailscaleLoginSnapshot(tailscale, client.tailscaleCancelLogin()) }
-                    .getOrNull()
-                    ?.let { tailscale = it }
+                runCatchingNonCancelled { applyTailscaleLoginSnapshot(tailscale, client.tailscaleCancelLogin()) }
+                    .onSuccess { tailscale = it }
+                    .onFailure { err -> tailscaleError = err.message ?: "Could not cancel sign-in." }
             }
         },
         onConfigureTailscaleService = { enabled, name, replace ->
             val client = api ?: return@RemoteAccessSettingsContent
+            tailscaleError = null
             scope.launch {
-                runCatching {
+                runCatchingNonCancelled {
                     parseTailscaleState(client.tailscaleConfigureService(enabled = enabled, name = name, replace = replace))
-                }.getOrNull()?.let { tailscale = it }
+                }.onSuccess {
+                    tailscale = it
+                    tailscaleServiceConflict = false
+                }.onFailure { err ->
+                    if (enabled == true && err is PpmError.Server && (err.status == 409 || err.code == "conflict")) {
+                        tailscaleServiceConflict = true
+                    }
+                    tailscaleError = err.message ?: if (enabled == true) {
+                        "Could not turn the address on."
+                    } else {
+                        "Could not turn the address off."
+                    }
+                    runCatchingNonCancelled { parseTailscaleState(client.tailscaleGetState()) }
+                        .getOrNull()
+                        ?.let { tailscale = it }
+                }
             }
         },
         onTogglePublicTunnel = { enabled ->
+            val previous = publicTunnel
+            publicTunnelError = null
             publicTunnel = publicTunnel.copy(enabled = enabled)
             val client = api ?: return@RemoteAccessSettingsContent
             scope.launch {
-                runCatching { applyPublicTunnelEnabledResult(publicTunnel, client.tunnelSetEnabled(enabled)) }
-                    .getOrNull()
-                    ?.let { publicTunnel = it }
-                runCatching { parsePublicTunnelState(client.tunnelGetStatus()) }
-                    .getOrNull()
-                    ?.let { publicTunnel = it }
+                runCatchingNonCancelled { applyPublicTunnelEnabledResult(publicTunnel, client.tunnelSetEnabled(enabled)) }
+                    .onSuccess { updated ->
+                        publicTunnel = updated
+                        runCatchingNonCancelled { parsePublicTunnelState(client.tunnelGetStatus()) }
+                            .getOrNull()
+                            ?.let { publicTunnel = it }
+                    }
+                    .onFailure { err ->
+                        publicTunnel = previous
+                        publicTunnelError = err.message ?: "Could not update public link."
+                    }
             }
         },
         onStartNamedTunnelLogin = { relogin ->
             val client = api ?: return@RemoteAccessSettingsContent
             lastOpenedNamedTunnelLoginUrl = null
+            namedTunnelError = null
             scope.launch {
-                val res = runCatching {
+                runCatchingNonCancelled {
                     applyNamedTunnelLoginSnapshot(namedTunnel, client.namedTunnelStartLogin(relogin))
-                }.getOrNull()
-                if (res != null) {
+                }.onSuccess { res ->
                     namedTunnel = res
+                    if (res.loginState == "error" && !res.loginError.isNullOrBlank()) {
+                        namedTunnelError = res.loginError
+                    }
                     val url = res.loginUrl
                     if (!url.isNullOrBlank()) {
                         lastOpenedNamedTunnelLoginUrl = url
-                        runCatching { uriHandler.openUri(url) }
+                        runCatchingNonCancelled { uriHandler.openUri(url) }
                     }
+                }.onFailure { err ->
+                    val msg = err.message ?: "Could not start Cloudflare login"
+                    namedTunnelError = msg
+                    namedTunnel = namedTunnel.copy(loginState = "error", loginError = msg)
                 }
             }
         },
         onCancelNamedTunnelLogin = {
             val client = api ?: return@RemoteAccessSettingsContent
+            namedTunnelError = null
             scope.launch {
-                runCatching { applyNamedTunnelLoginSnapshot(namedTunnel, client.namedTunnelCancelLogin()) }
-                    .getOrNull()
-                    ?.let { namedTunnel = it }
+                runCatchingNonCancelled { applyNamedTunnelLoginSnapshot(namedTunnel, client.namedTunnelCancelLogin()) }
+                    .onSuccess { namedTunnel = it }
+                    .onFailure { err -> namedTunnelError = err.message ?: "Could not cancel Cloudflare login" }
             }
         },
         onSetupNamedTunnel = { hostname ->
             val client = api ?: return@RemoteAccessSettingsContent
+            namedTunnelError = null
             scope.launch {
-                runCatching { applyNamedTunnelSetupResult(namedTunnel, client.namedTunnelSetup(hostname)) }
-                    .getOrNull()
-                    ?.let { namedTunnel = it }
-                runCatching { parseNamedTunnelState(client.namedTunnelGetStatus()) }
-                    .getOrNull()
-                    ?.let { namedTunnel = it }
-                runCatching { parsePublicTunnelState(client.tunnelGetStatus()) }
-                    .getOrNull()
-                    ?.let { publicTunnel = it }
+                runCatchingNonCancelled { applyNamedTunnelSetupResult(namedTunnel, client.namedTunnelSetup(hostname)) }
+                    .onSuccess { updated ->
+                        namedTunnel = updated
+                        runCatchingNonCancelled { parseNamedTunnelState(client.namedTunnelGetStatus()) }
+                            .getOrNull()
+                            ?.let { namedTunnel = it }
+                        runCatchingNonCancelled { parsePublicTunnelState(client.tunnelGetStatus()) }
+                            .getOrNull()
+                            ?.let { publicTunnel = it }
+                    }
+                    .onFailure { err ->
+                        namedTunnelError = err.message ?: "setup failed"
+                    }
             }
         },
         onDisableNamedTunnel = {
             val client = api ?: return@RemoteAccessSettingsContent
+            namedTunnelError = null
             scope.launch {
-                runCatching { applyNamedTunnelDisableResult(namedTunnel, client.namedTunnelDisable()) }
-                    .getOrNull()
-                    ?.let { namedTunnel = it }
-                reloadAll()
+                runCatchingNonCancelled { applyNamedTunnelDisableResult(namedTunnel, client.namedTunnelDisable()) }
+                    .onSuccess {
+                        namedTunnel = it
+                        reloadAll()
+                    }
+                    .onFailure { err ->
+                        namedTunnelError = err.message ?: "Could not switch to temporary address"
+                    }
             }
         },
     )
@@ -882,6 +967,10 @@ internal fun RemoteAccessSettingsContent(
     tailscale: TailscaleState,
     publicTunnel: PublicTunnelState,
     namedTunnel: NamedTunnelState,
+    tailscaleError: String? = null,
+    tailscaleServiceConflict: Boolean = false,
+    publicTunnelError: String? = null,
+    namedTunnelError: String? = null,
     onRunInTerminal: (String) -> Unit,
     onStartTailscaleLogin: () -> Unit,
     onCancelTailscaleLogin: () -> Unit,
@@ -992,6 +1081,16 @@ internal fun RemoteAccessSettingsContent(
                 }
             }
 
+            val displayedTailscaleError = tailscaleError
+                ?: tailscale.login.message?.takeIf { tailscale.login.state == "error" }
+            if (!displayedTailscaleError.isNullOrBlank()) {
+                BasicText(
+                    displayedTailscaleError,
+                    style = ppmText(11f).copy(color = tokens.error.color),
+                    modifier = Modifier.testTag("tailscale-error"),
+                )
+            }
+
             // Service configuration
             Separator()
             BasicText("Tailscale Service Name", style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text.color))
@@ -1011,7 +1110,7 @@ internal fun RemoteAccessSettingsContent(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val isSvcEnabled = tailscale.enabled
-                val hasServiceConflict = tailscale.service.defined && !tailscale.service.pointsAtPpm
+                val hasServiceConflict = tailscaleServiceConflict || (tailscale.service.defined && !tailscale.service.pointsAtPpm)
                 SettingsButton(
                     label = if (isSvcEnabled) "Update Service" else "Enable Service",
                     primary = true,
@@ -1058,6 +1157,13 @@ internal fun RemoteAccessSettingsContent(
                     }
                 },
             )
+            if (!publicTunnelError.isNullOrBlank()) {
+                BasicText(
+                    publicTunnelError,
+                    style = ppmText(11f).copy(color = tokens.error.color),
+                    modifier = Modifier.testTag("public-tunnel-error"),
+                )
+            }
             if (publicTunnel.enabled && !publicTunnel.active && publicTunnel.url.isNullOrBlank()) {
                 BasicText(
                     "Starting public tunnel…",
@@ -1094,8 +1200,13 @@ internal fun RemoteAccessSettingsContent(
             if (!namedTunnel.tunnelWarning.isNullOrBlank()) {
                 BasicText(namedTunnel.tunnelWarning!!, style = ppmText(11f).copy(color = tokens.warning.color))
             }
-            if (!namedTunnel.loginError.isNullOrBlank()) {
-                BasicText(namedTunnel.loginError!!, style = ppmText(11f).copy(color = tokens.error.color))
+            val displayedNamedError = namedTunnelError ?: namedTunnel.loginError
+            if (!displayedNamedError.isNullOrBlank()) {
+                BasicText(
+                    displayedNamedError,
+                    style = ppmText(11f).copy(color = tokens.error.color),
+                    modifier = Modifier.testTag("named-tunnel-error"),
+                )
             }
             SettingsTextInput(
                 value = namedHostnameDraft,
@@ -1107,6 +1218,7 @@ internal fun RemoteAccessSettingsContent(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SettingsButton(
                     label = if (namedTunnel.certState == "valid") "Re-login Cloudflare" else "Sign in with Cloudflare",
+                    modifier = Modifier.testTag("named-tunnel-login-btn"),
                     onClick = { onStartNamedTunnelLogin(namedTunnel.certState == "valid") },
                 )
                 if (namedTunnel.loginState in setOf("starting", "waiting", "slow", "url_ready")) {
@@ -1115,7 +1227,6 @@ internal fun RemoteAccessSettingsContent(
                 SettingsButton(
                     label = "Save Domain",
                     primary = true,
-                    enabled = namedHostnameDraft.isNotBlank(),
                     modifier = Modifier.testTag("named-tunnel-save"),
                     onClick = { onSetupNamedTunnel(namedHostnameDraft.trim()) },
                 )
@@ -1194,8 +1305,8 @@ internal fun CloudSettingsSection(model: AppModel) {
 
     suspend fun reload() {
         val client = api ?: return
-        runCatching { parseCloudStatus(client.cloudGetStatus()) }.getOrNull()?.let { status = it }
-        runCatching { client.cloudGetAlias() }.getOrNull()?.let { res ->
+        runCatchingNonCancelled { parseCloudStatus(client.cloudGetStatus()) }.getOrNull()?.let { status = it }
+        runCatchingNonCancelled { client.cloudGetAlias() }.getOrNull()?.let { res ->
             aliasSlug = res["slug"].string ?: res.obj?.get("alias")?.obj?.get("slug").string
         }
     }
@@ -1217,7 +1328,7 @@ internal fun CloudSettingsSection(model: AppModel) {
                 deviceCodeFlow = deviceCodeFlow.copy(status = "expired", error = "Device code expired. Please try again.")
                 break
             }
-            val poll = runCatching {
+            val poll = runCatchingNonCancelled {
                 parseCloudDeviceCodePoll(client.cloudPollDeviceCode(activeFlow.cloudUrl, activeFlow.deviceCode))
             }.getOrNull() ?: continue
             when (poll.status) {
@@ -1225,7 +1336,7 @@ internal fun CloudSettingsSection(model: AppModel) {
                     val token = poll.accessToken
                     val email = poll.email
                     if (!token.isNullOrBlank() && !email.isNullOrBlank()) {
-                        runCatching {
+                        runCatchingNonCancelled {
                             client.cloudLogin(accessToken = token, email = email, cloudUrl = activeFlow.cloudUrl)
                         }.onSuccess {
                             deviceCodeFlow = CloudDeviceCodeFlowState()
@@ -1272,14 +1383,14 @@ internal fun CloudSettingsSection(model: AppModel) {
             val client = api ?: return@CloudSettingsContent
             deviceCodeFlow = CloudDeviceCodeFlowState(status = "starting")
             scope.launch {
-                val cloudUrl = runCatching { parseCloudLoginUrl(client.cloudGetLoginUrl()) }
+                val cloudUrl = runCatchingNonCancelled { parseCloudLoginUrl(client.cloudGetLoginUrl()) }
                     .getOrDefault(status.cloudUrl.ifBlank { "https://ppm.bot" })
-                runCatching {
+                runCatchingNonCancelled {
                     parseCloudDeviceCodeStart(client.cloudRequestDeviceCode(cloudUrl), cloudUrl)
                 }.onSuccess { started ->
                     deviceCodeFlow = started
                     if (started.verificationUri.isNotBlank()) {
-                        runCatching { uriHandler.openUri(started.verificationUri) }
+                        runCatchingNonCancelled { uriHandler.openUri(started.verificationUri) }
                     }
                 }.onFailure { err ->
                     deviceCodeFlow = CloudDeviceCodeFlowState(
@@ -1298,30 +1409,30 @@ internal fun CloudSettingsSection(model: AppModel) {
             val wasLinked = status.linked
             scope.launch {
                 if (wasLinked) {
-                    runCatching { client.cloudUnlink() }
+                    runCatchingNonCancelled { client.cloudUnlink() }
                 }
-                runCatching { client.cloudLogout() }
+                runCatchingNonCancelled { client.cloudLogout() }
                 reload()
             }
         },
         onLinkDevice = { name ->
             val client = api ?: return@CloudSettingsContent
             scope.launch {
-                runCatching { client.cloudLink(name) }
+                runCatchingNonCancelled { client.cloudLink(name) }
                 reload()
             }
         },
         onUnlinkDevice = {
             val client = api ?: return@CloudSettingsContent
             scope.launch {
-                runCatching { client.cloudUnlink() }
+                runCatchingNonCancelled { client.cloudUnlink() }
                 reload()
             }
         },
         onSaveAlias = { slugOrNull ->
             val client = api ?: return@CloudSettingsContent
             scope.launch {
-                runCatching { client.cloudSetAlias(slugOrNull) }
+                runCatchingNonCancelled { client.cloudSetAlias(slugOrNull) }
                     .onSuccess {
                         aliasSlug = slugOrNull
                         statusMessage = if (slugOrNull == null) "Alias cleared" else "Alias saved"
@@ -1407,7 +1518,7 @@ internal fun CloudSettingsContent(
                                     label = "Open Verification Page",
                                     primary = true,
                                     modifier = Modifier.testTag("cloud-device-open-url"),
-                                    onClick = { runCatching { uriHandler.openUri(deviceCodeFlow.verificationUri) } },
+                                    onClick = { runCatchingNonCancelled { uriHandler.openUri(deviceCodeFlow.verificationUri) } },
                                 )
                             }
                             SettingsButton(
@@ -1538,7 +1649,7 @@ internal fun ProxySettingsSection(model: AppModel) {
 
     LaunchedEffect(api) {
         if (api == null) return@LaunchedEffect
-        runCatching { parseProxySettings(api.settingsGetProxy()) }.getOrNull()?.let { state = it }
+        runCatchingNonCancelled { parseProxySettings(api.settingsGetProxy()) }.getOrNull()?.let { state = it }
     }
 
     ProxySettingsContent(
@@ -1547,13 +1658,13 @@ internal fun ProxySettingsSection(model: AppModel) {
             state = state.copy(enabled = enabled)
             val client = api ?: return@ProxySettingsContent
             scope.launch {
-                runCatching { parseProxySettings(client.settingsPutProxy(enabled = enabled)) }.getOrNull()?.let { state = it }
+                runCatchingNonCancelled { parseProxySettings(client.settingsPutProxy(enabled = enabled)) }.getOrNull()?.let { state = it }
             }
         },
         onGenerateKey = {
             val client = api ?: return@ProxySettingsContent
             scope.launch {
-                runCatching { parseProxySettings(client.settingsPutProxy(generateKey = true)) }.getOrNull()?.let { state = it }
+                runCatchingNonCancelled { parseProxySettings(client.settingsPutProxy(generateKey = true)) }.getOrNull()?.let { state = it }
             }
         },
     )
@@ -1673,7 +1784,7 @@ internal fun ExtensionsSettingsSection(model: AppModel) {
 
     suspend fun reload() {
         val client = api ?: return
-        runCatching { parseExtensionsList(client.extensionsList()) }.getOrNull()?.let { extensions = it }
+        runCatchingNonCancelled { parseExtensionsList(client.extensionsList()) }.getOrNull()?.let { extensions = it }
     }
 
     LaunchedEffect(api) {
@@ -1688,7 +1799,7 @@ internal fun ExtensionsSettingsSection(model: AppModel) {
             val client = api ?: return@ExtensionsSettingsContent
             busy = true
             scope.launch {
-                runCatching { client.extensionsInstall(pkg) }
+                runCatchingNonCancelled { client.extensionsInstall(pkg) }
                     .onSuccess {
                         statusMessage = "Installed $pkg"
                         reload()
@@ -1701,7 +1812,7 @@ internal fun ExtensionsSettingsSection(model: AppModel) {
             val client = api ?: return@ExtensionsSettingsContent
             busy = true
             scope.launch {
-                runCatching { client.extensionsDevLink(path) }
+                runCatchingNonCancelled { client.extensionsDevLink(path) }
                     .onSuccess {
                         statusMessage = "Linked $path"
                         reload()
@@ -1714,14 +1825,14 @@ internal fun ExtensionsSettingsSection(model: AppModel) {
             extensions = extensions.map { if (it.id == id) it.copy(enabled = enabled) else it }
             val client = api ?: return@ExtensionsSettingsContent
             scope.launch {
-                runCatching { client.extensionsSetEnabled(id, enabled) }
+                runCatchingNonCancelled { client.extensionsSetEnabled(id, enabled) }
                 reload()
             }
         },
         onRemove = { id ->
             val client = api ?: return@ExtensionsSettingsContent
             scope.launch {
-                runCatching { client.extensionsRemove(id) }
+                runCatchingNonCancelled { client.extensionsRemove(id) }
                 reload()
             }
         },
@@ -1843,17 +1954,17 @@ internal fun JiraSettingsSection(model: AppModel) {
 
     suspend fun reloadAll() {
         val client = api ?: return
-        val loadedProjects = runCatching { parseJiraProjectOptions(client.jiraListConfigProjects()) }.getOrDefault(emptyList())
+        val loadedProjects = runCatchingNonCancelled { parseJiraProjectOptions(client.jiraListConfigProjects()) }.getOrDefault(emptyList())
         projects = loadedProjects
-        val loadedConfigs = runCatching { parseJiraConfigs(client.jiraListConfigs()) }.getOrDefault(emptyList())
+        val loadedConfigs = runCatchingNonCancelled { parseJiraConfigs(client.jiraListConfigs()) }.getOrDefault(emptyList())
         configs = loadedConfigs
         val allWatchers = mutableListOf<JiraWatcherRow>()
         for (cfg in loadedConfigs) {
-            val w = runCatching { parseJiraWatchers(client.jiraListWatchers(cfg.id)) }.getOrDefault(emptyList())
+            val w = runCatchingNonCancelled { parseJiraWatchers(client.jiraListWatchers(cfg.id)) }.getOrDefault(emptyList())
             allWatchers.addAll(w)
         }
         watchers = allWatchers
-        results = runCatching { parseJiraResults(client.jiraListResults()) }.getOrDefault(emptyList())
+        results = runCatchingNonCancelled { parseJiraResults(client.jiraListResults()) }.getOrDefault(emptyList())
     }
 
     LaunchedEffect(api) {
@@ -1871,7 +1982,7 @@ internal fun JiraSettingsSection(model: AppModel) {
         onSaveConfig = { projectId, baseUrl, email, token ->
             val client = api ?: return@JiraSettingsContent
             scope.launch {
-                runCatching { client.jiraPutConfig(projectId, baseUrl, email, token) }
+                runCatchingNonCancelled { client.jiraPutConfig(projectId, baseUrl, email, token) }
                     .onSuccess {
                         statusMessage = "Jira credentials saved"
                         reloadAll()
@@ -1882,7 +1993,7 @@ internal fun JiraSettingsSection(model: AppModel) {
         onTestConfig = { projectId ->
             val client = api ?: return@JiraSettingsContent
             scope.launch {
-                runCatching { client.jiraTestConfig(projectId) }
+                runCatchingNonCancelled { client.jiraTestConfig(projectId) }
                     .onSuccess { statusMessage = "Jira connection verified" }
                     .onFailure { statusMessage = it.message ?: "Jira connection failed" }
             }
@@ -1890,14 +2001,14 @@ internal fun JiraSettingsSection(model: AppModel) {
         onDeleteConfig = { projectId ->
             val client = api ?: return@JiraSettingsContent
             scope.launch {
-                runCatching { client.jiraDeleteConfig(projectId) }
+                runCatchingNonCancelled { client.jiraDeleteConfig(projectId) }
                 reloadAll()
             }
         },
         onCreateWatcher = { configId, name, jql, prompt, intervalMs, mode ->
             val client = api ?: return@JiraSettingsContent
             scope.launch {
-                runCatching {
+                runCatchingNonCancelled {
                     client.jiraCreateWatcher(
                         configId = configId,
                         name = name,
@@ -1915,14 +2026,14 @@ internal fun JiraSettingsSection(model: AppModel) {
         onToggleWatcher = { id, enabled ->
             val client = api ?: return@JiraSettingsContent
             scope.launch {
-                runCatching { client.jiraUpdateWatcher(id, enabled = enabled) }
+                runCatchingNonCancelled { client.jiraUpdateWatcher(id, enabled = enabled) }
                 reloadAll()
             }
         },
         onPullWatcher = { id ->
             val client = api ?: return@JiraSettingsContent
             scope.launch {
-                runCatching { client.jiraPullWatcher(id) }
+                runCatchingNonCancelled { client.jiraPullWatcher(id) }
                     .onSuccess {
                         statusMessage = "Watcher triggered"
                         reloadAll()
@@ -1932,14 +2043,14 @@ internal fun JiraSettingsSection(model: AppModel) {
         onDeleteWatcher = { id ->
             val client = api ?: return@JiraSettingsContent
             scope.launch {
-                runCatching { client.jiraDeleteWatcher(id) }
+                runCatchingNonCancelled { client.jiraDeleteWatcher(id) }
                 reloadAll()
             }
         },
         onTestJql = { configId, jql ->
             val client = api ?: return@JiraSettingsContent
             scope.launch {
-                runCatching { client.jiraTestJql(configId, jql) }
+                runCatchingNonCancelled { client.jiraTestJql(configId, jql) }
                     .onSuccess { res ->
                         val total = res["total"]?.int ?: 0
                         statusMessage = "JQL matched $total issue(s)"
@@ -1950,35 +2061,35 @@ internal fun JiraSettingsSection(model: AppModel) {
         onDebugResult = { id ->
             val client = api ?: return@JiraSettingsContent
             scope.launch {
-                runCatching { client.jiraDebugResult(id) }
+                runCatchingNonCancelled { client.jiraDebugResult(id) }
                 reloadAll()
             }
         },
         onResumeResult = { id ->
             val client = api ?: return@JiraSettingsContent
             scope.launch {
-                runCatching { client.jiraResumeResult(id) }
+                runCatchingNonCancelled { client.jiraResumeResult(id) }
                 reloadAll()
             }
         },
         onCancelResult = { id ->
             val client = api ?: return@JiraSettingsContent
             scope.launch {
-                runCatching { client.jiraCancelResult(id) }
+                runCatchingNonCancelled { client.jiraCancelResult(id) }
                 reloadAll()
             }
         },
         onMarkResultRead = { id ->
             val client = api ?: return@JiraSettingsContent
             scope.launch {
-                runCatching { client.jiraMarkResultRead(id) }
+                runCatchingNonCancelled { client.jiraMarkResultRead(id) }
                 reloadAll()
             }
         },
         onDeleteResult = { id ->
             val client = api ?: return@JiraSettingsContent
             scope.launch {
-                runCatching { client.jiraDeleteResult(id) }
+                runCatchingNonCancelled { client.jiraDeleteResult(id) }
                 reloadAll()
             }
         },
@@ -2287,7 +2398,7 @@ internal fun SchedulesSettingsSection(model: AppModel) {
 
     suspend fun reload() {
         val client = api ?: return
-        runCatching { parseSchedulesList(client.schedulesList(enabledOnly)) }.getOrNull()?.let { schedules = it }
+        runCatchingNonCancelled { parseSchedulesList(client.schedulesList(enabledOnly)) }.getOrNull()?.let { schedules = it }
     }
 
     LaunchedEffect(api, enabledOnly) {
@@ -2305,7 +2416,7 @@ internal fun SchedulesSettingsSection(model: AppModel) {
         val target = activeLogsSchedule ?: return@LaunchedEffect
         logBuffer = ScheduleLogBufferState()
         while (activeLogsSchedule?.id == target.id) {
-            val poll = runCatching {
+            val poll = runCatchingNonCancelled {
                 parseScheduleLogs(client.schedulesGetLogs(target.id, after = logBuffer.afterSeq))
             }.getOrNull()
             if (poll != null) {
@@ -2335,7 +2446,7 @@ internal fun SchedulesSettingsSection(model: AppModel) {
         onRunNow = { id ->
             val client = api ?: return@SchedulesSettingsContent
             scope.launch {
-                runCatching { client.schedulesRunNow(id) }
+                runCatchingNonCancelled { client.schedulesRunNow(id) }
                 reload()
             }
         },
@@ -2343,21 +2454,21 @@ internal fun SchedulesSettingsSection(model: AppModel) {
             schedules = schedules.map { if (it.id == id) it.copy(enabled = enabled) else it }
             val client = api ?: return@SchedulesSettingsContent
             scope.launch {
-                runCatching { client.schedulesUpdate(id, buildJsonObject { put("enabled", enabled) }) }
+                runCatchingNonCancelled { client.schedulesUpdate(id, buildJsonObject { put("enabled", enabled) }) }
                 reload()
             }
         },
         onDeleteSchedule = { id ->
             val client = api ?: return@SchedulesSettingsContent
             scope.launch {
-                runCatching { client.schedulesDelete(id) }
+                runCatchingNonCancelled { client.schedulesDelete(id) }
                 reload()
             }
         },
         onCreateSchedule = { payload ->
             val client = api ?: return@SchedulesSettingsContent
             scope.launch {
-                runCatching { client.schedulesCreate(payload) }
+                runCatchingNonCancelled { client.schedulesCreate(payload) }
                     .onSuccess {
                         statusMessage = "Schedule created"
                         reload()
@@ -2368,7 +2479,7 @@ internal fun SchedulesSettingsSection(model: AppModel) {
         onExportTemplate = { id ->
             val client = api ?: return@SchedulesSettingsContent
             scope.launch {
-                runCatching { client.schedulesExport(id) }
+                runCatchingNonCancelled { client.schedulesExport(id) }
                     .onSuccess { json ->
                         val templateJson = json.obj?.get("template") ?: json
                         copyToClipboard12c(
@@ -2387,7 +2498,7 @@ internal fun SchedulesSettingsSection(model: AppModel) {
                 return@SchedulesSettingsContent
             }
             scope.launch {
-                runCatching {
+                runCatchingNonCancelled {
                     client.schedulesImport(
                         template = parsed.rawJson,
                         projectName = projectName,
@@ -2406,7 +2517,7 @@ internal fun SchedulesSettingsSection(model: AppModel) {
                 return@SchedulesSettingsContent
             }
             scope.launch {
-                runCatching {
+                runCatchingNonCancelled {
                     client.schedulesImport(
                         template = parsed.rawJson,
                         projectName = projectName,

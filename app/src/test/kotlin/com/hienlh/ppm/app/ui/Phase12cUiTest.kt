@@ -4,12 +4,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import com.hienlh.ppm.app.withComposeActivity
+import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.state.settings.CloudDeviceCodeFlowState
@@ -27,6 +30,10 @@ import com.hienlh.ppm.state.settings.TailscaleDeviceInfo
 import com.hienlh.ppm.state.settings.TailscaleState
 import com.hienlh.ppm.state.settings.TelegramNotifyState
 import kotlinx.serialization.json.JsonObject
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -395,5 +402,119 @@ class Phase12cUiTest {
         assertNull(publicToggledTo)
         composeRule.onNodeWithTag("public-tunnel-turn-off-confirm").performClick()
         assertEquals(false, publicToggledTo)
+    }
+
+    @Test
+    fun remoteAccessSettingsSection_surfacesServer409OnNamedTunnelSetupAndTailscaleServiceConflict() {
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.url.encodedPath
+                return when {
+                    request.method == "GET" && path == "/api/tailscale/state" -> MockResponse.Builder()
+                        .code(200)
+                        .addHeader("Content-Type", "application/json")
+                        .body(
+                            """
+                            {
+                              "ok": true,
+                              "data": {
+                                "installed": true,
+                                "backendState": "Running",
+                                "canManage": true,
+                                "magicDns": true,
+                                "httpsCertificates": true,
+                                "dnsSuffix": "tail123.ts.net",
+                                "device": { "name": "box", "dnsName": "box.tail123.ts.net", "ips": ["100.64.0.1"], "tags": ["tag:ppm"] },
+                                "service": { "name": "ppm", "defined": false, "approved": false, "advertised": false, "pointsAtPpm": false },
+                                "enabled": false,
+                                "ppmPort": 3210,
+                                "login": { "state": "idle", "url": null, "message": null },
+                                "authEnabled": true
+                              }
+                            }
+                            """.trimIndent(),
+                        ).build()
+                    request.method == "GET" && path == "/api/tunnel" -> MockResponse.Builder()
+                        .code(200)
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"active":false,"url":null,"localUrl":"http://192.168.1.10:3210","enabled":false}}""")
+                        .build()
+                    request.method == "GET" && path == "/api/tunnel/named/status" -> MockResponse.Builder()
+                        .code(200)
+                        .addHeader("Content-Type", "application/json")
+                        .body(
+                            """
+                            {
+                              "ok": true,
+                              "data": {
+                                "mode": "quick",
+                                "liveMode": "quick",
+                                "hostname": "ppm.example.com",
+                                "tunnelName": null,
+                                "tokenMasked": null,
+                                "certState": "valid",
+                                "dismissed": false,
+                                "login": { "state": "idle", "url": null, "message": null },
+                                "tunnelWarning": null,
+                                "authEnabled": true
+                              }
+                            }
+                            """.trimIndent(),
+                        ).build()
+                    request.method == "POST" && path == "/api/tunnel/named/setup" -> MockResponse.Builder()
+                        .code(409)
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":false,"error":"Hostname ppm.example.com is already in use"}""")
+                        .build()
+                    request.method == "POST" && path == "/api/tailscale/service" -> MockResponse.Builder()
+                        .code(409)
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":false,"error":"Service ppm already points to another port","code":"conflict"}""")
+                        .build()
+                    else -> MockResponse.Builder().code(404).build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val client = ApiClient(server.url("/"), "test-token")
+            composeRule.setContent {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    androidx.compose.foundation.layout.Column(
+                        modifier = androidx.compose.ui.Modifier.verticalScroll(
+                            androidx.compose.foundation.rememberScrollState(),
+                        ),
+                    ) {
+                        RemoteAccessSettingsSection(
+                            api = client,
+                            currentServerUrl = "http://192.168.1.10:3210",
+                        )
+                    }
+                }
+            }
+
+            composeRule.waitUntil(5_000) {
+                composeRule.onAllNodesWithTag("named-tunnel-save").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithTag("named-tunnel-save").performScrollTo().performClick()
+            composeRule.waitUntil(5_000) {
+                composeRule.onAllNodesWithTag("named-tunnel-error").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithTag("named-tunnel-error")
+                .assertIsDisplayed()
+                .assertTextContains("Hostname ppm.example.com is already in use")
+
+            composeRule.onNodeWithTag("tailscale-service-enable").performScrollTo().performClick()
+            composeRule.waitUntil(5_000) {
+                composeRule.onAllNodesWithTag("tailscale-error").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithTag("tailscale-error")
+                .assertIsDisplayed()
+                .assertTextContains("Service ppm already points to another port")
+            composeRule.onNodeWithTag("tailscale-service-replace").performScrollTo().assertIsDisplayed()
+        } finally {
+            server.close()
+        }
     }
 }
