@@ -286,4 +286,19 @@ class Phase11bUiTest {
         assertEquals(android.media.AudioTrack.WRITE_BLOCKING, capturedMode)
         track.release()
     }
+
+    @Test
+    fun `H264SurfaceDecoder reset posts codec release to worker thread instead of caller thread`() {
+        val decoder = H264SurfaceDecoder()
+        try {
+            decoder.reset()
+            val deadline = System.currentTimeMillis() + 2_000L
+            while (decoder.lastReleaseThreadName == null && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10L)
+            }
+            assertEquals("ppm-rd-video-decoder", decoder.lastReleaseThreadName)
+        } finally {
+            decoder.release()
+        }
+    }
 }

@@ -111,14 +111,26 @@ class H264SurfaceDecoder(
     internal val isWorkerAlive: Boolean
         get() = synchronized(lock) { workerThread?.isAlive == true }
 
+    @Volatile
+    internal var lastReleaseThreadName: String? = null
+        private set
+
     fun reset() {
         synchronized(lock) {
             frameQueue.clear()
             waitingForKeyframe = true
             ptsUs = 0L
             activeSpsPps = null
-            workerHandler?.removeCallbacksAndMessages(null)
-            releaseCodecLocked()
+            val handler = ensureWorkerLocked()
+            handler.removeCallbacksAndMessages(null)
+            handler.post {
+                synchronized(lock) {
+                    releaseCodecLocked()
+                    waitingForKeyframe = true
+                    ptsUs = 0L
+                    activeSpsPps = null
+                }
+            }
         }
     }
 
@@ -286,6 +298,7 @@ class H264SurfaceDecoder(
     }
 
     private fun releaseCodecLocked() {
+        lastReleaseThreadName = Thread.currentThread().name
         val old = codec ?: return
         codec = null
         runCatching { old.stop() }
@@ -428,8 +441,13 @@ class OpusAudioPlayer(private val maxPendingPackets: Int = 16) {
     fun reset() {
         synchronized(lock) {
             packetQueue.clear()
-            workerHandler?.removeCallbacksAndMessages(null)
-            resetLocked()
+            val handler = ensureWorkerLocked()
+            handler.removeCallbacksAndMessages(null)
+            handler.post {
+                synchronized(lock) {
+                    resetLocked()
+                }
+            }
         }
     }
 
