@@ -2,6 +2,7 @@ package com.hienlh.ppm.app.ui.editor
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -286,7 +287,7 @@ class Phase07dUiTest {
             assertEquals("7", commitLineReq.url.queryParameter("line"))
         } finally {
             SharedBlamePreference.setEnabled(false)
-            DeviceLspPreference.setEnabled(true)
+            DeviceLspPreference.setEnabled(false)
             server.close()
         }
     }
@@ -369,24 +370,26 @@ class Phase07dUiTest {
             }
 
             composeRule.waitUntil(5_000) {
-                composeRule.mainClock.advanceTimeBy(50)
-                composeRule.waitForIdle()
-                server.requestCount >= 1
+                composeRule.onAllNodesWithTag("conflict-accept-current-0").fetchSemanticsNodes().isNotEmpty()
             }
+            val readReq = server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)
+            org.junit.Assert.assertNotNull(readReq)
+            assertEquals("GET", readReq!!.method)
+            assertEquals("/api/project/ppm/files/read", readReq.url.encodedPath)
+            assertEquals("src/Conflict.ts", readReq.url.queryParameter("path"))
+
             composeRule.onNodeWithTag("conflict-accept-current-0").assertIsDisplayed()
             composeRule.onNodeWithTag("conflict-accept-current-0").performClick()
 
             composeRule.waitUntil(5_000) {
-                composeRule.mainClock.advanceTimeBy(50)
-                composeRule.waitForIdle()
-                server.requestCount >= 2
+                composeRule.onAllNodesWithTag("editor-save-error-banner").fetchSemanticsNodes().isNotEmpty()
             }
-            composeRule.waitUntil(5_000) {
-                runCatching {
-                    composeRule.onNodeWithTag("editor-save-error-banner").assertIsDisplayed()
-                    true
-                }.getOrDefault(false)
-            }
+            composeRule.onNodeWithTag("editor-save-error-banner").assertIsDisplayed()
+
+            val writeReq = server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)
+            org.junit.Assert.assertNotNull(writeReq)
+            assertEquals("PUT", writeReq!!.method)
+            assertEquals("/api/project/ppm/files/write", writeReq.url.encodedPath)
 
             // Save error banner and toast must be shown, and 403 must not loop retries
             assertTrue(model.toasts.isNotEmpty())
