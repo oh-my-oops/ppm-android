@@ -32,7 +32,7 @@ class ExtensionStateTest {
         assertNotNull(contribMsg)
         assertEquals(1, contribMsg!!.contributions.commands.size)
         assertEquals("git-graph.view", contribMsg.contributions.commands[0].command)
-        assertEquals("Timed out", contribMsg.activationErrors["bad.ext"])
+        assertEquals("Timed out", contribMsg.activationErrors?.get("bad.ext"))
 
         val createMsg = ExtServerMessage.parse(
             """
@@ -254,6 +254,15 @@ class ExtensionStateTest {
                 )!!,
             )
             assertEquals(listOf("ext.a" to "Boom", "ext.b" to "Crash"), newErrors)
+            assertEquals(mapOf("ext.a" to "Boom", "ext.b" to "Crash"), client.activationErrors.value)
+
+            // Update without activationErrors key preserves existing activationErrors (use-extension-ws.ts:101)
+            client.handle(
+                ExtServerMessage.parse(
+                    """{"type":"contributions:update","contributions":{}}""",
+                )!!,
+            )
+            assertEquals(mapOf("ext.a" to "Boom", "ext.b" to "Crash"), client.activationErrors.value)
         } finally {
             client.stop()
         }

@@ -350,7 +350,7 @@ data class WebviewPanelUI(
 sealed interface ExtServerMessage {
     data class ContributionsUpdate(
         val contributions: ExtensionContributes,
-        val activationErrors: Map<String, String>,
+        val activationErrors: Map<String, String>? = null,
     ) : ExtServerMessage
 
     data class StatusBarUpdate(val item: StatusBarItemUI) : ExtServerMessage
@@ -413,7 +413,7 @@ sealed interface ExtServerMessage {
                     contributions = ExtensionContributes.from(root["contributions"]),
                     activationErrors = root["activationErrors"].obj?.mapNotNull { (k, v) ->
                         v.string?.let { k to it }
-                    }?.toMap().orEmpty(),
+                    }?.toMap(),
                 )
                 "statusbar:update" -> {
                     val item = StatusBarItemUI.from(root["item"]) ?: return Unknown(type, root)
@@ -988,12 +988,15 @@ open class ExtensionClient(
     internal fun handle(msg: ExtServerMessage) {
         when (msg) {
             is ExtServerMessage.ContributionsUpdate -> {
-                val prev = _activationErrors.value
                 _contributions.value = msg.contributions
-                _activationErrors.value = msg.activationErrors
-                for ((extId, error) in msg.activationErrors) {
-                    if (extId !in prev) {
-                        onActivationError?.invoke(extId, error)
+                val errors = msg.activationErrors
+                if (errors != null) {
+                    val prev = _activationErrors.value
+                    _activationErrors.value = errors
+                    for ((extId, error) in errors) {
+                        if (extId !in prev) {
+                            onActivationError?.invoke(extId, error)
+                        }
                     }
                 }
             }
