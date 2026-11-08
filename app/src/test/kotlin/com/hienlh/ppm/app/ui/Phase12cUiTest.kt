@@ -27,6 +27,7 @@ import com.hienlh.ppm.state.settings.PushStatusState
 import com.hienlh.ppm.state.settings.ScheduleProjectOption
 import com.hienlh.ppm.state.settings.ScheduleRowState
 import com.hienlh.ppm.state.settings.TailscaleDeviceInfo
+import com.hienlh.ppm.state.settings.TailscaleLoginState
 import com.hienlh.ppm.state.settings.TailscaleState
 import com.hienlh.ppm.state.settings.TelegramNotifyState
 import kotlinx.serialization.json.JsonObject
@@ -516,5 +517,76 @@ class Phase12cUiTest {
         } finally {
             server.close()
         }
+    }
+
+    @Test
+    fun remoteAccessSettingsContent_showsLoginUrlsAndOpensBrowserOnlyOnButtonClick() {
+        val openedUrls = mutableListOf<String>()
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                androidx.compose.foundation.layout.Column(
+                    modifier = androidx.compose.ui.Modifier.verticalScroll(
+                        androidx.compose.foundation.rememberScrollState(),
+                    ),
+                ) {
+                    RemoteAccessSettingsContent(
+                        currentServerUrl = "http://192.168.1.10:3210",
+                        tailscale = TailscaleState(
+                            installed = true,
+                            backendState = "NeedsLogin",
+                            canManage = true,
+                            login = TailscaleLoginState(
+                                state = "waiting",
+                                url = "https://login.tailscale.com/a/abc123",
+                            ),
+                        ),
+                        publicTunnel = PublicTunnelState(enabled = false),
+                        namedTunnel = NamedTunnelState(
+                            loginState = "waiting",
+                            loginUrl = "https://dash.cloudflare.com/argotunnel?aud=xyz",
+                        ),
+                        onRunInTerminal = {},
+                        onOpenUrl = { openedUrls += it },
+                        onStartTailscaleLogin = {},
+                        onCancelTailscaleLogin = {},
+                        onConfigureTailscaleService = { _, _, _ -> },
+                        onTogglePublicTunnel = {},
+                        onStartNamedTunnelLogin = {},
+                        onCancelNamedTunnelLogin = {},
+                        onSetupNamedTunnel = {},
+                        onDisableNamedTunnel = {},
+                    )
+                }
+            }
+        }
+
+        // Neither login URL opens automatically on render
+        composeRule.waitForIdle()
+        assertTrue(openedUrls.isEmpty())
+
+        composeRule.onNodeWithTag("tailscale-login-url")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertTextContains("https://login.tailscale.com/a/abc123")
+        composeRule.onNodeWithTag("tailscale-open-login-url")
+            .performScrollTo()
+            .performClick()
+        assertEquals(listOf("https://login.tailscale.com/a/abc123"), openedUrls)
+
+        composeRule.onNodeWithTag("named-tunnel-login-url")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertTextContains("https://dash.cloudflare.com/argotunnel?aud=xyz")
+        composeRule.onNodeWithTag("named-tunnel-open-login-url")
+            .performScrollTo()
+            .performClick()
+        assertEquals(
+            listOf(
+                "https://login.tailscale.com/a/abc123",
+                "https://dash.cloudflare.com/argotunnel?aud=xyz",
+            ),
+            openedUrls,
+        )
     }
 }

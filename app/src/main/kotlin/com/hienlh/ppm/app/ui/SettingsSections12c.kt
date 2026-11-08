@@ -745,9 +745,6 @@ internal fun RemoteAccessSettingsSection(
     var publicTunnelError by remember { mutableStateOf<String?>(null) }
     var namedTunnelError by remember { mutableStateOf<String?>(null) }
 
-    var lastOpenedTailscaleLoginUrl by remember { mutableStateOf<String?>(null) }
-    var lastOpenedNamedTunnelLoginUrl by remember { mutableStateOf<String?>(null) }
-
     suspend fun reloadAll() {
         val client = api ?: return
         runCatchingNonCancelled { parseTailscaleState(client.tailscaleGetState()) }.getOrNull()?.let { tailscale = it }
@@ -779,11 +776,6 @@ internal fun RemoteAccessSettingsSection(
             delay(1_500L)
             val fresh = runCatchingNonCancelled { parseTailscaleState(client.tailscaleGetState()) }.getOrNull() ?: continue
             tailscale = fresh
-            val url = fresh.login.url
-            if (!url.isNullOrBlank() && url != lastOpenedTailscaleLoginUrl) {
-                lastOpenedTailscaleLoginUrl = url
-                runCatchingNonCancelled { uriHandler.openUri(url) }
-            }
         }
     }
 
@@ -796,11 +788,6 @@ internal fun RemoteAccessSettingsSection(
             delay(2_000L)
             val fresh = runCatchingNonCancelled { parseNamedTunnelState(client.namedTunnelGetStatus()) }.getOrNull() ?: continue
             namedTunnel = fresh
-            val url = fresh.loginUrl
-            if (!url.isNullOrBlank() && url != lastOpenedNamedTunnelLoginUrl) {
-                lastOpenedNamedTunnelLoginUrl = url
-                runCatchingNonCancelled { uriHandler.openUri(url) }
-            }
         }
     }
 
@@ -814,9 +801,9 @@ internal fun RemoteAccessSettingsSection(
         publicTunnelError = publicTunnelError,
         namedTunnelError = namedTunnelError,
         onRunInTerminal = onRunInTerminal,
+        onOpenUrl = { url -> runCatchingNonCancelled { uriHandler.openUri(url) } },
         onStartTailscaleLogin = {
             val client = api ?: return@RemoteAccessSettingsContent
-            lastOpenedTailscaleLoginUrl = null
             tailscaleError = null
             scope.launch {
                 runCatchingNonCancelled { applyTailscaleLoginSnapshot(tailscale, client.tailscaleStartLogin()) }
@@ -824,11 +811,6 @@ internal fun RemoteAccessSettingsSection(
                         tailscale = res
                         if (res.login.state == "error") {
                             tailscaleError = res.login.message ?: "Sign-in failed."
-                        }
-                        val url = res.login.url
-                        if (!url.isNullOrBlank()) {
-                            lastOpenedTailscaleLoginUrl = url
-                            runCatchingNonCancelled { uriHandler.openUri(url) }
                         }
                     }
                     .onFailure { err ->
@@ -894,7 +876,6 @@ internal fun RemoteAccessSettingsSection(
         },
         onStartNamedTunnelLogin = { relogin ->
             val client = api ?: return@RemoteAccessSettingsContent
-            lastOpenedNamedTunnelLoginUrl = null
             namedTunnelError = null
             scope.launch {
                 runCatchingNonCancelled {
@@ -903,11 +884,6 @@ internal fun RemoteAccessSettingsSection(
                     namedTunnel = res
                     if (res.loginState == "error" && !res.loginError.isNullOrBlank()) {
                         namedTunnelError = res.loginError
-                    }
-                    val url = res.loginUrl
-                    if (!url.isNullOrBlank()) {
-                        lastOpenedNamedTunnelLoginUrl = url
-                        runCatchingNonCancelled { uriHandler.openUri(url) }
                     }
                 }.onFailure { err ->
                     val msg = err.message ?: "Could not start Cloudflare login"
@@ -972,6 +948,7 @@ internal fun RemoteAccessSettingsContent(
     publicTunnelError: String? = null,
     namedTunnelError: String? = null,
     onRunInTerminal: (String) -> Unit,
+    onOpenUrl: (String) -> Unit = {},
     onStartTailscaleLogin: () -> Unit,
     onCancelTailscaleLogin: () -> Unit,
     onConfigureTailscaleService: (Boolean?, String?, Boolean?) -> Unit,
@@ -1076,6 +1053,36 @@ internal fun RemoteAccessSettingsContent(
                         SettingsButton(
                             label = "Cancel",
                             onClick = onCancelTailscaleLogin,
+                        )
+                    }
+                }
+            }
+
+            if (!tailscale.login.url.isNullOrBlank() && (tailscale.login.state == "starting" || tailscale.login.state == "waiting")) {
+                val loginUrl = tailscale.login.url!!
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(tokens.bgSolid.color)
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    BasicText(
+                        loginUrl,
+                        style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text.color),
+                        modifier = Modifier.testTag("tailscale-login-url"),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SettingsButton(
+                            label = "Copy",
+                            onClick = { copyToClipboard12c(context, "Tailscale Sign-In URL", loginUrl) },
+                        )
+                        SettingsButton(
+                            label = "Open sign-in page",
+                            primary = true,
+                            modifier = Modifier.testTag("tailscale-open-login-url"),
+                            onClick = { onOpenUrl(loginUrl) },
                         )
                     }
                 }
@@ -1207,6 +1214,35 @@ internal fun RemoteAccessSettingsContent(
                     style = ppmText(11f).copy(color = tokens.error.color),
                     modifier = Modifier.testTag("named-tunnel-error"),
                 )
+            }
+            if (!namedTunnel.loginUrl.isNullOrBlank() && namedTunnel.loginState in setOf("starting", "waiting", "slow", "url_ready")) {
+                val cfLoginUrl = namedTunnel.loginUrl!!
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(tokens.bgSolid.color)
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    BasicText(
+                        cfLoginUrl,
+                        style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text.color),
+                        modifier = Modifier.testTag("named-tunnel-login-url"),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SettingsButton(
+                            label = "Copy",
+                            onClick = { copyToClipboard12c(context, "Cloudflare Login URL", cfLoginUrl) },
+                        )
+                        SettingsButton(
+                            label = "Open",
+                            primary = true,
+                            modifier = Modifier.testTag("named-tunnel-open-login-url"),
+                            onClick = { onOpenUrl(cfLoginUrl) },
+                        )
+                    }
+                }
             }
             SettingsTextInput(
                 value = namedHostnameDraft,
@@ -1389,9 +1425,6 @@ internal fun CloudSettingsSection(model: AppModel) {
                     parseCloudDeviceCodeStart(client.cloudRequestDeviceCode(cloudUrl), cloudUrl)
                 }.onSuccess { started ->
                     deviceCodeFlow = started
-                    if (started.verificationUri.isNotBlank()) {
-                        runCatchingNonCancelled { uriHandler.openUri(started.verificationUri) }
-                    }
                 }.onFailure { err ->
                     deviceCodeFlow = CloudDeviceCodeFlowState(
                         cloudUrl = cloudUrl,
