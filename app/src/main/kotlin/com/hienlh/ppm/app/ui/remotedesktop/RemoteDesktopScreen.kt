@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -117,6 +118,7 @@ import com.hienlh.ppm.state.remotedesktop.CUSTOM_QUALITY_MAX_MORE_PERCENT
 import com.hienlh.ppm.state.remotedesktop.CUSTOM_QUALITY_MAX_PERCENT
 import com.hienlh.ppm.state.remotedesktop.CUSTOM_QUALITY_MIN_PERCENT
 import com.hienlh.ppm.state.remotedesktop.DEFAULT_CUSTOM_SCALE
+import com.hienlh.ppm.state.remotedesktop.computeStageVideoRect
 import com.hienlh.ppm.state.remotedesktop.DEFAULT_PRESET_ID
 import com.hienlh.ppm.state.remotedesktop.DEFAULT_VIEW_STYLE
 import com.hienlh.ppm.state.remotedesktop.IDENTITY_TRANSFORM
@@ -907,7 +909,7 @@ fun RemoteDesktopViewer(
                                         audioPlayer.decodePacket(bytes, 1, bytes.size - 1)
                                     } else {
                                         val isKey = kind == RD_FRAME_KEY
-                                        decoder.decodeAccessUnit(bytes, 1, bytes.size - 1, isKey)
+                                        decoder.enqueueAccessUnit(bytes, 1, bytes.size - 1, isKey)
                                         activeRecorder?.writeAccessUnit(bytes, 1, bytes.size - 1, isKey)
                                         if (connState == "connecting") connState = "streaming"
                                     }
@@ -1024,19 +1026,31 @@ fun RemoteDesktopViewer(
             }
             .testTag(if (mobile) "remote-desktop-mobile-view" else "remote-desktop-window"),
     ) {
+        val stageVideoRect = computeStageVideoRect(
+            containerWidthPx = containerSize.width.toDouble(),
+            containerHeightPx = containerSize.height.toDouble(),
+            frameSize = frameSize,
+            viewStyle = viewStyle,
+            customScale = customScale,
+            mobile = mobile,
+            densityScale = density.density.toDouble(),
+        )
+
         // Video Stage
         Box(
             Modifier
                 .fillMaxSize()
                 .onSizeChanged { containerSize = it }
                 .pointerInteropFilter { motion ->
-                    val outerRect = RdRect(
-                        left = 0.0,
-                        top = 0.0,
-                        width = containerSize.width.toDouble(),
-                        height = containerSize.height.toDouble(),
+                    val videoRect = computeStageVideoRect(
+                        containerWidthPx = containerSize.width.toDouble(),
+                        containerHeightPx = containerSize.height.toDouble(),
+                        frameSize = frameSize,
+                        viewStyle = viewStyle,
+                        customScale = customScale,
+                        mobile = mobile,
+                        densityScale = density.density.toDouble(),
                     )
-                    val videoRect = letterboxedContentRect(outerRect, frameSize.width, frameSize.height)
                     val pointerCount = motion.pointerCount
 
                     when (motion.actionMasked) {
@@ -1132,15 +1146,26 @@ fun RemoteDesktopViewer(
             contentAlignment = Alignment.Center,
         ) {
             val cssSize = if (!mobile) canvasCssSize(viewStyle, customScale, frameSize) else null
+            val surfaceSizeModifier = when {
+                containerSize.width > 0 && containerSize.height > 0 -> {
+                    with(density) {
+                        Modifier.size(
+                            stageVideoRect.width.toFloat().toDp(),
+                            stageVideoRect.height.toFloat().toDp(),
+                        )
+                    }
+                }
+                cssSize != null -> {
+                    with(density) { Modifier.size(cssSize.width.toDp(), cssSize.height.toDp()) }
+                }
+                else -> {
+                    val aspect = frameSize.width.coerceAtLeast(1).toFloat() / frameSize.height.coerceAtLeast(1).toFloat()
+                    Modifier.aspectRatio(aspect)
+                }
+            }
             Box(
                 Modifier
-                    .let { mod ->
-                        if (cssSize != null) {
-                            with(density) { mod.size(cssSize.width.toDp(), cssSize.height.toDp()) }
-                        } else {
-                            mod.fillMaxSize()
-                        }
-                    }
+                    .fillMaxSize()
                     .graphicsLayer {
                         scaleX = transform.scale.toFloat()
                         scaleY = transform.scale.toFloat()
@@ -1152,6 +1177,9 @@ fun RemoteDesktopViewer(
                 AndroidView(
                     factory = { ctx ->
                         SurfaceView(ctx).apply {
+                            if (frameSize.width > 0 && frameSize.height > 0) {
+                                runCatching { holder.setFixedSize(frameSize.width, frameSize.height) }
+                            }
                             holder.addCallback(
                                 object : SurfaceHolder.Callback {
                                     override fun surfaceCreated(holder: SurfaceHolder) {
@@ -1170,20 +1198,18 @@ fun RemoteDesktopViewer(
                             surfaceViewRef = this
                         }
                     },
-                    modifier = Modifier.fillMaxSize().testTag("remote-desktop-surface"),
+                    update = { sv ->
+                        if (frameSize.width > 0 && frameSize.height > 0) {
+                            runCatching { sv.holder.setFixedSize(frameSize.width, frameSize.height) }
+                        }
+                    },
+                    modifier = surfaceSizeModifier.testTag("remote-desktop-surface"),
                 )
 
                 // Virtual cursor marker in mobile mouse mode
                 if (mobile && inputMode == "mouse") {
-                    val outerRect = RdRect(
-                        left = 0.0,
-                        top = 0.0,
-                        width = containerSize.width.toDouble().coerceAtLeast(1.0),
-                        height = containerSize.height.toDouble().coerceAtLeast(1.0),
-                    )
-                    val videoRect = letterboxedContentRect(outerRect, frameSize.width, frameSize.height)
-                    val cursorX = (videoRect.left + virtualCursor.xFrac * videoRect.width).roundToInt()
-                    val cursorY = (videoRect.top + virtualCursor.yFrac * videoRect.height).roundToInt()
+                    val cursorX = (stageVideoRect.left + virtualCursor.xFrac * stageVideoRect.width).roundToInt()
+                    val cursorY = (stageVideoRect.top + virtualCursor.yFrac * stageVideoRect.height).roundToInt()
                     Box(
                         Modifier
                             .align(Alignment.TopStart)

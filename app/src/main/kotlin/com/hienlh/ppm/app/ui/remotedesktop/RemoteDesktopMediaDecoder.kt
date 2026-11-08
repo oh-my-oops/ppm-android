@@ -9,11 +9,14 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.Looper
 import android.view.PixelCopy
 import android.view.Surface
 import android.view.SurfaceView
+import com.hienlh.ppm.state.remotedesktop.BoundedVideoFrameQueue
 import com.hienlh.ppm.state.remotedesktop.H264SpsPps
+import com.hienlh.ppm.state.remotedesktop.QueuedVideoFrame
 import com.hienlh.ppm.state.remotedesktop.RdSize
 import com.hienlh.ppm.state.remotedesktop.buildOpusHeadCsd
 import com.hienlh.ppm.state.remotedesktop.buildOpusNanosecondsCsd
@@ -23,59 +26,130 @@ import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Low-latency Android [MediaCodec] H.264 Annex-B decoder rendering to a [Surface],
- * Opus audio player ([AudioTrack]), MP4 stream recorder ([MediaMuxer]), and [PixelCopy] screenshot helper.
+ * Low-latency Android [MediaCodec] H.264 Annex-B decoder rendering to a [Surface] on a dedicated
+ * background decode thread with a [BoundedVideoFrameQueue], Opus audio player ([AudioTrack]),
+ * MP4 stream recorder ([MediaMuxer]), and [PixelCopy] screenshot helper.
  */
 class H264SurfaceDecoder(
     private val onFrameSizeChanged: (RdSize) -> Unit = {},
     private val onStatusChanged: (String, String?) -> Unit = { _, _ -> },
+    queueCapacity: Int = 8,
 ) {
     private val lock = Any()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var workerThread: HandlerThread? = null
+    private var workerHandler: Handler? = null
     private var codec: MediaCodec? = null
     private var surface: Surface? = null
     private var activeSpsPps: H264SpsPps? = null
     private var waitingForKeyframe: Boolean = true
     private var ptsUs: Long = 0L
 
+    val frameQueue = BoundedVideoFrameQueue(queueCapacity)
     val frameCount = AtomicInteger(0)
     @Volatile
     var frameSize: RdSize = RdSize(1920, 1080)
         private set
 
+    private val drainRunnable = Runnable { drainQueueOnWorker() }
+
+    private fun ensureWorkerLocked(): Handler {
+        val existing = workerHandler
+        if (existing != null && workerThread?.isAlive == true) return existing
+        val thread = HandlerThread("ppm-rd-video-decoder").apply { start() }
+        val handler = Handler(thread.looper)
+        workerThread = thread
+        workerHandler = handler
+        return handler
+    }
+
+    private fun postStatus(status: String, error: String?) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            onStatusChanged(status, error)
+        } else {
+            mainHandler.post { onStatusChanged(status, error) }
+        }
+    }
+
+    private fun postFrameSize(size: RdSize) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            onFrameSizeChanged(size)
+        } else {
+            mainHandler.post { onFrameSizeChanged(size) }
+        }
+    }
+
     fun attachSurface(newSurface: Surface?) {
         synchronized(lock) {
             if (surface === newSurface) return
             surface = newSurface
-            releaseCodecLocked()
+            frameQueue.clear()
             waitingForKeyframe = true
+            ensureWorkerLocked().post {
+                synchronized(lock) {
+                    releaseCodecLocked()
+                    waitingForKeyframe = true
+                }
+            }
         }
     }
 
     fun configure() {
         synchronized(lock) {
-            releaseCodecLocked()
+            frameQueue.clear()
             waitingForKeyframe = true
-            onStatusChanged("ready", null)
+            ensureWorkerLocked().post {
+                synchronized(lock) {
+                    releaseCodecLocked()
+                    waitingForKeyframe = true
+                }
+            }
+            postStatus("ready", null)
         }
     }
 
     fun reset() {
         synchronized(lock) {
-            releaseCodecLocked()
-            activeSpsPps = null
+            frameQueue.clear()
             waitingForKeyframe = true
             ptsUs = 0L
+            activeSpsPps = null
+            workerHandler?.removeCallbacksAndMessages(null)
+            releaseCodecLocked()
         }
     }
 
+    fun enqueueAccessUnit(data: ByteArray, offset: Int, length: Int, isKeyframe: Boolean): Boolean {
+        val accepted = frameQueue.offer(data, offset, length, isKeyframe)
+        if (accepted) {
+            synchronized(lock) {
+                ensureWorkerLocked().post(drainRunnable)
+            }
+        }
+        return accepted
+    }
+
     fun decodeAccessUnit(data: ByteArray, offset: Int, length: Int, isKeyframe: Boolean) {
+        enqueueAccessUnit(data, offset, length, isKeyframe)
+    }
+
+    private fun drainQueueOnWorker() {
+        while (true) {
+            val frame: QueuedVideoFrame = frameQueue.poll() ?: break
+            decodeFrameLocked(frame.bytes, frame.offset, frame.length, frame.isKeyframe)
+        }
+    }
+
+    private fun decodeFrameLocked(data: ByteArray, offset: Int, length: Int, isKeyframe: Boolean) {
         synchronized(lock) {
             val targetSurface = surface
             if (targetSurface == null || !targetSurface.isValid) {
                 waitingForKeyframe = true
+                frameQueue.markWaitingForKeyframe()
                 return
             }
             if (waitingForKeyframe && !isKeyframe) {
+                frameQueue.markWaitingForKeyframe()
                 return
             }
 
@@ -83,13 +157,15 @@ class H264SurfaceDecoder(
             if (codec == null || (spsPps != null && activeSpsPps != null && spsPps != activeSpsPps)) {
                 if (!startCodecLocked(targetSurface, spsPps)) {
                     waitingForKeyframe = true
+                    frameQueue.markWaitingForKeyframe()
                     return
                 }
             }
 
             val activeCodec = codec ?: return
             try {
-                val inIdx = activeCodec.dequeueInputBuffer(10_000L)
+                drainOutputLocked(activeCodec)
+                val inIdx = activeCodec.dequeueInputBuffer(2_000L)
                 if (inIdx >= 0) {
                     val inBuf = activeCodec.getInputBuffer(inIdx)
                     if (inBuf != null) {
@@ -101,12 +177,17 @@ class H264SurfaceDecoder(
                         activeCodec.queueInputBuffer(inIdx, 0, copyLen, ptsUs, flags)
                         waitingForKeyframe = false
                     }
+                } else {
+                    // Could not obtain input buffer in time: drop frame and wait for next keyframe
+                    waitingForKeyframe = true
+                    frameQueue.markWaitingForKeyframe()
                 }
                 drainOutputLocked(activeCodec)
             } catch (e: Throwable) {
                 // Decoder error or resolution switch: rebuild on next keyframe (<= 1s)
                 releaseCodecLocked()
                 waitingForKeyframe = true
+                frameQueue.markWaitingForKeyframe()
             }
         }
     }
@@ -129,10 +210,10 @@ class H264SurfaceDecoder(
             mc.configure(format, targetSurface, null, 0)
             mc.start()
             codec = mc
-            onStatusChanged("ready", null)
+            postStatus("ready", null)
             true
         } catch (e: Throwable) {
-            onStatusChanged("error", e.message ?: "H.264 decoder failed to start")
+            postStatus("error", e.message ?: "H.264 decoder failed to start")
             false
         }
     }
@@ -162,7 +243,7 @@ class H264SurfaceDecoder(
                         val nextSize = RdSize(w, h)
                         if (nextSize != frameSize) {
                             frameSize = nextSize
-                            onFrameSizeChanged(nextSize)
+                            postFrameSize(nextSize)
                         }
                     }
                 }
@@ -180,95 +261,135 @@ class H264SurfaceDecoder(
 }
 
 /**
- * Low-latency Opus audio decoder (`audio/opus`) + [AudioTrack] playback for Remote Desktop audio frames.
+ * Low-latency Opus audio decoder (`audio/opus`) + [AudioTrack] playback on a dedicated background
+ * audio thread with a bounded packet queue so Main is never blocked.
  */
-class OpusAudioPlayer {
+class OpusAudioPlayer(private val maxPendingPackets: Int = 16) {
     private val lock = Any()
+    private val packetQueue = ArrayDeque<ByteArray>(maxPendingPackets)
+    private var workerThread: HandlerThread? = null
+    private var workerHandler: Handler? = null
     private var codec: MediaCodec? = null
     private var audioTrack: AudioTrack? = null
     private var ptsUs: Long = 0L
 
+    private val drainAudioRunnable = Runnable { drainAudioOnWorker() }
+
+    private fun ensureWorkerLocked(): Handler {
+        val existing = workerHandler
+        if (existing != null && workerThread?.isAlive == true) return existing
+        val thread = HandlerThread("ppm-rd-audio-decoder").apply { start() }
+        val handler = Handler(thread.looper)
+        workerThread = thread
+        workerHandler = handler
+        return handler
+    }
+
     fun configure(channels: Int = 2, sampleRate: Int = 48_000) {
         synchronized(lock) {
-            resetLocked()
-            runCatching {
-                val ch = channels.coerceIn(1, 2)
-                val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_OPUS, sampleRate, ch)
-                format.setByteBuffer("csd-0", ByteBuffer.wrap(buildOpusHeadCsd(ch, sampleRate)))
-                format.setByteBuffer("csd-1", ByteBuffer.wrap(buildOpusNanosecondsCsd(80_000_000L)))
-                format.setByteBuffer("csd-2", ByteBuffer.wrap(buildOpusNanosecondsCsd(80_000_000L)))
+            packetQueue.clear()
+            ensureWorkerLocked().post {
+                synchronized(lock) {
+                    resetLocked()
+                    runCatching {
+                        val ch = channels.coerceIn(1, 2)
+                        val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_OPUS, sampleRate, ch)
+                        format.setByteBuffer("csd-0", ByteBuffer.wrap(buildOpusHeadCsd(ch, sampleRate)))
+                        format.setByteBuffer("csd-1", ByteBuffer.wrap(buildOpusNanosecondsCsd(80_000_000L)))
+                        format.setByteBuffer("csd-2", ByteBuffer.wrap(buildOpusNanosecondsCsd(80_000_000L)))
 
-                val mc = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS)
-                mc.configure(format, null, null, 0)
-                mc.start()
-                codec = mc
+                        val mc = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS)
+                        mc.configure(format, null, null, 0)
+                        mc.start()
+                        codec = mc
 
-                val channelMask = if (ch == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO
-                val minBuf = AudioTrack.getMinBufferSize(sampleRate, channelMask, AudioFormat.ENCODING_PCM_16BIT)
-                    .coerceAtLeast(4096)
-                val track = AudioTrack.Builder()
-                    .setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
-                            .build(),
-                    )
-                    .setAudioFormat(
-                        AudioFormat.Builder()
-                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                            .setSampleRate(sampleRate)
-                            .setChannelMask(channelMask)
-                            .build(),
-                    )
-                    .setBufferSizeInBytes(minBuf)
-                    .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
-                    .build()
-                track.play()
-                audioTrack = track
+                        val channelMask = if (ch == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO
+                        val minBuf = AudioTrack.getMinBufferSize(sampleRate, channelMask, AudioFormat.ENCODING_PCM_16BIT)
+                            .coerceAtLeast(4096)
+                        val track = AudioTrack.Builder()
+                            .setAudioAttributes(
+                                AudioAttributes.Builder()
+                                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                                    .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                                    .build(),
+                            )
+                            .setAudioFormat(
+                                AudioFormat.Builder()
+                                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                    .setSampleRate(sampleRate)
+                                    .setChannelMask(channelMask)
+                                    .build(),
+                            )
+                            .setBufferSizeInBytes(minBuf)
+                            .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+                            .build()
+                        track.play()
+                        audioTrack = track
+                    }
+                }
             }
         }
     }
 
     fun decodePacket(data: ByteArray, offset: Int, length: Int) {
+        if (length <= 0) return
+        val packet = data.copyOfRange(offset, offset + length)
         synchronized(lock) {
-            val mc = codec ?: return
-            val track = audioTrack ?: return
-            try {
-                val inIdx = mc.dequeueInputBuffer(5_000L)
-                if (inIdx >= 0) {
-                    val inBuf = mc.getInputBuffer(inIdx)
-                    if (inBuf != null) {
-                        inBuf.clear()
-                        val copyLen = minOf(length, inBuf.remaining())
-                        inBuf.put(data, offset, copyLen)
-                        ptsUs += 20_000L
-                        mc.queueInputBuffer(inIdx, 0, copyLen, ptsUs, 0)
-                    }
-                }
-                val info = MediaCodec.BufferInfo()
-                while (true) {
-                    val outIdx = mc.dequeueOutputBuffer(info, 0L)
-                    if (outIdx >= 0) {
-                        val outBuf = mc.getOutputBuffer(outIdx)
-                        if (outBuf != null && info.size > 0) {
-                            val pcm = ByteArray(info.size)
-                            outBuf.position(info.offset)
-                            outBuf.get(pcm, 0, info.size)
-                            track.write(pcm, 0, pcm.size)
+            while (packetQueue.size >= maxPendingPackets) {
+                packetQueue.removeFirst()
+            }
+            packetQueue.addLast(packet)
+            ensureWorkerLocked().post(drainAudioRunnable)
+        }
+    }
+
+    private fun drainAudioOnWorker() {
+        while (true) {
+            val packet = synchronized(lock) {
+                if (packetQueue.isEmpty()) null else packetQueue.removeFirst()
+            } ?: break
+            synchronized(lock) {
+                val mc = codec ?: return
+                val track = audioTrack ?: return
+                try {
+                    val inIdx = mc.dequeueInputBuffer(2_000L)
+                    if (inIdx >= 0) {
+                        val inBuf = mc.getInputBuffer(inIdx)
+                        if (inBuf != null) {
+                            inBuf.clear()
+                            val copyLen = minOf(packet.size, inBuf.remaining())
+                            inBuf.put(packet, 0, copyLen)
+                            ptsUs += 20_000L
+                            mc.queueInputBuffer(inIdx, 0, copyLen, ptsUs, 0)
                         }
-                        mc.releaseOutputBuffer(outIdx, false)
-                    } else {
-                        break
                     }
+                    val info = MediaCodec.BufferInfo()
+                    while (true) {
+                        val outIdx = mc.dequeueOutputBuffer(info, 0L)
+                        if (outIdx >= 0) {
+                            val outBuf = mc.getOutputBuffer(outIdx)
+                            if (outBuf != null && info.size > 0) {
+                                val pcm = ByteArray(info.size)
+                                outBuf.position(info.offset)
+                                outBuf.get(pcm, 0, info.size)
+                                track.write(pcm, 0, pcm.size, AudioTrack.WRITE_NON_BLOCKING)
+                            }
+                            mc.releaseOutputBuffer(outIdx, false)
+                        } else {
+                            break
+                        }
+                    }
+                } catch (_: Throwable) {
+                    // Ignore transient packet errors
                 }
-            } catch (_: Throwable) {
-                // Ignore transient packet errors
             }
         }
     }
 
     fun reset() {
         synchronized(lock) {
+            packetQueue.clear()
+            workerHandler?.removeCallbacksAndMessages(null)
             resetLocked()
         }
     }

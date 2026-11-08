@@ -1,13 +1,17 @@
 package com.hienlh.ppm.app.ui.remotedesktop
 
 import android.content.Context
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.withComposeActivity
@@ -211,5 +215,27 @@ class Phase11bUiTest {
         // Tap Esc on mobile key bar
         composeRule.onNodeWithTag("rd-key-Esc").performClick()
         assertTrue(sentMessages.any { it.jsonObject["code"].string == "Escape" })
+    }
+
+    @Test
+    fun `RemoteDesktopViewer sizes SurfaceView to letterboxed rect instead of stretching full height`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val model = AppModel(context)
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                Box(Modifier.size(width = 800.dp, height = 800.dp)) {
+                    RemoteDesktopViewer(model = model)
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val stageBounds = composeRule.onNodeWithTag("remote-desktop-stage").fetchSemanticsNode().boundsInRoot
+        val surfaceBounds = composeRule.onNodeWithTag("remote-desktop-surface").fetchSemanticsNode().boundsInRoot
+        assertEquals(stageBounds.width, surfaceBounds.width, 2f)
+        // 1920x1080 (16:9) inside a square stage must be letterboxed to 9/16 of stage height, not stretched to full height
+        assertEquals(stageBounds.width * 9f / 16f, surfaceBounds.height, 4f)
+        assertTrue(surfaceBounds.height < stageBounds.height - 100f)
     }
 }

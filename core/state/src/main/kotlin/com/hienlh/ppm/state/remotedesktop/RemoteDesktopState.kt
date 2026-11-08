@@ -275,6 +275,111 @@ fun letterboxedContentRect(box: RdRect, contentWidth: Int, contentHeight: Int): 
     }
 }
 
+/**
+ * On-screen video rectangle inside the stage container for both `SurfaceView` sizing and
+ * pointer coordinate mapping across `adaptive`, `original`, and `custom` scale modes.
+ */
+fun computeStageVideoRect(
+    containerWidthPx: Double,
+    containerHeightPx: Double,
+    frameSize: RdSize,
+    viewStyle: String = DEFAULT_VIEW_STYLE,
+    customScale: Double = DEFAULT_CUSTOM_SCALE,
+    mobile: Boolean = false,
+    densityScale: Double = 1.0,
+): RdRect {
+    val outer = RdRect(
+        left = 0.0,
+        top = 0.0,
+        width = containerWidthPx.coerceAtLeast(1.0),
+        height = containerHeightPx.coerceAtLeast(1.0),
+    )
+    val css = if (!mobile) canvasCssSize(viewStyle, customScale, frameSize) else null
+    if (css == null) {
+        return letterboxedContentRect(outer, frameSize.width, frameSize.height)
+    }
+    val wPx = (css.width * densityScale.coerceAtLeast(0.1)).coerceAtLeast(1.0)
+    val hPx = (css.height * densityScale.coerceAtLeast(0.1)).coerceAtLeast(1.0)
+    val left = (outer.width - wPx) / 2.0
+    val top = (outer.height - hPx) / 2.0
+    return RdRect(left = left, top = top, width = wPx, height = hPx)
+}
+
+/**
+ * Bounded access-unit queue for off-main H.264 decoding.
+ * Drops delta frames when waiting for a keyframe or when at capacity, and sets
+ * [waitingForKeyframe] = `true` whenever a delta frame is dropped so subsequent
+ * deltas in the same GOP are not fed to the decoder until the next keyframe arrives.
+ */
+class QueuedVideoFrame(
+    val bytes: ByteArray,
+    val offset: Int,
+    val length: Int,
+    val isKeyframe: Boolean,
+)
+
+class BoundedVideoFrameQueue(val capacity: Int = 8) {
+    private val lock = Any()
+    private val queue = ArrayDeque<QueuedVideoFrame>(capacity.coerceAtLeast(1))
+
+    @Volatile
+    var waitingForKeyframe: Boolean = true
+        private set
+
+    @Volatile
+    var droppedDeltas: Int = 0
+        private set
+
+    val size: Int
+        get() = synchronized(lock) { queue.size }
+
+    fun offer(bytes: ByteArray, offset: Int = 0, length: Int = bytes.size - offset, isKeyframe: Boolean): Boolean {
+        synchronized(lock) {
+            if (!isKeyframe) {
+                if (waitingForKeyframe) {
+                    droppedDeltas++
+                    return false
+                }
+                if (queue.size >= capacity) {
+                    waitingForKeyframe = true
+                    droppedDeltas++
+                    return false
+                }
+                queue.addLast(QueuedVideoFrame(bytes, offset, length, false))
+                return true
+            }
+            while (queue.size >= capacity) {
+                val removed = queue.removeFirst()
+                if (!removed.isKeyframe) droppedDeltas++
+            }
+            waitingForKeyframe = false
+            queue.addLast(QueuedVideoFrame(bytes, offset, length, true))
+            return true
+        }
+    }
+
+    fun poll(): QueuedVideoFrame? = synchronized(lock) {
+        if (queue.isEmpty()) null else queue.removeFirst()
+    }
+
+    fun markWaitingForKeyframe() {
+        synchronized(lock) {
+            waitingForKeyframe = true
+            while (queue.isNotEmpty() && !queue.last().isKeyframe) {
+                queue.removeLast()
+                droppedDeltas++
+            }
+        }
+    }
+
+    fun clear() {
+        synchronized(lock) {
+            queue.clear()
+            waitingForKeyframe = true
+        }
+    }
+}
+
 // ── 4. Touch Gesture Classifiers & Trackers ───────────────────────────
 
 data class PointerSample(

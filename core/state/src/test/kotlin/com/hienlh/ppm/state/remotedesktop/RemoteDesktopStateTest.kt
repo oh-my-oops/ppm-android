@@ -173,4 +173,59 @@ class RemoteDesktopStateTest {
         assertEquals(19, opusCsd.size)
         assertEquals("OpusHead", String(opusCsd, 0, 8, Charsets.US_ASCII))
     }
+
+    @Test
+    fun `computeStageVideoRect and BoundedVideoFrameQueue enforce letterbox sizing and keyframe resync on dropped delta`() {
+        // B7: computeStageVideoRect in adaptive vs original vs custom scale modes
+        val adaptiveRect = computeStageVideoRect(
+            containerWidthPx = 1000.0,
+            containerHeightPx = 1000.0,
+            frameSize = RdSize(1920, 1080),
+            viewStyle = "adaptive",
+        )
+        assertEquals(0.0, adaptiveRect.left, 1e-3)
+        assertEquals(218.75, adaptiveRect.top, 1e-3)
+        assertEquals(1000.0, adaptiveRect.width, 1e-3)
+        assertEquals(562.5, adaptiveRect.height, 1e-3)
+
+        val customRect = computeStageVideoRect(
+            containerWidthPx = 1000.0,
+            containerHeightPx = 1000.0,
+            frameSize = RdSize(1920, 1080),
+            viewStyle = "custom",
+            customScale = 0.5,
+            densityScale = 1.0,
+        )
+        assertEquals(20.0, customRect.left, 1e-3)
+        assertEquals(230.0, customRect.top, 1e-3)
+        assertEquals(960.0, customRect.width, 1e-3)
+        assertEquals(540.0, customRect.height, 1e-3)
+
+        // B8: BoundedVideoFrameQueue drops deltas before keyframe, and dropping a delta on overflow sets waitingForKeyframe = true
+        val queue = BoundedVideoFrameQueue(capacity = 2)
+        assertTrue(queue.waitingForKeyframe)
+        assertEquals(false, queue.offer(byteArrayOf(1), isKeyframe = false))
+        assertEquals(1, queue.droppedDeltas)
+
+        // First keyframe + 1 delta fills capacity = 2
+        assertTrue(queue.offer(byteArrayOf(10), isKeyframe = true))
+        assertEquals(false, queue.waitingForKeyframe)
+        assertTrue(queue.offer(byteArrayOf(11), isKeyframe = false))
+        assertEquals(2, queue.size)
+
+        // Offering another delta overflows capacity -> dropped AND waitingForKeyframe becomes true
+        assertEquals(false, queue.offer(byteArrayOf(12), isKeyframe = false))
+        assertTrue(queue.waitingForKeyframe)
+        assertEquals(2, queue.droppedDeltas)
+
+        // Even after polling 1 frame so queue has space, subsequent deltas are still rejected until next keyframe
+        assertNotNull(queue.poll())
+        assertEquals(1, queue.size)
+        assertEquals(false, queue.offer(byteArrayOf(13), isKeyframe = false))
+        assertTrue(queue.waitingForKeyframe)
+
+        // Next keyframe resets waitingForKeyframe and is accepted
+        assertTrue(queue.offer(byteArrayOf(20), isKeyframe = true))
+        assertEquals(false, queue.waitingForKeyframe)
+    }
 }
