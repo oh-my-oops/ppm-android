@@ -44,6 +44,7 @@ class H264SurfaceDecoder(
     private var activeSpsPps: H264SpsPps? = null
     private var waitingForKeyframe: Boolean = true
     private var ptsUs: Long = 0L
+    private var released: Boolean = false
 
     val frameQueue = BoundedVideoFrameQueue(queueCapacity)
     val frameCount = AtomicInteger(0)
@@ -53,7 +54,8 @@ class H264SurfaceDecoder(
 
     private val drainRunnable = Runnable { drainQueueOnWorker() }
 
-    private fun ensureWorkerLocked(): Handler {
+    private fun ensureWorkerLocked(): Handler? {
+        if (released) return null
         val existing = workerHandler
         if (existing != null && workerThread?.isAlive == true) return existing
         val thread = HandlerThread("ppm-rd-video-decoder").apply { start() }
@@ -81,11 +83,12 @@ class H264SurfaceDecoder(
 
     fun attachSurface(newSurface: Surface?) {
         synchronized(lock) {
+            if (released) return
             if (surface === newSurface) return
             surface = newSurface
             frameQueue.clear()
             waitingForKeyframe = true
-            ensureWorkerLocked().post {
+            ensureWorkerLocked()?.post {
                 synchronized(lock) {
                     releaseCodecLocked()
                     waitingForKeyframe = true
@@ -96,9 +99,10 @@ class H264SurfaceDecoder(
 
     fun configure() {
         synchronized(lock) {
+            if (released) return
             frameQueue.clear()
             waitingForKeyframe = true
-            ensureWorkerLocked().post {
+            ensureWorkerLocked()?.post {
                 synchronized(lock) {
                     releaseCodecLocked()
                     waitingForKeyframe = true
@@ -117,11 +121,12 @@ class H264SurfaceDecoder(
 
     fun reset() {
         synchronized(lock) {
+            if (released) return
             frameQueue.clear()
             waitingForKeyframe = true
             ptsUs = 0L
             activeSpsPps = null
-            val handler = ensureWorkerLocked()
+            val handler = ensureWorkerLocked() ?: return
             handler.removeCallbacksAndMessages(null)
             handler.post {
                 synchronized(lock) {
@@ -136,6 +141,8 @@ class H264SurfaceDecoder(
 
     fun release() {
         synchronized(lock) {
+            if (released) return
+            released = true
             frameQueue.clear()
             waitingForKeyframe = true
             ptsUs = 0L
@@ -165,13 +172,14 @@ class H264SurfaceDecoder(
     }
 
     fun enqueueAccessUnit(data: ByteArray, offset: Int, length: Int, isKeyframe: Boolean): Boolean {
-        val accepted = frameQueue.offer(data, offset, length, isKeyframe)
-        if (accepted) {
-            synchronized(lock) {
-                ensureWorkerLocked().post(drainRunnable)
+        synchronized(lock) {
+            if (released) return false
+            val accepted = frameQueue.offer(data, offset, length, isKeyframe)
+            if (accepted) {
+                ensureWorkerLocked()?.post(drainRunnable)
             }
+            return accepted
         }
-        return accepted
     }
 
     fun decodeAccessUnit(data: ByteArray, offset: Int, length: Int, isKeyframe: Boolean) {
@@ -318,10 +326,12 @@ class OpusAudioPlayer(private val maxPendingPackets: Int = 16) {
     private var codec: MediaCodec? = null
     private var audioTrack: AudioTrack? = null
     private var ptsUs: Long = 0L
+    private var released: Boolean = false
 
     private val drainAudioRunnable = Runnable { drainAudioOnWorker() }
 
-    private fun ensureWorkerLocked(): Handler {
+    private fun ensureWorkerLocked(): Handler? {
+        if (released) return null
         val existing = workerHandler
         if (existing != null && workerThread?.isAlive == true) return existing
         val thread = HandlerThread("ppm-rd-audio-decoder").apply { start() }
@@ -333,9 +343,11 @@ class OpusAudioPlayer(private val maxPendingPackets: Int = 16) {
 
     fun configure(channels: Int = 2, sampleRate: Int = 48_000) {
         synchronized(lock) {
+            if (released) return
             packetQueue.clear()
-            ensureWorkerLocked().post {
+            ensureWorkerLocked()?.post {
                 synchronized(lock) {
+                    if (released) return@post
                     resetLocked()
                     runCatching {
                         val ch = channels.coerceIn(1, 2)
@@ -381,11 +393,12 @@ class OpusAudioPlayer(private val maxPendingPackets: Int = 16) {
         if (length <= 0) return
         val packet = data.copyOfRange(offset, offset + length)
         synchronized(lock) {
+            if (released) return
             while (packetQueue.size >= maxPendingPackets) {
                 packetQueue.removeFirst()
             }
             packetQueue.addLast(packet)
-            ensureWorkerLocked().post(drainAudioRunnable)
+            ensureWorkerLocked()?.post(drainAudioRunnable)
         }
     }
 
@@ -440,8 +453,9 @@ class OpusAudioPlayer(private val maxPendingPackets: Int = 16) {
 
     fun reset() {
         synchronized(lock) {
+            if (released) return
             packetQueue.clear()
-            val handler = ensureWorkerLocked()
+            val handler = ensureWorkerLocked() ?: return
             handler.removeCallbacksAndMessages(null)
             handler.post {
                 synchronized(lock) {
@@ -453,6 +467,8 @@ class OpusAudioPlayer(private val maxPendingPackets: Int = 16) {
 
     fun release() {
         synchronized(lock) {
+            if (released) return
+            released = true
             packetQueue.clear()
             val handler = workerHandler
             val thread = workerThread

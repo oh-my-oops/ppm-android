@@ -258,6 +258,16 @@ class Phase11bUiTest {
         }
         assertEquals(false, decoder.isWorkerAlive)
         assertEquals(false, audioPlayer.isWorkerAlive)
+
+        // Late arrivals after release() must not resurrect a worker thread
+        assertEquals(false, decoder.enqueueAccessUnit(byteArrayOf(0, 0, 0, 1, 0x65), 0, 5, isKeyframe = true))
+        decoder.configure()
+        decoder.reset()
+        audioPlayer.decodePacket(byteArrayOf(0x01, 0x02), 0, 2)
+        audioPlayer.configure()
+        audioPlayer.reset()
+        assertEquals(false, decoder.isWorkerAlive)
+        assertEquals(false, audioPlayer.isWorkerAlive)
     }
 
     @Test
