@@ -318,7 +318,10 @@ class H264SurfaceDecoder(
  * Low-latency Opus audio decoder (`audio/opus`) + [AudioTrack] playback on a dedicated background
  * audio thread with a bounded packet queue so Main is never blocked.
  */
-class OpusAudioPlayer(private val maxPendingPackets: Int = 16) {
+class OpusAudioPlayer(
+    private val maxPendingPackets: Int = 16,
+    private val pcmDecoder: ((ByteArray) -> List<ByteArray>)? = null,
+) {
     private val lock = Any()
     private val packetQueue = ArrayDeque<ByteArray>(maxPendingPackets)
     private var workerThread: HandlerThread? = null
@@ -327,6 +330,13 @@ class OpusAudioPlayer(private val maxPendingPackets: Int = 16) {
     private var audioTrack: AudioTrack? = null
     private var ptsUs: Long = 0L
     private var released: Boolean = false
+
+    internal fun attachAudioTrack(track: AudioTrack) {
+        synchronized(lock) {
+            if (released) return
+            audioTrack = track
+        }
+    }
 
     private val drainAudioRunnable = Runnable { drainAudioOnWorker() }
 
@@ -404,43 +414,55 @@ class OpusAudioPlayer(private val maxPendingPackets: Int = 16) {
 
     private fun drainAudioOnWorker() {
         while (true) {
-            val packet = synchronized(lock) {
-                if (packetQueue.isEmpty()) null else packetQueue.removeFirst()
-            } ?: break
+            val pcmChunks = ArrayList<ByteArray>(2)
+            val track: AudioTrack
             synchronized(lock) {
-                val mc = codec ?: return
-                val track = audioTrack ?: return
-                try {
-                    val inIdx = mc.dequeueInputBuffer(2_000L)
-                    if (inIdx >= 0) {
-                        val inBuf = mc.getInputBuffer(inIdx)
-                        if (inBuf != null) {
-                            inBuf.clear()
-                            val copyLen = minOf(packet.size, inBuf.remaining())
-                            inBuf.put(packet, 0, copyLen)
-                            ptsUs += 20_000L
-                            mc.queueInputBuffer(inIdx, 0, copyLen, ptsUs, 0)
-                        }
-                    }
-                    val info = MediaCodec.BufferInfo()
-                    while (true) {
-                        val outIdx = mc.dequeueOutputBuffer(info, 0L)
-                        if (outIdx >= 0) {
-                            val outBuf = mc.getOutputBuffer(outIdx)
-                            if (outBuf != null && info.size > 0) {
-                                val pcm = ByteArray(info.size)
-                                outBuf.position(info.offset)
-                                outBuf.get(pcm, 0, info.size)
-                                writePcmToTrack(track, pcm)
+                if (released || packetQueue.isEmpty()) return
+                val packet = packetQueue.removeFirst()
+                val currentTrack = audioTrack ?: return
+                track = currentTrack
+                val customDecoder = pcmDecoder
+                if (customDecoder != null) {
+                    pcmChunks.addAll(customDecoder(packet))
+                } else {
+                    val mc = codec ?: return
+                    try {
+                        val inIdx = mc.dequeueInputBuffer(2_000L)
+                        if (inIdx >= 0) {
+                            val inBuf = mc.getInputBuffer(inIdx)
+                            if (inBuf != null) {
+                                inBuf.clear()
+                                val copyLen = minOf(packet.size, inBuf.remaining())
+                                inBuf.put(packet, 0, copyLen)
+                                ptsUs += 20_000L
+                                mc.queueInputBuffer(inIdx, 0, copyLen, ptsUs, 0)
                             }
-                            mc.releaseOutputBuffer(outIdx, false)
-                        } else {
-                            break
                         }
+                        val info = MediaCodec.BufferInfo()
+                        while (true) {
+                            val outIdx = mc.dequeueOutputBuffer(info, 0L)
+                            if (outIdx >= 0) {
+                                val outBuf = mc.getOutputBuffer(outIdx)
+                                if (outBuf != null && info.size > 0) {
+                                    val pcm = ByteArray(info.size)
+                                    outBuf.position(info.offset)
+                                    outBuf.get(pcm, 0, info.size)
+                                    pcmChunks.add(pcm)
+                                }
+                                mc.releaseOutputBuffer(outIdx, false)
+                            } else {
+                                break
+                            }
+                        }
+                    } catch (_: Throwable) {
+                        // Ignore transient packet errors
                     }
-                } catch (_: Throwable) {
-                    // Ignore transient packet errors
                 }
+            }
+            for (pcm in pcmChunks) {
+                val canWrite = synchronized(lock) { !released && audioTrack === track }
+                if (!canWrite) break
+                runCatching { writePcmToTrack(track, pcm) }
             }
         }
     }

@@ -271,10 +271,14 @@ class Phase11bUiTest {
     }
 
     @Test
-    fun `OpusAudioPlayer writes PCM with AudioTrack WRITE_BLOCKING on worker thread`() {
-        val audioPlayer = OpusAudioPlayer()
+    fun `OpusAudioPlayer writes PCM with AudioTrack WRITE_BLOCKING outside lock so decodePacket does not stall`() {
+        val enteredWrite = java.util.concurrent.CountDownLatch(1)
+        val allowWriteToFinish = java.util.concurrent.CountDownLatch(1)
         var capturedMode = -1
         var capturedSize = 0
+        val audioPlayer = OpusAudioPlayer(
+            pcmDecoder = { listOf(ByteArray(960) { 0x11 }) },
+        )
         val track = object : android.media.AudioTrack(
             android.media.AudioManager.STREAM_MUSIC,
             48_000,
@@ -286,15 +290,36 @@ class Phase11bUiTest {
             override fun write(audioData: ByteArray, offsetInBytes: Int, sizeInBytes: Int, writeMode: Int): Int {
                 capturedMode = writeMode
                 capturedSize = sizeInBytes
+                enteredWrite.countDown()
+                allowWriteToFinish.await(5, java.util.concurrent.TimeUnit.SECONDS)
                 return sizeInBytes
             }
         }
-        val pcm = ByteArray(960) { 0x11 }
-        val written = audioPlayer.writePcmToTrack(track, pcm)
-        assertEquals(960, written)
-        assertEquals(960, capturedSize)
-        assertEquals(android.media.AudioTrack.WRITE_BLOCKING, capturedMode)
-        track.release()
+        try {
+            audioPlayer.attachAudioTrack(track)
+            audioPlayer.decodePacket(byteArrayOf(0x01, 0x02), 0, 2)
+            assertTrue(enteredWrite.await(2, java.util.concurrent.TimeUnit.SECONDS))
+
+            // While AudioTrack.write is blocked on the worker thread, decodePacket on another thread must return promptly
+            val decodeDone = java.util.concurrent.CountDownLatch(1)
+            val readerThread = Thread {
+                audioPlayer.decodePacket(byteArrayOf(0x03, 0x04), 0, 2)
+                decodeDone.countDown()
+            }.apply { start() }
+            assertTrue(
+                "decodePacket blocked while AudioTrack.write was in progress",
+                decodeDone.await(500, java.util.concurrent.TimeUnit.MILLISECONDS),
+            )
+            allowWriteToFinish.countDown()
+            readerThread.join(1_000)
+
+            assertEquals(960, capturedSize)
+            assertEquals(android.media.AudioTrack.WRITE_BLOCKING, capturedMode)
+        } finally {
+            allowWriteToFinish.countDown()
+            audioPlayer.release()
+            track.release()
+        }
     }
 
     @Test
