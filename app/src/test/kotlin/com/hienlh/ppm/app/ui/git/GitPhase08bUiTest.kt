@@ -13,8 +13,10 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
@@ -647,6 +649,92 @@ class GitPhase08bUiTest {
 
             // BranchReviewBody renders the diffed file row
             compose.onNodeWithTag("branch-review-file-src/Feature.kt", useUnmergedTree = true).assertIsDisplayed()
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `GitLogBody retries failed pagination page when user scrolls again`() {
+        val server = MockWebServer()
+        val requestedSkips = mutableListOf<Int>()
+        var failSkip100Once = true
+        val page1Commits = (0 until 100).joinToString(",") { i ->
+            val h = "c%06d".format(i)
+            """{"hash":"$h","shortHash":"$h","subject":"Commit $i","author":"Dev","email":"d@e.com","date":"2026-11-08T00:00:00Z","parents":[]}"""
+        }
+        val page2Commits = """[{"hash":"c000100","shortHash":"c000100","subject":"Commit 100","author":"Dev","email":"d@e.com","date":"2026-11-08T00:00:00Z","parents":[]}]"""
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                return when {
+                    target.endsWith("/git/repos") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"projectPath":"/work/ppm","rootIsRepo":true,"repos":[{"path":"/work/ppm","name":"ppm","relative":"."}]}}""")
+                        .build()
+                    target.contains("/git/graph") -> {
+                        val skip = Regex("skip=(\\d+)").find(target)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                        synchronized(requestedSkips) { requestedSkips += skip }
+                        if (skip == 100 && failSkip100Once) {
+                            failSkip100Once = false
+                            MockResponse.Builder()
+                                .code(500)
+                                .addHeader("Content-Type", "application/json")
+                                .body("""{"ok":false,"error":"transient graph error"}""")
+                                .build()
+                        } else if (skip == 0) {
+                            MockResponse.Builder()
+                                .addHeader("Content-Type", "application/json")
+                                .body("""{"ok":true,"data":{"commits":[$page1Commits],"branches":[],"head":"main"}}""")
+                                .build()
+                        } else {
+                            MockResponse.Builder()
+                                .addHeader("Content-Type", "application/json")
+                                .body("""{"ok":true,"data":{"commits":$page2Commits,"branches":[],"head":"main"}}""")
+                                .build()
+                        }
+                    }
+                    else -> MockResponse.Builder().code(404).build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val model = AppModel(ApplicationProvider.getApplicationContext())
+            model.api = ApiClient(server.url("/"), "tok")
+            model.selectedProject = "ppm"
+            val logTab = WorkspaceTab(
+                id = "tab-log",
+                type = "git-log",
+                title = "Git Log",
+                projectId = "ppm",
+                metadata = buildJsonObject { put("projectName", JsonPrimitive("ppm")) },
+            )
+            compose.setContent {
+                Box(Modifier.size(600.dp, 300.dp)) {
+                    GitLogBody(model = model, tab = logTab)
+                }
+            }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("100 commits").fetchSemanticsNodes().isNotEmpty()
+            }
+            // Scroll near the bottom -> triggers skip=100 which fails once
+            compose.onNodeWithTag("git-log-list").performScrollToIndex(95)
+            compose.waitUntil(5_000) {
+                synchronized(requestedSkips) { requestedSkips.count { it == 100 } == 1 }
+            }
+            compose.waitForIdle()
+            // Still 100 commits after first failure
+            compose.onNodeWithText("100 commits").assertIsDisplayed()
+
+            // Scroll again -> retries skip=100 and loads Commit 100 (101 commits total)
+            compose.onNodeWithTag("git-log-list").performScrollToIndex(50)
+            compose.waitForIdle()
+            compose.onNodeWithTag("git-log-list").performScrollToIndex(98)
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("101 commits").fetchSemanticsNodes().isNotEmpty()
+            }
+            assertEquals(2, synchronized(requestedSkips) { requestedSkips.count { it == 100 } })
         } finally {
             server.close()
         }
