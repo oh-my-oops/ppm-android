@@ -70,6 +70,53 @@ fun codePointColumnToUtf16(lineText: String, codePointIndex: Int): Int {
     return lineText.offsetByCodePoints(0, clampedCp)
 }
 
+/**
+ * Converts a buffer offset to a 0-based UTF-16 [LspPosition] (`positionEncodings: ["utf-16"]`),
+ * clamping out of the middle of any surrogate pair.
+ */
+fun offsetToLspPosition(buffer: EditorBuffer, offset: Int): LspPosition {
+    val lc = buffer.offsetToLineCol(offset)
+    val lineText = buffer.line(lc.line)
+    return LspPosition(
+        line = lc.line,
+        character = utf16ColumnToCharOffset(lineText, lc.column),
+    )
+}
+
+/**
+ * Converts a 0-based UTF-16 [LspPosition] from the language server back into an [EditorBuffer]
+ * char offset, clamping out of the middle of any surrogate pair.
+ */
+fun lspPositionToOffset(buffer: EditorBuffer, position: LspPosition): Int {
+    val row = position.line.coerceIn(0, (buffer.lineCount - 1).coerceAtLeast(0))
+    val lineText = buffer.line(row)
+    val col = utf16ColumnToCharOffset(lineText, position.character)
+    return buffer.lineColToOffset(row, col)
+}
+
+private fun Char.isLspWordChar(): Boolean = isLetterOrDigit() || this == '_' || this == '$'
+
+/**
+ * Port of `completionRange` fallback (`model.getWordUntilPosition(position)`) in
+ * `src/web/lib/lsp/lsp-responses.ts:166-184`: when a completion item has no explicit `textEdit`,
+ * replace the word surrounding [cursorOffset] on the same line.
+ */
+fun defaultCompletionReplaceOffsets(buffer: EditorBuffer, cursorOffset: Int): IntRange {
+    val pos = offsetToLspPosition(buffer, cursorOffset)
+    val lineText = buffer.line(pos.line)
+    val col = pos.character.coerceIn(0, lineText.length)
+    var wordStart = col
+    while (wordStart > 0 && lineText[wordStart - 1].isLspWordChar()) {
+        wordStart--
+    }
+    var wordEnd = col
+    while (wordEnd < lineText.length && lineText[wordEnd].isLspWordChar()) {
+        wordEnd++
+    }
+    val lineStartOffset = buffer.lineStart(pos.line)
+    return (lineStartOffset + wordStart)..(lineStartOffset + wordEnd)
+}
+
 // ── Kind Tables (Mapped by Name, Never Raw Number Offset) ──────────────────
 
 val COMPLETION_KIND_NAMES: Map<Int, String> = mapOf(

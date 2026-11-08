@@ -203,6 +203,14 @@ class ProjectLspBridge(
     @Volatile
     private var outboundSender: ((String) -> Boolean)? = null
 
+    internal fun setTestOutboundSender(sender: ((String) -> Boolean)?) {
+        outboundSender = sender
+    }
+
+    internal fun dispatchTestServerFrame(rawJson: String) {
+        handleIncomingFrame(rawJson)
+    }
+
     @Volatile
     private var activeSocket: SocketConnection? = null
     private var connectionJob: Job? = null

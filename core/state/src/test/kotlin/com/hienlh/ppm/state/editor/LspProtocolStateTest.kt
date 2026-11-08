@@ -191,4 +191,25 @@ class LspProtocolStateTest {
         assertEquals(2, tokens[1].line)
         assertEquals("function", tokens[1].tokenType)
     }
+
+    @Test
+    fun `offsetToLspPosition and lspPositionToOffset use 0-based UTF-16 with non-ASCII before cursor`() {
+        // Line 1 has both multi-byte UTF-8 ('é') and a 2-code-unit UTF-16 surrogate pair ('🚀') before `targetSymbol`
+        val text = "// header\nconst msg = \"café 🚀\"; targetSymbol.call()"
+        val buffer = EditorBuffer(text)
+        val cursorOffset = text.indexOf("targetSymbol") + "target".length
+
+        val lspPos = offsetToLspPosition(buffer, cursorOffset)
+        assertEquals(1, lspPos.line)
+        // On line 1: `const msg = "café 🚀"; target` -> '🚀' is 2 UTF-16 code units, so UTF-16 column is 29 (code point count would be 28)
+        assertEquals("const msg = \"café 🚀\"; target".length, lspPos.character)
+        assertEquals(29, lspPos.character)
+
+        // Round-trip back from 0-based UTF-16 LspPosition to EditorBuffer offset
+        assertEquals(cursorOffset, lspPositionToOffset(buffer, lspPos))
+
+        // Default completion word range replaces `targetSymbol` even without explicit textEdit
+        val replaceRange = defaultCompletionReplaceOffsets(buffer, cursorOffset)
+        assertEquals("targetSymbol", buffer.substring(replaceRange.first, replaceRange.last))
+    }
 }

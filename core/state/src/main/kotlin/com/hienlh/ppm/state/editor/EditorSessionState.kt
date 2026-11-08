@@ -638,9 +638,12 @@ class EditorSessionState(
         return true
     }
 
-    /** Moves cursor to 1-based [lineOneBased] and [columnOneBased]. */
+    /** Moves cursor to 1-based [lineOneBased] and UTF-16 [columnOneBased], clamping out of surrogate pairs. */
     fun goToLine(lineOneBased: Int, columnOneBased: Int = 1): Int {
-        val offset = buffer.lineColToOffset((lineOneBased - 1).coerceAtLeast(0), (columnOneBased - 1).coerceAtLeast(0))
+        val row = (lineOneBased - 1).coerceIn(0, (buffer.lineCount - 1).coerceAtLeast(0))
+        val lineText = buffer.line(row)
+        val col = utf16ColumnToCharOffset(lineText, (columnOneBased - 1).coerceAtLeast(0))
+        val offset = buffer.lineColToOffset(row, col)
         setSelection(offset, offset)
         return offset
     }

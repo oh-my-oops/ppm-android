@@ -690,13 +690,12 @@ internal fun EditableFileCodeView(
             }
             val replaceRange = entry.replaceRange
             if (replaceRange != null) {
-                val startLineText = buf.line(replaceRange.start.line)
-                val endLineText = buf.line(replaceRange.end.line)
-                val startCol = com.hienlh.ppm.state.editor.utf16ColumnToCharOffset(startLineText, replaceRange.start.character)
-                val endCol = com.hienlh.ppm.state.editor.utf16ColumnToCharOffset(endLineText, replaceRange.end.character)
-                val startOffset = buf.lineColToOffset(replaceRange.start.line, startCol)
-                val endOffset = buf.lineColToOffset(replaceRange.end.line, endCol)
+                val startOffset = com.hienlh.ppm.state.editor.lspPositionToOffset(buf, replaceRange.start)
+                val endOffset = com.hienlh.ppm.state.editor.lspPositionToOffset(buf, replaceRange.end)
                 docState.session.setSelection(startOffset, endOffset)
+            } else {
+                val wordRange = com.hienlh.ppm.state.editor.defaultCompletionReplaceOffsets(buf, docState.session.selectionStart)
+                docState.session.setSelection(wordRange.first, wordRange.last)
             }
             docState.session.commitText(expanded, 1)
             val newCursor = (docState.session.selectionStart - expanded.length + cursorOffsetInExpanded)
@@ -713,18 +712,18 @@ internal fun EditableFileCodeView(
         fun triggerLspCompletions() {
             val bridge = lspBridge ?: return
             val filePath = path?.takeIf { it.isNotBlank() } ?: return
-            val pos = docState.session.buffer.offsetToLineCol(docState.session.selectionStart)
+            val pos = com.hienlh.ppm.state.editor.offsetToLspPosition(docState.session.buffer, docState.session.selectionStart)
             scope.launch {
-                lspCompletions = bridge.requestCompletions(filePath, clientUri, pos.line, pos.column)
+                lspCompletions = bridge.requestCompletions(filePath, clientUri, pos.line, pos.character)
             }
         }
 
         fun triggerLspHover() {
             val bridge = lspBridge ?: return
             val filePath = path?.takeIf { it.isNotBlank() } ?: return
-            val pos = docState.session.buffer.offsetToLineCol(docState.session.selectionStart)
+            val pos = com.hienlh.ppm.state.editor.offsetToLspPosition(docState.session.buffer, docState.session.selectionStart)
             scope.launch {
-                lspHoverMarkdown = bridge.requestHover(filePath, clientUri, pos.line, pos.column)
+                lspHoverMarkdown = bridge.requestHover(filePath, clientUri, pos.line, pos.character)
             }
         }
 
@@ -732,15 +731,16 @@ internal fun EditableFileCodeView(
             val bridge = lspBridge ?: return
             val filePath = path?.takeIf { it.isNotBlank() } ?: return
             val projName = project ?: return
-            val pos = docState.session.buffer.offsetToLineCol(docState.session.selectionStart)
+            val pos = com.hienlh.ppm.state.editor.offsetToLspPosition(docState.session.buffer, docState.session.selectionStart)
             val projRoot = (lspStatus as? com.hienlh.ppm.state.editor.LspDocumentStatus.Ready)?.projectPath
                 ?: model.projects.firstOrNull { it.name == projName }?.path
             scope.launch {
-                val targets = bridge.requestDefinition(filePath, clientUri, pos.line, pos.column)
+                val targets = bridge.requestDefinition(filePath, clientUri, pos.line, pos.character)
                 val firstTarget = targets.firstOrNull() ?: return@launch
                 when (val act = com.hienlh.ppm.state.editor.resolveDefinitionAction(firstTarget, clientUri, projRoot, projName)) {
                     is com.hienlh.ppm.state.editor.LspNavigationAction.SameFile -> {
-                        docState.session.goToLine(act.range.start.line + 1, act.range.start.character + 1)
+                        val targetOffset = com.hienlh.ppm.state.editor.lspPositionToOffset(docState.session.buffer, act.range.start)
+                        docState.session.setSelection(targetOffset, targetOffset)
                         editTick++
                     }
                     is com.hienlh.ppm.state.editor.LspNavigationAction.OpenProjectFile -> {
@@ -1558,8 +1558,9 @@ private fun decorateEditorLine(
             if (len <= 0) break
             val rawStart = if (diag.range.start.line == rowIndex) diag.range.start.character else 0
             val rawEnd = if (diag.range.end.line == rowIndex) diag.range.end.character else len
-            val s = rawStart.coerceIn(0, len)
-            val e = rawEnd.coerceIn((s + 1).coerceAtMost(len), len)
+            val s = com.hienlh.ppm.state.editor.utf16ColumnToCharOffset(base.text, rawStart).coerceIn(0, len)
+            val e = com.hienlh.ppm.state.editor.utf16ColumnToCharOffset(base.text, rawEnd)
+                .coerceIn((s + 1).coerceAtMost(len), len)
             if (s < e) {
                 val bg = if (diag.effectiveSeverity == com.hienlh.ppm.state.editor.SEVERITY_ERROR) errorBg else warningBg
                 addStyle(

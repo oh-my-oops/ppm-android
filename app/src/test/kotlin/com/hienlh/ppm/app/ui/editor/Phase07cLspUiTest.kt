@@ -216,4 +216,70 @@ class Phase07cLspUiTest {
         composeRule.onNodeWithTag("lsp-open-problems-btn").assertIsDisplayed().performClick()
         org.junit.Assert.assertTrue(problemsOpened)
     }
+
+    @Test
+    fun projectLspBridge_requestsAndResponsesUseZeroBasedUtf16WithNonAsciiBeforeCursor() {
+        val server = mockwebserver3.MockWebServer()
+        server.start()
+        try {
+            val api = com.hienlh.ppm.client.ApiClient(server.url("/"), "secret")
+            val bridge = ProjectLspBridge(api, "ppm")
+            val text = "// line 0\nconst greeting = \"Xin chào 🚀\"; myHelper()"
+            val buffer = com.hienlh.ppm.state.editor.EditorBuffer(text)
+            val cursorOffset = text.indexOf("myHelper") + 2
+            val pos = com.hienlh.ppm.state.editor.offsetToLspPosition(buffer, cursorOffset)
+            // Line 1 (0-based), UTF-16 character offset counts '🚀' as 2 UTF-16 code units
+            assertEquals(1, pos.line)
+            assertEquals("const greeting = \"Xin chào 🚀\"; my".length, pos.character)
+
+            val sentPayloads = mutableListOf<kotlinx.serialization.json.JsonObject>()
+            bridge.setTestOutboundSender { raw ->
+                val json = kotlinx.serialization.json.Json.parseToJsonElement(raw) as kotlinx.serialization.json.JsonObject
+                sentPayloads += json
+                val id = (json["id"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull()
+                val method = (json["method"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                if (id != null) {
+                    val resultJson = when (method) {
+                        "textDocument/completion" -> """
+                            [{"label":"myHelperFunction","kind":3,"textEdit":{"range":{"start":{"line":1,"character":32},"end":{"line":1,"character":40}},"newText":"myHelperFunction"}}]
+                        """.trimIndent()
+                        "textDocument/hover" -> """
+                            {"contents":{"kind":"markdown","value":"`function myHelper(): void`"}}
+                        """.trimIndent()
+                        "textDocument/definition" -> """
+                            [{"uri":"inmemory://model/99","range":{"start":{"line":1,"character":32},"end":{"line":1,"character":40}}}]
+                        """.trimIndent()
+                        else -> "null"
+                    }
+                    bridge.dispatchTestServerFrame("""{"t":"response","id":$id,"result":$resultJson}""")
+                }
+                true
+            }
+
+            kotlinx.coroutines.runBlocking {
+                val completions = bridge.requestCompletions("src/a.ts", "inmemory://model/99", pos.line, pos.character)
+                val hover = bridge.requestHover("src/a.ts", "inmemory://model/99", pos.line, pos.character)
+                val defs = bridge.requestDefinition("src/a.ts", "inmemory://model/99", pos.line, pos.character)
+
+                assertEquals(3, sentPayloads.size)
+                for (payload in sentPayloads) {
+                    val params = payload["params"] as kotlinx.serialization.json.JsonObject
+                    val position = params["position"] as kotlinx.serialization.json.JsonObject
+                    assertEquals("1", position["line"].toString())
+                    assertEquals("34", position["character"].toString())
+                }
+
+                assertEquals(1, completions.size)
+                val replaceRange = completions[0].replaceRange!!
+                assertEquals(text.indexOf("myHelper"), com.hienlh.ppm.state.editor.lspPositionToOffset(buffer, replaceRange.start))
+                assertEquals(text.indexOf("myHelper") + "myHelper".length, com.hienlh.ppm.state.editor.lspPositionToOffset(buffer, replaceRange.end))
+
+                assertEquals("`function myHelper(): void`", hover)
+                assertEquals(1, defs.size)
+                assertEquals(text.indexOf("myHelper"), com.hienlh.ppm.state.editor.lspPositionToOffset(buffer, defs[0].range.start))
+            }
+        } finally {
+            server.close()
+        }
+    }
 }
