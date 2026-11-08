@@ -849,7 +849,7 @@ window.addEventListener("message",function(e){
 /**
  * WebSocket client and state store for `/ws/extensions` (`use-extension-ws.ts` + `extension-store.ts`).
  */
-class ExtensionClient(
+open class ExtensionClient(
     private val api: ApiClient,
     parent: CoroutineScope,
     private val clock: () -> Long = System::currentTimeMillis,
@@ -894,7 +894,6 @@ class ExtensionClient(
     var onLoadWebviewState: ((key: String) -> String?)? = null
 
     private val webviewStates = LinkedHashMap<String, String>()
-    internal val sentClientMessages = mutableListOf<String>()
 
     private var socket: SocketConnection? = null
     private var socketJob: Job? = null
@@ -904,8 +903,7 @@ class ExtensionClient(
     private var failures = 0
     private var stopped = false
 
-    private fun sendRaw(json: String) {
-        sentClientMessages += json
+    protected open fun sendRaw(json: String) {
         socket?.send(json)
     }
 

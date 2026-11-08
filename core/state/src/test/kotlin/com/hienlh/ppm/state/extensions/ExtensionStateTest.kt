@@ -175,7 +175,12 @@ class ExtensionStateTest {
     fun `QuickPickShow and InputBoxShow resolve superseded requests with null before replacing`() {
         val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob())
         val api = com.hienlh.ppm.client.ApiClient("http://localhost:3210".toHttpUrl(), "tok")
-        val client = ExtensionClient(api, scope)
+        val sentClientMessages = mutableListOf<String>()
+        val client = object : ExtensionClient(api, scope) {
+            override fun sendRaw(json: String) {
+                sentClientMessages += json
+            }
+        }
         try {
             val qp1 = ExtServerMessage.parse(
                 """{"type":"quickpick:show","requestId":"qp-1","items":[{"label":"one"}]}""",
@@ -185,14 +190,14 @@ class ExtensionStateTest {
             )!!
             client.handle(qp1)
             assertEquals("qp-1", client.quickPick.value?.requestId)
-            assertTrue(client.sentClientMessages.isEmpty())
+            assertTrue(sentClientMessages.isEmpty())
 
             client.handle(qp2)
             assertEquals("qp-2", client.quickPick.value?.requestId)
-            assertEquals(1, client.sentClientMessages.size)
-            assertTrue(client.sentClientMessages[0].contains("\"type\":\"quickpick:resolve\""))
-            assertTrue(client.sentClientMessages[0].contains("\"requestId\":\"qp-1\""))
-            assertTrue(client.sentClientMessages[0].contains("\"selected\":null"))
+            assertEquals(1, sentClientMessages.size)
+            assertTrue(sentClientMessages[0].contains("\"type\":\"quickpick:resolve\""))
+            assertTrue(sentClientMessages[0].contains("\"requestId\":\"qp-1\""))
+            assertTrue(sentClientMessages[0].contains("\"selected\":null"))
 
             val ib1 = ExtServerMessage.parse(
                 """{"type":"inputbox:show","requestId":"ib-1","options":{"prompt":"First"}}""",
@@ -204,10 +209,10 @@ class ExtensionStateTest {
             assertEquals("ib-1", client.inputBox.value?.requestId)
             client.handle(ib2)
             assertEquals("ib-2", client.inputBox.value?.requestId)
-            assertEquals(2, client.sentClientMessages.size)
-            assertTrue(client.sentClientMessages[1].contains("\"type\":\"inputbox:resolve\""))
-            assertTrue(client.sentClientMessages[1].contains("\"requestId\":\"ib-1\""))
-            assertTrue(client.sentClientMessages[1].contains("\"value\":null"))
+            assertEquals(2, sentClientMessages.size)
+            assertTrue(sentClientMessages[1].contains("\"type\":\"inputbox:resolve\""))
+            assertTrue(sentClientMessages[1].contains("\"requestId\":\"ib-1\""))
+            assertTrue(sentClientMessages[1].contains("\"value\":null"))
         } finally {
             client.stop()
         }
