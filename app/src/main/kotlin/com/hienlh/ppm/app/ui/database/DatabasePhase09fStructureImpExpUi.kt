@@ -60,6 +60,7 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.SettingsButton
 import com.hienlh.ppm.app.ui.SettingsTextInput
 import com.hienlh.ppm.client.DbLoginCoordinator
+import com.hienlh.ppm.client.DbLoginFailedException
 import com.hienlh.ppm.client.DbLoginPromptInfo
 import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.client.dbChangesetApply
@@ -289,10 +290,12 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
     var activeLoginPrompt by remember { mutableStateOf<DbLoginPromptInfo?>(null) }
     var activeLoginDeferred by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     var loginError by remember { mutableStateOf<String?>(null) }
+    var loginErrorDetails by remember { mutableStateOf<String?>(null) }
     val loginCoordinator = remember {
         DbLoginCoordinator { prompt ->
             val deferred = CompletableDeferred<Boolean>()
             loginError = null
+            loginErrorDetails = null
             activeLoginDeferred = deferred
             activeLoginPrompt = prompt
             deferred.await()
@@ -335,6 +338,7 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
             DbLoginDialogContent(
                 prompt = prompt,
                 errorMessage = loginError,
+                errorDetails = loginErrorDetails,
                 onSubmit = { user, pass ->
                     val client = api ?: return@DbLoginDialogContent
                     val cid = prompt.connectionId ?: return@DbLoginDialogContent
@@ -344,7 +348,10 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
                                 activeLoginPrompt = null
                                 activeLoginDeferred?.complete(true)
                             }
-                            .onFailure { err -> loginError = err.message ?: "Login failed" }
+                            .onFailure { err ->
+                                loginError = err.message ?: "Login failed"
+                                loginErrorDetails = (err as? DbLoginFailedException)?.details?.takeIf { it.isNotBlank() }
+                            }
                     }
                 },
                 onCancel = {

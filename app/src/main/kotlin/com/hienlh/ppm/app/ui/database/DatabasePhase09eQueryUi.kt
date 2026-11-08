@@ -63,6 +63,7 @@ import com.hienlh.ppm.app.ui.SettingsButton
 import com.hienlh.ppm.app.ui.SettingsTextInput
 import com.hienlh.ppm.client.DbDriverMissingException
 import com.hienlh.ppm.client.DbLoginCoordinator
+import com.hienlh.ppm.client.DbLoginFailedException
 import com.hienlh.ppm.client.DbLoginPromptInfo
 import com.hienlh.ppm.client.dbChangesetApply
 import com.hienlh.ppm.client.dbChangesetPreview
@@ -213,11 +214,13 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
     var activeLoginPrompt by remember { mutableStateOf<DbLoginPromptInfo?>(null) }
     var activeLoginDeferred by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     var loginError by remember { mutableStateOf<String?>(null) }
+    var loginErrorDetails by remember { mutableStateOf<String?>(null) }
 
     val loginCoordinator = remember {
         DbLoginCoordinator { prompt ->
             val def = CompletableDeferred<Boolean>()
             loginError = null
+            loginErrorDetails = null
             activeLoginPrompt = prompt
             activeLoginDeferred = def
             def.await()
@@ -279,6 +282,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
             DbLoginDialogContent(
                 prompt = prompt,
                 errorMessage = loginError,
+                errorDetails = loginErrorDetails,
                 onSubmit = { user, pass ->
                     val client = api ?: return@DbLoginDialogContent
                     val cid = prompt.connectionId ?: return@DbLoginDialogContent
@@ -290,6 +294,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                             activeLoginDeferred?.complete(true)
                         }.onFailure { err ->
                             loginError = err.message ?: "Login failed"
+                            loginErrorDetails = (err as? DbLoginFailedException)?.details?.takeIf { it.isNotBlank() }
                         }
                     }
                 },

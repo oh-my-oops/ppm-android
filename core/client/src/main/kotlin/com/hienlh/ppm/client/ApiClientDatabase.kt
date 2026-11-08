@@ -93,6 +93,14 @@ class DbDriverMissingException(
 ) : Exception(message)
 
 /**
+ * Thrown when `POST /api/db/connections/:id/login` answers HTTP 200 with `{ ok: false, error, details }`.
+ */
+class DbLoginFailedException(
+    val error: String,
+    val details: String = "",
+) : Exception("Connect failed: $error")
+
+/**
  * Coalesces concurrent HTTP 428 `DB_LOGIN_REQUIRED` responses for the same connection into a
  * single login dialog prompt, and replays all waiting requests once the user logs in (`§9a.1`).
  */
@@ -273,23 +281,33 @@ suspend fun ApiClient.dbDuplicateConnection(id: Int): JsonObject {
     return res
 }
 
-/** `PATCH /api/db/connections/:id/group` — move connection to a folder (`groupName = null` for root). */
+/** `PUT /api/db/connections/:id` — move connection to a folder (`groupName = null` for root). */
 suspend fun ApiClient.dbMoveConnectionGroup(id: Int, groupName: String?) {
     val body = buildJsonObject {
         if (groupName == null) put("groupName", JsonNull) else put("groupName", groupName)
     }
-    dbCall("PATCH", "/api/db/connections/$id/group", body = body)
+    dbCall("PUT", "/api/db/connections/$id", body = body)
     DbConnectionsEvents.notifyConnectionsChanged()
 }
 
-/** `POST /api/db/connections/:id/login` — store runtime DB login in server memory. */
-suspend fun ApiClient.dbLoginConnection(id: Int, password: String, user: String? = null) {
+/**
+ * `POST /api/db/connections/:id/login` — store runtime DB login in server memory.
+ * The server returns HTTP 200 `{ ok: true, data: DbTestResult }` where `data.ok` is `false`
+ * when the database rejected the credentials (`database.ts:512–530`).
+ */
+suspend fun ApiClient.dbLoginConnection(id: Int, password: String, user: String? = null): JsonObject {
     val body = buildJsonObject {
         put("password", password)
         if (!user.isNullOrBlank()) put("user", user)
     }
-    dbCall("POST", "/api/db/connections/$id/login", body = body)
+    val res = (dbCall("POST", "/api/db/connections/$id/login", body = body) as? JsonObject) ?: buildJsonObject {}
+    if (res["ok"]?.bool == false) {
+        val err = res["error"]?.string?.takeIf { it.isNotBlank() } ?: "Access denied"
+        val details = res["details"]?.string.orEmpty()
+        throw DbLoginFailedException(error = err, details = details)
+    }
     DbConnectionsEvents.notifyConnectionsChanged()
+    return res
 }
 
 /** `POST /api/db/connections/:id/disconnect` — close pool and optionally keep held login (`keepLogin`). */

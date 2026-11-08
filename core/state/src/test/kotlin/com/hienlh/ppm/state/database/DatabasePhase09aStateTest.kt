@@ -101,4 +101,79 @@ class DatabasePhase09aStateTest {
         assertEquals("~1.5k", formatRowEstimate(1_500L))
         assertEquals("~13k", formatRowEstimate(12_500L))
     }
+
+    @Test
+    fun parseStructureColumns_readsTableNameFromServerDbTableStructureNameField() {
+        val raw = kotlinx.serialization.json.Json.parseToJsonElement(
+            """
+            {
+              "dialect": "postgres",
+              "schema": "public",
+              "name": "orders",
+              "columns": [
+                {
+                  "name": "id",
+                  "type": "bigint",
+                  "nullable": false,
+                  "defaultValue": null,
+                  "autoIncrement": true,
+                  "generated": false,
+                  "computedExpression": null,
+                  "comment": null,
+                  "ordinalPosition": 1,
+                  "unsigned": false,
+                  "zerofill": false,
+                  "collation": null
+                },
+                {
+                  "name": "user_id",
+                  "type": "bigint",
+                  "nullable": false,
+                  "defaultValue": null,
+                  "autoIncrement": false,
+                  "generated": false,
+                  "computedExpression": null,
+                  "comment": null,
+                  "ordinalPosition": 2,
+                  "unsigned": false,
+                  "zerofill": false,
+                  "collation": null
+                }
+              ],
+              "primaryKey": { "name": "orders_pkey", "columns": ["id"] },
+              "indexes": [],
+              "foreignKeys": [
+                {
+                  "name": "orders_user_id_fkey",
+                  "columns": ["user_id"],
+                  "refSchema": "public",
+                  "refTable": "users",
+                  "refColumns": ["id"],
+                  "onUpdate": "NO ACTION",
+                  "onDelete": "CASCADE"
+                }
+              ],
+              "references": [],
+              "checks": [],
+              "triggers": [],
+              "comment": null,
+              "engine": null,
+              "withoutRowid": false,
+              "strict": false,
+              "rowKey": ["id"],
+              "rowKeyIsRowid": false
+            }
+            """.trimIndent(),
+        ) as kotlinx.serialization.json.JsonObject
+
+        val cols = parseStructureColumns(raw)
+        assertEquals(2, cols.size)
+        assertEquals("orders", cols[0].table)
+        assertEquals("public", cols[0].schema)
+        assertTrue(cols[0].pk)
+        assertNull(cols[0].fk)
+        assertEquals("orders", cols[1].table)
+        assertFalse(cols[1].pk)
+        assertEquals("users.id", cols[1].fk)
+    }
 }

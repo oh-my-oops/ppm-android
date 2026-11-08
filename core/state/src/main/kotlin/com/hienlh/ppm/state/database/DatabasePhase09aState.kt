@@ -687,7 +687,8 @@ fun parseStructureColumns(structureObj: JsonObject): List<DbColumnRefItem> {
             }
         }
     }
-    val tableName = (structureObj["table"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+    val tableName = (structureObj["name"] as? JsonPrimitive)?.contentOrNull
+        ?: (structureObj["table"] as? JsonPrimitive)?.contentOrNull.orEmpty()
     val schemaName = (structureObj["schema"] as? JsonPrimitive)?.contentOrNull
     return ((structureObj["columns"] as? JsonArray).orEmpty()).mapNotNull { colEl ->
         val cObj = colEl as? JsonObject ?: return@mapNotNull null
