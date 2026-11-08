@@ -7,10 +7,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.logs.LogsAppBody
@@ -479,10 +481,21 @@ class Phase11aUiTest {
                 val target = request.target
                 if (request.method == "POST" && target.contains("/api/system/services/")) {
                     actionPaths += target
+                    if (target.endsWith("/disable")) {
+                        return MockResponse.Builder()
+                            .code(500)
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":false}""")
+                            .build()
+                    }
+                    return MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"unit":"nginx.service","action":"stop"}}""")
+                        .build()
                 }
                 return MockResponse.Builder()
                     .addHeader("Content-Type", "application/json")
-                    .body("""{"ok":true,"data":{"supported":true,"manager":"systemd","services":[{"unit":"nginx.service","scope":"system","description":"Nginx web server","activeState":"active","subState":"running","running":true,"failed":false,"enabled":true}]}}""")
+                    .body("""{"ok":true,"data":{"supported":true,"manager":"systemd","services":[{"unit":"nginx.service","scope":"system","description":"Nginx web server","activeState":"active","subState":"running","running":true,"failed":false,"enabled":true,"mainPid":812}]}}""")
                     .build()
             }
         }
@@ -504,6 +517,7 @@ class Phase11aUiTest {
                         subState = "running",
                         running = true,
                         enabled = true,
+                        mainPid = 812,
                     ),
                 ),
             )
@@ -518,15 +532,33 @@ class Phase11aUiTest {
                 }
             }
 
+            // No disable icon on the service row
+            composeRule.onNodeWithTag("service-disable-nginx.service").assertDoesNotExist()
+
             composeRule.onNodeWithTag("service-stop-nginx.service").performClick()
             // Must not call API before confirming!
             assertTrue(actionPaths.isEmpty())
             composeRule.onNodeWithTag("sysmon-service-confirm").assertIsDisplayed()
             composeRule.onNodeWithText("Stop nginx.service? Anything depending on it stops too.").assertIsDisplayed()
+            composeRule.onNodeWithText("System service · pid 812").assertIsDisplayed()
             composeRule.onNodeWithTag("sysmon-service-confirm-ok").performClick()
 
-            composeRule.waitUntil(5_000) { actionPaths.isNotEmpty() }
+            composeRule.waitUntil(5_000) {
+                actionPaths.isNotEmpty() && model.toasts.any { it.message.title == "nginx.service: stop done" }
+            }
             assertTrue(actionPaths.first().endsWith("/api/system/services/system/nginx.service/stop"))
+
+            // Long-press row opens context menu with "Disable at boot"; failure shows toast "Could not disable nginx.service"
+            composeRule.onNodeWithTag("service-row-nginx.service").performTouchInput { longClick() }
+            composeRule.onNodeWithText("Disable at boot").assertIsDisplayed()
+            composeRule.onNodeWithTag("service-menu-action-disable").performClick()
+            composeRule.onNodeWithTag("sysmon-service-confirm").assertIsDisplayed()
+            composeRule.onNodeWithTag("sysmon-service-confirm-ok").performClick()
+
+            composeRule.waitUntil(5_000) {
+                actionPaths.size >= 2 && model.toasts.any { it.message.title == "Could not disable nginx.service" }
+            }
+            composeRule.onNodeWithText("Service action 'disable' failed").assertDoesNotExist()
         } finally {
             server.close()
         }

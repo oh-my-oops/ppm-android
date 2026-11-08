@@ -1,7 +1,9 @@
 package com.hienlh.ppm.app.ui.sysmon
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -2027,6 +2029,7 @@ private fun ProcessDetailsDialog(
 
 // ── 5. Services Panel ──────────────────────────────────────────────────
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ServicesPanel(
     model: AppModel,
@@ -2044,6 +2047,7 @@ private fun ServicesPanel(
     val searchState = remember { TextFieldState("") }
     var busyUnit by remember { mutableStateOf<String?>(null) }
     var detailsTarget by remember { mutableStateOf<ServiceInfo?>(null) }
+    var menuService by remember { mutableStateOf<ServiceInfo?>(null) }
     var pendingConfirm by remember { mutableStateOf<Pair<ServiceInfo, String>?>(null) }
     var inFlight by remember { mutableStateOf(false) }
 
@@ -2087,12 +2091,16 @@ private fun ServicesPanel(
         busyUnit = "${service.scope}:${service.unit}"
         scope.launch {
             try {
-                api.systemServiceAction(service.scope, service.unit, action)
+                val res = api.systemServiceAction(service.scope, service.unit, action)
+                val note = res["note"].string?.takeIf { it.isNotBlank() }
+                model.toast(ErrorToastMessage("${service.unit}: $action done", description = note, kind = ErrorToastMessage.Kind.SUCCESS))
                 fetchServices()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                onError(e.message ?: "Service action '$action' failed")
+                val msg = e.message?.takeIf { it.isNotBlank() && !it.startsWith("The server answered HTTP ") }
+                    ?: "Could not $action ${service.unit}"
+                model.toast(ErrorToastMessage(msg, kind = ErrorToastMessage.Kind.ERROR))
             } finally {
                 busyUnit = null
             }
@@ -2222,7 +2230,10 @@ private fun ServicesPanel(
                         Modifier
                             .fillMaxWidth()
                             .edge(Edge.Bottom, tokens.border.opacity(0.4).color)
-                            .ppmClickable { detailsTarget = svc }
+                            .combinedClickable(
+                                onClick = { detailsTarget = svc },
+                                onLongClick = { menuService = svc },
+                            )
                             .padding(horizontal = 12.dp, vertical = 9.dp)
                             .testTag("service-row-${svc.unit}"),
                         verticalAlignment = Alignment.CenterVertically,
@@ -2301,20 +2312,6 @@ private fun ServicesPanel(
                                         PpmIcon(ProductIcon.Play, 12.dp, Color(0xFF22C55E))
                                     }
                                 }
-                                if (svc.enabled) {
-                                    val disableRefused = svc.refused.containsKey("disable")
-                                    Box(
-                                        Modifier
-                                            .size(24.dp)
-                                            .alpha(if (disableRefused) 0.35f else 1f)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .ppmClickable(enabled = !disableRefused) { triggerAction(svc, "disable") }
-                                            .testTag("service-disable-${svc.unit}"),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        PpmIcon(ProductIcon.CircleX, 12.dp, tokens.text2.color)
-                                    }
-                                }
                             }
                         }
                     }
@@ -2323,11 +2320,105 @@ private fun ServicesPanel(
         }
     }
 
+    val ctxService = menuService
+    if (ctxService != null) {
+        val manager = snapshot?.manager ?: "systemd"
+        val allActions = listOf("start", "stop", "restart", "enable", "disable")
+        val allowed = allActions.filter { !ctxService.refused.containsKey(it) }
+        val reason = allActions.firstNotNullOfOrNull { ctxService.refused[it]?.takeIf { r -> r.isNotBlank() } }
+        fun actionLabel(action: String): String {
+            val base = when (action) {
+                "start" -> "Start"
+                "stop" -> "Stop"
+                "restart" -> "Restart"
+                "enable" -> "Enable at boot"
+                "disable" -> "Disable at boot"
+                else -> action
+            }
+            return if (manager == "launchd" && ctxService.scope == "user") {
+                base.replace(" at boot", " at login")
+            } else {
+                base
+            }
+        }
+        Dialog(onDismissRequest = { menuService = null }) {
+            val shape = RoundedCornerShape(tokens.rad.dp)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .ppmShadow(tokens.shadowPanel, shape)
+                    .clip(shape)
+                    .background(tokens.panel2.over(tokens.bgSolid).color)
+                    .cssBorder(tokens.border.color, shape)
+                    .padding(16.dp)
+                    .testTag("service-menu-dialog"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                for (action in allowed) {
+                    val destructive = action == "stop" || action == "disable"
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (destructive) tokens.error.opacity(0.12).color else tokens.panel.color)
+                            .ppmClickable(shape = RoundedCornerShape(8.dp)) {
+                                menuService = null
+                                triggerAction(ctxService, action)
+                            }
+                            .padding(horizontal = 12.dp)
+                            .testTag("service-menu-action-$action"),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        BasicText(
+                            actionLabel(action),
+                            style = ppmText(13f, FontWeight.Medium, lineHeight = 18f)
+                                .copy(color = if (destructive) tokens.error.color else tokens.text.color),
+                        )
+                    }
+                }
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(tokens.panel.color)
+                        .ppmClickable(shape = RoundedCornerShape(8.dp)) {
+                            menuService = null
+                            detailsTarget = ctxService
+                        }
+                        .padding(horizontal = 12.dp)
+                        .testTag("service-menu-details"),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    BasicText(
+                        "Details and log",
+                        style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.text.color),
+                    )
+                }
+                if (reason != null) {
+                    BasicText(
+                        reason,
+                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text2.color),
+                    )
+                }
+            }
+        }
+    }
+
     val confirmPair = pendingConfirm
     if (confirmPair != null) {
         val (svc, act) = confirmPair
-        val wording = ServicesModel.confirmWordingFor(snapshot?.manager ?: "systemd", svc, act)
+        val manager = snapshot?.manager ?: "systemd"
+        val wording = ServicesModel.confirmWordingFor(manager, svc, act)
         if (wording != null) {
+            val scopeLabel = when {
+                manager == "scm" -> "Windows"
+                svc.scope == "system" -> "System"
+                else -> "User"
+            }
+            val kindLabel = if (manager == "launchd") "job" else "service"
+            val pidSuffix = if (svc.mainPid != null) " · pid ${svc.mainPid}" else ""
             Dialog(onDismissRequest = { pendingConfirm = null }) {
                 val shape = RoundedCornerShape(tokens.rad.dp)
                 Column(
@@ -2343,9 +2434,10 @@ private fun ServicesPanel(
                 ) {
                     BasicText(wording.title, style = ppmText(16f, FontWeight.SemiBold, lineHeight = 22f).copy(color = tokens.text.color))
                     BasicText(wording.body, style = ppmText(13f, lineHeight = 18f).copy(color = tokens.text.color))
-                    if (svc.description.isNotBlank()) {
-                        BasicText(svc.description, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color))
-                    }
+                    BasicText(
+                        "$scopeLabel $kindLabel$pidSuffix",
+                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+                    )
                     Row(
                         Modifier.fillMaxWidth().padding(top = 6.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
