@@ -171,4 +171,53 @@ class BlameDiffConflictStateTest {
         assertEquals("git-diff:compare:src/a.ts↔src/b.ts", id1)
         assertEquals("git-diff:compare:src/a.ts↔src/c.ts", id2)
     }
+
+    @Test
+    fun `C10 diff3 conflict with empty current or incoming side resolves without spurious blank line and preserves CRLF`() {
+        val diff3EmptyCurrent = listOf(
+            "before",
+            "<<<<<<< HEAD",
+            "||||||| merged common ancestors",
+            "const deletedInHead = 1;",
+            "=======",
+            "const modifiedInBranch = 2;",
+            ">>>>>>> feature/branch",
+            "after",
+        ).joinToString("\n")
+
+        val parsed = parseConflicts(diff3EmptyCurrent)
+        assertEquals(1, parsed.size)
+        assertTrue(parsed[0].currentLines.isEmpty())
+        assertEquals(listOf("const deletedInHead = 1;"), parsed[0].baseLines)
+        assertEquals(listOf("const modifiedInBranch = 2;"), parsed[0].incomingLines)
+
+        assertEquals(
+            "before\nafter",
+            resolveConflictRegion(diff3EmptyCurrent, parsed[0].id, ConflictResolutionAction.CURRENT),
+        )
+        assertEquals(
+            "before\nconst modifiedInBranch = 2;\nafter",
+            resolveConflictRegion(diff3EmptyCurrent, parsed[0].id, ConflictResolutionAction.BOTH),
+        )
+
+        val diff3EmptyIncomingCrlf = listOf(
+            "before",
+            "<<<<<<< HEAD",
+            "const keptInHead = 1;",
+            "||||||| base",
+            "const old = 0;",
+            "=======",
+            ">>>>>>> feature/delete",
+            "after",
+        ).joinToString("\r\n")
+
+        assertEquals(
+            "before\r\nafter",
+            resolveConflictRegion(diff3EmptyIncomingCrlf, 0, ConflictResolutionAction.INCOMING),
+        )
+        assertEquals(
+            "before\r\nconst keptInHead = 1;\r\nafter",
+            resolveConflictRegion(diff3EmptyIncomingCrlf, 0, ConflictResolutionAction.BOTH),
+        )
+    }
 }

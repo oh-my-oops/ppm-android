@@ -17,6 +17,34 @@ data class IndentStyle(
     val unit: String get() = if (useTabs) "\t" else " ".repeat(size)
 }
 
+/** Detects the dominant line-ending sequence (`"\r\n"`, `"\r"`, or `"\n"`) in [text]. */
+fun detectEol(text: String, fallback: String = "\n"): String {
+    var crlf = 0
+    var lf = 0
+    var cr = 0
+    var i = 0
+    val len = text.length
+    while (i < len) {
+        val c = text[i]
+        if (c == '\r') {
+            if (i + 1 < len && text[i + 1] == '\n') {
+                crlf++
+                i += 2
+                continue
+            } else {
+                cr++
+            }
+        } else if (c == '\n') {
+            lf++
+        }
+        i++
+    }
+    if (crlf == 0 && lf == 0 && cr == 0) return fallback
+    if (crlf >= lf && crlf >= cr && crlf > 0) return "\r\n"
+    if (cr > lf && cr > crlf) return "\r"
+    return "\n"
+}
+
 /**
  * Piece-table text buffer with a lazily maintained line-start index (`O(log N)` line/offset lookup
  * and bounded `subSequence` slices that never copy the entire document on keystrokes or IME IPC).
@@ -28,6 +56,10 @@ class EditorBuffer(initialText: String = "") : CharSequence {
         val start: Int,
         val length: Int,
     )
+
+    /** Dominant line-ending sequence detected on load (`"\n"`, `"\r\n"`, or `"\r"`), restored on save. */
+    var eol: String = detectEol(initialText)
+        internal set
 
     private val original: String = initialText.replace("\r\n", "\n").replace('\r', '\n')
     private val addBuffer = StringBuilder()
@@ -248,4 +280,10 @@ class EditorBuffer(initialText: String = "") : CharSequence {
     }
 
     override fun toString(): String = subSequence(0, totalLength).toString()
+
+    /** Returns the document text with the file's original [eol] (`"\n"`, `"\r\n"`, or `"\r"`) restored. */
+    fun toDiskString(): String {
+        val lfText = toString()
+        return if (eol == "\n") lfText else lfText.replace("\n", eol)
+    }
 }

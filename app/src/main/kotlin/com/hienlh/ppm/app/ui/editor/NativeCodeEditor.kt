@@ -306,6 +306,9 @@ internal fun EditableFileCodeView(
     var editTick by remember { mutableLongStateOf(0L) }
     var conflictVisible by remember { mutableStateOf(false) }
     var latestDiskContent by remember { mutableStateOf(initialContent) }
+    var saveError by remember(path, project) { mutableStateOf<String?>(null) }
+    var haltedOn4xx by remember(path, project) { mutableStateOf(false) }
+    val currentBufferVersion = remember(editTick) { docState.session.buffer.version }
 
     // Per-device LSP bridge (Phase 07c)
     val lspEnabled by DeviceLspPreference.enabled.collectAsState()
@@ -358,42 +361,86 @@ internal fun EditableFileCodeView(
         }
     }
 
-    suspend fun performSaveNow() {
+    suspend fun performSaveNow(forceOverwrite: Boolean = false) {
         val client = api ?: return
         val targetPath = path?.takeIf { it.isNotBlank() } ?: return
         if (docState.session.readOnly || isUntitled || !docState.isDirty) return
-        val textToSave = docState.session.buffer.toString()
+        if (!forceOverwrite && (conflictVisible || docState.externalChangeConflict)) return
+        val textToSave = docState.textToSave()
         docState.saving = true
-        runCatching {
+        try {
             client.writeFile(project, targetPath, textToSave)
-        }.onSuccess {
             docState.markSaved(textToSave)
+            saveError = null
+            haltedOn4xx = false
             lspBridge?.saveDocument(targetPath, textToSave)
             conflictVisible = false
             onDirtyChange(docState.isDirty)
             editTick++
-        }.onFailure { err ->
+        } catch (ce: kotlinx.coroutines.CancellationException) {
             docState.saving = false
-            docState.saveError = err.message ?: "Failed to save file"
-            editTick++
+            throw ce
+        } catch (err: Throwable) {
+            docState.saving = false
+            val msg = err.message ?: "Failed to save file"
+            docState.saveError = msg
+            saveError = msg
+            val is4xx = (err is com.hienlh.ppm.client.PpmError.Server && err.status in 400..499) ||
+                err is com.hienlh.ppm.client.PpmError.Unauthorized ||
+                err is IllegalArgumentException
+            if (is4xx) {
+                haltedOn4xx = true
+            }
         }
     }
 
-    // 1000 ms debounced autosave after edits
-    LaunchedEffect(editTick, api, path, project) {
+    // 1000 ms debounced autosave after buffer edits (never while external-change conflict is active or halted on 4xx)
+    LaunchedEffect(currentBufferVersion, api, path, project, conflictVisible, haltedOn4xx) {
         onDirtyChange(docState.isDirty)
-        if (!docState.isDirty || docState.session.readOnly || isUntitled || path.isNullOrBlank()) return@LaunchedEffect
+        if (
+            !docState.isDirty ||
+            docState.session.readOnly ||
+            isUntitled ||
+            path.isNullOrBlank() ||
+            conflictVisible ||
+            docState.externalChangeConflict ||
+            haltedOn4xx
+        ) {
+            return@LaunchedEffect
+        }
         delay(1_000L)
-        performSaveNow()
+        if (conflictVisible || docState.externalChangeConflict || haltedOn4xx) return@LaunchedEffect
+        performSaveNow(forceOverwrite = false)
     }
 
     // Flush pending unsaved changes when closing tab / disposing (fixes web data-loss bug)
     DisposableEffect(docState, api, path, project) {
         onDispose {
-            if (docState.isDirty && !docState.session.readOnly && !isUntitled && !path.isNullOrBlank() && api != null) {
-                val textToSave = docState.session.buffer.toString()
+            if (
+                docState.isDirty &&
+                !docState.session.readOnly &&
+                !isUntitled &&
+                !docState.externalChangeConflict &&
+                !path.isNullOrBlank() &&
+                api != null
+            ) {
+                val textToSave = docState.textToSave()
                 model.scope.launch {
-                    runCatching { api.writeFile(project, path, textToSave) }
+                    try {
+                        api.writeFile(project, path, textToSave)
+                        docState.markSaved(textToSave)
+                    } catch (ce: kotlinx.coroutines.CancellationException) {
+                        throw ce
+                    } catch (err: Throwable) {
+                        val msg = err.message ?: "Failed to save $path"
+                        docState.saveError = msg
+                        model.toast(
+                            com.hienlh.ppm.app.ErrorToastMessage(
+                                title = "Failed to save $path",
+                                description = msg,
+                            ),
+                        )
+                    }
                 }
             }
         }
@@ -424,6 +471,8 @@ internal fun EditableFileCodeView(
                             docState.session.reloadExternalContent(latestDiskContent)
                             docState.markSaved(latestDiskContent)
                             conflictVisible = false
+                            saveError = null
+                            haltedOn4xx = false
                             onDirtyChange(false)
                             editTick++
                         },
@@ -431,13 +480,14 @@ internal fun EditableFileCodeView(
                     SettingsButton(
                         label = "Overwrite Disk",
                         primary = true,
-                        onClick = { scope.launch { performSaveNow() } },
+                        onClick = { scope.launch { performSaveNow(forceOverwrite = true) } },
                     )
                 }
             }
         }
 
-        if (!docState.saveError.isNullOrBlank()) {
+        val currentSaveError = saveError ?: docState.saveError
+        if (!currentSaveError.isNullOrBlank()) {
             val tokens = LocalPpmTokens.current
             Row(
                 Modifier
@@ -449,14 +499,17 @@ internal fun EditableFileCodeView(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 BasicText(
-                    docState.saveError.orEmpty(),
+                    currentSaveError,
                     style = ppmText(11f).copy(color = tokens.error.color),
                     modifier = Modifier.weight(1f),
                 )
                 SettingsButton(
                     label = "Retry Save",
                     primary = true,
-                    onClick = { scope.launch { performSaveNow() } },
+                    onClick = {
+                        haltedOn4xx = false
+                        scope.launch { performSaveNow() }
+                    },
                 )
             }
         }
@@ -1312,22 +1365,52 @@ fun AiResourceEditorBody(model: AppModel, tab: WorkspaceTab) {
     val scope = rememberCoroutineScope()
     val tokens = LocalPpmTokens.current
     val path = tab.metaString("filePath") ?: tab.metaString("path").orEmpty()
-    val projectPath = tab.metaString("projectPath").orEmpty()
+    val projectPath = tab.metaString("project") ?: tab.metaString("projectPath").orEmpty()
+    val resourceType = tab.metaString("resourceType") ?: "skill"
+    val resourceScope = tab.metaString("scope") ?: "user"
+    val tabReadOnly = tab.metadata["readOnly"].bool == true || resourceScope == "bundled"
+    val shadowed = tab.metadata["shadowed"].bool == true
+    val shadowedByObj = tab.metadata["shadowedBy"] as? kotlinx.serialization.json.JsonObject
+    val shadowedByName = shadowedByObj?.get("name").string
+    val shadowedBySource = shadowedByObj?.get("source").string
 
-    var content by remember(path) { mutableStateOf<String?>(null) }
-    var editable by remember(path) { mutableStateOf(true) }
+    var initialContent by remember(path, projectPath) { mutableStateOf<String?>(null) }
+    var lastSavedContent by remember(path, projectPath) { mutableStateOf("") }
+    var loadError by remember(path, projectPath) { mutableStateOf<String?>(null) }
+    var saveError by remember(path, projectPath) { mutableStateOf<String?>(null) }
+    var saving by remember(path, projectPath) { mutableStateOf(false) }
+    var readOnly by remember(path, projectPath, tabReadOnly) { mutableStateOf(tabReadOnly) }
     var wrap by remember { mutableStateOf(true) }
-    var dirty by remember { mutableStateOf(false) }
+    var dirty by remember(path, projectPath) { mutableStateOf(false) }
 
     LaunchedEffect(api, path, projectPath) {
         if (api == null || path.isBlank()) return@LaunchedEffect
-        runCatching { api.aiResourcesReadContent(path, projectPath) }.getOrNull()?.let { res ->
-            content = res["content"].string.orEmpty()
-            editable = res["editable"]?.bool ?: true
+        loadError = null
+        try {
+            val res = api.aiResourcesReadContent(path, projectPath)
+            val fetched = res["content"].string.orEmpty()
+            initialContent = fetched
+            lastSavedContent = fetched
+            readOnly = tabReadOnly || (res["editable"]?.bool == false)
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
+        } catch (err: Throwable) {
+            loadError = err.message ?: "Failed to load AI resource"
         }
     }
 
-    val loaded = content
+    if (loadError != null) {
+        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+            BasicText(
+                loadError.orEmpty(),
+                style = ppmText(12f).copy(color = tokens.error.color),
+                modifier = Modifier.testTag("ai-resource-load-error"),
+            )
+        }
+        return
+    }
+
+    val loaded = initialContent
     if (loaded == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             BasicText("Loading AI resource…", style = ppmText(12f).copy(color = tokens.text3.color))
@@ -1335,26 +1418,90 @@ fun AiResourceEditorBody(model: AppModel, tab: WorkspaceTab) {
         return
     }
 
-    val docState = remember(path, loaded) {
+    val docState = remember(path, projectPath, readOnly) {
         EditorTabDocumentState(
             initialContent = loaded,
             language = fileCodeLanguage(path, "markdown"),
-            readOnly = !editable,
+            readOnly = readOnly,
         )
     }
     var editTick by remember { mutableLongStateOf(0L) }
 
+    fun saveResource() {
+        val client = api ?: return
+        if (readOnly || saving || !docState.isDirty) return
+        val textToSave = docState.textToSave()
+        saving = true
+        saveError = null
+        scope.launch {
+            try {
+                client.aiResourcesWriteContent(path, textToSave, projectPath)
+                lastSavedContent = textToSave
+                docState.markSaved(textToSave)
+                dirty = docState.isDirty
+                saving = false
+                editTick++
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                saving = false
+                throw ce
+            } catch (err: Throwable) {
+                saving = false
+                val msg = err.message ?: "Failed to save AI resource"
+                docState.saveError = msg
+                saveError = msg
+                model.toast(com.hienlh.ppm.app.ErrorToastMessage(title = msg))
+            }
+        }
+    }
+
     Column(Modifier.fillMaxSize().background(tokens.bgSolid.color)) {
-        if (!editable) {
+        if (readOnly) {
             Row(
                 Modifier
                     .fillMaxWidth()
                     .background(tokens.panel2.color)
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .testTag("ai-resource-readonly-banner"),
             ) {
                 BasicText(
-                    "Read-only bundled resource — duplicate in Settings → AI Resources to customize.",
+                    "Bundled resource — read-only. Duplicate it (from the AI Resources panel) to make an editable copy.",
                     style = ppmText(11f).copy(color = tokens.text3.color),
+                )
+            }
+        }
+        if (shadowed && !shadowedByName.isNullOrBlank() && !shadowedBySource.isNullOrBlank()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(tokens.warning.opacity(0.14).color)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .testTag("ai-resource-shadowed-banner"),
+            ) {
+                BasicText(
+                    "This $resourceType is overridden by another “$shadowedByName” from a higher-priority source ($shadowedBySource). It is currently inactive.",
+                    style = ppmText(11f).copy(color = tokens.warning.color),
+                )
+            }
+        }
+        if (!saveError.isNullOrBlank()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(tokens.error.opacity(0.14).color)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .testTag("ai-resource-save-error-banner"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BasicText(
+                    saveError.orEmpty(),
+                    style = ppmText(11f).copy(color = tokens.error.color),
+                    modifier = Modifier.weight(1f),
+                )
+                SettingsButton(
+                    label = "Retry Save",
+                    primary = true,
+                    onClick = { saveResource() },
                 )
             }
         }
@@ -1368,40 +1515,32 @@ fun AiResourceEditorBody(model: AppModel, tab: WorkspaceTab) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BasicText(
-                docState.formatTabTitle(tab.title.ifBlank { path }),
+                docState.formatTabTitle((tab.metaString("name") ?: tab.title).ifBlank { path }),
                 style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text.color),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            if (editable && dirty) {
+            if (!readOnly && dirty) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     SettingsButton(
                         label = "Revert",
+                        enabled = !saving,
+                        modifier = Modifier.testTag("ai-resource-revert-btn"),
                         onClick = {
-                            docState.session.reloadExternalContent(loaded)
-                            docState.markSaved(loaded)
+                            docState.session.reloadExternalContent(lastSavedContent)
+                            docState.markSaved(lastSavedContent)
                             dirty = false
+                            saveError = null
                             editTick++
                         },
                     )
                     SettingsButton(
                         label = "Save",
                         primary = true,
-                        onClick = {
-                            val client = api ?: return@SettingsButton
-                            val textToSave = docState.session.buffer.toString()
-                            scope.launch {
-                                runCatching {
-                                    client.aiResourcesWriteContent(path, textToSave, projectPath)
-                                }.onSuccess {
-                                    content = textToSave
-                                    docState.markSaved(textToSave)
-                                    dirty = false
-                                    editTick++
-                                }
-                            }
-                        },
+                        enabled = !saving,
+                        modifier = Modifier.testTag("ai-resource-save-btn"),
+                        onClick = { saveResource() },
                     )
                 }
             }
@@ -1416,19 +1555,7 @@ fun AiResourceEditorBody(model: AppModel, tab: WorkspaceTab) {
             isDirty = dirty,
             wrap = wrap,
             onToggleWrap = { wrap = !wrap },
-            onSaveNow = {
-                val client = api ?: return@NativeCodeEditorCanvas
-                val textToSave = docState.session.buffer.toString()
-                scope.launch {
-                    runCatching { client.aiResourcesWriteContent(path, textToSave, projectPath) }
-                        .onSuccess {
-                            content = textToSave
-                            docState.markSaved(textToSave)
-                            dirty = false
-                            editTick++
-                        }
-                }
-            },
+            onSaveNow = { saveResource() },
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
     }

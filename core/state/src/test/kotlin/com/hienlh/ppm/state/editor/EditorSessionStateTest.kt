@@ -187,4 +187,27 @@ class EditorSessionStateTest {
         val snippet = buildAiEditorContextSnippet("src/Main.kt", "kotlin", 10, 12, "val x = 1\nval y = 2")
         assertTrue(snippet.startsWith("src/Main.kt:10-12\n```kotlin\n"))
     }
+
+    @Test
+    fun `C8 preserves CRLF and CR line endings on load edit and save`() {
+        val doc = EditorTabDocumentState("a\r\nb", language = "typescript")
+        assertEquals("\r\n", doc.session.buffer.eol)
+        assertFalse(doc.isDirty)
+
+        doc.session.setSelection(1, 1)
+        doc.session.commitText("1", 1)
+        assertTrue(doc.isDirty)
+        assertEquals("a1\nb", doc.session.buffer.toString())
+        assertEquals("a1\r\nb", doc.textToSave())
+
+        doc.markSaved()
+        assertFalse(doc.isDirty)
+        assertFalse(doc.onExternalDiskContent("a1\r\nb"))
+
+        val crDoc = EditorTabDocumentState("x\ry", language = "plaintext")
+        assertEquals("\r", crDoc.session.buffer.eol)
+        crDoc.session.setSelection(1, 1)
+        crDoc.session.commitText("2", 1)
+        assertEquals("x2\ry", crDoc.textToSave())
+    }
 }

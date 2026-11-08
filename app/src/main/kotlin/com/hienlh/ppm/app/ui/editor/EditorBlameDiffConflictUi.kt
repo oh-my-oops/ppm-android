@@ -574,11 +574,11 @@ internal fun ConflictEditorContent(
     LaunchedEffect(editTick) {
         if (editTick <= 0L) return@LaunchedEffect
         delay(1000L)
-        onSaveContent(session.buffer.toString())
+        onSaveContent(session.buffer.toDiskString())
     }
 
     fun applyResolution(region: ConflictRegion, action: ConflictResolutionAction) {
-        val updated = resolveConflictRegion(session.buffer.toString(), region.id, action)
+        val updated = resolveConflictRegion(session.buffer.toDiskString(), region.id, action)
         session.reloadExternalContent(updated)
         editTick++
         onSaveContent(updated)

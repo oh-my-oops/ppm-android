@@ -397,10 +397,14 @@ class EditorSessionState(
         composingEnd = -1
         undoStack.clear()
         redoStack.clear()
+        buffer.eol = detectEol(newText, fallback = buffer.eol)
         buffer.replace(0, buffer.length, newText)
         indentStyle = buffer.detectIndentation()
         setSelection(selectionStart.coerceAtMost(buffer.length), selectionEnd.coerceAtMost(buffer.length))
     }
+
+    /** Returns the buffer content serialized with the file's detected line endings (`\r\n`, `\r`, or `\n`). */
+    fun toDiskString(): String = buffer.toDiskString()
 
     // =======================================================================
     // Phase 07a.5 Core Editing Commands
