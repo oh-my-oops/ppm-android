@@ -1322,7 +1322,6 @@ internal fun AndroidLiveViewer(
             val closedSignal = CompletableDeferred<Unit>()
             var configuredCodec: String? = null
             var localHasPicture = false
-            var localSessionGen = 1
 
             val ws = api.openAndroidSocket(
                 object : WebSocketListener() {
@@ -1338,7 +1337,6 @@ internal fun AndroidLiveViewer(
                                     attempt = 0
                                     connState = AndroidConnState.LIVE
                                     errorMessage = null
-                                    localSessionGen = msg.sessionGeneration
                                     sessionGeneration = msg.sessionGeneration
                                     geometry = msg.geometry
                                     controller = msg.controller
@@ -1394,7 +1392,6 @@ internal fun AndroidLiveViewer(
                     override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                         val frame = decodeAndroidVideoFrame(bytes.toByteArray()) ?: return
                         if (frame.header.version != ANDROID_PROTOCOL_VERSION) return
-                        if (frame.header.sessionGeneration != localSessionGen) return
                         if (!shouldDecodeAndroidAccessUnit(localHasPicture, frame.header.keyframe)) return
                         if (!localHasPicture) {
                             localHasPicture = true

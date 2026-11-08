@@ -20,8 +20,22 @@ import com.hienlh.ppm.state.androiddevice.AndroidLogLevel
 import com.hienlh.ppm.state.androiddevice.AndroidQuality
 import com.hienlh.ppm.state.androiddevice.AndroidRequirement
 import com.hienlh.ppm.state.androiddevice.AndroidRuntimeInfo
+import androidx.compose.ui.test.onAllNodesWithTag
+import com.hienlh.ppm.client.ApiClient
+import com.hienlh.ppm.state.androiddevice.AndroidVideoHeader
 import com.hienlh.ppm.state.androiddevice.AvdDeviceProfile
 import com.hienlh.ppm.state.androiddevice.SystemImageRow
+import com.hienlh.ppm.state.androiddevice.encodeAndroidVideoFrame
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okio.ByteString.Companion.toByteString
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -321,5 +335,117 @@ class Phase11cUiTest {
 
         rule.onNodeWithTag("android-logcat-list").assertIsDisplayed()
         rule.onNodeWithText("25 lines").assertIsDisplayed()
+    }
+
+    @Test
+    fun `AndroidLiveViewer decodes video frame with bumped sessionGeneration after controller hand-off`() {
+        val server = MockWebServer()
+        val serverSockets = LinkedBlockingQueue<WebSocket>()
+        val clientMessages = LinkedBlockingQueue<String>()
+
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.headers["Upgrade"].equals("websocket", ignoreCase = true)) {
+                    return MockResponse.Builder().webSocketUpgrade(
+                        object : WebSocketListener() {
+                            override fun onOpen(webSocket: WebSocket, response: Response) {
+                                serverSockets.put(webSocket)
+                            }
+
+                            override fun onMessage(webSocket: WebSocket, text: String) {
+                                clientMessages.put(text)
+                            }
+
+                            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                                webSocket.close(1000, null)
+                            }
+                        },
+                    ).build()
+                }
+                if (request.target.endsWith("/sessions")) {
+                    return MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"nonce":"nonce-1","deviceId":"emu-5554-gen1","generation":1,"hardwareKeyboard":true}}""")
+                        .build()
+                }
+                return MockResponse.Builder()
+                    .addHeader("Content-Type", "application/json")
+                    .body("""{"ok":true,"data":{}}""")
+                    .build()
+            }
+        }
+        server.start()
+        try {
+            val api = ApiClient(server.url("/"), "secret")
+            val device = AndroidDeviceItem(
+                avdId = "Pixel_8_API_34",
+                name = "Pixel 8 API 34",
+                apiLevel = 34,
+                abi = "x86_64",
+                state = AndroidDeviceStatus.READY,
+                runtime = AndroidRuntimeInfo(
+                    deviceId = "emu-5554-gen1",
+                    generation = 1,
+                    adbSerial = "emulator-5554",
+                    ownedByPpm = true,
+                ),
+            )
+
+            rule.setContent {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    AndroidLiveViewer(
+                        api = api,
+                        device = device,
+                        projects = emptyList(),
+                        selectedProject = null,
+                        onBackToList = {},
+                    )
+                }
+            }
+
+            val ws = serverSockets.poll(5, TimeUnit.SECONDS)
+            requireNotNull(ws) { "Timed out waiting for viewer WebSocket connection" }
+            val authMsg = clientMessages.poll(5, TimeUnit.SECONDS)
+            requireNotNull(authMsg) { "Timed out waiting for auth message" }
+            assertTrue(authMsg.contains("\"type\":\"auth\""))
+
+            // 1. ready with sessionGeneration = 1, controller = false
+            ws.send(
+                """{"type":"ready","sessionId":"s-1","sessionGeneration":1,"geometry":{"width":720,"height":1600,"deviceWidth":1080,"deviceHeight":2400,"rotation":0,"generation":1},"controller":false,"codec":"avc1.42E01F","encoder":"libx264"}""",
+            )
+            rule.waitUntil(5_000) {
+                rule.onAllNodesWithTag("android-take-control-banner").fetchSemanticsNodes().isNotEmpty()
+            }
+            // Before any video frame arrives, waiting overlay is visible
+            rule.onNodeWithTag("android-waiting-overlay").assertIsDisplayed()
+
+            // 2. controller hand-off (server bumps sessionGeneration to 2 internally; controller message does not carry it)
+            ws.send("""{"type":"controller","controller":true,"reason":"take-control"}""")
+            rule.waitUntil(5_000) {
+                rule.onAllNodesWithTag("android-take-control-banner").fetchSemanticsNodes().isEmpty()
+            }
+
+            // 3. Binary keyframe with sessionGeneration = 2 must be decoded (hasPicture -> true, waiting overlay removed)
+            val payload = byteArrayOf(0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1F)
+            val frameGen2 = encodeAndroidVideoFrame(
+                header = AndroidVideoHeader(
+                    keyframe = true,
+                    codecConfig = true,
+                    sessionGeneration = 2,
+                    geometryGeneration = 1,
+                    sequence = 1L,
+                    ptsMs = 16.6,
+                    payloadLength = payload.size,
+                ),
+                payload = payload,
+            )
+            ws.send(frameGen2.toByteString())
+
+            rule.waitUntil(5_000) {
+                rule.onAllNodesWithTag("android-waiting-overlay").fetchSemanticsNodes().isEmpty()
+            }
+        } finally {
+            server.close()
+        }
     }
 }
