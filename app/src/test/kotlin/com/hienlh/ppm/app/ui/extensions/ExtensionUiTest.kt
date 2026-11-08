@@ -1,5 +1,8 @@
 package com.hienlh.ppm.app.ui.extensions
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -207,5 +210,88 @@ class ExtensionUiTest {
         composeRule.onNodeWithText("Extension failed to load").assertIsDisplayed()
         composeRule.onNodeWithTag("ext-webview-retry").performClick()
         assertTrue(retried)
+    }
+
+    @Test
+    fun `TreeView renders header actions tooltips handles duplicate child ids across parents and resets stale expanded state on root update`() {
+        var headerClickedCmd: String? = null
+        val expandedIds = mutableListOf<String>()
+        var itemsState by androidx.compose.runtime.mutableStateOf(
+            listOf(
+                TreeItemUI(
+                    id = "conn-1",
+                    label = "Postgres 1",
+                    tooltip = "Primary DB",
+                    collapsibleState = "expanded",
+                    children = listOf(
+                        TreeItemUI(id = "tables", label = "Tables (1)", collapsibleState = "none"),
+                    ),
+                ),
+                TreeItemUI(
+                    id = "conn-2",
+                    label = "Postgres 2",
+                    collapsibleState = "expanded",
+                    children = listOf(
+                        // Same child id "tables" under a different parent must not crash LazyColumn!
+                        TreeItemUI(id = "tables", label = "Tables (2)", collapsibleState = "none"),
+                    ),
+                ),
+            ),
+        )
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                ExtensionTreeViewList(
+                    viewId = "db.tree",
+                    viewName = "Connections",
+                    items = itemsState,
+                    onExpand = { expandedIds += it },
+                    onCommand = { cmd, _ -> headerClickedCmd = cmd },
+                    headerActions = listOf(
+                        com.hienlh.ppm.state.extensions.TreeHeaderAction(
+                            command = "db.refresh",
+                            title = "Refresh Connections",
+                            icon = "refresh",
+                        ),
+                    ),
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Tables (1)").assertIsDisplayed()
+        composeRule.onNodeWithText("Tables (2)").assertIsDisplayed()
+        composeRule.onNodeWithTag("ext-tree-header-action-db.refresh").performClick()
+        assertEquals("db.refresh", headerClickedCmd)
+
+        // Root update replaces items with collapsed roots and no children -> stale expanded state is cleared
+        itemsState = listOf(
+            TreeItemUI(
+                id = "conn-1",
+                label = "Postgres 1",
+                collapsibleState = "collapsed",
+                children = null,
+            ),
+        )
+        composeRule.waitForIdle()
+        // Clicking conn-1 now expands it and triggers onExpand("conn-1") instead of collapsing
+        composeRule.onNodeWithTag("ext-tree-item-conn-1").performClick()
+        assertEquals(listOf("conn-1"), expandedIds)
+    }
+
+    @Test
+    fun `LoadingOrFailedView displays activationError when failed`() {
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                ExtensionLoadingOrFailedView(
+                    title = "Git Graph",
+                    failed = true,
+                    activationError = "RPC timeout: ext:activate (10000ms)",
+                    onRetry = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Extension failed to load").assertIsDisplayed()
+        composeRule.onNodeWithText("RPC timeout: ext:activate (10000ms)").assertIsDisplayed()
     }
 }

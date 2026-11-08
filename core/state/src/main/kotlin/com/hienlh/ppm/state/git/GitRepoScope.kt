@@ -120,6 +120,9 @@ object GitRepoScope {
             untracked = status.untracked.map { projectRelativePath(it, repo) },
         )
     }
+
+    /** `commandRunsGit` in `src/web/lib/git-repo-scope.ts:215-217`. */
+    fun commandRunsGit(command: String): Boolean = command.startsWith("git-graph.")
 }
 
 /**

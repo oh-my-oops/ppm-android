@@ -45,6 +45,7 @@ import com.hienlh.ppm.design.ThemeTokens
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.extensions.ExtensionWebviewBridge
+import com.hienlh.ppm.state.extensions.ExternalLinkGate
 import com.hienlh.ppm.state.extensions.WebviewPanelUI
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.web.ExtensionWebviewSurface
@@ -77,18 +78,36 @@ fun ExtensionWebviewBody(
     val ext = model.extensions
     val panels by (ext?.webviewPanels?.collectAsState() ?: remember { mutableStateOf(emptyMap()) })
     val contributions by (ext?.contributions?.collectAsState() ?: remember { mutableStateOf(null) })
+    val activationErrors by (ext?.activationErrors?.collectAsState() ?: remember { mutableStateOf(emptyMap()) })
 
     val panelIdMeta = tab.metaString("panelId")
     val viewTypeMeta = tab.metaString("viewType")
-    val tabProjectName = tab.metaString("projectName") ?: tab.projectId ?: model.selectedProject
+    val extensionIdMeta = tab.metaString("extensionId")
+    // Use the tab's own project name (frozen at creation time), NOT model.selectedProject (`extension-webview.tsx:76`).
+    val tabProjectName = tab.metaString("projectName")?.takeIf { it.isNotEmpty() }
+        ?: tab.projectId?.takeIf { it.isNotEmpty() }
 
     val panel: WebviewPanelUI? = remember(panels, panelIdMeta, viewTypeMeta, tabProjectName) {
         if (!panelIdMeta.isNullOrEmpty() && panelIdMeta in panels) {
             panels[panelIdMeta]
         } else if (!viewTypeMeta.isNullOrEmpty()) {
-            panels.values.firstOrNull { p ->
-                p.viewType == viewTypeMeta && (p.projectName == null || p.projectName == tabProjectName)
+            val fullViewType = if (viewTypeMeta.contains(".")) viewTypeMeta else "$viewTypeMeta.view"
+            val candidates = panels.values.filter { p ->
+                p.viewType == viewTypeMeta || p.viewType == fullViewType
             }
+            candidates.firstOrNull { p -> p.projectName != null && p.projectName == tabProjectName }
+                ?: candidates.firstOrNull { p -> p.projectName == null || tabProjectName == null }
+        } else {
+            null
+        }
+    }
+
+    val activationError: String? = remember(activationErrors, extensionIdMeta, viewTypeMeta) {
+        if (!extensionIdMeta.isNullOrEmpty() && extensionIdMeta in activationErrors) {
+            activationErrors[extensionIdMeta]
+        } else if (!viewTypeMeta.isNullOrEmpty()) {
+            val slug = viewTypeMeta.removeSuffix(".view")
+            activationErrors["ext-$slug"] ?: activationErrors["ext-$viewTypeMeta"]
         } else {
             null
         }
@@ -109,19 +128,19 @@ fun ExtensionWebviewBody(
     }
 
     // Auto-recover when panel is missing (e.g. page reload or server restart)
-    LaunchedEffect(panel == null, viewTypeMeta, contributions != null, retryAttempt, failed) {
+    LaunchedEffect(panel == null, viewTypeMeta, tabProjectName, contributions != null, retryAttempt, failed) {
         if (panel != null || viewTypeMeta.isNullOrEmpty() || contributions == null || failed) return@LaunchedEffect
         val cmd = if (viewTypeMeta.contains(".")) viewTypeMeta else "$viewTypeMeta.view"
         if (retryAttempt == 0) {
             retryAttempt = 1
-            model.dispatchExtCommand(cmd, recovery = true)
+            model.dispatchExtCommand(cmd, recovery = true, projectName = tabProjectName)
         }
         delay(RETRY_INTERVAL_MS)
         if (retryAttempt >= MAX_RETRIES) {
             failed = true
         } else {
             retryAttempt += 1
-            model.dispatchExtCommand(cmd, recovery = true)
+            model.dispatchExtCommand(cmd, recovery = true, projectName = tabProjectName)
         }
     }
 
@@ -131,12 +150,13 @@ fun ExtensionWebviewBody(
             ExtensionLoadingOrFailedView(
                 title = tab.title,
                 failed = failed,
+                activationError = activationError,
                 onRetry = {
                     if (!viewTypeMeta.isNullOrEmpty()) {
                         retryAttempt = 1
                         failed = false
                         val cmd = if (viewTypeMeta.contains(".")) viewTypeMeta else "$viewTypeMeta.view"
-                        model.dispatchExtCommand(cmd, recovery = true)
+                        model.dispatchExtCommand(cmd, recovery = true, projectName = tabProjectName)
                     }
                 },
                 modifier = modifier,
@@ -199,12 +219,13 @@ fun ExtensionWebviewBody(
         ExtensionLoadingOrFailedView(
             title = tab.title,
             failed = failed,
+            activationError = activationError,
             onRetry = {
                 if (!viewTypeMeta.isNullOrEmpty()) {
                     retryAttempt = 1
                     failed = false
                     val cmd = if (viewTypeMeta.contains(".")) viewTypeMeta else "$viewTypeMeta.view"
-                    model.dispatchExtCommand(cmd, recovery = true)
+                    model.dispatchExtCommand(cmd, recovery = true, projectName = tabProjectName)
                 }
             },
             modifier = modifier,
@@ -218,16 +239,20 @@ fun ExtensionWebviewBody(
     }
     val initialMode = remember(panel.id) { themeMode }
     val initialCss = remember(panel.id) { themeCss }
+    val initialStateJson = remember(panel.id, panel.viewType, tabProjectName) {
+        ext?.getWebviewState(panel.viewType, tabProjectName)
+    }
 
-    val srcDoc = remember(panel.html, initialMode, initialCss) {
+    val srcDoc = remember(panel.html, initialMode, initialCss, initialStateJson) {
         ExtensionWebviewBridge.injectHostTheme(
-            ExtensionWebviewBridge.injectVscodeApiShim(panel.html),
+            ExtensionWebviewBridge.injectVscodeApiShim(panel.html, initialStateJson),
             initialMode,
             initialCss,
         )
     }
 
     val channel = remember(panel.id) { FrameChannel() }
+    val externalLinkGate = remember(panel.id) { ExternalLinkGate() }
     var crashed by remember(panel.id) { mutableStateOf(false) }
 
     fun postHostTheme() {
@@ -257,6 +282,7 @@ fun ExtensionWebviewBody(
         ExtensionLoadingOrFailedView(
             title = tab.title,
             failed = true,
+            activationError = activationError,
             onRetry = { crashed = false },
             modifier = modifier,
         )
@@ -270,7 +296,12 @@ fun ExtensionWebviewBody(
         channel = channel,
         onMessage = { rawJson ->
             val data = runCatching { Json.parseToJsonElement(rawJson) }.getOrNull() ?: return@ExtensionWebviewSurface
-            val extLink = ExtensionWebviewBridge.externalLinkRequest(data)
+            val stateUpdate = ExtensionWebviewBridge.setStateRequest(data)
+            if (stateUpdate != null) {
+                ext?.setWebviewState(panel.viewType, tabProjectName, stateUpdate)
+                return@ExtensionWebviewSurface
+            }
+            val extLink = externalLinkGate.tryConsumeOpenExternal(data)
             if (extLink != null) {
                 extLink.getOrNull()?.let { url ->
                     runCatching {
@@ -296,6 +327,7 @@ fun ExtensionWebviewBody(
         },
         onFrameLoad = { postHostTheme() },
         onCrash = { crashed = true },
+        onUserGesture = { externalLinkGate.recordUserGesture() },
         modifier = modifier
             .fillMaxSize()
             .testTag("ext-webview-${panel.id}"),
@@ -307,6 +339,7 @@ internal fun ExtensionLoadingOrFailedView(
     title: String,
     failed: Boolean,
     onRetry: () -> Unit,
+    activationError: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
@@ -327,6 +360,15 @@ internal fun ExtensionLoadingOrFailedView(
                     "Extension failed to load",
                     style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.text3.color),
                 )
+                if (!activationError.isNullOrEmpty()) {
+                    BasicText(
+                        activationError,
+                        style = ppmText(12f, lineHeight = 16f).copy(
+                            color = tokens.text3.color,
+                            textAlign = TextAlign.Center,
+                        ),
+                    )
+                }
                 Row(
                     Modifier
                         .clip(RoundedCornerShape(tokens.radSm.dp))

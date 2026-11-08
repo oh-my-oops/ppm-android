@@ -1432,58 +1432,75 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     private fun startExtensions(api: ApiClient) {
         val ext = com.hienlh.ppm.state.extensions.ExtensionClient(api, scope)
+        wireExtensionClient(ext)
+        this.extensions = ext
+        ext.start()
+    }
+
+    internal fun wireExtensionClient(ext: com.hienlh.ppm.state.extensions.ExtensionClient) {
+        ext.onActivationError = { extId, error ->
+            toast(ErrorToastMessage("Extension \"$extId\" failed to activate: $error"))
+        }
+        ext.onPersistWebviewState = { key, stateJson ->
+            prefs.put("extWebviewState.$serverKey.$key", stateJson)
+        }
+        ext.onLoadWebviewState = { key ->
+            prefs.get("extWebviewState.$serverKey.$key")
+        }
         ext.onWebviewCreated = { msg ->
             val slug = ext.coordinator.viewSlug(msg.viewType)
+            val locallyRequested = ext.coordinator.takeLocalDispatch(slug, msg.projectPath)
             val projName = msg.projectName ?: projects.firstOrNull { it.path == msg.projectPath }?.name
-            val existingTab = openTabs.map { it.first }.firstOrNull { t ->
+            val candidates = openTabs.map { it.first }.filter { t ->
                 t.type == "extension" &&
-                    ext.coordinator.viewSlug(t.metaString("viewType").orEmpty()) == slug &&
-                    (projName == null || t.projectId == projName || t.metaString("projectName") == projName)
+                    ext.coordinator.viewSlug(t.metaString("viewType").orEmpty()) == slug
+            }
+            val existingTab = if (projName != null) {
+                candidates.firstOrNull { t -> (t.metaString("projectName") ?: t.projectId) == projName }
+                    ?: candidates.firstOrNull { t -> (t.metaString("projectName") ?: t.projectId).isNullOrEmpty() }
+            } else {
+                candidates.firstOrNull()
             }
             if (existingTab != null) {
                 patchTabMetadata(
                     existingTab.id,
                     "panelId" to JsonPrimitive(msg.panelId),
-                    "viewType" to JsonPrimitive(msg.viewType),
+                    "viewType" to JsonPrimitive(slug),
                     "extensionId" to JsonPrimitive(msg.extensionId),
                     *(if (projName != null) arrayOf("projectName" to JsonPrimitive(projName)) else emptyArray()),
                 )
-                if (!ext.coordinator.consumeRecovery(slug)) {
+                val wasRecovery = ext.coordinator.consumeRecovery(slug)
+                if (locallyRequested && !wasRecovery) {
                     activate(existingTab.id)
                 }
-            } else if (!ext.coordinator.isRecentlyClosed(slug, projName)) {
-                val isLocal = ext.coordinator.takeLocalDispatch(slug, msg.projectPath)
-                if (isLocal) {
-                    withWorkspace { store ->
-                        store.openTab(
-                            NewTab(
-                                type = "extension",
-                                title = msg.title,
-                                projectId = projName ?: selectedProject,
-                                closable = true,
-                                metadata = buildJsonObject {
-                                    put("panelId", msg.panelId)
-                                    put("viewType", msg.viewType)
-                                    put("extensionId", msg.extensionId)
-                                    if (projName != null) put("projectName", projName)
-                                },
-                            ),
-                        )
-                    }
+            } else if (locallyRequested && !ext.coordinator.isRecentlyClosed(slug, projName)) {
+                val targetProject = projName ?: selectedProject
+                withWorkspace { store ->
+                    store.openTab(
+                        NewTab(
+                            type = "extension",
+                            title = msg.title,
+                            projectId = targetProject,
+                            closable = true,
+                            metadata = buildJsonObject {
+                                put("panelId", msg.panelId)
+                                put("viewType", slug)
+                                put("extensionId", msg.extensionId)
+                                if (targetProject != null) put("projectName", targetProject)
+                            },
+                        ),
+                    )
                 }
             }
         }
         ext.onTabOpen = { msg ->
-            val targetProject = msg.projectId
-                ?: (msg.metadata["projectName"] as? JsonPrimitive)?.contentOrNull
-                ?: selectedProject
-            if (msg.tabType == "git-review" && targetProject != null) {
-                val selObj = msg.metadata["select"] as? JsonObject
-                val path = (selObj?.get("path") as? JsonPrimitive)?.contentOrNull
-                    ?: (msg.metadata["filePath"] as? JsonPrimitive)?.contentOrNull
-                val repo = (selObj?.get("repo") as? JsonPrimitive)?.contentOrNull
-                openGitReview(targetProject, path, repo)
+            val metaProjectName = (msg.metadata["projectName"] as? JsonPrimitive)?.contentOrNull
+            if (msg.tabType == "git-review" && !metaProjectName.isNullOrEmpty()) {
+                val path = (msg.metadata["path"] as? JsonPrimitive)?.contentOrNull
+                val repo = (msg.metadata["repo"] as? JsonPrimitive)?.contentOrNull
+                openGitReview(metaProjectName, path, repo)
             } else {
+                val targetProject = msg.projectId ?: metaProjectName ?: selectedProject
                 withWorkspace { store ->
                     store.openTab(
                         NewTab(
@@ -1509,6 +1526,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 else -> ErrorToastMessage.Kind.INFO
             }
             val firstAction = msg.actions.firstOrNull()
+            val secondAction = msg.actions.getOrNull(1)
             toast(
                 ErrorToastMessage(
                     title = msg.message,
@@ -1517,41 +1535,81 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                             ext.sendNotificationAction(msg.id, label)
                         }
                     },
+                    cancel = secondAction?.let { label ->
+                        ErrorToastMessage.Action(label) {
+                            ext.sendNotificationAction(msg.id, label)
+                        }
+                    },
+                    onDismiss = if (msg.actions.isNotEmpty()) {
+                        { ext.sendNotificationAction(msg.id, null) }
+                    } else {
+                        null
+                    },
                     kind = kind,
                 ),
             )
         }
-        this.extensions = ext
-        ext.start()
     }
 
     /**
      * Dispatches an extension command (`ext-command-dispatch.ts`), automatically passing the active
-     * project's path (or chosen git repository path for git commands) when [args] is null.
+     * project's path (or chosen git repository path for `git-graph.*` commands) when [args] is null.
      */
     fun dispatchExtCommand(
         command: String,
         args: List<JsonElement>? = null,
         recovery: Boolean = false,
+        projectName: String? = null,
     ) {
         val ext = extensions ?: return
-        val proj = currentProject
-        val runsGit = command == "git-graph.view" || command.startsWith("git-graph.") || command.startsWith("git.")
-        val projectPath = if (proj != null) {
-            if (runsGit) {
-                com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(
-                    gitDiscovery[proj.name],
-                    gitChosenRepoPath[proj.name],
-                )?.path ?: proj.path
-            } else {
-                proj.path
-            }
-        } else {
-            null
+        if (args != null) {
+            val argPath = (args.firstOrNull() as? JsonPrimitive)?.contentOrNull
+            ext.coordinator.recordCommandDispatch(command, argPath, recovery)
+            ext.sendCommand(command, args)
+            return
         }
-        ext.coordinator.recordCommandDispatch(command, projectPath, recovery)
-        val effectiveArgs = args ?: if (projectPath != null) listOf(JsonPrimitive(projectPath)) else emptyList()
-        ext.sendCommand(command, effectiveArgs)
+        val targetProjectName = if (recovery) projectName else (projectName ?: selectedProject)
+        if (targetProjectName.isNullOrEmpty()) {
+            ext.coordinator.recordCommandDispatch(command, null, recovery)
+            ext.sendCommand(command, emptyList())
+            return
+        }
+        val runsGit = com.hienlh.ppm.state.git.GitRepoScope.commandRunsGit(command)
+        val cachedProj = projects.firstOrNull { it.name == targetProjectName }
+        if (cachedProj != null && (!runsGit || cachedProj.name in gitDiscovery)) {
+            val projectPath = if (runsGit) {
+                com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(
+                    gitDiscovery[cachedProj.name],
+                    gitChosenRepoPath[cachedProj.name],
+                )?.path ?: cachedProj.path
+            } else {
+                cachedProj.path
+            }
+            ext.coordinator.recordCommandDispatch(command, projectPath, recovery)
+            ext.sendCommand(command, listOf(JsonPrimitive(projectPath)))
+            return
+        }
+        scope.launch {
+            val proj = cachedProj ?: api?.let { client ->
+                quietly { client.projects() }?.firstOrNull { it.name == targetProjectName }
+            }
+            val projectPath = if (proj != null) {
+                if (runsGit) {
+                    loadGitRepos(proj.name)
+                    com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(
+                        gitDiscovery[proj.name],
+                        gitChosenRepoPath[proj.name],
+                    )?.path ?: proj.path
+                } else {
+                    proj.path
+                }
+            } else {
+                null
+            }
+            ext.coordinator.recordCommandDispatch(command, projectPath, recovery)
+            val effectiveArgs = if (projectPath != null) listOf(JsonPrimitive(projectPath)) else emptyList()
+            ext.sendCommand(command, effectiveArgs)
+        }
     }
 
     /** How many times the app has come to the front: each restarts the reconnect pill's clocks. */
@@ -4808,6 +4866,8 @@ class ErrorToastMessage(
     val persistent: Boolean = false,
     /** `duration: n`: how long it stays, in milliseconds; sonner's four seconds when none is given. */
     val durationMillis: Long? = null,
+    val cancel: Action? = null,
+    val onDismiss: (() -> Unit)? = null,
 ) {
     class Action(val label: String, val run: () -> Unit)
 
@@ -4828,8 +4888,15 @@ class AppToast internal constructor(val id: Long, message: ErrorToastMessage) {
     var dismissed by mutableStateOf(false)
         private set
 
-    fun dismiss() {
+    private var dismissNotified = false
+
+    fun dismiss(byAction: Boolean = false) {
+        if (dismissed) return
         dismissed = true
+        if (!byAction && !dismissNotified) {
+            dismissNotified = true
+            message.onDismiss?.invoke()
+        }
     }
 }
 

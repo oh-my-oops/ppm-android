@@ -159,7 +159,11 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
             add(action("Report Bug", ProductIcon.Bug, "bug report github issue crash", null, run { model.openLogs("report") }))
             add(action("Forward a Port", ProductIcon.Globe, "port forward tunnel tailscale cloudflare preview", null, run { model.openPortForwarding() }))
         }
+        val extKbs = extContribs?.keybindings.orEmpty()
         val extItems = extContribs?.commands.orEmpty().map { cmd ->
+            val kb = extKbs.firstOrNull { it.command == cmd.command }
+            val overrideCombo = if (kb != null) bindings.binding("ext:${kb.command}") else ""
+            val shortcutCombo = overrideCombo.ifEmpty { kb?.key.orEmpty() }
             val label = if (!cmd.category.isNullOrEmpty()) "${cmd.category}: ${cmd.title}" else cmd.title
             val icon = when (cmd.icon) {
                 "git-branch", "git-compare" -> ProductIcon.GitBranch
@@ -181,8 +185,8 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
             action(
                 label = label,
                 icon = icon,
-                words = "${cmd.command} ${cmd.title} ${cmd.category.orEmpty()}",
-                shortcut = null,
+                words = "extension ${cmd.command} ${cmd.title} ${cmd.category.orEmpty()}",
+                shortcut = formatShortcut(shortcutCombo),
                 run = run { model.dispatchExtCommand(cmd.command) },
             )
         }

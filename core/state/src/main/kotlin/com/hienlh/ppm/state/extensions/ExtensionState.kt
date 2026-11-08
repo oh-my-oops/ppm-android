@@ -111,12 +111,47 @@ data class ContributedKeybinding(
     }
 }
 
+data class TreeHeaderAction(
+    val command: String,
+    val title: String,
+    val icon: String? = null,
+)
+
+private val VIEW_WHEN_REGEX = Regex("""view\s*==\s*(\S+)""")
+
+fun inferTreeActionIcon(command: String): String = when {
+    command.contains("refresh") -> "refresh"
+    command.contains("add") || command.contains("create") || command.contains("new") -> "plus"
+    command.contains("delete") || command.contains("remove") -> "trash"
+    command.contains("edit") || command.contains("update") -> "edit"
+    command.contains("search") || command.contains("find") -> "search"
+    else -> "refresh"
+}
+
 data class ExtensionContributes(
     val commands: List<ContributedCommand> = emptyList(),
     val views: Map<String, List<ContributedView>> = emptyMap(),
     val menus: Map<String, List<ContributedMenu>> = emptyMap(),
     val keybindings: List<ContributedKeybinding> = emptyList(),
 ) {
+    /** Header actions for a tree view from `menus["view/title"]` (`extension-tree-view.tsx:44-57`). */
+    fun headerActionsForView(viewId: String): List<TreeHeaderAction> {
+        val viewTitleMenus = menus["view/title"].orEmpty()
+        if (viewTitleMenus.isEmpty()) return emptyList()
+        val out = mutableListOf<TreeHeaderAction>()
+        for (menu in viewTitleMenus) {
+            val whenClause = menu.whenClause
+            if (!whenClause.isNullOrEmpty()) {
+                val match = VIEW_WHEN_REGEX.find(whenClause)
+                if (match != null && match.groupValues[1] != viewId) continue
+            }
+            val cmd = commands.firstOrNull { it.command == menu.command }
+            if (cmd != null) {
+                out += TreeHeaderAction(command = cmd.command, title = cmd.title, icon = cmd.icon)
+            }
+        }
+        return out
+    }
     companion object {
         fun from(json: JsonElement?): ExtensionContributes {
             val obj = json.obj ?: return ExtensionContributes()
@@ -564,30 +599,74 @@ class ExtensionCoordinator(
     fun consumeRecovery(slug: String): Boolean = recoveryViews.remove(slug)
 }
 
+/**
+ * User-gesture and rate-limit guard for `__ppm.openExternal` requests from extension webviews.
+ */
+class ExternalLinkGate(
+    private val gestureWindowMs: Long = 2_000L,
+    private val cooldownMs: Long = 1_000L,
+) {
+    private var lastGestureAtMs: Long = -1L
+    private var lastOpenedAtMs: Long = -1L
+
+    fun recordUserGesture(nowMs: Long = System.currentTimeMillis()) {
+        lastGestureAtMs = nowMs
+    }
+
+    /**
+     * Returns `null` when [data] is not an `__ppm.openExternal` message; otherwise returns
+     * `Result.success(url)` only if the URL is valid http(s), a recent user touch gesture
+     * occurred within [gestureWindowMs], and at least [cooldownMs] has elapsed since the
+     * last opened external link.
+     */
+    fun tryConsumeOpenExternal(
+        data: JsonElement?,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Result<String>? {
+        val parsed = ExtensionWebviewBridge.externalLinkRequest(data) ?: return null
+        val url = parsed.getOrElse { return Result.failure(it) }
+        if (lastGestureAtMs < 0L || nowMs - lastGestureAtMs > gestureWindowMs) {
+            return Result.failure(IllegalStateException("User gesture required to open external link"))
+        }
+        if (lastOpenedAtMs >= 0L && nowMs - lastOpenedAtMs < cooldownMs) {
+            return Result.failure(IllegalStateException("External link rate limit exceeded"))
+        }
+        lastOpenedAtMs = nowMs
+        return Result.success(url)
+    }
+}
+
 object ExtensionWebviewBridge {
     const val HOST_THEME_MESSAGE = "ppm:theme"
     const val OPEN_EXTERNAL_COMMAND = "__ppm.openExternal"
+    const val SET_STATE_COMMAND = "__ppm.setState"
     const val FILE_ICONS_COMMAND = "__ppm.fileIcons"
     private const val MAX_ICON_NAMES = 500
 
     /**
-     * Inject `acquireVsCodeApi()` shim right after `<head>`.
-     * Uses in-memory fallback when `sessionStorage` throws inside a sandboxed iframe
-     * without `allow-same-origin`.
+     * Build `acquireVsCodeApi()` shim script seeded with [initialStateJson] so `getState()`
+     * returns persisted state across sessions even inside `<iframe sandbox="allow-scripts">`,
+     * and `setState(s)` posts `{ command: "__ppm.setState", state: s }` to the host to persist.
      */
-    private const val VSCODE_API_SHIM = """<script>
+    private fun buildVscodeApiShim(initialStateJson: String?): String {
+        val seed = initialStateJson?.takeIf { it.isNotBlank() }?.replace("</", "<\\/") ?: "null"
+        return """<script>
 (function(){
-  var memState = null;
+  var memState = $seed;
   window.acquireVsCodeApi = function() {
     return {
       postMessage: function(m) { window.parent.postMessage(m, "*"); },
       getState: function() {
-        try { return JSON.parse(sessionStorage.getItem("vscode-state") || "null"); }
-        catch (e) { return memState; }
+        try {
+          var raw = sessionStorage.getItem("vscode-state");
+          return raw !== null ? JSON.parse(raw) : memState;
+        } catch (e) { return memState; }
       },
       setState: function(s) {
         memState = s;
         try { sessionStorage.setItem("vscode-state", JSON.stringify(s)); }
+        catch (e) {}
+        try { window.parent.postMessage({ command: "$SET_STATE_COMMAND", state: s }, "*"); }
         catch (e) {}
         return s;
       }
@@ -595,6 +674,7 @@ object ExtensionWebviewBridge {
   };
 })();
 </script>"""
+    }
 
     private const val HOST_THEME_SHIM = """<script>
 window.addEventListener("message",function(e){
@@ -632,14 +712,24 @@ window.addEventListener("message",function(e){
         "--shadow-panel" to "--shadow-panel",
     )
 
-    fun injectVscodeApiShim(html: String): String {
+    fun injectVscodeApiShim(html: String, initialStateJson: String? = null): String {
         if (html.isEmpty()) return html
+        val shim = buildVscodeApiShim(initialStateJson)
         val headIdx = html.indexOf("<head>", ignoreCase = true)
         return if (headIdx != -1) {
-            html.substring(0, headIdx + 6) + VSCODE_API_SHIM + html.substring(headIdx + 6)
+            html.substring(0, headIdx + 6) + shim + html.substring(headIdx + 6)
         } else {
-            VSCODE_API_SHIM + html
+            shim + html
         }
+    }
+
+    /**
+     * Returns `null` when [data] is not a `__ppm.setState` message; otherwise returns the state payload.
+     */
+    fun setStateRequest(data: JsonElement?): JsonElement? {
+        val obj = data?.obj ?: return null
+        if (obj["command"].string != SET_STATE_COMMAND) return null
+        return obj["state"] ?: JsonNull
     }
 
     fun hostThemeCss(readVar: (String) -> String): String {
@@ -799,6 +889,12 @@ class ExtensionClient(
     var onTabOpen: ((ExtServerMessage.TabOpen) -> Unit)? = null
     var onProjectSwitch: ((projectName: String) -> Unit)? = null
     var onNotification: ((ExtServerMessage.Notification) -> Unit)? = null
+    var onActivationError: ((extId: String, error: String) -> Unit)? = null
+    var onPersistWebviewState: ((key: String, stateJson: String) -> Unit)? = null
+    var onLoadWebviewState: ((key: String) -> String?)? = null
+
+    private val webviewStates = LinkedHashMap<String, String>()
+    internal val sentClientMessages = mutableListOf<String>()
 
     private var socket: SocketConnection? = null
     private var socketJob: Job? = null
@@ -807,6 +903,26 @@ class ExtensionClient(
     private var lastFrameAt = clock()
     private var failures = 0
     private var stopped = false
+
+    private fun sendRaw(json: String) {
+        sentClientMessages += json
+        socket?.send(json)
+    }
+
+    fun webviewStateKey(viewType: String, projectName: String?): String =
+        "${coordinator.viewSlug(viewType)}:${projectName.orEmpty()}"
+
+    fun getWebviewState(viewType: String, projectName: String?): String? {
+        val key = webviewStateKey(viewType, projectName)
+        return webviewStates[key] ?: onLoadWebviewState?.invoke(key)?.also { webviewStates[key] = it }
+    }
+
+    fun setWebviewState(viewType: String, projectName: String?, state: JsonElement) {
+        val key = webviewStateKey(viewType, projectName)
+        val raw = state.toString()
+        webviewStates[key] = raw
+        onPersistWebviewState?.invoke(key, raw)
+    }
 
     fun start() {
         connect()
@@ -831,20 +947,20 @@ class ExtensionClient(
     }
 
     fun sendCommand(command: String, args: List<JsonElement> = emptyList()) {
-        socket?.send(ExtClientMessages.commandExecute(command, args))
+        sendRaw(ExtClientMessages.commandExecute(command, args))
     }
 
     fun expandTree(viewId: String, itemId: String) {
-        socket?.send(ExtClientMessages.treeExpand(viewId, itemId))
+        sendRaw(ExtClientMessages.treeExpand(viewId, itemId))
     }
 
     fun sendWebviewMessage(panelId: String, message: JsonElement) {
-        socket?.send(ExtClientMessages.webviewMessage(panelId, message))
+        sendRaw(ExtClientMessages.webviewMessage(panelId, message))
     }
 
     fun closeWebview(panelId: String) {
         _webviewPanels.value = _webviewPanels.value - panelId
-        socket?.send(ExtClientMessages.webviewClose(panelId))
+        sendRaw(ExtClientMessages.webviewClose(panelId))
     }
 
     fun resolveQuickPick(requestId: String, selected: List<QuickPickItemUI>?) {
@@ -852,7 +968,7 @@ class ExtensionClient(
         if (_quickPick.value?.requestId == requestId) {
             _quickPick.value = null
         }
-        socket?.send(ExtClientMessages.quickPickResolve(requestId, selected))
+        sendRaw(ExtClientMessages.quickPickResolve(requestId, selected))
     }
 
     fun resolveInputBox(requestId: String, value: String?) {
@@ -860,18 +976,24 @@ class ExtensionClient(
         if (_inputBox.value?.requestId == requestId) {
             _inputBox.value = null
         }
-        socket?.send(ExtClientMessages.inputBoxResolve(requestId, value))
+        sendRaw(ExtClientMessages.inputBoxResolve(requestId, value))
     }
 
     fun sendNotificationAction(id: String, action: String?) {
-        socket?.send(ExtClientMessages.notificationAction(id, action))
+        sendRaw(ExtClientMessages.notificationAction(id, action))
     }
 
     internal fun handle(msg: ExtServerMessage) {
         when (msg) {
             is ExtServerMessage.ContributionsUpdate -> {
+                val prev = _activationErrors.value
                 _contributions.value = msg.contributions
                 _activationErrors.value = msg.activationErrors
+                for ((extId, error) in msg.activationErrors) {
+                    if (extId !in prev) {
+                        onActivationError?.invoke(extId, error)
+                    }
+                }
             }
             is ExtServerMessage.StatusBarUpdate -> {
                 _statusBarItems.value = _statusBarItems.value + (msg.item.id to msg.item)
@@ -888,7 +1010,9 @@ class ExtensionClient(
                 }
                 _treeViews.value = _treeViews.value + (msg.viewId to updated)
             }
-            is ExtServerMessage.TreeRefresh -> Unit
+            is ExtServerMessage.TreeRefresh -> {
+                _treeViews.value = _treeViews.value - msg.viewId
+            }
             is ExtServerMessage.WebviewCreate -> {
                 val existingHtml = _webviewPanels.value[msg.panelId]?.html.orEmpty()
                 val panel = WebviewPanelUI(
@@ -915,6 +1039,9 @@ class ExtensionClient(
             }
             is ExtServerMessage.QuickPickShow -> {
                 quickPickTimeoutJob?.cancel()
+                _quickPick.value?.let { existing ->
+                    sendRaw(ExtClientMessages.quickPickResolve(existing.requestId, null))
+                }
                 _quickPick.value = QuickPickRequest(msg.requestId, msg.items, msg.options)
                 quickPickTimeoutJob = scope.launch {
                     delay(30_000L)
@@ -925,6 +1052,9 @@ class ExtensionClient(
             }
             is ExtServerMessage.InputBoxShow -> {
                 inputBoxTimeoutJob?.cancel()
+                _inputBox.value?.let { existing ->
+                    sendRaw(ExtClientMessages.inputBoxResolve(existing.requestId, null))
+                }
                 _inputBox.value = InputBoxRequest(msg.requestId, msg.options)
                 inputBoxTimeoutJob = scope.launch {
                     delay(30_000L)

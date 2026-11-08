@@ -124,18 +124,34 @@ fun HtmlSurface(
     )
 }
 
-private fun hostPage(src: String): String {
-    // A JSON string is a JavaScript one; `</` is split so the URL can never close the script.
-    val frameSrc = JsonPrimitive(src).toString().replace("</", "<\\/")
+internal fun buildHostFramePage(
+    title: String,
+    bgHex: String,
+    frameSrc: String? = null,
+    frameSrcDoc: String? = null,
+): String {
+    val frameTitle = JsonPrimitive(title).toString().replace("</", "<\\/")
+    val safeBg = bgHex.replace(Regex("[^#a-zA-Z0-9(),.%\\s-]"), "")
+    val assignment = when {
+        frameSrc != null -> {
+            val escaped = JsonPrimitive(frameSrc).toString().replace("</", "<\\/")
+            "frame.src = $escaped;"
+        }
+        frameSrcDoc != null -> {
+            val escaped = JsonPrimitive(frameSrcDoc).toString().replace("</", "<\\/")
+            "window.ppmSetSrcDoc = function (doc) { frame.srcdoc = doc; };\n  frame.srcdoc = $escaped;"
+        }
+        else -> ""
+    }
     return """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>html,body{margin:0;height:100%;overflow:hidden;background:#fff}iframe{display:block;width:100%;height:100%;border:0;background:#fff}</style>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:$safeBg}iframe{display:block;width:100%;height:100%;border:0;background:$safeBg}</style>
 </head><body><script>
 (function () {
   var host = window.$HOST_OBJECT;
   if (!host) return;
   var frame = document.createElement("iframe");
-  frame.title = "HTML preview";
+  frame.title = $frameTitle;
   frame.setAttribute("sandbox", "allow-scripts");
   frame.setAttribute("referrerpolicy", "no-referrer");
   window.addEventListener("message", function (event) {
@@ -148,11 +164,17 @@ private fun hostPage(src: String): String {
   window.ppmSend = function (message) {
     if (frame.contentWindow) frame.contentWindow.postMessage(message, "*");
   };
-  frame.src = $frameSrc;
+  $assignment
   document.body.appendChild(frame);
 })();
 </script></body></html>"""
 }
+
+private fun hostPage(src: String): String =
+    buildHostFramePage(title = "HTML preview", bgHex = "#fff", frameSrc = src)
+
+private fun hostSrcDocPage(srcDoc: String, title: String, bgHex: String): String =
+    buildHostFramePage(title = title, bgHex = bgHex, frameSrcDoc = srcDoc)
 
 /**
  * Sandboxed `<iframe sandbox="allow-scripts">` surface for extension webviews (e.g. Git Graph)
@@ -161,7 +183,7 @@ private fun hostPage(src: String): String {
  * Host page runs at [EXTENSION_HOST_ORIGIN] (`https://appassets.androidplatform.net`) and bridges
  * `window.parent.postMessage` <-> [HOST_OBJECT] / `window.ppmSend`.
  */
-@SuppressLint("SetJavaScriptEnabled")
+@SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
 @Composable
 fun ExtensionWebviewSurface(
     srcDoc: String,
@@ -171,11 +193,13 @@ fun ExtensionWebviewSurface(
     onMessage: (String) -> Unit,
     onFrameLoad: () -> Unit,
     onCrash: () -> Unit,
+    onUserGesture: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val message by rememberUpdatedState(onMessage)
     val loaded by rememberUpdatedState(onFrameLoad)
     val crashed by rememberUpdatedState(onCrash)
+    val gesture by rememberUpdatedState(onUserGesture)
     var lastSrcDoc by remember { mutableStateOf(srcDoc) }
 
     AndroidView(
@@ -190,6 +214,13 @@ fun ExtensionWebviewSurface(
                 settings.domStorageEnabled = true
                 settings.allowFileAccess = false
                 settings.allowContentAccess = false
+                setOnTouchListener { _, event ->
+                    val action = event.actionMasked
+                    if (action == android.view.MotionEvent.ACTION_DOWN || action == android.view.MotionEvent.ACTION_UP) {
+                        gesture()
+                    }
+                    false
+                }
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                         request.isForMainFrame
@@ -240,38 +271,4 @@ fun ExtensionWebviewSurface(
             view.destroy()
         },
     )
-}
-
-private fun hostSrcDocPage(srcDoc: String, title: String, bgHex: String): String {
-    val frameDoc = JsonPrimitive(srcDoc).toString().replace("</", "<\\/")
-    val frameTitle = JsonPrimitive(title).toString().replace("</", "<\\/")
-    val safeBg = bgHex.replace(Regex("[^#a-zA-Z0-9(),.%\\s-]"), "")
-    return """<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>html,body{margin:0;height:100%;overflow:hidden;background:$safeBg}iframe{display:block;width:100%;height:100%;border:0;background:$safeBg}</style>
-</head><body><script>
-(function () {
-  var host = window.$HOST_OBJECT;
-  if (!host) return;
-  var frame = document.createElement("iframe");
-  frame.title = $frameTitle;
-  frame.setAttribute("sandbox", "allow-scripts");
-  frame.setAttribute("referrerpolicy", "no-referrer");
-  window.addEventListener("message", function (event) {
-    if (!frame.contentWindow || event.source !== frame.contentWindow) return;
-    var text;
-    try { text = JSON.stringify(event.data); } catch (e) { return; }
-    if (typeof text === "string" && text.length <= $MAX_RELAY_CHARS) host.postMessage(text);
-  });
-  frame.addEventListener("load", function () { host.postMessage("$LOAD_SIGNAL"); });
-  window.ppmSend = function (message) {
-    if (frame.contentWindow) frame.contentWindow.postMessage(message, "*");
-  };
-  window.ppmSetSrcDoc = function (doc) {
-    frame.srcdoc = doc;
-  };
-  frame.srcdoc = $frameDoc;
-  document.body.appendChild(frame);
-})();
-</script></body></html>"""
 }

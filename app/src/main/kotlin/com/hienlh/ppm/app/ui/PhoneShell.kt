@@ -894,8 +894,10 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                     contentAlignment = Alignment.Center,
                 ) { PpmIcon(ProductIcon.X, 16.dp, tokens.text.color) }
             }
-            val sections = model.sidebarSections
-            val shown = section?.takeIf { it in sections || it.startsWith("ext:") } ?: sections.first()
+            val contribs = model.extensions?.contributions?.collectAsState()?.value
+            val extViews = contribs?.views?.get("sidebar").orEmpty().filter { it.type != "webview" }
+            val sections = model.sidebarSections + extViews.map { "ext:${it.id}" }
+            val shown = section?.takeIf { it in sections } ?: sections.first()
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 val list = model.sidebarList
                 val search = model.sidebarSearch
@@ -935,25 +937,33 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                 Row(Modifier.fillMaxWidth()) {
                     for (id in sections) {
                         val teams = id == "teams"
+                        val extView = if (id.startsWith("ext:")) {
+                            val viewId = id.removePrefix("ext:")
+                            extViews.firstOrNull { it.id == viewId }
+                        } else {
+                            null
+                        }
                         DrawerTabSlot(
-                            when (id) {
-                                "explorer" -> ProductIcon.FolderOpen
-                                "search" -> ProductIcon.Search
-                                "git" -> ProductIcon.GitBranch
-                                "database" -> ProductIcon.Database
-                                "designs" -> ProductIcon.Palette
-                                "teams" -> ProductIcon.Users
-                                "tunnels" -> ProductIcon.Globe
+                            when {
+                                id == "explorer" -> ProductIcon.FolderOpen
+                                id == "search" -> ProductIcon.Search
+                                id == "git" -> ProductIcon.GitBranch
+                                id == "database" -> ProductIcon.Database
+                                id == "designs" -> ProductIcon.Palette
+                                id == "teams" -> ProductIcon.Users
+                                id == "tunnels" -> ProductIcon.Globe
+                                id.startsWith("ext:") -> ProductIcon.Puzzle
                                 else -> ProductIcon.BotMessageSquare
                             },
-                            when (id) {
-                                "explorer" -> "Explorer"
-                                "search" -> "Search"
-                                "git" -> "Git"
-                                "database" -> "DB"
-                                "designs" -> "Designs"
-                                "teams" -> "Teams"
-                                "tunnels" -> "Ports"
+                            when {
+                                id == "explorer" -> "Explorer"
+                                id == "search" -> "Search"
+                                id == "git" -> "Git"
+                                id == "database" -> "DB"
+                                id == "designs" -> "Designs"
+                                id == "teams" -> "Teams"
+                                id == "tunnels" -> "Ports"
+                                id.startsWith("ext:") -> extView?.name ?: id.removePrefix("ext:")
                                 else -> "History"
                             },
                             active = id == shown,

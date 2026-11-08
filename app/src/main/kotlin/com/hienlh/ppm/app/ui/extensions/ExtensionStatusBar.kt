@@ -35,7 +35,7 @@ fun ExtensionStatusBarItems(
     ExtensionStatusBarRow(
         items = map.values.toList(),
         alignment = alignment,
-        onCommand = { cmd -> model.dispatchExtCommand(cmd) },
+        onCommand = { cmd -> model.dispatchExtCommand(cmd, args = emptyList()) },
         modifier = modifier,
     )
 }
