@@ -213,7 +213,7 @@ class ExtensionUiTest {
     }
 
     @Test
-    fun `TreeView renders header actions tooltips handles duplicate child ids across parents and resets stale expanded state on root update`() {
+    fun `TreeView nodes start closed auto-expand once when children arrive do not set row tooltip contentDescription and reset on root update`() {
         var headerClickedCmd: String? = null
         val expandedIds = mutableListOf<String>()
         var itemsState by androidx.compose.runtime.mutableStateOf(
@@ -222,17 +222,16 @@ class ExtensionUiTest {
                     id = "conn-1",
                     label = "Postgres 1",
                     tooltip = "Primary DB",
+                    // Initial item with collapsibleState = "expanded" and no children starts closed
                     collapsibleState = "expanded",
-                    children = listOf(
-                        TreeItemUI(id = "tables", label = "Tables (1)", collapsibleState = "none"),
-                    ),
+                    children = null,
                 ),
                 TreeItemUI(
                     id = "conn-2",
                     label = "Postgres 2",
-                    collapsibleState = "expanded",
+                    // Even with collapsibleState = "collapsed", non-empty children auto-expand once
+                    collapsibleState = "collapsed",
                     children = listOf(
-                        // Same child id "tables" under a different parent must not crash LazyColumn!
                         TreeItemUI(id = "tables", label = "Tables (2)", collapsibleState = "none"),
                     ),
                 ),
@@ -258,6 +257,39 @@ class ExtensionUiTest {
             }
         }
 
+        // Row does not set contentDescription to tooltip
+        val rowSemantics = composeRule.onNodeWithTag("ext-tree-item-conn-1", useUnmergedTree = true).fetchSemanticsNode()
+        assertTrue(
+            "Expected no ContentDescription on tree row",
+            !rowSemantics.config.contains(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription),
+        )
+
+        // conn-1 started closed despite collapsibleState = "expanded"; clicking it requests children
+        composeRule.onNodeWithTag("ext-tree-item-conn-1").performClick()
+        assertEquals(listOf("conn-1"), expandedIds)
+
+        // Children arrive for conn-1 (same child id "tables" under both parents must not crash LazyColumn)
+        itemsState = listOf(
+            TreeItemUI(
+                id = "conn-1",
+                label = "Postgres 1",
+                tooltip = "Primary DB",
+                collapsibleState = "collapsed",
+                children = listOf(
+                    TreeItemUI(id = "tables", label = "Tables (1)", collapsibleState = "none"),
+                ),
+            ),
+            TreeItemUI(
+                id = "conn-2",
+                label = "Postgres 2",
+                collapsibleState = "collapsed",
+                children = listOf(
+                    TreeItemUI(id = "tables", label = "Tables (2)", collapsibleState = "none"),
+                ),
+            ),
+        )
+        composeRule.waitForIdle()
+
         composeRule.onNodeWithText("Tables (1)").assertIsDisplayed()
         composeRule.onNodeWithText("Tables (2)").assertIsDisplayed()
         composeRule.onNodeWithTag("ext-tree-header-action-db.refresh").performClick()
@@ -275,7 +307,7 @@ class ExtensionUiTest {
         composeRule.waitForIdle()
         // Clicking conn-1 now expands it and triggers onExpand("conn-1") instead of collapsing
         composeRule.onNodeWithTag("ext-tree-item-conn-1").performClick()
-        assertEquals(listOf("conn-1"), expandedIds)
+        assertEquals(listOf("conn-1", "conn-1"), expandedIds)
     }
 
     @Test
