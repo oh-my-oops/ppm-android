@@ -70,6 +70,7 @@ import com.hienlh.ppm.client.clawbotStartTelegramConnect
 import com.hienlh.ppm.client.codexAccounts
 import com.hienlh.ppm.client.codexAccountsOverview
 import com.hienlh.ppm.client.codexAddApiKey
+import com.hienlh.ppm.client.codexBrowserLoginStatus
 import com.hienlh.ppm.client.codexCancelBrowserLogin
 import com.hienlh.ppm.client.codexCancelDeviceLogin
 import com.hienlh.ppm.client.codexDeleteAccount
@@ -135,6 +136,7 @@ import com.hienlh.ppm.state.settings.TokenTestReport
 import com.hienlh.ppm.state.settings.UsageSnapshotPoint
 import com.hienlh.ppm.state.settings.buildMcpConfigJson
 import com.hienlh.ppm.state.settings.clampDebounceMs
+import com.hienlh.ppm.state.settings.effectiveClaudeBackupPassword
 import com.hienlh.ppm.state.settings.filterAiResources
 import com.hienlh.ppm.state.settings.isPpmToolEnabled
 import com.hienlh.ppm.state.settings.looksLikeAnthropicOAuthCode
@@ -147,10 +149,12 @@ import com.hienlh.ppm.state.settings.parseClawbotTasks
 import com.hienlh.ppm.state.settings.parseClawbotTelegram
 import com.hienlh.ppm.state.settings.parseCodexBrowserLogin
 import com.hienlh.ppm.state.settings.parseCodexDeviceLogin
+import com.hienlh.ppm.state.settings.parseCodexLoginPollStatus
 import com.hienlh.ppm.state.settings.parseDesignSettings
 import com.hienlh.ppm.state.settings.parseDesignSystems
 import com.hienlh.ppm.state.settings.parseMcpServers
 import com.hienlh.ppm.state.settings.parseOAuthCodeFlowStart
+import com.hienlh.ppm.state.settings.parseTelegramConnectLink
 import com.hienlh.ppm.state.settings.parseTokenTestReport
 import com.hienlh.ppm.state.settings.parseUsageHistory
 import com.hienlh.ppm.state.settings.utf8ByteCount
@@ -744,7 +748,9 @@ private fun ClaudeAccountsPane(model: AppModel) {
     // Export / Import Dialog
     if (showExportImportDialog) {
         var password by remember { mutableStateOf("") }
+        var showPassword by remember { mutableStateOf(false) }
         var ppmPassword by remember { mutableStateOf("") }
+        var showPpmPassword by remember { mutableStateOf(false) }
         var includeRefresh by remember { mutableStateOf(true) }
         var refreshBefore by remember { mutableStateOf(false) }
         var payloadText by remember { mutableStateOf("") }
@@ -767,17 +773,23 @@ private fun ClaudeAccountsPane(model: AppModel) {
                     "Warning: if you export refresh tokens and another machine refreshes them, this server's access token expires in ~1 hour.",
                     style = ppmText(11f, lineHeight = 16f).copy(color = tokens.warning.color),
                 )
-                SettingsTextInput(
+                SettingsPasswordInput(
                     value = password,
                     onValueChange = { password = it },
-                    placeholder = "Encryption password (optional, defaults to built-in)",
+                    placeholder = "Leave empty for default",
+                    visible = showPassword,
+                    onToggleVisible = { showPassword = !showPassword },
                     modifier = Modifier.fillMaxWidth(),
+                    inputTestTag = "claude-backup-password-input",
                 )
-                SettingsTextInput(
+                SettingsPasswordInput(
                     value = ppmPassword,
                     onValueChange = { ppmPassword = it },
                     placeholder = "PPM server password (required when auth is enabled)",
+                    visible = showPpmPassword,
+                    onToggleVisible = { showPpmPassword = !showPpmPassword },
                     modifier = Modifier.fillMaxWidth(),
+                    inputTestTag = "claude-backup-ppm-password-input",
                 )
                 SettingsToggleRow(
                     title = "Include refresh tokens",
@@ -812,7 +824,7 @@ private fun ClaudeAccountsPane(model: AppModel) {
                             scope.launch {
                                 try {
                                     val data = client.accountsExportEncrypted(
-                                        password = password.trim(),
+                                        password = effectiveClaudeBackupPassword(password),
                                         ppmPassword = ppmPassword.ifBlank { null },
                                         includeRefreshToken = includeRefresh,
                                         refreshBeforeExport = refreshBefore,
@@ -838,7 +850,10 @@ private fun ClaudeAccountsPane(model: AppModel) {
                             busy = true
                             scope.launch {
                                 try {
-                                    client.accountsImportEncrypted(payloadText.trim(), password.trim())
+                                    client.accountsImportEncrypted(
+                                        payloadText.trim(),
+                                        effectiveClaudeBackupPassword(password),
+                                    )
                                     reload()
                                     dialogMsg = "Imported successfully"
                                 } catch (t: Throwable) {
@@ -939,7 +954,7 @@ private fun ClaudeAccountsPane(model: AppModel) {
                         val sPct = "${(pt.fiveHour * 100).toInt()}%"
                         val wPct = "${(pt.sevenDay * 100).toInt()}%"
                         BasicText(
-                            "ts=${pt.timestamp} · 5h: $sPct · 7d: $wPct",
+                            "${pt.recordedAt} · 5h: $sPct · 7d: $wPct",
                             style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text2.color),
                         )
                     }
@@ -1023,16 +1038,45 @@ private fun CodexAccountsPane(model: AppModel) {
         val deadline = System.currentTimeMillis() + 210_000L
         while (isActive && System.currentTimeMillis() < deadline) {
             delay(2_000L)
-            val status = runCatching { parseCodexDeviceLogin(client.codexDeviceLoginStatus(current.id)) }.getOrNull()
-            if (status != null) {
-                deviceFlow = status
-                if (status.status == "completed" || status.status == "done" || status.status == "success") {
+            val polled = runCatching { parseCodexLoginPollStatus(client.codexDeviceLoginStatus(current.id)) }.getOrNull()
+            if (polled != null) {
+                deviceFlow = current.copy(status = polled.state, error = polled.error)
+                if (polled.isDone) {
                     deviceFlow = null
                     reload()
                     isError = false
                     statusMsg = "Codex account signed in via device code"
                     break
-                } else if (status.status in setOf("failed", "expired", "cancelled")) {
+                } else if (polled.isError) {
+                    isError = true
+                    statusMsg = polled.error ?: "Device login failed"
+                    break
+                }
+            }
+        }
+    }
+
+    // Poll active browser login flow every 2s up to 600s
+    LaunchedEffect(browserFlow?.id) {
+        val current = browserFlow ?: return@LaunchedEffect
+        val client = api ?: return@LaunchedEffect
+        val deadline = System.currentTimeMillis() + 600_000L
+        while (isActive && System.currentTimeMillis() < deadline) {
+            delay(2_000L)
+            val polled = runCatching { parseCodexLoginPollStatus(client.codexBrowserLoginStatus(current.id)) }.getOrNull()
+            if (polled != null) {
+                browserFlow = current.copy(status = polled.state, error = polled.error)
+                if (polled.isDone) {
+                    browserFlow = null
+                    browserBusy = false
+                    reload()
+                    isError = false
+                    statusMsg = "Codex account connected via browser login"
+                    break
+                } else if (polled.isError) {
+                    browserBusy = false
+                    isError = true
+                    statusMsg = polled.error ?: "Browser login failed"
                     break
                 }
             }
@@ -1296,6 +1340,12 @@ private fun CodexAccountsPane(model: AppModel) {
                     mono = true,
                     modifier = Modifier.fillMaxWidth().testTag("codex-browser-callback-input"),
                 )
+                flow.error?.let { errText ->
+                    BasicText(
+                        errText,
+                        style = ppmText(11f).copy(color = tokens.error.color),
+                    )
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     SettingsButton(
                         label = "Cancel",
@@ -1319,10 +1369,25 @@ private fun CodexAccountsPane(model: AppModel) {
                             scope.launch {
                                 try {
                                     client.codexSubmitBrowserCallback(flow.id, browserCallbackInput.trim())
-                                    browserFlow = null
-                                    reload()
-                                    isError = false
-                                    statusMsg = "Codex account connected via browser login"
+                                    val deadline = System.currentTimeMillis() + 60_000L
+                                    while (isActive && System.currentTimeMillis() < deadline && browserFlow?.id == flow.id) {
+                                        val polled = parseCodexLoginPollStatus(client.codexBrowserLoginStatus(flow.id))
+                                        if (polled != null) {
+                                            browserFlow = flow.copy(status = polled.state, error = polled.error)
+                                            if (polled.isDone) {
+                                                browserFlow = null
+                                                reload()
+                                                isError = false
+                                                statusMsg = "Codex account connected via browser login"
+                                                break
+                                            } else if (polled.isError) {
+                                                isError = true
+                                                statusMsg = polled.error ?: "Browser login failed"
+                                                break
+                                            }
+                                        }
+                                        delay(1_000L)
+                                    }
                                 } catch (t: Throwable) {
                                     isError = true
                                     statusMsg = t.message ?: "Browser callback failed"
@@ -1401,6 +1466,7 @@ private fun CodexAccountsPane(model: AppModel) {
     // Backup / Restore Dialog
     if (showBackupDialog) {
         var password by remember { mutableStateOf("") }
+        var showPassword by remember { mutableStateOf(false) }
         var bundleText by remember { mutableStateOf("") }
         var dialogMsg by remember { mutableStateOf<String?>(null) }
         var busy by remember { mutableStateOf(false) }
@@ -1416,11 +1482,14 @@ private fun CodexAccountsPane(model: AppModel) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 SettingsSectionTitle("Backup / Restore Codex Accounts")
-                SettingsTextInput(
+                SettingsPasswordInput(
                     value = password,
                     onValueChange = { password = it },
-                    placeholder = "Encryption password (optional)",
+                    placeholder = "Encryption password (required)",
+                    visible = showPassword,
+                    onToggleVisible = { showPassword = !showPassword },
                     modifier = Modifier.fillMaxWidth(),
+                    inputTestTag = "codex-backup-password-input",
                 )
                 SettingsTextInput(
                     value = bundleText,
@@ -1436,7 +1505,7 @@ private fun CodexAccountsPane(model: AppModel) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SettingsButton(
                         label = "Export",
-                        enabled = !busy,
+                        enabled = !busy && password.isNotBlank(),
                         onClick = {
                             val client = api ?: return@SettingsButton
                             busy = true
@@ -1458,7 +1527,7 @@ private fun CodexAccountsPane(model: AppModel) {
                     SettingsButton(
                         label = "Import",
                         primary = true,
-                        enabled = !busy && bundleText.isNotBlank(),
+                        enabled = !busy && bundleText.isNotBlank() && password.isNotBlank(),
                         onClick = {
                             val client = api ?: return@SettingsButton
                             busy = true
@@ -2194,6 +2263,7 @@ internal fun PpmBotSettingsSection(model: AppModel) {
 
     var config by remember { mutableStateOf(ClawbotConfigState()) }
     var telegram by remember { mutableStateOf(ClawbotTelegramState()) }
+    var chatsBeforeConnect by remember { mutableStateOf<Set<String>?>(null) }
     var tasks by remember { mutableStateOf<List<ClawbotTaskRow>>(emptyList()) }
     var memories by remember { mutableStateOf<List<ClawbotMemoryRow>>(emptyList()) }
     var statusMsg by remember { mutableStateOf<String?>(null) }
@@ -2202,7 +2272,13 @@ internal fun PpmBotSettingsSection(model: AppModel) {
     suspend fun reloadAll() {
         val client = api ?: return
         runCatching { config = parseClawbotConfig(client.clawbotGetConfig()) }
-        runCatching { telegram = parseClawbotTelegram(client.clawbotGetTelegram()) }
+        runCatching {
+            telegram = parseClawbotTelegram(
+                client.clawbotGetTelegram(),
+                previousConnectUrl = telegram.connectUrl,
+                previousChatIds = chatsBeforeConnect,
+            )
+        }
         runCatching { tasks = parseClawbotTasks(client.clawbotListTasks(20)) }
         runCatching { memories = parseClawbotMemories(client.clawbotListMemories("_global")) }
     }
@@ -2212,12 +2288,30 @@ internal fun PpmBotSettingsSection(model: AppModel) {
     }
 
     // Poll Telegram connect state every 2s while a connect link is active
-    LaunchedEffect(api, telegram.connectUrl) {
+    LaunchedEffect(api, telegram.connectActive, telegram.connectUrl) {
         val client = api ?: return@LaunchedEffect
-        if (telegram.connectUrl.isNullOrBlank()) return@LaunchedEffect
+        if (!telegram.connectActive && telegram.connectUrl.isNullOrBlank()) return@LaunchedEffect
         while (isActive) {
             delay(2_000L)
-            runCatching { telegram = parseClawbotTelegram(client.clawbotGetTelegram()) }
+            val next = runCatching {
+                parseClawbotTelegram(
+                    client.clawbotGetTelegram(),
+                    previousConnectUrl = telegram.connectUrl,
+                    previousChatIds = chatsBeforeConnect,
+                )
+            }.getOrNull() ?: continue
+            val before = chatsBeforeConnect
+            val added = if (before != null) next.chats.firstOrNull { it.chatId !in before } else null
+            telegram = next
+            if (added != null) {
+                chatsBeforeConnect = null
+                isError = false
+                statusMsg = "Connected ${added.name}"
+                break
+            } else if (!next.connectActive) {
+                chatsBeforeConnect = null
+                break
+            }
         }
     }
 
@@ -2245,6 +2339,7 @@ internal fun PpmBotSettingsSection(model: AppModel) {
                     config = parseClawbotConfig(
                         client.clawbotPutConfig(buildJsonObject { put("enabled", enabled) }),
                     )
+                    runCatching { telegram = parseClawbotTelegram(client.clawbotGetTelegram()) }
                     isError = false
                     statusMsg = if (enabled) "PPMBot enabled" else "PPMBot disabled"
                 } catch (t: Throwable) {
@@ -2257,7 +2352,11 @@ internal fun PpmBotSettingsSection(model: AppModel) {
             val client = api ?: return@PpmBotSettingsContent
             scope.launch {
                 try {
-                    telegram = parseClawbotTelegram(client.clawbotPutTelegramToken(token))
+                    // PUT /api/settings/clawbot/telegram returns maskedBot ({bot_token, bot_username}),
+                    // not PPMBotTelegramStatus; re-fetch GET /api/settings/clawbot/telegram as web does.
+                    client.clawbotPutTelegramToken(token)
+                    chatsBeforeConnect = null
+                    telegram = parseClawbotTelegram(client.clawbotGetTelegram())
                     isError = false
                     statusMsg = "Telegram bot token saved"
                 } catch (t: Throwable) {
@@ -2270,9 +2369,22 @@ internal fun PpmBotSettingsSection(model: AppModel) {
             val client = api ?: return@PpmBotSettingsContent
             scope.launch {
                 try {
-                    val res = client.clawbotStartTelegramConnect()
-                    val url = res["url"].string
-                    telegram = telegram.copy(connectUrl = url)
+                    chatsBeforeConnect = telegram.chats.map { it.chatId }.toSet()
+                    val link = parseTelegramConnectLink(client.clawbotStartTelegramConnect())
+                    val url = link?.url
+                    val fresh = runCatching {
+                        parseClawbotTelegram(
+                            client.clawbotGetTelegram(),
+                            previousConnectUrl = url,
+                            previousChatIds = chatsBeforeConnect,
+                        )
+                    }.getOrNull()
+                    telegram = (fresh ?: telegram).copy(
+                        connectActive = true,
+                        connectUrl = url,
+                        connectExpiresAt = link?.expiresAt,
+                        connectError = null,
+                    )
                     if (!url.isNullOrBlank()) {
                         runCatching { uriHandler.openUri(url) }
                     }
@@ -2286,7 +2398,8 @@ internal fun PpmBotSettingsSection(model: AppModel) {
             val client = api ?: return@PpmBotSettingsContent
             scope.launch {
                 runCatching { client.clawbotCancelTelegramConnect() }
-                telegram = telegram.copy(connectUrl = null)
+                chatsBeforeConnect = null
+                telegram = telegram.copy(connectActive = false, connectUrl = null, connectExpiresAt = null)
             }
         },
         onDisconnectChat = { chatId ->
@@ -2413,7 +2526,7 @@ internal fun PpmBotSettingsContent(
                     modifier = Modifier.testTag("ppmbot-connect-telegram-btn"),
                     onClick = onStartTelegramConnect,
                 )
-                if (!telegram.connectUrl.isNullOrBlank()) {
+                if (telegram.connectActive || !telegram.connectUrl.isNullOrBlank()) {
                     SettingsButton(
                         label = "Cancel Pairing",
                         onClick = onCancelTelegramConnect,
