@@ -28,14 +28,12 @@ class GitPhase08bLogicTest {
             x = "M",
             y = "M",
             staged = ChangeSide(
-                status = "M",
                 added = 1,
                 removed = 0,
                 blocks = listOf("stg-id"),
                 changeBlocks = listOf(stagedBlock),
             ),
             unstaged = ChangeSide(
-                status = "M",
                 added = 4,
                 removed = 2,
                 blocks = listOf("dup-id", "dup-id"),
@@ -44,7 +42,7 @@ class GitPhase08bLogicTest {
         )
         val fileConflict = ChangedFile(
             path = "src/Conflict.kt",
-            conflict = "UU",
+            conflict = true,
             x = "U",
             y = "U",
         )
@@ -53,7 +51,6 @@ class GitPhase08bLogicTest {
             x = "A",
             y = " ",
             staged = ChangeSide(
-                status = "A",
                 added = 5,
                 removed = 0,
                 whole = "added",

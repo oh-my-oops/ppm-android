@@ -53,10 +53,10 @@ data class GitBranchStatus(
 data class ChangeBlock(
     val id: String,
     val index: Int = 0,
-    val oldStart: Int = 1,
-    val oldLines: Int = 1,
-    val newStart: Int = 1,
-    val newLines: Int = 1,
+    val oldStart: Int = 0,
+    val oldLines: Int = 0,
+    val newStart: Int = 0,
+    val newLines: Int = 0,
     val added: Int = 0,
     val removed: Int = 0,
 ) {
@@ -67,9 +67,9 @@ data class ChangeBlock(
             return ChangeBlock(
                 id = id,
                 index = obj["index"].int ?: fallbackIndex,
-                oldStart = obj["oldStart"].int ?: 1,
+                oldStart = obj["oldStart"].int ?: 0,
                 oldLines = obj["oldLines"].int ?: 0,
-                newStart = obj["newStart"].int ?: 1,
+                newStart = obj["newStart"].int ?: 0,
                 newLines = obj["newLines"].int ?: 0,
                 added = obj["added"].int ?: 0,
                 removed = obj["removed"].int ?: 0,
@@ -80,7 +80,6 @@ data class ChangeBlock(
 
 /** One side of a changed file (`staged` or `unstaged`) in `GET /git/changes`. */
 data class ChangeSide(
-    val status: String,
     val added: Int,
     val removed: Int,
     val blocks: List<String>,
@@ -88,14 +87,12 @@ data class ChangeSide(
     val changeBlocks: List<ChangeBlock> = emptyList(),
 ) {
     companion object {
-        fun from(json: JsonElement?, fallbackStatus: String = "M"): ChangeSide? {
+        fun from(json: JsonElement?): ChangeSide? {
             val obj = json.obj ?: return null
-            val status = obj["status"].string ?: fallbackStatus
             val parsedBlocks = obj["blocks"].array.orEmpty().mapIndexedNotNull { idx, el ->
                 ChangeBlock.from(el, idx)
             }
             return ChangeSide(
-                status = status,
                 added = obj["added"].int ?: 0,
                 removed = obj["removed"].int ?: 0,
                 blocks = parsedBlocks.map { it.id },
@@ -112,51 +109,24 @@ data class ChangedFile(
     val oldPath: String? = null,
     val staged: ChangeSide? = null,
     val unstaged: ChangeSide? = null,
-    val conflict: String? = null,
-    val x: String = when {
-        conflict != null -> "U"
-        staged != null -> staged.status
-        else -> "."
-    },
-    val y: String = when {
-        conflict != null -> "U"
-        unstaged != null -> unstaged.status
-        else -> "."
-    },
-    val untracked: Boolean = staged == null && unstaged?.status == "A",
+    val conflict: Boolean = false,
+    val x: String = ".",
+    val y: String = ".",
+    val untracked: Boolean = false,
 ) {
     companion object {
         fun from(json: JsonElement?): ChangedFile? {
             val obj = json.obj ?: return null
             val path = obj["path"].string ?: return null
-            val x = obj["x"].string ?: "."
-            val y = obj["y"].string ?: "."
-            val untracked = obj["untracked"].bool ?: false
-            val stagedFallback = when (x) {
-                ".", "?" -> "A"
-                else -> x
-            }
-            val unstagedFallback = when {
-                untracked || y == "?" -> "A"
-                y == "." -> "M"
-                else -> y
-            }
-            val conflictEl = obj["conflict"]
-            val conflict = when {
-                conflictEl == null -> null
-                conflictEl.bool == true -> "U"
-                conflictEl.bool == false -> null
-                else -> conflictEl.string
-            }
             return ChangedFile(
                 path = path,
                 oldPath = obj["oldPath"].string,
-                staged = ChangeSide.from(obj["staged"], stagedFallback),
-                unstaged = ChangeSide.from(obj["unstaged"], unstagedFallback),
-                conflict = conflict,
-                x = if (obj["x"] != null) x else if (conflict != null) "U" else stagedFallback.takeIf { obj["staged"] != null } ?: ".",
-                y = if (obj["y"] != null) y else if (conflict != null) "U" else unstagedFallback.takeIf { obj["unstaged"] != null } ?: ".",
-                untracked = if (obj["untracked"] != null) untracked else (obj["staged"] == null && unstagedFallback == "A" && obj["unstaged"] != null),
+                staged = ChangeSide.from(obj["staged"]),
+                unstaged = ChangeSide.from(obj["unstaged"]),
+                conflict = obj["conflict"].bool ?: false,
+                x = obj["x"].string ?: ".",
+                y = obj["y"].string ?: ".",
+                untracked = obj["untracked"].bool ?: false,
             )
         }
     }

@@ -79,7 +79,7 @@ class GitGraphNativeStateTest {
             GitGraphStash(index = 0, hash = "s1", parentHash = "c3", message = "WIP on feature: wip"),
         )
         val changedFiles = listOf(
-            ChangedFile(path = "README.md", staged = null, unstaged = null, conflict = null),
+            ChangedFile(path = "README.md", staged = null, unstaged = null, conflict = false),
         )
 
         val display = buildGitGraphDisplayCommits(

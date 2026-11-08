@@ -62,8 +62,8 @@ class GitTest {
               "operation": {"kind":"rebase","head":"abc1234","step":2,"total":5},
               "lastCommit": {"hash":"1234567890abcdef","shortHash":"1234567","subject":"feat: add sc","date":"2026-11-07T00:00:00Z","hasParent":true,"pushed":false},
               "files": [
-                {"path":"src/App.kt","staged":{"status":"M","added":4,"removed":1,"blocks":["add","change"]},"unstaged":{"status":"M","added":2,"removed":0,"blocks":["add"]}},
-                {"path":"CONFLICT.md","conflict":"UU"}
+                {"path":"src/App.kt","x":"M","y":"M","untracked":false,"conflict":false,"staged":{"added":4,"removed":1,"blocks":[{"id":"add","index":0,"oldStart":1,"oldLines":1,"newStart":1,"newLines":2,"added":2,"removed":0},{"id":"change","index":1,"oldStart":5,"oldLines":1,"newStart":6,"newLines":2,"added":2,"removed":1}]},"unstaged":{"added":2,"removed":0,"blocks":[{"id":"add","index":0,"oldStart":10,"oldLines":0,"newStart":11,"newLines":2,"added":2,"removed":0}]}},
+                {"path":"CONFLICT.md","x":"U","y":"U","untracked":false,"conflict":true,"staged":null,"unstaged":null}
               ],
               "truncated": false,
               "stashes": 2
@@ -126,7 +126,7 @@ class GitTest {
         assertEquals("1234567", changes.lastCommit?.shortHash)
         assertEquals(2, changes.files.size)
         assertEquals(4, changes.files[0].staged?.added)
-        assertEquals("UU", changes.files[1].conflict)
+        assertTrue(changes.files[1].conflict)
         assertEquals(2, changes.stashes)
 
         val hunks = api.gitHunks("ppm", "src/App.kt", "worktree", nestedRepo)
@@ -259,10 +259,15 @@ class GitTest {
         val changes = api.gitChanges("s3-git")
         assertEquals(false, changes.branch.hasRemote)
         assertEquals(2, changes.files.size)
-        assertEquals("M", changes.files[0].unstaged?.status)
+        assertEquals(".", changes.files[0].x)
+        assertEquals("M", changes.files[0].y)
+        assertEquals(false, changes.files[0].untracked)
         assertEquals(listOf("1f2ca95832d8a1ee4d0cde66ca6e09e0"), changes.files[0].unstaged?.blocks)
-        assertEquals("A", changes.files[1].unstaged?.status)
-        assertEquals(null, changes.files[0].conflict)
+        assertEquals("?", changes.files[1].x)
+        assertEquals("?", changes.files[1].y)
+        assertEquals(true, changes.files[1].untracked)
+        assertEquals(0, changes.files[1].unstaged?.changeBlocks?.get(0)?.oldStart)
+        assertEquals(false, changes.files[0].conflict)
 
         val hunks = api.gitHunks("s3-git", "src/App.kt")
         assertEquals("src/App.kt", hunks.path)

@@ -86,7 +86,6 @@ class GitSourceControlLogicTest {
             x = "R",
             y = " ",
             staged = ChangeSide(
-                "R",
                 added = 5,
                 removed = 2,
                 blocks = listOf("add", "delete"),
@@ -101,14 +100,12 @@ class GitSourceControlLogicTest {
             x = "A",
             y = "M",
             staged = ChangeSide(
-                "A",
                 added = 1,
                 removed = 0,
                 blocks = listOf("add"),
                 changeBlocks = listOf(ChangeBlock("add", 0, 1, 0, 1, 1, 1, 0)),
             ),
             unstaged = ChangeSide(
-                "M",
                 added = 3,
                 removed = 1,
                 blocks = listOf("change"),
@@ -121,7 +118,6 @@ class GitSourceControlLogicTest {
             y = "?",
             untracked = true,
             unstaged = ChangeSide(
-                "A",
                 added = 10,
                 removed = 0,
                 blocks = listOf("add"),
@@ -132,16 +128,14 @@ class GitSourceControlLogicTest {
             path = "src/Conflict.kt",
             x = "U",
             y = "U",
-            conflict = "both-modified",
+            conflict = true,
             staged = ChangeSide(
-                "U",
                 added = 2,
                 removed = 1,
                 blocks = listOf("c-staged"),
                 changeBlocks = listOf(ChangeBlock("c-staged", 0, 1, 1, 1, 2, 2, 1)),
             ),
             unstaged = ChangeSide(
-                "U",
                 added = 1,
                 removed = 1,
                 blocks = listOf("c-unstaged-1", "c-unstaged-2"),
@@ -241,7 +235,7 @@ class GitSourceControlLogicTest {
             path = "src/Mod.kt",
             x = " ",
             y = "M",
-            unstaged = ChangeSide("M", added = 1, removed = 1, blocks = emptyList()),
+            unstaged = ChangeSide(added = 1, removed = 1, blocks = emptyList()),
         )
         val modSummary = GitChangesView.discardSummary(listOf(modifiedOnlyFile))
         assertEquals("Discard changes to Mod.kt?", modSummary.title)
@@ -286,7 +280,7 @@ class GitSourceControlLogicTest {
             oldPath = "src/Orig.kt",
             x = "C",
             y = " ",
-            staged = ChangeSide("C", added = 4, removed = 0, blocks = listOf("add")),
+            staged = ChangeSide(added = 4, removed = 0, blocks = listOf("add")),
         )
         val detachedChanges = GitChanges(
             branch = GitBranchState(head = null, oid = "abcdef0", upstream = null, upstreamGone = false, ahead = 0, behind = 0),
@@ -305,9 +299,24 @@ class GitSourceControlLogicTest {
     fun `ChangeBlock rejects string primitives and DiscardRecord and StashEntry handle null server payloads`() {
         assertNull(ChangeBlock.from(JsonPrimitive("add")))
         val sideWithStrings = ChangeSide.from(
-            Json.parseToJsonElement("""{"status":"M","added":1,"removed":0,"blocks":["add"]}""").jsonObject,
+            Json.parseToJsonElement("""{"added":1,"removed":0,"blocks":["add"]}""").jsonObject,
         )
         assertTrue(sideWithStrings!!.changeBlocks.isEmpty())
+        val zeroStartBlock = ChangeBlock("new-file", 0)
+        assertEquals(0, zeroStartBlock.oldStart)
+        assertEquals(0, zeroStartBlock.newStart)
+        val parsedZeroBlock = ChangeBlock.from(Json.parseToJsonElement("""{"id":"h0"}""").jsonObject)!!
+        assertEquals(0, parsedZeroBlock.oldStart)
+        assertEquals(0, parsedZeroBlock.newStart)
+        val rawChangedFile = ChangedFile.from(
+            Json.parseToJsonElement(
+                """{"path":"src/Raw.kt","staged":{"added":3,"removed":0,"blocks":[]},"unstaged":{"added":1,"removed":0,"blocks":[]}}""",
+            ).jsonObject,
+        )!!
+        assertEquals(".", rawChangedFile.x)
+        assertEquals(".", rawChangedFile.y)
+        assertFalse(rawChangedFile.untracked)
+        assertFalse(rawChangedFile.conflict)
 
         // Server returns {"undo": null} when nothing could be backed up
         val nullUndoJson = Json.parseToJsonElement("""{"undo":null}""").jsonObject
@@ -331,14 +340,12 @@ class GitSourceControlLogicTest {
         val manyBlocksFile = ChangedFile(
             path = "src/Many.kt",
             staged = ChangeSide(
-                status = "M",
                 added = 1,
                 removed = 0,
                 blocks = listOf("s0"),
                 changeBlocks = listOf(ChangeBlock("s0", 0, 15, 1, 15, 2, 1, 0)),
             ),
             unstaged = ChangeSide(
-                status = "M",
                 added = 7,
                 removed = 0,
                 blocks = emptyList(),
@@ -353,8 +360,8 @@ class GitSourceControlLogicTest {
 
     @Test
     fun `GitFileTree compacts single-child folders and collects leaf files`() {
-        val f1 = ChangedFile(path = "src/web/components/git/A.tsx", unstaged = ChangeSide("M", 1, 0, emptyList()))
-        val f2 = ChangedFile(path = "src/web/components/git/B.tsx", unstaged = ChangeSide("A", 2, 0, emptyList()))
+        val f1 = ChangedFile(path = "src/web/components/git/A.tsx", y = "M", unstaged = ChangeSide(1, 0, emptyList()))
+        val f2 = ChangedFile(path = "src/web/components/git/B.tsx", y = "A", unstaged = ChangeSide(2, 0, emptyList()))
         val tree = GitFileTree.buildTree(listOf(f2, f1))
         assertEquals(1, tree.size)
         val root = tree[0]

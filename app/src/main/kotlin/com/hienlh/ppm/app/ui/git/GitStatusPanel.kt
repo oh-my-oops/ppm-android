@@ -256,8 +256,8 @@ fun GitStatusPanel(
     }
 
     val files = changes?.files.orEmpty()
-    val conflicts = remember(files) { files.filter { it.conflict != null } }
-    val normalFiles = remember(files) { files.filter { it.conflict == null } }
+    val conflicts = remember(files) { files.filter { it.conflict } }
+    val normalFiles = remember(files) { files.filter { !it.conflict } }
     val totals = remember(files) { GitChangesView.changeTotals(files) }
     val branch = changes?.branch ?: com.hienlh.ppm.client.GitBranchState(null, null, null, false, 0, 0)
     val operation = changes?.operation
@@ -325,7 +325,7 @@ fun GitStatusPanel(
     }
 
     fun stageFile(file: ChangedFile) {
-        if (file.conflict != null) {
+        if (file.conflict) {
             markResolved(file)
             return
         }
@@ -335,14 +335,14 @@ fun GitStatusPanel(
     }
 
     fun unstageFile(file: ChangedFile) {
-        if (file.conflict != null) return
+        if (file.conflict) return
         runGit("unstage") {
             api?.gitUnstage(project, GitChangesView.unstagePaths(file), repo)
         }
     }
 
     fun toggleFile(file: ChangedFile) {
-        if (file.conflict != null) {
+        if (file.conflict) {
             markResolved(file)
             return
         }
@@ -354,7 +354,7 @@ fun GitStatusPanel(
     }
 
     fun toggleBatch(batch: List<ChangedFile>) {
-        val eligible = batch.filter { it.conflict == null }
+        val eligible = batch.filter { !it.conflict }
         if (eligible.isEmpty() || api == null) return
         val state = GitChangesView.allCheckState(eligible)
         if (state == CheckState.ALL) {
@@ -584,7 +584,7 @@ fun GitStatusPanel(
     }
 
     fun openReview(file: ChangedFile? = null) {
-        if (file?.conflict != null) {
+        if (file?.conflict == true) {
             model.openGitConflictTab(project, GitRepoScope.projectRelativePath(file.path, repo))
         } else {
             model.openGitReview(project, file?.path, repo?.takeIf { it.relative != "." }?.path)
@@ -1300,7 +1300,7 @@ private fun GitTreeNodeView(
         CountChip(node.fileCount)
         CheckCell(
             state = folderState,
-            disabled = leafFiles.all { it.conflict != null },
+            disabled = leafFiles.all { it.conflict },
             onToggle = { onToggleBatch(leafFiles) },
         )
     }
@@ -1348,7 +1348,7 @@ internal fun GitChangeRow(
     val (name, dir) = remember(file.path) { GitChangesView.splitPath(file.path) }
     val state = remember(file) { GitChangesView.fileCheckState(file) }
     val letter = remember(file) { GitChangesView.changeLetter(file) }
-    val conflict = file.conflict != null
+    val conflict = file.conflict
     var menuOpen by remember { mutableStateOf(false) }
 
     @Composable

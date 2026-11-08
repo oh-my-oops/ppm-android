@@ -227,7 +227,8 @@ fun BranchReviewBody(model: AppModel, tab: WorkspaceTab) {
                 ChangedFile(
                     path = f.path,
                     oldPath = f.oldPath,
-                    unstaged = ChangeSide(status = status, added = f.additions, removed = f.deletions, blocks = emptyList()),
+                    unstaged = ChangeSide(added = f.additions, removed = f.deletions, blocks = emptyList()),
+                    y = status,
                 )
             },
         )

@@ -212,7 +212,7 @@ internal fun gitStatusRgba(status: String?, tokens: ThemeTokens): Color? =
 internal fun StatusTile(file: ChangedFile) {
     val tokens = LocalPpmTokens.current
     val letter = GitChangesView.changeLetter(file)
-    val conflict = file.conflict != null
+    val conflict = file.conflict
     val tone = when {
         conflict || letter == "D" -> tokens.error
         letter == "A" -> tokens.success

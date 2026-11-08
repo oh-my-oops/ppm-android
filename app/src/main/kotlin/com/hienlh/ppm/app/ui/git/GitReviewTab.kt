@@ -277,7 +277,7 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
             pending = pending,
         )
     }
-    val conflicts = remember(files) { files.filter { it.conflict != null } }
+    val conflicts = remember(files) { files.filter { it.conflict } }
     val totals = remember(reviews) { GitReviewModel.reviewTotals(reviews) }
     val commitTotals = remember(reviews, totals, conflicts) {
         ChangeTotals(
@@ -347,7 +347,7 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
         }
         for (p in wantedPaths) {
             val f = byPath[p] ?: continue
-            if (f.conflict != null || p in writingPaths) continue
+            if (f.conflict || p in writingPaths) continue
             val sig = GitReviewModel.fileSignature(f)
             if (detailSigs[p] == sig && p in details) continue
             detailSigs[p] = sig

@@ -61,14 +61,14 @@ object GitChangesView {
     )
 
     fun fileCheckState(file: ChangedFile): CheckState {
-        if (file.conflict != null) return CheckState.NONE
+        if (file.conflict) return CheckState.NONE
         if (file.staged != null && file.unstaged != null) return CheckState.SOME
         if (file.staged != null) return CheckState.ALL
         return CheckState.NONE
     }
 
     fun allCheckState(files: List<ChangedFile>): CheckState {
-        val eligible = files.filter { it.conflict == null }
+        val eligible = files.filter { !it.conflict }
         if (eligible.isEmpty()) return CheckState.NONE
         var staged = 0
         var partial = 0
@@ -86,7 +86,7 @@ object GitChangesView {
 
     /** Primary status letter shown in the 14px tile (`U`, `A`, `M`, `D`, `R`). */
     fun changeLetter(file: ChangedFile): String {
-        if (file.conflict != null) return "U"
+        if (file.conflict) return "U"
         if (file.untracked || file.x == "A") return "A"
         if (file.oldPath != null) return "R"
         if (file.x == "D" || file.y == "D") return "D"
@@ -98,7 +98,7 @@ object GitChangesView {
 
     /** Combined line additions/deletions across staged + unstaged sides (`added` to `removed`). */
     fun changeCounts(file: ChangedFile): Pair<Int, Int>? {
-        if (file.conflict != null) return null
+        if (file.conflict) return null
         val whole = file.unstaged?.whole ?: file.staged?.whole
         if (whole != null && (file.staged?.added ?: 0) + (file.unstaged?.added ?: 0) == 0 &&
             (file.staged?.removed ?: 0) + (file.unstaged?.removed ?: 0) == 0
@@ -113,7 +113,7 @@ object GitChangesView {
 
     /** Short explanation shown in place of `+N -M` when no line counts exist. */
     fun lineNote(file: ChangedFile): String? {
-        if (file.conflict != null || changeCounts(file) != null) return null
+        if (file.conflict || changeCounts(file) != null) return null
         return file.unstaged?.whole ?: file.staged?.whole
     }
 
@@ -145,7 +145,7 @@ object GitChangesView {
 
     /** Whether a file has unstaged changes that can be discarded. */
     fun hasUnstaged(file: ChangedFile): Boolean =
-        file.unstaged != null && file.conflict == null
+        file.unstaged != null && !file.conflict
 
     /**
      * Paths to pass to `POST /git/unstage` for a single file.
@@ -167,7 +167,7 @@ object GitChangesView {
         var conflicts = 0
         for (file in files) {
             filesCount++
-            if (file.conflict != null) conflicts++
+            if (file.conflict) conflicts++
             if (file.staged != null) filesStaged++
             val dots = blockDots(file)
             blocks += dots.size
@@ -297,7 +297,7 @@ object GitChangesView {
                 untracked += file.path
                 continue
             }
-            if (file.conflict != null) {
+            if (file.conflict) {
                 unstaged += GitFileChange(path = file.path, status = "M")
                 continue
             }

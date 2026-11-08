@@ -116,7 +116,8 @@ class GitStatusPanelTest {
         val files = listOf(
             ChangedFile(
                 path = "src/App.kt",
-                staged = ChangeSide(status = "M", added = 12, removed = 3, blocks = listOf("a")),
+                x = "M",
+                staged = ChangeSide(added = 12, removed = 3, blocks = listOf("a")),
             ),
         )
         val totals = GitChangesView.changeTotals(files)
@@ -190,11 +191,13 @@ class GitStatusPanelTest {
         val files = listOf(
             ChangedFile(
                 path = "src/ui/GitStatusPanel.kt",
-                staged = ChangeSide(status = "A", added = 50, removed = 0, blocks = listOf("a")),
+                x = "A",
+                staged = ChangeSide(added = 50, removed = 0, blocks = listOf("a")),
             ),
             ChangedFile(
                 path = "src/ui/GitChangeParts.kt",
-                unstaged = ChangeSide(status = "M", added = 10, removed = 2, blocks = listOf("m")),
+                y = "M",
+                unstaged = ChangeSide(added = 10, removed = 2, blocks = listOf("m")),
             ),
         )
         var toggledFile: String? = null
@@ -456,8 +459,9 @@ class GitStatusPanelTest {
     fun `BlockDots draws first 6 dots and +N-6 overflow like git-change-parts tsx`() {
         val fileWith8Blocks = ChangedFile(
             path = "src/EightBlocks.kt",
+            x = "M",
+            y = "M",
             staged = ChangeSide(
-                status = "M",
                 added = 2,
                 removed = 0,
                 blocks = listOf("s0", "s1"),
@@ -467,7 +471,6 @@ class GitStatusPanelTest {
                 ),
             ),
             unstaged = ChangeSide(
-                status = "M",
                 added = 6,
                 removed = 0,
                 blocks = emptyList(),

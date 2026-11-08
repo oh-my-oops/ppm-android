@@ -167,7 +167,8 @@ class GitPhase08bUiTest {
             files.map { f ->
                 ChangedFile(
                     path = f.path,
-                    unstaged = ChangeSide(status = f.status, added = f.additions, removed = f.deletions, blocks = emptyList()),
+                    y = f.status,
+                    unstaged = ChangeSide(added = f.additions, removed = f.deletions, blocks = emptyList()),
                 )
             },
         )
@@ -223,7 +224,8 @@ class GitPhase08bUiTest {
         val block0 = ChangeBlock("hunk-0", 0, 10, 2, 10, 3, added = 2, removed = 1)
         val file = ChangedFile(
             path = "src/App.kt",
-            unstaged = ChangeSide(status = "M", added = 2, removed = 1, blocks = listOf("hunk-0"), changeBlocks = listOf(block0)),
+            y = "M",
+            unstaged = ChangeSide(added = 2, removed = 1, blocks = listOf("hunk-0"), changeBlocks = listOf(block0)),
         )
         val detail = FileChangeDetail(
             path = "src/App.kt",
@@ -354,7 +356,8 @@ class GitPhase08bUiTest {
         val block0 = ChangeBlock("hunk-0", 0, 10, 2, 10, 3, added = 2, removed = 1)
         val file = ChangedFile(
             path = "src/App.kt",
-            unstaged = ChangeSide(status = "M", added = 2, removed = 1, blocks = listOf("hunk-0"), changeBlocks = listOf(block0)),
+            y = "M",
+            unstaged = ChangeSide(added = 2, removed = 1, blocks = listOf("hunk-0"), changeBlocks = listOf(block0)),
         )
         val detail = FileChangeDetail(
             path = "src/App.kt",
