@@ -20,6 +20,7 @@ import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.protocol.WireJson
+import com.hienlh.ppm.protocol.ServerInfo
 import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.int
@@ -506,6 +507,88 @@ class Phase11aUiTest {
 
             composeRule.waitUntil(5_000) { actionPaths.isNotEmpty() }
             assertTrue(actionPaths.first().endsWith("/api/system/services/system/nginx.service/stop"))
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `LogsBadge gates minimalMode on info polls only when visible and switch calls updateLogsBadge`() {
+        val summaryHits = java.util.concurrent.atomic.AtomicInteger(0)
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                return when {
+                    target.endsWith("/api/logs/issues/summary") -> {
+                        val hit = summaryHits.incrementAndGet()
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{"likelyBugs":$hit,"running":false}}""")
+                            .build()
+                    }
+                    target.endsWith("/api/logs/issues") -> {
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{"issues":[],"unsorted":0,"running":false,"auto":false}}""")
+                            .build()
+                    }
+                    else -> {
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{}}""")
+                            .build()
+                    }
+                }
+            }
+        }
+        server.start()
+        try {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val model = AppModel(context)
+            model.api = ApiClient(server.url("/"), "tok")
+
+            // 1. Before info loads (info == null), refreshLogsIssuesSummary / reconcileLogsBadge must be gated off
+            model.refreshLogsIssuesSummary()
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            assertEquals(0, summaryHits.get())
+
+            // 2. When minimalMode is true, still gated off
+            model.info = ServerInfo(version = "1.0.0", deviceName = "dev", tunnelActive = false, minimalMode = true)
+            model.reconcileLogsBadge(pollIntervalMs = 80L)
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            assertEquals(0, summaryHits.get())
+
+            // 3. When info loads with minimalMode = false, summary is fetched and poll runs while visible
+            model.info = ServerInfo(version = "1.0.0", deviceName = "dev", tunnelActive = false, minimalMode = false)
+            model.windowVisible = false
+            model.reconcileLogsBadge(pollIntervalMs = 80L)
+            composeRule.waitUntil(5_000) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                summaryHits.get() >= 1 && model.showLogsBadgeDot
+            }
+            val hitsWhileHidden = summaryHits.get()
+            Thread.sleep(150L)
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            assertEquals(hitsWhileHidden, summaryHits.get())
+
+            // 4. Mount LogsAppBody, open preferences, and toggle "Red dot on the Logs button for a likely bug"
+            composeRule.setContent {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    LogsAppBody(
+                        model = model,
+                        initialView = "logs",
+                        initialResult = LogQueryResult(),
+                        initialIssues = LogIssuesResult(),
+                    )
+                }
+            }
+            assertEquals(1, model.openLogsWindowCount)
+            composeRule.onNodeWithTag("logs-prefs-toggle").performClick()
+            composeRule.onNodeWithText("Red dot on the Logs button for a likely bug").assertIsDisplayed()
+            composeRule.onNodeWithTag("logs-prefs-badge-switch").performClick()
+            assertEquals(false, model.logsBadge)
+            assertEquals(0, model.logsLikelyBugs)
         } finally {
             server.close()
         }

@@ -788,7 +788,18 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     var logsLikelyBugs by mutableIntStateOf(0)
 
     val showLogsBadgeDot: Boolean
-        get() = logsBadge && info?.minimalMode != true && logsLikelyBugs > 0
+        get() = logsBadge && info?.minimalMode == false && logsLikelyBugs > 0
+
+    private var logsBadgePollJob: Job? = null
+    internal var openLogsWindowCount = 0
+
+    internal fun onLogsWindowMounted() {
+        openLogsWindowCount += 1
+    }
+
+    internal fun onLogsWindowUnmounted() {
+        openLogsWindowCount = (openLogsWindowCount - 1).coerceAtLeast(0)
+    }
 
     var sharedMetricsSnapshot by mutableStateOf<com.hienlh.ppm.state.sysmon.MetricsSnapshot?>(null)
     var sharedMetricsHistory by mutableStateOf<List<com.hienlh.ppm.state.sysmon.MetricsHistoryPoint>>(emptyList())
@@ -846,25 +857,42 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         }
     }
 
-    fun updateLogsBadge(enabled: Boolean) {
+    fun updateLogsBadge(enabled: Boolean, pollIntervalMs: Long = 10 * 60_000L) {
         logsBadge = enabled
         prefs.put("logsBadge.$serverKey", enabled.toString())
-        if (enabled && info?.minimalMode != true) {
-            refreshLogsIssuesSummary()
-        } else {
+        reconcileLogsBadge(pollIntervalMs)
+    }
+
+    internal fun reconcileLogsBadge(pollIntervalMs: Long = 10 * 60_000L) {
+        val currentApi = api
+        if (currentApi == null || !logsBadge || info?.minimalMode != false) {
+            logsBadgePollJob?.cancel()
+            logsBadgePollJob = null
             logsLikelyBugs = 0
+            return
+        }
+        refreshLogsIssuesSummary()
+        if (logsBadgePollJob?.isActive != true) {
+            logsBadgePollJob = scope.launch {
+                while (isActive) {
+                    delay(pollIntervalMs)
+                    if (windowVisible && logsBadge && info?.minimalMode == false) {
+                        refreshLogsIssuesSummary()
+                    }
+                }
+            }
         }
     }
 
     fun refreshLogsIssuesSummary() {
-        if (!logsBadge || info?.minimalMode == true) {
+        if (!logsBadge || info?.minimalMode != false) {
             logsLikelyBugs = 0
             return
         }
         val currentApi = api ?: return
         scope.launch {
             val summaryJson = quietly { currentApi.logsIssuesSummary() } ?: return@launch
-            if (this@AppModel.api !== currentApi || !logsBadge || info?.minimalMode == true) return@launch
+            if (this@AppModel.api !== currentApi || !logsBadge || info?.minimalMode != false) return@launch
             logsLikelyBugs = com.hienlh.ppm.state.logs.LogIssuesSummary.from(summaryJson).likelyBugs
         }
     }
@@ -1144,6 +1172,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             canGoBack = false
         }
         closeWorkspace()
+        logsBadgePollJob?.cancel()
+        logsBadgePollJob = null
+        logsLikelyBugs = 0
         resourceStreamJob?.cancel()
         resourceStreamJob = null
         resourceTierTracker.reset()
@@ -1244,15 +1275,6 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 if (this@AppModel.api !== api) return@launch
                 localUrl = url
                 prefs.put("localUrl.$serverKey", url)
-            }
-            launch {
-                if (!logsBadge || info?.minimalMode == true) {
-                    logsLikelyBugs = 0
-                    return@launch
-                }
-                val summaryJson = quietly { api.logsIssuesSummary() } ?: return@launch
-                if (this@AppModel.api !== api || !logsBadge || info?.minimalMode == true) return@launch
-                logsLikelyBugs = com.hienlh.ppm.state.logs.LogIssuesSummary.from(summaryJson).likelyBugs
             }
             launch {
                 val capsJson = quietly { api.androidCapabilities() } ?: return@launch
@@ -1399,6 +1421,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 val keys = async { quietly { api.keybindings() } }
                 val projects = api.projects()
                 this@AppModel.info = info.await()
+                reconcileLogsBadge()
                 keys.await()?.let { keyBindings = KeyBindings(it) }
                 uiPrefs.await()?.let { prefs ->
                     prefs.projectSortMode?.takeIf { it in PROJECT_SORT_MODES }?.let { projectSortMode = it }
@@ -1528,7 +1551,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             }
         }
         events.onLogsIssuesChanged {
-            refreshLogsIssuesSummary()
+            if (openLogsWindowCount == 0) {
+                refreshLogsIssuesSummary()
+            }
         }
         this.events = events
         events.start()

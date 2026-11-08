@@ -45,6 +45,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -127,6 +129,7 @@ fun LogsAppBody(
     var loading by remember { mutableStateOf(initialResult == null) }
     var follow by remember { mutableStateOf(true) }
     var utc by remember { mutableStateOf(false) }
+    var prefsOpen by remember { mutableStateOf(false) }
     val liveBuffer = remember { LogsLiveFeedBuffer() }
     var pausedCount by remember { mutableIntStateOf(0) }
     var reloads by remember { mutableIntStateOf(0) }
@@ -207,7 +210,7 @@ fun LogsAppBody(
             val json = api.logsIssues()
             val parsed = LogIssuesResult.from(json)
             issuesResult = parsed
-            if (model.logsBadge && model.info?.minimalMode != true) {
+            if (model.logsBadge && model.info?.minimalMode == false) {
                 model.logsLikelyBugs = parsed.issues.count { !it.dismissed && it.cls == "bug" }
             }
         } catch (e: CancellationException) {
@@ -220,7 +223,8 @@ fun LogsAppBody(
     }
 
     // Live tail via GlobalEvents: subscribe BEFORE the page read, resubscribe and re-read on global_ready.
-    DisposableEffect(model.events) {
+    DisposableEffect(model, model.events) {
+        model.onLogsWindowMounted()
         val ev = model.events
         var unsubLines: (() -> Unit)? = null
         var unsubIssues: (() -> Unit)? = null
@@ -242,6 +246,7 @@ fun LogsAppBody(
             }
         }
         onDispose {
+            model.onLogsWindowUnmounted()
             unsubReady?.invoke()
             unsubLines?.invoke()
             unsubIssues?.invoke()
@@ -396,11 +401,11 @@ fun LogsAppBody(
                 )
             }
 
-            if (activeView == "logs") {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (activeView == "logs") {
                     val followShape = RoundedCornerShape(6.dp)
                     Row(
                         Modifier
@@ -442,6 +447,129 @@ fun LogsAppBody(
                         )
                     }
                 }
+                Box(
+                    Modifier
+                        .size(26.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (prefsOpen) tokens.accent.opacity(0.12).color else Color.Transparent)
+                        .ppmClickable { prefsOpen = !prefsOpen }
+                        .semantics { contentDescription = "Logs preferences" }
+                        .testTag("logs-prefs-toggle"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    PpmIcon(
+                        ProductIcon.Settings,
+                        14.dp,
+                        if (prefsOpen) tokens.accent.color else tokens.text2.color,
+                    )
+                }
+            }
+        }
+
+        if (prefsOpen) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(tokens.panel2.opacity(0.45).color)
+                    .edge(Edge.Bottom, tokens.border.color)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .testTag("logs-prefs"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    BasicText(
+                        "Times",
+                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text2.color),
+                    )
+                    val localShape = RoundedCornerShape(4.dp)
+                    Box(
+                        Modifier
+                            .clip(localShape)
+                            .background(if (!utc) tokens.accent.opacity(0.14).color else tokens.panel2.color)
+                            .ppmClickable(shape = localShape) { utc = false }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        BasicText(
+                            "Local (${localOffsetLabel()})",
+                            style = ppmText(11f, lineHeight = 15f).copy(color = if (!utc) tokens.accent.color else tokens.text2.color),
+                        )
+                    }
+                    Box(
+                        Modifier
+                            .clip(localShape)
+                            .background(if (utc) tokens.accent.opacity(0.14).color else tokens.panel2.color)
+                            .ppmClickable(shape = localShape) { utc = true }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        BasicText(
+                            "UTC",
+                            style = ppmText(11f, lineHeight = 15f).copy(color = if (utc) tokens.accent.color else tokens.text2.color),
+                        )
+                    }
+                }
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .ppmClickable { model.updateLogsBadge(!model.logsBadge) }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .testTag("logs-prefs-badge-switch"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(width = 24.dp, height = 14.dp)
+                            .clip(CircleShape)
+                            .background(if (model.logsBadge) tokens.accent.color else tokens.border.color)
+                            .padding(2.dp),
+                        contentAlignment = if (model.logsBadge) Alignment.CenterEnd else Alignment.CenterStart,
+                    ) {
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(Color.White))
+                    }
+                    BasicText(
+                        "Red dot on the Logs button for a likely bug",
+                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text.color),
+                    )
+                }
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .ppmClickable {
+                            val nextAuto = !issuesResult.auto
+                            scope.launch {
+                                runCatching { model.api?.logsSetIssuesAuto(nextAuto) }
+                                loadIssues()
+                            }
+                        }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .testTag("logs-prefs-auto-switch"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(width = 24.dp, height = 14.dp)
+                            .clip(CircleShape)
+                            .background(if (issuesResult.auto) tokens.accent.color else tokens.border.color)
+                            .padding(2.dp),
+                        contentAlignment = if (issuesResult.auto) Alignment.CenterEnd else Alignment.CenterStart,
+                    ) {
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(Color.White))
+                    }
+                    BasicText(
+                        "Let AI sort new errors and warnings",
+                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text.color),
+                    )
+                }
+                BasicText(
+                    "Keeps ${result.files.generations} × ${byteSize(result.files.capBytes)} of ppm.log and ${plural(result.files.browserRetentionDays, "day")} of browser logs",
+                    style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+                )
             }
         }
 
