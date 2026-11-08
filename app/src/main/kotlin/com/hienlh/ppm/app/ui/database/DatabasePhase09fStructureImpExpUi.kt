@@ -372,7 +372,7 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
 
         DatabaseStructureTabContent(
             structure = structure,
-            dialect = structure?.dialect ?: dialect,
+            dialect = dialect,
             dbType = dbType,
             schema = structure?.schema ?: schemaName,
             database = database,
@@ -526,7 +526,7 @@ internal fun DatabaseStructureTabContent(
         when {
             restoredEdit != null -> restoredEdit!!.base
             isNewTable -> newTableModel(dialect, schema)
-            structure != null -> modelFromStructure(structure)
+            structure != null -> modelFromStructure(structure, dialect)
             else -> newTableModel(dialect, schema)
         }
     }

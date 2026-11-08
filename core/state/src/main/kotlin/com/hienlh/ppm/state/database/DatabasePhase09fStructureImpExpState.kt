@@ -147,7 +147,6 @@ data class DbDependency(
 )
 
 data class DbTableStructure(
-    val dialect: String, // "postgres" | "mysql" | "sqlite"
     val database: String? = null,
     val schema: String? = null,
     val table: String,
@@ -206,7 +205,6 @@ fun parseDbForeignKey(obj: JsonObject, defaultRefTable: String? = null): DbForei
 }
 
 fun parseDbTableStructure(json: JsonObject): DbTableStructure {
-    val dialect = json.strOrNull("dialect") ?: "postgres"
     val table = json.strOrNull("name") ?: json.strOrNull("table").orEmpty()
     val columns = ((json["columns"] as? JsonArray).orEmpty()).mapIndexedNotNull { idx, el ->
         val c = el as? JsonObject ?: return@mapIndexedNotNull null
@@ -331,7 +329,6 @@ fun parseDbTableStructure(json: JsonObject): DbTableStructure {
     }
 
     return DbTableStructure(
-        dialect = dialect,
         database = json.strOrNull("database"),
         schema = json.strOrNull("schema"),
         table = table,
@@ -819,11 +816,11 @@ fun isStructureTabDirty(metadata: JsonObject?, defaultDialect: String = "postgre
 fun nextTableEdit(
     edit: TableEdit?,
     live: DbTableStructure?,
-    dialect: String = live?.dialect ?: "postgres",
+    dialect: String = "postgres",
     change: (TableModel) -> TableModel,
 ): TableEdit? {
     val start = edit ?: if (live != null) {
-        val m = modelFromStructure(live.copy(dialect = dialect))
+        val m = modelFromStructure(live, dialect)
         TableEdit(base = m, current = m, isNew = false)
     } else {
         null
@@ -932,12 +929,12 @@ fun declaredType(col: TableModelColumn, dialect: String): String {
     return type
 }
 
-fun modelFromStructure(structure: DbTableStructure): TableModel {
+fun modelFromStructure(structure: DbTableStructure, dialect: String = "postgres"): TableModel {
     val idByName = HashMap<String, String>()
     val columns = structure.columns.map { col ->
         val id = baseColumnId(col.name)
         idByName[col.name] = id
-        val split = if (structure.dialect == "mysql") {
+        val split = if (dialect == "mysql") {
             splitMysqlType(col)
         } else {
             SplitMysqlTypeResult(
@@ -1018,7 +1015,7 @@ fun modelFromStructure(structure: DbTableStructure): TableModel {
     }
 
     return TableModel(
-        dialect = structure.dialect,
+        dialect = dialect,
         schema = structure.schema,
         name = structure.table,
         comment = structure.comment.orEmpty(),
@@ -1624,7 +1621,6 @@ fun modelColumnDefinitions(model: TableModel, selectedIds: Set<String>): String 
         model.columns
     }
     val fakeStructure = DbTableStructure(
-        dialect = model.dialect,
         schema = model.schema,
         table = model.name,
         kind = "table",

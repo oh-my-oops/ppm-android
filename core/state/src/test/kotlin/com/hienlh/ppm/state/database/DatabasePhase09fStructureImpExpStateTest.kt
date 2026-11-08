@@ -18,7 +18,6 @@ class DatabasePhase09fStructureImpExpStateTest {
         val rawStructure = Json.parseToJsonElement(
             """
             {
-              "dialect": "mysql",
               "database": "shop",
               "schema": null,
               "name": "employees",
@@ -140,7 +139,6 @@ class DatabasePhase09fStructureImpExpStateTest {
         ).jsonObject
 
         val structure = parseDbTableStructure(rawStructure)
-        assertEquals("mysql", structure.dialect)
         assertEquals("employees", structure.name)
         assertEquals("employees", structure.table)
         assertEquals("InnoDB", structure.engine)
@@ -168,8 +166,10 @@ class DatabasePhase09fStructureImpExpStateTest {
         assertTrue(defs.contains("PRIMARY KEY"))
         assertTrue(defs.contains("COMMENT 'Primary login'"))
 
-        // Editable TableModel conversion
-        val baseModel = modelFromStructure(structure)
+        // Editable TableModel conversion takes dialect from connection type ("mysql"), not structure JSON
+        val baseModel = modelFromStructure(structure, "mysql")
+        assertEquals("mysql", baseModel.dialect)
+        assertFalse(primaryKeyHasName(baseModel.dialect))
         assertTrue(sameTableModel(baseModel, baseModel.copy()))
         assertEquals("int", baseModel.columns[0].dataType)
         assertTrue(baseModel.columns[0].isUnsigned)

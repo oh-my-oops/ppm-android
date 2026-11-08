@@ -53,7 +53,6 @@ class Phase09fDatabaseStructureImpExpUiTest {
     val rules: RuleChain = withComposeActivity(composeRule)
 
     private val sampleStructure = DbTableStructure(
-        dialect = "mysql",
         database = "shop",
         schema = null,
         table = "employees",
