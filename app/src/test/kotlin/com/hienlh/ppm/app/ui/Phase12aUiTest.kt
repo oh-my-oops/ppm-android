@@ -148,8 +148,8 @@ class Phase12aUiTest {
                     displayName = "TypeScript",
                     languages = listOf("ts", "tsx"),
                     installed = false,
-                    origin = "missing",
-                    canInstall = true,
+                    origin = null,
+                    installable = true,
                     removable = false,
                     alsoRemoves = emptyList(),
                     installHint = "npm i -g typescript-language-server",
@@ -161,11 +161,12 @@ class Phase12aUiTest {
             DbDriverRow(
                 id = "mssql",
                 displayName = "SQL Server",
-                dbTypes = listOf("mssql"),
-                npmPackage = "mssql",
+                engines = listOf("mssql"),
+                usedFor = "SQL Server connections",
+                pkg = "mssql",
                 version = "11.0.1",
-                approxBytes = 12_000_000L,
-                status = "not_installed",
+                license = "MIT",
+                state = "missing",
             ),
         )
 
@@ -191,7 +192,7 @@ class Phase12aUiTest {
                         onRequestUninstall = {},
                     )
                     RemoteDesktopRelayContent(
-                        relay = RelayStatusState(status = "missing"),
+                        relay = RelayStatusState(installed = false, available = true),
                         busy = false,
                         onInstall = { relayInstallClicked = true },
                         onUninstall = {},
