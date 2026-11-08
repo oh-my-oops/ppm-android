@@ -293,5 +293,11 @@ class ExtensionUiTest {
 
         composeRule.onNodeWithText("Extension failed to load").assertIsDisplayed()
         composeRule.onNodeWithText("RPC timeout: ext:activate (10000ms)").assertIsDisplayed()
+
+        // resolveActivationError matches extensionId or ext-$viewType only, not ext-$slug (extension-webview.tsx:151)
+        val errors = mapOf("ext-git-graph" to "Failed graph", "@ppm/ext-custom" to "Failed custom")
+        assertEquals("Failed custom", resolveActivationError(errors, "@ppm/ext-custom", "git-graph.view"))
+        assertEquals("Failed graph", resolveActivationError(errors, null, "git-graph"))
+        assertNull(resolveActivationError(errors, null, "git-graph.view"))
     }
 }

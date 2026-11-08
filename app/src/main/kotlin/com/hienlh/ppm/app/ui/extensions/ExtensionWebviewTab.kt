@@ -103,14 +103,7 @@ fun ExtensionWebviewBody(
     }
 
     val activationError: String? = remember(activationErrors, extensionIdMeta, viewTypeMeta) {
-        if (!extensionIdMeta.isNullOrEmpty() && extensionIdMeta in activationErrors) {
-            activationErrors[extensionIdMeta]
-        } else if (!viewTypeMeta.isNullOrEmpty()) {
-            val slug = viewTypeMeta.removeSuffix(".view")
-            activationErrors["ext-$slug"] ?: activationErrors["ext-$viewTypeMeta"]
-        } else {
-            null
-        }
+        resolveActivationError(activationErrors, extensionIdMeta, viewTypeMeta)
     }
 
     var retryAttempt by remember(tab.id, viewTypeMeta) { mutableIntStateOf(0) }
@@ -439,6 +432,18 @@ internal fun Rgba.toCssString(): String {
     } else {
         String.format(Locale.US, "rgba(%d, %d, %d, %.3f)", ri, gi, bi, a.coerceIn(0.0, 1.0))
     }
+}
+
+internal fun resolveActivationError(
+    activationErrors: Map<String, String>,
+    extensionId: String?,
+    viewType: String?,
+): String? {
+    if (!extensionId.isNullOrEmpty() && extensionId in activationErrors) {
+        return activationErrors[extensionId]
+    }
+    if (viewType.isNullOrEmpty()) return null
+    return activationErrors["ext-$viewType"]
 }
 
 internal fun ThemeShadow.toCssString(): String =

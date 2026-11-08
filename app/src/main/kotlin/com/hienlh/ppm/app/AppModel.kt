@@ -1604,13 +1604,12 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 val repo = (msg.metadata["repo"] as? JsonPrimitive)?.contentOrNull
                 openGitReview(metaProjectName, path, repo)
             } else {
-                val targetProject = msg.projectId ?: metaProjectName ?: selectedProject
                 withWorkspace { store ->
                     store.openTab(
                         NewTab(
                             type = msg.tabType,
                             title = msg.title,
-                            projectId = targetProject,
+                            projectId = msg.projectId,
                             closable = msg.closable,
                             metadata = JsonObject(msg.metadata),
                         ),
