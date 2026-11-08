@@ -209,11 +209,8 @@ class KeyboardPanFollowTest {
         assertEquals(0, pan())
         cursorAt(140)
         assertEquals(0, pan())
-        // 160..400 fits in 250, but 160..180 is still in view, so a visible cursor is not re-centred.
+        // 160..400 is 240 px: both fit, and the page goes up for the keys.
         cursorAt(160)
-        assertEquals(0, pan())
-        // Once the cursor crosses the keyboard's edge (240..260 > 250), it and the keys fit and both come up.
-        cursorAt(240)
         assertEquals(150, pan())
     }
 
@@ -265,6 +262,43 @@ class KeyboardPanFollowTest {
     }
 
     @Test
+    fun `a cursor that is in view brings the keys up with it when both fit`() {
+        show()
+        cursorAt(210)
+        takeFocus()
+        openKeyboard()
+        // 210..400 is 190 px of 250: the cursor is in view and the keys are not, and the page goes up for them.
+        assertEquals(150, pan())
+    }
+
+    @Test
+    fun `the page follows the keys when they are laid out after the keyboard is up`() {
+        show(withKeys = false)
+        cursorAt(240)
+        takeFocus()
+        openKeyboard()
+        // Nothing to show with the cursor but the cursor: 240..260 centred in 0..250.
+        assertEquals(125, pan())
+        compose.runOnIdle { keysShown = true }
+        compose.waitForIdle()
+        assertEquals(150, pan())
+    }
+
+    @Test
+    fun `the page follows the keys when they move and the cursor does not`() {
+        show()
+        cursorAt(100)
+        takeFocus()
+        openKeyboard()
+        // 100..400 is 300 px of the 250 the view has: the cursor, in view, is what decides.
+        assertEquals(0, pan())
+        compose.runOnIdle { keysLift = 100 }
+        compose.waitForIdle()
+        // The keys are at 260..300 now, half under the keyboard's edge at 250, and 100..300 fits the view.
+        assertEquals(75, pan())
+    }
+
+    @Test
     fun `holding the pan during a splitter drag keeps the page still until release and re-pans when the cursor is hidden`() {
         show()
         cursorAt(50)
@@ -282,38 +316,6 @@ class KeyboardPanFollowTest {
         compose.waitForIdle()
         // On release the cursor is hidden under the keyboard at 250, and 250..400 fits in the 250 px view, so both come up.
         assertEquals(150, pan())
-    }
-
-    @Test
-    fun `a cursor that is still visible is never re-centred when the keys move within reach`() {
-        show()
-        cursorAt(210)
-        takeFocus()
-        openKeyboard()
-        // 210..230 is already in the 0..250 view: the page stays put even though 210..400 would fit.
-        assertEquals(0, pan())
-
-        // After a pan to 125 for a cursor at 240..260 (with keys initially too far down to fit), a splitter drag that brings
-        // the keys within 250 px of the cursor leaves the pan at 125 both during the drag and after release (kp-c1).
-        compose.runOnIdle {
-            openKeyboard(0)
-            keysLift = -160
-        }
-        compose.waitForIdle()
-        cursorAt(240)
-        openKeyboard()
-        // 240..260 is hidden (> 250), and the keys at 520..560 do not fit with it, so the cursor alone is centred at 125.
-        assertEquals(125, pan())
-        compose.runOnIdle {
-            dragging = true
-            keysLift = 0
-        }
-        compose.waitForIdle()
-        assertEquals(125, pan())
-        compose.runOnIdle { dragging = false }
-        compose.waitForIdle()
-        // 240..260 is still inside 125..375, so the pan stays at 125 even though 240..400 now fits in 250 px.
-        assertEquals(125, pan())
     }
 
     @Test
