@@ -50,6 +50,8 @@ import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -231,35 +233,41 @@ internal fun StatusTile(file: ChangedFile) {
     }
 }
 
+private const val MAX_DOTS = 6
+
 @Composable
 internal fun BlockDots(file: ChangedFile) {
     val tokens = LocalPpmTokens.current
-    val res = remember(file) { GitChangesView.blockDots(file, 6) }
-    if (res.dots.isEmpty()) return
+    val dots = remember(file) { GitChangesView.blockDots(file) }
+    if (dots.isEmpty()) return
+    val staged = dots.count { it }
+    val title = "$staged of ${dots.size} ${if (dots.size == 1) "block" else "blocks"} staged"
     Row(
-        modifier = Modifier.testTag("git-block-dots-${file.path}"),
+        modifier = Modifier
+            .semantics { contentDescription = title }
+            .testTag("git-block-dots-${file.path}"),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        res.dots.forEachIndexed { i, on ->
+        dots.take(MAX_DOTS).forEachIndexed { i, on ->
             Box(
                 modifier = Modifier
-                    .size(5.dp)
+                    .size(7.dp)
                     .clip(CircleShape)
                     .then(
                         if (on) {
                             Modifier.background(tokens.accent.color)
                         } else {
-                            Modifier.cssBorder(tokens.text3.opacity(0.6).color, CircleShape)
+                            Modifier.cssBorder(tokens.text3.opacity(0.85).color, CircleShape)
                         },
                     )
                     .testTag("git-block-dot-${file.path}-$i-${if (on) "on" else "off"}"),
             )
         }
-        if (res.overflow > 0) {
+        if (dots.size > MAX_DOTS) {
             BasicText(
-                text = "+${res.overflow}",
-                style = PpmFont.mono(9, lineHeight = 10, color = tokens.text3.color),
+                text = "+${dots.size - MAX_DOTS}",
+                style = PpmFont.mono(10, lineHeight = 10, color = tokens.text3.color),
             )
         }
     }

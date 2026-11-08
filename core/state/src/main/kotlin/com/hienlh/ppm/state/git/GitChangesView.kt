@@ -18,13 +18,6 @@ enum class CheckState {
     NONE,
 }
 
-data class BlockDotsResult(
-    val dots: List<Boolean>,
-    val blocks: List<String>,
-    val overflow: Int,
-    val staged: Boolean,
-)
-
 data class ChangeTotals(
     val files: Int,
     val filesStaged: Int,
@@ -131,8 +124,8 @@ object GitChangesView {
             if (block.oldLines == 0) block.oldStart + 0.5 else block.oldStart.toDouble()
         }
 
-    /** Block-dot sequence (max [max] dots, then `+N` overflow). */
-    fun blockDots(file: ChangedFile, max: Int = 6): BlockDotsResult {
+    /** One dot per block in file order, true when it is staged (`blockDots` in `git-changes-view.ts`). */
+    fun blockDots(file: ChangedFile): List<Boolean> {
         val raw = mutableListOf<Pair<Double, Boolean>>()
         fun add(name: String, side: com.hienlh.ppm.client.ChangeSide?) {
             if (side == null) return
@@ -147,15 +140,7 @@ object GitChangesView {
         }
         add("staged", file.staged)
         add("unstaged", file.unstaged)
-        val sorted = raw.sortedBy { it.first }.map { it.second }
-        val shown = if (sorted.size <= max) sorted else sorted.take(max - 1)
-        val overflow = if (sorted.size <= max) 0 else sorted.size - (max - 1)
-        return BlockDotsResult(
-            dots = shown,
-            blocks = shown.map { if (it) "staged" else "unstaged" },
-            overflow = overflow,
-            staged = file.staged != null,
-        )
+        return raw.sortedBy { it.first }.map { it.second }
     }
 
     /** Whether a file has unstaged changes that can be discarded. */
@@ -184,7 +169,7 @@ object GitChangesView {
             filesCount++
             if (file.conflict != null) conflicts++
             if (file.staged != null) filesStaged++
-            val dots = blockDots(file, max = Int.MAX_VALUE).dots
+            val dots = blockDots(file)
             blocks += dots.size
             blocksStaged += dots.count { it }
         }

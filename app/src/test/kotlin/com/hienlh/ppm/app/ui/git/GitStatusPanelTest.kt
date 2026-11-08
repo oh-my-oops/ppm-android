@@ -18,6 +18,7 @@ import com.hienlh.ppm.app.ui.files.ExplorerTreeRow
 import com.hienlh.ppm.app.ui.files.installBlankFileIcons
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.client.ApiClient
+import com.hienlh.ppm.client.ChangeBlock
 import com.hienlh.ppm.client.ChangeSide
 import com.hienlh.ppm.client.ChangedFile
 import com.hienlh.ppm.client.GitBranchState
@@ -446,5 +447,42 @@ class GitStatusPanelTest {
         } finally {
             server.close()
         }
+    }
+
+    @Test
+    fun `BlockDots draws first 6 dots and +N-6 overflow like git-change-parts tsx`() {
+        val fileWith8Blocks = ChangedFile(
+            path = "src/EightBlocks.kt",
+            staged = ChangeSide(
+                status = "M",
+                added = 2,
+                removed = 0,
+                blocks = listOf("s0", "s1"),
+                changeBlocks = listOf(
+                    ChangeBlock("s0", 0, 5, 1, 5, 2, 1, 0),
+                    ChangeBlock("s1", 1, 25, 1, 25, 2, 1, 0),
+                ),
+            ),
+            unstaged = ChangeSide(
+                status = "M",
+                added = 6,
+                removed = 0,
+                blocks = emptyList(),
+                changeBlocks = (0 until 6).map { idx ->
+                    ChangeBlock("u$idx", idx, idx * 10, 1, idx * 10, 2, 1, 0)
+                },
+            ),
+        )
+        compose.setContent {
+            BlockDots(fileWith8Blocks)
+        }
+        compose.waitForIdle()
+        // First 6 dots (0..5) are drawn; dot 6 is not; overflow text is +2
+        for (i in 0 until 6) {
+            val state = if (i == 1 || i == 4) "on" else "off"
+            compose.onNodeWithTag("git-block-dot-src/EightBlocks.kt-$i-$state", useUnmergedTree = true).assertIsDisplayed()
+        }
+        assertTrue(compose.onAllNodesWithTag("git-block-dot-src/EightBlocks.kt-6-off", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        compose.onNodeWithText("+2", useUnmergedTree = true).assertIsDisplayed()
     }
 }

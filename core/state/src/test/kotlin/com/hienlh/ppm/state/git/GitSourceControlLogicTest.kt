@@ -297,9 +297,16 @@ class GitSourceControlLogicTest {
         val nullStashJson = Json.parseToJsonElement("""{"stashed":false,"stash":null}""").jsonObject
         assertNull(StashEntry.from(nullStashJson))
 
-        // blockDots slices max - 1 (5) when > 6 blocks
+        // blockDots returns all dots in file order without truncation
         val manyBlocksFile = ChangedFile(
             path = "src/Many.kt",
+            staged = ChangeSide(
+                status = "M",
+                added = 1,
+                removed = 0,
+                blocks = listOf("s0"),
+                changeBlocks = listOf(ChangeBlock("s0", 0, 15, 1, 15, 2, 1, 0)),
+            ),
             unstaged = ChangeSide(
                 status = "M",
                 added = 7,
@@ -310,9 +317,8 @@ class GitSourceControlLogicTest {
                 },
             ),
         )
-        val dots = GitChangesView.blockDots(manyBlocksFile, max = 6)
-        assertEquals(5, dots.dots.size)
-        assertEquals(2, dots.overflow)
+        val dots = GitChangesView.blockDots(manyBlocksFile)
+        assertEquals(listOf(false, false, true, false, false, false, false, false), dots)
     }
 
     @Test
