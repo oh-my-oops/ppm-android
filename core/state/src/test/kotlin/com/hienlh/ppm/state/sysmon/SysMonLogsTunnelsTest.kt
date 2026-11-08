@@ -282,12 +282,6 @@ class SysMonLogsTunnelsTest {
         val scmStop = ServicesModel.confirmWordingFor("scm", sysSvc, "stop")!!
         assertEquals("Stop nginx.service? Windows refuses if other running services depend on it.", scmStop.body)
 
-        assertFalse(tabNeedsProcesses("overview"))
-        assertFalse(tabNeedsProcesses("performance"))
-        assertTrue(tabNeedsProcesses("processes"))
-        assertTrue(tabNeedsProcesses("apps"))
-        assertTrue(tabNeedsProcesses("services"))
-
         val tracker = ResourceStreamTierTracker()
         assertEquals(StreamReconcileAction.Connect(false), tracker.retain(wantProcesses = false))
         assertEquals(StreamReconcileAction.NoOp, tracker.retain(wantProcesses = false))

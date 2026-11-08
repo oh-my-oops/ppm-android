@@ -247,6 +247,7 @@ private fun Resources(model: AppModel, text: TextStyle, onClick: () -> Unit) {
             }
         }
     }
+    if (!model.sharedMetricsConnected) return
     val snap = model.sharedMetricsSnapshot ?: return
     val cpuTotal = snap.system.cpu.total
     val memoryUsedMB = snap.system.mem.usedMB

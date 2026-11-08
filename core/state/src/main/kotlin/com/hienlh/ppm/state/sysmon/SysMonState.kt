@@ -1150,9 +1150,6 @@ object ServicesModel {
     }
 }
 
-fun tabNeedsProcesses(tab: String): Boolean =
-    tab == "processes" || tab == "apps" || tab == "services"
-
 sealed interface StreamReconcileAction {
     data object NoOp : StreamReconcileAction
     data object Disconnect : StreamReconcileAction

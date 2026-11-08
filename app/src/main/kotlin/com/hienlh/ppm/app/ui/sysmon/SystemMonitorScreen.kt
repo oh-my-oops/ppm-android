@@ -157,7 +157,6 @@ fun SystemMonitorBody(
         onTabChange(tab)
     }
 
-    val wantProcesses = tabNeedsProcesses(activeTab)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(model.api) {
         val api = model.api ?: return@LaunchedEffect
@@ -169,10 +168,10 @@ fun SystemMonitorBody(
         } catch (_: Exception) {
         }
     }
-    LaunchedEffect(model.api, lifecycle, wantProcesses) {
+    LaunchedEffect(model.api, lifecycle) {
         if (model.api == null) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            val release = model.retainResourceMonitor(wantProcesses = wantProcesses)
+            val release = model.retainResourceMonitor(wantProcesses = true)
             try {
                 awaitCancellation()
             } finally {

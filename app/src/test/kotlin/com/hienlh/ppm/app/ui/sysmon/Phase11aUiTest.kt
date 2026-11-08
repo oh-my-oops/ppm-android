@@ -645,4 +645,104 @@ class Phase11aUiTest {
             server.close()
         }
     }
+
+    @Test
+    fun `SystemMonitorBody always requests processes StatusBar hides CPU MEM when disconnected and reconnect resets tickCount`() {
+        val streamHits = java.util.concurrent.atomic.AtomicInteger(0)
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                return when {
+                    target.contains("/api/system/resources/stream") -> {
+                        val hit = streamHits.incrementAndGet()
+                        val sseBody = if (hit == 1) {
+                            buildString {
+                                append("event: snapshot\n")
+                                append("""data: {"ts":1000,"system":{"cpu":{"total":42},"mem":{"totalMB":1024,"usedMB":512,"availableMB":512,"percent":50},"disk":{"inBps":0,"outBps":0,"available":false},"net":{"inBps":0,"outBps":0,"available":false},"processCount":1},"groups":[],"processes":[]}""" + "\n\n")
+                                append("event: snapshot\n")
+                                append("""data: {"ts":2000,"system":{"cpu":{"total":45},"mem":{"totalMB":1024,"usedMB":512,"availableMB":512,"percent":50},"disk":{"inBps":0,"outBps":0,"available":false},"net":{"inBps":0,"outBps":0,"available":false},"processCount":1},"groups":[],"processes":[]}""" + "\n\n")
+                            }
+                        } else {
+                            buildString {
+                                append("event: snapshot\n")
+                                append("""data: {"ts":3000,"system":{"cpu":{"total":55},"mem":{"totalMB":1024,"usedMB":512,"availableMB":512,"percent":50},"disk":{"inBps":0,"outBps":0,"available":false},"net":{"inBps":0,"outBps":0,"available":false},"processCount":1},"groups":[],"processes":[]}""" + "\n\n")
+                            }
+                        }
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "text/event-stream")
+                            .body(sseBody)
+                            .build()
+                    }
+                    else -> {
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{}}""")
+                            .build()
+                    }
+                }
+            }
+        }
+        server.start()
+        try {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val model = AppModel(context)
+            model.api = ApiClient(server.url("/"), "tok")
+
+            val release = model.retainResourceMonitor(wantProcesses = true, reconnectDelayMs = 200L)
+            val deadline = System.currentTimeMillis() + 5_000L
+            while (System.currentTimeMillis() < deadline && model.sharedMetricsSnapshot?.ts != 2000L) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                Thread.sleep(10L)
+            }
+            assertEquals(2, model.sharedMetricsTickCount)
+
+            // Advance main looper past the 200ms reconnect delay so connection #2 runs
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+                .idleFor(java.time.Duration.ofMillis(250))
+            while (System.currentTimeMillis() < deadline && model.sharedMetricsSnapshot?.ts != 3000L) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                Thread.sleep(10L)
+            }
+            // Second connection emitted only 1 snapshot, so tickCount must have been reset to 0 on reconnect -> 1
+            assertEquals(1, model.sharedMetricsTickCount)
+            release()
+
+            // Mount SystemMonitorBody on overview tab and verify it retains with wantProcesses = true
+            composeRule.setContent {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    Column(Modifier.fillMaxSize()) {
+                        com.hienlh.ppm.app.ui.tablet.StatusBar(model = model)
+                        Box(Modifier.weight(1f)) {
+                            SystemMonitorBody(
+                                model = model,
+                                initialTab = "overview",
+                            )
+                        }
+                    }
+                }
+            }
+            assertEquals(1, model.resourceTierTracker.processesRefCount)
+
+            // Stop background stream job while keeping model.api non-null so StatusBar renders Resources deterministically
+            composeRule.waitForIdle()
+            model.applyResourceReconcile(com.hienlh.ppm.state.sysmon.StreamReconcileAction.Disconnect)
+            model.sharedMetricsSnapshot = MetricsSnapshot(
+                ts = 3000L,
+                system = SystemMetrics(
+                    cpu = CpuMetrics(total = 55.0),
+                    mem = MemoryMetrics(totalMB = 1024.0, usedMB = 512.0, availableMB = 512.0, percent = 50.0),
+                ),
+            )
+            model.sharedMetricsConnected = false
+            composeRule.waitForIdle()
+            composeRule.onNodeWithText("CPU 55%", useUnmergedTree = true).assertDoesNotExist()
+
+            model.sharedMetricsConnected = true
+            composeRule.waitForIdle()
+            composeRule.onNodeWithText("CPU 55%", useUnmergedTree = true).assertIsDisplayed()
+        } finally {
+            server.close()
+        }
+    }
 }

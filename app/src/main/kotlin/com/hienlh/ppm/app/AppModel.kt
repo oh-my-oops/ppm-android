@@ -808,18 +808,21 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     internal val resourceTierTracker = com.hienlh.ppm.state.sysmon.ResourceStreamTierTracker()
     private var resourceStreamJob: Job? = null
 
-    fun retainResourceMonitor(wantProcesses: Boolean): () -> Unit {
-        applyResourceReconcile(resourceTierTracker.retain(wantProcesses))
+    fun retainResourceMonitor(wantProcesses: Boolean, reconnectDelayMs: Long = 5_000L): () -> Unit {
+        applyResourceReconcile(resourceTierTracker.retain(wantProcesses), reconnectDelayMs)
         var released = false
         return {
             if (!released) {
                 released = true
-                applyResourceReconcile(resourceTierTracker.release(wantProcesses))
+                applyResourceReconcile(resourceTierTracker.release(wantProcesses), reconnectDelayMs)
             }
         }
     }
 
-    private fun applyResourceReconcile(action: com.hienlh.ppm.state.sysmon.StreamReconcileAction) {
+    internal fun applyResourceReconcile(
+        action: com.hienlh.ppm.state.sysmon.StreamReconcileAction,
+        reconnectDelayMs: Long = 5_000L,
+    ) {
         when (action) {
             com.hienlh.ppm.state.sysmon.StreamReconcileAction.NoOp -> {}
             com.hienlh.ppm.state.sysmon.StreamReconcileAction.Disconnect -> {
@@ -834,6 +837,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 sharedMetricsTickCount = 0
                 resourceStreamJob = scope.launch {
                     while (isActive) {
+                        sharedMetricsTickCount = 0
                         try {
                             currentApi.fullResourceSamples(processes = wantProc).collect { sampleJson ->
                                 val parsed = com.hienlh.ppm.state.sysmon.MetricsSnapshot.from(sampleJson) ?: return@collect
@@ -842,6 +846,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                                 sharedMetricsTickCount += 1
                                 sharedMetricsConnected = true
                             }
+                            sharedMetricsConnected = false
                         } catch (error: CancellationException) {
                             throw error
                         } catch (_: PpmError.Unauthorized) {
@@ -850,7 +855,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                         } catch (_: Exception) {
                             sharedMetricsConnected = false
                         }
-                        delay(5_000)
+                        delay(reconnectDelayMs)
                     }
                 }
             }
