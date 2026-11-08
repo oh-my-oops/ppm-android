@@ -229,6 +229,7 @@ import com.hienlh.ppm.state.database.structureApplyRequestJson
 import com.hienlh.ppm.state.database.structurePreviewRequestJson
 import com.hienlh.ppm.state.database.tableModelProblems
 import com.hienlh.ppm.state.database.tableReferences
+import com.hienlh.ppm.state.database.targetTypeOptions
 import com.hienlh.ppm.state.database.uid
 import com.hienlh.ppm.state.database.uniqueRows
 import com.hienlh.ppm.state.database.updateRow
@@ -2899,18 +2900,12 @@ internal fun DatabaseImpExpTabContent(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        SettingsButton(
-                            label = "Database",
-                            primary = form.targetType == "database",
-                            modifier = Modifier.testTag("db-impexp-target-type-database"),
-                            onClick = { onFormChange(setTargetType(form, "database")) },
-                        )
-                        for (fmt in IMPEXP_FILE_FORMATS.filter { it.exportable }) {
+                        for (opt in targetTypeOptions(form.sourceType)) {
                             SettingsButton(
-                                label = fmt.id.uppercase(),
-                                primary = form.targetType == fmt.id,
-                                modifier = Modifier.testTag("db-impexp-target-type-${fmt.id}"),
-                                onClick = { onFormChange(setTargetType(form, fmt.id)) },
+                                label = if (opt.id == "database") "Database" else opt.id.uppercase(),
+                                primary = form.targetType == opt.id,
+                                modifier = Modifier.testTag("db-impexp-target-type-${opt.id}"),
+                                onClick = { onFormChange(setTargetType(form, opt.id)) },
                             )
                         }
                     }

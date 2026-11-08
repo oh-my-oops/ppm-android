@@ -2765,19 +2765,23 @@ fun setSourceType(form: ImpExpForm, sourceType: String): ImpExpForm {
     }
 }
 
+fun isFileSource(type: String): Boolean =
+    type != "database" && type != "query"
+
+fun targetTypeOptions(source: String): List<LabeledChoice> =
+    if (isFileSource(source)) {
+        listOf(LabeledChoice("database", "Database"))
+    } else {
+        IMPEXP_FILE_FORMATS.map { LabeledChoice(it.id, it.label) }
+    }
+
 fun setTargetType(form: ImpExpForm, targetType: String): ImpExpForm {
-    var sourceType = form.sourceType
-    if (targetType != "database" && sourceType != "database" && sourceType != "query") {
-        sourceType = "database"
+    if (targetType == form.targetType || targetTypeOptions(form.sourceType).none { it.id == targetType }) {
+        return form
     }
     val prevDefaultTargets = form.rows.associate { r -> r.id to defaultRowTarget(form, r) }
-    val next = form.copy(sourceType = sourceType, targetType = targetType)
-    val baseRows = if (sourceType != form.sourceType) {
-        syncDatabaseRows(next, next.sourceTables)
-    } else {
-        next.rows
-    }
-    val rows = baseRows.map { r ->
+    val next = form.copy(targetType = targetType)
+    val rows = next.rows.map { r ->
         if (r.target.isEmpty() || r.target == prevDefaultTargets[r.id]) {
             r.copy(target = "")
         } else {

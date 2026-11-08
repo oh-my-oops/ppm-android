@@ -344,6 +344,12 @@ class DatabasePhase09fStructureImpExpStateTest {
         assertEquals("Export (1)", impExpTitle(form))
         assertNull(runBlocker(form))
 
+        // setTargetType refuses "database" when source is "database" or "query" (impexp-state.ts:163)
+        assertEquals("csv", setTargetType(form, "database").targetType)
+        val queryForm = gridExportForm(currentDb, format = "csv", sql = "SELECT * FROM users")
+        assertEquals("csv", setTargetType(queryForm, "database").targetType)
+        assertEquals("json", setTargetType(form, "json").targetType)
+
         form = addTables(form, listOf("orders"))
         assertEquals(2, activeRows(form).size)
         val exportJson = exportRequest(form)
@@ -366,6 +372,7 @@ class DatabasePhase09fStructureImpExpStateTest {
 
         // Switch to import with CSV upload (only csv, json, jsonl are importable)
         var impForm = importIntoForm(currentDb)
+        assertEquals("database", setTargetType(impForm, "csv").targetType)
         assertEquals("Add at least one file to import", runBlocker(impForm))
 
         // 128 MB upload limit check
