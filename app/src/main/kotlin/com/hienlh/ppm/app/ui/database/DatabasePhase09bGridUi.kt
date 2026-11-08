@@ -168,7 +168,6 @@ import com.hienlh.ppm.state.database.deleteRows
 import com.hienlh.ppm.state.database.descriptionColumn
 import com.hienlh.ppm.state.database.detailKeyFilters
 import com.hienlh.ppm.state.database.editCells
-import com.hienlh.ppm.state.database.encodeGridChangesetJson
 import com.hienlh.ppm.state.database.encodeGridFiltersJson
 import com.hienlh.ppm.state.database.filterRequest
 import com.hienlh.ppm.state.database.filterSyntax
@@ -192,7 +191,6 @@ import com.hienlh.ppm.state.database.parseChangesetFailure
 import com.hienlh.ppm.state.database.parseChangesetPreview
 import com.hienlh.ppm.state.database.parseDbCellValue
 import com.hienlh.ppm.state.database.parseFormText
-import com.hienlh.ppm.state.database.parseGridChangesetJson
 import com.hienlh.ppm.state.database.parseGridColumnsSchema
 import com.hienlh.ppm.state.database.parseGridResponse
 import com.hienlh.ppm.state.database.parseTsvPasteChanges
@@ -209,10 +207,12 @@ import com.hienlh.ppm.state.database.savedText
 import com.hienlh.ppm.state.database.selectedBlock
 import com.hienlh.ppm.state.database.selectedRowIndices
 import com.hienlh.ppm.state.database.selectionHasCell
+import com.hienlh.ppm.state.database.setUnsavedGridChangeset
 import com.hienlh.ppm.state.database.setUnsavedGridRows
 import com.hienlh.ppm.state.database.shouldBypassSaveDialog
 import com.hienlh.ppm.state.database.sortInfoForColumn
 import com.hienlh.ppm.state.database.tableReferences
+import com.hienlh.ppm.state.database.unsavedGridChangeset
 import com.hienlh.ppm.state.database.titleIconFor
 import com.hienlh.ppm.state.database.toFunnelKind
 import com.hienlh.ppm.state.database.toGridChanges
@@ -993,7 +993,7 @@ fun DatabaseTableTabBody(
     var readonlyEnabled by remember { mutableStateOf(meta["readonly"]?.bool ?: true) }
     var autoRefreshSec by remember { mutableIntStateOf(0) }
     val initialChangeset = remember(tab.id) {
-        parseGridChangesetJson(meta["pendingChangeset"] as? JsonObject) ?: EMPTY_CHANGESET
+        unsavedGridChangeset(tab.id)
     }
 
     val schemaMapForBody = remember(schemaList) { schemaList.associateBy { it.name } }
@@ -1657,11 +1657,10 @@ fun DatabaseTableTabBody(
             initialChangeset = initialChangeset,
             onChangesetChanged = { cs ->
                 val count = changedRowCount(cs)
-                setUnsavedGridRows(tab.id, count)
+                setUnsavedGridChangeset(tab.id, cs)
                 model.patchTabMetadata(
                     tab.id,
                     "unsavedGridRows" to if (count > 0) JsonPrimitive(count) else null,
-                    "pendingChangeset" to if (isEmptyChangeset(cs)) null else encodeGridChangesetJson(cs),
                 )
             },
             onOpenReferencedTableTab = { refTable, refSchema, refFilters ->

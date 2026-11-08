@@ -225,7 +225,7 @@ class DatabasePhase09eQueryStateTest {
         assertFalse(losesDbWorkOnClose(cleanQueryTab))
         assertTrue(losesDbWorkOnClose(dirtyQueryTab))
 
-        // Unsaved grid rows & pendingChangeset metadata persistence
+        // Unsaved grid edits stay in memory only (UnsavedGridRowsStore); metadata holds only unsavedGridRows count
         var cs = EMPTY_CHANGESET
         cs = editCells(
             cs,
@@ -239,10 +239,9 @@ class DatabasePhase09eQueryStateTest {
                 ),
             ),
         )
-        val encodedCs = encodeGridChangesetJson(cs)
-        val restoredCs = parseGridChangesetJson(encodedCs)
-        assertNotNull(restoredCs)
-        assertEquals(1, changedRowCount(restoredCs!!))
+        setUnsavedGridChangeset("database:1::public:users", cs)
+        val restoredCs = unsavedGridChangeset("database:1::public:users")
+        assertEquals(1, changedRowCount(restoredCs))
 
         val tableTab = com.hienlh.ppm.state.workspace.WorkspaceTab(
             id = "database:1::public:users",
@@ -250,10 +249,24 @@ class DatabasePhase09eQueryStateTest {
             title = "users",
             metadata = buildJsonObject {
                 put("unsavedGridRows", 1)
-                put("pendingChangeset", encodedCs)
             },
         )
+        assertFalse("pendingChangeset" in tableTab.metadata)
         assertTrue(losesDbWorkOnClose(tableTab))
+        clearUnsavedGridRows("database:1::public:users")
+        assertEquals(0, changedRowCount(unsavedGridChangeset("database:1::public:users")))
+
+        // pendingChangeset is never read from tab.metadata (row data must not live in synced UI prefs)
+        val stalePendingTab = com.hienlh.ppm.state.workspace.WorkspaceTab(
+            id = "database:1::public:stale",
+            type = "database",
+            title = "stale",
+            metadata = buildJsonObject {
+                put("pendingChangeset", buildJsonObject { put("inserted", 1) })
+            },
+        )
+        assertFalse(losesDbWorkOnClose(stalePendingTab))
+
         setUnsavedGridRows("database:1::public:orders", 2)
         val ordersTab = com.hienlh.ppm.state.workspace.WorkspaceTab(
             id = "database:1::public:orders",

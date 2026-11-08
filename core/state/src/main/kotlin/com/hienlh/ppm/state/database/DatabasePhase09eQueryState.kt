@@ -2195,9 +2195,7 @@ fun losesDbWorkOnClose(tab: WorkspaceTab): Boolean {
     if (isDbTabDirty(tab.type, tab.metadata)) return true
     if (unsavedGridRows(tab.id) > 0) return true
     val metaRows = tab.metadata["unsavedGridRows"]?.int ?: 0
-    if (metaRows > 0) return true
-    val restoredCs = parseGridChangesetJson(tab.metadata["pendingChangeset"] as? JsonObject)
-    return restoredCs != null && !isEmptyChangeset(restoredCs)
+    return metaRows > 0
 }
 
 /** The next `"Query N"` number across open tabs (`nextQueryNumber` in `src/web/lib/db-tabs.ts`). */
