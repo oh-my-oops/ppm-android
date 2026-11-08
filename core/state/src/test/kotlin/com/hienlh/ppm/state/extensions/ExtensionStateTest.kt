@@ -327,5 +327,21 @@ class ExtensionStateTest {
         assertTrue(com.hienlh.ppm.state.git.GitRepoScope.commandRunsGit("git-graph.view"))
         assertFalse(com.hienlh.ppm.state.git.GitRepoScope.commandRunsGit("git.other"))
         assertFalse(com.hienlh.ppm.state.git.GitRepoScope.commandRunsGit("db.refresh"))
+
+        val explorerFallback = ExtensionContributes.from(
+            Json.parseToJsonElement(
+                """
+                {
+                  "views": {
+                    "explorer": [
+                      {"id": "ext.tree", "name": "Explorer Tree", "type": "tree"},
+                      {"id": "ext.web", "name": "Explorer Web", "type": "webview"}
+                    ]
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+        assertEquals(listOf("ext.tree", "ext.web"), explorerFallback.sidebarViews().map { it.id })
     }
 }

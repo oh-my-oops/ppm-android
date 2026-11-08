@@ -366,7 +366,7 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
                 }
             }
             val contribs = model.extensions?.contributions?.collectAsState()?.value
-            for (view in contribs?.views?.get("sidebar").orEmpty().filter { it.type != "webview" }) {
+            for (view in (contribs?.views?.get("sidebar") ?: contribs?.views?.get("explorer")).orEmpty()) {
                 val secId = "ext:${view.id}"
                 val active = model.sidebarSection == secId
                 NavItem(ProductIcon.Puzzle, view.name, active, badge = 0) {

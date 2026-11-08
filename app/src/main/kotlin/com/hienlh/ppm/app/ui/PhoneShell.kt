@@ -895,7 +895,7 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                 ) { PpmIcon(ProductIcon.X, 16.dp, tokens.text.color) }
             }
             val contribs = model.extensions?.contributions?.collectAsState()?.value
-            val extViews = contribs?.views?.get("sidebar").orEmpty().filter { it.type != "webview" }
+            val extViews = (contribs?.views?.get("sidebar") ?: contribs?.views?.get("explorer")).orEmpty()
             val sections = model.sidebarSections + extViews.map { "ext:${it.id}" }
             val shown = section?.takeIf { it in sections } ?: sections.first()
             Box(Modifier.weight(1f).fillMaxWidth()) {

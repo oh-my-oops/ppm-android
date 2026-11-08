@@ -134,6 +134,10 @@ data class ExtensionContributes(
     val menus: Map<String, List<ContributedMenu>> = emptyMap(),
     val keybindings: List<ContributedKeybinding> = emptyList(),
 ) {
+    /** Sidebar extension views (`tab-registry.ts:69-72`: `views["sidebar"] ?? views["explorer"] ?? []`). */
+    fun sidebarViews(): List<ContributedView> =
+        (views["sidebar"] ?: views["explorer"]).orEmpty()
+
     /** Header actions for a tree view from `menus["view/title"]` (`extension-tree-view.tsx:44-57`). */
     fun headerActionsForView(viewId: String): List<TreeHeaderAction> {
         val viewTitleMenus = menus["view/title"].orEmpty()
