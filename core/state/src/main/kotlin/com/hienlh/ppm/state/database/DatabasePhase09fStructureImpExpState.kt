@@ -2147,9 +2147,6 @@ fun defaultZipName(atEpochMillis: Long = System.currentTimeMillis()): String {
     return "zip-archive-$stamp.zip"
 }
 
-fun defaultZipName(database: String?, atEpochMillis: Long? = null): String =
-    defaultZipName(atEpochMillis ?: System.currentTimeMillis())
-
 fun importSourceName(fileName: String): String {
     val base = fileName.trim().replace('\\', '/').substringAfterLast('/')
     val stripped = base.replace(Regex("""\.[^.]*$"""), "")
@@ -2298,7 +2295,7 @@ data class ImpExpForm(
     val uploads: List<ImpExpUpload> = emptyList(),
     val rows: List<ImpExpRow> = emptyList(),
     val archiveAsZip: Boolean = false,
-    val zipFileName: String = "export.zip",
+    val zipFileName: String = "",
     val exportOptions: ExportFormatOptions = DEFAULT_EXPORT_OPTIONS,
     val importOptions: ImportFormatOptions = DEFAULT_IMPORT_OPTIONS,
 )
@@ -2328,7 +2325,7 @@ fun newImpExpForm(current: ImpExpDatabase): ImpExpForm = ImpExpForm(
     uploads = emptyList(),
     rows = listOf(templateRow()),
     archiveAsZip = false,
-    zipFileName = defaultZipName(current.database),
+    zipFileName = "",
     exportOptions = DEFAULT_EXPORT_OPTIONS.copy(
         csv = DEFAULT_EXPORT_OPTIONS.csv.copy(),
         json = DEFAULT_EXPORT_OPTIONS.json.copy(),
@@ -2524,11 +2521,6 @@ fun setDatabase(form: ImpExpForm, side: String, patchConnectionId: Int? = form.s
         val next = form.copy(
             sourceDb = db,
             sourceTables = sourceTables,
-            zipFileName = if (form.zipFileName == defaultZipName(form.sourceDb.database)) {
-                defaultZipName(db.database)
-            } else {
-                form.zipFileName
-            },
         )
         return if (dbChanged && next.sourceType == "database") {
             next.copy(rows = syncDatabaseRows(next, emptyList(), listOf(templateRow())))
@@ -2750,7 +2742,7 @@ fun runBlocker(form: ImpExpForm, targetReadonly: Boolean = false): String? {
     return null
 }
 
-fun exportRequest(form: ImpExpForm): JsonObject {
+fun exportRequest(form: ImpExpForm, now: Long = System.currentTimeMillis()): JsonObject {
     val rows = activeRows(form)
     val format = if (form.targetType == "database") "csv" else form.targetType
     val sourceObj = if (form.sourceType == "query") {
@@ -2785,8 +2777,7 @@ fun exportRequest(form: ImpExpForm): JsonObject {
             )
         }
     }
-    val zipName = form.zipFileName.trim().ifEmpty { defaultZipName(form.sourceDb.database) }
-    val normalizedZip = if (zipName.lowercase().endsWith(".zip")) zipName else "$zipName.zip"
+    val zipName = form.zipFileName.trim().ifEmpty { defaultZipName(now) }
     return buildJsonObject {
         put("source", sourceObj)
         put("format", format)
@@ -2794,7 +2785,7 @@ fun exportRequest(form: ImpExpForm): JsonObject {
         put(
             "zip",
             if (form.archiveAsZip) {
-                buildJsonObject { put("name", normalizedZip) }
+                buildJsonObject { put("name", zipName) }
             } else {
                 JsonNull
             },

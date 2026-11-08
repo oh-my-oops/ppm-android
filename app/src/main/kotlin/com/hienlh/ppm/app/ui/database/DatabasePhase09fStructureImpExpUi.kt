@@ -2938,7 +2938,7 @@ internal fun DatabaseImpExpTabContent(
                                 SettingsTextInput(
                                     value = form.zipFileName,
                                     onValueChange = { onFormChange(form.copy(zipFileName = it)) },
-                                    placeholder = "export.zip",
+                                    placeholder = "zip-archive-yyyy-mm-dd-hh-mm-ss.zip",
                                     modifier = Modifier.weight(1f).testTag("db-impexp-zip-name-input"),
                                 )
                             }

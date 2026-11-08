@@ -397,6 +397,7 @@ class DatabasePhase09fStructureImpExpStateTest {
     fun impExpFormState_handlesExportImportUploadsColumnMapPreviewAndJobStatusWireContracts() {
         val currentDb = ImpExpDatabase(connectionId = 1, database = "analytics", schema = "public")
         var form = databaseExportForm(currentDb, table = "users")
+        assertEquals("", form.zipFileName)
         assertEquals("Export (1)", impExpTitle(form))
         assertNull(runBlocker(form))
 
@@ -410,6 +411,26 @@ class DatabasePhase09fStructureImpExpStateTest {
         assertEquals(2, activeRows(form).size)
         val exportJson = exportRequest(form)
         assertEquals("csv", exportJson["format"]?.jsonPrimitive?.content)
+        assertTrue(exportJson["zip"]!!.isNullLiteral())
+        val prevTz = java.util.TimeZone.getDefault()
+        val emptyZipExportJson = try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Asia/Ho_Chi_Minh"))
+            exportRequest(form.copy(archiveAsZip = true), now = 1730000000000L)
+        } finally {
+            java.util.TimeZone.setDefault(prevTz)
+        }
+        assertEquals(
+            "zip-archive-2024-10-27-10-33-20.zip",
+            emptyZipExportJson["zip"]?.jsonObject?.get("name")?.jsonPrimitive?.content,
+        )
+        val typedZipExportJson = exportRequest(
+            form.copy(archiveAsZip = true, zipFileName = "my-typed-bundle"),
+            now = 1730000000000L,
+        )
+        assertEquals(
+            "my-typed-bundle",
+            typedZipExportJson["zip"]?.jsonObject?.get("name")?.jsonPrimitive?.content,
+        )
         val exportSource = exportJson["source"]!!.jsonObject
         assertEquals("database", exportSource["type"]?.jsonPrimitive?.content)
         assertEquals("public", exportSource["schema"]?.jsonPrimitive?.content)
