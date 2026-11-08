@@ -2341,17 +2341,33 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         return status.staged.size + status.unstaged.size + status.untracked.size
     }
 
+    private val gitReposInflight = mutableMapOf<String, CompletableDeferred<Unit>>()
+
     suspend fun loadGitRepos(project: String, force: Boolean = false) {
         val client = api ?: return
         if (!force && project in gitDiscovery) {
             gitRepoChoices.chosen(project)?.let { gitChosenRepoPath[project] = it }
             return
         }
-        val repos = quietly { client.gitRepos(project) } ?: return
-        if (this.api === client) {
-            gitDiscovery[project] = repos
-            val saved = gitRepoChoices.chosen(project)
-            if (saved != null) gitChosenRepoPath[project] = saved
+        val existing = gitReposInflight[project]
+        if (existing != null && !force) {
+            existing.await()
+            return
+        }
+        val request = CompletableDeferred<Unit>()
+        gitReposInflight[project] = request
+        try {
+            val repos = quietly { client.gitRepos(project) }
+            if (repos != null && this.api === client) {
+                gitDiscovery[project] = repos
+                val saved = gitRepoChoices.chosen(project)
+                if (saved != null) gitChosenRepoPath[project] = saved
+            }
+        } finally {
+            if (gitReposInflight[project] === request) {
+                gitReposInflight.remove(project)
+            }
+            request.complete(Unit)
         }
     }
 

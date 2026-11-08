@@ -20,6 +20,7 @@ import com.hienlh.ppm.state.extensions.QuickPickRequest
 import com.hienlh.ppm.state.extensions.StatusBarItemUI
 import com.hienlh.ppm.state.extensions.TreeItemAction
 import com.hienlh.ppm.state.extensions.TreeItemUI
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
@@ -331,5 +332,86 @@ class ExtensionUiTest {
         assertEquals("Failed custom", resolveActivationError(errors, "@ppm/ext-custom", "git-graph.view"))
         assertEquals("Failed graph", resolveActivationError(errors, null, "git-graph"))
         assertNull(resolveActivationError(errors, null, "git-graph.view"))
+    }
+
+    @Test
+    fun `loadGitRepos deduplicates concurrent in-flight requests and clears inflight by identity on force`() {
+        val server = mockwebserver3.MockWebServer()
+        val callCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val gate1 = java.util.concurrent.CountDownLatch(1)
+        val gate2 = java.util.concurrent.CountDownLatch(1)
+        val entered1 = java.util.concurrent.CountDownLatch(1)
+        val entered2 = java.util.concurrent.CountDownLatch(1)
+
+        server.dispatcher = object : mockwebserver3.Dispatcher() {
+            override fun dispatch(request: mockwebserver3.RecordedRequest): mockwebserver3.MockResponse {
+                if (request.target.endsWith("/git/repos")) {
+                    val idx = callCount.incrementAndGet()
+                    if (idx == 1) {
+                        entered1.countDown()
+                        gate1.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                    } else if (idx == 2) {
+                        entered2.countDown()
+                        gate2.await(5, java.util.concurrent.TimeUnit.SECONDS)
+                    }
+                    return mockwebserver3.MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"projectPath":"/work/app","rootIsRepo":true,"repos":[{"path":"/work/app","name":"app","relative":"."}]}}""")
+                        .build()
+                }
+                return mockwebserver3.MockResponse.Builder()
+                    .addHeader("Content-Type", "application/json")
+                    .body("""{"ok":true,"data":{}}""")
+                    .build()
+            }
+        }
+        server.start()
+        try {
+            val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+            val model = com.hienlh.ppm.app.AppModel(ctx)
+            val client1 = com.hienlh.ppm.client.ApiClient(server.url("/"), "tok1")
+            val client2 = com.hienlh.ppm.client.ApiClient(server.url("/"), "tok2")
+            val client3 = com.hienlh.ppm.client.ApiClient(server.url("/"), "tok3")
+            model.api = client1
+
+            // First call starts request 1
+            val job1 = model.scope.launch { model.loadGitRepos("app", force = false) }
+            composeRule.waitUntil(5_000) { entered1.count == 0L }
+            assertEquals(1, callCount.get())
+
+            // Even with a different ApiClient token (bypassing HTTP-level InflightGets), a second non-force call joins gitReposInflight
+            model.api = client2
+            val job2 = model.scope.launch { model.loadGitRepos("app", force = false) }
+            assertEquals(1, callCount.get())
+
+            // Start a force reload while request 1 is still in flight
+            val jobForce = model.scope.launch { model.loadGitRepos("app", force = true) }
+            composeRule.waitUntil(5_000) { entered2.count == 0L }
+            assertEquals(2, callCount.get())
+
+            // Release request 1 first; its cleanup must NOT delete request 2's inflight entry
+            gate1.countDown()
+            composeRule.waitUntil(5_000) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                job1.isCompleted && job2.isCompleted
+            }
+
+            // A third caller joining with force = false (even on client3) while request 2 is still running must join request 2
+            model.api = client3
+            val job3 = model.scope.launch { model.loadGitRepos("app", force = false) }
+            assertEquals(2, callCount.get())
+
+            model.api = client2
+            gate2.countDown()
+            composeRule.waitUntil(5_000) {
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+                jobForce.isCompleted && job3.isCompleted
+            }
+
+            assertEquals(2, callCount.get())
+            assertEquals(1, model.gitDiscovery["app"]?.repos?.size)
+        } finally {
+            server.close()
+        }
     }
 }
