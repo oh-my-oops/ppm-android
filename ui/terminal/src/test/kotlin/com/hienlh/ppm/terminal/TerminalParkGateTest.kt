@@ -111,4 +111,40 @@ class TerminalParkGateTest {
         assertFalse(gate.parked)
         assertTrue(gate.shown)
     }
+
+    @Test
+    fun `refuses to park when canPark is false so trimmed rings, alternate screen and mouse modes keep their live emulator`() {
+        val clock = FakeClock()
+        val events = mutableListOf<String>()
+        var allowPark = false
+        val gate = TerminalParkGate(
+            scope = CoroutineScope(Dispatchers.Unconfined),
+            graceMs = 150L,
+            canPark = { allowPark },
+            onShow = { events += "show" },
+            onPark = { events += "park" },
+            schedule = clock::schedule,
+        )
+        gate.setShown(true)
+        assertEquals(listOf("show"), events)
+
+        gate.setShown(false)
+        clock.advanceBy(200)
+        assertEquals("does not park while canPark is false", listOf("show"), events)
+        assertFalse(gate.parked)
+        assertFalse(gate.shown)
+
+        // Showing again reuses the live emulator without calling onShow again.
+        gate.setShown(true)
+        assertEquals(listOf("show"), events)
+        assertTrue(gate.shown)
+        assertFalse(gate.parked)
+
+        // Once the condition clears (e.g. leaving alternate screen), a subsequent hide parks normally.
+        allowPark = true
+        gate.setShown(false)
+        clock.advanceBy(150)
+        assertEquals(listOf("show", "park"), events)
+        assertTrue(gate.parked)
+    }
 }

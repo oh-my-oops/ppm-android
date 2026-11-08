@@ -32,6 +32,7 @@ internal const val PARK_GRACE_MS = 150L
 internal class TerminalParkGate(
     private val scope: CoroutineScope,
     private val graceMs: Long = PARK_GRACE_MS,
+    private val canPark: () -> Boolean = { true },
     private val onShow: () -> Unit,
     private val onPark: () -> Unit,
     private val schedule: (Long, () -> Unit) -> Job = { ms, block ->
@@ -62,7 +63,7 @@ internal class TerminalParkGate(
             if (parked || parkJob != null) return
             parkJob = schedule(graceMs) {
                 parkJob = null
-                if (!shown && !parked) {
+                if (!shown && !parked && canPark()) {
                     parked = true
                     onPark()
                 }
@@ -100,6 +101,7 @@ class NativeTerminal(
 
     private val parkGate = TerminalParkGate(
         scope = scope,
+        canPark = ::canPark,
         onShow = ::unparkEmulator,
         onPark = ::parkEmulator,
     )
@@ -118,7 +120,8 @@ class NativeTerminal(
 
     /**
      * Show or hide the terminal view. Showing builds [emulator] if parked (waiting for its first layout to
-     * release the controller's 1 MB ring); hiding parks it after [PARK_GRACE_MS] unless shown again first.
+     * release the controller's 1 MB ring); hiding parks it after [PARK_GRACE_MS] unless shown again first,
+     * provided the ring has not trimmed and neither the alternate screen nor mouse tracking is active.
      */
     fun setShown(shown: Boolean) {
         if (closed) return
@@ -126,19 +129,32 @@ class NativeTerminal(
         parkGate.setShown(shown)
     }
 
+    /**
+     * Whether tearing down [emulator] and replaying [controller]'s 1 MB raw ring can reconstruct the session
+     * without losing scrollback, the alternate screen, or an active mouse mode.
+     */
+    internal fun canPark(
+        emulatorModes: (TerminalEmulator) -> Pair<Boolean, Boolean> = { it.isAlternateScreen to it.isMouseTracking },
+    ): Boolean {
+        if (closed || controller.ringTrimmed) return false
+        val current = emulator ?: return false
+        val (alternateScreen, mouseTracking) = emulatorModes(current)
+        return !alternateScreen && !mouseTracking
+    }
+
     private fun unparkEmulator() {
         if (closed || emulator != null) return
         emulator = newEmulator().also { applyTheme(it) }
     }
 
-    private fun parkEmulator() {
+    internal fun parkEmulator(bufferOf: (TerminalEmulator) -> TerminalBufferSnapshot = TerminalEmulator::getBufferSnapshot) {
         if (closed) return
+        val previous = emulator ?: return
+        history.replaced(bufferOf(previous))
         generation++
-        val previous = emulator
         emulator = null
-        history.reset()
         controller.park()
-        previous?.close()
+        previous.close()
     }
 
     /**
@@ -155,7 +171,6 @@ class NativeTerminal(
         val previous = emulator
         if (previous == null) {
             generation++
-            history.reset()
             return
         }
         val dimensions = previous.dimensions

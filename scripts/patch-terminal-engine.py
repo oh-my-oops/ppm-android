@@ -47,6 +47,10 @@ def emulator(text):
         /** Idempotent; releases JNI, images and retained history. Late queued writes are ignored. */
         override fun close()
         val isClosed: Boolean
+        /** Whether a mouse-tracking mode (`?1000`, `?1002` or `?1003`) is on. */
+        val isMouseTracking: Boolean
+        /** Whether the alternate screen (`?47`, `?1047` or `?1049`) is active. */
+        val isAlternateScreen: Boolean
         /** Fresh parser/screens/history, preserving dimensions, callbacks, palette and defaults. */
         fun reset()
         /**
@@ -561,10 +565,10 @@ def emulator(text):
         }
 
         /** Whether a mouse-tracking mode with wheel events (`?1000`, `?1002` or `?1003`) is on, or the alternate screen is active. */
-        internal val isMouseTracking: Boolean
+        override val isMouseTracking: Boolean
             get() = synchronized(damageLock) { writeCuts.mouseTracking }
 
-        internal val isAlternateScreen: Boolean
+        override val isAlternateScreen: Boolean
             get() = synchronized(damageLock) { isAltScreenActive || writeCuts.onAlternate }
 
         /** Sends one wheel step at 0-based [row] and [col] when mouse tracking is on, in the protocol the stream asked for. */

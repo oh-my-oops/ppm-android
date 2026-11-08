@@ -130,4 +130,39 @@ class NativeTerminalReattachTest {
         terminal.setShown(true)
         assertNotNull(terminal.emulator)
     }
+
+    @Test
+    fun `parking calls history replaced before closing the parked emulator so the last command survives unpark and reconnect`() {
+        val terminal = terminal()
+        terminal.history.send("\r", { snapshot("$ echo old", "old", "$ seq 1 3", cursor = 2) }) { true }
+        val old = terminal.emulator
+        var readBeforeClose: TerminalEmulator? = null
+
+        terminal.parkEmulator {
+            readBeforeClose = it
+            assertFalse("buffer snapshot must be read before closing the parked emulator", it.isClosed)
+            assertSame(old, terminal.emulator)
+            snapshot("$ echo old", "old", "$ seq 1 3", "1", "2", "3", "$ ")
+        }
+
+        assertSame(old, readBeforeClose)
+        assertNull(terminal.emulator)
+        assertTrue(old!!.isClosed)
+
+        // Even if a reconnect happens while parked, the carried command text is preserved until shown again.
+        terminal.replaceEmulator()
+        assertNull(terminal.emulator)
+
+        val replayed = snapshot("banner", "$ echo old", "old", "$ seq 1 3", "1", "2", "3", "$ ")
+        assertEquals("$ seq 1 3", terminal.history.lastCommand(replayed))
+        assertEquals("1\n2\n3\n$", terminal.history.lastOutput(replayed))
+    }
+
+    @Test
+    fun `canPark refuses when alternate screen or mouse tracking is active or when the ring trimmed`() {
+        val terminal = terminal()
+        assertTrue(terminal.canPark { false to false })
+        assertFalse("must not park on alternate screen", terminal.canPark { true to false })
+        assertFalse("must not park when mouse tracking is on", terminal.canPark { false to true })
+    }
 }

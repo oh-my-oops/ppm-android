@@ -126,13 +126,34 @@ class HistoryCostTest {
                 val (liveRow, liveCol) = live.vterm.cursor
                 live.emulator.moveCursor(liveRow, liveCol, liveRow, liveCol, true)
 
+                val startNanos = System.nanoTime()
                 replayed.emulator.writeReplay(tail)
                 val (repRow, repCol) = replayed.vterm.cursor
                 replayed.emulator.moveCursor(repRow, repCol, repRow, repCol, true)
+                val reshowMs = (System.nanoTime() - startNanos) / 1_000_000
 
                 assertEquals(live.emulator.getScreenText(), replayed.emulator.getScreenText())
                 assertEquals(live.history().takeLast(500).map { it.text }, replayed.history().takeLast(500).map { it.text })
+                assertTrue("1 MB re-show replay took ${reshowMs} ms", reshowMs < 15_000)
             }
+        }
+    }
+
+    @Test fun `emulator exposes isAlternateScreen and isMouseTracking so parking stands down when either is active`() {
+        Rig(24, 105, 50_000).use { rig ->
+            val emulator: TerminalEmulator = rig.emulator
+            assertEquals(false, emulator.isAlternateScreen)
+            assertEquals(false, emulator.isMouseTracking)
+
+            rig.write("\u001b[?1049h")
+            assertEquals(true, emulator.isAlternateScreen)
+            rig.write("\u001b[?1049l")
+            assertEquals(false, emulator.isAlternateScreen)
+
+            rig.write("\u001b[?1000h")
+            assertEquals(true, emulator.isMouseTracking)
+            rig.write("\u001b[?1000l")
+            assertEquals(false, emulator.isMouseTracking)
         }
     }
 }
