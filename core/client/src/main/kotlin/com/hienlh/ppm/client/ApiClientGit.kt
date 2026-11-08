@@ -52,27 +52,34 @@ data class GitBranchStatus(
 /** One hunk summary (`ChangeBlock`) in `GET /git/changes`. */
 data class ChangeBlock(
     val id: String,
-    val index: Int = 0,
-    val oldStart: Int = 0,
-    val oldLines: Int = 0,
-    val newStart: Int = 0,
-    val newLines: Int = 0,
-    val added: Int = 0,
-    val removed: Int = 0,
+    val index: Int,
+    val oldStart: Int,
+    val oldLines: Int,
+    val newStart: Int,
+    val newLines: Int,
+    val added: Int,
+    val removed: Int,
 ) {
     companion object {
-        fun from(json: JsonElement?, fallbackIndex: Int = 0): ChangeBlock? {
+        fun from(json: JsonElement?): ChangeBlock? {
             val obj = json.obj ?: return null
             val id = obj["id"].string ?: return null
+            val index = obj["index"].int ?: return null
+            val oldStart = obj["oldStart"].int ?: return null
+            val oldLines = obj["oldLines"].int ?: return null
+            val newStart = obj["newStart"].int ?: return null
+            val newLines = obj["newLines"].int ?: return null
+            val added = obj["added"].int ?: return null
+            val removed = obj["removed"].int ?: return null
             return ChangeBlock(
                 id = id,
-                index = obj["index"].int ?: fallbackIndex,
-                oldStart = obj["oldStart"].int ?: 0,
-                oldLines = obj["oldLines"].int ?: 0,
-                newStart = obj["newStart"].int ?: 0,
-                newLines = obj["newLines"].int ?: 0,
-                added = obj["added"].int ?: 0,
-                removed = obj["removed"].int ?: 0,
+                index = index,
+                oldStart = oldStart,
+                oldLines = oldLines,
+                newStart = newStart,
+                newLines = newLines,
+                added = added,
+                removed = removed,
             )
         }
     }
@@ -89,12 +96,12 @@ data class ChangeSide(
     companion object {
         fun from(json: JsonElement?): ChangeSide? {
             val obj = json.obj ?: return null
-            val parsedBlocks = obj["blocks"].array.orEmpty().mapIndexedNotNull { idx, el ->
-                ChangeBlock.from(el, idx)
-            }
+            val added = obj["added"].int ?: return null
+            val removed = obj["removed"].int ?: return null
+            val parsedBlocks = obj["blocks"].array.orEmpty().mapNotNull(ChangeBlock::from)
             return ChangeSide(
-                added = obj["added"].int ?: 0,
-                removed = obj["removed"].int ?: 0,
+                added = added,
+                removed = removed,
                 blocks = parsedBlocks.map { it.id },
                 whole = obj["whole"].string,
                 changeBlocks = parsedBlocks,
@@ -109,24 +116,28 @@ data class ChangedFile(
     val oldPath: String? = null,
     val staged: ChangeSide? = null,
     val unstaged: ChangeSide? = null,
-    val conflict: Boolean = false,
-    val x: String = ".",
-    val y: String = ".",
-    val untracked: Boolean = false,
+    val conflict: Boolean,
+    val x: String,
+    val y: String,
+    val untracked: Boolean,
 ) {
     companion object {
         fun from(json: JsonElement?): ChangedFile? {
             val obj = json.obj ?: return null
             val path = obj["path"].string ?: return null
+            val conflict = obj["conflict"].bool ?: return null
+            val x = obj["x"].string ?: return null
+            val y = obj["y"].string ?: return null
+            val untracked = obj["untracked"].bool ?: return null
             return ChangedFile(
                 path = path,
                 oldPath = obj["oldPath"].string,
                 staged = ChangeSide.from(obj["staged"]),
                 unstaged = ChangeSide.from(obj["unstaged"]),
-                conflict = obj["conflict"].bool ?: false,
-                x = obj["x"].string ?: ".",
-                y = obj["y"].string ?: ".",
-                untracked = obj["untracked"].bool ?: false,
+                conflict = conflict,
+                x = x,
+                y = y,
+                untracked = untracked,
             )
         }
     }

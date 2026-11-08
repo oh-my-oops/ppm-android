@@ -25,8 +25,10 @@ class GitPhase08bLogicTest {
 
         val fileA = ChangedFile(
             path = "src/A.kt",
+            conflict = false,
             x = "M",
             y = "M",
+            untracked = false,
             staged = ChangeSide(
                 added = 1,
                 removed = 0,
@@ -45,11 +47,14 @@ class GitPhase08bLogicTest {
             conflict = true,
             x = "U",
             y = "U",
+            untracked = false,
         )
         val fileStagedOnly = ChangedFile(
             path = "src/StagedOnly.kt",
+            conflict = false,
             x = "A",
-            y = " ",
+            y = ".",
+            untracked = false,
             staged = ChangeSide(
                 added = 5,
                 removed = 0,

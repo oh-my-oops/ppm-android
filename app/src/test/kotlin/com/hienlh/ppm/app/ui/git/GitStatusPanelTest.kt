@@ -116,7 +116,10 @@ class GitStatusPanelTest {
         val files = listOf(
             ChangedFile(
                 path = "src/App.kt",
+                conflict = false,
                 x = "M",
+                y = ".",
+                untracked = false,
                 staged = ChangeSide(added = 12, removed = 3, blocks = listOf("a")),
             ),
         )
@@ -192,12 +195,18 @@ class GitStatusPanelTest {
         val files = listOf(
             ChangedFile(
                 path = "src/ui/GitStatusPanel.kt",
+                conflict = false,
                 x = "A",
+                y = ".",
+                untracked = false,
                 staged = ChangeSide(added = 50, removed = 0, blocks = listOf("a")),
             ),
             ChangedFile(
                 path = "src/ui/GitChangeParts.kt",
+                conflict = false,
+                x = ".",
                 y = "M",
+                untracked = false,
                 unstaged = ChangeSide(added = 10, removed = 2, blocks = listOf("m")),
             ),
         )
@@ -355,7 +364,7 @@ class GitStatusPanelTest {
                     target.contains("/git/changes") -> MockResponse.Builder()
                         .addHeader("Content-Type", "application/json")
                         .body(
-                            """{"ok":true,"data":{"branch":{"head":"main","oid":"1111111","upstream":"origin/main","upstreamGone":false,"ahead":0,"behind":0,"hasRemote":true},"operation":null,"files":[{"path":"src/Partial.kt","oldPath":null,"x":"M","y":"M","untracked":false,"conflict":null,"staged":{"status":"M","added":2,"removed":0,"blocks":[{"id":"b1","index":0,"oldStart":1,"oldLines":0,"newStart":1,"newLines":2,"added":2,"removed":0}]},"unstaged":{"status":"M","added":3,"removed":1,"blocks":[{"id":"b2","index":0,"oldStart":10,"oldLines":1,"newStart":12,"newLines":3,"added":3,"removed":1}]}}],"stashes":0,"lastCommit":null,"truncated":false}}""",
+                            """{"ok":true,"data":{"branch":{"head":"main","oid":"1111111","upstream":"origin/main","upstreamGone":false,"ahead":0,"behind":0,"hasRemote":true},"operation":null,"files":[{"path":"src/Partial.kt","x":"M","y":"M","untracked":false,"conflict":false,"staged":{"added":2,"removed":0,"blocks":[{"id":"b1","index":0,"oldStart":1,"oldLines":0,"newStart":1,"newLines":2,"added":2,"removed":0}]},"unstaged":{"added":3,"removed":1,"blocks":[{"id":"b2","index":0,"oldStart":10,"oldLines":1,"newStart":12,"newLines":3,"added":3,"removed":1}]}}],"stashes":0,"lastCommit":null,"truncated":false}}""",
                         )
                         .build()
                     target.contains("/git/commit-draft") -> MockResponse.Builder()
@@ -460,8 +469,10 @@ class GitStatusPanelTest {
     fun `BlockDots draws first 6 dots and +N-6 overflow like git-change-parts tsx`() {
         val fileWith8Blocks = ChangedFile(
             path = "src/EightBlocks.kt",
+            conflict = false,
             x = "M",
             y = "M",
+            untracked = false,
             staged = ChangeSide(
                 added = 2,
                 removed = 0,
@@ -522,7 +533,7 @@ class GitStatusPanelTest {
                             MockResponse.Builder()
                                 .addHeader("Content-Type", "application/json")
                                 .body(
-                                    """{"ok":true,"data":{"branch":{"head":"main","oid":"1111111","upstream":"origin/main","upstreamGone":false,"ahead":0,"behind":$changesBehind,"hasRemote":true},"operation":null,"files":[{"path":"$fileName","oldPath":null,"x":" ","y":"M","untracked":false,"conflict":null,"staged":null,"unstaged":{"status":"M","added":1,"removed":0,"blocks":[{"id":"b1","index":0,"oldStart":1,"oldLines":1,"newStart":1,"newLines":2,"added":1,"removed":0}]}}],"stashes":0,"lastCommit":null,"truncated":false}}""",
+                                    """{"ok":true,"data":{"branch":{"head":"main","oid":"1111111","upstream":"origin/main","upstreamGone":false,"ahead":0,"behind":$changesBehind,"hasRemote":true},"operation":null,"files":[{"path":"$fileName","x":".","y":"M","untracked":false,"conflict":false,"staged":null,"unstaged":{"added":1,"removed":0,"blocks":[{"id":"b1","index":0,"oldStart":1,"oldLines":1,"newStart":1,"newLines":2,"added":1,"removed":0}]}}],"stashes":0,"lastCommit":null,"truncated":false}}""",
                                 )
                                 .build()
                         }
@@ -588,6 +599,7 @@ class GitStatusPanelTest {
                     compose.onAllNodesWithTag("git-poll-error-banner").fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithTag("git-poll-error-banner").assertIsDisplayed()
+            compose.onNodeWithText("git status poll failed", substring = true, useUnmergedTree = true).assertIsDisplayed()
             assertTrue(compose.onAllNodesWithTag("git-graph-button").fetchSemanticsNodes().isEmpty())
             compose.onNodeWithTag("git-history-button").assertIsDisplayed()
             assertTrue(

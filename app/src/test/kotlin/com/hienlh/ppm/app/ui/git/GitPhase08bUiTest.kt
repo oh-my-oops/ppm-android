@@ -167,7 +167,10 @@ class GitPhase08bUiTest {
             files.map { f ->
                 ChangedFile(
                     path = f.path,
+                    conflict = false,
+                    x = ".",
                     y = f.status,
+                    untracked = false,
                     unstaged = ChangeSide(added = f.additions, removed = f.deletions, blocks = emptyList()),
                 )
             },
@@ -224,7 +227,10 @@ class GitPhase08bUiTest {
         val block0 = ChangeBlock("hunk-0", 0, 10, 2, 10, 3, added = 2, removed = 1)
         val file = ChangedFile(
             path = "src/App.kt",
+            conflict = false,
+            x = ".",
             y = "M",
+            untracked = false,
             unstaged = ChangeSide(added = 2, removed = 1, blocks = listOf("hunk-0"), changeBlocks = listOf(block0)),
         )
         val detail = FileChangeDetail(
@@ -356,7 +362,10 @@ class GitPhase08bUiTest {
         val block0 = ChangeBlock("hunk-0", 0, 10, 2, 10, 3, added = 2, removed = 1)
         val file = ChangedFile(
             path = "src/App.kt",
+            conflict = false,
+            x = ".",
             y = "M",
+            untracked = false,
             unstaged = ChangeSide(added = 2, removed = 1, blocks = listOf("hunk-0"), changeBlocks = listOf(block0)),
         )
         val detail = FileChangeDetail(
@@ -578,7 +587,7 @@ class GitPhase08bUiTest {
                     target.contains("/git/changes") -> MockResponse.Builder()
                         .addHeader("Content-Type", "application/json")
                         .body(
-                            """{"ok":true,"data":{"branch":{"head":"feat/review","oid":"abcdef1","upstream":"origin/feat/review","upstreamGone":false,"ahead":1,"behind":0,"hasRemote":true},"operation":null,"files":[{"path":"src/App.kt","oldPath":null,"x":" ","y":"M","untracked":false,"conflict":null,"staged":null,"unstaged":{"status":"M","added":2,"removed":1,"blocks":[{"id":"hunk-0","index":0,"oldStart":10,"oldLines":2,"newStart":10,"newLines":3,"added":2,"removed":1}]}}],"stashes":0,"lastCommit":null,"truncated":false}}""",
+                            """{"ok":true,"data":{"branch":{"head":"feat/review","oid":"abcdef1","upstream":"origin/feat/review","upstreamGone":false,"ahead":1,"behind":0,"hasRemote":true},"operation":null,"files":[{"path":"src/App.kt","x":".","y":"M","untracked":false,"conflict":false,"staged":null,"unstaged":{"added":2,"removed":1,"blocks":[{"id":"hunk-0","index":0,"oldStart":10,"oldLines":2,"newStart":10,"newLines":3,"added":2,"removed":1}]}}],"stashes":0,"lastCommit":null,"truncated":false}}""",
                         )
                         .build()
                     target.endsWith("/git/stage-hunks") -> {

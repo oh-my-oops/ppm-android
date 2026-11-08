@@ -83,8 +83,10 @@ class GitSourceControlLogicTest {
         val stagedFile = ChangedFile(
             path = "src/A.kt",
             oldPath = "src/OldA.kt",
+            conflict = false,
             x = "R",
-            y = " ",
+            y = ".",
+            untracked = false,
             staged = ChangeSide(
                 added = 5,
                 removed = 2,
@@ -97,8 +99,10 @@ class GitSourceControlLogicTest {
         )
         val partialFile = ChangedFile(
             path = "src/B.kt",
+            conflict = false,
             x = "A",
             y = "M",
+            untracked = false,
             staged = ChangeSide(
                 added = 1,
                 removed = 0,
@@ -114,6 +118,7 @@ class GitSourceControlLogicTest {
         )
         val untrackedFile = ChangedFile(
             path = "src/new/C.kt",
+            conflict = false,
             x = "?",
             y = "?",
             untracked = true,
@@ -126,9 +131,10 @@ class GitSourceControlLogicTest {
         )
         val conflictFile = ChangedFile(
             path = "src/Conflict.kt",
+            conflict = true,
             x = "U",
             y = "U",
-            conflict = true,
+            untracked = false,
             staged = ChangeSide(
                 added = 2,
                 removed = 1,
@@ -233,8 +239,10 @@ class GitSourceControlLogicTest {
 
         val modifiedOnlyFile = ChangedFile(
             path = "src/Mod.kt",
-            x = " ",
+            conflict = false,
+            x = ".",
             y = "M",
+            untracked = false,
             unstaged = ChangeSide(added = 1, removed = 1, blocks = emptyList()),
         )
         val modSummary = GitChangesView.discardSummary(listOf(modifiedOnlyFile))
@@ -278,8 +286,10 @@ class GitSourceControlLogicTest {
         val copiedFile = ChangedFile(
             path = "src/Copied.kt",
             oldPath = "src/Orig.kt",
+            conflict = false,
             x = "C",
-            y = " ",
+            y = ".",
+            untracked = false,
             staged = ChangeSide(added = 4, removed = 0, blocks = listOf("add")),
         )
         val detachedChanges = GitChanges(
@@ -296,25 +306,32 @@ class GitSourceControlLogicTest {
     }
 
     @Test
-    fun `ChangeBlock rejects string primitives and DiscardRecord and StashEntry handle null server payloads`() {
+    fun `ChangeBlock and ChangedFile reject missing required fields and DiscardRecord and StashEntry handle null server payloads`() {
         assertNull(ChangeBlock.from(JsonPrimitive("add")))
         val sideWithStrings = ChangeSide.from(
             Json.parseToJsonElement("""{"added":1,"removed":0,"blocks":["add"]}""").jsonObject,
         )
         assertTrue(sideWithStrings!!.changeBlocks.isEmpty())
-        val zeroStartBlock = ChangeBlock("new-file", 0)
-        assertEquals(0, zeroStartBlock.oldStart)
-        assertEquals(0, zeroStartBlock.newStart)
-        val parsedZeroBlock = ChangeBlock.from(Json.parseToJsonElement("""{"id":"h0"}""").jsonObject)!!
+        assertNull(ChangeBlock.from(Json.parseToJsonElement("""{"id":"h0"}""").jsonObject))
+        val parsedZeroBlock = ChangeBlock.from(
+            Json.parseToJsonElement("""{"id":"h0","index":0,"oldStart":0,"oldLines":0,"newStart":1,"newLines":5,"added":5,"removed":0}""").jsonObject,
+        )!!
         assertEquals(0, parsedZeroBlock.oldStart)
-        assertEquals(0, parsedZeroBlock.newStart)
+        assertEquals(1, parsedZeroBlock.newStart)
+        assertNull(
+            ChangedFile.from(
+                Json.parseToJsonElement(
+                    """{"path":"src/Raw.kt","staged":{"added":3,"removed":0,"blocks":[]},"unstaged":{"added":1,"removed":0,"blocks":[]}}""",
+                ).jsonObject,
+            ),
+        )
         val rawChangedFile = ChangedFile.from(
             Json.parseToJsonElement(
-                """{"path":"src/Raw.kt","staged":{"added":3,"removed":0,"blocks":[]},"unstaged":{"added":1,"removed":0,"blocks":[]}}""",
+                """{"path":"src/Raw.kt","x":".","y":"M","untracked":false,"conflict":false,"staged":{"added":3,"removed":0,"blocks":[]},"unstaged":{"added":1,"removed":0,"blocks":[]}}""",
             ).jsonObject,
         )!!
         assertEquals(".", rawChangedFile.x)
-        assertEquals(".", rawChangedFile.y)
+        assertEquals("M", rawChangedFile.y)
         assertFalse(rawChangedFile.untracked)
         assertFalse(rawChangedFile.conflict)
 
@@ -339,6 +356,10 @@ class GitSourceControlLogicTest {
         // blockDots returns all dots in file order without truncation
         val manyBlocksFile = ChangedFile(
             path = "src/Many.kt",
+            conflict = false,
+            x = "M",
+            y = "M",
+            untracked = false,
             staged = ChangeSide(
                 added = 1,
                 removed = 0,
@@ -360,8 +381,8 @@ class GitSourceControlLogicTest {
 
     @Test
     fun `GitFileTree compacts single-child folders and collects leaf files`() {
-        val f1 = ChangedFile(path = "src/web/components/git/A.tsx", y = "M", unstaged = ChangeSide(1, 0, emptyList()))
-        val f2 = ChangedFile(path = "src/web/components/git/B.tsx", y = "A", unstaged = ChangeSide(2, 0, emptyList()))
+        val f1 = ChangedFile(path = "src/web/components/git/A.tsx", conflict = false, x = ".", y = "M", untracked = false, unstaged = ChangeSide(1, 0, emptyList()))
+        val f2 = ChangedFile(path = "src/web/components/git/B.tsx", conflict = false, x = ".", y = "A", untracked = false, unstaged = ChangeSide(2, 0, emptyList()))
         val tree = GitFileTree.buildTree(listOf(f2, f1))
         assertEquals(1, tree.size)
         val root = tree[0]
