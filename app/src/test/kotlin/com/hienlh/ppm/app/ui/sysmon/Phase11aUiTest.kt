@@ -1,6 +1,10 @@
 package com.hienlh.ppm.app.ui.sysmon
 
 import android.content.Context
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -11,17 +15,31 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.logs.LogsAppBody
 import com.hienlh.ppm.app.ui.tunnels.PortForwardingPanel
 import com.hienlh.ppm.app.withComposeActivity
+import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
+import com.hienlh.ppm.protocol.WireJson
+import com.hienlh.ppm.protocol.array
+import com.hienlh.ppm.protocol.get
+import com.hienlh.ppm.protocol.int
+import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.logs.*
 import com.hienlh.ppm.state.sysmon.*
 import com.hienlh.ppm.state.tunnels.*
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.concurrent.CopyOnWriteArrayList
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w900dp-h1200dp-xxhdpi")
@@ -205,5 +223,142 @@ class Phase11aUiTest {
         // Clicking stop on external tunnel opens ConfirmDialog
         composeRule.onNodeWithTag("tunnel-stop-402").performClick()
         composeRule.onNodeWithText("Stop tunnel?").assertIsDisplayed()
+    }
+
+    @Test
+    fun `KillConfirmDialog sends bare signal name TERM and LogsAppBody sends snippets and environment array to report draft`() {
+        val signalBodies = CopyOnWriteArrayList<String>()
+        val draftBodies = CopyOnWriteArrayList<String>()
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                val body = request.body?.utf8().orEmpty()
+                return when {
+                    target.endsWith("/api/system/resources/signal") -> {
+                        signalBodies += body
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{"pid":201,"signal":"TERM","signaled":[201]}}""")
+                            .build()
+                    }
+                    target.endsWith("/api/logs/environment") -> {
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":[["PPM","0.9.90"],["Runtime","Bun 1.2.0"],["OS","linux x64 6.8.0"]]}""")
+                            .build()
+                    }
+                    target.endsWith("/api/logs/report/draft") -> {
+                        draftBodies += body
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body(
+                                """{"ok":true,"data":{"title":"Claude stream crash on token parse","summary":"Crash while parsing stream chunk.","expected":"Stream parses cleanly.","steps":["Start Claude chat"],"additional":"Needs null check."}}""",
+                            )
+                            .build()
+                    }
+                    else -> {
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{}}""")
+                            .build()
+                    }
+                }
+            }
+        }
+        server.start()
+        try {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val model = AppModel(context)
+            model.api = ApiClient(server.url("/"), "tok")
+
+            val snapshot = MetricsSnapshot(
+                ts = 10_000L,
+                system = SystemMetrics(
+                    cpu = CpuMetrics(total = 42.0, cores = listOf(40.0, 44.0), model = "AMD Ryzen 9"),
+                    mem = MemoryMetrics(totalMB = 16384.0, usedMB = 8192.0, availableMB = 8192.0, percent = 50.0),
+                    disk = RateMetrics(inBps = 1024.0, outBps = 2048.0, available = true),
+                    net = RateMetrics(inBps = 4096.0, outBps = 1024.0, available = true),
+                    processCount = 1,
+                ),
+                groups = listOf(
+                    ProcessGroup(key = "node-grp", label = "Node Server", rootPid = 201, cpu = 25.0, ramMB = 256.0, count = 1, ppm = false, pids = listOf(201)),
+                ),
+                processes = listOf(
+                    ProcessInfo(pid = 201, ppid = 1, name = "node", command = "node server.js", cpu = 25.0, ramMB = 256.0, startedAt = 1234L),
+                ),
+            )
+            val entries = listOf(
+                LogEntry(id = "l3", ts = 3_000L, lv = "error", src = "ai", tag = "claude", msg = "Stream closed unexpectedly"),
+            )
+            val queryResult = LogQueryResult(entries = entries, matched = 1, inRange = 1)
+            val issuesResult = LogIssuesResult(
+                issues = listOf(
+                    LogIssue(
+                        id = "iss-1",
+                        cls = "bug",
+                        title = "Claude stream crash on token parse",
+                        area = "ai/claude",
+                        src = "ai",
+                        why = "Stream closed unexpectedly while parsing chunk.",
+                        fix = "Guard null delta in stream parser.",
+                        count = 1,
+                        errors = 1,
+                        lines = entries,
+                    ),
+                ),
+                analyzedAt = 3_500L,
+            )
+
+            composeRule.setContent {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    Column(Modifier.fillMaxSize()) {
+                        Box(Modifier.weight(1f)) {
+                            SystemMonitorBody(
+                                model = model,
+                                initialTab = "processes",
+                                initialSnapshot = snapshot,
+                            )
+                        }
+                        Box(Modifier.weight(1f)) {
+                            LogsAppBody(
+                                model = model,
+                                initialView = "issues",
+                                initialResult = queryResult,
+                                initialIssues = issuesResult,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // B4: Open KillConfirmDialog and click Stop (default signal TERM)
+            composeRule.onNodeWithTag("proc-group-kill-node-grp").performClick()
+            composeRule.onNodeWithTag("kill-confirm-dialog").assertIsDisplayed()
+            composeRule.onNodeWithTag("signal-chip-TERM").assertIsDisplayed()
+            composeRule.onNodeWithTag("kill-confirm-signal-btn").performClick()
+
+            composeRule.waitUntil(5_000) { signalBodies.isNotEmpty() }
+            val sigJson = WireJson.parse(signalBodies.first())
+            assertEquals("TERM", sigJson["signal"].string)
+            assertEquals(201, sigJson["pid"].int)
+
+            // B5: Click Draft report on issue -> switches to Report tab and calls Draft with AI
+            composeRule.onNodeWithTag("issue-draft-report-iss-1").performClick()
+
+            composeRule.waitUntil(5_000) { draftBodies.isNotEmpty() }
+            val draftJson = WireJson.parse(draftBodies.first())
+            val snippets = draftJson["snippets"].array.orEmpty()
+            assertEquals(1, snippets.size)
+            assertEquals("AI & chat · 00:00:03–00:00:03 UTC", snippets[0]["label"].string)
+            assertTrue(snippets[0]["lines"].array.orEmpty().isNotEmpty())
+            assertEquals("Claude stream crash on token parse", draftJson["note"].string)
+            val envArr = draftJson["environment"].array.orEmpty()
+            assertEquals(4, envArr.size)
+            assertEquals("PPM", envArr[0].array.orEmpty()[0].string)
+            assertEquals("0.9.90", envArr[0].array.orEmpty()[1].string)
+        } finally {
+            server.close()
+        }
     }
 }

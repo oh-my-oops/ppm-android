@@ -46,12 +46,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.PpmTextField
 import com.hienlh.ppm.app.ui.SecondaryButton
 import com.hienlh.ppm.app.ui.pressable
 import com.hienlh.ppm.app.ui.tablet.Edge
 import com.hienlh.ppm.app.ui.tablet.edge
+import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.client.fullResourceSamples
 import com.hienlh.ppm.client.hardwareInventory
 import com.hienlh.ppm.client.killProcess
@@ -73,6 +77,7 @@ import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.sysmon.*
 import com.hienlh.ppm.state.windows.WindowRuntimeState
 import com.hienlh.ppm.state.workspace.WorkspaceTab
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -146,18 +151,34 @@ fun SystemMonitorBody(
         onTabChange(tab)
     }
 
-    LaunchedEffect(model.api) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(model.api, lifecycle) {
         val api = model.api ?: return@LaunchedEffect
         launch {
             runCatching { api.hardwareInventory() }.getOrNull()?.let { json ->
                 HardwareInventory.from(json)?.let { inventory = it }
             }
         }
-        api.fullResourceSamples(processes = true).collect { sampleJson ->
-            val parsed = MetricsSnapshot.from(sampleJson) ?: return@collect
-            snapshot = parsed
-            history = SysMonRingBuffer.appendSnapshot(history, parsed)
-            tickCount += 1
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            launch {
+                while (true) {
+                    try {
+                        api.fullResourceSamples(processes = true).collect { sampleJson ->
+                            val parsed = MetricsSnapshot.from(sampleJson) ?: return@collect
+                            snapshot = parsed
+                            history = SysMonRingBuffer.appendSnapshot(history, parsed)
+                            tickCount += 1
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: PpmError.Unauthorized) {
+                        return@launch
+                    } catch (_: Exception) {
+                        // Read again shortly, as an EventSource reconnects.
+                    }
+                    delay(5_000)
+                }
+            }
         }
     }
 
@@ -1173,7 +1194,7 @@ private fun AppsPanel(
         KillConfirmDialog(
             model = model,
             target = pendingKill,
-            availableSignals = snapshot.signals.ifEmpty { listOf("SIGTERM", "SIGKILL", "SIGINT", "SIGHUP") },
+            availableSignals = snapshot.signals.map(::normalizeProcessSignal).ifEmpty { DEFAULT_PROCESS_SIGNALS },
             onDismiss = { killTarget = null },
             onError = onError,
         )
@@ -1516,7 +1537,7 @@ private fun ProcessesPanel(
         KillConfirmDialog(
             model = model,
             target = pendingKill,
-            availableSignals = snapshot.signals.ifEmpty { listOf("SIGTERM", "SIGKILL", "SIGINT", "SIGHUP") },
+            availableSignals = snapshot.signals.map(::normalizeProcessSignal).ifEmpty { DEFAULT_PROCESS_SIGNALS },
             onDismiss = { killTarget = null },
             onError = onError,
         )
@@ -1543,7 +1564,7 @@ private fun KillConfirmDialog(
     val tokens = LocalPpmTokens.current
     val scope = rememberCoroutineScope()
     var includeTree by remember { mutableStateOf(true) }
-    var selectedSignal by remember { mutableStateOf("SIGTERM") }
+    var selectedSignal by remember { mutableStateOf("TERM") }
     var busy by remember { mutableStateOf(false) }
 
     val title = when (target) {
@@ -1568,7 +1589,7 @@ private fun KillConfirmDialog(
                     if (forceKill) {
                         api.killProcess(req.pid, req.startedAt, req.tree)
                     } else {
-                        api.signalProcess(req.pid, req.startedAt, selectedSignal, req.tree)
+                        api.signalProcess(req.pid, req.startedAt, normalizeProcessSignal(selectedSignal), req.tree)
                     }
                 }
                 onDismiss()
@@ -1646,8 +1667,10 @@ private fun KillConfirmDialog(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                for (sig in availableSignals.take(6)) {
+                for (rawSig in availableSignals.take(8)) {
+                    val sig = normalizeProcessSignal(rawSig)
                     val active = selectedSignal == sig
+                    val label = SIGNAL_LABELS[sig] ?: sig
                     val chipShape = RoundedCornerShape(6.dp)
                     Box(
                         Modifier
@@ -1655,10 +1678,11 @@ private fun KillConfirmDialog(
                             .background(if (active) tokens.accent.opacity(0.18).color else tokens.bgSolid.color)
                             .cssBorder((if (active) tokens.accent else tokens.border).color, chipShape)
                             .ppmClickable(shape = chipShape) { selectedSignal = sig }
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("signal-chip-$sig"),
                     ) {
                         BasicText(
-                            sig,
+                            label,
                             style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f)
                                 .copy(color = if (active) tokens.accent.color else tokens.text2.color),
                         )
@@ -1683,7 +1707,7 @@ private fun KillConfirmDialog(
                     contentAlignment = Alignment.Center,
                 ) {
                     BasicText(
-                        if (selectedSignal == "SIGTERM") "Stop" else selectedSignal,
+                        if (selectedSignal == "TERM") "Stop" else (SIGNAL_LABELS[selectedSignal] ?: selectedSignal),
                         style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.accentFg.color),
                     )
                 }

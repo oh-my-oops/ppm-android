@@ -18,6 +18,22 @@ import kotlin.math.roundToLong
 const val METRICS_HISTORY_MAX = 900
 const val GROUPS_RETENTION = 60
 
+val SIGNAL_LABELS: Map<String, String> = linkedMapOf(
+    "STOP" to "Suspend (SIGSTOP)",
+    "CONT" to "Continue (SIGCONT)",
+    "TERM" to "Terminate (SIGTERM)",
+    "KILL" to "Kill (SIGKILL)",
+    "HUP" to "Hang up (SIGHUP)",
+    "INT" to "Interrupt (SIGINT)",
+    "USR1" to "User signal 1",
+    "USR2" to "User signal 2",
+)
+
+val DEFAULT_PROCESS_SIGNALS: List<String> = listOf("STOP", "CONT", "TERM", "KILL", "HUP", "INT", "USR1", "USR2")
+
+fun normalizeProcessSignal(signal: String): String =
+    signal.trim().uppercase().removePrefix("SIG")
+
 data class CpuMetrics(
     val total: Double = 0.0,
     val cores: List<Double> = emptyList(),

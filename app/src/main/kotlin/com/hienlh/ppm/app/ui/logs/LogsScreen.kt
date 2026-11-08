@@ -207,19 +207,40 @@ fun LogsAppBody(
         }
     }
 
-    LaunchedEffect(model.api) {
-        val api = model.api ?: return@LaunchedEffect
-        launch { loadIssues() }
-        launch {
-            runCatching { api.logsEnvironment() }.getOrNull()?.obj?.let { envObj ->
-                val list = mutableListOf<Pair<String, String>>()
-                envObj["ppm"]?.string?.let { list += "PPM" to it }
-                envObj["os"]?.string?.let { list += "Host OS" to it }
-                envObj["bun"]?.string?.let { list += "Bun" to it }
-                list += "Client" to "PPM Android (${android.os.Build.MODEL})"
-                if (list.isNotEmpty()) envPairs = list
+    suspend fun loadEnvironment(): List<Pair<String, String>> {
+        val api = model.api ?: return envPairs
+        runCatching { api.logsEnvironment() }.getOrNull()?.let { envJson ->
+            val list = mutableListOf<Pair<String, String>>()
+            val arr = envJson.array
+            if (arr != null) {
+                for (item in arr) {
+                    val pair = item.array ?: continue
+                    val k = pair.getOrNull(0)?.string ?: continue
+                    val v = pair.getOrNull(1)?.string ?: continue
+                    list += k to v
+                }
+            } else {
+                envJson.obj?.let { envObj ->
+                    envObj["ppm"]?.string?.let { list += "PPM" to it }
+                    envObj["os"]?.string?.let { list += "Host OS" to it }
+                    envObj["bun"]?.string?.let { list += "Bun" to it }
+                }
+            }
+            list += "Client" to "PPM Android (${android.os.Build.MODEL})"
+            if (list.isNotEmpty()) {
+                envPairs = list
+                return list
             }
         }
+        return envPairs
+    }
+
+    LaunchedEffect(model.api) {
+        val api = model.api ?: return@LaunchedEffect
+        if (initialIssues == null) {
+            launch { loadIssues() }
+        }
+        launch { loadEnvironment() }
     }
 
     // Live tail via GlobalEvents
@@ -259,20 +280,43 @@ fun LogsAppBody(
         }
     }
 
-    fun draftWithAi(rows: List<LogRow>, note: String = "") {
+    fun draftWithAi(targetSnippets: List<ReportSnippet>, note: String = "") {
         val api = model.api ?: return
+        if (targetSnippets.isEmpty() || draftingAi) return
         draftingAi = true
         scope.launch {
             try {
-                val rawLines = rows.take(120).map { rawLogLine(it.entry, it.count) }
+                val activeEnv = if (envPairs.size <= 1) loadEnvironment() else envPairs
+                val snippetsJson = kotlinx.serialization.json.JsonArray(
+                    targetSnippets.map { s ->
+                        buildJsonObject {
+                            put("label", JsonPrimitive(snippetHeading(s)))
+                            put(
+                                "lines",
+                                kotlinx.serialization.json.JsonArray(
+                                    s.rows.take(500).map { JsonPrimitive(rawLogLine(it.entry, it.count)) },
+                                ),
+                            )
+                        }
+                    },
+                )
+                val envJson = kotlinx.serialization.json.JsonArray(
+                    activeEnv.take(20).map { (k, v) ->
+                        kotlinx.serialization.json.JsonArray(listOf(JsonPrimitive(k), JsonPrimitive(v)))
+                    },
+                )
                 val res = api.logsDraftReport(
                     buildJsonObject {
-                        put("lines", kotlinx.serialization.json.JsonArray(rawLines.map(::JsonPrimitive)))
-                        put("note", JsonPrimitive(note))
+                        put("snippets", snippetsJson)
+                        put("environment", envJson)
+                        if (note.isNotBlank()) put("note", JsonPrimitive(note))
                     },
                 )
                 res?.get("title")?.string?.takeIf { it.isNotBlank() }?.let { t ->
                     titleField.edit { replace(0, length, t) }
+                }
+                res?.get("labels")?.array?.mapNotNull { it.string }?.takeIf { it.isNotEmpty() }?.let { l ->
+                    labels = l
                 }
                 res?.get("what")?.string?.takeIf { it.isNotBlank() }?.let { w ->
                     whatField.edit { replace(0, length, w) }
@@ -483,7 +527,7 @@ fun LogsAppBody(
                         titleField.edit { replace(0, length, issue.title) }
                         whatField.edit { replace(0, length, issue.why) }
                         selectView("report")
-                        if (rows.isNotEmpty()) draftWithAi(rows, issue.title)
+                        if (rows.isNotEmpty()) draftWithAi(listOf(snip), issue.title)
                     },
                 )
                 "report" -> LogsReportPane(
@@ -502,8 +546,11 @@ fun LogsAppBody(
                     environment = envPairs,
                     draftingAi = draftingAi,
                     onDraftWithAi = {
-                        val rows = snippets.flatMap { it.rows }.ifEmpty { foldRepeats(result.entries.takeLast(80)) }
-                        draftWithAi(rows, titleField.text.toString())
+                        val targetSnips = snippets.ifEmpty {
+                            val rows = foldRepeats(result.entries.takeLast(80))
+                            if (rows.isEmpty()) emptyList() else listOf(ReportSnippet(id = "s-auto", src = filter.src, rows = rows))
+                        }
+                        draftWithAi(targetSnips, titleField.text.toString())
                     },
                     onCopyMarkdown = { md ->
                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
