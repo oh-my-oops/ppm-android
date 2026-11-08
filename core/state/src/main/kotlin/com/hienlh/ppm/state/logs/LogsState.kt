@@ -698,6 +698,48 @@ fun parseLogsEnvironment(json: JsonElement?): List<Pair<String, String>> =
         k to v
     }
 
+data class UserAgentInfo(val browser: String, val version: String?, val os: String)
+
+private val BROWSER_PATTERNS = listOf(
+    Regex("""\bEdg(?:e|A|iOS)?/(\d+)""") to "Edge",
+    Regex("""\bOPR/(\d+)""") to "Opera",
+    Regex("""\bSamsungBrowser/(\d+)""") to "Samsung Internet",
+    Regex("""\b(?:Firefox|FxiOS)/(\d+)""") to "Firefox",
+    Regex("""\bCriOS/(\d+)""") to "Chrome",
+    Regex("""\bChrome/(\d+)""") to "Chrome",
+    Regex("""\bVersion/(\d+)(?:\.\d+)*.*\bSafari/""") to "Safari",
+)
+
+private val SYSTEM_PATTERNS = listOf(
+    Regex("""\b(?:iPhone|iPad|iPod)\b""") to "iOS",
+    Regex("""\bAndroid\b""") to "Android",
+    Regex("""\bCrOS\b""") to "ChromeOS",
+    Regex("""\b(?:Macintosh|Mac OS X)\b""") to "macOS",
+    Regex("""\bWindows\b""") to "Windows",
+    Regex("""\bLinux\b""") to "Linux",
+)
+
+fun describeUserAgent(ua: String?): UserAgentInfo {
+    val text = ua.orEmpty()
+    var browser = "Browser"
+    var version: String? = null
+    for ((re, name) in BROWSER_PATTERNS) {
+        val m = re.find(text)
+        if (m != null) {
+            browser = name
+            version = m.groupValues.getOrNull(1)?.takeIf { it.isNotEmpty() }
+            break
+        }
+    }
+    val os = SYSTEM_PATTERNS.firstOrNull { (re, _) -> re.containsMatchIn(text) }?.second ?: "Unknown OS"
+    return UserAgentInfo(browser, version, os)
+}
+
+fun userAgentSummary(ua: String?): String {
+    val info = describeUserAgent(ua)
+    return "${info.browser}${info.version?.let { " $it" }.orEmpty()} on ${info.os}"
+}
+
 data class DuplicateIssue(
     val number: Int,
     val title: String,

@@ -380,9 +380,11 @@ class Phase11aUiTest {
             assertTrue(snippets[0]["lines"].array.orEmpty().isNotEmpty())
             assertEquals("Claude stream crash on token parse", draftJson["note"].string)
             val envArr = draftJson["environment"].array.orEmpty()
-            assertEquals(3, envArr.size)
+            assertEquals(4, envArr.size)
             assertEquals("PPM", envArr[0].array.orEmpty()[0].string)
             assertEquals("0.9.90", envArr[0].array.orEmpty()[1].string)
+            assertEquals("Browser", envArr[3].array.orEmpty()[0].string)
+            assertTrue(envArr[3].array.orEmpty()[1].string.orEmpty().contains("Android"))
 
             // Wait for 700ms duplicate-issue search debounce and assert web strings from server JSON shape
             composeRule.mainClock.advanceTimeBy(800L)
@@ -794,5 +796,74 @@ class Phase11aUiTest {
         composeRule.waitForIdle()
         assertEquals(0, model.openLogsWindowCount)
         assertEquals(listOf("""{"type":"logs:subscribe"}""", """{"type":"logs:unsubscribe"}"""), sentFrames)
+    }
+
+    @Test
+    fun `LogsReportPane toggles Project names redaction shows Copy body and open GitHub and toasts on copy failure`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val model = AppModel(context)
+        model.projects = listOf(com.hienlh.ppm.protocol.ProjectInfo(name = "secret-project", path = "/work/secret-project"))
+        model.reportClipboardCopy = { false }
+
+        val longMsg = "Crash in secret-project " + "x".repeat(8500)
+        val entries = listOf(
+            LogEntry(id = "l1", ts = 1_000L, lv = "error", src = "server", tag = "ppm", msg = longMsg),
+        )
+        val issuesResult = LogIssuesResult(
+            issues = listOf(
+                LogIssue(
+                    id = "iss-long",
+                    cls = "bug",
+                    title = "Failure in secret-project",
+                    area = "server",
+                    src = "server",
+                    why = "Long error in secret-project",
+                    count = 1,
+                    errors = 1,
+                    lines = entries,
+                ),
+            ),
+            analyzedAt = 2_000L,
+        )
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                LogsAppBody(
+                    model = model,
+                    initialView = "issues",
+                    initialResult = LogQueryResult(entries = entries, matched = 1, inRange = 1),
+                    initialIssues = issuesResult,
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        // Click Draft report on issue -> opens Report tab with >8KB body
+        composeRule.onNodeWithTag("issue-draft-report-iss-long").performClick()
+        composeRule.waitForIdle()
+
+        // Button text is "Copy body and open GitHub", NOT "Open issue (copies body)"
+        composeRule.onNodeWithTag("report-open-github-btn").performScrollTo()
+        composeRule.onNodeWithText("Copy body and open GitHub", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Open issue (copies body)", useUnmergedTree = true).assertDoesNotExist()
+
+        // Clicking when clipboard copy fails shows exact web error toast
+        composeRule.onNodeWithTag("report-open-github-btn").performClick()
+        composeRule.waitForIdle()
+        assertTrue(
+            model.toasts.any {
+                it.message.title == "Could not copy the body. Use Copy as Markdown, then paste it into the issue." &&
+                    it.message.kind == com.hienlh.ppm.app.ErrorToastMessage.Kind.ERROR
+            },
+        )
+
+        // Toggle "Project names" redaction chip on and verify preview redacts "secret-project" -> "<project>"
+        composeRule.onNodeWithTag("report-privacy-projects").performScrollTo()
+        composeRule.onNodeWithText("Project names", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("report-privacy-projects").performClick()
+        composeRule.onNodeWithTag("report-mode-preview").performScrollTo()
+        composeRule.onNodeWithTag("report-mode-preview").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("# Failure in <project>").assertIsDisplayed()
     }
 }

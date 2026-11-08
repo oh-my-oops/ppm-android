@@ -144,16 +144,20 @@ fun LogsAppBody(
     val stepsField = remember { TextFieldState("") }
     val expectedField = remember { TextFieldState("") }
     var labels by remember { mutableStateOf(listOf("bug")) }
+    var redactProjects by remember { mutableStateOf(false) }
     var redactOpts by remember {
         mutableStateOf(
             RedactOptions(
                 home = true,
                 email = true,
                 chats = true,
-                projects = model.projects.map { it.name },
+                projects = emptyList(),
             ),
         )
     }
+    val effectiveRedact = redactOpts.copy(
+        projects = if (redactProjects) model.projects.map { it.name } else emptyList(),
+    )
     var envPairs by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var envLoaded by remember { mutableStateOf(false) }
     var draftingAi by remember { mutableStateOf(false) }
@@ -273,7 +277,9 @@ fun LogsAppBody(
             null
         }
         if (envJson != null) {
-            val list = parseLogsEnvironment(envJson)
+            val rawAgent = System.getProperty("http.agent")?.takeIf { it.contains("Android", ignoreCase = true) }
+                ?: "Mozilla/5.0 (Linux; Android ${android.os.Build.VERSION.RELEASE ?: "14"})"
+            val list = parseLogsEnvironment(envJson) + ("Browser" to userAgentSummary(rawAgent))
             envPairs = list
             envLoaded = true
             return list
@@ -683,8 +689,10 @@ fun LogsAppBody(
                     },
                     snippets = snippets,
                     onRemoveSnippet = { id -> snippets = snippets.filterNot { it.id == id } },
-                    redact = redactOpts,
-                    onRedactChange = { redactOpts = it },
+                    redact = effectiveRedact,
+                    onRedactChange = { redactOpts = it.copy(projects = emptyList()) },
+                    redactProjects = redactProjects,
+                    onRedactProjectsChange = { redactProjects = it },
                     environment = envPairs,
                     draftingAi = draftingAi,
                     onDraftWithAi = {
@@ -695,8 +703,16 @@ fun LogsAppBody(
                         draftWithAi(targetSnips, titleField.text.toString())
                     },
                     onCopyMarkdown = { md ->
-                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                        cm?.setPrimaryClip(ClipData.newPlainText("PPM Bug Report", md))
+                        val custom = model.reportClipboardCopy
+                        if (custom != null) {
+                            custom(md)
+                        } else {
+                            runCatching {
+                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return@runCatching false
+                                cm.setPrimaryClip(ClipData.newPlainText("PPM Bug Report", md))
+                                true
+                            }.getOrDefault(false)
+                        }
                     },
                     onOpenGithub = { url ->
                         runCatching {
@@ -1454,10 +1470,12 @@ private fun LogsReportPane(
     onRemoveSnippet: (String) -> Unit,
     redact: RedactOptions,
     onRedactChange: (RedactOptions) -> Unit,
+    redactProjects: Boolean,
+    onRedactProjectsChange: (Boolean) -> Unit,
     environment: List<Pair<String, String>>,
     draftingAi: Boolean,
     onDraftWithAi: () -> Unit,
-    onCopyMarkdown: (String) -> Unit,
+    onCopyMarkdown: (String) -> Boolean,
     onOpenGithub: (String) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
@@ -1663,9 +1681,10 @@ private fun LogsReportPane(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    PrivacyChip("Home paths (~)", redact.home) { onRedactChange(redact.copy(home = !redact.home)) }
-                    PrivacyChip("Emails", redact.email) { onRedactChange(redact.copy(email = !redact.email)) }
-                    PrivacyChip("Chat UUIDs", redact.chats) { onRedactChange(redact.copy(chats = !redact.chats)) }
+                    PrivacyChip("Home folder", redact.home, tag = "report-privacy-home") { onRedactChange(redact.copy(home = !redact.home)) }
+                    PrivacyChip("Email addresses", redact.email, tag = "report-privacy-email") { onRedactChange(redact.copy(email = !redact.email)) }
+                    PrivacyChip("Chat ids", redact.chats, tag = "report-privacy-chats") { onRedactChange(redact.copy(chats = !redact.chats)) }
+                    PrivacyChip("Project names", redactProjects, tag = "report-privacy-projects") { onRedactProjectsChange(!redactProjects) }
                 }
             }
         }
@@ -1685,8 +1704,12 @@ private fun LogsReportPane(
                     .background(tokens.accent.color)
                     .ppmClickable(shape = btnShape) {
                         if (prepared.bodyOverLimit) {
-                            onCopyMarkdown(compiledBody)
-                            model.toast(ErrorToastMessage("Body copied. Paste it into the issue that just opened.", kind = ErrorToastMessage.Kind.SUCCESS))
+                            val ok = onCopyMarkdown(compiledBody)
+                            if (ok) {
+                                model.toast(ErrorToastMessage("Body copied. Paste it into the issue that just opened.", kind = ErrorToastMessage.Kind.SUCCESS))
+                            } else {
+                                model.toast(ErrorToastMessage("Could not copy the body. Use Copy as Markdown, then paste it into the issue.", kind = ErrorToastMessage.Kind.ERROR))
+                            }
                         } else {
                             model.toast(ErrorToastMessage("Opened the new issue on GitHub. Check it there, then press Submit.", kind = ErrorToastMessage.Kind.SUCCESS))
                         }
@@ -1699,7 +1722,7 @@ private fun LogsReportPane(
                 PpmIcon(ProductIcon.ExternalLink, 14.dp, tokens.accentFg.color)
                 Spacer(Modifier.width(6.dp))
                 BasicText(
-                    if (prepared.bodyOverLimit) "Open issue (copies body)" else "Open GitHub issue",
+                    if (prepared.bodyOverLimit) "Copy body and open GitHub" else "Open GitHub issue",
                     style = ppmText(12f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.accentFg.color),
                 )
             }
@@ -1711,8 +1734,13 @@ private fun LogsReportPane(
                     .background(tokens.panel2.color)
                     .cssBorder(tokens.border.color, btnShape)
                     .ppmClickable(shape = btnShape) {
-                        onCopyMarkdown(reportMarkdown(prepared.redactedTitle, compiledBody))
-                        copied = true
+                        val ok = onCopyMarkdown(reportMarkdown(prepared.redactedTitle, compiledBody))
+                        if (ok) {
+                            copied = true
+                            model.toast(ErrorToastMessage("Copied the issue as Markdown", kind = ErrorToastMessage.Kind.SUCCESS))
+                        } else {
+                            model.toast(ErrorToastMessage("Could not copy the issue", kind = ErrorToastMessage.Kind.ERROR))
+                        }
                     }
                     .testTag("report-copy-md-btn"),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1809,7 +1837,7 @@ private fun ReportFieldBox(
 }
 
 @Composable
-private fun PrivacyChip(label: String, checked: Boolean, onClick: () -> Unit) {
+private fun PrivacyChip(label: String, checked: Boolean, tag: String, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(6.dp)
     Row(
@@ -1818,7 +1846,8 @@ private fun PrivacyChip(label: String, checked: Boolean, onClick: () -> Unit) {
             .background(if (checked) tokens.accent.opacity(0.15).color else tokens.bgSolid.color)
             .cssBorder((if (checked) tokens.accent else tokens.border).color, shape)
             .ppmClickable(shape = shape, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .testTag(tag),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {

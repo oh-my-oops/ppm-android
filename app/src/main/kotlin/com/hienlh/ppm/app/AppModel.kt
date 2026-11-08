@@ -447,7 +447,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     val androidAvailable: Boolean
         get() = info?.minimalMode != true && androidEnabled
     var projects by mutableStateOf(emptyList<ProjectInfo>())
-        private set
+        internal set
     var projectsLoad by mutableStateOf<Load>(Load.Idle)
         private set
     var selectedProject by mutableStateOf<String?>(null)
@@ -795,6 +795,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     private var logsReadyOff: (() -> Unit)? = null
     private var logsBoundEvents: GlobalEvents? = null
     internal var logsTailSender: ((String) -> Unit)? = null
+    internal var reportClipboardCopy: ((String) -> Boolean)? = null
 
     private fun sendLogsTailFrame(frame: String) {
         val custom = logsTailSender
