@@ -321,6 +321,170 @@ fun changedRowCount(cs: GridChangeset): Int {
     return rows.size
 }
 
+/**
+ * Tracks unsaved grid row counts by tab ID (and optional secondary grid slot, e.g. reference detail grid),
+ * matching `src/web/stores/unsaved-grid-rows-store.ts`.
+ */
+object UnsavedGridRowsStore {
+    private val counts = LinkedHashMap<String, Int>()
+
+    private fun slotKey(tabId: String, slot: String? = null): String =
+        if (!slot.isNullOrEmpty()) "$tabId\u0000$slot" else tabId
+
+    @Synchronized
+    fun set(tabId: String, rows: Int, slot: String? = null) {
+        if (tabId.isEmpty()) return
+        val key = slotKey(tabId, slot)
+        if (rows > 0) {
+            counts[key] = rows
+        } else {
+            counts.remove(key)
+        }
+    }
+
+    @Synchronized
+    fun get(tabId: String): Int {
+        if (tabId.isEmpty()) return 0
+        val prefix = "$tabId\u0000"
+        var total = 0
+        for ((k, v) in counts) {
+            if (k == tabId || k.startsWith(prefix)) {
+                total += v
+            }
+        }
+        return total
+    }
+
+    @Synchronized
+    fun getSlot(tabId: String, slot: String? = null): Int =
+        counts[slotKey(tabId, slot)] ?: 0
+
+    @Synchronized
+    fun clearTab(tabId: String) {
+        if (tabId.isEmpty()) return
+        val prefix = "$tabId\u0000"
+        val iter = counts.keys.iterator()
+        while (iter.hasNext()) {
+            val k = iter.next()
+            if (k == tabId || k.startsWith(prefix)) iter.remove()
+        }
+    }
+
+    @Synchronized
+    fun clearAll() {
+        counts.clear()
+    }
+}
+
+fun setUnsavedGridRows(tabId: String, rows: Int, slot: String? = null) =
+    UnsavedGridRowsStore.set(tabId, rows, slot)
+
+fun unsavedGridRows(tabId: String): Int =
+    UnsavedGridRowsStore.get(tabId)
+
+fun slotUnsavedRows(tabId: String, slot: String? = null): Int =
+    UnsavedGridRowsStore.getSlot(tabId, slot)
+
+fun clearUnsavedGridRows(tabId: String) =
+    UnsavedGridRowsStore.clearTab(tabId)
+
+private fun encodeCellValueMapJson(map: Map<String, DbCellValue>): JsonObject = buildJsonObject {
+    for ((k, v) in map) {
+        if (v != DbCellValue.NoField) {
+            put(k, dbCellValueToWireJson(v))
+        }
+    }
+}
+
+private fun parseCellValueMapJson(obj: JsonObject?): Map<String, DbCellValue> {
+    if (obj == null) return emptyMap()
+    val out = LinkedHashMap<String, DbCellValue>()
+    for ((k, v) in obj) {
+        out[k] = parseDbCellValue(v)
+    }
+    return out
+}
+
+/** Encodes a [GridChangeset] into JSON so tab metadata preserves unsaved edits across tab switches. */
+fun encodeGridChangesetJson(cs: GridChangeset): JsonObject = buildJsonObject {
+    put(
+        "cells",
+        buildJsonObject {
+            for ((rowId, rowEdits) in cs.cells) {
+                put(
+                    rowId,
+                    buildJsonObject {
+                        for ((col, edit) in rowEdits) {
+                            put(
+                                col,
+                                buildJsonObject {
+                                    put("pkVal", edit.pkVal)
+                                    put("col", edit.col)
+                                    put("newVal", dbCellValueToWireJson(edit.newVal))
+                                    if (edit.key.isNotEmpty()) put("key", encodeCellValueMapJson(edit.key))
+                                    if (edit.original != DbCellValue.NoField) {
+                                        put("original", dbCellValueToWireJson(edit.original))
+                                    }
+                                },
+                            )
+                        }
+                    },
+                )
+            }
+        },
+    )
+    put("inserted", buildJsonArray { cs.inserted.forEach { add(JsonPrimitive(it)) } })
+    put("deleted", buildJsonArray { cs.deleted.forEach { add(JsonPrimitive(it)) } })
+    put(
+        "deletedKeys",
+        buildJsonObject {
+            for ((rowId, keyMap) in cs.deletedKeys) {
+                put(rowId, encodeCellValueMapJson(keyMap))
+            }
+        },
+    )
+}
+
+/** Restores a [GridChangeset] from tab metadata JSON. */
+fun parseGridChangesetJson(obj: JsonObject?): GridChangeset? {
+    if (obj == null) return null
+    val cellsObj = obj["cells"] as? JsonObject
+    val cells = LinkedHashMap<String, Map<String, PendingEdit>>()
+    if (cellsObj != null) {
+        for ((rowId, rowEl) in cellsObj) {
+            val rowObj = rowEl as? JsonObject ?: continue
+            val rowEdits = LinkedHashMap<String, PendingEdit>()
+            for ((col, editEl) in rowObj) {
+                val eObj = editEl as? JsonObject ?: continue
+                rowEdits[col] = PendingEdit(
+                    pkVal = (eObj["pkVal"] as? JsonPrimitive)?.contentOrNull ?: rowId,
+                    col = (eObj["col"] as? JsonPrimitive)?.contentOrNull ?: col,
+                    newVal = parseDbCellValue(eObj["newVal"]),
+                    key = parseCellValueMapJson(eObj["key"] as? JsonObject),
+                    original = if ("original" in eObj) parseDbCellValue(eObj["original"]) else DbCellValue.NoField,
+                )
+            }
+            if (rowEdits.isNotEmpty()) cells[rowId] = rowEdits
+        }
+    }
+    val inserted = (obj["inserted"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
+    val deleted = (obj["deleted"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }?.toSet().orEmpty()
+    val deletedKeysObj = obj["deletedKeys"] as? JsonObject
+    val deletedKeys = LinkedHashMap<String, Map<String, DbCellValue>>()
+    if (deletedKeysObj != null) {
+        for ((rowId, keyEl) in deletedKeysObj) {
+            val keyMap = parseCellValueMapJson(keyEl as? JsonObject)
+            if (keyMap.isNotEmpty()) deletedKeys[rowId] = keyMap
+        }
+    }
+    return GridChangeset(
+        cells = cells,
+        inserted = inserted,
+        deleted = deleted,
+        deletedKeys = deletedKeys,
+    )
+}
+
 data class GridUpdateItem(
     val key: Map<String, DbCellValue>,
     val set: Map<String, DbCellValue>,

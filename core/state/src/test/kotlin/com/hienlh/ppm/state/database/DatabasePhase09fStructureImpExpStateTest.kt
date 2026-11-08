@@ -251,6 +251,19 @@ class DatabasePhase09fStructureImpExpStateTest {
         assertEquals("backup-table", backupChange.toJsonObject()["kind"]?.jsonPrimitive?.content)
         assertEquals(backupName, backupChange.toJsonObject()["newName"]?.jsonPrimitive?.content)
 
+        // TableEdit metadata round-trip & isStructureTabDirty (src/web/lib/db-table-edit.ts)
+        val cleanMeta = withTableEdit(null, TableEdit(base = baseModel, current = baseModel, isNew = false))
+        assertFalse(isStructureTabDirty(cleanMeta))
+        val dirtyMeta = withTableEdit(cleanMeta, TableEdit(base = baseModel, current = draftModel, isNew = false))
+        assertTrue(isStructureTabDirty(dirtyMeta))
+        val parsedEdit = readTableEdit(dirtyMeta)
+        assertNotNull(parsedEdit)
+        assertEquals("new_table", parsedEdit!!.base.name)
+        assertEquals("orders", parsedEdit.current.name)
+        assertNull(resetTableEdit(parsedEdit))
+        val newTblMeta = newTableTabMetadata(baseModel, tableNumber = 2, newTableId = "nt-1")
+        assertEquals(true, readTableEdit(newTblMeta)?.isNew)
+
         // Server 200 / 409 StructurePreview payload: { sql, statements, recreate, warnings, transactional } (no dialect field!)
         val conflictPayload = Json.parseToJsonElement(
             """

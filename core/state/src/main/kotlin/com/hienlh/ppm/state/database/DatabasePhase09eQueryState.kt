@@ -2174,6 +2174,32 @@ fun isQueryTabDirty(metadata: JsonObject?): Boolean {
     return cur != opened
 }
 
+/**
+ * DBGate's unsaved indicator on whichever database tab holds work nothing else keeps
+ * (`isDbTabDirty` in `src/web/lib/db-tabs.ts`).
+ */
+fun isDbTabDirty(type: String, metadata: JsonObject?): Boolean = when (type) {
+    "db-query" -> isQueryTabDirty(metadata)
+    "db-structure" -> isStructureTabDirty(metadata)
+    else -> false
+}
+
+/**
+ * True when closing [tab] would discard unsaved database work (`losesWorkOnClose` in
+ * `src/web/stores/tab-close-confirm-store.ts`):
+ * - dirty `db-query` SQL (`currentSql != openedSql`)
+ * - dirty `db-structure` table model (`!sameTableModel(tableEdit.base, tableEdit.current)`)
+ * - unsaved grid row edits in `UnsavedGridRowsStore` or `tab.metadata["unsavedGridRows"]`
+ */
+fun losesDbWorkOnClose(tab: WorkspaceTab): Boolean {
+    if (isDbTabDirty(tab.type, tab.metadata)) return true
+    if (unsavedGridRows(tab.id) > 0) return true
+    val metaRows = tab.metadata["unsavedGridRows"]?.int ?: 0
+    if (metaRows > 0) return true
+    val restoredCs = parseGridChangesetJson(tab.metadata["pendingChangeset"] as? JsonObject)
+    return restoredCs != null && !isEmptyChangeset(restoredCs)
+}
+
 /** The next `"Query N"` number across open tabs (`nextQueryNumber` in `src/web/lib/db-tabs.ts`). */
 fun nextQueryNumber(tabs: Iterable<WorkspaceTab>): Int {
     var maxNum = 0

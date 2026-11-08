@@ -644,6 +644,215 @@ data class TableModel(
     }
 }
 
+/** Parses a [TableModel] from JSON (`src/web/lib/db-table-edit.ts` `isModel`). */
+fun parseTableModel(obj: JsonObject?, defaultDialect: String = "postgres"): TableModel? {
+    if (obj == null) return null
+    val name = obj.strOrNull("name") ?: return null
+    val colsArr = obj["columns"] as? JsonArray ?: return null
+    val indexesArr = obj["indexes"] as? JsonArray ?: return null
+    val uniquesArr = obj["uniques"] as? JsonArray ?: return null
+    val fksArr = obj["foreignKeys"] as? JsonArray ?: return null
+    val checksArr = obj["checks"] as? JsonArray ?: return null
+
+    val dialect = obj.strOrNull("dialect")?.takeIf { it.isNotBlank() } ?: defaultDialect
+    val schema = obj.strOrNull("schema")
+    val comment = obj.strOrNull("comment").orEmpty()
+    val engine = (obj.strOrNull("engine") ?: obj.strOrNull("tableEngine")).orEmpty()
+    val withoutRowId = (obj.boolOrNull("withoutRowid") == true) || (obj.boolOrNull("withoutRowId") == true)
+    val strict = obj.boolOrNull("strict") == true
+
+    val columns = colsArr.mapNotNull { el ->
+        val c = el as? JsonObject ?: return@mapNotNull null
+        val cName = c.strOrNull("name") ?: return@mapNotNull null
+        TableModelColumn(
+            id = c.strOrNull("id")?.takeIf { it.isNotBlank() } ?: "c:$cName",
+            name = cName,
+            dataType = c.strOrNull("type") ?: c.strOrNull("dataType") ?: "text",
+            notNull = c.boolOrNull("notNull") == true,
+            autoIncrement = c.boolOrNull("autoIncrement") == true,
+            isUnsigned = (c.boolOrNull("unsigned") == true) || (c.boolOrNull("isUnsigned") == true),
+            isZeroFill = (c.boolOrNull("zerofill") == true) || (c.boolOrNull("isZeroFill") == true),
+            defaultValue = c.strOrNull("defaultValue").orEmpty(),
+            computedExpression = c.strOrNull("computedExpression").orEmpty(),
+            computedStored = c.boolOrNull("computedStored") == true,
+            comment = c.strOrNull("comment").orEmpty(),
+            collation = c.strOrNull("collation"),
+            onUpdate = c.strOrNull("onUpdate"),
+            identity = c.strOrNull("identity"),
+            sqliteAutoincrement = c.boolOrNull("sqliteAutoincrement") == true,
+        )
+    }
+
+    val pkObj = obj["primaryKey"] as? JsonObject
+    val primaryKey = if (pkObj != null) {
+        val pkCols = pkObj.strList("columns").ifEmpty { pkObj.strList("columnIds") }
+        if (pkCols.isNotEmpty()) {
+            TableModelPrimaryKey(
+                constraintName = pkObj.strOrNull("name") ?: pkObj.strOrNull("constraintName").orEmpty(),
+                columnIds = pkCols,
+                id = pkObj.strOrNull("id")?.takeIf { it.isNotBlank() } ?: "pk",
+            )
+        } else {
+            null
+        }
+    } else {
+        null
+    }
+
+    val indexes = indexesArr.mapNotNull { el ->
+        val iObj = el as? JsonObject ?: return@mapNotNull null
+        val iCols = (iObj["columns"] as? JsonArray)?.mapNotNull { kEl ->
+            val kObj = kEl as? JsonObject ?: return@mapNotNull null
+            val desc = (kObj.boolOrNull("descending") == true) || (kObj.strOrNull("order")?.equals("DESC", ignoreCase = true) == true)
+            TableModelIndexColumn(
+                columnId = kObj.strOrNull("columnId"),
+                order = if (desc) "DESC" else "ASC",
+                expression = kObj.strOrNull("expression"),
+                nulls = kObj.strOrNull("nulls"),
+                length = kObj.intOrNull("length"),
+                opclass = kObj.strOrNull("opclass"),
+            )
+        }.orEmpty()
+        val cName = iObj.strOrNull("name") ?: iObj.strOrNull("constraintName").orEmpty()
+        TableModelIndex(
+            id = iObj.strOrNull("id")?.takeIf { it.isNotBlank() } ?: "i:$cName",
+            constraintName = cName,
+            isUnique = (iObj.boolOrNull("unique") == true) || (iObj.boolOrNull("isUnique") == true),
+            indexType = iObj.strOrNull("method") ?: iObj.strOrNull("indexType").orEmpty(),
+            filter = iObj.strOrNull("where") ?: iObj.strOrNull("filter").orEmpty(),
+            columns = iCols,
+        )
+    }
+
+    val uniques = uniquesArr.mapNotNull { el ->
+        val uObj = el as? JsonObject ?: return@mapNotNull null
+        val uName = uObj.strOrNull("name") ?: uObj.strOrNull("constraintName").orEmpty()
+        val uCols = uObj.strList("columns").ifEmpty { uObj.strList("columnIds") }
+        TableModelUnique(
+            id = uObj.strOrNull("id")?.takeIf { it.isNotBlank() } ?: "u:$uName",
+            constraintName = uName,
+            columnIds = uCols,
+        )
+    }
+
+    val foreignKeys = fksArr.mapNotNull { el ->
+        val fkObj = el as? JsonObject ?: return@mapNotNull null
+        val fkName = fkObj.strOrNull("name") ?: fkObj.strOrNull("constraintName").orEmpty()
+        val fkCols = fkObj.strList("columns").ifEmpty { fkObj.strList("columnIds") }
+        val refCols = fkObj.strList("refColumns").ifEmpty { fkObj.strList("referencedColumns") }
+        TableModelForeignKey(
+            id = fkObj.strOrNull("id")?.takeIf { it.isNotBlank() } ?: "f:$fkName",
+            constraintName = fkName,
+            columnIds = fkCols,
+            referencedSchema = fkObj.strOrNull("refSchema") ?: fkObj.strOrNull("referencedSchema"),
+            referencedTable = fkObj.strOrNull("refTable") ?: fkObj.strOrNull("referencedTable").orEmpty(),
+            referencedColumns = refCols,
+            onUpdateAction = fkObj.strOrNull("onUpdate") ?: fkObj.strOrNull("onUpdateAction").orEmpty(),
+            onDeleteAction = fkObj.strOrNull("onDelete") ?: fkObj.strOrNull("onDeleteAction").orEmpty(),
+        )
+    }
+
+    val checks = checksArr.mapNotNull { el ->
+        val chkObj = el as? JsonObject ?: return@mapNotNull null
+        val expr = chkObj.strOrNull("expression") ?: return@mapNotNull null
+        DbCheckConstraint(
+            name = chkObj.strOrNull("name"),
+            expression = expr,
+            column = chkObj.strOrNull("column"),
+        )
+    }
+
+    return TableModel(
+        dialect = dialect,
+        schema = schema,
+        name = name,
+        comment = comment,
+        tableEngine = engine,
+        withoutRowId = withoutRowId,
+        strict = strict,
+        columns = columns,
+        primaryKey = primaryKey,
+        indexes = indexes,
+        uniques = uniques,
+        foreignKeys = foreignKeys,
+        checks = checks,
+    )
+}
+
+/** The metadata field the Structure tab's unsaved edit is kept under (`src/web/lib/db-table-edit.ts`). */
+const val TABLE_EDIT_FIELD = "tableEdit"
+
+/** Unsaved structure edit kept in a `db-structure` tab's metadata (`src/web/lib/db-table-edit.ts`). */
+data class TableEdit(
+    val base: TableModel,
+    val current: TableModel,
+    val isNew: Boolean = false,
+)
+
+fun encodeTableEditJson(edit: TableEdit): JsonObject = buildJsonObject {
+    put("base", edit.base.toJsonObject())
+    put("current", edit.current.toJsonObject())
+    if (edit.isNew) put("isNew", true)
+}
+
+fun readTableEdit(metadata: JsonObject?, defaultDialect: String = "postgres"): TableEdit? {
+    val editObj = metadata?.get(TABLE_EDIT_FIELD) as? JsonObject ?: return null
+    val dialect = metadata.strOrNull("dbType")?.let {
+        when (it.lowercase()) {
+            "mysql", "mariadb" -> "mysql"
+            "sqlite" -> "sqlite"
+            else -> "postgres"
+        }
+    } ?: defaultDialect
+    val base = parseTableModel(editObj["base"] as? JsonObject, dialect) ?: return null
+    val current = parseTableModel(editObj["current"] as? JsonObject, dialect) ?: return null
+    val isNew = editObj.boolOrNull("isNew") == true
+    return TableEdit(base = base, current = current, isNew = isNew)
+}
+
+/** True when a `db-structure` tab holds unsaved changes (`isStructureTabDirty` in `src/web/lib/db-table-edit.ts`). */
+fun isStructureTabDirty(metadata: JsonObject?, defaultDialect: String = "postgres"): Boolean {
+    val edit = readTableEdit(metadata, defaultDialect) ?: return false
+    return !sameTableModel(edit.base, edit.current)
+}
+
+fun nextTableEdit(
+    edit: TableEdit?,
+    live: DbTableStructure?,
+    dialect: String = live?.dialect ?: "postgres",
+    change: (TableModel) -> TableModel,
+): TableEdit? {
+    val start = edit ?: if (live != null) {
+        val m = modelFromStructure(live.copy(dialect = dialect))
+        TableEdit(base = m, current = m, isNew = false)
+    } else {
+        null
+    } ?: return null
+    val current = change(start.current)
+    if (!start.isNew && sameTableModel(start.base, current)) return null
+    return start.copy(current = current)
+}
+
+fun resetTableEdit(edit: TableEdit?): TableEdit? =
+    if (edit?.isNew == true) edit.copy(current = edit.base) else null
+
+fun withTableEdit(metadata: JsonObject?, edit: TableEdit?): JsonObject = buildJsonObject {
+    metadata?.forEach { (k, v) ->
+        if (k != TABLE_EDIT_FIELD) put(k, v)
+    }
+    if (edit != null) {
+        put(TABLE_EDIT_FIELD, encodeTableEditJson(edit))
+    }
+}
+
+fun newTableTabMetadata(model: TableModel, tableNumber: Int, newTableId: String): JsonObject = buildJsonObject {
+    put("newTableId", newTableId)
+    put("tableNumber", tableNumber)
+    put("schemaName", model.schema.orEmpty())
+    put("newTable", true)
+    put(TABLE_EDIT_FIELD, encodeTableEditJson(TableEdit(base = model, current = model, isNew = true)))
+}
+
 enum class TableModelSection(val wire: String) {
     TABLE("table"),
     COLUMNS("columns"),

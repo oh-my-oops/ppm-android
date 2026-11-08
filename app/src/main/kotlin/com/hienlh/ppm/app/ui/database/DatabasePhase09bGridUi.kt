@@ -157,6 +157,8 @@ import com.hienlh.ppm.state.database.changedRowCount
 import com.hienlh.ppm.state.database.classifyColumnType
 import com.hienlh.ppm.state.database.cloneValues
 import com.hienlh.ppm.state.database.collectCellData
+import com.hienlh.ppm.state.database.EMPTY_CHANGESET
+import com.hienlh.ppm.state.database.changedRowCount
 import com.hienlh.ppm.state.database.columnFilterState
 import com.hienlh.ppm.state.database.columnNameMatches
 import com.hienlh.ppm.state.database.computeRowCountView
@@ -166,6 +168,7 @@ import com.hienlh.ppm.state.database.deleteRows
 import com.hienlh.ppm.state.database.descriptionColumn
 import com.hienlh.ppm.state.database.detailKeyFilters
 import com.hienlh.ppm.state.database.editCells
+import com.hienlh.ppm.state.database.encodeGridChangesetJson
 import com.hienlh.ppm.state.database.encodeGridFiltersJson
 import com.hienlh.ppm.state.database.filterRequest
 import com.hienlh.ppm.state.database.filterSyntax
@@ -189,6 +192,7 @@ import com.hienlh.ppm.state.database.parseChangesetFailure
 import com.hienlh.ppm.state.database.parseChangesetPreview
 import com.hienlh.ppm.state.database.parseDbCellValue
 import com.hienlh.ppm.state.database.parseFormText
+import com.hienlh.ppm.state.database.parseGridChangesetJson
 import com.hienlh.ppm.state.database.parseGridColumnsSchema
 import com.hienlh.ppm.state.database.parseGridResponse
 import com.hienlh.ppm.state.database.parseTsvPasteChanges
@@ -205,6 +209,7 @@ import com.hienlh.ppm.state.database.savedText
 import com.hienlh.ppm.state.database.selectedBlock
 import com.hienlh.ppm.state.database.selectedRowIndices
 import com.hienlh.ppm.state.database.selectionHasCell
+import com.hienlh.ppm.state.database.setUnsavedGridRows
 import com.hienlh.ppm.state.database.shouldBypassSaveDialog
 import com.hienlh.ppm.state.database.sortInfoForColumn
 import com.hienlh.ppm.state.database.tableReferences
@@ -218,6 +223,7 @@ import com.hienlh.ppm.state.database.withMultiFilter
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -986,6 +992,9 @@ fun DatabaseTableTabBody(
     var missingDriverId by remember { mutableStateOf<String?>(null) }
     var readonlyEnabled by remember { mutableStateOf(meta["readonly"]?.bool ?: true) }
     var autoRefreshSec by remember { mutableIntStateOf(0) }
+    val initialChangeset = remember(tab.id) {
+        parseGridChangesetJson(meta["pendingChangeset"] as? JsonObject) ?: EMPTY_CHANGESET
+    }
 
     val schemaMapForBody = remember(schemaList) { schemaList.associateBy { it.name } }
     val columnNames = pageData?.columnKeys.orEmpty()
@@ -1640,7 +1649,19 @@ fun DatabaseTableTabBody(
                         if (!project.isNullOrBlank()) put("project", project)
                         put("dbType", dbType)
                         put("sql", sql)
+                        put("currentSql", sql)
+                        put("openedSql", sql)
                     },
+                )
+            },
+            initialChangeset = initialChangeset,
+            onChangesetChanged = { cs ->
+                val count = changedRowCount(cs)
+                setUnsavedGridRows(tab.id, count)
+                model.patchTabMetadata(
+                    tab.id,
+                    "unsavedGridRows" to if (count > 0) JsonPrimitive(count) else null,
+                    "pendingChangeset" to if (isEmptyChangeset(cs)) null else encodeGridChangesetJson(cs),
                 )
             },
             onOpenReferencedTableTab = { refTable, refSchema, refFilters ->
@@ -1743,7 +1764,9 @@ internal fun DatabaseTableTabContent(
     onCountExactly: () -> Unit = {},
     onStartQuickExport: (String, List<String>) -> Unit = { _, _ -> },
     onInstallMissingDriver: (String) -> Unit = {},
+    initialChangeset: GridChangeset = EMPTY_CHANGESET,
     onChangesetDirtyChanged: (Boolean) -> Unit = {},
+    onChangesetChanged: (GridChangeset) -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -1801,10 +1824,11 @@ internal fun DatabaseTableTabContent(
     var phoneSheetSubmenu by remember { mutableStateOf<String?>(null) }
 
     // Phase 09d Changeset & Editing State
-    var history by remember { mutableStateOf(ChangesetHistory()) }
+    var history by remember(initialChangeset) { mutableStateOf(ChangesetHistory(present = initialChangeset)) }
     val changeset = history.present
     LaunchedEffect(changeset) {
         onChangesetDirtyChanged(!isEmptyChangeset(changeset))
+        onChangesetChanged(changeset)
     }
     var newRowSeq by remember { mutableIntStateOf(0) }
     var inlineEditTarget by remember { mutableStateOf<Pair<Int, Int>?>(null) } // (visColIdx, rowIdx)

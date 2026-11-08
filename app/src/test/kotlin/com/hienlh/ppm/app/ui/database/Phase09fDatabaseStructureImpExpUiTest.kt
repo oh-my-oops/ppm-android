@@ -355,4 +355,68 @@ class Phase09fDatabaseStructureImpExpUiTest {
         composeRule.onNodeWithTag("sqlite-table-item-users").performClick()
         assertEquals("users", selectedSqliteTable)
     }
+
+    @Test
+    fun structureTabEditPersistenceAndTabCloseConfirmDialog_preserveTableEditAndConfirmClose() {
+        var persistedEdit by mutableStateOf<com.hienlh.ppm.state.database.TableEdit?>(null)
+        var remountGeneration by mutableStateOf(0)
+        var closeConfirmedCount = 0
+        var closeCancelledCount = 0
+        var losingTabs by mutableStateOf<List<com.hienlh.ppm.state.workspace.WorkspaceTab>>(emptyList())
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                androidx.compose.runtime.key(remountGeneration) {
+                    DatabaseStructureTabContent(
+                        structure = sampleStructure,
+                        dialect = "mysql",
+                        dbType = "mysql",
+                        schema = "shop",
+                        initialTableEdit = persistedEdit,
+                        onTableEditChanged = { persistedEdit = it },
+                    )
+                }
+                DbTabCloseConfirmDialogContent(
+                    losingTabs = losingTabs,
+                    onCancel = { closeCancelledCount++ },
+                    onConfirm = { closeConfirmedCount++ },
+                )
+            }
+        }
+
+        // 1. Add a column -> persistedEdit is updated with dirty TableEdit
+        composeRule.onNodeWithTag("db-structure-add-col-btn").performScrollTo().performClick()
+        composeRule.onNodeWithTag("db-col-dialog-name-input").performTextReplacement("bonus")
+        composeRule.onNodeWithTag("db-col-dialog-type-chip-decimal(10,2)").performScrollTo().performClick()
+        composeRule.onNodeWithTag("db-col-dialog-save-btn").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        assertTrue(persistedEdit != null)
+        assertTrue(persistedEdit!!.current.columns.any { it.name == "bonus" })
+
+        // 2. Simulate tab switch unmount/remount -> restored from initialTableEdit
+        remountGeneration = 1
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("db-structure-dirty-badge").assertIsDisplayed()
+
+        // 3. Verify Confirm close tabs dialog (single tab & multiple tabs)
+        losingTabs = listOf(
+            com.hienlh.ppm.state.workspace.WorkspaceTab(
+                id = "db-structure:1::public:employees",
+                type = "db-structure",
+                title = "employees · Structure",
+            ),
+        )
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("db-tab-close-confirm-dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("db-tab-close-confirm-accept").performClick()
+        assertEquals(1, closeConfirmedCount)
+
+        losingTabs = listOf(
+            com.hienlh.ppm.state.workspace.WorkspaceTab(id = "t1", type = "db-query", title = "Query 1"),
+            com.hienlh.ppm.state.workspace.WorkspaceTab(id = "t2", type = "database", title = "orders"),
+        )
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("db-tab-close-confirm-cancel").performClick()
+        assertEquals(1, closeCancelledCount)
+    }
 }

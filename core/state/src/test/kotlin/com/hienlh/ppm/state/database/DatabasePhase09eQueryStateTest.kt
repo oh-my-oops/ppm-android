@@ -213,6 +213,56 @@ class DatabasePhase09eQueryStateTest {
             put("currentSql", "SELECT 2;")
         }
         assertTrue(isQueryTabDirty(dirtyMeta))
+        assertTrue(isDbTabDirty("db-query", dirtyMeta))
+
+        val cleanQueryTab = com.hienlh.ppm.state.workspace.WorkspaceTab(
+            id = "db-query:q1",
+            type = "db-query",
+            title = "Query 1",
+            metadata = meta,
+        )
+        val dirtyQueryTab = cleanQueryTab.copy(metadata = dirtyMeta)
+        assertFalse(losesDbWorkOnClose(cleanQueryTab))
+        assertTrue(losesDbWorkOnClose(dirtyQueryTab))
+
+        // Unsaved grid rows & pendingChangeset metadata persistence
+        var cs = EMPTY_CHANGESET
+        cs = editCells(
+            cs,
+            listOf(
+                CellChange(
+                    rowId = "1",
+                    col = "name",
+                    value = DbCellValue.Text("Bob"),
+                    key = mapOf("id" to DbCellValue.Num("1", 1.0)),
+                    original = DbCellValue.Text("Alice"),
+                ),
+            ),
+        )
+        val encodedCs = encodeGridChangesetJson(cs)
+        val restoredCs = parseGridChangesetJson(encodedCs)
+        assertNotNull(restoredCs)
+        assertEquals(1, changedRowCount(restoredCs!!))
+
+        val tableTab = com.hienlh.ppm.state.workspace.WorkspaceTab(
+            id = "database:1::public:users",
+            type = "database",
+            title = "users",
+            metadata = buildJsonObject {
+                put("unsavedGridRows", 1)
+                put("pendingChangeset", encodedCs)
+            },
+        )
+        assertTrue(losesDbWorkOnClose(tableTab))
+        setUnsavedGridRows("database:1::public:orders", 2)
+        val ordersTab = com.hienlh.ppm.state.workspace.WorkspaceTab(
+            id = "database:1::public:orders",
+            type = "database",
+            title = "orders",
+        )
+        assertTrue(losesDbWorkOnClose(ordersTab))
+        clearUnsavedGridRows("database:1::public:orders")
+        assertFalse(losesDbWorkOnClose(ordersTab))
 
         var openedQueryJson: JsonObject? = null
         val req = TabOpenRequest.Query(

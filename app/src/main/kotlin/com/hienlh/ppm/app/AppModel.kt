@@ -3454,6 +3454,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     }
 
     private fun onTabClosing(tabId: String) {
+        com.hienlh.ppm.state.database.clearUnsavedGridRows(tabId)
         val tab = tabOf(tabId) ?: return
         if (tab.type == "extension") {
             val viewType = tab.metaString("viewType")
@@ -3465,7 +3466,45 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         }
     }
 
-    fun closeTab(tabId: String, panelId: String? = panelOf(tabId)) {
+    data class PendingTabClose(
+        val panelId: String?,
+        val tabs: List<WorkspaceTab>,
+        val losingTabs: List<WorkspaceTab>,
+    )
+
+    var pendingTabClose by mutableStateOf<PendingTabClose?>(null)
+        private set
+
+    private val tabCloseConfirmOverlay: @Composable () -> Unit = {
+        com.hienlh.ppm.app.ui.database.DbTabCloseConfirmHost(this)
+    }
+
+    fun confirmPendingTabClose() {
+        val pending = pendingTabClose ?: return
+        pendingTabClose = null
+        if (screenOverlay === tabCloseConfirmOverlay) screenOverlay = null
+        val store = workspace ?: return
+        for (t in pending.tabs) {
+            val pid = pending.panelId ?: panelOf(t.id)
+            if (tabOf(t.id) != null) {
+                onTabClosing(t.id)
+                store.closeTab(t.id, pid)
+            }
+        }
+    }
+
+    fun cancelPendingTabClose() {
+        pendingTabClose = null
+        if (screenOverlay === tabCloseConfirmOverlay) screenOverlay = null
+    }
+
+    fun closeTab(tabId: String, panelId: String? = panelOf(tabId), force: Boolean = false) {
+        val tab = tabOf(tabId)
+        if (!force && tab != null && com.hienlh.ppm.state.database.losesDbWorkOnClose(tab)) {
+            pendingTabClose = PendingTabClose(panelId = panelId, tabs = listOf(tab), losingTabs = listOf(tab))
+            if (screenOverlay == null) screenOverlay = tabCloseConfirmOverlay
+            return
+        }
         onTabClosing(tabId)
         workspace?.closeTab(tabId, panelId)
     }
@@ -3616,6 +3655,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     private fun closeAll(panelId: String, ids: List<String>) {
         val store = workspace ?: return
+        val tabs = ids.mapNotNull(::tabOf)
+        val losing = tabs.filter { com.hienlh.ppm.state.database.losesDbWorkOnClose(it) }
+        if (losing.isNotEmpty()) {
+            pendingTabClose = PendingTabClose(panelId = panelId, tabs = tabs, losingTabs = losing)
+            if (screenOverlay == null) screenOverlay = tabCloseConfirmOverlay
+            return
+        }
         for (id in ids) {
             onTabClosing(id)
             store.closeTab(id, panelId)

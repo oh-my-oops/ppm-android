@@ -127,7 +127,9 @@ import com.hienlh.ppm.state.database.StatementOutcome
 import com.hienlh.ppm.state.database.StructureChange
 import com.hienlh.ppm.state.database.StructureFailure
 import com.hienlh.ppm.state.database.StructurePreview
+import com.hienlh.ppm.state.database.TABLE_EDIT_FIELD
 import com.hienlh.ppm.state.database.TEMPLATE_SOURCE
+import com.hienlh.ppm.state.database.TableEdit
 import com.hienlh.ppm.state.database.TableModel
 import com.hienlh.ppm.state.database.TableModelColumn
 import com.hienlh.ppm.state.database.TableModelForeignKey
@@ -158,6 +160,7 @@ import com.hienlh.ppm.state.database.databaseExportForm
 import com.hienlh.ppm.state.database.declaredType
 import com.hienlh.ppm.state.database.defaultRowTarget
 import com.hienlh.ppm.state.database.editorColumnRows
+import com.hienlh.ppm.state.database.encodeTableEditJson
 import com.hienlh.ppm.state.database.enginesFor
 import com.hienlh.ppm.state.database.exportRequest
 import com.hienlh.ppm.state.database.failureOf
@@ -207,6 +210,7 @@ import com.hienlh.ppm.state.database.patchUpload
 import com.hienlh.ppm.state.database.primaryKeyHasName
 import com.hienlh.ppm.state.database.primaryKeyRow
 import com.hienlh.ppm.state.database.queryTabMetadata
+import com.hienlh.ppm.state.database.readTableEdit
 import com.hienlh.ppm.state.database.removeColumns
 import com.hienlh.ppm.state.database.removeItem
 import com.hienlh.ppm.state.database.removeRow
@@ -278,7 +282,8 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
     val dialect = dbDialectForType(dbType)
     val initialTableName = meta["tableName"]?.string.orEmpty()
     val schemaName = meta["schema"]?.string?.takeIf { it.isNotBlank() }
-    val initialIsNewTable = meta["newTable"]?.bool == true || initialTableName.isBlank()
+    val initialTableEdit = remember(tab.id) { readTableEdit(meta, dialect) }
+    val initialIsNewTable = initialTableEdit?.isNew == true || meta["newTable"]?.bool == true || initialTableName.isBlank()
     val readonly = meta["readonly"]?.bool == true
 
     var structure by remember(connId, database, filePath, schemaName, initialTableName) {
@@ -376,7 +381,12 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
             readonly = readonly,
             loading = loading,
             errorMessage = errorMessage,
+            initialTableEdit = initialTableEdit,
+            onTableEditChanged = { edit ->
+                model.patchTabMetadata(tab.id, TABLE_EDIT_FIELD to edit?.let(::encodeTableEditJson))
+            },
             onRefresh = {
+                model.patchTabMetadata(tab.id, TABLE_EDIT_FIELD to null)
                 scope.launch { loadStructure() }
             },
             onStartNewTable = {
@@ -461,6 +471,12 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
             },
             onAppliedModel = { savedModel ->
                 isNewTable = false
+                model.patchTabMetadata(
+                    tab.id,
+                    TABLE_EDIT_FIELD to null,
+                    "newTable" to null,
+                    "tableName" to JsonPrimitive(savedModel.name),
+                )
                 scope.launch { loadStructure(savedModel.name) }
             },
         )
@@ -480,6 +496,8 @@ internal fun DatabaseStructureTabContent(
     loading: Boolean = false,
     errorMessage: String? = null,
     availableObjects: List<DbObjectItem> = emptyList(),
+    initialTableEdit: TableEdit? = null,
+    onTableEditChanged: (TableEdit?) -> Unit = {},
     onRefresh: () -> Unit = {},
     onStartNewTable: () -> Unit = {},
     onOpenDataTab: (table: String, schema: String?) -> Unit = { _, _ -> },
@@ -503,15 +521,27 @@ internal fun DatabaseStructureTabContent(
     val mobile = LocalPpmMobile.current
     val context = LocalContext.current
 
-    val baseModel = remember(structure, isNewTable, dialect, schema) {
+    var restoredEdit by remember { mutableStateOf(initialTableEdit) }
+    val baseModel = remember(structure, isNewTable, dialect, schema, restoredEdit?.base) {
         when {
+            restoredEdit != null -> restoredEdit!!.base
             isNewTable -> newTableModel(dialect, schema)
             structure != null -> modelFromStructure(structure)
             else -> newTableModel(dialect, schema)
         }
     }
-    var draftModel by remember(baseModel) { mutableStateOf(baseModel) }
+    var draftModel by remember(baseModel) {
+        mutableStateOf(restoredEdit?.current ?: baseModel)
+    }
     val isDirty = remember(baseModel, draftModel) { !sameTableModel(baseModel, draftModel) }
+    LaunchedEffect(baseModel, draftModel, isNewTable) {
+        val nextEdit = if (!isNewTable && sameTableModel(baseModel, draftModel)) {
+            null
+        } else {
+            TableEdit(base = baseModel, current = draftModel, isNew = isNewTable)
+        }
+        onTableEditChanged(nextEdit)
+    }
     val problems = remember(draftModel) { tableModelProblems(draftModel) }
     val canEdit = !mobile && !readonly && (isNewTable || structure?.kind == "table" || structure == null)
 
@@ -622,6 +652,7 @@ internal fun DatabaseStructureTabContent(
                         label = "Reset",
                         modifier = Modifier.testTag("db-structure-reset-btn"),
                         onClick = {
+                            if (!isNewTable) restoredEdit = null
                             draftModel = baseModel
                             selectedColIds = emptySet()
                         },
@@ -1889,6 +1920,8 @@ internal fun DatabaseStructureTabContent(
             onDismiss = { activeSaveChange = null },
             onApplied = {
                 activeSaveChange = null
+                restoredEdit = null
+                onTableEditChanged(null)
                 onAppliedModel(draftModel)
             },
         )
@@ -3707,6 +3740,106 @@ internal fun SqliteViewerTabContent(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * DBGate's "Confirm close tabs" dialog (`src/web/components/layout/tab-close-confirm-dialog.tsx`),
+ * shown when closing one or more database tabs that hold unsaved changes.
+ */
+@Composable
+fun DbTabCloseConfirmHost(model: AppModel) {
+    val pending = model.pendingTabClose ?: return
+    DbTabCloseConfirmDialogContent(
+        losingTabs = pending.losingTabs,
+        onCancel = { model.cancelPendingTabClose() },
+        onConfirm = { model.confirmPendingTabClose() },
+    )
+}
+
+@Composable
+fun DbTabCloseConfirmDialogContent(
+    losingTabs: List<WorkspaceTab>,
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    if (losingTabs.isEmpty()) return
+    val tokens = LocalPpmTokens.current
+    val one = losingTabs.size == 1
+    val title = "Confirm close tabs"
+    val explanation = if (one) {
+        "This tab has changes that are not saved. Closing it discards them."
+    } else {
+        "These tabs have changes that are not saved. Closing them discards the changes."
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.55f))
+            .clickable(onClick = onCancel)
+            .padding(16.dp)
+            .testTag("db-tab-close-confirm-dialog"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 460.dp)
+                .fillMaxWidth()
+                .background(tokens.panel.color, RoundedCornerShape(8.dp))
+                .cssBorder(tokens.border.color)
+                .clickable(enabled = false) {}
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            BasicText(
+                title,
+                style = ppmText(15f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color),
+                modifier = Modifier.testTag("db-tab-close-confirm-title"),
+            )
+            BasicText(
+                explanation,
+                style = ppmText(12f, lineHeight = 17f).copy(color = tokens.text2.color),
+                modifier = Modifier.testTag("db-tab-close-confirm-explanation"),
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 192.dp)
+                    .background(tokens.panel2.color, RoundedCornerShape(6.dp))
+                    .cssBorder(tokens.border.color)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                for (t in losingTabs) {
+                    BasicText(
+                        t.title.ifBlank { t.id },
+                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text.color),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag("db-tab-close-confirm-item-${t.id}"),
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SettingsButton(
+                    label = "Cancel",
+                    modifier = Modifier.testTag("db-tab-close-confirm-cancel"),
+                    onClick = onCancel,
+                )
+                Spacer(Modifier.width(8.dp))
+                SettingsButton(
+                    label = if (one) "Close tab" else "Close tabs",
+                    danger = true,
+                    modifier = Modifier.testTag("db-tab-close-confirm-accept"),
+                    onClick = onConfirm,
+                )
             }
         }
     }

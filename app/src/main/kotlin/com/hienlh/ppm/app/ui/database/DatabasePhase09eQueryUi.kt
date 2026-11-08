@@ -146,6 +146,7 @@ import com.hienlh.ppm.state.database.savedFileOf
 import com.hienlh.ppm.state.database.savedQueryTab
 import com.hienlh.ppm.state.database.scriptRun
 import com.hienlh.ppm.state.database.selectionOrStatementRun
+import com.hienlh.ppm.state.database.setUnsavedGridRows
 import com.hienlh.ppm.state.database.shownResultTab
 import com.hienlh.ppm.state.database.splitSqlStatementsWithLines
 import com.hienlh.ppm.state.database.startQueryRun
@@ -496,6 +497,10 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                     runCatching { client.dbInstallMissingDriver(driverId) }
                 }
             },
+            onUnsavedResultRowsChanged = { count ->
+                setUnsavedGridRows(tab.id, count, slot = "query-results")
+                model.patchTabMetadata(tab.id, "unsavedGridRows" to if (count > 0) JsonPrimitive(count) else null)
+            },
         )
     }
 }
@@ -555,6 +560,7 @@ internal fun DatabaseQueryTabContent(
     onSaveSqlFile: suspend (SavedQueryFile, String) -> Unit = { _, _ -> },
     onOpenNewQueryTab: (String) -> Unit = {},
     onInstallMissingDriver: (String) -> Unit = {},
+    onUnsavedResultRowsChanged: (Int) -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -648,7 +654,11 @@ internal fun DatabaseQueryTabContent(
     // Result editability & dirty tracking per result tab
     val resultTabSchemas = remember { mutableStateMapOf<String, List<GridColumnSchema>>() }
     val dirtyResultTabs = remember { mutableStateMapOf<String, Boolean>() }
-    val hasUnsavedResultEdits = dirtyResultTabs.values.any { it }
+    val unsavedResultTabCount = dirtyResultTabs.values.count { it }
+    val hasUnsavedResultEdits = unsavedResultTabCount > 0
+    LaunchedEffect(unsavedResultTabCount) {
+        onUnsavedResultRowsChanged(unsavedResultTabCount)
+    }
 
     var pendingRunConfirmationSpec by remember { mutableStateOf<QueryRunSpec?>(null) }
     var showWriteOnceDialog by remember { mutableStateOf(false) }
