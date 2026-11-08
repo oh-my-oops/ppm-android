@@ -10,6 +10,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.logs.LogsAppBody
@@ -257,6 +258,14 @@ class Phase11aUiTest {
                             )
                             .build()
                     }
+                    target.contains("/api/logs/github/duplicates") -> {
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body(
+                                """{"ok":true,"data":{"query":"Claude stream crash on token parse","issues":[{"number":42,"title":"Claude stream crash on token parse","url":"https://github.com/hienlh/ppm/issues/42"}]}}""",
+                            )
+                            .build()
+                    }
                     else -> {
                         MockResponse.Builder()
                             .addHeader("Content-Type", "application/json")
@@ -357,6 +366,15 @@ class Phase11aUiTest {
             assertEquals(3, envArr.size)
             assertEquals("PPM", envArr[0].array.orEmpty()[0].string)
             assertEquals("0.9.90", envArr[0].array.orEmpty()[1].string)
+
+            // Wait for 700ms duplicate-issue search debounce and assert web strings from server JSON shape
+            composeRule.mainClock.advanceTimeBy(800L)
+            composeRule.waitUntil(5_000) {
+                composeRule.onAllNodes(androidx.compose.ui.test.hasTestTag("report-duplicates-box")).fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithTag("report-duplicates-box").performScrollTo()
+            composeRule.onNodeWithText("Open issues that look like this one:").assertIsDisplayed()
+            composeRule.onNodeWithText("#42 Claude stream crash on token parse").assertIsDisplayed()
         } finally {
             server.close()
         }

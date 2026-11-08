@@ -1327,7 +1327,7 @@ private fun LogsReportPane(
     val tokens = LocalPpmTokens.current
     var mode by remember { mutableStateOf("write") } // "write" | "preview"
     var copied by remember { mutableStateOf(false) }
-    var duplicates by remember { mutableStateOf<List<Pair<Int, String>>>(emptyList()) }
+    var dupes by remember { mutableStateOf<DuplicateSearchResult?>(null) }
 
     val fields = ReportFields(
         title = titleField.text.toString(),
@@ -1343,17 +1343,13 @@ private fun LogsReportPane(
     val ghUrl = prepared.openUrl
 
     LaunchedEffect(prepared.duplicateQuery, model.api) {
-        duplicates = emptyList()
+        dupes = null
         val dq = prepared.duplicateQuery ?: return@LaunchedEffect
         val api = model.api ?: return@LaunchedEffect
         delay(700L)
         try {
             val res = api.logsGithubDuplicates(dq)
-            duplicates = res["items"].array.orEmpty().mapNotNull { item ->
-                val num = item["number"]?.toString()?.toIntOrNull() ?: return@mapNotNull null
-                val t = item["title"].string ?: return@mapNotNull null
-                num to t
-            }
+            dupes = DuplicateSearchResult.from(res, dq)
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -1592,6 +1588,53 @@ private fun LogsReportPane(
                     if (copied) "Copied Markdown" else "Copy as Markdown",
                     style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color),
                 )
+            }
+        }
+
+        val currentDupes = dupes
+        if (currentDupes != null) {
+            val hasIssues = currentDupes.issues.isNotEmpty()
+            val dupeShape = RoundedCornerShape(8.dp)
+            val warnColor = Color(0xFFEAB308)
+            val okColor = Color(0xFF22C55E)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(dupeShape)
+                    .background(if (hasIssues) warnColor.copy(alpha = 0.12f) else tokens.panel2.opacity(0.35).color)
+                    .cssBorder(if (hasIssues) warnColor.copy(alpha = 0.35f) else tokens.border.color, dupeShape)
+                    .padding(10.dp)
+                    .testTag("report-duplicates-box"),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PpmIcon(
+                    if (hasIssues) ProductIcon.TriangleAlert else ProductIcon.CheckCircle2,
+                    14.dp,
+                    if (hasIssues) warnColor else okColor,
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (hasIssues) {
+                        BasicText(
+                            "Open issues that look like this one:",
+                            style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text.color),
+                        )
+                        for (issue in currentDupes.issues.take(3)) {
+                            BasicText(
+                                "#${issue.number} ${issue.title}",
+                                modifier = Modifier
+                                    .ppmClickable { onOpenGithub(issue.url) }
+                                    .testTag("report-dupe-issue-${issue.number}"),
+                                style = ppmText(11f, FontWeight.Medium, lineHeight = 15f).copy(color = tokens.accent.color),
+                            )
+                        }
+                    } else {
+                        BasicText(
+                            "No open issue looks like this one. Searched $LOGS_ISSUE_REPO for \u201C${currentDupes.query}\u201D.",
+                            style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text2.color),
+                        )
+                    }
+                }
             }
         }
     }

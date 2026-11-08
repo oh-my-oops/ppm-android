@@ -698,6 +698,30 @@ fun parseLogsEnvironment(json: JsonElement?): List<Pair<String, String>> =
         k to v
     }
 
+data class DuplicateIssue(
+    val number: Int,
+    val title: String,
+    val url: String,
+)
+
+data class DuplicateSearchResult(
+    val query: String,
+    val issues: List<DuplicateIssue>,
+) {
+    companion object {
+        fun from(json: JsonElement?, fallbackQuery: String = ""): DuplicateSearchResult {
+            val query = json["query"].string ?: fallbackQuery
+            val issues = json["issues"].array.orEmpty().mapNotNull { item ->
+                val num = item["number"].int ?: item["number"]?.toString()?.toIntOrNull() ?: return@mapNotNull null
+                val title = item["title"].string ?: return@mapNotNull null
+                val url = item["url"].string ?: return@mapNotNull null
+                DuplicateIssue(number = num, title = title, url = url)
+            }
+            return DuplicateSearchResult(query = query, issues = issues)
+        }
+    }
+}
+
 data class PreparedIssueReport(
     val redactedTitle: String,
     val body: String,
