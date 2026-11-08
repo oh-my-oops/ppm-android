@@ -129,6 +129,10 @@ import kotlinx.coroutines.withContext
 internal class EditorImeBridgeView(context: Context) : View(context) {
     var session: EditorSessionState? = null
     var onMutated: (() -> Unit)? = null
+    var monitorCursorUpdates: Boolean = false
+        private set
+    var cursorAnchorUpdateCount: Int = 0
+        private set
 
     init {
         isFocusable = true
@@ -142,8 +146,7 @@ internal class EditorImeBridgeView(context: Context) : View(context) {
         if (currentSession.readOnly) return null
         outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
             InputType.TYPE_TEXT_FLAG_MULTI_LINE or
-            InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or
-            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+            InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_ACTION_NONE
         outAttrs.initialSelStart = currentSession.selectionStart
         outAttrs.initialSelEnd = currentSession.selectionEnd
@@ -208,6 +211,32 @@ internal class EditorImeBridgeView(context: Context) : View(context) {
             override fun getSelectedText(flags: Int): CharSequence? =
                 currentSession.getSelectedText()
 
+            override fun getSurroundingText(
+                beforeLength: Int,
+                afterLength: Int,
+                flags: Int,
+            ): android.view.inputmethod.SurroundingText? {
+                if (android.os.Build.VERSION.SDK_INT < 31) {
+                    return super.getSurroundingText(beforeLength, afterLength, flags)
+                }
+                val slice = currentSession.getSurroundingTextSlice(beforeLength, afterLength)
+                return android.view.inputmethod.SurroundingText(
+                    slice.text,
+                    slice.selectionStart,
+                    slice.selectionEnd,
+                    slice.offset,
+                )
+            }
+
+            override fun requestCursorUpdates(cursorUpdateMode: Int): Boolean {
+                val immediate = (cursorUpdateMode and InputConnection.CURSOR_UPDATE_IMMEDIATE) != 0
+                monitorCursorUpdates = (cursorUpdateMode and InputConnection.CURSOR_UPDATE_MONITOR) != 0
+                if (immediate) {
+                    sendCursorAnchorInfo()
+                }
+                return true
+            }
+
             override fun setSelection(start: Int, end: Int): Boolean {
                 currentSession.setSelection(start, end)
                 onMutated?.invoke()
@@ -253,16 +282,36 @@ internal class EditorImeBridgeView(context: Context) : View(context) {
         imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
     }
 
+    fun sendCursorAnchorInfo() {
+        val currentSession = session ?: return
+        cursorAnchorUpdateCount += 1
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
+        val builder = android.view.inputmethod.CursorAnchorInfo.Builder()
+            .setSelectionRange(currentSession.selectionStart, currentSession.selectionEnd)
+        if (currentSession.composingStart >= 0 && currentSession.composingEnd >= currentSession.composingStart) {
+            val compText = currentSession.buffer.substring(
+                currentSession.composingStart,
+                currentSession.composingEnd.coerceAtMost(currentSession.buffer.length),
+            )
+            builder.setComposingText(currentSession.composingStart, compText)
+        }
+        builder.setMatrix(android.graphics.Matrix())
+        imm.updateCursorAnchorInfo(this, builder.build())
+    }
+
     fun syncImmSelection() {
         val currentSession = session ?: return
-        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
-        imm.updateSelection(
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        imm?.updateSelection(
             this,
             currentSession.selectionStart,
             currentSession.selectionEnd,
             currentSession.composingStart,
             currentSession.composingEnd,
         )
+        if (monitorCursorUpdates) {
+            sendCursorAnchorInfo()
+        }
     }
 }
 
@@ -310,14 +359,14 @@ internal fun EditableFileCodeView(
     var haltedOn4xx by remember(path, project) { mutableStateOf(false) }
     val currentBufferVersion = remember(editTick) { docState.session.buffer.version }
 
-    // Per-device LSP bridge (Phase 07c)
+    // Shared per-project LSP bridge (Phase 07c)
     val lspEnabled by DeviceLspPreference.enabled.collectAsState()
     val isRelativeProjectFile = !project.isNullOrBlank() && !path.isNullOrBlank() &&
         !isUntitled && !path.startsWith("/") && !Regex("^[A-Za-z]:[/\\\\]").containsMatchIn(path)
     val clientUri = remember(project, path) { allocateClientUri() }
     val lspBridge = remember(api, project, isRelativeProjectFile, lspEnabled) {
         if (api != null && lspEnabled && isRelativeProjectFile && project != null) {
-            ProjectLspBridge(api, project, scope)
+            SharedProjectLspRegistry.getOrCreate(api, project)
         } else {
             null
         }
@@ -332,7 +381,11 @@ internal fun EditableFileCodeView(
     } else {
         emptyList()
     }
+    var lspCompletions by remember(path, project) { mutableStateOf<List<com.hienlh.ppm.state.editor.LspCompletionEntry>>(emptyList()) }
+    var lspHoverMarkdown by remember(path, project) { mutableStateOf<String?>(null) }
+    var showCompareDialog by remember(path, project) { mutableStateOf(false) }
 
+    val initialLspVersion = remember(lspBridge, path) { docState.session.buffer.version }
     DisposableEffect(lspBridge, path) {
         if (lspBridge != null && !path.isNullOrBlank()) {
             lspBridge.openDocument(path, clientUri, docState.session.buffer.toString())
@@ -344,9 +397,12 @@ internal fun EditableFileCodeView(
         }
     }
 
-    LaunchedEffect(editTick, lspBridge, path) {
-        if (lspBridge != null && !path.isNullOrBlank() && editTick > 0L) {
-            lspBridge.changeDocument(path, docState.session.buffer.toString())
+    // Debounced off-main-thread LSP change notifications only when buffer version actually changes
+    LaunchedEffect(currentBufferVersion, lspBridge, path) {
+        if (lspBridge != null && !path.isNullOrBlank() && currentBufferVersion != initialLspVersion) {
+            delay(150L)
+            val text = withContext(Dispatchers.Default) { docState.session.buffer.toString() }
+            lspBridge.changeDocument(path, text)
         }
     }
 
@@ -521,38 +577,47 @@ internal fun EditableFileCodeView(
         val activeCursorLineOneBased = remember(editTick) {
             docState.session.buffer.offsetToLineCol(docState.session.selectionStart).line + 1
         }
-        val activeBlameCommit = remember(blameData, activeCursorLineOneBased, docState.isDirty) {
+        val activeLineBlame = remember(blameData, activeCursorLineOneBased, docState.isDirty, blameEnabled) {
             if (!blameEnabled || docState.isDirty) return@remember null
-            val data = blameData ?: return@remember null
-            val entry = data.lines[activeCursorLineOneBased] ?: return@remember null
-            data.commits[entry.hash]
+            blameData?.lineBlame(activeCursorLineOneBased)
         }
+        val activeBlameCommit = activeLineBlame?.first
+        val fileGitScope = remember(project, path, model.gitDiscovery[project]) {
+            if (project != null && !path.isNullOrBlank()) {
+                com.hienlh.ppm.state.git.GitRepoScope.fileGitScope(model.gitDiscovery[project], path)
+            } else {
+                null
+            }
+        }
+        val repoFile = fileGitScope?.filePath ?: path
+        val fileRepo = fileGitScope?.repo
 
-        LaunchedEffect(api, project, path, blameEnabled, docState.isDirty) {
-            if (!blameEnabled || docState.isDirty || api == null || !isRelativeProjectFile || project == null || path == null) {
+        LaunchedEffect(api, project, repoFile, fileRepo?.path, blameEnabled, docState.isDirty) {
+            if (!blameEnabled || docState.isDirty || api == null || !isRelativeProjectFile || project == null || repoFile.isNullOrBlank()) {
                 if (docState.isDirty) blameData = null
                 return@LaunchedEffect
             }
             delay(300L)
-            runCatching { api.gitBlame(project, path) }
+            runCatching { api.gitBlame(project, repoFile, repo = fileRepo) }
                 .getOrNull()
                 ?.let { blameData = parseBlameResult(it) }
         }
 
-        LaunchedEffect(api, project, path, blameData, activeCursorLineOneBased, activeBlameCommit) {
+        LaunchedEffect(api, project, repoFile, fileRepo?.path, blameData, activeCursorLineOneBased, activeBlameCommit) {
             val commit = activeBlameCommit
-            if (api == null || project == null || path == null || commit == null || isUncommittedHash(commit.hash)) {
+            if (api == null || project == null || repoFile.isNullOrBlank() || commit == null || isUncommittedHash(commit.hash)) {
                 activeLineDetail = null
                 return@LaunchedEffect
             }
-            val origLine = blameData?.lines?.get(activeCursorLineOneBased)?.origLine ?: activeCursorLineOneBased
-            val cacheKey = "${commit.hash}:$path:$origLine"
+            val origLine = activeLineBlame?.second ?: activeCursorLineOneBased
+            val detailPath = commit.filename?.takeIf { it.isNotBlank() } ?: repoFile
+            val cacheKey = "${commit.hash}:${fileRepo?.path.orEmpty()}:$detailPath:$origLine"
             val cached = SharedBlamePreference.commitLineCache.get(cacheKey)
             if (cached != null) {
                 activeLineDetail = cached
                 return@LaunchedEffect
             }
-            runCatching { api.gitCommitLine(project, commit.hash, path, origLine) }
+            runCatching { api.gitCommitLine(project, commit.hash, detailPath, origLine, repo = fileRepo) }
                 .getOrNull()
                 ?.let {
                     val parsed = parseBlameLineDetail(it)
@@ -562,13 +627,18 @@ internal fun EditableFileCodeView(
         }
 
         if (blameEnabled && !docState.isDirty && activeBlameCommit != null && !path.isNullOrBlank()) {
-            val resolvedProjectRoot = remember(project, model.projects, model.gitDiscovery[project], model.gitChosenRepoPath[project]) {
+            val resolvedProjectRoot = remember(project, model.projects, model.gitDiscovery[project], model.gitChosenRepoPath[project], fileRepo?.path) {
                 val projInfo = model.projects.firstOrNull { it.name == project }
                 if (projInfo != null && project != null) {
-                    com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(
+                    val subRepo = fileRepo?.path ?: com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(
                         model.gitDiscovery[project],
                         model.gitChosenRepoPath[project],
-                    )?.path ?: projInfo.path
+                    )?.path
+                    if (!subRepo.isNullOrBlank() && subRepo != ".") {
+                        "${projInfo.path.trimEnd('/')}/$subRepo"
+                    } else {
+                        projInfo.path
+                    }
                 } else {
                     project
                 }
@@ -576,11 +646,11 @@ internal fun EditableFileCodeView(
             InlineBlameAnnotationStrip(
                 commit = activeBlameCommit,
                 detail = activeLineDetail,
-                filePath = path,
+                filePath = repoFile ?: path,
                 projectPath = resolvedProjectRoot,
                 onActionCommand = { actionCmd, actionArgs ->
                     val root = actionArgs.getOrNull(0) ?: resolvedProjectRoot
-                    val targetFile = actionArgs.getOrNull(1) ?: path
+                    val targetFile = actionArgs.getOrNull(1) ?: (repoFile ?: path)
                     when (actionCmd) {
                         "ppm.blame.fileHistory" -> if (!root.isNullOrBlank()) {
                             model.dispatchExtCommand(
@@ -611,6 +681,151 @@ internal fun EditableFileCodeView(
             )
         }
 
+        fun applyCompletionItem(entry: com.hienlh.ppm.state.editor.LspCompletionEntry) {
+            val buf = docState.session.buffer
+            val (expanded, cursorOffsetInExpanded) = if (entry.isSnippet) {
+                com.hienlh.ppm.state.editor.expandSnippetPlaceholders(entry.insertText)
+            } else {
+                entry.insertText to entry.insertText.length
+            }
+            val replaceRange = entry.replaceRange
+            if (replaceRange != null) {
+                val startLineText = buf.line(replaceRange.start.line)
+                val endLineText = buf.line(replaceRange.end.line)
+                val startCol = com.hienlh.ppm.state.editor.utf16ColumnToCharOffset(startLineText, replaceRange.start.character)
+                val endCol = com.hienlh.ppm.state.editor.utf16ColumnToCharOffset(endLineText, replaceRange.end.character)
+                val startOffset = buf.lineColToOffset(replaceRange.start.line, startCol)
+                val endOffset = buf.lineColToOffset(replaceRange.end.line, endCol)
+                docState.session.setSelection(startOffset, endOffset)
+            }
+            docState.session.commitText(expanded, 1)
+            val newCursor = (docState.session.selectionStart - expanded.length + cursorOffsetInExpanded)
+                .coerceIn(0, buf.length)
+            docState.session.setSelection(newCursor, newCursor)
+            if (entry.additionalTextEdits.isNotEmpty()) {
+                val updated = com.hienlh.ppm.state.editor.applyLspTextEdits(buf.toString(), entry.additionalTextEdits)
+                docState.session.reloadExternalContent(updated)
+            }
+            lspCompletions = emptyList()
+            editTick++
+        }
+
+        fun triggerLspCompletions() {
+            val bridge = lspBridge ?: return
+            val filePath = path?.takeIf { it.isNotBlank() } ?: return
+            val pos = docState.session.buffer.offsetToLineCol(docState.session.selectionStart)
+            scope.launch {
+                lspCompletions = bridge.requestCompletions(filePath, clientUri, pos.line, pos.column)
+            }
+        }
+
+        fun triggerLspHover() {
+            val bridge = lspBridge ?: return
+            val filePath = path?.takeIf { it.isNotBlank() } ?: return
+            val pos = docState.session.buffer.offsetToLineCol(docState.session.selectionStart)
+            scope.launch {
+                lspHoverMarkdown = bridge.requestHover(filePath, clientUri, pos.line, pos.column)
+            }
+        }
+
+        fun triggerLspDefinition() {
+            val bridge = lspBridge ?: return
+            val filePath = path?.takeIf { it.isNotBlank() } ?: return
+            val projName = project ?: return
+            val pos = docState.session.buffer.offsetToLineCol(docState.session.selectionStart)
+            val projRoot = (lspStatus as? com.hienlh.ppm.state.editor.LspDocumentStatus.Ready)?.projectPath
+                ?: model.projects.firstOrNull { it.name == projName }?.path
+            scope.launch {
+                val targets = bridge.requestDefinition(filePath, clientUri, pos.line, pos.column)
+                val firstTarget = targets.firstOrNull() ?: return@launch
+                when (val act = com.hienlh.ppm.state.editor.resolveDefinitionAction(firstTarget, clientUri, projRoot, projName)) {
+                    is com.hienlh.ppm.state.editor.LspNavigationAction.SameFile -> {
+                        docState.session.goToLine(act.range.start.line + 1, act.range.start.character + 1)
+                        editTick++
+                    }
+                    is com.hienlh.ppm.state.editor.LspNavigationAction.OpenProjectFile -> {
+                        model.openFileTab(act.projectName, act.relativePath, act.lineNumber.toLong())
+                    }
+                    com.hienlh.ppm.state.editor.LspNavigationAction.IgnoreOutsideProject -> {}
+                }
+            }
+        }
+
+        fun triggerLspFormatting() {
+            val bridge = lspBridge ?: return
+            val filePath = path?.takeIf { it.isNotBlank() } ?: return
+            if (docState.session.readOnly) return
+            val indent = docState.session.indentStyle
+            scope.launch {
+                val edits = bridge.requestFormatting(filePath, clientUri, indent.size, !indent.useTabs)
+                if (edits.isNotEmpty()) {
+                    val formatted = com.hienlh.ppm.state.editor.applyLspTextEdits(
+                        docState.session.buffer.toString(),
+                        edits,
+                    )
+                    docState.session.selectAll()
+                    docState.session.commitText(formatted, 1)
+                    editTick++
+                }
+            }
+        }
+
+        LspCompletionPopup(
+            items = lspCompletions,
+            onSelect = { applyCompletionItem(it) },
+            onDismiss = { lspCompletions = emptyList() },
+        )
+        LspHoverPopup(
+            markdown = lspHoverMarkdown,
+            onDismiss = { lspHoverMarkdown = null },
+        )
+
+        if (showCompareDialog && project != null && !path.isNullOrBlank()) {
+            val allTabs = model.layout?.panels?.values?.flatMap { it.tabs }.orEmpty()
+            val openTabs = remember(allTabs, project, path) {
+                allTabs.mapNotNull { t ->
+                    val p = t.metaString("filePath") ?: t.metaString("path") ?: return@mapNotNull null
+                    if (p == path) return@mapNotNull null
+                    com.hienlh.ppm.state.editor.CompareCandidate(
+                        id = "tab:${t.id}",
+                        path = p,
+                        label = p.substringAfterLast('/').substringAfterLast('\\'),
+                        source = "tab",
+                    )
+                }
+            }
+            val initialSel = remember(project, path, editTick) {
+                com.hienlh.ppm.state.editor.CompareSelection(
+                    filePath = path,
+                    projectName = project,
+                    dirtyContent = if (docState.isDirty) docState.session.buffer.toString() else null,
+                )
+            }
+            androidx.compose.ui.window.Dialog(onDismissRequest = { showCompareDialog = false }) {
+                CompareFilesDialogContent(
+                    initialSelectionA = SharedCompareStore.store.selection ?: initialSel,
+                    candidates = com.hienlh.ppm.state.editor.buildCompareCandidates(openTabs, emptyList()),
+                    onPickPair = { selA, candB ->
+                        showCompareDialog = false
+                        SharedCompareStore.store.clearSelection()
+                        model.openWorkspaceTab(
+                            type = "git-diff",
+                            title = com.hienlh.ppm.state.editor.formatCompareTabTitle(selA.filePath, candB.path),
+                            projectId = project,
+                            metadata = kotlinx.serialization.json.JsonObject(
+                                mapOf(
+                                    "projectName" to kotlinx.serialization.json.JsonPrimitive(project),
+                                    "file1" to kotlinx.serialization.json.JsonPrimitive(selA.filePath),
+                                    "file2" to kotlinx.serialization.json.JsonPrimitive(candB.path),
+                                ),
+                            ),
+                        )
+                    },
+                    onClose = { showCompareDialog = false },
+                )
+            }
+        }
+
         NativeCodeEditorCanvas(
             session = docState.session,
             editTick = editTick,
@@ -619,6 +834,11 @@ internal fun EditableFileCodeView(
             wrap = wrap,
             onToggleWrap = onToggleWrap,
             onSaveNow = { scope.launch { performSaveNow() } },
+            onRequestCompletions = if (lspBridge != null) ({ triggerLspCompletions() }) else null,
+            onRequestHover = if (lspBridge != null) ({ triggerLspHover() }) else null,
+            onRequestDefinition = if (lspBridge != null) ({ triggerLspDefinition() }) else null,
+            onRequestFormatting = if (lspBridge != null && !docState.session.readOnly) ({ triggerLspFormatting() }) else null,
+            diagnostics = lspDiagnostics,
             lineNumber = lineNumber,
             endLine = endLine,
             revealAt = revealAt,
@@ -628,6 +848,11 @@ internal fun EditableFileCodeView(
                         enabled = blameEnabled,
                         onToggle = { SharedBlamePreference.setEnabled(it) },
                     )
+                    SettingsButton(
+                        label = "Compare",
+                        modifier = Modifier.testTag("editor-compare-files-btn"),
+                        onClick = { showCompareDialog = true },
+                    )
                     LspStatusChip(
                         enabled = lspEnabled,
                         onToggle = { DeviceLspPreference.setEnabled(it) },
@@ -636,6 +861,9 @@ internal fun EditableFileCodeView(
                         onInstall = if (lspBridge != null) {
                             { serverId -> lspBridge.installServer(serverId) }
                         } else null,
+                        onOpenProblems = {
+                            model.openWorkspaceTab(type = "problems", title = "Problems")
+                        },
                     )
                 }
             },
@@ -653,6 +881,11 @@ internal fun NativeCodeEditorCanvas(
     wrap: Boolean,
     onToggleWrap: () -> Unit,
     onSaveNow: () -> Unit = {},
+    onRequestCompletions: (() -> Unit)? = null,
+    onRequestHover: (() -> Unit)? = null,
+    onRequestDefinition: (() -> Unit)? = null,
+    onRequestFormatting: (() -> Unit)? = null,
+    diagnostics: List<com.hienlh.ppm.state.editor.LspDiagnostic> = emptyList(),
     lineNumber: Long? = null,
     endLine: Long? = null,
     revealAt: String? = null,
@@ -698,8 +931,8 @@ internal fun NativeCodeEditorCanvas(
     val cursorLineCol = remember(editTick) { session.buffer.offsetToLineCol(session.selectionStart) }
     val bracketMatch = remember(editTick) { session.findMatchingBracket(session.selectionStart) }
 
-    // Off-main-thread Shiki highlighting for files up to 200 KB (keeps 5 MB files instant)
-    val highlightedState = remember(bufferVersion, currentLanguage, shikiTheme) {
+    // Off-main-thread Shiki highlighting for files up to 200 KB (keeps previous tokens across edits so it never flickers)
+    val highlightedState = remember(currentLanguage, shikiTheme) {
         mutableStateOf<HighlightedEditorCache?>(null)
     }
     LaunchedEffect(bufferVersion, currentLanguage, shikiTheme) {
@@ -707,7 +940,7 @@ internal fun NativeCodeEditorCanvas(
             highlightedState.value = null
             return@LaunchedEffect
         }
-        val snapshotText = session.buffer.toString()
+        val snapshotText = withContext(Dispatchers.Default) { session.buffer.toString() }
         val code = highlighter.cached(snapshotText, currentLanguage, shikiTheme)
             ?: highlighter.highlight(snapshotText, currentLanguage, shikiTheme)
         highlightedState.value = code?.let {
@@ -746,6 +979,18 @@ internal fun NativeCodeEditorCanvas(
                 when {
                     mod && ev.key == Key.S -> {
                         onSaveNow()
+                        true
+                    }
+                    mod && ev.key == Key.Spacebar && onRequestCompletions != null -> {
+                        onRequestCompletions()
+                        true
+                    }
+                    ev.key == Key.F12 && onRequestDefinition != null -> {
+                        onRequestDefinition()
+                        true
+                    }
+                    ev.isShiftPressed && ev.isAltPressed && ev.key == Key.F && onRequestFormatting != null -> {
+                        onRequestFormatting()
                         true
                     }
                     mod && ev.key == Key.F -> {
@@ -903,6 +1148,34 @@ internal fun NativeCodeEditorCanvas(
                 lspSlot()
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (onRequestCompletions != null) {
+                    SettingsButton(
+                        label = "Complete",
+                        modifier = Modifier.testTag("editor-lsp-complete-btn"),
+                        onClick = onRequestCompletions,
+                    )
+                }
+                if (onRequestHover != null) {
+                    SettingsButton(
+                        label = "Hover",
+                        modifier = Modifier.testTag("editor-lsp-hover-btn"),
+                        onClick = onRequestHover,
+                    )
+                }
+                if (onRequestDefinition != null) {
+                    SettingsButton(
+                        label = "Def",
+                        modifier = Modifier.testTag("editor-lsp-def-btn"),
+                        onClick = onRequestDefinition,
+                    )
+                }
+                if (onRequestFormatting != null) {
+                    SettingsButton(
+                        label = "Format",
+                        modifier = Modifier.testTag("editor-lsp-format-btn"),
+                        onClick = onRequestFormatting,
+                    )
+                }
                 SettingsButton(
                     label = "Find",
                     modifier = Modifier.testTag("editor-toggle-find"),
@@ -1133,6 +1406,10 @@ internal fun NativeCodeEditorCanvas(
                         }
                         val rowStartOffset = remember(editTick, row) { session.buffer.lineStart(row) }
                         val rowEndOffset = rowStartOffset + plainLine.length
+                        val rowDiagnostics = remember(diagnostics, row) {
+                            if (diagnostics.isEmpty()) emptyList()
+                            else diagnostics.filter { d -> row in d.range.start.line..d.range.end.line }
+                        }
 
                         val decoratedLine = remember(
                             baseStyled,
@@ -1143,9 +1420,11 @@ internal fun NativeCodeEditorCanvas(
                             session.composingStart,
                             session.composingEnd,
                             bracketMatch,
+                            rowDiagnostics,
                         ) {
                             decorateEditorLine(
                                 base = baseStyled,
+                                rowIndex = row,
                                 rowStart = rowStartOffset,
                                 rowEnd = rowEndOffset,
                                 selMin = session.selectionMin,
@@ -1153,8 +1432,11 @@ internal fun NativeCodeEditorCanvas(
                                 compStart = session.composingStart,
                                 compEnd = session.composingEnd,
                                 bracketMatch = bracketMatch,
+                                rowDiagnostics = rowDiagnostics,
                                 selectionBg = colors.accent.color.copy(alpha = 0.28f),
                                 bracketBg = colors.accent.color.copy(alpha = 0.22f),
+                                errorBg = colors.error.color.copy(alpha = 0.18f),
+                                warningBg = colors.warning.color.copy(alpha = 0.16f),
                             )
                         }
 
@@ -1230,6 +1512,7 @@ internal fun NativeCodeEditorCanvas(
 
 private fun decorateEditorLine(
     base: AnnotatedString,
+    rowIndex: Int,
     rowStart: Int,
     rowEnd: Int,
     selMin: Int,
@@ -1237,15 +1520,19 @@ private fun decorateEditorLine(
     compStart: Int,
     compEnd: Int,
     bracketMatch: com.hienlh.ppm.state.editor.BracketMatch?,
+    rowDiagnostics: List<com.hienlh.ppm.state.editor.LspDiagnostic>,
     selectionBg: Color,
     bracketBg: Color,
+    errorBg: Color,
+    warningBg: Color,
 ): AnnotatedString {
     val len = base.text.length
     val hasSelOverlap = selMin < selMax && selMax > rowStart && selMin < rowEnd
     val hasCompOverlap = compStart in 0 until compEnd && compEnd > rowStart && compStart < rowEnd
     val hasBracket = bracketMatch != null &&
         (bracketMatch.openOffset in rowStart until rowEnd || bracketMatch.closeOffset in rowStart until rowEnd)
-    if (!hasSelOverlap && !hasCompOverlap && !hasBracket) return base
+    val hasDiag = rowDiagnostics.isNotEmpty()
+    if (!hasSelOverlap && !hasCompOverlap && !hasBracket && !hasDiag) return base
 
     return buildAnnotatedString {
         append(base)
@@ -1265,6 +1552,24 @@ private fun decorateEditorLine(
                     val idx = (bOffset - rowStart).coerceIn(0, (len - 1).coerceAtLeast(0))
                     if (idx < len) addStyle(SpanStyle(background = bracketBg, fontWeight = FontWeight.Bold), idx, idx + 1)
                 }
+            }
+        }
+        for (diag in rowDiagnostics) {
+            if (len <= 0) break
+            val rawStart = if (diag.range.start.line == rowIndex) diag.range.start.character else 0
+            val rawEnd = if (diag.range.end.line == rowIndex) diag.range.end.character else len
+            val s = rawStart.coerceIn(0, len)
+            val e = rawEnd.coerceIn((s + 1).coerceAtMost(len), len)
+            if (s < e) {
+                val bg = if (diag.effectiveSeverity == com.hienlh.ppm.state.editor.SEVERITY_ERROR) errorBg else warningBg
+                addStyle(
+                    SpanStyle(
+                        background = bg,
+                        textDecoration = TextDecoration.Underline,
+                    ),
+                    s,
+                    e,
+                )
             }
         }
     }

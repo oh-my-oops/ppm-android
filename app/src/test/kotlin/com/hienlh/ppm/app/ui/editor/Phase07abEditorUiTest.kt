@@ -136,11 +136,39 @@ class Phase07abEditorUiTest {
         val ic = view.onCreateInputConnection(attrs)
         assertNotNull(ic)
 
+        // Verify inputType uses NO_SUGGESTIONS and NOT VISIBLE_PASSWORD (which breaks Gboard Telex composing)
+        assertEquals(0, attrs.inputType and android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD)
+        assertTrue((attrs.inputType and android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS) != 0)
+
         // Select all (~70,000 chars) -> getSelectedText must be capped at MAX_IME_SLICE_CHARS (4096)
         session.selectAll()
         val selected = ic!!.getSelectedText(0)
         assertNotNull(selected)
         assertEquals(MAX_IME_SLICE_CHARS, selected!!.length)
+
+        // Verify Android 12+ getSurroundingText returns bounded slice with local selection & offset
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            session.setSelection(100, 106)
+            val surrounding = ic.getSurroundingText(10, 10, 0)
+            assertNotNull(surrounding)
+            assertEquals(90, surrounding!!.offset)
+            assertEquals(10, surrounding.selectionStart)
+            assertEquals(16, surrounding.selectionEnd)
+            assertEquals(26, surrounding.text.length)
+        }
+
+        // Verify requestCursorUpdates immediate + monitor mode
+        assertEquals(0, view.cursorAnchorUpdateCount)
+        assertTrue(
+            ic.requestCursorUpdates(
+                android.view.inputmethod.InputConnection.CURSOR_UPDATE_IMMEDIATE or
+                    android.view.inputmethod.InputConnection.CURSOR_UPDATE_MONITOR,
+            ),
+        )
+        assertTrue(view.monitorCursorUpdates)
+        assertEquals(1, view.cursorAnchorUpdateCount)
+        ic.setSelection(10, 10)
+        assertEquals(2, view.cursorAnchorUpdateCount)
 
         // Reset to empty and test Telex composition via InputConnection
         session.reloadExternalContent("")

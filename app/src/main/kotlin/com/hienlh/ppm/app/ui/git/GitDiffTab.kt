@@ -357,7 +357,10 @@ fun GitDiffViewer(
 
         // 2-column side-by-side diff on tablet (`!mobile`), 1-column unified diff on phone (`mobile`)
         val openedGaps = remember(original, modified) { mutableStateMapOf<Int, Boolean>() }
+        val oldLines = remember(original) { ReviewBlocks.splitLines(original).map(::stripDiffEol) }
         val newLines = remember(modified) { ReviewBlocks.splitLines(modified).map(::stripDiffEol) }
+        val oldFileTokens = rememberShikiTokenLines(oldLines.joinToString("\n"), language)
+        val newFileTokens = if (modified == original) oldFileTokens else rememberShikiTokenLines(newLines.joinToString("\n"), language)
 
         if (mobile) {
             val entries = remember(diff, original, modified, openedGaps.toMap()) {
@@ -367,35 +370,51 @@ fun GitDiffViewer(
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth().testTag("git-diff-rows"),
             ) {
-                items(entries, key = { it.key }) { entry ->
+                for (entry in entries) {
                     when (entry) {
                         is UnifiedDiffEntry.Gap -> {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(tokens.panel2.opacity(0.45).color)
-                                    .edge(Edge.Top, tokens.border.opacity(0.5).color)
-                                    .edge(Edge.Bottom, tokens.border.opacity(0.5).color)
-                                    .clickable { openedGaps[entry.fromNew] = true }
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                                    .testTag("git-diff-gap-${entry.fromNew}"),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                PpmIcon(ProductIcon.ChevronDown, size = 12.dp, tint = tokens.text3.color)
-                                BasicText(
-                                    text = "${entry.count} unchanged ${if (entry.count == 1) "line" else "lines"}",
-                                    style = PpmFont.sans(11, lineHeight = 14, color = tokens.text3.color),
-                                )
+                            item(key = entry.key) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(tokens.panel2.opacity(0.45).color)
+                                        .edge(Edge.Top, tokens.border.opacity(0.5).color)
+                                        .edge(Edge.Bottom, tokens.border.opacity(0.5).color)
+                                        .clickable { openedGaps[entry.fromNew] = true }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                        .testTag("git-diff-gap-${entry.fromNew}"),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    PpmIcon(ProductIcon.ChevronDown, size = 12.dp, tint = tokens.text3.color)
+                                    BasicText(
+                                        text = "${entry.count} unchanged ${if (entry.count == 1) "line" else "lines"}",
+                                        style = PpmFont.sans(11, lineHeight = 14, color = tokens.text3.color),
+                                    )
+                                }
                             }
                         }
                         is UnifiedDiffEntry.Rows -> {
-                            GitUnifiedDiffRows(
-                                rows = entry.rows,
-                                language = language,
-                                wordWrap = wordWrap,
-                                compact = true,
-                            )
+                            val wordSpans = SessionReviewModel.changedSpans(entry.rows)
+                            items(
+                                count = entry.rows.size,
+                                key = { idx -> "${entry.key}:$idx" },
+                                contentType = { "unified-diff-row" },
+                            ) { idx ->
+                                val row = entry.rows[idx]
+                                val tokenLine = if (row.kind == ReviewBlocks.Kind.REMOVED) {
+                                    row.o?.let { oldFileTokens?.getOrNull(it - 1) }
+                                } else {
+                                    row.n?.let { newFileTokens?.getOrNull(it - 1) }
+                                }
+                                GitUnifiedDiffSingleRow(
+                                    row = row,
+                                    tokenLine = tokenLine,
+                                    changedRange = wordSpans.getOrNull(idx),
+                                    wordWrap = wordWrap,
+                                    compact = true,
+                                )
+                            }
                         }
                     }
                 }
@@ -413,33 +432,47 @@ fun GitDiffViewer(
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth().testTag("git-diff-rows"),
             ) {
-                items(sbsEntries, key = { it.key }) { entry ->
+                for (entry in sbsEntries) {
                     when (entry) {
                         is com.hienlh.ppm.state.editor.SideBySideDiffEntry.Gap -> {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(tokens.panel2.opacity(0.45).color)
-                                    .edge(Edge.Top, tokens.border.opacity(0.5).color)
-                                    .edge(Edge.Bottom, tokens.border.opacity(0.5).color)
-                                    .clickable { openedGaps[entry.fromNew] = true }
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                                    .testTag("git-diff-gap-${entry.fromNew}"),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                PpmIcon(ProductIcon.ChevronDown, size = 12.dp, tint = tokens.text3.color)
-                                BasicText(
-                                    text = "${entry.count} unchanged ${if (entry.count == 1) "line" else "lines"}",
-                                    style = PpmFont.sans(11, lineHeight = 14, color = tokens.text3.color),
-                                )
+                            item(key = entry.key) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(tokens.panel2.opacity(0.45).color)
+                                        .edge(Edge.Top, tokens.border.opacity(0.5).color)
+                                        .edge(Edge.Bottom, tokens.border.opacity(0.5).color)
+                                        .clickable { openedGaps[entry.fromNew] = true }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                        .testTag("git-diff-gap-${entry.fromNew}"),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    PpmIcon(ProductIcon.ChevronDown, size = 12.dp, tint = tokens.text3.color)
+                                    BasicText(
+                                        text = "${entry.count} unchanged ${if (entry.count == 1) "line" else "lines"}",
+                                        style = PpmFont.sans(11, lineHeight = 14, color = tokens.text3.color),
+                                    )
+                                }
                             }
                         }
                         is com.hienlh.ppm.state.editor.SideBySideDiffEntry.Rows -> {
-                            com.hienlh.ppm.app.ui.editor.GitSideBySideDiffRows(
-                                rows = entry.rows,
-                                wordWrap = wordWrap,
-                            )
+                            items(
+                                count = entry.rows.size,
+                                key = { idx -> "${entry.key}:$idx" },
+                                contentType = { "sbs-diff-row" },
+                            ) { idx ->
+                                val row = entry.rows[idx]
+                                val leftTok = row.leftLineNumber?.let { oldFileTokens?.getOrNull(it - 1) }
+                                val rightTok = row.rightLineNumber?.let { newFileTokens?.getOrNull(it - 1) }
+                                com.hienlh.ppm.app.ui.editor.GitSideBySideDiffRowItem(
+                                    row = row,
+                                    wordWrap = wordWrap,
+                                    leftTokens = leftTok,
+                                    rightTokens = rightTok,
+                                    modifier = if (idx == 0) Modifier.testTag("git-diff-side-by-side-block") else Modifier,
+                                )
+                            }
                         }
                     }
                 }
@@ -833,109 +866,153 @@ internal fun GitUnifiedDiffRows(
             val pickable = picking && (isAdd || isDel)
             val isPicked = pickable && lineIndex in pickedIndices
 
-            val rowBg = when {
-                isPicked -> tokens.accent.opacity(0.22).color
-                isAdd -> addBg
-                isDel -> delBg
-                else -> Color.Transparent
-            }
-
-            val annotated = remember(row.text, tokenLine, wordSpans.getOrNull(idx), isAdd, isDel) {
-                buildDiffLineAnnotated(
-                    text = row.text,
-                    tokens = tokenLine,
-                    changedRange = wordSpans.getOrNull(idx),
-                    wordHighlight = if (isAdd) addWordBg else if (isDel) delWordBg else Color.Transparent,
-                )
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(rowBg)
-                    .then(
-                        if (pickable && onToggleLine != null) {
-                            Modifier.clickable(role = Role.Checkbox) { onToggleLine(lineIndex) }
-                        } else {
-                            Modifier
-                        },
-                    )
-                    .padding(vertical = 1.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                // Old line number
-                Box(
-                    modifier = Modifier.width(gutterWidth).padding(end = 6.dp),
-                    contentAlignment = Alignment.TopEnd,
-                ) {
-                    BasicText(
-                        text = row.o?.toString() ?: "",
-                        style = PpmFont.mono(fontSize - 1, lineHeight = lineHeight, color = tokens.text3.color),
-                        maxLines = 1,
-                    )
-                }
-                // New line number
-                Box(
-                    modifier = Modifier.width(gutterWidth).padding(end = 6.dp),
-                    contentAlignment = Alignment.TopEnd,
-                ) {
-                    BasicText(
-                        text = row.n?.toString() ?: "",
-                        style = PpmFont.mono(fontSize - 1, lineHeight = lineHeight, color = tokens.text3.color),
-                        maxLines = 1,
-                    )
-                }
-                // Sign or line-pick checkbox
-                Box(
-                    modifier = Modifier.width(signWidth),
-                    contentAlignment = Alignment.TopCenter,
-                ) {
-                    if (pickable) {
-                        val cbShape = RoundedCornerShape(3.dp)
-                        Box(
-                            modifier = Modifier
-                                .padding(top = 3.dp)
-                                .size(13.dp)
-                                .clip(cbShape)
-                                .background(if (isPicked) tokens.accent.color else Color.Transparent)
-                                .cssBorder(if (isPicked) tokens.accent.color else tokens.text3.opacity(0.6).color, cbShape),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (isPicked) {
-                                PpmIcon(ProductIcon.Check, size = 9.dp, tint = tokens.accentFg.color)
-                            }
-                        }
-                    } else {
-                        val sign = when (row.kind) {
-                            ReviewBlocks.Kind.ADDED -> "+"
-                            ReviewBlocks.Kind.REMOVED -> "−"
-                            ReviewBlocks.Kind.CONTEXT -> " "
-                        }
-                        val signColor = when (row.kind) {
-                            ReviewBlocks.Kind.ADDED -> tokens.success.color
-                            ReviewBlocks.Kind.REMOVED -> tokens.error.color
-                            ReviewBlocks.Kind.CONTEXT -> tokens.text3.color
-                        }
-                        BasicText(
-                            text = sign,
-                            style = PpmFont.mono(fontSize, lineHeight = lineHeight, color = signColor),
-                            maxLines = 1,
-                        )
-                    }
-                }
-                // Code
-                BasicText(
-                    text = annotated,
-                    style = PpmFont.mono(fontSize, lineHeight = lineHeight, color = tokens.text.color),
-                    softWrap = wordWrap,
-                    modifier = Modifier.weight(1f).padding(end = 10.dp),
-                )
-            }
+            GitUnifiedDiffSingleRow(
+                row = row,
+                tokenLine = tokenLine,
+                changedRange = wordSpans.getOrNull(idx),
+                wordWrap = wordWrap,
+                compact = compact,
+                picking = picking,
+                isPicked = isPicked,
+                lineIndex = lineIndex,
+                onToggleLine = onToggleLine,
+            )
         }
     }
 }
 
-private fun buildDiffLineAnnotated(
+@Composable
+internal fun GitUnifiedDiffSingleRow(
+    row: ReviewBlocks.Row,
+    tokenLine: AnnotatedString?,
+    changedRange: IntRange?,
+    wordWrap: Boolean = true,
+    compact: Boolean = false,
+    picking: Boolean = false,
+    isPicked: Boolean = false,
+    lineIndex: Int = 0,
+    onToggleLine: ((Int) -> Unit)? = null,
+) {
+    val tokens = LocalPpmTokens.current
+    val addBg = tokens.success.opacity(0.14).color
+    val delBg = tokens.error.opacity(0.14).color
+    val addWordBg = tokens.success.opacity(0.36).color
+    val delWordBg = tokens.error.opacity(0.36).color
+
+    val gutterWidth = if (compact) 30.dp else 38.dp
+    val signWidth = if (picking) 26.dp else if (compact) 16.dp else 20.dp
+    val fontSize = if (compact) 11 else 12
+    val lineHeight = if (compact) 18 else 20
+
+    val isAdd = row.kind == ReviewBlocks.Kind.ADDED
+    val isDel = row.kind == ReviewBlocks.Kind.REMOVED
+    val pickable = picking && (isAdd || isDel)
+
+    val rowBg = when {
+        isPicked -> tokens.accent.opacity(0.22).color
+        isAdd -> addBg
+        isDel -> delBg
+        else -> Color.Transparent
+    }
+
+    val annotated = remember(row.text, tokenLine, changedRange, isAdd, isDel) {
+        buildDiffLineAnnotated(
+            text = row.text,
+            tokens = tokenLine,
+            changedRange = changedRange,
+            wordHighlight = if (isAdd) addWordBg else if (isDel) delWordBg else Color.Transparent,
+        )
+    }
+
+    val scrollMod = if (wordWrap) Modifier else Modifier.horizontalScroll(rememberScrollState())
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(rowBg)
+            .then(
+                if (pickable && onToggleLine != null) {
+                    Modifier.clickable(role = Role.Checkbox) { onToggleLine(lineIndex) }
+                } else {
+                    Modifier
+                },
+            )
+            .padding(vertical = 1.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        // Old line number
+        Box(
+            modifier = Modifier.width(gutterWidth).padding(end = 6.dp),
+            contentAlignment = Alignment.TopEnd,
+        ) {
+            BasicText(
+                text = row.o?.toString() ?: "",
+                style = PpmFont.mono(fontSize - 1, lineHeight = lineHeight, color = tokens.text3.color),
+                maxLines = 1,
+            )
+        }
+        // New line number
+        Box(
+            modifier = Modifier.width(gutterWidth).padding(end = 6.dp),
+            contentAlignment = Alignment.TopEnd,
+        ) {
+            BasicText(
+                text = row.n?.toString() ?: "",
+                style = PpmFont.mono(fontSize - 1, lineHeight = lineHeight, color = tokens.text3.color),
+                maxLines = 1,
+            )
+        }
+        // Sign or line-pick checkbox
+        Box(
+            modifier = Modifier.width(signWidth),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            if (pickable) {
+                val cbShape = RoundedCornerShape(3.dp)
+                Box(
+                    modifier = Modifier
+                        .padding(top = 3.dp)
+                        .size(13.dp)
+                        .clip(cbShape)
+                        .background(if (isPicked) tokens.accent.color else Color.Transparent)
+                        .cssBorder(if (isPicked) tokens.accent.color else tokens.text3.opacity(0.6).color, cbShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isPicked) {
+                        PpmIcon(ProductIcon.Check, size = 9.dp, tint = tokens.accentFg.color)
+                    }
+                }
+            } else {
+                val sign = when (row.kind) {
+                    ReviewBlocks.Kind.ADDED -> "+"
+                    ReviewBlocks.Kind.REMOVED -> "−"
+                    ReviewBlocks.Kind.CONTEXT -> " "
+                }
+                val signColor = when (row.kind) {
+                    ReviewBlocks.Kind.ADDED -> tokens.success.color
+                    ReviewBlocks.Kind.REMOVED -> tokens.error.color
+                    ReviewBlocks.Kind.CONTEXT -> tokens.text3.color
+                }
+                BasicText(
+                    text = sign,
+                    style = PpmFont.mono(fontSize, lineHeight = lineHeight, color = signColor),
+                    maxLines = 1,
+                )
+            }
+        }
+        // Code
+        Box(modifier = Modifier.weight(1f).then(scrollMod)) {
+            BasicText(
+                text = annotated,
+                style = PpmFont.mono(fontSize, lineHeight = lineHeight, color = tokens.text.color),
+                softWrap = wordWrap,
+                modifier = Modifier.padding(end = 10.dp),
+            )
+        }
+    }
+}
+
+internal fun buildDiffLineAnnotated(
     text: String,
     tokens: AnnotatedString?,
     changedRange: IntRange?,

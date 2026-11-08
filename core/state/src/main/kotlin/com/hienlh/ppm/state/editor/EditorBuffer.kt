@@ -181,7 +181,61 @@ class EditorBuffer(initialText: String = "") : CharSequence {
         pieces.addAll(nextPieces)
         totalLength += norm.length - (e - s)
         version++
-        cachedLineStarts = null
+        cachedLineStarts = cachedLineStarts?.let { updateLineStartsIncremental(it, s, e, norm) }
+    }
+
+    private fun updateLineStartsIncremental(
+        oldStarts: IntArray,
+        s: Int,
+        e: Int,
+        norm: String,
+    ): IntArray {
+        val delta = norm.length - (e - s)
+        val bsLeft = oldStarts.binarySearch(s)
+        val keepLeftCount = if (bsLeft >= 0) bsLeft + 1 else -bsLeft - 1
+        val bsRight = oldStarts.binarySearch(e)
+        val firstRightIdx = if (bsRight >= 0) bsRight + 1 else -bsRight - 1
+
+        var newNewlines = 0
+        for (i in 0 until norm.length) {
+            if (norm[i] == '\n') newNewlines++
+        }
+        val removedCount = firstRightIdx - keepLeftCount
+        if (removedCount == 0 && newNewlines == 0) {
+            if (delta != 0) {
+                for (i in firstRightIdx until oldStarts.size) {
+                    oldStarts[i] += delta
+                }
+            }
+            return oldStarts
+        }
+
+        val nextStarts = IntArray(oldStarts.size - removedCount + newNewlines)
+        System.arraycopy(oldStarts, 0, nextStarts, 0, keepLeftCount)
+        var outIdx = keepLeftCount
+        for (i in 0 until norm.length) {
+            if (norm[i] == '\n') {
+                nextStarts[outIdx++] = s + i + 1
+            }
+        }
+        for (i in firstRightIdx until oldStarts.size) {
+            nextStarts[outIdx++] = oldStarts[i] + delta
+        }
+        return nextStarts
+    }
+
+    /** Compares buffer contents against [other] in-place without allocating a full-buffer String copy. */
+    fun contentEquals(other: CharSequence): Boolean {
+        if (other.length != totalLength) return false
+        var pos = 0
+        for (i in 0 until pieces.size) {
+            val p = pieces[i]
+            val src = pieceCharSequence(p)
+            for (j in 0 until p.length) {
+                if (src[p.start + j] != other[pos++]) return false
+            }
+        }
+        return true
     }
 
     private fun appendNewPiece(target: MutableList<Piece>, text: String) {
@@ -196,8 +250,13 @@ class EditorBuffer(initialText: String = "") : CharSequence {
         }
     }
 
+    /** Number of full-buffer line-start scans performed (1 on initial index build, 0 on incremental edits). */
+    var fullLineStartScanCount: Int = 0
+        private set
+
     private fun ensureLineStarts(): IntArray {
         cachedLineStarts?.let { return it }
+        fullLineStartScanCount++
         var newlineCount = 0
         for (i in 0 until pieces.size) {
             val p = pieces[i]

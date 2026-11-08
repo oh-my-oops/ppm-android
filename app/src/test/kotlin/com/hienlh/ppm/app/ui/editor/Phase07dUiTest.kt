@@ -178,4 +178,141 @@ class Phase07dUiTest {
         assertEquals("src/A.kt", pickedPair!!.first.filePath)
         assertEquals("src/B.kt", pickedPair!!.second.path)
     }
+
+    @Test
+    fun editableFileCodeView_blameCommitLineUsesCommitFilenameBeforeCurrentPath() {
+        val server = mockwebserver3.MockWebServer()
+        server.start()
+        try {
+            DeviceLspPreference.setEnabled(false)
+            SharedBlamePreference.setEnabled(true)
+            // 1. /git/blame response where commit renamed file from src/OldName.ts -> src/NewName.ts
+            server.enqueue(
+                mockwebserver3.MockResponse.Builder()
+                    .code(200)
+                    .addHeader("Content-Type", "application/json")
+                    .body(
+                        """
+                        {
+                          "ok": true,
+                          "data": {
+                            "commits": {
+                              "1111111122222222333333334444444455555555": {
+                                "hash": "1111111122222222333333334444444455555555",
+                                "author": "Thang Ho",
+                                "authorMail": "<thang@example.com>",
+                                "authorTime": 1700000000,
+                                "summary": "refactor: rename file",
+                                "filename": "src/OldName.ts"
+                              }
+                            },
+                            "lines": [
+                              {
+                                "hash": "1111111122222222333333334444444455555555",
+                                "origLine": 7,
+                                "finalLine": 1
+                              }
+                            ]
+                          }
+                        }
+                        """.trimIndent(),
+                    )
+                    .build(),
+            )
+            // 2. /git/commit-line response
+            server.enqueue(
+                mockwebserver3.MockResponse.Builder()
+                    .code(200)
+                    .addHeader("Content-Type", "application/json")
+                    .body(
+                        """
+                        {
+                          "ok": true,
+                          "data": {
+                            "hash": "1111111122222222333333334444444455555555",
+                            "author": "Thang Ho",
+                            "authorMail": "<thang@example.com>",
+                            "authorTime": 1700000000,
+                            "message": "refactor: rename file",
+                            "removed": ["const oldVal = 1;"],
+                            "added": ["const newVal = 2;"]
+                          }
+                        }
+                        """.trimIndent(),
+                    )
+                    .build(),
+            )
+
+            val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()
+            val model = com.hienlh.ppm.app.AppModel(app).apply {
+                api = com.hienlh.ppm.client.ApiClient(server.url("/"), "secret")
+            }
+
+            composeRule.setContent {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    EditableFileCodeView(
+                        model = model,
+                        project = "ppm",
+                        path = "src/NewName.ts",
+                        initialContent = "const newVal = 2;",
+                        initialLanguage = "typescript",
+                        wrap = true,
+                        onToggleWrap = {},
+                    )
+                }
+            }
+
+            composeRule.mainClock.advanceTimeBy(400)
+            composeRule.waitForIdle()
+            composeRule.waitUntil(5_000) {
+                composeRule.mainClock.advanceTimeBy(50)
+                server.requestCount >= 1
+            }
+
+            val blameReq = server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)
+            org.junit.Assert.assertNotNull(blameReq)
+            assertTrue(blameReq!!.url.encodedPath.endsWith("/git/blame"))
+
+            composeRule.waitUntil(5_000) {
+                composeRule.mainClock.advanceTimeBy(50)
+                composeRule.waitForIdle()
+                server.requestCount >= 2
+            }
+
+            val commitLineReq = server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)
+            org.junit.Assert.assertNotNull(commitLineReq)
+            assertTrue(commitLineReq!!.url.encodedPath.endsWith("/git/commit-line"))
+            assertEquals("src/OldName.ts", commitLineReq.url.queryParameter("path"))
+            assertEquals("7", commitLineReq.url.queryParameter("line"))
+        } finally {
+            SharedBlamePreference.setEnabled(false)
+            DeviceLspPreference.setEnabled(true)
+            server.close()
+        }
+    }
+
+    @Test
+    fun conflictEditorContent_flushesUnsavedManualEditsOnDisposePreservingCrlf() {
+        var savedContent = ""
+        val mounted = androidx.compose.runtime.mutableStateOf(true)
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
+                if (mounted.value) {
+                    ConflictEditorContent(
+                        fileName = "Conflict.ts",
+                        initialContent = "a\r\nb",
+                        onSaveContent = { savedContent = it },
+                    )
+                }
+            }
+        }
+
+        // Type '#' via the mobile symbol bar and immediately unmount before the 1000ms debounce fires
+        composeRule.onNodeWithTag("mobile-key-sym-#").performClick()
+        mounted.value = false
+        composeRule.waitForIdle()
+
+        assertEquals("#a\r\nb", savedContent)
+    }
 }

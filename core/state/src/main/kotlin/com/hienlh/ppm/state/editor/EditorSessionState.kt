@@ -18,6 +18,13 @@ data class BracketMatch(
     val closeOffset: Int,
 )
 
+data class SurroundingTextSlice(
+    val text: String,
+    val selectionStart: Int,
+    val selectionEnd: Int,
+    val offset: Int,
+)
+
 private data class UndoEntry(
     val start: Int,
     val oldText: String,
@@ -289,6 +296,30 @@ class EditorSessionState(
         return buffer.substring(start, cappedEnd)
     }
 
+    /**
+     * Returns a bounded, surrogate-safe slice around the current selection for Android 12+
+     * `InputConnection.getSurroundingText(beforeLength, afterLength, flags)`.
+     */
+    fun getSurroundingTextSlice(beforeLength: Int, afterLength: Int): SurroundingTextSlice {
+        val selMin = selectionMin
+        val selMax = selectionMax
+        val cappedBefore = beforeLength.coerceIn(0, MAX_IME_SLICE_CHARS)
+        val cappedAfter = afterLength.coerceIn(0, MAX_IME_SLICE_CHARS)
+        val start = clampSurrogateStart((selMin - cappedBefore).coerceAtLeast(0))
+        val maxEnd = (start + MAX_IME_SLICE_CHARS).coerceAtMost(buffer.length)
+        val effectiveSelMax = selMax.coerceIn(start, maxEnd)
+        val end = clampSurrogateEnd((effectiveSelMax + cappedAfter).coerceIn(effectiveSelMax, maxEnd))
+        val sliceText = buffer.substring(start, end)
+        val localSelStart = (selMin - start).coerceIn(0, sliceText.length)
+        val localSelEnd = (effectiveSelMax - start).coerceIn(localSelStart, sliceText.length)
+        return SurroundingTextSlice(
+            text = sliceText,
+            selectionStart = localSelStart,
+            selectionEnd = localSelEnd,
+            offset = start,
+        )
+    }
+
     // =======================================================================
     // Undo / Redo Stack with Keystroke Coalescing
     // =======================================================================
@@ -453,10 +484,12 @@ class EditorSessionState(
             return true
         }
 
-        // Insert auto-pair when cursor is at EOL or before whitespace/closing bracket
+        // Insert auto-pair when cursor is at EOL or before whitespace/closing bracket,
+        // except single-quote after a letter/digit (e.g. typing "don't").
         if (close != null && selMin == selMax) {
+            val prevIsWord = ch == '\'' && selMin > 0 && buffer[selMin - 1].isLetterOrDigit()
             val nextChar = if (selMin < buffer.length) buffer[selMin] else '\n'
-            if (nextChar.isWhitespace() || nextChar in CLOSING_CHARS) {
+            if (!prevIsWord && (nextChar.isWhitespace() || nextChar in CLOSING_CHARS)) {
                 applyEdit(
                     start = selMin,
                     end = selMax,

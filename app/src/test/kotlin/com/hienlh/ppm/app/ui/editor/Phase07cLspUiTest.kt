@@ -161,4 +161,59 @@ class Phase07cLspUiTest {
         composeRule.onNodeWithTag("lsp-completion-item-0").performClick()
         assertEquals("parseLspCompletions", selectedLabel)
     }
+
+    @Test
+    fun sharedProjectLspRegistry_reusesSingleBridgePerProjectAndStopsConnectLoopWhenDisabled() {
+        val server = mockwebserver3.MockWebServer()
+        server.start()
+        try {
+            SharedProjectLspRegistry.disconnectAll()
+            DeviceLspPreference.setEnabled(true)
+            val api = com.hienlh.ppm.client.ApiClient(server.url("/"), "secret")
+
+            val bridgeTab1 = SharedProjectLspRegistry.getOrCreate(api, "ppm")
+            val bridgeTab2 = SharedProjectLspRegistry.getOrCreate(api, "ppm")
+            org.junit.Assert.assertSame(bridgeTab1, bridgeTab2)
+            assertEquals(1, SharedProjectLspRegistry.activeBridgeCount())
+
+            bridgeTab1.openDocument("src/a.ts", "inmemory://model/1", "const a = 1;")
+            org.junit.Assert.assertTrue(bridgeTab1.isConnectedOrConnecting)
+
+            // Turning off DeviceLspPreference disconnects all active bridges and stops reconnect loops
+            DeviceLspPreference.setEnabled(false)
+            org.junit.Assert.assertFalse(bridgeTab1.isConnectedOrConnecting)
+            assertEquals(0, SharedProjectLspRegistry.activeBridgeCount())
+        } finally {
+            DeviceLspPreference.setEnabled(false)
+            SharedProjectLspRegistry.disconnectAll()
+            server.close()
+        }
+    }
+
+    @Test
+    fun lspStatusDetailsContent_readyStateOpensProblemsTabOnClick() {
+        var problemsOpened = false
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                LspStatusDetailsContent(
+                    status = LspDocumentStatus.Ready(
+                        languageId = "typescript",
+                        server = com.hienlh.ppm.state.editor.LspServerInfo(
+                            id = "ts",
+                            displayName = "typescript-language-server",
+                            rootPath = "/repo",
+                        ),
+                        projectPath = "/repo",
+                    ),
+                    errors = 2,
+                    warnings = 1,
+                    onToggle = {},
+                    onOpenProblems = { problemsOpened = true },
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("lsp-open-problems-btn").assertIsDisplayed().performClick()
+        org.junit.Assert.assertTrue(problemsOpened)
+    }
 }

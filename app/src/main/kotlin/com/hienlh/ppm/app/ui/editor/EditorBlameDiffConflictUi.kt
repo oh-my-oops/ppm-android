@@ -384,6 +384,51 @@ private fun BlameActionChip(
 fun GitSideBySideDiffRows(
     rows: List<SideBySideDiffRow>,
     wordWrap: Boolean,
+    language: String? = null,
+    oldTokens: List<androidx.compose.ui.text.AnnotatedString>? = null,
+    newTokens: List<androidx.compose.ui.text.AnnotatedString>? = null,
+    modifier: Modifier = Modifier,
+) {
+    val computedOldTokens = oldTokens ?: if (language != null) {
+        val leftDoc = remember(rows) { rows.mapNotNull { it.leftText }.joinToString("\n") }
+        com.hienlh.ppm.app.ui.git.rememberShikiTokenLines(leftDoc, language)
+    } else null
+    val computedNewTokens = newTokens ?: if (language != null) {
+        val rightDoc = remember(rows) { rows.mapNotNull { it.rightText }.joinToString("\n") }
+        com.hienlh.ppm.app.ui.git.rememberShikiTokenLines(rightDoc, language)
+    } else null
+
+    Column(modifier = modifier.fillMaxWidth().testTag("git-diff-side-by-side-block")) {
+        var leftNonNullIdx = 0
+        var rightNonNullIdx = 0
+        for (row in rows) {
+            val leftTok = if (oldTokens != null) {
+                row.leftLineNumber?.let { oldTokens.getOrNull(it - 1) }
+            } else if (row.leftText != null) {
+                computedOldTokens?.getOrNull(leftNonNullIdx++)
+            } else null
+            val rightTok = if (newTokens != null) {
+                row.rightLineNumber?.let { newTokens.getOrNull(it - 1) }
+            } else if (row.rightText != null) {
+                computedNewTokens?.getOrNull(rightNonNullIdx++)
+            } else null
+
+            GitSideBySideDiffRowItem(
+                row = row,
+                wordWrap = wordWrap,
+                leftTokens = leftTok,
+                rightTokens = rightTok,
+            )
+        }
+    }
+}
+
+@Composable
+fun GitSideBySideDiffRowItem(
+    row: SideBySideDiffRow,
+    wordWrap: Boolean,
+    leftTokens: androidx.compose.ui.text.AnnotatedString? = null,
+    rightTokens: androidx.compose.ui.text.AnnotatedString? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
@@ -391,42 +436,40 @@ fun GitSideBySideDiffRows(
     val delBg = tokens.error.opacity(0.14).color
     val emptyBg = tokens.panel.opacity(0.45).color
 
-    Column(modifier = modifier.fillMaxWidth().testTag("git-diff-side-by-side-block")) {
-        for (row in rows) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top,
-            ) {
-                // Left column (Original)
-                SideDiffCell(
-                    lineNumber = row.leftLineNumber,
-                    text = row.leftText,
-                    kind = row.leftKind,
-                    addBg = addBg,
-                    delBg = delBg,
-                    emptyBg = emptyBg,
-                    wordWrap = wordWrap,
-                    modifier = Modifier.weight(1f),
-                )
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .heightIn(min = 20.dp)
-                        .background(tokens.border.color),
-                )
-                // Right column (Modified)
-                SideDiffCell(
-                    lineNumber = row.rightLineNumber,
-                    text = row.rightText,
-                    kind = row.rightKind,
-                    addBg = addBg,
-                    delBg = delBg,
-                    emptyBg = emptyBg,
-                    wordWrap = wordWrap,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+    ) {
+        // Left column (Original)
+        SideDiffCell(
+            lineNumber = row.leftLineNumber,
+            text = row.leftText,
+            tokenLine = leftTokens,
+            kind = row.leftKind,
+            addBg = addBg,
+            delBg = delBg,
+            emptyBg = emptyBg,
+            wordWrap = wordWrap,
+            modifier = Modifier.weight(1f),
+        )
+        Box(
+            modifier = Modifier
+                .width(1.dp)
+                .heightIn(min = 20.dp)
+                .background(tokens.border.color),
+        )
+        // Right column (Modified)
+        SideDiffCell(
+            lineNumber = row.rightLineNumber,
+            text = row.rightText,
+            tokenLine = rightTokens,
+            kind = row.rightKind,
+            addBg = addBg,
+            delBg = delBg,
+            emptyBg = emptyBg,
+            wordWrap = wordWrap,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
@@ -434,6 +477,7 @@ fun GitSideBySideDiffRows(
 private fun SideDiffCell(
     lineNumber: Int?,
     text: String?,
+    tokenLine: androidx.compose.ui.text.AnnotatedString?,
     kind: ReviewBlocks.Kind?,
     addBg: Color,
     delBg: Color,
@@ -454,6 +498,14 @@ private fun SideDiffCell(
         else -> " "
     }
     val scrollMod = if (wordWrap) Modifier else Modifier.horizontalScroll(rememberScrollState())
+    val annotated = remember(text, tokenLine) {
+        com.hienlh.ppm.app.ui.git.buildDiffLineAnnotated(
+            text = text ?: "",
+            tokens = tokenLine,
+            changedRange = null,
+            wordHighlight = Color.Transparent,
+        )
+    }
 
     Row(
         modifier = modifier
@@ -484,7 +536,7 @@ private fun SideDiffCell(
         )
         Box(modifier = Modifier.weight(1f).then(scrollMod)) {
             BasicText(
-                text = text ?: "",
+                text = annotated,
                 style = ppmText(12f, kind = FontKind.MONO, lineHeight = 18f).copy(color = tokens.text.color),
                 softWrap = wordWrap,
             )
@@ -569,17 +621,34 @@ internal fun ConflictEditorContent(
 
     val currentText = remember(editTick) { session.buffer.toString() }
     val regions = remember(currentText) { parseConflicts(currentText) }
+    var lastSavedDiskText by remember(fileName) { mutableStateOf(session.buffer.toDiskString()) }
 
     // Autosave manual edits after 1000 ms (fixes web bug where manual typing in ConflictEditor is lost)
     LaunchedEffect(editTick) {
         if (editTick <= 0L) return@LaunchedEffect
         delay(1000L)
-        onSaveContent(session.buffer.toDiskString())
+        val diskText = session.buffer.toDiskString()
+        if (diskText != lastSavedDiskText) {
+            lastSavedDiskText = diskText
+            onSaveContent(diskText)
+        }
+    }
+
+    // Flush unsaved manual edits when the conflict editor is disposed before the 1000 ms debounce completes
+    androidx.compose.runtime.DisposableEffect(session) {
+        onDispose {
+            val diskText = session.buffer.toDiskString()
+            if (diskText != lastSavedDiskText) {
+                lastSavedDiskText = diskText
+                onSaveContent(diskText)
+            }
+        }
     }
 
     fun applyResolution(region: ConflictRegion, action: ConflictResolutionAction) {
         val updated = resolveConflictRegion(session.buffer.toDiskString(), region.id, action)
         session.reloadExternalContent(updated)
+        lastSavedDiskText = updated
         editTick++
         onSaveContent(updated)
     }
@@ -688,7 +757,11 @@ internal fun ConflictEditorContent(
             isDirty = false,
             wrap = wrap,
             onToggleWrap = { wrap = !wrap },
-            onSaveNow = { onSaveContent(session.buffer.toString()) },
+            onSaveNow = {
+                val diskText = session.buffer.toDiskString()
+                lastSavedDiskText = diskText
+                onSaveContent(diskText)
+            },
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
     }

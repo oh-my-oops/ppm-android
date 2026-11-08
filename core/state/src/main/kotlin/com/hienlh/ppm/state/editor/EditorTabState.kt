@@ -43,6 +43,7 @@ class EditorTabDocumentState(
 
     private var lastSavedContent: String = session.buffer.toString()
     private var lastSavedEol: String = session.buffer.eol
+    private var lastSavedVersion: Long = session.buffer.version
     private var lastCheckedVersion: Long = session.buffer.version
     private var cachedDirty: Boolean = false
 
@@ -54,9 +55,15 @@ class EditorTabDocumentState(
     val isDirty: Boolean
         get() {
             if (isUntitled) return session.buffer.length > 0
+            if (session.buffer.eol != lastSavedEol) return true
+            if (session.buffer.version == lastSavedVersion) return false
+            if (session.buffer.length != lastSavedContent.length) return true
             if (session.buffer.version != lastCheckedVersion) {
                 lastCheckedVersion = session.buffer.version
-                cachedDirty = session.buffer.toString() != lastSavedContent || session.buffer.eol != lastSavedEol
+                cachedDirty = !session.buffer.contentEquals(lastSavedContent)
+                if (!cachedDirty) {
+                    lastSavedVersion = session.buffer.version
+                }
             }
             return cachedDirty
         }
@@ -70,7 +77,10 @@ class EditorTabDocumentState(
         lastSavedContent = norm
         lastSavedEol = detectEol(savedText, fallback = session.buffer.eol)
         lastCheckedVersion = session.buffer.version
-        cachedDirty = session.buffer.toString() != lastSavedContent || session.buffer.eol != lastSavedEol
+        cachedDirty = !session.buffer.contentEquals(lastSavedContent) || session.buffer.eol != lastSavedEol
+        if (!cachedDirty) {
+            lastSavedVersion = session.buffer.version
+        }
         saving = false
         saveError = null
         externalChangeConflict = false
@@ -91,6 +101,7 @@ class EditorTabDocumentState(
                 session.reloadExternalContent(diskContent)
                 lastSavedContent = norm
                 lastSavedEol = session.buffer.eol
+                lastSavedVersion = session.buffer.version
                 lastCheckedVersion = session.buffer.version
                 cachedDirty = false
                 externalChangeConflict = false
@@ -98,7 +109,7 @@ class EditorTabDocumentState(
             }
             return false
         }
-        if (norm == session.buffer.toString() && diskEol == session.buffer.eol) {
+        if (session.buffer.contentEquals(norm) && diskEol == session.buffer.eol) {
             markSaved(diskContent)
             return false
         }

@@ -210,4 +210,83 @@ class EditorSessionStateTest {
         crDoc.session.commitText("2", 1)
         assertEquals("x2\ry", crDoc.textToSave())
     }
+
+    @Test
+    fun `EditorBuffer updates cachedLineStarts incrementally without rescanning full buffer`() {
+        val initial = (1..200).joinToString("\n") { "line-$it" }
+        val buf = EditorBuffer(initial)
+        assertEquals(200, buf.lineCount)
+        assertEquals(1, buf.fullLineStartScanCount)
+
+        // Single-line edit (no newlines added/removed) shifts subsequent lineStarts in-place
+        val line10Start = buf.lineStart(9)
+        buf.replace(line10Start, line10Start + 4, "LINE_UPDATED")
+        assertEquals(1, buf.fullLineStartScanCount)
+        assertEquals(200, buf.lineCount)
+        assertEquals("LINE_UPDATED-10", buf.line(9))
+        assertEquals("line-11", buf.line(10))
+
+        // Multi-line insertion splices new line starts incrementally
+        val line50Start = buf.lineStart(49)
+        buf.replace(line50Start, line50Start, "inserted-A\ninserted-B\n")
+        assertEquals(1, buf.fullLineStartScanCount)
+        assertEquals(202, buf.lineCount)
+        assertEquals("inserted-A", buf.line(49))
+        assertEquals("inserted-B", buf.line(50))
+        assertEquals("line-50", buf.line(51))
+
+        // Multi-line deletion removes spanned line starts incrementally
+        buf.replace(line50Start, buf.lineStart(51), "")
+        assertEquals(1, buf.fullLineStartScanCount)
+        assertEquals(200, buf.lineCount)
+        assertEquals("line-50", buf.line(49))
+    }
+
+    @Test
+    fun `EditorBuffer contentEquals and isDirty avoid full buffer string allocation`() {
+        val doc = EditorTabDocumentState("hello world\nsecond line", language = "plaintext")
+        assertFalse(doc.isDirty)
+        assertTrue(doc.session.buffer.contentEquals("hello world\nsecond line"))
+        assertFalse(doc.session.buffer.contentEquals("hello world\nsecond linX"))
+
+        // Same-length edit changes content -> isDirty is true via contentEquals
+        doc.session.setSelection(0, 1)
+        doc.session.commitText("H", 1)
+        assertTrue(doc.isDirty)
+
+        // Undo back to original content -> isDirty is false via contentEquals
+        doc.session.undo()
+        assertFalse(doc.isDirty)
+    }
+
+    @Test
+    fun `typeChar does not auto-pair single quote after letter or digit`() {
+        val session = EditorSessionState("don", language = "markdown")
+        session.setSelection(3, 3)
+        assertTrue(session.typeChar('\''))
+        assertTrue(session.typeChar('t'))
+        assertEquals("don't", session.buffer.toString())
+
+        // Still auto-pairs single quote after whitespace or opening paren
+        val codeSession = EditorSessionState("fn()", language = "typescript")
+        codeSession.setSelection(3, 3)
+        assertTrue(codeSession.typeChar('\''))
+        assertEquals("fn('')", codeSession.buffer.toString())
+        assertEquals(4, codeSession.selectionStart)
+    }
+
+    @Test
+    fun `getSurroundingTextSlice returns bounded surrogate-safe slice with local selection and offset`() {
+        val prefix = "a".repeat(500)
+        val emoji = "\uD83D\uDE80" // rocket surrogate pair
+        val suffix = "b".repeat(500)
+        val session = EditorSessionState(prefix + emoji + suffix)
+        session.setSelection(prefix.length, prefix.length + emoji.length)
+
+        val slice = session.getSurroundingTextSlice(beforeLength = 10, afterLength = 10)
+        assertEquals(prefix.length - 10, slice.offset)
+        assertEquals(10, slice.selectionStart)
+        assertEquals(10 + emoji.length, slice.selectionEnd)
+        assertEquals("a".repeat(10) + emoji + "b".repeat(10), slice.text)
+    }
 }
