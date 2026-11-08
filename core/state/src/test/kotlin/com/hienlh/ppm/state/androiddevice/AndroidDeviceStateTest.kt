@@ -580,4 +580,62 @@ class AndroidDeviceStateTest {
         assertEquals(0, partialGeo.deviceWidth)
         assertEquals(0, partialGeo.deviceHeight)
     }
+
+    @Test
+    fun `parseAndroidOperation parses operation poll answer id state detail result error`() {
+        val succeeded = parseAndroidOperation(
+            json.parseToJsonElement(
+                """
+                {
+                  "id": "op-install-1",
+                  "kind": "android-install",
+                  "state": "succeeded",
+                  "detail": "Performing Streamed Install",
+                  "startedAt": 1700000000100,
+                  "endedAt": 1700000002400,
+                  "result": { "message": "Success", "code": null, "package": "com.example.demo" },
+                  "error": null
+                }
+                """.trimIndent(),
+            ),
+        )
+        assertNotNull(succeeded)
+        assertEquals("op-install-1", succeeded!!.id)
+        assertEquals("android-install", succeeded.kind)
+        assertEquals("succeeded", succeeded.state)
+        assertEquals("Performing Streamed Install", succeeded.detail)
+        assertEquals(1700000000100L, succeeded.startedAt)
+        assertEquals(1700000002400L, succeeded.endedAt)
+        assertNotNull(succeeded.result)
+        assertEquals("Success", succeeded.result!!["message"]?.jsonPrimitive?.content)
+        assertEquals("com.example.demo", succeeded.result!!["package"]?.jsonPrimitive?.content)
+        assertNull(succeeded.error)
+        assertTrue(succeeded.isTerminal)
+        assertTrue(succeeded.isSucceeded)
+
+        val failed = parseAndroidOperation(
+            json.parseToJsonElement(
+                """
+                {
+                  "id": "op-install-2",
+                  "kind": "android-install",
+                  "state": "failed",
+                  "detail": "installing app.apk",
+                  "startedAt": 1700000003000,
+                  "endedAt": 1700000004000,
+                  "result": null,
+                  "error": "INSTALL_FAILED_VERSION_DOWNGRADE"
+                }
+                """.trimIndent(),
+            ),
+        )
+        assertNotNull(failed)
+        assertEquals("op-install-2", failed!!.id)
+        assertEquals("failed", failed.state)
+        assertEquals("installing app.apk", failed.detail)
+        assertNull(failed.result)
+        assertEquals("INSTALL_FAILED_VERSION_DOWNGRADE", failed.error)
+        assertTrue(failed.isTerminal)
+        assertFalse(failed.isSucceeded)
+    }
 }

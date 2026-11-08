@@ -683,6 +683,7 @@ data class AndroidOperationStatus(
     val detail: String? = null,
     val startedAt: Long = 0L,
     val endedAt: Long? = null,
+    val result: JsonObject? = null,
     val error: String? = null,
 ) {
     val isTerminal: Boolean get() = state == "succeeded" || state == "failed" || state == "cancelled"
@@ -856,15 +857,14 @@ fun parseAndroidOperation(element: JsonElement): AndroidOperationStatus? {
     val obj = element as? JsonObject ?: return null
     val id = obj.str("operationId").ifBlank { obj.str("id") }
     if (id.isBlank()) return null
-    val resultObj = obj["result"] as? JsonObject
-    val detail = obj.strOrNull("detail") ?: resultObj?.strOrNull("message")
     return AndroidOperationStatus(
         id = id,
         kind = obj.str("kind"),
         state = obj.str("state", "pending"),
-        detail = detail,
+        detail = obj.strOrNull("detail"),
         startedAt = obj.long("startedAt", 0L),
         endedAt = (obj["endedAt"] as? JsonPrimitive)?.longOrNull,
+        result = obj["result"] as? JsonObject,
         error = obj.strOrNull("error"),
     )
 }
