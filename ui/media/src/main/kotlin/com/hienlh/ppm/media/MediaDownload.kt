@@ -36,5 +36,8 @@ suspend fun downloadMedia(api: ApiClient, source: MediaSource, output: OutputStr
                 }
             }
         }
+    } catch (e: IOException) {
+        coroutineContext.ensureActive()
+        throw e
     } finally { cancellation.cancel() }
 }

@@ -84,8 +84,8 @@ fun HostPathPicker(model: AppModel, mode: HostPickerMode, root: String = "~", ac
         busy = true
         scope.launch {
             try {
-                // A picker-created folder is not a repository. Explicit false fixes the web's legacy default.
-                api.fsMkdir(destination); creating = false; error = null; session.refresh(); selected = destination
+                // Match web `file-browser-picker.tsx:179`: send `{path}` only so the server runs its default `git init`.
+                api.fsMkdir(destination, gitInit = null); creating = false; error = null; session.refresh(); selected = destination
                 if (model.api === api) model.filesMutated(com.hienlh.ppm.state.files.FileMutationReport(affectedDirectories = setOf(dir)))
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { error = (failure as? PpmError.Server)?.hint ?: failure.message }

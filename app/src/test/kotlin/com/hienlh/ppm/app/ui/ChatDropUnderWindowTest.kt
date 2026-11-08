@@ -16,8 +16,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.test.hasImeAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
@@ -111,7 +113,7 @@ class ChatDropUnderWindowTest {
         compose.waitForIdle()
     }
 
-    private val box get() = compose.onNode(hasSetTextAction()).fetchSemanticsNode().boundsInRoot.center
+    private val box get() = compose.onNode(hasSetTextAction().and(hasImeAction(ImeAction.Send))).fetchSemanticsNode().boundsInRoot.center
 
     private fun dropRow(): Boolean {
         val row = ExplorerRowDrag("p", "src/app.kt", false)

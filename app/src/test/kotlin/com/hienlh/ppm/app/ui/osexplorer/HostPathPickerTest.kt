@@ -120,7 +120,7 @@ class HostPathPickerTest {
     }
 
     @Test
-    fun `new folder submits gitInit false on Enter and delete folder sends rmdir after confirmation`() {
+    fun `new folder submits path only on Enter and delete folder sends rmdir after confirmation`() {
         compose.setContent {
             HostPathPicker(
                 model = model,
@@ -135,12 +135,16 @@ class HostPathPickerTest {
         compose.onNodeWithText("Folder name").performTextInput("new-dir")
         compose.onNodeWithText("new-dir").performKeyInput { pressKey(Key.Enter) }
         compose.waitUntil(10_000) {
-            synchronized(recorded) { recorded.any { it.target == "/api/fs/mkdir" } }
+            synchronized(recorded) {
+                recorded.any { it.target == "/api/fs/mkdir" } &&
+                    recorded.count { it.target.startsWith("/api/fs/browse") } >= 2
+            } && !isShown("Folder name")
         }
+        compose.waitForIdle()
         val mkdir = synchronized(recorded) { recorded.first { it.target == "/api/fs/mkdir" } }
         assertEquals("POST", mkdir.method)
         assertEquals(
-            WireJson.parse("""{"path":"/home/me/new-dir","gitInit":false}"""),
+            WireJson.parse("""{"path":"/home/me/new-dir"}"""),
             WireJson.parse(mkdir.body!!.utf8()),
         )
 
