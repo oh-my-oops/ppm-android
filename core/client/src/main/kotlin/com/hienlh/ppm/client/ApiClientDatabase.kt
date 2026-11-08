@@ -210,27 +210,29 @@ internal suspend fun sendDbRequest(client: OkHttpClient, request: Request): Json
                 throw PpmError.Unreachable(describe(error))
             }
             if (res.code == 401) throw PpmError.Unauthorized()
-            val json = WireJson.parseOrNull(text)
-            if (res.code == 428 && json != null && json["code"].string == "DB_LOGIN_REQUIRED") {
-                val loginObj = json["login"] as? JsonObject
-                val prompt = DbLoginPromptInfo(
-                    connectionId = loginObj?.get("connectionId")?.int,
-                    name = loginObj?.get("name")?.string.orEmpty(),
-                    type = loginObj?.get("type")?.string ?: "postgres",
-                    user = loginObj?.get("user")?.string.orEmpty(),
-                    askUser = loginObj?.get("askUser")?.bool == true,
-                )
-                throw DbLoginRequiredException(prompt, json["error"].string ?: "Database login required")
-            }
-            if (res.code == 424 && json != null && json["code"].string == "DB_DRIVER_MISSING") {
-                val driverObj = json["driver"] as? JsonObject
-                val driverId = driverObj?.get("id")?.string ?: json["driverId"].string ?: "unknown"
-                val driverLabel = driverObj?.get("label")?.string ?: driverId
-                throw DbDriverMissingException(
-                    driverId = driverId,
-                    driverLabel = driverLabel,
-                    message = json["error"].string ?: "Database driver $driverLabel is not installed.",
-                )
+            if (res.code == 428 || res.code == 424) {
+                val json = WireJson.parseOrNull(text)
+                if (res.code == 428 && json != null && json["code"].string == "DB_LOGIN_REQUIRED") {
+                    val loginObj = json["login"] as? JsonObject
+                    val prompt = DbLoginPromptInfo(
+                        connectionId = loginObj?.get("connectionId")?.int,
+                        name = loginObj?.get("name")?.string.orEmpty(),
+                        type = loginObj?.get("type")?.string ?: "postgres",
+                        user = loginObj?.get("user")?.string.orEmpty(),
+                        askUser = loginObj?.get("askUser")?.bool == true,
+                    )
+                    throw DbLoginRequiredException(prompt, json["error"].string ?: "Database login required")
+                }
+                if (res.code == 424 && json != null && json["code"].string == "DB_DRIVER_MISSING") {
+                    val driverObj = json["driver"] as? JsonObject
+                    val driverId = driverObj?.get("id")?.string ?: json["driverId"].string ?: "unknown"
+                    val driverLabel = driverObj?.get("label")?.string ?: driverId
+                    throw DbDriverMissingException(
+                        driverId = driverId,
+                        driverLabel = driverLabel,
+                        message = json["error"].string ?: "Database driver $driverLabel is not installed.",
+                    )
+                }
             }
             ApiClient.unwrap(res.code, res.header("Content-Type"), text)
         }

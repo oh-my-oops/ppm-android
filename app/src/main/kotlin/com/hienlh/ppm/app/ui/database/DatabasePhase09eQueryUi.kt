@@ -158,9 +158,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -271,7 +273,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                     loginCoordinator = loginCoordinator,
                 )
             }.getOrNull()?.let { objsJson ->
-                objectList = parseDbObjectList(objsJson)
+                objectList = withContext(Dispatchers.Default) { parseDbObjectList(objsJson) }
             }
         }
     }
@@ -368,7 +370,12 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                     loginCoordinator = loginCoordinator,
                     onCallCreated = onCall,
                     onEventLine = { line ->
-                        parseQueryScriptEventJson(line)?.let { ev -> onEvent(ev) }
+                        val ev = withContext(Dispatchers.Default) { parseQueryScriptEventJson(line) }
+                        if (ev != null) {
+                            withContext(Dispatchers.Main.immediate) {
+                                onEvent(ev)
+                            }
+                        }
                     },
                 )
             },
@@ -402,7 +409,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                         loginCoordinator = loginCoordinator,
                     )
                 }.getOrNull() ?: return@DatabaseQueryTabContent emptyList()
-                val parsed = parseGridColumnsSchema(arr)
+                val parsed = withContext(Dispatchers.Default) { parseGridColumnsSchema(arr) }
                 tableSchemasMap[key] = parsed
                 tableSchemasMap[table] = parsed
                 parsed
@@ -418,7 +425,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                     project = fileProject,
                     loginCoordinator = loginCoordinator,
                 )
-                parseChangesetPreview(obj)
+                withContext(Dispatchers.Default) { parseChangesetPreview(obj) }
             },
             onApplyResultChangeset = { table, schema, payload, cascade ->
                 val client = api ?: error("Not connected")
@@ -431,7 +438,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                     project = fileProject,
                     loginCoordinator = loginCoordinator,
                 )
-                parseChangesetApplyResult(obj)
+                withContext(Dispatchers.Default) { parseChangesetApplyResult(obj) }
             },
             onLoadHistory = { search, offset ->
                 val client = api ?: return@DatabaseQueryTabContent QueryHistoryResponse(emptyList())
@@ -445,7 +452,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                         loginCoordinator = loginCoordinator,
                     )
                 }.getOrNull() ?: return@DatabaseQueryTabContent QueryHistoryResponse(emptyList())
-                parseQueryHistoryResponse(json)
+                withContext(Dispatchers.Default) { parseQueryHistoryResponse(json) }
             },
             onListDirectoryEntries = { dirPath ->
                 val client = api ?: return@DatabaseQueryTabContent emptyList()

@@ -173,6 +173,9 @@ class DatabasePhase09eQueryStateTest {
         assertEquals("result-0-0", shownResultTab(MESSAGES_TAB, run).let { shownResultTab("auto", run) })
 
         val (_, rs) = resultOfTab(run, "result-0-0")!!
+        assertTrue("Result set rows must be parsed in a single pass (rows === cellRows)", rs.rows === rs.cellRows)
+        val pageData = rs.toGridPageData("SELECT id, id, name FROM users", listOf("id"))
+        assertTrue("toGridPageData must reuse cellRows without re-mapping", pageData.rows === rs.cellRows)
         val deduped = deduplicateResultColumns(rs.columns)
         assertEquals(listOf("id", "id (2)", "name"), deduped.map { it.name })
 

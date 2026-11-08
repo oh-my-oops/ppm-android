@@ -1076,16 +1076,19 @@ fun DatabaseTableTabBody(
             } else {
                 null
             }
-            Triple(gridObj, colsArr, structObj)
-        }.onSuccess { (gridObj, colsArr, structObj) ->
+            withContext(Dispatchers.Default) {
+                val parsed = parseGridResponse(gridObj, countKey = countKey)
+                val parsedCols = colsArr?.let(::parseGridColumnsSchema)
+                Triple(parsed, parsedCols, structObj)
+            }
+        }.onSuccess { (parsed, parsedCols, structObj) ->
             if (seq != fetchSeq) return
             missingDriverId = null
             errorMessage = null
             serverFilterErrors = emptyMap()
-            val parsed = parseGridResponse(gridObj, countKey = countKey)
             pageData = parsed
-            val nextCols = if (colsArr != null) parseGridColumnsSchema(colsArr) else schemaList
-            if (colsArr != null) schemaList = nextCols
+            val nextCols = parsedCols ?: schemaList
+            if (parsedCols != null) schemaList = nextCols
             if (structObj != null) structureJson = structObj
             if (sort.isEmpty() && !hasFilters(filters) && limit == GRID_PAGE_SIZE && nextCols.isNotEmpty()) {
                 TableFirstPageCache.write(cacheDbKey, schemaName, tableName, parsed, nextCols)
@@ -1367,12 +1370,14 @@ fun DatabaseTableTabBody(
                         )
                     }.fold(
                         onSuccess = { obj ->
-                            val valsArr = obj["values"] as? JsonArray
-                            val list = valsArr?.map { el -> parseDbCellValue(el) }.orEmpty()
-                            LookupValueListResult(
-                                values = list,
-                                hasMore = obj["hasMore"].bool == true,
-                            )
+                            withContext(Dispatchers.Default) {
+                                val valsArr = obj["values"] as? JsonArray
+                                val list = valsArr?.map { el -> parseDbCellValue(el) }.orEmpty()
+                                LookupValueListResult(
+                                    values = list,
+                                    hasMore = obj["hasMore"].bool == true,
+                                )
+                            }
                         },
                         onFailure = { err ->
                             LookupValueListResult(error = err.message ?: "Failed to load values")
@@ -1395,7 +1400,7 @@ fun DatabaseTableTabBody(
                             project = project,
                             loginCoordinator = loginCoordinator,
                         )
-                        val fkSchemaCols = parseGridColumnsSchema(fkSchemaArr)
+                        val fkSchemaCols = withContext(Dispatchers.Default) { parseGridColumnsSchema(fkSchemaArr) }
                         val fkFilterableCols = filterableColumns(fkSchemaCols, dbType)
                         val descCol = descriptionColumn(fkFilterableCols, fkCol, chosenDesc)
                         val searchCols = fkFilterableCols.filter { it.name == fkCol || it.name == descCol }
@@ -1413,8 +1418,10 @@ fun DatabaseTableTabBody(
                             project = project,
                             loginCoordinator = loginCoordinator,
                         )
-                        val parsed = parseGridResponse(gridObj, countKey = "$fkTable:${fkSchema.orEmpty()}")
-                        val rowsList = parsed.rows.indices.map { idx -> parsed.rowAsMap(idx) }
+                        val (parsed, rowsList) = withContext(Dispatchers.Default) {
+                            val p = parseGridResponse(gridObj, countKey = "$fkTable:${fkSchema.orEmpty()}")
+                            p to p.rows.indices.map { idx -> p.rowAsMap(idx) }
+                        }
                         LookupTableRowsResult(
                             columns = fkFilterableCols,
                             rows = rowsList,
@@ -1442,7 +1449,7 @@ fun DatabaseTableTabBody(
                         limit = GRID_PAGE_SIZE,
                     )
                     runCatching {
-                        client.dbGridPage(
+                        val moreObj = client.dbGridPage(
                             connectionId = connId,
                             body = reqJson,
                             database = database,
@@ -1450,9 +1457,11 @@ fun DatabaseTableTabBody(
                             project = project,
                             loginCoordinator = loginCoordinator,
                         )
-                    }.onSuccess { moreObj ->
+                        withContext(Dispatchers.Default) {
+                            parseGridResponse(moreObj, countKey = cur.countKey)
+                        }
+                    }.onSuccess { nextPart ->
                         if (seq == fetchSeq) {
-                            val nextPart = parseGridResponse(moreObj, countKey = cur.countKey)
                             val merged = cur.copy(
                                 rows = cur.rows + nextPart.rows,
                                 hasMore = nextPart.hasMore,
@@ -1486,8 +1495,8 @@ fun DatabaseTableTabBody(
                             offset = cur.rows.size,
                             limit = FETCH_ALL_CHUNK,
                         )
-                        val chunkObj = runCatching {
-                            client.dbGridPage(
+                        val part = runCatching {
+                            val chunkObj = client.dbGridPage(
                                 connectionId = connId,
                                 body = reqJson,
                                 database = database,
@@ -1495,9 +1504,11 @@ fun DatabaseTableTabBody(
                                 project = project,
                                 loginCoordinator = loginCoordinator,
                             )
+                            withContext(Dispatchers.Default) {
+                                parseGridResponse(chunkObj, countKey = cur.countKey)
+                            }
                         }.getOrNull() ?: break
                         if (seq != fetchSeq) break
-                        val part = parseGridResponse(chunkObj, countKey = cur.countKey)
                         cur = cur.copy(
                             rows = cur.rows + part.rows,
                             hasMore = part.hasMore,

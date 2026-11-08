@@ -1483,10 +1483,10 @@ data class QueryResultSet(
     fun toGridPageData(sql: String = "", primaryKeys: List<String> = emptyList()): DbGridPageData {
         val rawCols = columns.map { ResultColumnMeta(name = it.name, type = it.type) }
         val keys = uniqueColumnKeys(rawCols.map { it.name })
-        val resolvedRows = if (cellRows.isNotEmpty() && cellRows.size == rows.size) {
-            cellRows
-        } else {
-            rows.map { r ->
+        val resolvedRows = when {
+            rows.isEmpty() -> emptyList()
+            cellRows.size == rows.size -> cellRows
+            else -> rows.map { r ->
                 List(keys.size) { idx ->
                     when (val v = r.getOrNull(idx)) {
                         null -> DbCellValue.Null
@@ -1534,16 +1534,6 @@ sealed interface QueryScriptEvent {
     data class Done(val durationMs: Long, val error: String? = null) : QueryScriptEvent
 }
 
-private fun parseJsonCellValue(el: JsonElement?): Any? = when (el) {
-    null, is JsonNull -> null
-    is JsonPrimitive -> when {
-        el.isString -> el.content
-        el.booleanOrNull != null -> el.booleanOrNull
-        else -> el.content.toLongOrNull() ?: el.content.toDoubleOrNull() ?: el.content
-    }
-    else -> el.toString()
-}
-
 private fun parseQueryResultSet(obj: JsonObject): QueryResultSet {
     val colsArr = obj["columns"] as? JsonArray ?: JsonArray(emptyList())
     val columns = colsArr.mapNotNull { el ->
@@ -1562,17 +1552,14 @@ private fun parseQueryResultSet(obj: JsonObject): QueryResultSet {
         )
     }
     val rowsArr = obj["rows"] as? JsonArray ?: JsonArray(emptyList())
-    val rows = rowsArr.mapNotNull { rowEl ->
-        val rArr = rowEl as? JsonArray ?: return@mapNotNull null
-        rArr.map(::parseJsonCellValue)
-    }
     val cellRows = rowsArr.mapNotNull { rowEl ->
         val rArr = rowEl as? JsonArray ?: return@mapNotNull null
-        List(columns.size) { idx -> parseDbCellValue(rArr.getOrNull(idx)) }
+        val width = maxOf(columns.size, rArr.size)
+        List(width) { idx -> parseDbCellValue(rArr.getOrNull(idx)) }
     }
     return QueryResultSet(
         columns = columns,
-        rows = rows,
+        rows = cellRows,
         truncated = obj["truncated"]?.bool == true,
         cellRows = cellRows,
     )

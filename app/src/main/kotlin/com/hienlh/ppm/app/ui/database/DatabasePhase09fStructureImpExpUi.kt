@@ -311,7 +311,7 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
         loading = true
         errorMessage = null
         runCatching {
-            client.dbTableStructure(
+            val obj = client.dbTableStructure(
                 connectionId = connId,
                 table = targetTable,
                 schema = schemaName,
@@ -320,8 +320,9 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
                 project = project,
                 loginCoordinator = loginCoordinator,
             )
-        }.onSuccess { obj ->
-            structure = parseDbTableStructure(obj)
+            withContext(Dispatchers.Default) { parseDbTableStructure(obj) }
+        }.onSuccess { parsed ->
+            structure = parsed
             isNewTable = false
         }.onFailure { err ->
             errorMessage = err.message ?: "Failed to load table structure"
@@ -2406,7 +2407,7 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
                 val uidStr = u.uploadId ?: error("Upload not ready")
                 val body = uploadPreviewRequest(form, row)
                 val obj = client.dbImpExpUploadPreview(uidStr, body)
-                parseImportPreview(obj, source = row.source)
+                withContext(Dispatchers.Default) { parseImportPreview(obj, source = row.source) }
             } else {
                 val cid = form.sourceDb.connectionId ?: error("No source connection")
                 val reqJson = buildGridRequestJson(
@@ -2423,13 +2424,15 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
                     body = reqJson,
                     database = form.sourceDb.database,
                 )
-                val page = parseGridResponse(gridObj, countKey = row.source)
-                ImportPreviewResult(
-                    sources = listOf(row.source),
-                    source = row.source,
-                    columns = page.columnKeys,
-                    rows = page.rows.indices.map { page.rowAsMap(it) },
-                )
+                withContext(Dispatchers.Default) {
+                    val page = parseGridResponse(gridObj, countKey = row.source)
+                    ImportPreviewResult(
+                        sources = listOf(row.source),
+                        source = row.source,
+                        columns = page.columnKeys,
+                        rows = page.rows.indices.map { page.rowAsMap(it) },
+                    )
+                }
             }
         },
         onRunJob = { preservedLogs ->
