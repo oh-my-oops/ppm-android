@@ -521,4 +521,70 @@ class Phase08cGitGraphNativeUiTest {
         val stashBranchMsg = sentMessages.last { it["action"]?.jsonPrimitive?.content == "stashBranch" }
         assertEquals("from-stash-0", (stashBranchMsg["args"] as JsonObject)["name"]?.jsonPrimitive?.content)
     }
+
+    @Test
+    fun `toasts auto-dismiss after 8s for discard with Undo and 7s for standard toasts`() {
+        var lastToast by mutableStateOf<String?>(null)
+        var lastToastUndo by mutableStateOf<Pair<String, () -> Unit>?>(null)
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                GitGraphNativeContent(
+                    repoInfo = sampleRepoInfo,
+                    pageState = GitGraphCommitsPageState(
+                        commits = sampleCommits,
+                        hasMore = false,
+                        commitsLoaded = true,
+                        loading = false,
+                        scope = "all",
+                    ),
+                    changes = sampleChanges,
+                    toastMessage = lastToast,
+                    toastUndo = lastToastUndo,
+                    onShowToast = { msg, undo ->
+                        lastToast = msg
+                        lastToastUndo = undo
+                    },
+                    onDismissToast = {
+                        lastToast = null
+                        lastToastUndo = null
+                    },
+                )
+            }
+        }
+
+        // 1. Discard toast with Undo stays for 8,000 ms (still visible at 7,500 ms, dismissed at 8,000 ms)
+        composeRule.runOnIdle {
+            lastToast = "Discarded changes to 2 files"
+            lastToastUndo = "Undo" to {}
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("git-graph-toast").assertIsDisplayed()
+
+        composeRule.mainClock.advanceTimeBy(7_500L)
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("git-graph-toast").assertIsDisplayed()
+        assertEquals("Discarded changes to 2 files", lastToast)
+
+        composeRule.mainClock.advanceTimeBy(600L)
+        composeRule.waitForIdle()
+        assertEquals(null, lastToast)
+
+        // 2. Standard toast stays for 7,000 ms (still visible at 6,500 ms, dismissed at 7,000 ms)
+        composeRule.runOnIdle {
+            lastToast = "Copied the hash"
+            lastToastUndo = null
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("git-graph-toast").assertIsDisplayed()
+
+        composeRule.mainClock.advanceTimeBy(6_500L)
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("git-graph-toast").assertIsDisplayed()
+        assertEquals("Copied the hash", lastToast)
+
+        composeRule.mainClock.advanceTimeBy(600L)
+        composeRule.waitForIdle()
+        assertEquals(null, lastToast)
+    }
 }

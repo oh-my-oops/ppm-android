@@ -1838,3 +1838,22 @@ fun buildGitGraphPrUrl(config: GitGraphPrCreationConfig?, sourceBranch: String):
         .replace("\${sourceBranch}", encode(sourceBranch))
         .replace("\${targetBranch}", encode(config.defaultTargetBranch.ifBlank { "main" }))
 }
+
+// ── Toast Auto-Dismiss Durations (`showToast` in `webview-script-core.ts:580` & `webview-script-actions.ts:1101`) ──
+
+const val GIT_GRAPH_TOAST_DEFAULT_DURATION_MS = 7_000L
+const val GIT_GRAPH_TOAST_DISCARD_UNDO_DURATION_MS = 8_000L
+const val GIT_GRAPH_TOAST_ERROR_DURATION_MS = 12_000L
+
+fun gitGraphToastDurationMs(
+    message: String,
+    hasUndo: Boolean = false,
+    isError: Boolean = false,
+    explicitDurationMs: Long? = null,
+): Long = when {
+    explicitDurationMs != null && explicitDurationMs > 0L -> explicitDurationMs
+    isError -> GIT_GRAPH_TOAST_ERROR_DURATION_MS
+    hasUndo && message.startsWith("Discarded changes to ") -> GIT_GRAPH_TOAST_DISCARD_UNDO_DURATION_MS
+    else -> GIT_GRAPH_TOAST_DEFAULT_DURATION_MS
+}
+

@@ -341,4 +341,12 @@ class GitGraphNativeStateTest {
         )
         assertEquals("Discard 2 files", both.confirm)
     }
+
+    @Test
+    fun `gitGraphToastDurationMs matches web durations for discard undo, error, and default toasts`() {
+        assertEquals(8_000L, gitGraphToastDurationMs("Discarded changes to 2 files", hasUndo = true, isError = false))
+        assertEquals(7_000L, gitGraphToastDurationMs("Discarded changes to 2 files", hasUndo = false, isError = false))
+        assertEquals(7_000L, gitGraphToastDurationMs("Copied the hash", hasUndo = false, isError = false))
+        assertEquals(12_000L, gitGraphToastDurationMs("Push failed", hasUndo = false, isError = true))
+    }
 }

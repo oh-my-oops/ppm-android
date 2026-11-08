@@ -209,6 +209,7 @@ fun GitGraphNativePanelBody(
     var draft by remember(panel.id) { mutableStateOf(GitGraphCommitDraft()) }
     var toastMessage by remember(panel.id) { mutableStateOf<String?>(null) }
     var toastUndo by remember(panel.id) { mutableStateOf<Pair<String, () -> Unit>?>(null) }
+    var toastIsError by remember(panel.id) { mutableStateOf(false) }
 
     val tracker = remember(panel.id) { GitGraphRequestTracker() }
 
@@ -286,6 +287,8 @@ fun GitGraphNativePanelBody(
                         GitGraphRequestTracker.Outcome.Unknown -> {
                             if (!msg.result.ok) {
                                 toastMessage = msg.result.error ?: "Git action failed"
+                                toastUndo = null
+                                toastIsError = true
                             }
                         }
                     }
@@ -303,6 +306,8 @@ fun GitGraphNativePanelBody(
                     }
                     pageState = pageState.copy(loading = false)
                     toastMessage = msg.message
+                    toastUndo = null
+                    toastIsError = true
                 }
                 null -> Unit
             }
@@ -323,13 +328,16 @@ fun GitGraphNativePanelBody(
         draft = draft,
         toastMessage = toastMessage,
         toastUndo = toastUndo,
+        toastIsError = toastIsError,
         onDismissToast = {
             toastMessage = null
             toastUndo = null
+            toastIsError = false
         },
         onShowToast = { msg, undo ->
             toastMessage = msg
             toastUndo = undo
+            toastIsError = false
         },
         onSendMessage = { msg -> sendToExt(msg) },
         onSendTrackedAction = { action, buildMsg, onDone ->
@@ -369,6 +377,7 @@ internal fun GitGraphNativeContent(
     draft: GitGraphCommitDraft = GitGraphCommitDraft(),
     toastMessage: String? = null,
     toastUndo: Pair<String, () -> Unit>? = null,
+    toastIsError: Boolean = false,
     onDismissToast: () -> Unit = {},
     onShowToast: (String, Pair<String, () -> Unit>?) -> Unit = { _, _ -> },
     onSendMessage: (JsonObject) -> Unit = {},
@@ -391,6 +400,18 @@ internal fun GitGraphNativeContent(
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     val context = LocalContext.current
+
+    // Auto-dismiss toasts matching web durations (`webview-script-core.ts:580` & `webview-script-actions.ts:1101`)
+    LaunchedEffect(toastMessage, toastUndo, toastIsError) {
+        val msg = toastMessage ?: return@LaunchedEffect
+        val durationMs = com.hienlh.ppm.state.git.gitGraphToastDurationMs(
+            message = msg,
+            hasUndo = toastUndo != null,
+            isError = toastIsError,
+        )
+        delay(durationMs)
+        onDismissToast()
+    }
 
     val changedFiles = changes?.files.orEmpty()
     val displayCommits = remember(
