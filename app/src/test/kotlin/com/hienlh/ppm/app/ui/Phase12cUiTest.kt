@@ -20,6 +20,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.common.BitMatrix
+import com.google.zxing.common.HybridBinarizer
+import com.google.zxing.qrcode.QRCodeReader
 import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.client.ApiClient
@@ -587,10 +592,18 @@ class Phase12cUiTest {
         var cfUrl by mutableStateOf<String?>(null)
         var cfSlow by mutableStateOf(false)
 
-        // Verify pure-Kotlin QR code encoder produces a valid 29x29 version-3 QR matrix for a Tailscale login URL
-        val qrMatrix = encodeQrBitMatrix("https://login.tailscale.com/a/abc123")
-        assertEquals(29, qrMatrix.size)
-        assertTrue(qrMatrix[0][0] && qrMatrix[0][6] && qrMatrix[6][0] && qrMatrix[3][3])
+        // Verify QR code encoder round-trips through zxing QRCodeReader across short and long URLs
+        val qrSamples = listOf(
+            "https://login.tailscale.com/a/abc123",
+            "x",
+            "https://login.tailscale.com/a/" + "k".repeat(110),
+            "https://dash.cloudflare.com/argotunnel?aud=" + "m".repeat(105),
+            "https://dash.cloudflare.com/argotunnel?aud=" + "q".repeat(157),
+        )
+        for (sample in qrSamples) {
+            val qrMatrix = encodeQrBitMatrix(sample)
+            assertEquals(sample, decodeQrMatrixWithZxing(qrMatrix))
+        }
 
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
@@ -778,6 +791,30 @@ class Phase12cUiTest {
             server.close()
         }
     }
+}
+
+private fun decodeQrMatrixWithZxing(matrix: BitMatrix): String {
+    val quietZone = 4
+    val scale = 4
+    val imgW = (matrix.width + quietZone * 2) * scale
+    val imgH = (matrix.height + quietZone * 2) * scale
+    val pixels = IntArray(imgW * imgH) { 0xFFFFFFFF.toInt() }
+    for (y in 0 until matrix.height) {
+        for (x in 0 until matrix.width) {
+            if (matrix.get(x, y)) {
+                val startX = (x + quietZone) * scale
+                val startY = (y + quietZone) * scale
+                for (dy in 0 until scale) {
+                    for (dx in 0 until scale) {
+                        pixels[(startY + dy) * imgW + (startX + dx)] = 0xFF000000.toInt()
+                    }
+                }
+            }
+        }
+    }
+    val source = RGBLuminanceSource(imgW, imgH, pixels)
+    val bitmap = BinaryBitmap(HybridBinarizer(source))
+    return QRCodeReader().decode(bitmap).text
 }
 
 private class TestLifecycleOwner12c(initialState: Lifecycle.State) : LifecycleOwner {
