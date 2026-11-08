@@ -75,6 +75,7 @@ import com.hienlh.ppm.app.ui.ChatPane
 import com.hienlh.ppm.app.ui.PpmTextField
 import com.hienlh.ppm.app.ui.PrimaryButton
 import com.hienlh.ppm.app.ui.SecondaryButton
+import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.DesignProviderOption
 import com.hienlh.ppm.client.DesignStyleEditResult
 import com.hienlh.ppm.client.DesignTweaksApplyResult
@@ -1241,30 +1242,24 @@ fun DesignTabBody(
         runtimeIssues.clear()
         blockedNavHref = null
         scope.launch {
-            try {
-                val cap = api.designMintPreview(
-                    projectName = projectName,
-                    slug = slug,
-                    purpose = "canvas",
-                    token = previewToken,
-                    entry = activeVariant,
-                )
-                previewToken = cap.token
-                previewUrl = cap.url
+            val outcome = loadPreviewWithSelfHeal(
+                api = api,
+                projectName = projectName,
+                slug = slug,
+                entry = activeVariant,
+                initialToken = previewToken,
+                initialRecoveredOnce = hasRecoveredOnce,
+                retryDelayMs = 400L,
+            )
+            previewToken = outcome.token
+            hasRecoveredOnce = outcome.hasRecoveredOnce
+            if (outcome.phase == PreviewPhase.DEAD) {
+                previewPhase = PreviewPhase.DEAD
+            } else {
+                previewUrl = outcome.url
                 reloadNonce++
-                val gen = api.designHeadPreviewGen(cap.url)
-                if (!gen.isNullOrBlank()) {
-                    fileGens[activeVariant] = gen
-                }
-            } catch (_: Exception) {
-                val recovery = recoverPreviewOnFailure(previewToken, hasRecoveredOnce)
-                hasRecoveredOnce = recovery.hasRecoveredOnce
-                previewToken = recovery.nextToken
-                if (recovery.phase == PreviewPhase.RECOVERING) {
-                    delay(400)
-                    mintAndLoadPreview(resetRecovery = false)
-                } else {
-                    previewPhase = PreviewPhase.DEAD
+                if (!outcome.gen.isNullOrBlank()) {
+                    fileGens[activeVariant] = outcome.gen
                 }
             }
         }
@@ -2942,9 +2937,77 @@ internal fun DesignExportPanel(
     }
 }
 
-private fun saveStreamToDownloads(context: Context, rawFilename: String, input: InputStream): Long {
+internal data class PreviewSelfHealOutcome(
+    val phase: PreviewPhase,
+    val token: String?,
+    val url: String?,
+    val gen: String?,
+    val hasRecoveredOnce: Boolean,
+    val attempts: Int,
+)
+
+internal suspend fun loadPreviewWithSelfHeal(
+    api: ApiClient,
+    projectName: String,
+    slug: String,
+    entry: String,
+    initialToken: String?,
+    initialRecoveredOnce: Boolean = false,
+    retryDelayMs: Long = 0L,
+): PreviewSelfHealOutcome {
+    var currentToken = initialToken
+    var recoveredOnce = initialRecoveredOnce
+    var attempts = 0
+    while (true) {
+        attempts++
+        try {
+            val cap = api.designMintPreview(
+                projectName = projectName,
+                slug = slug,
+                purpose = "canvas",
+                token = currentToken,
+                entry = entry,
+            )
+            currentToken = cap.token
+            val gen = api.designHeadPreviewGen(cap.url)
+            return PreviewSelfHealOutcome(
+                phase = PreviewPhase.LOADING,
+                token = cap.token,
+                url = cap.url,
+                gen = gen,
+                hasRecoveredOnce = recoveredOnce,
+                attempts = attempts,
+            )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            val recovery = recoverPreviewOnFailure(currentToken, recoveredOnce)
+            recoveredOnce = recovery.hasRecoveredOnce
+            currentToken = recovery.nextToken
+            if (recovery.phase == PreviewPhase.RECOVERING) {
+                if (retryDelayMs > 0L) delay(retryDelayMs)
+                continue
+            }
+            return PreviewSelfHealOutcome(
+                phase = PreviewPhase.DEAD,
+                token = null,
+                url = null,
+                gen = null,
+                hasRecoveredOnce = recoveredOnce,
+                attempts = attempts,
+            )
+        }
+    }
+}
+
+internal fun saveStreamToDownloads(
+    context: Context,
+    rawFilename: String,
+    input: InputStream,
+    sdkInt: Int = Build.VERSION.SDK_INT,
+): Long {
     val safeFilename = filenameFromContentDisposition("""filename="$rawFilename"""", "design-export.bin")
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+    if (sdkInt >= Build.VERSION_CODES.Q) {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, safeFilename)

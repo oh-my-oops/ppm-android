@@ -197,11 +197,17 @@ suspend fun ApiClient.designHeadPreviewGen(previewPathOrUrl: String): String? {
         .header("x-ppm-client", PpmHttp.CLIENT_NAME)
         .build()
     return withContext(Dispatchers.IO) {
-        runCatching {
-            PpmHttp.client.newCall(req).await().use { res ->
-                if (!res.isSuccessful) null else res.header("X-PPM-Gen")
+        val res = try {
+            PpmHttp.client.newCall(req).await()
+        } catch (error: IOException) {
+            throw PpmError.Unreachable( error.message ?: "Network error")
+        }
+        res.use { response ->
+            if (!response.isSuccessful) {
+                throw PpmError.Server(response.code, "Preview answered HTTP ${response.code}.")
             }
-        }.getOrNull()
+            response.header("X-PPM-Gen")
+        }
     }
 }
 

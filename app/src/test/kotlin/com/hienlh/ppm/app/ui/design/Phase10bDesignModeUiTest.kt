@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui.design
 
+import android.os.Environment
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -9,7 +10,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.withComposeActivity
+import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.filenameFromContentDisposition
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
@@ -25,9 +28,22 @@ import com.hienlh.ppm.state.design.DesignVariant
 import com.hienlh.ppm.state.design.ElementRect
 import com.hienlh.ppm.state.design.PickedElement
 import com.hienlh.ppm.state.design.PinRect
+import com.hienlh.ppm.state.design.PreviewPhase
 import com.hienlh.ppm.state.design.SelectOption
 import com.hienlh.ppm.state.design.TweakDef
+import java.io.ByteArrayInputStream
+import java.io.File
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -236,5 +252,135 @@ class Phase10bDesignModeUiTest {
         assertTrue(exportedPptx)
         assertEquals("pitch-deck.zip", filenameFromContentDisposition("""attachment; filename="../../evil.zip"""", "pitch-deck.zip"))
         assertEquals("hero-v2.zip", filenameFromContentDisposition("""attachment; filename="hero-v2.zip"""", "pitch-deck.zip"))
+    }
+
+    @Test
+    fun previewSelfHealOn404_clearsTokenRetriesOnceAndEntersDeadState() = runBlocking {
+        val mintBodies = mutableListOf<String>()
+        var failAll = false
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.url.encodedPath
+                return when {
+                    request.method == "POST" && path == "/api/design-preview" -> {
+                        val raw = request.body?.utf8().orEmpty()
+                        mintBodies += raw
+                        val obj = Json.parseToJsonElement(raw).jsonObject
+                        val passedToken = obj["token"]?.jsonPrimitive?.content
+                        val issued = if (failAll) {
+                            "tok-dead"
+                        } else if (passedToken == "tok-stale") {
+                            "tok-stale"
+                        } else {
+                            "tok-fresh"
+                        }
+                        MockResponse.Builder()
+                            .code(200)
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{"token":"$issued","url":"/dp/$issued/index.html","expiresAt":999999}}""")
+                            .build()
+                    }
+                    request.method == "HEAD" && path == "/dp/tok-stale/index.html" -> {
+                        MockResponse.Builder().code(404).build()
+                    }
+                    request.method == "HEAD" && path == "/dp/tok-dead/index.html" -> {
+                        MockResponse.Builder().code(404).build()
+                    }
+                    request.method == "HEAD" && path == "/dp/tok-fresh/index.html" -> {
+                        MockResponse.Builder()
+                            .code(200)
+                            .addHeader("X-PPM-Gen", "gen-2")
+                            .build()
+                    }
+                    else -> MockResponse.Builder().code(404).build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val baseUrl = server.url("/")
+            val api = ApiClient(baseUrl = baseUrl, token = "test-token")
+
+            // 1) First 404 clears the stale token, retries once with token = null, and recovers on 200.
+            val recovered = loadPreviewWithSelfHeal(
+                api = api,
+                projectName = "demo",
+                slug = "pitch-deck",
+                entry = "index.html",
+                initialToken = "tok-stale",
+                initialRecoveredOnce = false,
+                retryDelayMs = 0L,
+            )
+            assertEquals(PreviewPhase.LOADING, recovered.phase)
+            assertEquals("tok-fresh", recovered.token)
+            assertEquals("/dp/tok-fresh/index.html", recovered.url)
+            assertEquals("gen-2", recovered.gen)
+            assertTrue(recovered.hasRecoveredOnce)
+            assertEquals(2, recovered.attempts)
+            assertEquals(2, mintBodies.size)
+            assertEquals(
+                "tok-stale",
+                Json.parseToJsonElement(mintBodies[0]).jsonObject["token"]?.jsonPrimitive?.content,
+            )
+            assertNull(Json.parseToJsonElement(mintBodies[1]).jsonObject["token"])
+
+            // 2) When both attempts answer HTTP 404, token is cleared, one retry runs, then phase is DEAD.
+            mintBodies.clear()
+            failAll = true
+            val dead = loadPreviewWithSelfHeal(
+                api = api,
+                projectName = "demo",
+                slug = "pitch-deck",
+                entry = "index.html",
+                initialToken = "tok-stale",
+                initialRecoveredOnce = false,
+                retryDelayMs = 0L,
+            )
+            assertEquals(PreviewPhase.DEAD, dead.phase)
+            assertNull(dead.token)
+            assertNull(dead.url)
+            assertNull(dead.gen)
+            assertTrue(dead.hasRecoveredOnce)
+            assertEquals(2, dead.attempts)
+            assertEquals(2, mintBodies.size)
+            assertEquals(
+                "tok-stale",
+                Json.parseToJsonElement(mintBodies[0]).jsonObject["token"]?.jsonPrimitive?.content,
+            )
+            assertNull(Json.parseToJsonElement(mintBodies[1]).jsonObject["token"])
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun saveStreamToDownloadsBelowAndroid10_writesSanitizedFileToLegacyDownloadsDir() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val payload = "PK\u0003\u0004-legacy-minSdk26-export".toByteArray(Charsets.UTF_8)
+        val written = saveStreamToDownloads(
+            context = context,
+            rawFilename = "pitch-deck.zip",
+            input = ByteArrayInputStream(payload),
+            sdkInt = 26, // Android 8.0 (minSdk 26), below Android 10 (API 29 / Q)
+        )
+        assertEquals(payload.size.toLong(), written)
+        val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+        requireNotNull(downloadsDir)
+        val savedFile = File(downloadsDir, "pitch-deck.zip")
+        assertTrue(savedFile.exists())
+        assertEquals(downloadsDir.canonicalPath, savedFile.parentFile?.canonicalPath)
+        assertArrayEquals(payload, savedFile.readBytes())
+
+        // Path traversal in rawFilename falls back to safe "design-export.bin" inside downloadsDir
+        saveStreamToDownloads(
+            context = context,
+            rawFilename = "../../evil.zip",
+            input = ByteArrayInputStream(payload),
+            sdkInt = 26,
+        )
+        val fallbackFile = File(downloadsDir, "design-export.bin")
+        assertTrue(fallbackFile.exists())
+        assertEquals(downloadsDir.canonicalPath, fallbackFile.parentFile?.canonicalPath)
     }
 }
