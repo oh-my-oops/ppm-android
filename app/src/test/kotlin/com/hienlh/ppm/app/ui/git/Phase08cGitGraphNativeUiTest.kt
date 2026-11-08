@@ -320,21 +320,205 @@ class Phase08cGitGraphNativeUiTest {
         composeRule.onNodeWithTag("git-graph-dialog-confirm-btn").performClick()
         assertTrue(sentMessages.any { it["action"]?.jsonPrimitive?.content == "createBranch" })
 
-        // Open Reset dialog on c2 with dirty working tree -> hard mode refuses reset
+        // Open Reset dialog on c2 -> selecting hard mode opens second "Throw away every change" confirmation step
         sentMessages.clear()
         composeRule.onNodeWithTag("git-graph-row-menu-btn-c222222222222222").performClick()
         composeRule.onNodeWithTag("git-graph-menu-reset").performClick()
         composeRule.onNodeWithTag("git-graph-dialog").assertIsDisplayed()
         composeRule.onNodeWithTag("git-graph-dialog-opt-hard").performClick()
         composeRule.onNodeWithTag("git-graph-dialog-confirm-btn").performClick()
+        // First confirm opens the second confirmation step instead of sending reset immediately
         assertTrue(sentMessages.none { it["action"]?.jsonPrimitive?.content == "reset" })
-        assertEquals("Hard reset refused while working tree has uncommitted changes", lastToast)
+        composeRule.onNodeWithTag("git-graph-dialog").assertIsDisplayed()
+        // Confirming the second step sends hard reset
+        composeRule.onNodeWithTag("git-graph-dialog-confirm-btn").performClick()
+        assertTrue(
+            sentMessages.any {
+                it["action"]?.jsonPrimitive?.content == "reset" &&
+                    it["args"]?.let { p -> (p as? JsonObject)?.get("mode")?.jsonPrimitive?.content } == "hard"
+            },
+        )
 
-        // Re-open Reset dialog and confirm mixed mode -> sends reset action
+        // Re-open Reset dialog and confirm mixed mode -> sends reset action in one step
+        sentMessages.clear()
         composeRule.onNodeWithTag("git-graph-row-menu-btn-c222222222222222").performClick()
         composeRule.onNodeWithTag("git-graph-menu-reset").performClick()
         composeRule.onNodeWithTag("git-graph-dialog-opt-mixed").performClick()
         composeRule.onNodeWithTag("git-graph-dialog-confirm-btn").performClick()
         assertTrue(sentMessages.any { it["action"]?.jsonPrimitive?.content == "reset" })
+    }
+
+    @Test
+    fun `c6_c7_and_08c_major_confirmDestructiveActionsSupportDiscardUndoAndCompleteMenus`() {
+        val sentMessages = mutableListOf<JsonObject>()
+        var lastToast by mutableStateOf<String?>(null)
+        var lastToastUndo by mutableStateOf<Pair<String, () -> Unit>?>(null)
+        var nextActionResult by mutableStateOf(GitGraphActionResult(ok = true))
+
+        val wipChanges = GitChanges.from(
+            Json.parseToJsonElement(
+                """
+                {
+                  "branch": {
+                    "name": "main",
+                    "upstream": "origin/main",
+                    "ahead": 1,
+                    "behind": 0,
+                    "detached": false
+                  },
+                  "files": [
+                    {
+                      "path": "src/StagedOnly.tsx",
+                      "x": "M",
+                      "y": ".",
+                      "untracked": false,
+                      "staged": { "status": "M", "added": 2, "removed": 1, "blocks": ["h1"] },
+                      "unstaged": null
+                    },
+                    {
+                      "path": "src/TrackedEdit.tsx",
+                      "x": ".",
+                      "y": "M",
+                      "untracked": false,
+                      "staged": null,
+                      "unstaged": { "status": "M", "added": 4, "removed": 1, "blocks": ["h2"] }
+                    },
+                    {
+                      "path": "src/NewFile.tsx",
+                      "x": "?",
+                      "y": "?",
+                      "untracked": true,
+                      "staged": null,
+                      "unstaged": { "status": "A", "added": 5, "removed": 0, "blocks": [], "whole": "new" }
+                    }
+                  ],
+                  "truncated": false,
+                  "stashes": 1
+                }
+                """.trimIndent(),
+            ),
+        )
+
+        val commitsWithNonHeadMerge = sampleCommits.map { c ->
+            if (c.hash == "c333333333333333") c.copy(parents = listOf("c111111111111111", "c222222222222222")) else c
+        }
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                GitGraphNativeContent(
+                    repoInfo = sampleRepoInfo,
+                    pageState = GitGraphCommitsPageState(
+                        commits = commitsWithNonHeadMerge,
+                        hasMore = false,
+                        commitsLoaded = true,
+                        loading = false,
+                        scope = "all",
+                    ),
+                    changes = wipChanges,
+                    toastMessage = lastToast,
+                    toastUndo = lastToastUndo,
+                    onShowToast = { msg, undo ->
+                        lastToast = msg
+                        lastToastUndo = undo
+                    },
+                    onDismissToast = {
+                        lastToast = null
+                        lastToastUndo = null
+                    },
+                    onSendMessage = { msg -> sentMessages += msg },
+                    onSendTrackedAction = { _, buildMsg, onDone ->
+                        sentMessages += buildMsg(1)
+                        onDone(nextActionResult)
+                    },
+                )
+            }
+        }
+
+        // C6: WIP "Discard all changes…" filters to hasUnstaged (TrackedEdit.tsx + NewFile.tsx, NOT StagedOnly.tsx),
+        // opens confirmation dialog first, and offers Undo toast that sends undoDiscard
+        nextActionResult = GitGraphActionResult(
+            ok = true,
+            data = Json.parseToJsonElement(
+                """{"undo":{"id":"undo-snap-1","paths":["src/TrackedEdit.tsx","src/NewFile.tsx"],"skipped":[]}}""",
+            ) as JsonObject,
+        )
+        composeRule.onNodeWithTag("git-graph-row-menu-btn-uncommitted").performClick()
+        composeRule.onNodeWithTag("git-graph-wip-menu-discard-all").performClick()
+        // Must not discard before confirmation
+        assertTrue(sentMessages.none { it["command"]?.jsonPrimitive?.content == "discardFiles" })
+        composeRule.onNodeWithTag("git-graph-dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("git-graph-dialog-confirm-btn").performClick()
+        val discardMsg = sentMessages.last { it["command"]?.jsonPrimitive?.content == "discardFiles" }
+        assertEquals("""["src/TrackedEdit.tsx","src/NewFile.tsx"]""", discardMsg["paths"].toString())
+        assertEquals("Discarded changes to 2 files", lastToast)
+        // Clicking Undo sends undoDiscard with the snapshot id
+        composeRule.onNodeWithTag("git-graph-toast-undo-btn").performClick()
+        val undoMsg = sentMessages.last { it["command"]?.jsonPrimitive?.content == "undoDiscard" }
+        assertEquals("undo-snap-1", undoMsg["id"]?.jsonPrimitive?.content)
+
+        // 08c Major: WIP "Delete untracked files…" filters to untracked (NewFile.tsx) and confirms
+        sentMessages.clear()
+        composeRule.onNodeWithTag("git-graph-row-menu-btn-uncommitted").performClick()
+        composeRule.onNodeWithTag("git-graph-wip-menu-delete-untracked").performClick()
+        composeRule.onNodeWithTag("git-graph-dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("git-graph-dialog-confirm-btn").performClick()
+        val deleteUntrackedMsg = sentMessages.last { it["command"]?.jsonPrimitive?.content == "discardFiles" }
+        assertEquals("""["src/NewFile.tsx"]""", deleteUntrackedMsg["paths"].toString())
+
+        // 08c Major: WIP "Reset…" opens reset mode dialog against HEAD
+        sentMessages.clear()
+        composeRule.onNodeWithTag("git-graph-row-menu-btn-uncommitted").performClick()
+        composeRule.onNodeWithTag("git-graph-wip-menu-reset").performClick()
+        composeRule.onNodeWithTag("git-graph-dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("git-graph-dialog-opt-mixed").performClick()
+        composeRule.onNodeWithTag("git-graph-dialog-confirm-btn").performClick()
+        assertTrue(sentMessages.any { it["action"]?.jsonPrimitive?.content == "reset" })
+
+        // C6: Single-file Discard in WIP inspector requires confirmation too
+        sentMessages.clear()
+        composeRule.onNodeWithTag("git-graph-row-uncommitted").performClick()
+        composeRule.onNodeWithTag("git-graph-wip-discard-src/TrackedEdit.tsx").performClick()
+        assertTrue(sentMessages.none { it["command"]?.jsonPrimitive?.content == "discardFiles" })
+        composeRule.onNodeWithTag("git-graph-dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("git-graph-dialog-confirm-btn").performClick()
+        val singleDiscardMsg = sentMessages.last { it["command"]?.jsonPrimitive?.content == "discardFiles" }
+        assertEquals("""["src/TrackedEdit.tsx"]""", singleDiscardMsg["paths"].toString())
+
+        // C7: Cherry-pick on merge commit (c3 has 2 parents and is not HEAD) is blocked with web toast
+        sentMessages.clear()
+        composeRule.onNodeWithTag("git-graph-row-menu-btn-c333333333333333").performClick()
+        composeRule.onNodeWithTag("git-graph-menu-cherry-pick").performClick()
+        assertTrue(sentMessages.none { it["action"]?.jsonPrimitive?.content == "cherryPick" })
+        assertEquals("A merge cannot be cherry-picked from here", lastToast)
+
+        // C7: Delete branch confirms first, and when unmerged ("not fully merged") prompts "Delete anyway" with force=true
+        sentMessages.clear()
+        nextActionResult = GitGraphActionResult(
+            ok = false,
+            error = "error: The branch 'feature/login' is not fully merged.",
+        )
+        composeRule.onNodeWithTag("git-graph-ref-pill-feature/login").performClick()
+        composeRule.onNodeWithTag("git-graph-ref-delete").performClick()
+        assertTrue(sentMessages.none { it["action"]?.jsonPrimitive?.content == "deleteBranch" })
+        composeRule.onNodeWithTag("git-graph-dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("git-graph-dialog-confirm-btn").performClick()
+        // First attempt used force=false and failed with "not fully merged" -> second dialog "Delete anyway" opens
+        val firstDelete = sentMessages.last { it["action"]?.jsonPrimitive?.content == "deleteBranch" }
+        assertEquals("false", (firstDelete["args"] as JsonObject)["force"]?.jsonPrimitive?.content)
+        composeRule.onNodeWithTag("git-graph-dialog").assertIsDisplayed()
+        nextActionResult = GitGraphActionResult(ok = true)
+        composeRule.onNodeWithTag("git-graph-dialog-confirm-btn").performClick()
+        val forcedDelete = sentMessages.last { it["action"]?.jsonPrimitive?.content == "deleteBranch" }
+        assertEquals("true", (forcedDelete["args"] as JsonObject)["force"]?.jsonPrimitive?.content)
+
+        // 08c Major: Stash menu & commit menu include "Create branch from stash…"
+        sentMessages.clear()
+        composeRule.onNodeWithTag("git-graph-stashes-btn").performClick()
+        composeRule.onNodeWithTag("git-graph-stash-branch-0").performClick()
+        composeRule.onNodeWithTag("git-graph-dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("git-graph-dialog-input").performTextReplacement("from-stash-0")
+        composeRule.onNodeWithTag("git-graph-dialog-confirm-btn").performClick()
+        val stashBranchMsg = sentMessages.last { it["action"]?.jsonPrimitive?.content == "stashBranch" }
+        assertEquals("from-stash-0", (stashBranchMsg["args"] as JsonObject)["name"]?.jsonPrimitive?.content)
     }
 }
