@@ -312,72 +312,83 @@ fun classifyCommittedText(
 // 5. Binary Video Frame (`src/shared/android-protocol.ts`)
 // -----------------------------------------------------------------------------
 
-const val ANDROID_FRAME_MAGIC: Int = 0x41 // 'A'
 const val ANDROID_PROTOCOL_VERSION: Int = 1
-const val ANDROID_FRAME_HEADER_BYTES: Int = 16
-const val ANDROID_FRAME_FLAG_KEYFRAME: Int = 0x01
-const val ANDROID_FRAME_FLAG_CONFIG: Int = 0x02
+const val ANDROID_VIDEO_HEADER_BYTES: Int = 22
+const val VIDEO_FLAG_KEYFRAME: Int = 1 shl 0
+const val VIDEO_FLAG_CODEC_CONFIG: Int = 1 shl 1
 
-data class AndroidVideoFrame(
-    val version: Int,
-    val flags: Int,
+data class AndroidVideoHeader(
+    val version: Int = ANDROID_PROTOCOL_VERSION,
+    val keyframe: Boolean,
+    val codecConfig: Boolean,
     val sessionGeneration: Int,
     val geometryGeneration: Int,
     val sequence: Long,
-    val ptsMs: Long,
-    val payload: ByteArray,
-) {
-    val isKeyframe: Boolean get() = (flags and ANDROID_FRAME_FLAG_KEYFRAME) != 0
-    val isCodecConfig: Boolean get() = (flags and ANDROID_FRAME_FLAG_CONFIG) != 0
-}
+    val ptsMs: Double,
+    val payloadLength: Int,
+)
 
-fun encodeAndroidVideoFrame(
-    payload: ByteArray,
-    isKeyframe: Boolean,
-    isCodecConfig: Boolean = false,
-    sessionGeneration: Int = 1,
-    geometryGeneration: Int = 1,
-    sequence: Long = 0L,
-    ptsMs: Long = 0L,
-): ByteArray {
-    val out = ByteArray(ANDROID_FRAME_HEADER_BYTES + payload.size)
-    val buf = ByteBuffer.wrap(out).order(ByteOrder.BIG_ENDIAN)
-    var flags = 0
-    if (isKeyframe) flags = flags or ANDROID_FRAME_FLAG_KEYFRAME
-    if (isCodecConfig) flags = flags or ANDROID_FRAME_FLAG_CONFIG
-    buf.put(ANDROID_FRAME_MAGIC.toByte())
-    buf.put(ANDROID_PROTOCOL_VERSION.toByte())
-    buf.put(flags.toByte())
-    buf.put(0.toByte())
-    buf.putShort((sessionGeneration and 0xFFFF).toShort())
-    buf.putShort((geometryGeneration and 0xFFFF).toShort())
-    buf.putInt((sequence and 0xFFFF_FFFFL).toInt())
-    buf.putInt((ptsMs and 0xFFFF_FFFFL).toInt())
-    System.arraycopy(payload, 0, out, ANDROID_FRAME_HEADER_BYTES, payload.size)
+data class AndroidVideoFramePacket(
+    val header: AndroidVideoHeader,
+    val payload: ByteArray,
+)
+
+/**
+ * Encode a 22-byte little-endian binary video header + H.264 Annex-B payload.
+ *
+ * Layout (`src/shared/android-protocol.ts`):
+ * - `0`: u8 version (`1`)
+ * - `1`: u8 flags (`bit0 = keyframe`, `bit1 = codecConfig`)
+ * - `2..3`: u16 sessionGeneration (LE)
+ * - `4..5`: u16 geometryGeneration (LE)
+ * - `6..9`: u32 sequence (LE)
+ * - `10..17`: f64 ptsMs (LE)
+ * - `18..21`: u32 payloadLength (LE)
+ * - `22..`: payload
+ */
+fun encodeAndroidVideoFrame(header: AndroidVideoHeader, payload: ByteArray): ByteArray {
+    val out = ByteArray(ANDROID_VIDEO_HEADER_BYTES + payload.size)
+    val buf = ByteBuffer.wrap(out).order(ByteOrder.LITTLE_ENDIAN)
+    val flags = (if (header.keyframe) VIDEO_FLAG_KEYFRAME else 0) or (if (header.codecConfig) VIDEO_FLAG_CODEC_CONFIG else 0)
+    buf.put((header.version and 0xFF).toByte())
+    buf.put((flags and 0xFF).toByte())
+    buf.putShort((header.sessionGeneration and 0xFFFF).toShort())
+    buf.putShort((header.geometryGeneration and 0xFFFF).toShort())
+    buf.putInt((header.sequence and 0xFFFFFFFFL).toInt())
+    buf.putDouble(header.ptsMs)
+    buf.putInt(payload.size)
+    System.arraycopy(payload, 0, out, ANDROID_VIDEO_HEADER_BYTES, payload.size)
     return out
 }
 
-fun decodeAndroidVideoFrame(bytes: ByteArray): AndroidVideoFrame? {
-    if (bytes.size <= ANDROID_FRAME_HEADER_BYTES) return null
-    val buf = ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN)
-    val magic = buf.get().toInt() and 0xFF
-    if (magic != ANDROID_FRAME_MAGIC) return null
+/**
+ * Decode a binary WebSocket frame from `/ws/android`.
+ * Returns `null` if the buffer is shorter than 22 bytes, version != 1, or payload length mismatches.
+ */
+fun decodeAndroidVideoFrame(bytes: ByteArray): AndroidVideoFramePacket? {
+    if (bytes.size < ANDROID_VIDEO_HEADER_BYTES) return null
+    val buf = ByteBuffer.wrap(bytes, 0, ANDROID_VIDEO_HEADER_BYTES).order(ByteOrder.LITTLE_ENDIAN)
     val version = buf.get().toInt() and 0xFF
     if (version != ANDROID_PROTOCOL_VERSION) return null
     val flags = buf.get().toInt() and 0xFF
-    buf.get() // reserved
     val sessionGen = buf.short.toInt() and 0xFFFF
     val geometryGen = buf.short.toInt() and 0xFFFF
-    val seq = buf.int.toLong() and 0xFFFF_FFFFL
-    val pts = buf.int.toLong() and 0xFFFF_FFFFL
-    val payload = bytes.copyOfRange(ANDROID_FRAME_HEADER_BYTES, bytes.size)
-    return AndroidVideoFrame(
-        version = version,
-        flags = flags,
-        sessionGeneration = sessionGen,
-        geometryGeneration = geometryGen,
-        sequence = seq,
-        ptsMs = pts,
+    val sequence = buf.int.toLong() and 0xFFFFFFFFL
+    val ptsMs = buf.double
+    val payloadLen = buf.int
+    if (payloadLen < 0 || bytes.size - ANDROID_VIDEO_HEADER_BYTES != payloadLen) return null
+    val payload = bytes.copyOfRange(ANDROID_VIDEO_HEADER_BYTES, bytes.size)
+    return AndroidVideoFramePacket(
+        header = AndroidVideoHeader(
+            version = version,
+            keyframe = (flags and VIDEO_FLAG_KEYFRAME) != 0,
+            codecConfig = (flags and VIDEO_FLAG_CODEC_CONFIG) != 0,
+            sessionGeneration = sessionGen,
+            geometryGeneration = geometryGen,
+            sequence = sequence,
+            ptsMs = ptsMs,
+            payloadLength = payloadLen,
+        ),
         payload = payload,
     )
 }

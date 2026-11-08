@@ -138,35 +138,71 @@ class AndroidDeviceStateTest {
     }
 
     @Test
-    fun `encodeAndroidVideoFrame and decodeAndroidVideoFrame round-trip 16-byte header`() {
-        val annexB = byteArrayOf(0x00, 0x00, 0x00, 0x01, 0x65, 0x11, 0x22, 0x33)
-        val encoded = encodeAndroidVideoFrame(
-            payload = annexB,
-            isKeyframe = true,
-            isCodecConfig = false,
+    fun `encode and decode 22-byte video frame round-trip`() {
+        val payload = byteArrayOf(0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1F)
+        val header = AndroidVideoHeader(
+            version = ANDROID_PROTOCOL_VERSION,
+            keyframe = true,
+            codecConfig = true,
             sessionGeneration = 7,
             geometryGeneration = 3,
-            sequence = 42L,
-            ptsMs = 123_456L,
+            sequence = 42_000L,
+            ptsMs = 1234.5,
+            payloadLength = payload.size,
         )
-        assertEquals(16 + annexB.size, encoded.size)
-        assertEquals(0x41, encoded[0].toInt() and 0xFF)
-        assertEquals(1, encoded[1].toInt() and 0xFF)
+        val encoded = encodeAndroidVideoFrame(header, payload)
+        assertEquals(ANDROID_VIDEO_HEADER_BYTES + payload.size, encoded.size)
 
         val decoded = decodeAndroidVideoFrame(encoded)
         assertNotNull(decoded)
-        assertTrue(decoded!!.isKeyframe)
-        assertFalse(decoded.isCodecConfig)
-        assertEquals(7, decoded.sessionGeneration)
-        assertEquals(3, decoded.geometryGeneration)
-        assertEquals(42L, decoded.sequence)
-        assertEquals(123_456L, decoded.ptsMs)
-        assertArrayEquals(annexB, decoded.payload)
+        assertEquals(header, decoded!!.header)
+        assertArrayEquals(payload, decoded.payload)
 
-        // Rejects wrong magic or version or truncated header
-        val badMagic = encoded.clone().apply { this[0] = 0x42 }
-        assertNull(decodeAndroidVideoFrame(badMagic))
-        assertNull(decodeAndroidVideoFrame(ByteArray(16)))
+        // Reject short buffer, wrong version, or mismatched payload length
+        assertNull(decodeAndroidVideoFrame(ByteArray(21)))
+        val badVersion = encoded.copyOf().also { it[0] = 2 }
+        assertNull(decodeAndroidVideoFrame(badVersion))
+        assertNull(decodeAndroidVideoFrame(encoded + byteArrayOf(0x99.toByte())))
+    }
+
+    @Test
+    fun `decodeAndroidVideoFrame decodes real server encodeVideoFrame bytes`() {
+        // Produced by server's encodeVideoFrame in src/shared/android-protocol.ts via bun:
+        // encodeVideoFrame({ keyframe: true, codecConfig: true, sessionGeneration: 7, geometryGeneration: 3, sequence: 42000, ptsMs: 1234.5 }, Uint8Array([0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1f]))
+        val serverKeyframeHex = "01030700030010a4000000000000004a934008000000000000016742001f"
+        val keyframeBytes = serverKeyframeHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val decodedKeyframe = decodeAndroidVideoFrame(keyframeBytes)
+        assertNotNull(decodedKeyframe)
+        assertEquals(1, decodedKeyframe!!.header.version)
+        assertTrue(decodedKeyframe.header.keyframe)
+        assertTrue(decodedKeyframe.header.codecConfig)
+        assertEquals(7, decodedKeyframe.header.sessionGeneration)
+        assertEquals(3, decodedKeyframe.header.geometryGeneration)
+        assertEquals(42_000L, decodedKeyframe.header.sequence)
+        assertEquals(1234.5, decodedKeyframe.header.ptsMs, 0.0)
+        assertEquals(8, decodedKeyframe.header.payloadLength)
+        assertArrayEquals(
+            byteArrayOf(0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1F),
+            decodedKeyframe.payload,
+        )
+
+        // encodeVideoFrame({ keyframe: false, codecConfig: false, sessionGeneration: 2, geometryGeneration: 1, sequence: 99, ptsMs: 33.333 }, Uint8Array([0x00, 0x00, 0x00, 0x01, 0x41, 0x9a]))
+        val serverDeltaHex = "01000200010063000000b4c876be9faa40400600000000000001419a"
+        val deltaBytes = serverDeltaHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val decodedDelta = decodeAndroidVideoFrame(deltaBytes)
+        assertNotNull(decodedDelta)
+        assertEquals(1, decodedDelta!!.header.version)
+        assertFalse(decodedDelta.header.keyframe)
+        assertFalse(decodedDelta.header.codecConfig)
+        assertEquals(2, decodedDelta.header.sessionGeneration)
+        assertEquals(1, decodedDelta.header.geometryGeneration)
+        assertEquals(99L, decodedDelta.header.sequence)
+        assertEquals(33.333, decodedDelta.header.ptsMs, 1e-9)
+        assertEquals(6, decodedDelta.header.payloadLength)
+        assertArrayEquals(
+            byteArrayOf(0x00, 0x00, 0x00, 0x01, 0x41, 0x9A.toByte()),
+            decodedDelta.payload,
+        )
     }
 
     @Test

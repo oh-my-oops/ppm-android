@@ -1393,14 +1393,14 @@ internal fun AndroidLiveViewer(
 
                     override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                         val frame = decodeAndroidVideoFrame(bytes.toByteArray()) ?: return
-                        if (frame.version != ANDROID_PROTOCOL_VERSION) return
-                        if (frame.sessionGeneration != localSessionGen) return
-                        if (!shouldDecodeAndroidAccessUnit(localHasPicture, frame.isKeyframe)) return
+                        if (frame.header.version != ANDROID_PROTOCOL_VERSION) return
+                        if (frame.header.sessionGeneration != localSessionGen) return
+                        if (!shouldDecodeAndroidAccessUnit(localHasPicture, frame.header.keyframe)) return
                         if (!localHasPicture) {
                             localHasPicture = true
                             scope.launch { hasPicture = true }
                         }
-                        decoder.enqueueAccessUnit(frame.payload, 0, frame.payload.size, frame.isKeyframe)
+                        decoder.enqueueAccessUnit(frame.payload, 0, frame.payload.size, frame.header.keyframe)
                     }
 
                     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
