@@ -341,11 +341,14 @@ class SettingsIntegrationsStateTest {
             {
               "ppmScheduleTemplate": 1,
               "name": "Nightly Audit",
-              "kind": "script",
+              "description": "Runs nightly audit checks",
+              "kind": "prompt",
               "mode": "tick",
-              "cron": "*/10 * * * * *",
-              "script": "echo hello",
+              "cron": "0 2 * * *",
+              "prompt": "Audit repository",
               "timeoutMs": 30000,
+              "maxTurns": 25,
+              "permissionMode": "bypassPermissions",
               "inputs": [
                 {"key": "API_TOKEN", "label": "Token", "type": "secret", "required": true}
               ]
@@ -353,9 +356,24 @@ class SettingsIntegrationsStateTest {
         """.trimIndent()
         val parsed = parseScheduleTemplateJson(validJson).getOrThrow()
         assertEquals("Nightly Audit", parsed.name)
-        assertEquals("script", parsed.kind)
+        assertEquals("Runs nightly audit checks", parsed.description)
+        assertEquals("prompt", parsed.kind)
+        assertEquals(25, parsed.maxTurns)
+        assertEquals("bypassPermissions", parsed.permissionMode)
         assertEquals(1, parsed.inputs.size)
         assertEquals("API_TOKEN", parsed.inputs[0].key)
+
+        // Export response wrapper `{template, fileName, warnings}` is also accepted
+        val wrappedJson = """
+            {
+              "template": $validJson,
+              "fileName": "nightly-audit.ppm-schedule.json",
+              "warnings": []
+            }
+        """.trimIndent()
+        val unwrapped = parseScheduleTemplateJson(wrappedJson).getOrThrow()
+        assertEquals("Nightly Audit", unwrapped.name)
+        assertEquals(1, unwrapped.rawJson["ppmScheduleTemplate"]?.toString()?.toInt())
 
         val secretWithDefault = """
             {
@@ -406,5 +424,25 @@ class SettingsIntegrationsStateTest {
         assertEquals(0, reset.afterSeq)
         assertTrue(reset.lines.isEmpty())
         assertEquals(456, reset.status.pid)
+    }
+
+    @Test
+    fun `notification defaults and jira watcher result action gates match server rules`() {
+        val defaultNotify = parseNotificationSettings(Json.parseToJsonElement("{}"))
+        assertTrue(defaultNotify.telegram)
+        assertTrue(defaultNotify.ntfy)
+
+        assertTrue(canDebugJiraWatcherResult("pending", null))
+        assertTrue(canDebugJiraWatcherResult("failed", null))
+        assertFalse(canDebugJiraWatcherResult("failed", "sess-123"))
+        assertFalse(canDebugJiraWatcherResult("done", "sess-123"))
+
+        assertTrue(canResumeJiraWatcherResult("failed", "sess-123"))
+        assertFalse(canResumeJiraWatcherResult("failed", null))
+        assertFalse(canResumeJiraWatcherResult("done", "sess-123"))
+
+        assertTrue(canCancelJiraWatcherResult("queued"))
+        assertTrue(canCancelJiraWatcherResult("running"))
+        assertFalse(canCancelJiraWatcherResult("done"))
     }
 }

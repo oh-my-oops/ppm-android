@@ -1,10 +1,12 @@
 package com.hienlh.ppm.app.ui
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
+import android.os.PersistableBundle
 import android.provider.OpenableColumns
-import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -362,6 +364,8 @@ private fun AboutBlock(model: AppModel) {
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
     var upgrading by remember { mutableStateOf(false) }
+    var reconnecting by remember { mutableStateOf(false) }
+    var confirmUpgradeOpen by remember { mutableStateOf(false) }
     var availableVersion by remember { mutableStateOf<String?>(null) }
     var statusNote by remember { mutableStateOf<String?>(null) }
     var learnPpmOpen by remember { mutableStateOf(false) }
@@ -414,23 +418,15 @@ private fun AboutBlock(model: AppModel) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (!availableVersion.isNullOrBlank()) {
                         SettingsButton(
-                            label = if (upgrading) "Upgrading…" else "Update to v$availableVersion",
-                            primary = true,
-                            enabled = !upgrading && api != null,
-                            onClick = {
-                                val client = api ?: return@SettingsButton
-                                upgrading = true
-                                scope.launch {
-                                    try {
-                                        val res = client.applyUpgrade()
-                                        statusNote = res.message ?: "Upgrading to v${res.newVersion ?: availableVersion}…"
-                                    } catch (t: Throwable) {
-                                        statusNote = t.message ?: "Upgrade failed"
-                                    } finally {
-                                        upgrading = false
-                                    }
-                                }
+                            label = when {
+                                reconnecting -> "Updating, reconnecting…"
+                                upgrading -> "Updating…"
+                                else -> "Update to v$availableVersion"
                             },
+                            primary = true,
+                            enabled = !upgrading && !reconnecting && api != null,
+                            modifier = Modifier.testTag("about-upgrade-btn"),
+                            onClick = { confirmUpgradeOpen = true },
                         )
                     } else {
                         SettingsButton(
@@ -460,6 +456,64 @@ private fun AboutBlock(model: AppModel) {
             }
             if (statusNote != null) {
                 BasicText(statusNote!!, style = ppmText(11f).copy(color = tokens.text2.color))
+            }
+            if (confirmUpgradeOpen && !availableVersion.isNullOrBlank()) {
+                val targetVersion = availableVersion!!
+                ConfirmDialog(
+                    title = "Update PPM Server to v$targetVersion?",
+                    message = "The server will install v$targetVersion and restart. Active connections will briefly reconnect.",
+                    confirm = "Update now",
+                    confirmTestTag = "about-upgrade-confirm",
+                    onDismiss = { confirmUpgradeOpen = false },
+                    onConfirm = {
+                        confirmUpgradeOpen = false
+                        val client = api ?: return@ConfirmDialog
+                        upgrading = true
+                        statusNote = "Updating to v$targetVersion…"
+                        val serverUpgrade = model.upgrade
+                        if (serverUpgrade != null) {
+                            serverUpgrade.update(targetVersion)
+                        }
+                        scope.launch {
+                            var shouldPollRestart = false
+                            try {
+                                if (serverUpgrade == null) {
+                                    val res = client.applyUpgrade()
+                                    if (res.restart) {
+                                        shouldPollRestart = true
+                                    } else {
+                                        statusNote = res.message ?: "Upgrade installed. Restart PPM manually."
+                                        availableVersion = null
+                                    }
+                                } else {
+                                    shouldPollRestart = true
+                                }
+                            } catch (e: Exception) {
+                                val failure = com.hienlh.ppm.state.UpgradeOffer.failure(e)
+                                if (failure == com.hienlh.ppm.state.UpgradeFailure.Restarting) {
+                                    shouldPollRestart = true
+                                } else {
+                                    statusNote = e.message ?: "Upgrade failed"
+                                }
+                            }
+                            if (shouldPollRestart) {
+                                reconnecting = true
+                                statusNote = "Server restarting, reconnecting…"
+                                val deadline = System.currentTimeMillis() + 60_000L
+                                while (System.currentTimeMillis() < deadline) {
+                                    val alive = runCatching { client.health() }.isSuccess
+                                    if (alive) break
+                                    delay(2_000L)
+                                }
+                                runCatching { model.loadProjects() }
+                                availableVersion = null
+                                statusNote = "Updated to v$targetVersion"
+                            }
+                            upgrading = false
+                            reconnecting = false
+                        }
+                    },
+                )
             }
             Separator()
             Row(
@@ -549,6 +603,7 @@ internal fun AppearanceExtrasSection(model: AppModel) {
         scope.launch {
             runCatching { parseImportedThemes(client.settingsListThemes()) }.getOrNull()?.let {
                 importedThemes = it
+                model.updateCustomThemes(it)
             }
         }
     }
@@ -608,7 +663,7 @@ internal fun AppearanceExtrasSection(model: AppModel) {
                         if (custom.swatch.isNotEmpty()) {
                             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                                 for (hex in custom.swatch.take(3)) {
-                                    val c = Rgba.hex(hex)?.color ?: tokens.accent.color
+                                    val c = Rgba.parse(hex)?.color ?: tokens.accent.color
                                     Box(
                                         Modifier
                                             .size(10.dp)
@@ -757,6 +812,11 @@ internal fun AppearanceExtrasSection(model: AppModel) {
             onDismiss = { importDialogOpen = false },
             onImported = { imported ->
                 importDialogOpen = false
+                if (imported.isNotEmpty()) {
+                    val merged = (importedThemes.filterNot { existing -> imported.any { it.id == existing.id } } + imported)
+                    importedThemes = merged
+                    model.updateCustomThemes(merged)
+                }
                 reloadCustomThemes()
                 val first = imported.firstOrNull()
                 if (first != null) {
@@ -2501,4 +2561,23 @@ internal fun SettingsPasswordInput(
             )
         }
     }
+}
+
+/**
+ * Copies a secret/token/backup to the system clipboard with `ClipDescription.EXTRA_IS_SENSITIVE = true`
+ * (`"android.content.extra.IS_SENSITIVE"` on pre-Tiramisu) so Android masks the clipboard preview.
+ */
+internal fun copySensitiveClip(context: Context, label: String, text: String): ClipData {
+    val clip = ClipData.newPlainText(label, text)
+    val extras = PersistableBundle().apply {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+        } else {
+            putBoolean("android.content.extra.IS_SENSITIVE", true)
+        }
+    }
+    clip.description.extras = extras
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+    cm?.setPrimaryClip(clip)
+    return clip
 }

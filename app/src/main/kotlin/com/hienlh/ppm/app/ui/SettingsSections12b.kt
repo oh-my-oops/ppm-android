@@ -113,6 +113,7 @@ import com.hienlh.ppm.protocol.int
 import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.codexPlanLabel
 import com.hienlh.ppm.state.dailyGuardState
+import com.hienlh.ppm.state.settings.duplicateAiResourceTargetScope
 import com.hienlh.ppm.state.settings.AccountRotationSettings
 import com.hienlh.ppm.state.settings.AiResourceFilter
 import com.hienlh.ppm.state.settings.AiResourceItem
@@ -830,8 +831,7 @@ private fun ClaudeAccountsPane(model: AppModel) {
                                         refreshBeforeExport = refreshBefore,
                                     )
                                     payloadText = data
-                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                    cm?.setPrimaryClip(ClipData.newPlainText("PPM Claude Accounts", data))
+                                    copySensitiveClip(context, "PPM Claude Accounts", data)
                                     dialogMsg = "Exported & copied to clipboard"
                                 } catch (t: Throwable) {
                                     dialogMsg = t.message ?: "Export failed"
@@ -1273,8 +1273,7 @@ private fun CodexAccountsPane(model: AppModel) {
                     SettingsButton(
                         label = "Copy Code",
                         onClick = {
-                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                            cm?.setPrimaryClip(ClipData.newPlainText("Codex Device Code", flow.userCode))
+                            copySensitiveClip(context, "Codex Device Code", flow.userCode)
                         },
                     )
                     SettingsButton(
@@ -1513,8 +1512,7 @@ private fun CodexAccountsPane(model: AppModel) {
                                 try {
                                     val data = client.codexExportEncrypted(password.trim())
                                     bundleText = data
-                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                    cm?.setPrimaryClip(ClipData.newPlainText("ppm-codex-accounts-backup.json", data))
+                                    copySensitiveClip(context, "ppm-codex-accounts-backup.json", data)
                                     dialogMsg = "Exported & copied to clipboard"
                                 } catch (t: Throwable) {
                                     dialogMsg = t.message ?: "Export failed"
@@ -1990,7 +1988,7 @@ internal fun AiResourcesSettingsSection(model: AppModel) {
                     client.aiResourcesDuplicate(
                         path = item.filePath,
                         type = item.type,
-                        scope = item.scope,
+                        scope = duplicateAiResourceTargetScope(item.scope, activeProjectPath),
                         name = "${item.name}-copy",
                         projectPath = activeProjectPath,
                     )

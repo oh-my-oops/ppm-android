@@ -49,8 +49,8 @@ val NOTIFICATION_DELAY_OPTIONS: List<Pair<Int, String>> = listOf(
 data class NotificationSettingsState(
     val events: Map<String, Boolean> = NOTIFICATION_EVENT_DEFS.associate { it.key to true },
     val delaySeconds: Int = 60,
-    val telegram: Boolean = false,
-    val ntfy: Boolean = false,
+    val telegram: Boolean = true,
+    val ntfy: Boolean = true,
 ) {
     fun toJsonPatch(): JsonObject = buildJsonObject {
         put(
@@ -76,8 +76,8 @@ fun parseNotificationSettings(element: JsonElement?): NotificationSettingsState 
     return NotificationSettingsState(
         events = events,
         delaySeconds = delaySeconds,
-        telegram = root["telegram"]?.bool ?: false,
-        ntfy = root["ntfy"]?.bool ?: false,
+        telegram = root["telegram"]?.bool ?: true,
+        ntfy = root["ntfy"]?.bool ?: true,
     )
 }
 
@@ -785,6 +785,27 @@ fun parseJiraResults(element: JsonElement?): List<JiraResultRow> {
 /** Clamps Jira watcher polling interval between 30s (`30_000`) and 1h (`3_600_000`). */
 fun clampJiraIntervalMs(ms: Int): Int = ms.coerceIn(30_000, 3_600_000)
 
+/**
+ * Mirrors `src/server/routes/jira-watcher-routes.ts:130` and `src/web/components/jira/jira-ticket-card.tsx:41-42`:
+ * only `pending` or `failed` results can be debugged (and when `failed` already has a session, Resume is shown instead).
+ */
+fun canDebugJiraWatcherResult(status: String, sessionId: String? = null): Boolean =
+    status == "pending" || (status == "failed" && sessionId.isNullOrBlank())
+
+/**
+ * Mirrors `src/server/routes/jira-watcher-routes.ts:146-147`:
+ * only `failed` results that have a `sessionId` can be resumed.
+ */
+fun canResumeJiraWatcherResult(status: String, sessionId: String?): Boolean =
+    status == "failed" && !sessionId.isNullOrBlank()
+
+/**
+ * Mirrors `src/server/routes/jira-watcher-routes.ts:165`:
+ * only `queued` or `running` results can be cancelled.
+ */
+fun canCancelJiraWatcherResult(status: String): Boolean =
+    status == "queued" || status == "running"
+
 // ===========================================================================
 // 5. Schedules State, Cron Validators, Template Parser & Logs Ring Buffer
 // ===========================================================================
@@ -1127,6 +1148,7 @@ fun scheduleFormProblems(
 private val TEMPLATE_KNOWN_FIELDS = setOf(
     "ppmScheduleTemplate",
     "name",
+    "description",
     "kind",
     "mode",
     "cron",
@@ -1134,6 +1156,8 @@ private val TEMPLATE_KNOWN_FIELDS = setOf(
     "script",
     "providerId",
     "timeoutMs",
+    "maxTurns",
+    "permissionMode",
     "inputs",
 )
 
@@ -1142,6 +1166,7 @@ private val INPUT_KEY_REGEX = Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 data class ParsedScheduleTemplate(
     val rawJson: JsonObject,
     val name: String,
+    val description: String? = null,
     val kind: String,
     val mode: String,
     val cron: String,
@@ -1149,19 +1174,23 @@ data class ParsedScheduleTemplate(
     val script: String? = null,
     val providerId: String? = null,
     val timeoutMs: Int = 900_000,
+    val maxTurns: Int? = null,
+    val permissionMode: String? = null,
     val inputs: List<ScheduleInputDeclState> = emptyList(),
 )
 
 /**
  * Mirrors `parseScheduleTemplate(input)` in `src/shared/schedule-template.ts`.
  * Returns `Result.success(ParsedScheduleTemplate)` or `Result.failure(IllegalArgumentException)`.
+ * Also unwraps `{ template: { ... } }` if an export response wrapper is passed directly.
  */
 fun parseScheduleTemplateJson(rawText: String): Result<ParsedScheduleTemplate> = runCatching {
     val element = runCatching { Json.parseToJsonElement(rawText) }.getOrElse {
         throw IllegalArgumentException("Invalid JSON: ${it.message}")
     }
-    val obj = element as? JsonObject
+    val outerObj = element as? JsonObject
         ?: throw IllegalArgumentException("Schedule template must be a JSON object")
+    val obj = (outerObj["template"] as? JsonObject) ?: outerObj
 
     val version = obj["ppmScheduleTemplate"]?.int
     if (version != 1) {
@@ -1175,6 +1204,10 @@ fun parseScheduleTemplateJson(rawText: String): Result<ParsedScheduleTemplate> =
     val name = obj["name"].string?.trim().orEmpty()
     if (name.isEmpty() || name.length > 120) {
         throw IllegalArgumentException("Template name must be 1–120 characters")
+    }
+    val description = obj["description"].string?.trim()
+    if (description != null && description.length > 2000) {
+        throw IllegalArgumentException("Template description must be 2000 characters or fewer")
     }
     val kind = obj["kind"].string ?: throw IllegalArgumentException("Template kind is required")
     if (kind != "prompt" && kind != "script") {
@@ -1206,6 +1239,14 @@ fun parseScheduleTemplateJson(rawText: String): Result<ParsedScheduleTemplate> =
     val timeoutMs = obj["timeoutMs"]?.int ?: 900_000
     if (mode == "tick" && timeoutMs < 10_000) {
         throw IllegalArgumentException("timeoutMs must be at least 10000")
+    }
+    val maxTurns = obj["maxTurns"]?.int
+    if (maxTurns != null && (maxTurns < 1 || maxTurns > 200)) {
+        throw IllegalArgumentException("maxTurns must be between 1 and 200")
+    }
+    val permissionMode = obj["permissionMode"].string
+    if (permissionMode != null && permissionMode !in setOf("default", "acceptEdits", "plan", "bypassPermissions")) {
+        throw IllegalArgumentException("Invalid permissionMode '$permissionMode'")
     }
 
     val inputsArr = obj["inputs"]?.array.orEmpty()
@@ -1240,6 +1281,7 @@ fun parseScheduleTemplateJson(rawText: String): Result<ParsedScheduleTemplate> =
     ParsedScheduleTemplate(
         rawJson = obj,
         name = name,
+        description = description,
         kind = kind,
         mode = mode,
         cron = cron,
@@ -1247,6 +1289,8 @@ fun parseScheduleTemplateJson(rawText: String): Result<ParsedScheduleTemplate> =
         script = script,
         providerId = obj["providerId"].string,
         timeoutMs = timeoutMs,
+        maxTurns = maxTurns,
+        permissionMode = permissionMode,
         inputs = inputs,
     )
 }

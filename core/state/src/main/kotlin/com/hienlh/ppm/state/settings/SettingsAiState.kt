@@ -500,6 +500,19 @@ fun filterAiResources(
     }
 }
 
+/**
+ * Mirrors `src/server/routes/ai-resources.ts:18,77` (`VALID_SCOPES = new Set(["project", "user"])`):
+ * when duplicating a `"bundled"` resource, target `"project"` if a project is open, else `"user"`.
+ */
+fun duplicateAiResourceTargetScope(itemScope: String, activeProjectPath: String): String =
+    if (itemScope == "project" || itemScope == "user") {
+        itemScope
+    } else if (activeProjectPath.isNotBlank()) {
+        "project"
+    } else {
+        "user"
+    }
+
 // ===========================================================================
 // 5. PPMBot / Clawbot (Phase 12b.5 — /api/settings/clawbot)
 // ===========================================================================

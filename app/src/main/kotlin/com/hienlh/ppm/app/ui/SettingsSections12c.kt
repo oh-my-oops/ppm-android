@@ -131,6 +131,7 @@ import com.hienlh.ppm.state.settings.NotificationSettingsState
 import com.hienlh.ppm.state.settings.NtfyStatusState
 import com.hienlh.ppm.state.settings.ProxySettingsState
 import com.hienlh.ppm.state.settings.PublicTunnelState
+import com.hienlh.ppm.state.settings.PushDeviceRow
 import com.hienlh.ppm.state.settings.PushStatusState
 import com.hienlh.ppm.state.settings.ScheduleLogBufferState
 import com.hienlh.ppm.state.settings.ScheduleProjectOption
@@ -138,6 +139,7 @@ import com.hienlh.ppm.state.settings.ScheduleRowState
 import com.hienlh.ppm.state.settings.TailscaleState
 import com.hienlh.ppm.state.settings.TailscaleStepId
 import com.hienlh.ppm.state.settings.TelegramNotifyState
+import com.hienlh.ppm.state.settings.TelegramPairedChat
 import com.hienlh.ppm.state.settings.applyNamedTunnelDisableResult
 import com.hienlh.ppm.state.settings.applyNamedTunnelLoginSnapshot
 import com.hienlh.ppm.state.settings.applyNamedTunnelSetupResult
@@ -145,6 +147,9 @@ import com.hienlh.ppm.state.settings.applyPublicTunnelEnabledResult
 import com.hienlh.ppm.state.settings.applyTailscaleLoginSnapshot
 import com.hienlh.ppm.state.settings.blockingTailscaleSetupStep
 import com.hienlh.ppm.state.settings.buildProxyEndpointUrl
+import com.hienlh.ppm.state.settings.canCancelJiraWatcherResult
+import com.hienlh.ppm.state.settings.canDebugJiraWatcherResult
+import com.hienlh.ppm.state.settings.canResumeJiraWatcherResult
 import com.hienlh.ppm.state.settings.clampJiraIntervalMs
 import com.hienlh.ppm.state.settings.currentTailscaleSetupStep
 import com.hienlh.ppm.state.settings.isConnectedViaAddress
@@ -403,7 +408,11 @@ internal fun NotificationsSettingsContent(
     var ntfyServerDraft by remember(ntfy.server) { mutableStateOf(ntfy.server) }
     var ntfyTopicDraft by remember(ntfy.topic) { mutableStateOf(ntfy.topic) }
     var ntfyTokenDraft by remember { mutableStateOf("") }
+    var ntfyTokenVisible by remember { mutableStateOf(false) }
     var ntfyValidationError by remember { mutableStateOf<String?>(null) }
+    var pendingRemovePushDevice by remember { mutableStateOf<PushDeviceRow?>(null) }
+    var pendingRemoveTelegramChat by remember { mutableStateOf<TelegramPairedChat?>(null) }
+    var confirmRemoveNtfy by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (!statusMessage.isNullOrBlank()) {
@@ -478,7 +487,7 @@ internal fun NotificationsSettingsContent(
                                 label = "Remove",
                                 danger = true,
                                 modifier = Modifier.testTag("push-remove-${dev.id}"),
-                                onClick = { onRemovePushDevice(dev.id, dev.endpoint) },
+                                onClick = { pendingRemovePushDevice = dev },
                             )
                         }
                     }
@@ -555,7 +564,8 @@ internal fun NotificationsSettingsContent(
                     SettingsButton(
                         label = "Remove",
                         danger = true,
-                        onClick = { onRemoveTelegramChat(chat.chatId) },
+                        modifier = Modifier.testTag("notify-telegram-remove-${chat.chatId}"),
+                        onClick = { pendingRemoveTelegramChat = chat },
                     )
                 }
             }
@@ -590,12 +600,14 @@ internal fun NotificationsSettingsContent(
                 mono = true,
                 modifier = Modifier.fillMaxWidth().testTag("notify-ntfy-topic"),
             )
-            SettingsTextInput(
+            SettingsPasswordInput(
                 value = ntfyTokenDraft,
                 onValueChange = { ntfyTokenDraft = it },
                 placeholder = if (ntfy.tokenSet) "Access token (configured)" else "Optional access token (tk_…)",
-                mono = true,
-                modifier = Modifier.fillMaxWidth().testTag("notify-ntfy-token"),
+                visible = ntfyTokenVisible,
+                onToggleVisible = { ntfyTokenVisible = !ntfyTokenVisible },
+                modifier = Modifier.fillMaxWidth(),
+                inputTestTag = "notify-ntfy-token",
             )
             if (!ntfyValidationError.isNullOrBlank()) {
                 BasicText(
@@ -638,11 +650,53 @@ internal fun NotificationsSettingsContent(
                         label = "Clear",
                         danger = true,
                         modifier = Modifier.testTag("notify-ntfy-clear"),
-                        onClick = onRemoveNtfy,
+                        onClick = { confirmRemoveNtfy = true },
                     )
                 }
             }
         }
+    }
+
+    pendingRemovePushDevice?.let { dev ->
+        ConfirmDialog(
+            title = "Remove push device?",
+            message = "Stop sending web push notifications to ${dev.label}?",
+            confirm = "Remove",
+            confirmTestTag = "push-remove-confirm",
+            onDismiss = { pendingRemovePushDevice = null },
+            onConfirm = {
+                pendingRemovePushDevice = null
+                onRemovePushDevice(dev.id, dev.endpoint)
+            },
+        )
+    }
+
+    pendingRemoveTelegramChat?.let { chat ->
+        ConfirmDialog(
+            title = "Remove Telegram chat?",
+            message = "Stop sending notifications to ${chat.name} (${chat.chatId})?",
+            confirm = "Remove",
+            confirmTestTag = "notify-telegram-remove-confirm",
+            onDismiss = { pendingRemoveTelegramChat = null },
+            onConfirm = {
+                pendingRemoveTelegramChat = null
+                onRemoveTelegramChat(chat.chatId)
+            },
+        )
+    }
+
+    if (confirmRemoveNtfy) {
+        ConfirmDialog(
+            title = "Remove ntfy configuration?",
+            message = "Stop publishing notifications to ${ntfy.server}/${ntfy.topic}?",
+            confirm = "Remove",
+            confirmTestTag = "notify-ntfy-clear-confirm",
+            onDismiss = { confirmRemoveNtfy = false },
+            onConfirm = {
+                confirmRemoveNtfy = false
+                onRemoveNtfy()
+            },
+        )
     }
 }
 
@@ -847,6 +901,12 @@ internal fun RemoteAccessSettingsContent(
     var namedHostnameDraft by remember(namedTunnel.hostname) { mutableStateOf(namedTunnel.hostname.orEmpty()) }
     val selfDnsName = tailscale.device?.dnsName
     val operatorCmd = tailscale.operatorCommand
+    val connectedViaTailscale = isConnectedViaAddress(currentServerUrl, tailscale.service.url ?: selfDnsName)
+    val connectedViaPublic = isConnectedViaAddress(currentServerUrl, publicTunnel.url)
+    val connectedViaNamed = isConnectedViaAddress(currentServerUrl, namedTunnel.hostname)
+    var confirmTurnOffTailscale by remember { mutableStateOf(false) }
+    var confirmTurnOffPublic by remember { mutableStateOf(false) }
+    var confirmSwitchQuickTunnel by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         // 1. Tailscale Card
@@ -962,7 +1022,14 @@ internal fun RemoteAccessSettingsContent(
                 if (isSvcEnabled) {
                     SettingsButton(
                         label = "Disable",
-                        onClick = { onConfigureTailscaleService(false, null, null) },
+                        modifier = Modifier.testTag("tailscale-service-disable"),
+                        onClick = {
+                            if (connectedViaTailscale) {
+                                confirmTurnOffTailscale = true
+                            } else {
+                                onConfigureTailscaleService(false, null, null)
+                            }
+                        },
                     )
                 }
                 if (hasServiceConflict) {
@@ -983,7 +1050,13 @@ internal fun RemoteAccessSettingsContent(
                 subtitle = "Expose PPM via a temporary *.trycloudflare.com HTTPS URL",
                 checked = publicTunnel.enabled,
                 testTag = "public-tunnel-toggle",
-                onCheckedChange = onTogglePublicTunnel,
+                onCheckedChange = { next ->
+                    if (!next && connectedViaPublic) {
+                        confirmTurnOffPublic = true
+                    } else {
+                        onTogglePublicTunnel(next)
+                    }
+                },
             )
             if (publicTunnel.enabled && !publicTunnel.active && publicTunnel.url.isNullOrBlank()) {
                 BasicText(
@@ -1050,11 +1123,57 @@ internal fun RemoteAccessSettingsContent(
                     SettingsButton(
                         label = "Switch to Quick Tunnel",
                         danger = true,
-                        onClick = onDisableNamedTunnel,
+                        enabled = !connectedViaNamed,
+                        modifier = Modifier.testTag("named-tunnel-switch-quick"),
+                        onClick = { confirmSwitchQuickTunnel = true },
                     )
                 }
             }
         }
+    }
+
+    if (confirmTurnOffTailscale) {
+        val activeUrl = tailscale.service.url ?: selfDnsName?.let { "https://$it" } ?: "Tailscale"
+        ConfirmDialog(
+            title = "Turn off the address you are using?",
+            message = "This page is open at $activeUrl. Turning the address off disconnects it; reach PPM another way to turn it back on.",
+            confirm = "Turn off",
+            confirmTestTag = "tailscale-turn-off-confirm",
+            onDismiss = { confirmTurnOffTailscale = false },
+            onConfirm = {
+                confirmTurnOffTailscale = false
+                onConfigureTailscaleService(false, null, null)
+            },
+        )
+    }
+
+    if (confirmTurnOffPublic) {
+        ConfirmDialog(
+            title = "Turn off the link you are using?",
+            message = "This page is open at ${publicTunnel.url ?: "your public link"}. Turning the link off disconnects it; reach PPM another way to turn it back on.",
+            confirm = "Turn off",
+            confirmTestTag = "public-tunnel-turn-off-confirm",
+            onDismiss = { confirmTurnOffPublic = false },
+            onConfirm = {
+                confirmTurnOffPublic = false
+                onTogglePublicTunnel(false)
+            },
+        )
+    }
+
+    if (confirmSwitchQuickTunnel) {
+        val domainText = namedTunnel.hostname?.let { "https://$it" } ?: "your domain"
+        ConfirmDialog(
+            title = "Switch to a temporary address?",
+            message = "PPM stops answering at $domainText and gets a new random address instead. Links that use your domain stop working until you set it up again.",
+            confirm = "Switch",
+            confirmTestTag = "named-tunnel-switch-confirm",
+            onDismiss = { confirmSwitchQuickTunnel = false },
+            onConfirm = {
+                confirmSwitchQuickTunnel = false
+                onDisableNamedTunnel()
+            },
+        )
     }
 }
 
@@ -1176,7 +1295,11 @@ internal fun CloudSettingsSection(model: AppModel) {
         },
         onLogout = {
             val client = api ?: return@CloudSettingsContent
+            val wasLinked = status.linked
             scope.launch {
+                if (wasLinked) {
+                    runCatching { client.cloudUnlink() }
+                }
                 runCatching { client.cloudLogout() }
                 reload()
             }
@@ -1227,6 +1350,8 @@ internal fun CloudSettingsContent(
     val uriHandler = LocalUriHandler.current
     var deviceNameDraft by remember(status.deviceName) { mutableStateOf(status.deviceName.orEmpty()) }
     var aliasDraft by remember(aliasSlug) { mutableStateOf(aliasSlug.orEmpty()) }
+    var confirmLogout by remember { mutableStateOf(false) }
+    var confirmUnlink by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (!statusMessage.isNullOrBlank()) {
@@ -1249,7 +1374,7 @@ internal fun CloudSettingsContent(
                         label = "Sign Out",
                         danger = true,
                         modifier = Modifier.testTag("cloud-logout-btn"),
-                        onClick = onLogout,
+                        onClick = { confirmLogout = true },
                     )
                 }
             } else {
@@ -1275,7 +1400,7 @@ internal fun CloudSettingsContent(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             SettingsButton(
                                 label = "Copy Code",
-                                onClick = { copyToClipboard12c(context, "PPM Cloud Device Code", deviceCodeFlow.userCode) },
+                                onClick = { copySensitiveClip(context, "PPM Cloud Device Code", deviceCodeFlow.userCode) },
                             )
                             if (deviceCodeFlow.verificationUri.isNotBlank()) {
                                 SettingsButton(
@@ -1328,7 +1453,7 @@ internal fun CloudSettingsContent(
                         label = "Unlink Device",
                         danger = true,
                         modifier = Modifier.testTag("cloud-unlink-btn"),
-                        onClick = onUnlinkDevice,
+                        onClick = { confirmUnlink = true },
                     )
                 }
             } else {
@@ -1370,6 +1495,34 @@ internal fun CloudSettingsContent(
                 )
             }
         }
+    }
+
+    if (confirmLogout) {
+        ConfirmDialog(
+            title = "Sign out from PPM Cloud?",
+            message = if (status.linked) "This will also unlink your device." else "Sign out from your PPM Cloud account on this server.",
+            confirm = "Sign Out",
+            confirmTestTag = "cloud-logout-confirm",
+            onDismiss = { confirmLogout = false },
+            onConfirm = {
+                confirmLogout = false
+                onLogout()
+            },
+        )
+    }
+
+    if (confirmUnlink) {
+        ConfirmDialog(
+            title = "Unlink this device from PPM Cloud?",
+            message = "It will no longer appear on your cloud dashboard.",
+            confirm = "Unlink",
+            confirmTestTag = "cloud-unlink-confirm",
+            onDismiss = { confirmUnlink = false },
+            onConfirm = {
+                confirmUnlink = false
+                onUnlinkDevice()
+            },
+        )
     }
 }
 
@@ -1457,7 +1610,8 @@ internal fun ProxySettingsContent(
                     if (state.authKey.isNotBlank()) {
                         SettingsButton(
                             label = "Copy Key",
-                            onClick = { copyToClipboard12c(context, "Proxy Auth Key", state.authKey) },
+                            modifier = Modifier.testTag("proxy-copy-key"),
+                            onClick = { copySensitiveClip(context, "Proxy Auth Key", state.authKey) },
                         )
                     }
                 }
@@ -1498,7 +1652,8 @@ internal fun ProxySettingsContent(
             )
             SettingsButton(
                 label = "Copy Env Snippet",
-                onClick = { copyToClipboard12c(context, "Proxy Env Snippet", envSnippet) },
+                modifier = Modifier.testTag("proxy-copy-env"),
+                onClick = { copySensitiveClip(context, "Proxy Env Snippet", envSnippet) },
             )
         }
     }
@@ -1830,6 +1985,7 @@ internal fun JiraSettingsSection(model: AppModel) {
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun JiraSettingsContent(
     jiraEnabled: Boolean,
@@ -1857,9 +2013,14 @@ internal fun JiraSettingsContent(
     var selectedProjectId by remember(projects, configs) {
         mutableIntStateOf(projects.firstOrNull()?.id ?: configs.firstOrNull()?.projectId ?: 1)
     }
+    var selectedWatcherConfigId by remember(configs) {
+        mutableIntStateOf(configs.firstOrNull()?.id ?: 0)
+    }
     var baseUrlDraft by remember { mutableStateOf("") }
     var emailDraft by remember { mutableStateOf("") }
     var tokenDraft by remember { mutableStateOf("") }
+    var tokenVisible by remember { mutableStateOf(false) }
+    var pendingDeleteConfig by remember { mutableStateOf<JiraConfigRow?>(null) }
 
     var watcherNameDraft by remember { mutableStateOf("") }
     var watcherJqlDraft by remember { mutableStateOf("") }
@@ -1883,6 +2044,29 @@ internal fun JiraSettingsContent(
 
         IntegrationCard {
             SettingsSectionTitle("Jira Project Credentials (${configs.size})")
+            if (projects.isNotEmpty()) {
+                BasicText("Target Project", style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text2.color))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    for (proj in projects) {
+                        FilterChip12c(
+                            label = proj.name,
+                            selected = selectedProjectId == proj.id,
+                            testTag = "jira-project-${proj.id}",
+                            onClick = {
+                                selectedProjectId = proj.id
+                                val existing = configs.firstOrNull { it.projectId == proj.id }
+                                if (existing != null) {
+                                    baseUrlDraft = existing.baseUrl
+                                    emailDraft = existing.email
+                                }
+                            },
+                        )
+                    }
+                }
+            }
             for (cfg in configs) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -1895,7 +2079,12 @@ internal fun JiraSettingsContent(
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         SettingsButton(label = "Test", onClick = { onTestConfig(cfg.projectId) })
-                        SettingsButton(label = "Delete", danger = true, onClick = { onDeleteConfig(cfg.projectId) })
+                        SettingsButton(
+                            label = "Delete",
+                            danger = true,
+                            modifier = Modifier.testTag("jira-delete-config-${cfg.projectId}"),
+                            onClick = { pendingDeleteConfig = cfg },
+                        )
                     }
                 }
             }
@@ -1913,12 +2102,14 @@ internal fun JiraSettingsContent(
                 placeholder = "Jira account email",
                 modifier = Modifier.fillMaxWidth().testTag("jira-email"),
             )
-            SettingsTextInput(
+            SettingsPasswordInput(
                 value = tokenDraft,
                 onValueChange = { tokenDraft = it },
                 placeholder = "Atlassian API token",
-                mono = true,
-                modifier = Modifier.fillMaxWidth().testTag("jira-token"),
+                visible = tokenVisible,
+                onToggleVisible = { tokenVisible = !tokenVisible },
+                modifier = Modifier.fillMaxWidth(),
+                inputTestTag = "jira-token",
             )
             SettingsButton(
                 label = "Save Credentials",
@@ -1956,8 +2147,23 @@ internal fun JiraSettingsContent(
                 }
             }
             if (configs.isNotEmpty()) {
-                val activeConfigId = configs.first().id
+                val activeConfigId = configs.firstOrNull { it.id == selectedWatcherConfigId }?.id ?: configs.first().id
                 Separator()
+                if (configs.size > 1) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        for (cfg in configs) {
+                            FilterChip12c(
+                                label = cfg.projectName ?: "Config #${cfg.id}",
+                                selected = activeConfigId == cfg.id,
+                                testTag = "jira-watcher-config-${cfg.id}",
+                                onClick = { selectedWatcherConfigId = cfg.id },
+                            )
+                        }
+                    }
+                }
                 SettingsTextInput(
                     value = watcherNameDraft,
                     onValueChange = { watcherNameDraft = it },
@@ -2016,11 +2222,26 @@ internal fun JiraSettingsContent(
                             }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            SettingsButton(label = "Debug", onClick = { onDebugResult(r.id) })
-                            if (r.status == "running") {
-                                SettingsButton(label = "Cancel", onClick = { onCancelResult(r.id) })
-                            } else if (r.sessionId != null) {
-                                SettingsButton(label = "Resume", onClick = { onResumeResult(r.id) })
+                            if (canDebugJiraWatcherResult(r.status, r.sessionId)) {
+                                SettingsButton(
+                                    label = "Debug",
+                                    modifier = Modifier.testTag("jira-result-debug-${r.id}"),
+                                    onClick = { onDebugResult(r.id) },
+                                )
+                            }
+                            if (canCancelJiraWatcherResult(r.status)) {
+                                SettingsButton(
+                                    label = "Cancel",
+                                    modifier = Modifier.testTag("jira-result-cancel-${r.id}"),
+                                    onClick = { onCancelResult(r.id) },
+                                )
+                            }
+                            if (canResumeJiraWatcherResult(r.status, r.sessionId)) {
+                                SettingsButton(
+                                    label = "Resume",
+                                    modifier = Modifier.testTag("jira-result-resume-${r.id}"),
+                                    onClick = { onResumeResult(r.id) },
+                                )
                             }
                             if (r.readAt == null) {
                                 SettingsButton(label = "Read", onClick = { onMarkResultRead(r.id) })
@@ -2031,6 +2252,20 @@ internal fun JiraSettingsContent(
                 }
             }
         }
+    }
+
+    pendingDeleteConfig?.let { cfg ->
+        ConfirmDialog(
+            title = "Delete Jira credentials?",
+            message = "Remove Jira credentials for ${cfg.projectName ?: "Project #${cfg.projectId}"}?",
+            confirm = "Delete",
+            confirmTestTag = "jira-delete-config-confirm",
+            onDismiss = { pendingDeleteConfig = null },
+            onConfirm = {
+                pendingDeleteConfig = null
+                onDeleteConfig(cfg.projectId)
+            },
+        )
     }
 }
 
@@ -2164,6 +2399,25 @@ internal fun SchedulesSettingsSection(model: AppModel) {
                 }.onFailure { statusMessage = it.message ?: "Import failed" }
             }
         },
+        onImportTemplateWithTrust = { rawJson, projectName, trust ->
+            val client = api ?: return@SchedulesSettingsContent
+            val parsed = parseScheduleTemplateJson(rawJson).getOrElse {
+                statusMessage = it.message ?: "Invalid template JSON"
+                return@SchedulesSettingsContent
+            }
+            scope.launch {
+                runCatching {
+                    client.schedulesImport(
+                        template = parsed.rawJson,
+                        projectName = projectName,
+                        trust = trust,
+                    )
+                }.onSuccess {
+                    statusMessage = "Imported '${parsed.name}'"
+                    reload()
+                }.onFailure { statusMessage = it.message ?: "Import failed" }
+            }
+        },
         onOpenLogs = { activeLogsSchedule = it },
         onCloseLogs = { activeLogsSchedule = null },
     )
@@ -2184,6 +2438,7 @@ internal fun SchedulesSettingsContent(
     onCreateSchedule: (kotlinx.serialization.json.JsonObject) -> Unit,
     onExportTemplate: (Int) -> Unit,
     onImportTemplate: (String, String) -> Unit,
+    onImportTemplateWithTrust: (String, String, Boolean) -> Unit = { raw, proj, _ -> onImportTemplate(raw, proj) },
     onOpenLogs: (ScheduleRowState) -> Unit,
     onCloseLogs: () -> Unit,
 ) {
@@ -2307,9 +2562,9 @@ internal fun SchedulesSettingsContent(
         ScheduleImportDialog(
             projects = projects,
             onDismiss = { showImportDialog = false },
-            onImport = { json, proj ->
+            onImport = { json, proj, trust ->
                 showImportDialog = false
-                onImportTemplate(json, proj)
+                onImportTemplateWithTrust(json, proj, trust)
             },
         )
     }
@@ -2484,62 +2739,121 @@ internal fun ScheduleCreateFormContent(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ScheduleImportDialog(
     projects: List<ScheduleProjectOption>,
     onDismiss: () -> Unit,
-    onImport: (String, String) -> Unit,
+    onImport: (String, String, Boolean) -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        ScheduleImportFormContent(
+            projects = projects,
+            onDismiss = onDismiss,
+            onImport = onImport,
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun ScheduleImportFormContent(
+    projects: List<ScheduleProjectOption>,
+    onDismiss: () -> Unit,
+    onImport: (String, String, Boolean) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
     var jsonText by remember { mutableStateOf("") }
     var projectName by remember(projects) { mutableStateOf(projects.firstOrNull()?.name ?: "default") }
+    var trusted by remember { mutableStateOf(false) }
 
-    Dialog(onDismissRequest = onDismiss) {
-        val shape = RoundedCornerShape(12.dp)
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(shape)
-                .background(tokens.panel.color)
-                .cssBorder(tokens.border.color, shape)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            SettingsSectionTitle("Import Schedule Template")
-            if (projects.isNotEmpty()) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    for (proj in projects) {
-                        FilterChip12c(
-                            label = proj.name,
-                            selected = projectName == proj.name,
-                            onClick = { projectName = proj.name },
-                        )
-                    }
+    val parsedResult = remember(jsonText) {
+        if (jsonText.isBlank()) null else parseScheduleTemplateJson(jsonText)
+    }
+    val parsed = parsedResult?.getOrNull()
+    val parseError = parsedResult?.exceptionOrNull()?.message
+
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(tokens.panel.color)
+            .cssBorder(tokens.border.color, shape)
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        SettingsSectionTitle("Import Schedule Template")
+        if (projects.isNotEmpty()) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                for (proj in projects) {
+                    FilterChip12c(
+                        label = proj.name,
+                        selected = projectName == proj.name,
+                        onClick = { projectName = proj.name },
+                    )
                 }
             }
-            SettingsTextInput(
-                value = jsonText,
-                onValueChange = { jsonText = it },
-                placeholder = "{\"ppmScheduleTemplate\": 1, ...}",
-                mono = true,
-                singleLine = false,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp).testTag("schedule-import-json"),
+        }
+        SettingsTextInput(
+            value = jsonText,
+            onValueChange = {
+                jsonText = it
+                trusted = false
+            },
+            placeholder = "{\"ppmScheduleTemplate\": 1, ...}",
+            mono = true,
+            singleLine = false,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp).testTag("schedule-import-json"),
+        )
+        if (!parseError.isNullOrBlank()) {
+            BasicText(
+                parseError,
+                style = ppmText(11f).copy(color = tokens.error.color),
+                modifier = Modifier.testTag("schedule-import-error"),
             )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                SettingsButton(label = "Cancel", onClick = onDismiss)
-                Spacer(Modifier.width(8.dp))
-                SettingsButton(
-                    label = "Import",
-                    primary = true,
-                    enabled = jsonText.isNotBlank(),
-                    modifier = Modifier.testTag("schedule-import-confirm"),
-                    onClick = { onImport(jsonText.trim(), projectName) },
+        }
+        if (parsed != null) {
+            val codePreview = parsed.script ?: parsed.prompt.orEmpty()
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(tokens.bgSolid.color)
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                BasicText(
+                    "${parsed.name} (${parsed.kind}/${parsed.mode})",
+                    style = ppmText(11f, FontWeight.SemiBold).copy(color = tokens.text.color),
+                )
+                BasicText(
+                    codePreview,
+                    style = ppmText(10f, kind = FontKind.MONO).copy(color = tokens.text2.color),
+                    modifier = Modifier.testTag("schedule-import-preview"),
                 )
             }
+        }
+        SettingsToggleRow(
+            title = "I have read this code and trust it to run on this machine",
+            subtitle = "Schedules run commands or AI sessions on the host with your server's permissions.",
+            checked = trusted,
+            testTag = "schedule-import-trust",
+            onCheckedChange = { trusted = it },
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            SettingsButton(label = "Cancel", onClick = onDismiss)
+            Spacer(Modifier.width(8.dp))
+            SettingsButton(
+                label = "Import",
+                primary = true,
+                enabled = parsed != null && trusted,
+                modifier = Modifier.testTag("schedule-import-confirm"),
+                onClick = { onImport(jsonText.trim(), projectName, trusted) },
+            )
         }
     }
 }

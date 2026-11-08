@@ -1,9 +1,13 @@
 package com.hienlh.ppm.app.ui
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.design.BuiltInThemes
@@ -260,5 +264,136 @@ class Phase12cUiTest {
         assertEquals("Daily Summary", createdPayload?.get("name")?.toString()?.trim('"'))
         assertEquals("/home/thawngho/Projects/web", createdPayload?.get("project_path")?.toString()?.trim('"'))
         assertEquals("0 * * * *", createdPayload?.get("cron_expr")?.toString()?.trim('"'))
+    }
+
+    @Test
+    fun scheduleImportAndJiraAndRemoteAccess_enforceConfirmationsTrustAndStatusGates() {
+        var importedTrust: Boolean? = null
+        var importedProject: String? = null
+        var savedJiraProjectId: Int? = null
+        var deletedJiraProjectId: Int? = null
+        var createdWatcherConfigId: Int? = null
+        var publicToggledTo: Boolean? = null
+
+        val validTemplateJson = """
+            {
+              "ppmScheduleTemplate": 1,
+              "name": "Nightly Check",
+              "description": "Audit repo",
+              "kind": "prompt",
+              "mode": "tick",
+              "cron": "0 3 * * *",
+              "prompt": "Check status",
+              "maxTurns": 10,
+              "permissionMode": "default"
+            }
+        """.trimIndent()
+
+        var activeSection by androidx.compose.runtime.mutableStateOf(0)
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                when (activeSection) {
+                    0 -> ScheduleImportFormContent(
+                        projects = listOf(ScheduleProjectOption(name = "ppm", path = "/home/thawngho/Projects/ppm")),
+                        onDismiss = {},
+                        onImport = { _, proj, trust ->
+                            importedProject = proj
+                            importedTrust = trust
+                        },
+                    )
+                    1 -> androidx.compose.foundation.layout.Column(
+                        modifier = androidx.compose.ui.Modifier.verticalScroll(
+                            androidx.compose.foundation.rememberScrollState(),
+                        ),
+                    ) {
+                        JiraSettingsContent(
+                            jiraEnabled = true,
+                            projects = listOf(
+                                com.hienlh.ppm.state.settings.JiraProjectOption(id = 1, name = "Alpha", path = "/projects/alpha", hasConfig = true),
+                                com.hienlh.ppm.state.settings.JiraProjectOption(id = 2, name = "Beta", path = "/projects/beta", hasConfig = true),
+                            ),
+                            configs = listOf(
+                                com.hienlh.ppm.state.settings.JiraConfigRow(id = 10, projectId = 1, projectName = "Alpha", baseUrl = "https://alpha.atlassian.net", email = "a@ex.com", hasToken = true),
+                                com.hienlh.ppm.state.settings.JiraConfigRow(id = 20, projectId = 2, projectName = "Beta", baseUrl = "https://beta.atlassian.net", email = "b@ex.com", hasToken = true),
+                            ),
+                            watchers = emptyList(),
+                            results = listOf(
+                                com.hienlh.ppm.state.settings.JiraResultRow(id = 101, issueKey = "BETA-1", status = "done", sessionId = "sess-done"),
+                                com.hienlh.ppm.state.settings.JiraResultRow(id = 102, issueKey = "BETA-2", status = "failed", sessionId = "sess-fail"),
+                            ),
+                            onToggleJiraEnabled = {},
+                            onSaveConfig = { pid, _, _, _ -> savedJiraProjectId = pid },
+                            onTestConfig = {},
+                            onDeleteConfig = { pid -> deletedJiraProjectId = pid },
+                            onCreateWatcher = { cid, _, _, _, _, _ -> createdWatcherConfigId = cid },
+                            onToggleWatcher = { _, _ -> },
+                            onPullWatcher = {},
+                            onDeleteWatcher = {},
+                            onTestJql = { _, _ -> },
+                            onDebugResult = {},
+                            onResumeResult = {},
+                            onCancelResult = {},
+                            onMarkResultRead = {},
+                            onDeleteResult = {},
+                        )
+                    }
+                    else -> RemoteAccessSettingsContent(
+                        currentServerUrl = "https://random-quick.trycloudflare.com",
+                        tailscale = TailscaleState(installed = true, backendState = "Running"),
+                        publicTunnel = PublicTunnelState(enabled = true, active = true, url = "https://random-quick.trycloudflare.com"),
+                        namedTunnel = NamedTunnelState(),
+                        onRunInTerminal = {},
+                        onStartTailscaleLogin = {},
+                        onCancelTailscaleLogin = {},
+                        onConfigureTailscaleService = { _, _, _ -> },
+                        onTogglePublicTunnel = { publicToggledTo = it },
+                        onStartNamedTunnelLogin = {},
+                        onCancelNamedTunnelLogin = {},
+                        onSetupNamedTunnel = {},
+                        onDisableNamedTunnel = {},
+                    )
+                }
+            }
+        }
+
+        // 1. Schedule import requires explicit trust checkbox before Import fires
+        composeRule.onNodeWithTag("schedule-import-json").performTextReplacement(validTemplateJson)
+        composeRule.onNodeWithTag("schedule-import-confirm").performClick()
+        assertNull(importedTrust)
+        composeRule.onNodeWithTag("schedule-import-trust").performClick()
+        composeRule.onNodeWithTag("schedule-import-confirm").performClick()
+        assertEquals(true, importedTrust)
+        assertEquals("ppm", importedProject)
+
+        // 2. Jira project & watcher config selector + delete confirmation + Resume only on failed result
+        activeSection = 1
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("jira-project-2").performClick()
+        composeRule.onNodeWithTag("jira-save-config").performClick()
+        assertEquals(2, savedJiraProjectId)
+
+        composeRule.onNodeWithTag("jira-watcher-config-20").performClick()
+        composeRule.onNodeWithTag("jira-watcher-name").performTextReplacement("Bug Watcher")
+        composeRule.onNodeWithTag("jira-watcher-jql").performTextReplacement("project = BETA")
+        composeRule.onNodeWithTag("jira-watcher-add").performClick()
+        assertEquals(20, createdWatcherConfigId)
+
+        // Result 101 ("done" with sessionId) must NOT show Resume; Result 102 ("failed" with sessionId) DOES show Resume
+        composeRule.onNodeWithTag("jira-result-resume-101").assertDoesNotExist()
+        composeRule.onNodeWithTag("jira-result-resume-102").performScrollTo().assertIsDisplayed()
+
+        composeRule.onNodeWithTag("jira-delete-config-1").performScrollTo().performClick()
+        assertNull(deletedJiraProjectId)
+        composeRule.onNodeWithTag("jira-delete-config-confirm").performClick()
+        assertEquals(1, deletedJiraProjectId)
+
+        // 3. Turning off Public Tunnel while connected via its URL requires confirmation
+        activeSection = 2
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("public-tunnel-toggle").performClick()
+        assertNull(publicToggledTo)
+        composeRule.onNodeWithTag("public-tunnel-turn-off-confirm").performClick()
+        assertEquals(false, publicToggledTo)
     }
 }

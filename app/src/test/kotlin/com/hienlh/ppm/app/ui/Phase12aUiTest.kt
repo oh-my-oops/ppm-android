@@ -210,4 +210,37 @@ class Phase12aUiTest {
         composeRule.onNodeWithTag("rd-relay-download").performClick()
         assertTrue(relayInstallClicked)
     }
+
+    @Test
+    fun copySensitiveClip_marksClipWithExtraIsSensitiveAndCustomThemeResolvesTokens() {
+        val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val clip = copySensitiveClip(ctx, "Secret Key", "sk-secret-123")
+        val extras = clip.description.extras
+        assertTrue(extras != null && extras.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE))
+
+        val customTheme = com.hienlh.ppm.design.PpmTheme.fromCustom(
+            id = "catppuccin-mocha",
+            name = "Catppuccin Mocha",
+            mode = "dark",
+            tokenMap = mapOf(
+                "bgSolid" to "#1e1e2e",
+                "panel" to "#181825",
+                "text" to "#cdd6f4",
+                "accent" to "#cba6f7",
+                "rad" to "14px",
+            ),
+            swatchStrings = listOf("#1e1e2e", "#cba6f7", "#89b4fa"),
+        )
+        val resolved = com.hienlh.ppm.design.PpmTheme.resolve(
+            style = "custom",
+            mode = "dark",
+            systemIsDark = true,
+            customThemes = listOf(customTheme),
+            customThemeId = "catppuccin-mocha",
+        )
+        assertEquals("catppuccin-mocha", resolved.id)
+        assertEquals(com.hienlh.ppm.design.Rgba.hex("#cba6f7"), resolved.tokens.accent)
+        assertEquals(com.hienlh.ppm.design.Rgba.hex("#1e1e2e"), resolved.tokens.bgSolid)
+        assertEquals(14.0, resolved.tokens.rad, 0.001)
+    }
 }

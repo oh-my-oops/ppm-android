@@ -296,4 +296,12 @@ class SettingsAiStateTest {
         assertNull(parsedAfter.connectUrl)
         assertEquals(2, parsedAfter.chats.size)
     }
+
+    @Test
+    fun `12b duplicateAiResourceTargetScope maps bundled scope to project or user`() {
+        assertEquals("project", duplicateAiResourceTargetScope("bundled", "/home/thawngho/Projects/ppm"))
+        assertEquals("user", duplicateAiResourceTargetScope("bundled", ""))
+        assertEquals("project", duplicateAiResourceTargetScope("project", ""))
+        assertEquals("user", duplicateAiResourceTargetScope("user", "/home/thawngho/Projects/ppm"))
+    }
 }
