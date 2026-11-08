@@ -165,13 +165,13 @@ fun LogsAppBody(
     }
 
     suspend fun loadLogs(before: String? = null) {
+        if (before == null) {
+            liveBuffer.beginPageRead()
+            pausedCount = 0
+        }
         val api = model.api ?: run {
             loading = false
             return
-        }
-        if (before == null) {
-            model.events?.sendIfOpen("""{"type":"logs:subscribe"}""")
-            liveBuffer.beginPageRead()
         }
         loading = true
         try {
@@ -224,15 +224,13 @@ fun LogsAppBody(
 
     // Live tail via GlobalEvents: subscribe BEFORE the page read, resubscribe and re-read on global_ready.
     DisposableEffect(model, model.events) {
-        model.onLogsWindowMounted()
+        val releaseTail = model.retainLogsTail()
         val ev = model.events
         var unsubLines: (() -> Unit)? = null
         var unsubIssues: (() -> Unit)? = null
         var unsubReady: (() -> Unit)? = null
         if (ev != null) {
-            ev.sendIfOpen("""{"type":"logs:subscribe"}""")
             unsubReady = ev.onGlobalReady {
-                ev.sendIfOpen("""{"type":"logs:subscribe"}""")
                 reloads += 1
             }
             unsubLines = ev.onLogsLines { msg ->
@@ -246,18 +244,23 @@ fun LogsAppBody(
             }
         }
         onDispose {
-            model.onLogsWindowUnmounted()
             unsubReady?.invoke()
             unsubLines?.invoke()
             unsubIssues?.invoke()
-            ev?.sendIfOpen("""{"type":"logs:unsubscribe"}""")
+            releaseTail()
         }
     }
 
+    var initialLoadSkipped by remember { mutableStateOf(false) }
     LaunchedEffect(model.api, filter, range, reloads) {
-        if (reloads > 0 || initialResult == null || filter != DEFAULT_LOG_FILTER || range != "1h") {
-            loadLogs()
+        if (!initialLoadSkipped && initialResult != null && reloads == 0 && filter == DEFAULT_LOG_FILTER && range == "1h") {
+            initialLoadSkipped = true
+            return@LaunchedEffect
         }
+        initialLoadSkipped = true
+        liveBuffer.beginPageRead()
+        pausedCount = 0
+        loadLogs()
     }
 
     suspend fun loadEnvironment(): List<Pair<String, String>> {
@@ -787,7 +790,12 @@ private fun LogsStreamPane(
     LaunchedEffect(follow, lastEntryId, rows.size) {
         if (follow && rows.isNotEmpty()) {
             val targetIdx = (rows.size - 1 + (if (result.hasMore) 1 else 0) + dividers.size).coerceAtLeast(0)
-            runCatching { listState.scrollToItem(targetIdx) }
+            try {
+                listState.scrollToItem(targetIdx)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
         }
     }
 

@@ -745,4 +745,54 @@ class Phase11aUiTest {
             server.close()
         }
     }
+
+    @Test
+    fun `retainLogsTail reference counts subscribe and unsubscribe across two LogsAppBody views`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val model = AppModel(context)
+        val sentFrames = mutableListOf<String>()
+        model.logsTailSender = { frame -> sentFrames += frame }
+
+        val showFirst = androidx.compose.runtime.mutableStateOf(true)
+        val showSecond = androidx.compose.runtime.mutableStateOf(true)
+        val initialLogs = LogQueryResult(
+            entries = listOf(LogEntry(id = "1", ts = 1000L, lv = "info", src = "server", tag = "ppm", msg = "line 1")),
+            matched = 1,
+            inRange = 1,
+            fromTs = 0L,
+        )
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                Column(Modifier.fillMaxSize()) {
+                    if (showFirst.value) {
+                        Box(Modifier.weight(1f)) {
+                            LogsAppBody(model = model, initialResult = initialLogs)
+                        }
+                    }
+                    if (showSecond.value) {
+                        Box(Modifier.weight(1f)) {
+                            LogsAppBody(model = model, initialResult = initialLogs)
+                        }
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        assertEquals(2, model.openLogsWindowCount)
+        assertEquals(listOf("""{"type":"logs:subscribe"}"""), sentFrames)
+
+        // Closing the second Logs view must NOT send logs:unsubscribe while the first view remains open
+        showSecond.value = false
+        composeRule.waitForIdle()
+        assertEquals(1, model.openLogsWindowCount)
+        assertEquals(listOf("""{"type":"logs:subscribe"}"""), sentFrames)
+
+        // Closing the last Logs view sends logs:unsubscribe
+        showFirst.value = false
+        composeRule.waitForIdle()
+        assertEquals(0, model.openLogsWindowCount)
+        assertEquals(listOf("""{"type":"logs:subscribe"}""", """{"type":"logs:unsubscribe"}"""), sentFrames)
+    }
 }

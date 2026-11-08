@@ -346,5 +346,22 @@ class SysMonLogsTunnelsTest {
         val merged = buf.finishPageRead(page, DEFAULT_LOG_FILTER)
         assertEquals(listOf("1", "2", "3"), merged.entries.map { it.id })
         assertEquals("Chat 1", merged.titles["s1"])
+
+        // 4. Paused entries and titles are cleared when beginPageRead() starts a new filter/range/reload fetch
+        buf.onLiveBatch(
+            merged,
+            listOf(LogEntry(id = "4", ts = 4000L, lv = "warn", src = "server", tag = "ppm", msg = "held while paused")),
+            mapOf("s2" to "Chat 2"),
+            DEFAULT_LOG_FILTER,
+            follow = false,
+        )
+        assertEquals(1, buf.pausedEntryCount)
+        assertEquals(1, buf.pausedTitleCount)
+        assertEquals(1, buf.pausedMatchingCount(merged, DEFAULT_LOG_FILTER))
+
+        buf.beginPageRead()
+        assertEquals(0, buf.pausedEntryCount)
+        assertEquals(0, buf.pausedTitleCount)
+        assertEquals(0, buf.pausedMatchingCount(merged, DEFAULT_LOG_FILTER))
     }
 }

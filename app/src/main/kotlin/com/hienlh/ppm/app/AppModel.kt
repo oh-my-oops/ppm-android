@@ -792,13 +792,49 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     private var logsBadgePollJob: Job? = null
     internal var openLogsWindowCount = 0
+    private var logsReadyOff: (() -> Unit)? = null
+    private var logsBoundEvents: GlobalEvents? = null
+    internal var logsTailSender: ((String) -> Unit)? = null
 
-    internal fun onLogsWindowMounted() {
-        openLogsWindowCount += 1
+    private fun sendLogsTailFrame(frame: String) {
+        val custom = logsTailSender
+        if (custom != null) {
+            custom(frame)
+        } else {
+            events?.sendIfOpen(frame)
+        }
     }
 
-    internal fun onLogsWindowUnmounted() {
-        openLogsWindowCount = (openLogsWindowCount - 1).coerceAtLeast(0)
+    /** Keeps the server pushing new lines while any Logs view is mounted (`retainLogsTail`, `use-logs-feed.ts:35-46`). */
+    fun retainLogsTail(): () -> Unit {
+        val ev = events
+        if (logsBoundEvents !== ev) {
+            logsReadyOff?.invoke()
+            logsReadyOff = null
+            logsBoundEvents = ev
+            if (openLogsWindowCount > 0) {
+                val subscribe = { sendLogsTailFrame("""{"type":"logs:subscribe"}""") }
+                subscribe()
+                logsReadyOff = ev?.onGlobalReady(subscribe)
+            }
+        }
+        if (openLogsWindowCount++ == 0) {
+            val subscribe = { sendLogsTailFrame("""{"type":"logs:subscribe"}""") }
+            subscribe()
+            logsReadyOff = ev?.onGlobalReady(subscribe)
+        }
+        var released = false
+        return {
+            if (!released) {
+                released = true
+                openLogsWindowCount = (openLogsWindowCount - 1).coerceAtLeast(0)
+                if (openLogsWindowCount == 0) {
+                    logsReadyOff?.invoke()
+                    logsReadyOff = null
+                    sendLogsTailFrame("""{"type":"logs:unsubscribe"}""")
+                }
+            }
+        }
     }
 
     var sharedMetricsSnapshot by mutableStateOf<com.hienlh.ppm.state.sysmon.MetricsSnapshot?>(null)

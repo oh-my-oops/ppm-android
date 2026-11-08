@@ -762,10 +762,18 @@ class LogsLiveFeedBuffer {
     private val pausedEntries = mutableListOf<LogEntry>()
     private val pausedTitles = mutableMapOf<String, String>()
 
+    val pausedEntryCount: Int
+        get() = pausedEntries.size
+
+    val pausedTitleCount: Int
+        get() = pausedTitles.size
+
     fun beginPageRead() {
         inFlight = true
         inFlightEntries.clear()
         inFlightTitles.clear()
+        pausedEntries.clear()
+        pausedTitles.clear()
     }
 
     fun cancelPageRead() {
