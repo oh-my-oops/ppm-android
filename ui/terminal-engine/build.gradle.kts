@@ -89,7 +89,7 @@ android {
     compileSdk = 37
     defaultConfig {
         minSdk = 26
-        testInstrumentationRunner = "org.connectbot.terminal.EngineInstrumentation"
+        testInstrumentationRunner = providers.gradleProperty("testInstrumentationRunner").getOrElse("org.connectbot.terminal.EngineInstrumentation")
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
