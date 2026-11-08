@@ -72,6 +72,7 @@ import com.hienlh.ppm.client.dbUninstallDriver
 import com.hienlh.ppm.client.lspGlobalInstall
 import com.hienlh.ppm.client.lspGlobalServers
 import com.hienlh.ppm.client.lspGlobalUninstall
+import com.hienlh.ppm.client.listProjectDirectory
 import com.hienlh.ppm.client.remoteDesktopRelayInstall
 import com.hienlh.ppm.client.remoteDesktopRelayStatus
 import com.hienlh.ppm.client.remoteDesktopRelayUninstall
@@ -141,9 +142,14 @@ import com.hienlh.ppm.state.settings.validateQueryAuditInputs
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import com.hienlh.ppm.app.ui.shell.LearnPpmDialog
 import com.hienlh.ppm.app.ui.shell.PreviousExitCrashCard
+import com.hienlh.ppm.app.ui.shell.getDismissedCrashTimestamp
 import com.hienlh.ppm.app.ui.shell.inspectLatestCrashOrAnrExit
+import com.hienlh.ppm.app.ui.shell.loadOnboardingStateFromPrefs
+import com.hienlh.ppm.app.ui.shell.saveDismissedCrashTimestamp
+import com.hienlh.ppm.app.ui.shell.saveOnboardingStateToPrefs
 import com.hienlh.ppm.state.shell.OnboardingEvidence
 import com.hienlh.ppm.state.shell.OnboardingState
+import com.hienlh.ppm.state.shell.PreviousExitCrashInfo
 import com.hienlh.ppm.state.shell.applySuggestedPromptToDraft
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -369,17 +375,53 @@ private fun AboutBlock(model: AppModel) {
     var availableVersion by remember { mutableStateOf<String?>(null) }
     var statusNote by remember { mutableStateOf<String?>(null) }
     var learnPpmOpen by remember { mutableStateOf(false) }
-    var onboardingState by remember {
-        mutableStateOf(
-            OnboardingState(active = true).mergeEvidence(
-                OnboardingEvidence(
-                    hasProjectSelected = model.selectedProject != null,
-                    chatSessionCount = model.sessions.size,
-                ),
-            ),
+    fun currentWorkspaceEvidence(fileCount: Int = 0): OnboardingEvidence {
+        val openTabs = model.layout?.panels?.values?.flatMap { panel -> panel.tabs }.orEmpty()
+        return OnboardingEvidence(
+            hasProjectSelected = model.selectedProject != null,
+            projectFileCount = fileCount,
+            chatSessionCount = model.sessions.size,
+            hasOpenedFileTab = openTabs.any { tab -> tab.type == "editor" || tab.type == "file" },
+            hasOpenedTerminalTab = openTabs.any { tab -> tab.type == "terminal" },
+            hasOpenedGitTab = openTabs.any { tab -> tab.type == "git-status" || tab.type == "git-graph" },
         )
     }
-    var crashExitInfo by remember { mutableStateOf(inspectLatestCrashOrAnrExit(context)) }
+    var onboardingState by remember {
+        val saved = loadOnboardingStateFromPrefs(context)
+        val initial = saved.mergeEvidence(currentWorkspaceEvidence())
+        saveOnboardingStateToPrefs(context, initial)
+        mutableStateOf(initial)
+    }
+    fun updateOnboarding(next: OnboardingState) {
+        onboardingState = next
+        saveOnboardingStateToPrefs(context, next)
+    }
+    fun refreshOnboardingEvidence() {
+        val baseMerged = onboardingState.mergeEvidence(currentWorkspaceEvidence())
+        updateOnboarding(baseMerged)
+        val client = api ?: return
+        val proj = model.selectedProject ?: return
+        scope.launch {
+            val fileCount = withContext(Dispatchers.IO) {
+                runCatching { client.listProjectDirectory(proj, "").size }.getOrDefault(0)
+            }
+            updateOnboarding(onboardingState.mergeEvidence(currentWorkspaceEvidence(fileCount)))
+        }
+    }
+    var crashExitInfo by remember { mutableStateOf<PreviousExitCrashInfo?>(null) }
+
+    LaunchedEffect(Unit) {
+        val dismissedTs = getDismissedCrashTimestamp(context)
+        crashExitInfo = withContext(Dispatchers.IO) {
+            inspectLatestCrashOrAnrExit(context, dismissedTimestampMs = dismissedTs)
+        }
+    }
+
+    LaunchedEffect(learnPpmOpen) {
+        if (learnPpmOpen) {
+            refreshOnboardingEvidence()
+        }
+    }
 
     LaunchedEffect(api) {
         if (api == null) return@LaunchedEffect
@@ -546,35 +588,39 @@ private fun AboutBlock(model: AppModel) {
                     cm?.setPrimaryClip(ClipData.newPlainText("PPM Crash Report", md))
                     model.toast(ErrorToastMessage("Crash report copied", "You can paste it into Report Bug.", kind = ErrorToastMessage.Kind.INFO))
                 },
-                onDismiss = { crashExitInfo = null },
+                onDismiss = {
+                    saveDismissedCrashTimestamp(context, info.timestampMs)
+                    crashExitInfo = null
+                },
             )
         }
         if (learnPpmOpen) {
             LearnPpmDialog(
                 state = onboardingState,
-                onStateChange = { onboardingState = it },
-                onRefreshEvidence = {
-                    onboardingState = onboardingState.mergeEvidence(
-                        OnboardingEvidence(
-                            hasProjectSelected = model.selectedProject != null,
-                            chatSessionCount = model.sessions.size,
+                onStateChange = { updateOnboarding(it) },
+                onRefreshEvidence = { refreshOnboardingEvidence() },
+                onInsertSuggestedPrompt = { prompt ->
+                    val openTabs = model.layout?.panels?.values?.flatMap { panel -> panel.tabs }.orEmpty()
+                    val existingChat = model.activeTab?.let { model.chat(it.id) }
+                        ?: openTabs.firstNotNullOfOrNull { tab -> model.chat(tab.id) }
+                    if (existingChat != null) {
+                        val updated = applySuggestedPromptToDraft(existingChat.draft.text.toString(), prompt)
+                        existingChat.draft.setTextAndPlaceCursorAtEnd(updated)
+                        model.activate(existingChat.tabId)
+                        existingChat.requestFocus()
+                    } else if (model.selectedProject != null) {
+                        model.newChat(pendingMessage = prompt)
+                    } else {
+                        model.terminalToChat(prompt, newTab = true, asContext = false)
+                    }
+                    updateOnboarding(onboardingState.markStepCompleted("ai.send"))
+                    model.toast(
+                        ErrorToastMessage(
+                            "Prompt inserted into composer",
+                            "Review the prompt in your chat composer before sending.",
+                            kind = ErrorToastMessage.Kind.INFO,
                         ),
                     )
-                },
-                onInsertSuggestedPrompt = { prompt ->
-                    val activeTab = model.activeTab
-                    val chat = activeTab?.let { model.chat(it.id) }
-                    if (chat != null) {
-                        val updated = applySuggestedPromptToDraft(chat.draft.text.toString(), prompt)
-                        chat.draft.setTextAndPlaceCursorAtEnd(updated)
-                        model.toast(
-                            ErrorToastMessage(
-                                "Prompt inserted into composer",
-                                "Review the prompt in your chat composer before sending.",
-                                kind = ErrorToastMessage.Kind.INFO,
-                            ),
-                        )
-                    }
                     learnPpmOpen = false
                 },
                 onDismiss = { learnPpmOpen = false },

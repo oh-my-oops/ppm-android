@@ -1,6 +1,5 @@
 package com.hienlh.ppm.app.ui.shell
 
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -13,19 +12,18 @@ import androidx.compose.ui.test.performScrollTo
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
-import com.hienlh.ppm.state.shell.HingeBounds
-import com.hienlh.ppm.state.shell.HingeOcclusion
-import com.hienlh.ppm.state.shell.HingeOrientation
 import com.hienlh.ppm.state.shell.OnboardingGoalId
 import com.hienlh.ppm.state.shell.OnboardingState
 import com.hienlh.ppm.state.shell.PreviousExitCrashInfo
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -35,52 +33,6 @@ class Phase13And14ShellUiTest {
 
     @get:Rule
     val rules: RuleChain = withComposeActivity(composeRule)
-
-    @Test
-    fun `FoldablePostureLayout renders book and tabletop splits around hinge`() {
-        var hinge by mutableStateOf<HingeBounds?>(
-            HingeBounds(
-                leftPx = 500,
-                topPx = 0,
-                rightPx = 524,
-                bottomPx = 768,
-                orientation = HingeOrientation.VERTICAL,
-                isSeparating = true,
-                occlusion = HingeOcclusion.FULL,
-            ),
-        )
-
-        composeRule.setContent {
-            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
-                FoldablePostureLayout(
-                    hinge = hinge,
-                    windowWidthPx = 1024,
-                    windowHeightPx = 768,
-                    primaryPane = { BasicText("Primary Pane Content") },
-                    secondaryPane = { BasicText("Secondary Pane Content") },
-                )
-            }
-        }
-
-        composeRule.onNodeWithTag("foldable-posture-book").assertIsDisplayed()
-        composeRule.onNodeWithText("Primary Pane Content").assertIsDisplayed()
-        composeRule.onNodeWithText("Secondary Pane Content").assertIsDisplayed()
-
-        // Switch to tabletop posture
-        hinge = HingeBounds(
-            leftPx = 0,
-            topPx = 360,
-            rightPx = 1024,
-            bottomPx = 380,
-            orientation = HingeOrientation.HORIZONTAL,
-            isSeparating = true,
-            occlusion = HingeOcclusion.NONE,
-        )
-        composeRule.waitForIdle()
-        composeRule.onNodeWithTag("foldable-posture-tabletop").assertIsDisplayed()
-        composeRule.onNodeWithText("Primary Pane Content").assertIsDisplayed()
-        composeRule.onNodeWithText("Secondary Pane Content").assertIsDisplayed()
-    }
 
     @Test
     fun `LearnPpmDialog switches goals, inserts suggested prompt without auto-sending, and navigates Quick Orientation`() {
@@ -120,8 +72,9 @@ class Phase13And14ShellUiTest {
     }
 
     @Test
-    fun `PreviousExitCrashCard displays crash reason and copies markdown report`() {
+    fun `PreviousExitCrashCard displays crash reason, copies markdown report, and triggers dismiss`() {
         var copiedMarkdown: String? = null
+        var dismissed = false
         val crash = PreviousExitCrashInfo(
             reasonCode = 4,
             reasonName = "REASON_CRASH",
@@ -136,13 +89,32 @@ class Phase13And14ShellUiTest {
                 PreviousExitCrashCard(
                     crashInfo = crash,
                     onCopyReport = { copiedMarkdown = it },
-                    onDismiss = {},
+                    onDismiss = { dismissed = true },
                 )
             }
         }
 
         composeRule.onNodeWithText("Previous session exited unexpectedly (REASON_CRASH)").assertIsDisplayed()
-        composeRule.onNodeWithText("Copy Crash Report").performClick()
+        composeRule.onNodeWithTag("previous-exit-crash-copy").performClick()
         assertTrue(copiedMarkdown?.contains("REASON_CRASH") == true)
+
+        composeRule.onNodeWithTag("previous-exit-crash-dismiss").performClick()
+        assertTrue(dismissed)
+
+        // Verify SharedPreferences persistence helpers for Learn PPM state and crash dismissal
+        val appContext = RuntimeEnvironment.getApplication()
+        assertNull(getDismissedCrashTimestamp(appContext))
+        saveDismissedCrashTimestamp(appContext, crash.timestampMs)
+        assertEquals(crash.timestampMs, getDismissedCrashTimestamp(appContext))
+
+        val savedState = OnboardingState(
+            active = true,
+            selectedGoal = OnboardingGoalId.DEVELOPER,
+            completedSteps = setOf("developer.project", "developer.terminal"),
+        )
+        saveOnboardingStateToPrefs(appContext, savedState)
+        val loadedState = loadOnboardingStateFromPrefs(appContext)
+        assertEquals(OnboardingGoalId.DEVELOPER, loadedState.selectedGoal)
+        assertEquals(setOf("developer.project", "developer.terminal"), loadedState.completedSteps)
     }
 }

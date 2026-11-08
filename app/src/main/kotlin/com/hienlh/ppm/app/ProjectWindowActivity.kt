@@ -22,9 +22,6 @@ class ProjectWindowActivity : MainActivity() {
         private const val WINDOW_ID = "ppm.window.id"
         private const val SERVER_ID = "ppm.window.server"
         private const val PROJECT = "ppm.window.project"
-        private const val TAB_TYPE = "ppm.window.tab.type"
-        private const val TAB_ID = "ppm.window.tab.id"
-        private const val TAB_TITLE = "ppm.window.tab.title"
 
         fun open(context: Context, model: AppModel, project: String, adjacent: Boolean = true) {
             val id = UUID.randomUUID().toString()
@@ -39,34 +36,6 @@ class ProjectWindowActivity : MainActivity() {
                 .addFlags(flags)
             // Emulator launches have no saved server entry. These debug-only extras are read
             // only in debuggable builds; this Activity is not exported to other applications.
-            model.debug?.let {
-                intent.putExtra("url", it.url.toString()).putExtra("password", it.password).putExtra("project", project)
-            }
-            context.startActivity(intent)
-        }
-
-        fun openTab(
-            context: Context,
-            model: AppModel,
-            project: String,
-            tabType: String,
-            tabId: String,
-            tabTitle: String,
-            adjacent: Boolean = true,
-        ) {
-            val id = UUID.randomUUID().toString()
-            val flags = Intent.FLAG_ACTIVITY_NEW_DOCUMENT or
-                Intent.FLAG_ACTIVITY_MULTIPLE_TASK or
-                (if (adjacent) Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT else 0)
-            val intent = Intent(context, ProjectWindowActivity::class.java)
-                .setData(Uri.parse("ppm-window://project/$project/tab/$id"))
-                .putExtra(WINDOW_ID, id)
-                .putExtra(SERVER_ID, model.store.selected?.id)
-                .putExtra(PROJECT, project)
-                .putExtra(TAB_TYPE, tabType)
-                .putExtra(TAB_ID, tabId)
-                .putExtra(TAB_TITLE, tabTitle)
-                .addFlags(flags)
             model.debug?.let {
                 intent.putExtra("url", it.url.toString()).putExtra("password", it.password).putExtra("project", project)
             }

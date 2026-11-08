@@ -1,5 +1,6 @@
 package com.hienlh.ppm.state.shell
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -9,11 +10,7 @@ import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.int
-import com.hienlh.ppm.protocol.long
 import com.hienlh.ppm.protocol.string
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.pow
 
 // ===========================================================================
 // 13b.1 · Onboarding "Learn PPM" State, Goals, Steps & Evidence Verification
@@ -48,8 +45,6 @@ data class OnboardingStepDef(
     val goal: OnboardingGoalId,
     val title: String,
     val instruction: String,
-    /** Tag attached via Modifier.testTag("onboarding-<targetTag>") on the target Composable. */
-    val targetTag: String,
     /** Optional sample prompt that is inserted into the composer draft (NEVER auto-sent!). */
     val suggestedPrompt: String? = null,
 )
@@ -61,21 +56,18 @@ val ONBOARDING_STEPS: List<OnboardingStepDef> = listOf(
         goal = OnboardingGoalId.AI,
         title = "Select or add a project",
         instruction = "Open the project switcher to pick an existing repository or register a new one.",
-        targetTag = "onboarding-project",
     ),
     OnboardingStepDef(
         id = "ai.chat",
         goal = OnboardingGoalId.AI,
         title = "Open an AI Chat tab",
         instruction = "Start a new chat session in the current project.",
-        targetTag = "onboarding-chat",
     ),
     OnboardingStepDef(
         id = "ai.send",
         goal = OnboardingGoalId.AI,
         title = "Draft a prompt in the composer",
         instruction = "Try inserting a starter prompt into the composer box and review it before sending.",
-        targetTag = "onboarding-send",
         suggestedPrompt = "Summarize the architecture of this repository and list the main entry points.",
     ),
     OnboardingStepDef(
@@ -83,7 +75,6 @@ val ONBOARDING_STEPS: List<OnboardingStepDef> = listOf(
         goal = OnboardingGoalId.AI,
         title = "Browse chat history",
         instruction = "Check your previous AI sessions in the Chats list.",
-        targetTag = "onboarding-history",
     ),
     // Goal: EXPLORE
     OnboardingStepDef(
@@ -91,21 +82,18 @@ val ONBOARDING_STEPS: List<OnboardingStepDef> = listOf(
         goal = OnboardingGoalId.EXPLORE,
         title = "Select a project",
         instruction = "Pick a project workspace to inspect its files.",
-        targetTag = "onboarding-project",
     ),
     OnboardingStepDef(
         id = "explore.file",
         goal = OnboardingGoalId.EXPLORE,
         title = "Open a file from Explorer",
         instruction = "Browse the project file tree and tap any source file to view or edit it.",
-        targetTag = "onboarding-file",
     ),
     OnboardingStepDef(
         id = "explore.search",
         goal = OnboardingGoalId.EXPLORE,
         title = "Search across files",
         instruction = "Use project search or Command Palette to find symbols or text.",
-        targetTag = "onboarding-search",
     ),
     // Goal: DEVELOPER
     OnboardingStepDef(
@@ -113,28 +101,24 @@ val ONBOARDING_STEPS: List<OnboardingStepDef> = listOf(
         goal = OnboardingGoalId.DEVELOPER,
         title = "Select a project",
         instruction = "Open your development repository.",
-        targetTag = "onboarding-project",
     ),
     OnboardingStepDef(
         id = "developer.terminal",
         goal = OnboardingGoalId.DEVELOPER,
         title = "Open a Terminal session",
         instruction = "Launch an interactive shell in your project directory.",
-        targetTag = "onboarding-terminal",
     ),
     OnboardingStepDef(
         id = "developer.git",
         goal = OnboardingGoalId.DEVELOPER,
         title = "Inspect Source Control",
         instruction = "Review working tree changes, stage hunks, or view Git Graph.",
-        targetTag = "onboarding-git",
     ),
     OnboardingStepDef(
         id = "developer.run",
         goal = OnboardingGoalId.DEVELOPER,
         title = "Preview or run your app",
         instruction = "Use Web Preview, Port Forwarding, or ask AI to run tests.",
-        targetTag = "onboarding-run",
         suggestedPrompt = "What command runs the unit test suite for this project?",
     ),
 )
@@ -254,6 +238,12 @@ data class OnboardingState(
                 quickOrientationPage = el["quickOrientationPage"]?.int?.coerceIn(0, 1),
             )
         }
+
+        fun fromJsonString(raw: String?): OnboardingState {
+            if (raw.isNullOrBlank()) return OnboardingState(active = true)
+            return runCatching { fromJson(Json.parseToJsonElement(raw)) }
+                .getOrElse { OnboardingState(active = true) }
+        }
     }
 }
 
@@ -275,137 +265,8 @@ fun applySuggestedPromptToDraft(existingDraft: String, suggestedPrompt: String):
 }
 
 // ===========================================================================
-// 13b.2 & 13b.3 · Mobile Ergonomics, Contrast Ratio & Accessibility Helpers
+// 14.4 · ApplicationExitInfo Crash Report & Dismissal Filter
 // ===========================================================================
-
-object MobileErgonomicsSpec {
-    const val MIN_TOUCH_TARGET_DP = 44
-    const val PRIMARY_ACTION_BOTTOM_ZONE_FRACTION = 0.333f // bottom 1/3 of screen
-    const val WCAG_AA_NORMAL_CONTRAST = 4.5
-    const val WCAG_AA_LARGE_CONTRAST = 3.0
-}
-
-/**
- * Returns true if an interactive control's height/width meets the 44 dp mobile minimum.
- */
-fun meetsMobileTouchTarget(widthDp: Int, heightDp: Int): Boolean =
-    widthDp >= MobileErgonomicsSpec.MIN_TOUCH_TARGET_DP &&
-        heightDp >= MobileErgonomicsSpec.MIN_TOUCH_TARGET_DP
-
-/**
- * Returns true if a primary mobile action bar/button at [centerYgerPx] in a viewport of
- * [screenHeightPx] resides in the bottom 1/3 ergonomic thumb zone.
- */
-fun isInBottomThumbZone(centerYPx: Int, screenHeightPx: Int): Boolean {
-    if (screenHeightPx <= 0) return false
-    val thresholdY = screenHeightPx * (1f - MobileErgonomicsSpec.PRIMARY_ACTION_BOTTOM_ZONE_FRACTION)
-    return centerYPx >= thresholdY
-}
-
-/**
- * Computes WCAG 2.1 relative luminance for an sRGB `(r, g, b)` color (`0..255` each).
- */
-fun relativeLuminance(r: Int, g: Int, b: Int): Double {
-    fun channel(c: Int): Double {
-        val s = (c.coerceIn(0, 255)) / 255.0
-        return if (s <= 0.03928) s / 12.92 else ((s + 0.055) / 1.055).pow(2.4)
-    }
-    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
-}
-
-/**
- * Computes WCAG 2.1 contrast ratio (`1.0..21.0`) between two sRGB colors `0xRRGGBB`.
- */
-fun wcagContrastRatio(fgRgb: Int, bgRgb: Int): Double {
-    val l1 = relativeLuminance((fgRgb shr 16) and 0xFF, (fgRgb shr 8) and 0xFF, fgRgb and 0xFF)
-    val l2 = relativeLuminance((bgRgb shr 16) and 0xFF, (bgRgb shr 8) and 0xFF, bgRgb and 0xFF)
-    val lighter = max(l1, l2)
-    val darker = min(l1, l2)
-    return (lighter + 0.05) / (darker + 0.05)
-}
-
-enum class SurfaceFontRole {
-    READING, // Chat prose, Settings, dialogs -> scales with system font size
-    CODE_FIXED, // Code blocks, Editor, Terminal, DB Grid -> keeps dedicated zoom/font size
-}
-
-fun effectiveFontScaleForRole(role: SurfaceFontRole, systemFontScale: Float): Float = when (role) {
-    SurfaceFontRole.READING -> systemFontScale.coerceIn(0.85f, 2.0f)
-    SurfaceFontRole.CODE_FIXED -> 1.0f
-}
-
-fun formatTurnCompleteAnnouncement(
-    projectName: String?,
-    sessionTitle: String?,
-    hasPendingApproval: Boolean = false,
-): String {
-    val titlePart = sessionTitle?.takeIf { it.isNotBlank() } ?: "Chat"
-    val projPart = projectName?.takeIf { it.isNotBlank() }?.let { " in $it" }.orEmpty()
-    return if (hasPendingApproval) {
-        "AI waiting for approval in $titlePart$projPart"
-    } else {
-        "AI response finished in $titlePart$projPart"
-    }
-}
-
-// ===========================================================================
-// Phase 14 · Release Compatibility, ApplicationExitInfo Crash Report & SDK 37
-// ===========================================================================
-
-enum class ProtocolCompatStatus {
-    COMPATIBLE,
-    SERVER_UPDATE_RECOMMENDED,
-    APP_UPDATE_REQUIRED,
-}
-
-data class ProtocolCompatibilityResult(
-    val status: ProtocolCompatStatus,
-    val appProtocolVersion: Int,
-    val serverProtocolVersion: Int?,
-    val missingCapabilities: List<String>,
-    val bannerMessage: String?,
-)
-
-fun checkProtocolCompatibility(
-    appProtocolVersion: Int,
-    serverProtocolVersion: Int?,
-    serverCapabilities: Set<String> = emptySet(),
-    requiredCapabilities: Set<String> = emptySet(),
-): ProtocolCompatibilityResult {
-    val missing = requiredCapabilities.filter { it !in serverCapabilities }
-    if (serverProtocolVersion == null) {
-        return ProtocolCompatibilityResult(
-            status = if (missing.isEmpty()) ProtocolCompatStatus.COMPATIBLE else ProtocolCompatStatus.SERVER_UPDATE_RECOMMENDED,
-            appProtocolVersion = appProtocolVersion,
-            serverProtocolVersion = null,
-            missingCapabilities = missing,
-            bannerMessage = if (missing.isEmpty()) null else "Update PPM on this machine to enable: ${missing.joinToString(", ")}",
-        )
-    }
-    return when {
-        serverProtocolVersion < appProtocolVersion || missing.isNotEmpty() -> ProtocolCompatibilityResult(
-            status = ProtocolCompatStatus.SERVER_UPDATE_RECOMMENDED,
-            appProtocolVersion = appProtocolVersion,
-            serverProtocolVersion = serverProtocolVersion,
-            missingCapabilities = missing,
-            bannerMessage = "Update PPM on this machine (server protocol v$serverProtocolVersion, app expects v$appProtocolVersion).",
-        )
-        serverProtocolVersion > appProtocolVersion + 1 -> ProtocolCompatibilityResult(
-            status = ProtocolCompatStatus.APP_UPDATE_REQUIRED,
-            appProtocolVersion = appProtocolVersion,
-            serverProtocolVersion = serverProtocolVersion,
-            missingCapabilities = emptyList(),
-            bannerMessage = "A newer version of the PPM Android app is recommended for this server.",
-        )
-        else -> ProtocolCompatibilityResult(
-            status = ProtocolCompatStatus.COMPATIBLE,
-            appProtocolVersion = appProtocolVersion,
-            serverProtocolVersion = serverProtocolVersion,
-            missingCapabilities = emptyList(),
-            bannerMessage = null,
-        )
-    }
-}
 
 data class PreviousExitCrashInfo(
     val reasonCode: Int,
@@ -422,7 +283,7 @@ data class PreviousExitCrashInfo(
     fun toBugReportMarkdown(appVersionName: String, appVersionCode: Int, deviceModel: String): String = buildString {
         appendLine("### Android App Exit Report")
         appendLine("- **App Version**: `$appVersionName` (`$appVersionCode`)")
-        appendLine("- **Device**: `$deviceModel`")
+        appendLine("- **Device**: `$deviceModel`)")
         appendLine("- **Reason**: `$reasonName` (code `$reasonCode`)")
         appendLine("- **Timestamp**: `$timestampMs`")
         if (!description.isNullOrBlank()) {
@@ -435,4 +296,12 @@ data class PreviousExitCrashInfo(
             appendLine("```")
         }
     }
+}
+
+fun shouldShowCrashExit(
+    info: PreviousExitCrashInfo?,
+    dismissedTimestampMs: Long?,
+): Boolean {
+    if (info == null || !info.isActionableCrashOrAnr) return false
+    return dismissedTimestampMs == null || info.timestampMs > dismissedTimestampMs
 }
