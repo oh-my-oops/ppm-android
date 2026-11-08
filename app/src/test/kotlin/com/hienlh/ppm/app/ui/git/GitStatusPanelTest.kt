@@ -150,6 +150,7 @@ class GitStatusPanelTest {
                     busyAction = null,
                     onCommit = { _, _, _ -> committed = true },
                     onUndoLast = {},
+                    branch = branch.head,
                 )
                 CleanState(
                     last = lastCommit,
@@ -587,6 +588,12 @@ class GitStatusPanelTest {
                     compose.onAllNodesWithTag("git-poll-error-banner").fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithTag("git-poll-error-banner").assertIsDisplayed()
+            assertTrue(compose.onAllNodesWithTag("git-graph-button").fetchSemanticsNodes().isEmpty())
+            compose.onNodeWithTag("git-history-button").assertIsDisplayed()
+            assertTrue(
+                "Expected Could not stage toast on stage failure, got ${model.toasts.map { it.message }}",
+                model.toasts.any { it.message.title == "Could not stage" && it.message.description?.contains("index.lock exists") == true },
+            )
 
             // Visibility transition false -> true triggers refresh and clears poll-error banner
             failChanges = false
@@ -608,6 +615,287 @@ class GitStatusPanelTest {
                 model.toasts.any { it.message.title == "Fetched — 2 new commits to pull" }
             }
             assertEquals(2, model.cachedGitChanges("demo", "/work/app/b")?.branch?.behind)
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `strings and controls match web git-status-panel git-commit-composer git-repo-picker and hunk-stage-dialog`() {
+        installBlankFileIcons()
+        val server = MockWebServer()
+        var binaryHunks = true
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                return when {
+                    target.contains("/git/hunks") -> {
+                        val body = if (binaryHunks) {
+                            """{"ok":true,"data":{"binary":true,"hunks":[]}}"""
+                        } else {
+                            """{"ok":true,"data":{"binary":false,"hunks":[]}}"""
+                        }
+                        MockResponse.Builder().addHeader("Content-Type", "application/json").body(body).build()
+                    }
+                    else -> MockResponse.Builder().addHeader("Content-Type", "application/json").body("""{"ok":true,"data":{}}""").build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val model = AppModel(ApplicationProvider.getApplicationContext())
+            model.api = ApiClient(server.url("/"), "tok")
+            val stagedOnly = ChangedFile(
+                path = "src/StagedOnly.kt",
+                x = "M",
+                y = ".",
+                untracked = false,
+                conflict = false,
+                staged = ChangeSide(
+                    added = 3,
+                    removed = 0,
+                    blocks = listOf("b0"),
+                    changeBlocks = listOf(ChangeBlock("b0", 0, 1, 0, 1, 3, 3, 0)),
+                ),
+                unstaged = null,
+            )
+            val conflictFile = ChangedFile(
+                path = "src/Conflict.kt",
+                x = "U",
+                y = "U",
+                untracked = false,
+                conflict = true,
+            )
+            val totals = GitChangesView.changeTotals(listOf(stagedOnly))
+            var scopeMode by androidx.compose.runtime.mutableStateOf("worktree")
+            var showHunkDialog by androidx.compose.runtime.mutableStateOf(true)
+            var viewStep by androidx.compose.runtime.mutableStateOf("no-repo")
+
+            compose.setContent {
+                when (viewStep) {
+                    "no-repo" -> GitNoRepo(onRescan = {})
+                    "repo-choice" -> GitRepoChoice(
+                        repos = listOf(
+                            com.hienlh.ppm.client.GitRepo("/w/a", "a", "a"),
+                            com.hienlh.ppm.client.GitRepo("/w/b", "b", "b"),
+                        ),
+                        onSelect = {},
+                    )
+                    else -> Column {
+                        GitCommitComposer(
+                            message = "",
+                            onMessageChange = {},
+                            totals = totals,
+                            operation = null,
+                            lastCommit = null,
+                            syncMode = "publish",
+                            busyAction = null,
+                            onCommit = { _, _, _ -> },
+                            onUndoLast = {},
+                            branch = "feat/demo",
+                        )
+                        ChangeGroupSection(
+                            model = model,
+                            label = "Conflicts",
+                            files = listOf(conflictFile),
+                            errorTone = true,
+                            showCheckAll = false,
+                            viewMode = "flat",
+                            onToggleFile = {},
+                            onToggleBatch = {},
+                            onOpen = {},
+                            onOpenDiff = {},
+                            onOpenFile = {},
+                            onDiscard = {},
+                            onStageLines = { _, _ -> },
+                            onMarkResolved = {},
+                            onReviewAll = null,
+                        )
+                        GitChangeRow(
+                            model = model,
+                            file = stagedOnly,
+                            onToggle = {},
+                            onOpen = {},
+                            onOpenDiff = {},
+                            onOpenFile = {},
+                            onDiscard = {},
+                            onStageLines = { _, _ -> },
+                            onMarkResolved = {},
+                        )
+                        if (showHunkDialog) {
+                            GitHunkStageDialog(
+                                model = model,
+                                project = "demo",
+                                repo = com.hienlh.ppm.client.GitRepo("/w", "w", "."),
+                                filePath = "src/Bin.png",
+                                scope = scopeMode,
+                                onClose = { showHunkDialog = false },
+                                onApplied = {},
+                            )
+                        }
+                    }
+                }
+            }
+            compose.waitForIdle()
+
+            // GitNoRepo and GitRepoChoice strings
+            compose.onNodeWithText("No git repository in this project, or in any folder two levels below it.").assertIsDisplayed()
+            viewStep = "repo-choice"
+            compose.waitForIdle()
+            compose.onNodeWithText("2 repositories in this folder").assertIsDisplayed()
+            compose.onNodeWithText("This project folder is not a git repository itself. Pick the one to work with — you can switch later from the header.").assertIsDisplayed()
+            viewStep = "controls"
+            compose.waitForIdle()
+
+            // Composer placeholder includes branch name; menu has "Commit and push" (never "Commit and publish")
+            compose.onNodeWithText("Message (⌘↵ to commit on feat/demo)", useUnmergedTree = true).assertIsDisplayed()
+            // Conflicts group has no Review button
+            assertTrue(compose.onAllNodesWithTag("git-group-review-Conflicts").fetchSemanticsNodes().isEmpty())
+
+            // Tablet row tools on staged-only file: Discard is present and carries "Only staged changes left"
+            val discardNode = compose.onNodeWithTag("git-row-discard-src/StagedOnly.kt", useUnmergedTree = true).fetchSemanticsNode()
+            assertEquals(
+                 listOf("Only staged changes left"),
+                discardNode.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription],
+            )
+
+            // Hunk dialog binary message and no "Tap a line or hunk header to toggle"
+            compose.waitUntil(5_000) {
+                runCatching {
+                    compose.onNodeWithText("This is a binary file — it can only be staged whole.").assertIsDisplayed()
+                    true
+                }.getOrDefault(false)
+            }
+            compose.onNodeWithText("This is a binary file — it can only be staged whole.").assertIsDisplayed()
+            assertTrue(
+                compose.onAllNodesWithTag("git-hunk-stage-dialog")
+                    .fetchSemanticsNodes()
+                    .none { it.config.toString().contains("Tap a line or hunk header to toggle") },
+            )
+
+            // Switch hunk dialog to empty non-binary unstaged & staged
+            binaryHunks = false
+            scopeMode = "index"
+            compose.waitUntil(5_000) {
+                runCatching {
+                    compose.onNodeWithText("No staged changes in this file.").assertIsDisplayed()
+                    true
+                }.getOrDefault(false)
+            }
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `GitStatusPanel toasts and confirm dialogs match web strings for publish operation abort-continue and stash pop Undo`() {
+        installBlankFileIcons()
+        val server = MockWebServer()
+        var currentOp = """{"kind":"am","step":1,"total":2}"""
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                return when {
+                    target.endsWith("/git/repos") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"projectPath":"/work/app","rootIsRepo":true,"repos":[{"path":"/work/app","name":"app","relative":"."}]}}""")
+                        .build()
+                    target.contains("/git/changes") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body(
+                            """{"ok":true,"data":{"branch":{"head":"feat/demo","oid":"1111111","upstream":null,"upstreamGone":false,"ahead":0,"behind":0,"hasRemote":true},"operation":$currentOp,"files":[{"path":"src/A.kt","oldPath":null,"x":".","y":"M","untracked":false,"conflict":false,"staged":null,"unstaged":{"added":1,"removed":0,"blocks":[{"id":"b1","index":0,"oldStart":1,"oldLines":1,"newStart":1,"newLines":2,"added":1,"removed":0}]}}],"stashes":1,"lastCommit":null,"truncated":false}}""",
+                        )
+                        .build()
+                    target.contains("/git/commit-draft") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"message":"","updatedAt":0}}""")
+                        .build()
+                    target.contains("/git/operation/continue") -> {
+                        currentOp = "null"
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{}}""")
+                            .build()
+                    }
+                    target.contains("/git/publish") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"remote":"origin","branch":"feat/demo"}}""")
+                        .build()
+                    target.endsWith("/git/stash") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"stashed":true,"stash":{"index":0,"hash":"abc1234","message":"WIP on feat/demo","date":"2026-11-08T00:00:00Z"}}}""")
+                        .build()
+                    target.contains("/git/stash/pop") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"indexRestored":false}}""")
+                        .build()
+                    else -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{}}""")
+                        .build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val model = AppModel(ApplicationProvider.getApplicationContext())
+            model.api = ApiClient(server.url("/"), "tok")
+            model.selectedProject = "demo"
+
+            compose.setContent {
+                androidx.compose.runtime.CompositionLocalProvider(com.hienlh.ppm.design.LocalPpmMobile provides true) {
+                    GitStatusPanel(model = model)
+                }
+            }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithTag("git-operation-banner").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText("Applying patches (1 of 2)").assertIsDisplayed()
+
+            // Click Abort patch series -> shows web abort confirm dialog on phone bottom sheet
+            compose.onNodeWithText("Abort patch series").performClick()
+            compose.waitForIdle()
+            compose.onNodeWithTag("git-confirm-bottom-sheet").assertIsDisplayed()
+            compose.onNodeWithText("Abort the patch series?").assertIsDisplayed()
+            compose.onNodeWithText("This puts the branch back where it was before the patch series started. Conflicts you resolved so far are lost.").assertIsDisplayed()
+            compose.onNodeWithText("Cancel").performClick()
+            compose.waitForIdle()
+
+            // Click Continue -> shows "The patch series is finished" toast
+            compose.onNodeWithText("Continue").performClick()
+            compose.waitUntil(5_000) {
+                model.toasts.any { it.message.title == "The patch series is finished" }
+            }
+
+            // Now operation is null -> Publish button is visible; click it -> "Published feat/demo to origin"
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithTag("git-sync-button").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithTag("git-sync-button").performClick()
+            compose.waitUntil(5_000) {
+                model.toasts.any { it.message.title == "Published feat/demo to origin" }
+            }
+
+            // More -> Stash all changes -> click Undo -> "Stash applied and dropped" with indexRestored=false warning
+            compose.onNodeWithTag("git-more-button").performClick()
+            compose.waitUntil(5_000) {
+                runCatching {
+                    compose.onNodeWithText("Stash all changes").assertIsEnabled()
+                    true
+                }.getOrDefault(false)
+            }
+            compose.onNodeWithText("Stash all changes").performClick()
+            compose.waitUntil(5_000) {
+                model.toasts.any { it.message.title == "Stashed 1 file" && it.message.action?.label == "Undo" }
+            }
+            val stashToast = model.toasts.first { it.message.title == "Stashed 1 file" }.message
+            stashToast.action!!.run()
+            compose.waitUntil(5_000) {
+                model.toasts.any { it.message.title == "Stash applied and dropped" }
+            }
+            val popToast = model.toasts.first { it.message.title == "Stash applied and dropped" }.message
+            assertEquals("Its staged changes no longer fit the index, so they came back unstaged.", popToast.description)
+            assertEquals(com.hienlh.ppm.app.ErrorToastMessage.Kind.WARNING, popToast.kind)
         } finally {
             server.close()
         }

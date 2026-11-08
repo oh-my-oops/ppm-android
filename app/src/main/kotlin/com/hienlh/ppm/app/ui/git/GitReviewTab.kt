@@ -752,11 +752,11 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
             if (andPush && before != null) {
                 val publish = GitChangesView.syncMode(before.branch) == "publish"
                 try {
-                    if (publish) client.gitPublish(projectName, repo = repo)
-                    else client.gitPush(projectName, repo = repo)
+                    val pub = if (publish) client.gitPublish(projectName, repo = repo) else null
+                    if (!publish) client.gitPush(projectName, repo = repo)
                     refreshChanges()
                     showToast(
-                        if (publish) "Published ${before.branch.head ?: "the branch"}"
+                        if (pub != null) "Published ${pub.branch} to ${pub.remote}"
                         else "Pushed $short to ${before.branch.upstream ?: "the remote"}",
                     )
                 } catch (e: CancellationException) {
@@ -1017,6 +1017,7 @@ internal fun GitReviewDesktopLayout(
                     onCommit = onCommit,
                     onUndoLast = onUndoCommit,
                     isBottom = true,
+                    branch = changes.branch.head,
                     onInputFocusChanged = { commitInputFocused = it },
                 )
             }
@@ -1790,6 +1791,7 @@ private fun GitReviewPhoneLayout(
                         },
                         onUndoLast = onUndoCommit,
                         isBottom = true,
+                        branch = changes.branch.head,
                     )
                 }
             }

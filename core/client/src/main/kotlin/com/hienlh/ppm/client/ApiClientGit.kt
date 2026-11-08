@@ -267,6 +267,7 @@ data class GitBranchState(
 data class GitOperation(
     val kind: String,
     val head: String? = null,
+    val name: String? = null,
     val step: Int? = null,
     val total: Int? = null,
 ) {
@@ -277,6 +278,7 @@ data class GitOperation(
             return GitOperation(
                 kind = kind,
                 head = obj["head"].string,
+                name = obj["name"].string,
                 step = obj["step"].int,
                 total = obj["total"].int,
             )
@@ -981,8 +983,17 @@ suspend fun ApiClient.gitPush(
     call("POST", "/api/project/${ApiClient.escape(project)}/git/push", gitRepoScope(repo), body)
 }
 
-suspend fun ApiClient.gitPublish(project: String, repo: GitRepo? = null) {
-    call("POST", "/api/project/${ApiClient.escape(project)}/git/publish", gitRepoScope(repo), buildJsonObject {})
+data class GitPublishResult(
+    val remote: String,
+    val branch: String,
+)
+
+suspend fun ApiClient.gitPublish(project: String, repo: GitRepo? = null): GitPublishResult {
+    val data = call("POST", "/api/project/${ApiClient.escape(project)}/git/publish", gitRepoScope(repo), buildJsonObject {})
+    return GitPublishResult(
+        remote = data["remote"].string ?: "origin",
+        branch = data["branch"].string ?: "",
+    )
 }
 
 suspend fun ApiClient.gitPull(

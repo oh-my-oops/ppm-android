@@ -102,27 +102,34 @@ internal fun GitStashSection(
         scope.launch {
             try {
                 val res = client.gitStashAction(project, action, entry.index, entry.hash, repo)
-                when {
-                    action == "drop" -> model.toast(ErrorToastMessage("Dropped stash@{${entry.index}}", kind = ErrorToastMessage.Kind.SUCCESS))
-                    !res.indexRestored -> model.toast(
+                val what = when (action) {
+                    "apply" -> "Stash applied"
+                    "pop" -> "Stash applied and dropped"
+                    else -> "Stash dropped"
+                }
+                if (!res.indexRestored) {
+                    model.toast(
                         ErrorToastMessage(
-                            "Applied stash@{${entry.index}} — staged changes were merged into the working tree",
+                            title = what,
+                            description = "Its staged changes no longer fit the index, so they came back unstaged.",
                             kind = ErrorToastMessage.Kind.WARNING,
                         ),
                     )
-                    else -> model.toast(
-                        ErrorToastMessage(
-                            "${if (action == "pop") "Popped" else "Applied"} stash@{${entry.index}}",
-                            kind = ErrorToastMessage.Kind.SUCCESS,
-                        ),
-                    )
+                } else {
+                    model.toast(ErrorToastMessage(title = what, kind = ErrorToastMessage.Kind.SUCCESS))
                 }
                 onChanged()
                 loadStashes()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                model.actionError(model.describe(e))
+                model.toast(
+                    ErrorToastMessage(
+                        title = "Could not $action the stash",
+                        description = model.describe(e),
+                        kind = ErrorToastMessage.Kind.ERROR,
+                    ),
+                )
             } finally {
                 busyKey = null
             }
@@ -247,9 +254,9 @@ internal fun GitStashSection(
 
     confirmDrop?.let { target ->
         GitConfirm(
-            title = "Drop stash@{${target.index}}?",
-            detail = "“${target.message}” will be permanently removed.",
-            confirmLabel = "Drop",
+            title = "Drop “${target.message.ifEmpty { "stash@{${target.index}}" }}”?",
+            detail = "The stash is deleted for good: nothing in PPM can bring it back.",
+            confirmLabel = "Drop stash",
             destructive = true,
             onConfirm = {
                 confirmDrop = null

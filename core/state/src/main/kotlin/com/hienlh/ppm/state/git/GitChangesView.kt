@@ -48,7 +48,7 @@ object GitChangesView {
         "rebase" to "rebase",
         "cherry-pick" to "cherry-pick",
         "revert" to "revert",
-        "am" to "patch",
+        "am" to "patch series",
     )
 
     private val STATUS_PRIORITY: Map<String, Int> = mapOf(
@@ -257,22 +257,23 @@ object GitChangesView {
         )
     }
 
-    fun operationTitle(op: GitOperation, branch: GitBranchState): String {
-        val onto = branch.head ?: "HEAD"
-        val target = op.head
+    fun operationTitle(op: GitOperation, branch: String?): String {
+        val into = if (!branch.isNullOrEmpty()) " into $branch" else ""
+        val step = op.step
+        val total = op.total
+        val progress = if (step != null && total != null && step > 0 && total > 0) " ($step of $total)" else ""
         return when (op.kind) {
-            "merge" -> if (target != null) "Merging $target into $onto" else "Merging into $onto"
-            "rebase" -> {
-                val step = if (op.step != null && op.total != null) " (${op.step} of ${op.total})" else ""
-                val into = if (target != null) " onto $target" else ""
-                "Rebasing$into$step"
-            }
-            "cherry-pick" -> if (target != null) "Cherry-picking $target" else "Cherry-picking"
-            "revert" -> if (target != null) "Reverting $target" else "Reverting"
-            "am" -> "Applying patch"
+            "merge" -> "Merging ${op.name ?: op.head ?: "a commit"}$into"
+            "rebase" -> "Rebasing ${op.name ?: branch ?: "HEAD"}$progress"
+            "cherry-pick" -> "Cherry-picking ${op.head ?: "a commit"}$into"
+            "revert" -> "Reverting ${op.head ?: "a commit"}"
+            "am" -> "Applying patches$progress"
             else -> op.kind
         }
     }
+
+    fun operationTitle(op: GitOperation, branch: GitBranchState): String =
+        operationTitle(op, branch.head)
 
     /** Split `"src/web/app.tsx"` into `Pair("app.tsx", "src/web")`. */
     fun splitPath(path: String): Pair<String, String> {

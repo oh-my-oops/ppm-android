@@ -437,4 +437,42 @@ class GitSourceControlLogicTest {
         sync.consumed("ppm", null, "from web")
         assertEquals("", sync.message("ppm", null))
     }
+
+    @Test
+    fun `OPERATION_NOUN and operationTitle match git-changes-view ts`() {
+        assertEquals("patch series", GitChangesView.OPERATION_NOUN["am"])
+        assertEquals("merge", GitChangesView.OPERATION_NOUN["merge"])
+        assertEquals("rebase", GitChangesView.OPERATION_NOUN["rebase"])
+        assertEquals("cherry-pick", GitChangesView.OPERATION_NOUN["cherry-pick"])
+        assertEquals("revert", GitChangesView.OPERATION_NOUN["revert"])
+
+        assertEquals(
+            "Merging feat/x into main",
+            GitChangesView.operationTitle(GitOperation(kind = "merge", name = "feat/x", head = "1234567"), "main"),
+        )
+        assertEquals(
+            "Merging a commit",
+            GitChangesView.operationTitle(GitOperation(kind = "merge"), null as String?),
+        )
+        assertEquals(
+            "Rebasing feat/x (2 of 5)",
+            GitChangesView.operationTitle(GitOperation(kind = "rebase", name = "feat/x", step = 2, total = 5), "main"),
+        )
+        assertEquals(
+            "Rebasing HEAD",
+            GitChangesView.operationTitle(GitOperation(kind = "rebase"), null as String?),
+        )
+        assertEquals(
+            "Cherry-picking abcdef1 into main",
+            GitChangesView.operationTitle(GitOperation(kind = "cherry-pick", head = "abcdef1"), "main"),
+        )
+        assertEquals(
+            "Reverting abcdef1",
+            GitChangesView.operationTitle(GitOperation(kind = "revert", head = "abcdef1"), "main"),
+        )
+        assertEquals(
+            "Applying patches (1 of 3)",
+            GitChangesView.operationTitle(GitOperation(kind = "am", step = 1, total = 3), "main"),
+        )
+    }
 }

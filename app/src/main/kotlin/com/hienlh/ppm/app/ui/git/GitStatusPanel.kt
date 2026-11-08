@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,15 +38,19 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.client.ChangedFile
 import com.hienlh.ppm.client.GitChanges
+import com.hienlh.ppm.client.StashEntry
 import com.hienlh.ppm.client.gitChanges
 import com.hienlh.ppm.client.gitCommit
 import com.hienlh.ppm.client.gitDiscard
@@ -80,6 +85,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonPrimitive
 
 private data class ConfirmState(
     val title: String,
@@ -266,6 +272,7 @@ fun GitStatusPanel(
 
     fun runGit(
         key: String,
+        failureTitle: String,
         onAfterRefresh: ((GitChanges?) -> Unit)? = null,
         fn: suspend () -> Unit,
     ) {
@@ -282,7 +289,13 @@ fun GitStatusPanel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                model.actionError(model.describe(e))
+                model.toast(
+                    ErrorToastMessage(
+                        title = failureTitle,
+                        description = model.describe(e),
+                        kind = ErrorToastMessage.Kind.ERROR,
+                    ),
+                )
             } finally {
                 busyAction = null
                 writeMutex.unlock()
@@ -297,7 +310,7 @@ fun GitStatusPanel(
     fun markResolved(file: ChangedFile) {
         val client = api ?: return
         val stageNow = {
-            runGit("resolve") {
+            runGit("stage", "Could not stage") {
                 client.gitStage(project, listOf(file.path), repo)
             }
         }
@@ -329,14 +342,14 @@ fun GitStatusPanel(
             markResolved(file)
             return
         }
-        runGit("stage") {
+        runGit("stage", "Could not stage") {
             api?.gitStage(project, listOf(file.path), repo)
         }
     }
 
     fun unstageFile(file: ChangedFile) {
         if (file.conflict) return
-        runGit("unstage") {
+        runGit("unstage", "Could not unstage") {
             api?.gitUnstage(project, GitChangesView.unstagePaths(file), repo)
         }
     }
@@ -358,19 +371,19 @@ fun GitStatusPanel(
         if (eligible.isEmpty() || api == null) return
         val state = GitChangesView.allCheckState(eligible)
         if (state == CheckState.ALL) {
-            runGit("unstage") {
+            runGit("unstage", "Could not unstage") {
                 api.gitUnstage(project, eligible.flatMap(GitChangesView::unstagePaths), repo)
             }
         } else {
             val paths = eligible.map { it.path }
-            runGit("stage") {
+            runGit("stage", "Could not stage") {
                 api.gitStage(project, paths, repo)
             }
         }
     }
 
     fun performDiscard(paths: List<String>, what: String) {
-        runGit("discard") {
+        runGit("discard", "Could not discard") {
             val record = api?.gitDiscard(project, paths, repo) ?: return@runGit
             if (record.files.isNotEmpty()) {
                 val kept = if (record.files.size == 1) {
@@ -384,16 +397,10 @@ fun GitStatusPanel(
                         kind = ErrorToastMessage.Kind.SUCCESS,
                         durationMillis = 8_000L,
                         action = ErrorToastMessage.Action("Undo") {
-                            model.scope.launch {
-                                try {
-                                    api?.gitDiscardUndo(project, record.id, repo)
-                                    model.notifyGitChanged(project)
-                                    model.toast(ErrorToastMessage("Restored $kept", kind = ErrorToastMessage.Kind.SUCCESS))
-                                } catch (e: CancellationException) {
-                                    throw e
-                                } catch (e: Exception) {
-                                    model.actionError(model.describe(e))
-                                }
+                            runGit("undo", "Could not undo the discard") {
+                                api?.gitDiscardUndo(project, record.id, repo)
+                                model.notifyGitChanged(project)
+                                model.toast(ErrorToastMessage("Restored $kept", kind = ErrorToastMessage.Kind.SUCCESS))
                             }
                         },
                     ),
@@ -430,7 +437,6 @@ fun GitStatusPanel(
     }
 
     fun undoCommit(hash: String) {
-        val client = api ?: return
         if (busyAction != null || writeMutex.isLocked) {
             model.toast(
                 ErrorToastMessage(
@@ -441,21 +447,58 @@ fun GitStatusPanel(
             )
             return
         }
-        model.scope.launch {
-            writeMutex.lock()
-            busyAction = "undo-commit"
-            try {
-                client.gitUndoCommit(project, hash, repo)
-                model.commitDrafts.load(client, project, repo)
-                model.notifyGitChanged(project)
-                model.toast(ErrorToastMessage("Commit undone — its changes are staged again", kind = ErrorToastMessage.Kind.INFO))
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                model.actionError(model.describe(e))
-            } finally {
-                busyAction = null
-                writeMutex.unlock()
+        runGit(
+            key = "undo-commit",
+            failureTitle = "Could not undo the commit",
+            onAfterRefresh = {
+                api?.let { client -> scope.launch { model.commitDrafts.load(client, project, repo) } }
+            },
+        ) {
+            api?.gitUndoCommit(project, hash, repo)
+            model.notifyGitChanged(project)
+            model.toast(ErrorToastMessage("Commit undone — its changes are staged again", kind = ErrorToastMessage.Kind.INFO))
+        }
+    }
+
+    fun handleSync(syncMode: String? = mode, branchOverride: com.hienlh.ppm.client.GitBranchState = branch) {
+        val upstream = branchOverride.upstream ?: "the remote"
+        when (syncMode) {
+            "publish" -> runGit("publish", "Publish failed") {
+                val res = api?.gitPublish(project, repo) ?: return@runGit
+                model.toast(ErrorToastMessage("Published ${res.branch} to ${res.remote}", kind = ErrorToastMessage.Kind.SUCCESS))
+            }
+            "pull" -> runGit("pull", "Pull failed") {
+                api?.gitPull(project, rebase = false, repo = repo)
+                model.toast(ErrorToastMessage("Pulled ${branchOverride.behind} ${if (branchOverride.behind == 1) "commit" else "commits"} from $upstream", kind = ErrorToastMessage.Kind.SUCCESS))
+            }
+            "push" -> runGit("push", "Push failed") {
+                api?.gitPush(project, repo = repo)
+                model.toast(
+                    ErrorToastMessage(
+                        if (branchOverride.ahead > 0) "Pushed ${branchOverride.ahead} ${if (branchOverride.ahead == 1) "commit" else "commits"} to $upstream" else "Pushed to $upstream",
+                        kind = ErrorToastMessage.Kind.SUCCESS,
+                    ),
+                )
+            }
+            "sync" -> runGit("sync", "Sync failed") {
+                api?.gitPull(project, rebase = false, repo = repo)
+                api?.gitPush(project, repo = repo)
+                model.toast(ErrorToastMessage("In sync with $upstream", kind = ErrorToastMessage.Kind.SUCCESS))
+            }
+            "synced" -> runGit(
+                key = "fetch",
+                failureTitle = "Fetch failed",
+                onAfterRefresh = { next ->
+                    val behind = next?.branch?.behind ?: 0
+                    model.toast(
+                        ErrorToastMessage(
+                            if (behind > 0) "Fetched — $behind new ${if (behind == 1) "commit" else "commits"} to pull" else "Fetched — nothing new",
+                            kind = ErrorToastMessage.Kind.INFO,
+                        ),
+                    )
+                },
+            ) {
+                api?.gitFetch(project, repo = repo)
             }
         }
     }
@@ -463,13 +506,19 @@ fun GitStatusPanel(
     fun handleCommit(amend: Boolean, signoff: Boolean, andPush: Boolean) {
         val msg = commitMessage.trim()
         if ((!amend && msg.isEmpty()) || (amend && msg.isEmpty() && totals.filesStaged == 0) || api == null) return
-        val key = when {
-            andPush -> "commit-push"
-            amend -> "amend"
-            else -> "commit"
-        }
         val count = totals.filesStaged
-        runGit(key) {
+        val beforeBranch = branch
+        val beforeMode = mode
+        runGit(
+            key = "commit",
+            failureTitle = if (amend) "Could not amend the commit" else "Could not commit",
+            onAfterRefresh = {
+                if (andPush) {
+                    val targetMode = if (beforeMode == "publish") "publish" else "push"
+                    handleSync(targetMode, beforeBranch.copy(ahead = beforeBranch.ahead + 1))
+                }
+            },
+        ) {
             model.commitDrafts.flush(api, project, repo)
             val res = api.gitCommit(project, msg, amend = amend, signoff = signoff, repo = repo)
             val hash = res.hash
@@ -487,64 +536,35 @@ fun GitStatusPanel(
                     ),
                 )
             }
-            if (andPush) {
-                if (mode == "publish") {
-                    api.gitPublish(project, repo)
-                    model.toast(ErrorToastMessage("Published ${branch.head ?: "branch"}", kind = ErrorToastMessage.Kind.SUCCESS))
-                } else {
-                    api.gitPush(project, repo = repo)
-                    val upstream = branch.upstream ?: "the remote"
-                    model.toast(ErrorToastMessage("Pushed to $upstream", kind = ErrorToastMessage.Kind.SUCCESS))
-                }
-            }
         }
     }
 
-    fun handleSync(syncMode: String? = mode) {
-        val upstream = branch.upstream ?: "the remote"
-        when (syncMode) {
-            "publish" -> runGit("publish") {
-                api?.gitPublish(project, repo)
-                model.toast(ErrorToastMessage("Published ${branch.head ?: "branch"}", kind = ErrorToastMessage.Kind.SUCCESS))
+    fun stashAction(action: String, stash: StashEntry) {
+        runGit("stash-$action", "Could not $action the stash") {
+            val res = api?.gitStashAction(project, action, stash.index, stash.hash, repo) ?: return@runGit
+            model.notifyGitChanged(project)
+            val what = when (action) {
+                "apply" -> "Stash applied"
+                "pop" -> "Stash applied and dropped"
+                else -> "Stash dropped"
             }
-            "pull" -> runGit("pull") {
-                api?.gitPull(project, rebase = false, repo = repo)
-                model.toast(ErrorToastMessage("Pulled ${branch.behind} ${if (branch.behind == 1) "commit" else "commits"} from $upstream", kind = ErrorToastMessage.Kind.SUCCESS))
-            }
-            "push" -> runGit("push") {
-                api?.gitPush(project, repo = repo)
+            if (!res.indexRestored) {
                 model.toast(
                     ErrorToastMessage(
-                        if (branch.ahead > 0) "Pushed ${branch.ahead} ${if (branch.ahead == 1) "commit" else "commits"} to $upstream" else "Pushed to $upstream",
-                        kind = ErrorToastMessage.Kind.SUCCESS,
+                        title = what,
+                        description = "Its staged changes no longer fit the index, so they came back unstaged.",
+                        kind = ErrorToastMessage.Kind.WARNING,
                     ),
                 )
-            }
-            "sync" -> runGit("sync") {
-                api?.gitPull(project, rebase = false, repo = repo)
-                api?.gitPush(project, repo = repo)
-                model.toast(ErrorToastMessage("In sync with $upstream", kind = ErrorToastMessage.Kind.SUCCESS))
-            }
-            "synced" -> runGit(
-                key = "fetch",
-                onAfterRefresh = { next ->
-                    val behind = next?.branch?.behind ?: 0
-                    model.toast(
-                        ErrorToastMessage(
-                            if (behind > 0) "Fetched — $behind new ${if (behind == 1) "commit" else "commits"} to pull" else "Fetched — nothing new",
-                            kind = ErrorToastMessage.Kind.INFO,
-                        ),
-                    )
-                },
-            ) {
-                api?.gitFetch(project, repo = repo)
+            } else {
+                model.toast(ErrorToastMessage(title = what, kind = ErrorToastMessage.Kind.SUCCESS))
             }
         }
     }
 
     fun handleStashAll() {
         val fileCount = totals.files
-        runGit("stash") {
+        runGit("stash", "Could not stash") {
             val entry = api?.gitStash(project, includeUntracked = true, repo = repo)
             if (entry == null) {
                 model.toast(
@@ -562,21 +582,7 @@ fun GitStatusPanel(
                     kind = ErrorToastMessage.Kind.INFO,
                     durationMillis = 8_000L,
                     action = ErrorToastMessage.Action("Undo") {
-                        model.scope.launch {
-                            writeMutex.lock()
-                            busyAction = "stash-pop"
-                            try {
-                                api?.gitStashAction(project, "pop", entry.index, entry.hash, repo)
-                                model.notifyGitChanged(project)
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                model.actionError(model.describe(e))
-                            } finally {
-                                busyAction = null
-                                writeMutex.unlock()
-                            }
-                        }
+                        stashAction("pop", entry)
                     },
                 ),
             )
@@ -602,13 +608,20 @@ fun GitStatusPanel(
         onNavigate?.invoke()
     }
 
-    fun openHistory() {
-        model.openGitHistoryTab(project)
-        onNavigate?.invoke()
+    val extContributions = model.extensions?.contributions?.collectAsState()?.value
+    val gitGraphAvailable = remember(extContributions) {
+        extContributions?.commands?.any { it.command == "git-graph.view" } == true
     }
+    val activeProjectPath = model.projects.firstOrNull { it.name == project }?.path
+    val gitRoot = repo?.path ?: activeProjectPath
 
-    fun openGitGraph() {
-        model.dispatchExtCommand("git-graph.view")
+    fun openGraph() {
+        if (gitGraphAvailable) {
+            val args = if (!gitRoot.isNullOrEmpty()) listOf(JsonPrimitive(gitRoot)) else emptyList()
+            model.dispatchExtCommand("git-graph.view", args = args)
+        } else {
+            model.openGitHistoryTab(project)
+        }
         onNavigate?.invoke()
     }
 
@@ -618,6 +631,7 @@ fun GitStatusPanel(
     }
 
     val showComposer = files.isNotEmpty() && operation == null
+    val headerIconSize = if (mobile) 44.dp else 24.dp
 
     Column(
         modifier = Modifier.fillMaxSize().testTag("git-status-panel"),
@@ -626,7 +640,7 @@ fun GitStatusPanel(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(34.dp)
+                .height(if (mobile) 44.dp else 34.dp)
                 .edge(Edge.Bottom, tokens.border.color)
                 .padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -641,7 +655,7 @@ fun GitStatusPanel(
             val isTree = model.gitStatusViewMode == "tree"
             Box(
                 modifier = Modifier
-                    .size(24.dp)
+                    .size(headerIconSize)
                     .clip(RoundedCornerShape(4.dp))
                     .clickable { model.setGitViewMode(if (isTree) "flat" else "tree") }
                     .testTag("git-view-mode-toggle"),
@@ -653,23 +667,12 @@ fun GitStatusPanel(
                     tint = tokens.text2.color,
                 )
             }
-            // Git Graph button
+            // History / Git Graph button
             Box(
                 modifier = Modifier
-                    .size(24.dp)
+                    .size(headerIconSize)
                     .clip(RoundedCornerShape(4.dp))
-                    .clickable(onClick = ::openGitGraph)
-                    .testTag("git-graph-button"),
-                contentAlignment = Alignment.Center,
-            ) {
-                PpmIcon(ProductIcon.GitBranch, size = 14.dp, tint = tokens.text2.color)
-            }
-            // History button
-            Box(
-                modifier = Modifier
-                    .size(24.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .clickable(onClick = ::openHistory)
+                    .clickable(onClick = ::openGraph)
                     .testTag("git-history-button"),
                 contentAlignment = Alignment.Center,
             ) {
@@ -679,7 +682,7 @@ fun GitStatusPanel(
             Box {
                 Box(
                     modifier = Modifier
-                        .size(24.dp)
+                        .size(headerIconSize)
                         .clip(RoundedCornerShape(4.dp))
                         .clickable { moreMenuOpen = !moreMenuOpen }
                         .testTag("git-more-button"),
@@ -698,12 +701,11 @@ fun GitStatusPanel(
                         MoreMenuItem(
                             ProductIcon.ArrowDown,
                             "Pull with rebase",
-                            enabled = busyAction == null && branch.head != null && branch.upstream != null,
+                            enabled = busyAction == null && branch.upstream != null && !branch.upstreamGone,
                         ) {
                             moreMenuOpen = false
-                            runGit("pull-rebase") {
+                            runGit("pull", "Pull failed") {
                                 api?.gitPull(project, rebase = true, repo = repo)
-                                model.toast(ErrorToastMessage("Pulled with rebase", kind = ErrorToastMessage.Kind.SUCCESS))
                             }
                         }
                         MoreMenuItem(
@@ -736,7 +738,10 @@ fun GitStatusPanel(
                         }
                     }
                     if (mobile) {
-                        androidx.compose.ui.window.Dialog(onDismissRequest = { moreMenuOpen = false }) {
+                        androidx.compose.ui.window.Dialog(
+                            onDismissRequest = { moreMenuOpen = false },
+                            properties = DialogProperties(usePlatformDefaultWidth = false),
+                        ) {
                             Box(
                                 modifier = Modifier.fillMaxSize().clickable { moreMenuOpen = false },
                                 contentAlignment = Alignment.BottomCenter,
@@ -863,21 +868,20 @@ fun GitStatusPanel(
                         conflicts = conflicts.size,
                         busyAction = busyAction,
                         onContinue = {
-                            runGit("op:continue") {
+                            runGit("continue", "Could not continue the $noun") {
                                 api?.gitOperation(project, "continue", repo)
-                                model.toast(ErrorToastMessage("Finished $noun", kind = ErrorToastMessage.Kind.SUCCESS))
+                                model.toast(ErrorToastMessage("The $noun is finished", kind = ErrorToastMessage.Kind.SUCCESS))
                             }
                         },
                         onAbort = {
                             confirm = ConfirmState(
-                                title = "Abort $noun?",
-                                detail = "The repository will return to the state before the $noun started.",
+                                title = "Abort the $noun?",
+                                detail = "This puts the branch back where it was before the $noun started. Conflicts you resolved so far are lost.",
                                 confirmLabel = "Abort $noun",
                                 destructive = true,
                                 run = {
-                                    runGit("op:abort") {
+                                    runGit("abort", "Could not abort the $noun") {
                                         api?.gitOperation(project, "abort", repo)
-                                        model.toast(ErrorToastMessage("Aborted $noun", kind = ErrorToastMessage.Kind.SUCCESS))
                                     }
                                 },
                             )
@@ -898,6 +902,7 @@ fun GitStatusPanel(
                         onCommit = ::handleCommit,
                         onUndoLast = { lastCommit?.let { undoCommit(it.hash) } },
                         isBottom = false,
+                        branch = branch.head,
                     )
                 }
 
@@ -916,7 +921,7 @@ fun GitStatusPanel(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 PpmIcon(ProductIcon.Loader2, size = 14.dp, tint = tokens.text3.color)
-                                BasicText("Reading repository…", style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color))
+                                BasicText("Loading git status...", style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color))
                             }
                         }
                         error != null && changes == null -> {
@@ -927,14 +932,15 @@ fun GitStatusPanel(
                                 BasicText(error ?: "", style = PpmFont.sans(12, lineHeight = 16, color = tokens.error.color))
                                 Box(
                                     modifier = Modifier
-                                        .height(26.dp)
+                                        .height(if (mobile) 44.dp else 28.dp)
                                         .clip(RoundedCornerShape(6.dp))
                                         .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
                                         .clickable(onClick = ::triggerRefresh)
-                                        .padding(horizontal = 10.dp),
+                                        .padding(horizontal = 10.dp)
+                                        .testTag("git-retry"),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    BasicText("Try again", style = PpmFont.sans(12, lineHeight = 16, color = tokens.text.color))
+                                    BasicText("Retry", style = PpmFont.sans(12, lineHeight = 16, color = tokens.text.color))
                                 }
                             }
                         }
@@ -944,7 +950,7 @@ fun GitStatusPanel(
                                 operation = operation,
                                 busy = busyAction != null,
                                 onUndo = { lastCommit?.let { undoCommit(it.hash) } },
-                                onOpenHistory = ::openHistory,
+                                onOpenHistory = ::openGraph,
                             )
                         }
                         else -> {
@@ -956,6 +962,7 @@ fun GitStatusPanel(
                                     errorTone = true,
                                     showCheckAll = false,
                                     viewMode = model.gitStatusViewMode,
+                                    busy = busyAction != null,
                                     onToggleFile = ::toggleFile,
                                     onStageFile = ::stageFile,
                                     onUnstageFile = ::unstageFile,
@@ -966,7 +973,7 @@ fun GitStatusPanel(
                                     onDiscard = ::askDiscardFiles,
                                     onStageLines = { f, s -> hunkTarget = HunkModalTarget(f, s) },
                                     onMarkResolved = ::markResolved,
-                                    onReviewAll = { openReview(conflicts.firstOrNull()) },
+                                    onReviewAll = null,
                                 )
                             }
                             if (normalFiles.isNotEmpty()) {
@@ -977,6 +984,7 @@ fun GitStatusPanel(
                                     errorTone = false,
                                     showCheckAll = operation == null,
                                     viewMode = model.gitStatusViewMode,
+                                    busy = busyAction != null,
                                     onToggleFile = ::toggleFile,
                                     onStageFile = ::stageFile,
                                     onUnstageFile = ::unstageFile,
@@ -1032,6 +1040,7 @@ fun GitStatusPanel(
                         onCommit = ::handleCommit,
                         onUndoLast = { lastCommit?.let { undoCommit(it.hash) } },
                         isBottom = true,
+                        branch = branch.head,
                     )
                 }
             }
@@ -1075,11 +1084,13 @@ private fun MoreMenuItem(
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
     val fg = if (destructive) tokens.error.color else tokens.text.color
     val iconColor = if (destructive) tokens.error.color else tokens.text3.color
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = if (mobile) 44.dp else 28.dp)
             .alpha(if (enabled) 1f else 0.4f)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),
@@ -1099,6 +1110,7 @@ internal fun ChangeGroupSection(
     errorTone: Boolean,
     showCheckAll: Boolean,
     viewMode: String,
+    busy: Boolean = false,
     onToggleFile: (ChangedFile) -> Unit,
     onStageFile: (ChangedFile) -> Unit = onToggleFile,
     onUnstageFile: (ChangedFile) -> Unit = onToggleFile,
@@ -1109,7 +1121,7 @@ internal fun ChangeGroupSection(
     onDiscard: (List<ChangedFile>) -> Unit,
     onStageLines: (ChangedFile, String) -> Unit,
     onMarkResolved: (ChangedFile) -> Unit,
-    onReviewAll: () -> Unit,
+    onReviewAll: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -1148,19 +1160,23 @@ internal fun ChangeGroupSection(
                 )
                 CountChip(files.size, errorTone = errorTone)
             }
-            Box(
-                modifier = Modifier
-                    .height(if (mobile) 44.dp else 20.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .clickable(onClick = onReviewAll)
-                    .padding(horizontal = 6.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                BasicText("Review", style = PpmFont.sans(11, lineHeight = 14, color = tokens.text2.color))
+            if (onReviewAll != null) {
+                Box(
+                    modifier = Modifier
+                        .height(if (mobile) 44.dp else 20.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable(onClick = onReviewAll)
+                        .padding(horizontal = 6.dp)
+                        .testTag("git-group-review-$label"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText("Review", style = PpmFont.sans(11, lineHeight = 14, color = tokens.text2.color))
+                }
             }
             if (showCheckAll) {
                 CheckCell(
                     state = allState,
+                    disabled = busy,
                     tag = "git-group-check-all-$label",
                     onToggle = { onToggleBatch(files) },
                 )
@@ -1177,6 +1193,7 @@ internal fun ChangeGroupSection(
                         node = node,
                         depth = 0,
                         closedPaths = closedPaths,
+                        busy = busy,
                         onToggleFile = onToggleFile,
                         onStageFile = onStageFile,
                         onUnstageFile = onUnstageFile,
@@ -1196,6 +1213,7 @@ internal fun ChangeGroupSection(
                         file = file,
                         depth = 0,
                         nested = false,
+                        busy = busy,
                         onToggle = onToggleFile,
                         onStage = onStageFile,
                         onUnstage = onUnstageFile,
@@ -1218,6 +1236,7 @@ private fun GitTreeNodeView(
     node: GitTreeNode,
     depth: Int,
     closedPaths: MutableMap<String, Boolean>,
+    busy: Boolean = false,
     onToggleFile: (ChangedFile) -> Unit,
     onStageFile: (ChangedFile) -> Unit,
     onUnstageFile: (ChangedFile) -> Unit,
@@ -1236,6 +1255,7 @@ private fun GitTreeNodeView(
             file = file,
             depth = depth,
             nested = true,
+            busy = busy,
             onToggle = onToggleFile,
             onStage = onStageFile,
             onUnstage = onUnstageFile,
@@ -1260,7 +1280,7 @@ private fun GitTreeNodeView(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(if (mobile) 44.dp else 26.dp)
+            .height(if (mobile) 44.dp else 28.dp)
             .clickable { closedPaths[node.path] = open }
             .padding(start = (depth * 12 + 6).dp, end = 8.dp)
             .testTag("git-tree-folder-${node.path}"),
@@ -1289,9 +1309,11 @@ private fun GitTreeNodeView(
         if (canDiscard) {
             Box(
                 modifier = Modifier
-                    .size(20.dp)
+                    .size(if (mobile) 44.dp else 24.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .clickable { onDiscard(leafFiles) },
+                    .alpha(if (busy) 0.4f else 1f)
+                    .clickable(enabled = !busy) { onDiscard(leafFiles) }
+                    .testTag("git-folder-discard-${node.path}"),
                 contentAlignment = Alignment.Center,
             ) {
                 PpmIcon(ProductIcon.Trash2, size = 12.dp, tint = tokens.text3.color)
@@ -1300,7 +1322,7 @@ private fun GitTreeNodeView(
         CountChip(node.fileCount)
         CheckCell(
             state = folderState,
-            disabled = leafFiles.all { it.conflict },
+            disabled = busy || leafFiles.all { it.conflict },
             onToggle = { onToggleBatch(leafFiles) },
         )
     }
@@ -1312,6 +1334,7 @@ private fun GitTreeNodeView(
                 node = child,
                 depth = depth + 1,
                 closedPaths = closedPaths,
+                busy = busy,
                 onToggleFile = onToggleFile,
                 onStageFile = onStageFile,
                 onUnstageFile = onUnstageFile,
@@ -1333,6 +1356,7 @@ internal fun GitChangeRow(
     file: ChangedFile,
     depth: Int = 0,
     nested: Boolean = false,
+    busy: Boolean = false,
     onToggle: (ChangedFile) -> Unit,
     onStage: (ChangedFile) -> Unit = onToggle,
     onUnstage: (ChangedFile) -> Unit = onToggle,
@@ -1348,6 +1372,7 @@ internal fun GitChangeRow(
     val (name, dir) = remember(file.path) { GitChangesView.splitPath(file.path) }
     val state = remember(file) { GitChangesView.fileCheckState(file) }
     val letter = remember(file) { GitChangesView.changeLetter(file) }
+    val discardable = remember(file) { GitChangesView.hasUnstaged(file) }
     val conflict = file.conflict
     var menuOpen by remember { mutableStateOf(false) }
 
@@ -1357,27 +1382,27 @@ internal fun GitChangeRow(
             ContextRow("Resolve conflict", mobile = mobile) { menuOpen = false; onOpen(file) }
             ContextRow("Open file", mobile = mobile) { menuOpen = false; onOpenFile(file) }
             Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(tokens.border.color))
-            ContextRow("Mark as resolved", mobile = mobile) { menuOpen = false; onMarkResolved(file) }
+            ContextRow("Mark as resolved", enabled = !busy, mobile = mobile) { menuOpen = false; onMarkResolved(file) }
         } else {
             ContextRow("Review changes", mobile = mobile) { menuOpen = false; onOpen(file) }
             ContextRow("Open diff", mobile = mobile) { menuOpen = false; onOpenDiff(file) }
             ContextRow("Open file", mobile = mobile) { menuOpen = false; onOpenFile(file) }
             Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(tokens.border.color))
             if (state != CheckState.ALL) {
-                ContextRow("Stage file", mobile = mobile) { menuOpen = false; onStage(file) }
+                ContextRow("Stage file", enabled = !busy, mobile = mobile) { menuOpen = false; onStage(file) }
             }
             if (state != CheckState.NONE) {
-                ContextRow("Unstage file", mobile = mobile) { menuOpen = false; onUnstage(file) }
+                ContextRow("Unstage file", enabled = !busy, mobile = mobile) { menuOpen = false; onUnstage(file) }
             }
             if (file.unstaged != null) {
-                ContextRow("Stage lines…", mobile = mobile) { menuOpen = false; onStageLines(file, "worktree") }
+                ContextRow("Stage lines…", enabled = !busy, mobile = mobile) { menuOpen = false; onStageLines(file, "worktree") }
             }
             if (file.staged != null) {
-                ContextRow("Unstage lines…", mobile = mobile) { menuOpen = false; onStageLines(file, "index") }
+                ContextRow("Unstage lines…", enabled = !busy, mobile = mobile) { menuOpen = false; onStageLines(file, "index") }
             }
-            if (GitChangesView.hasUnstaged(file)) {
+            if (discardable) {
                 Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(tokens.border.color))
-                ContextRow("Discard changes…", destructive = true, mobile = mobile) { menuOpen = false; onDiscard(file) }
+                ContextRow("Discard changes…", enabled = !busy, destructive = true, mobile = mobile) { menuOpen = false; onDiscard(file) }
             }
         }
     }
@@ -1386,19 +1411,13 @@ internal fun GitChangeRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .then(
-                    if (mobile) {
-                        Modifier.padding(vertical = 3.dp).height(44.dp)
-                    } else {
-                        Modifier.height(28.dp)
-                    },
-                )
+                .heightIn(min = if (mobile) 44.dp else 36.dp)
                 .rightClick { menuOpen = true }
                 .combinedClickable(
                     onClick = { onOpen(file) },
                     onLongClick = { menuOpen = true },
                 )
-                .padding(start = (depth * 12 + 8).dp, end = 8.dp)
+                .padding(start = (depth * 12 + 8).dp, end = 4.dp, top = 3.dp, bottom = 3.dp)
                 .testTag("git-change-row-${file.path}"),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1407,50 +1426,26 @@ internal fun GitChangeRow(
                 name = name,
                 size = 14.dp,
             )
-            if (mobile && !nested && dir.isNotEmpty()) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    StartTruncatedText(
-                        text = name,
-                        style = PpmFont.sans(
-                            12,
-                            lineHeight = 16,
-                            color = if (letter == "D") tokens.text2.color else tokens.text.color,
-                        ).copy(
-                            textDecoration = if (letter == "D") TextDecoration.LineThrough else TextDecoration.None,
-                        ),
-                    )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                StartTruncatedText(
+                    text = name,
+                    style = PpmFont.sans(
+                        12,
+                        FontWeight.Medium,
+                        lineHeight = 16,
+                        color = if (letter == "D") tokens.text2.color else tokens.text.color,
+                    ).copy(
+                        textDecoration = if (letter == "D") TextDecoration.LineThrough else TextDecoration.None,
+                    ),
+                )
+                if (!nested && dir.isNotEmpty()) {
                     StartTruncatedText(
                         text = dir,
                         style = PpmFont.sans(11, lineHeight = 14, color = tokens.text3.color),
                     )
-                }
-            } else {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    StartTruncatedText(
-                        text = name,
-                        style = PpmFont.sans(
-                            12,
-                            lineHeight = 16,
-                            color = if (letter == "D") tokens.text2.color else tokens.text.color,
-                        ).copy(
-                            textDecoration = if (letter == "D") TextDecoration.LineThrough else TextDecoration.None,
-                        ),
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    if (!nested && dir.isNotEmpty()) {
-                        StartTruncatedText(
-                            text = dir,
-                            style = PpmFont.sans(11, lineHeight = 14, color = tokens.text3.color),
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                    }
                 }
             }
             if (conflict) {
@@ -1478,34 +1473,37 @@ internal fun GitChangeRow(
                     LineCounts(file)
                 }
                 if (!mobile) {
-                    if (GitChangesView.hasUnstaged(file)) {
-                        Box(
-                            modifier = Modifier
-                                .size(20.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .clickable { onDiscard(file) }
-                                .testTag("git-row-discard-${file.path}"),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            PpmIcon(ProductIcon.Trash2, size = 12.dp, tint = tokens.text3.color)
-                        }
-                    }
                     Box(
                         modifier = Modifier
-                            .size(20.dp)
+                            .size(24.dp)
                             .clip(RoundedCornerShape(4.dp))
+                            .semantics { contentDescription = "Open file" }
                             .clickable { onOpenFile(file) }
                             .testTag("git-row-open-file-${file.path}"),
                         contentAlignment = Alignment.Center,
                     ) {
                         PpmIcon(ProductIcon.FileCode, size = 12.dp, tint = tokens.text3.color)
                     }
+                    val canDiscardRow = discardable && !busy
+                    val discardTitle = if (discardable) "Discard changes…" else "Only staged changes left"
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .alpha(if (canDiscardRow) 1f else 0.4f)
+                            .semantics { contentDescription = discardTitle }
+                            .clickable(enabled = canDiscardRow) { onDiscard(file) }
+                            .testTag("git-row-discard-${file.path}"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        PpmIcon(ProductIcon.Trash2, size = 12.dp, tint = tokens.text3.color)
+                    }
                 }
             }
             StatusTile(file)
             CheckCell(
                 state = state,
-                disabled = false,
+                disabled = busy,
                 tag = "git-change-check-${file.path}",
                 onToggle = { onToggle(file) },
             )
@@ -1513,7 +1511,10 @@ internal fun GitChangeRow(
 
         if (menuOpen) {
             if (mobile) {
-                androidx.compose.ui.window.Dialog(onDismissRequest = { menuOpen = false }) {
+                androidx.compose.ui.window.Dialog(
+                    onDismissRequest = { menuOpen = false },
+                    properties = DialogProperties(usePlatformDefaultWidth = false),
+                ) {
                     Box(
                         modifier = Modifier.fillMaxSize().clickable { menuOpen = false },
                         contentAlignment = Alignment.BottomCenter,
@@ -1557,13 +1558,20 @@ internal fun GitChangeRow(
 }
 
 @Composable
-private fun ContextRow(label: String, destructive: Boolean = false, mobile: Boolean = false, onClick: () -> Unit) {
+private fun ContextRow(
+    label: String,
+    enabled: Boolean = true,
+    destructive: Boolean = false,
+    mobile: Boolean = false,
+    onClick: () -> Unit,
+) {
     val tokens = LocalPpmTokens.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(if (mobile) 44.dp else 28.dp)
-            .clickable(onClick = onClick)
+            .alpha(if (enabled) 1f else 0.4f)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
