@@ -182,7 +182,7 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
 
     val held = !selectRepo.isNullOrEmpty() && selectRepo != repo?.path
 
-    var changes by remember(projectName, repo?.path) { mutableStateOf(model.gitChangesCache[projectName]) }
+    var changes by remember(projectName, repo?.path) { mutableStateOf(model.cachedGitChanges(projectName, repo?.path)) }
     var error by remember(projectName, repo?.path) { mutableStateOf<String?>(null) }
     val details = remember(projectName, repo?.path) { mutableStateMapOf<String, FileChangeDetail>() }
     val detailSigs = remember(projectName, repo?.path) { mutableMapOf<String, String>() }

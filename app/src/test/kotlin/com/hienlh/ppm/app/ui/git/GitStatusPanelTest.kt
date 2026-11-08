@@ -33,6 +33,7 @@ import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -486,5 +487,126 @@ class GitStatusPanelTest {
         }
         assertTrue(compose.onAllNodesWithTag("git-block-dot-src/EightBlocks.kt-6-off", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
         compose.onNodeWithText("+2", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun `gitChangesCache is keyed per repo and GitStatusPanel refreshes on failed write visibility and Fetch and shows poll-error banner`() {
+        installBlankFileIcons()
+        val server = MockWebServer()
+        val calls = mutableListOf<Pair<String, String>>()
+        var changesBehind = 0
+        var failChanges = false
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val method = request.method ?: "GET"
+                val target = request.target
+                synchronized(calls) { calls += method to target }
+                return when {
+                    target.endsWith("/git/repos") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"projectPath":"/work/app","rootIsRepo":false,"repos":[{"path":"/work/app/a","name":"a","relative":"a"},{"path":"/work/app/b","name":"b","relative":"b"}]}}""")
+                        .build()
+                    target.contains("/git/changes") -> {
+                        if (failChanges) {
+                            MockResponse.Builder()
+                                .code(500)
+                                .addHeader("Content-Type", "application/json")
+                                .body("""{"ok":false,"error":"git status poll failed"}""")
+                                .build()
+                        } else {
+                            val fileName = if (target.contains("repo=%2Fwork%2Fapp%2Fb")) "src/B.kt" else "src/A.kt"
+                            MockResponse.Builder()
+                                .addHeader("Content-Type", "application/json")
+                                .body(
+                                    """{"ok":true,"data":{"branch":{"head":"main","oid":"1111111","upstream":"origin/main","upstreamGone":false,"ahead":0,"behind":$changesBehind,"hasRemote":true},"operation":null,"files":[{"path":"$fileName","oldPath":null,"x":" ","y":"M","untracked":false,"conflict":null,"staged":null,"unstaged":{"status":"M","added":1,"removed":0,"blocks":[{"id":"b1","index":0,"oldStart":1,"oldLines":1,"newStart":1,"newLines":2,"added":1,"removed":0}]}}],"stashes":0,"lastCommit":null,"truncated":false}}""",
+                                )
+                                .build()
+                        }
+                    }
+                    target.contains("/git/commit-draft") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"message":"","updatedAt":0}}""")
+                        .build()
+                    target.contains("/git/stage") -> MockResponse.Builder()
+                        .code(500)
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":false,"error":"index.lock exists"}""")
+                        .build()
+                    target.contains("/git/fetch") -> {
+                        changesBehind = 2
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{}}""")
+                            .build()
+                    }
+                    else -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{}}""")
+                        .build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val model = AppModel(ApplicationProvider.getApplicationContext())
+            model.api = ApiClient(server.url("/"), "tok")
+            model.selectedProject = "demo"
+            model.chooseGitRepo("demo", "/work/app/a")
+
+            compose.setContent {
+                androidx.compose.runtime.CompositionLocalProvider(com.hienlh.ppm.design.LocalPpmMobile provides true) {
+                    GitStatusPanel(model = model)
+                }
+            }
+            compose.waitUntil(5_000) {
+                model.cachedGitChanges("demo", "/work/app/a") != null
+            }
+            compose.waitForIdle()
+            assertEquals("src/A.kt", model.cachedGitChanges("demo", "/work/app/a")?.files?.single()?.path)
+            assertNull(model.cachedGitChanges("demo", "/work/app/b"))
+
+            // Switch to repo B -> separate cache entry for repo B, repo A stays intact
+            model.chooseGitRepo("demo", "/work/app/b")
+            compose.waitUntil(5_000) {
+                model.cachedGitChanges("demo", "/work/app/b") != null
+            }
+            compose.waitForIdle()
+            assertEquals("src/A.kt", model.cachedGitChanges("demo", "/work/app/a")?.files?.single()?.path)
+            assertEquals("src/B.kt", model.cachedGitChanges("demo", "/work/app/b")?.files?.single()?.path)
+
+            // Failed write (stage returns 500) still refreshes in finally; make that refresh fail so poll-error banner shows
+            val changesReadsBeforeFail = synchronized(calls) { calls.count { it.second.contains("/git/changes") } }
+            failChanges = true
+            compose.onNodeWithTag("git-change-check-src/B.kt").performClick()
+            compose.waitUntil(5_000) {
+                synchronized(calls) { calls.any { it.second.contains("/git/stage") } } &&
+                    synchronized(calls) { calls.count { it.second.contains("/git/changes") } > changesReadsBeforeFail } &&
+                    compose.onAllNodesWithTag("git-poll-error-banner").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithTag("git-poll-error-banner").assertIsDisplayed()
+
+            // Visibility transition false -> true triggers refresh and clears poll-error banner
+            failChanges = false
+            val readsBeforeVisible = synchronized(calls) { calls.count { it.second.contains("/git/changes") } }
+            model.windowVisible = false
+            compose.waitForIdle()
+            model.windowVisible = true
+            compose.waitUntil(5_000) {
+                synchronized(calls) { calls.count { it.second.contains("/git/changes") } > readsBeforeVisible } &&
+                    compose.onAllNodesWithTag("git-poll-error-banner").fetchSemanticsNodes().isEmpty()
+            }
+            assertTrue(compose.onAllNodesWithTag("git-poll-error-banner").fetchSemanticsNodes().isEmpty())
+
+            // More -> Fetch runs loadChanges() and shows Fetched — 2 new commits to pull
+            compose.onNodeWithTag("git-more-button").performClick()
+            compose.waitForIdle()
+            compose.onNodeWithText("Fetch").performClick()
+            compose.waitUntil(5_000) {
+                model.toasts.any { it.message.title == "Fetched — 2 new commits to pull" }
+            }
+            assertEquals(2, model.cachedGitChanges("demo", "/work/app/b")?.branch?.behind)
+        } finally {
+            server.close()
+        }
     }
 }

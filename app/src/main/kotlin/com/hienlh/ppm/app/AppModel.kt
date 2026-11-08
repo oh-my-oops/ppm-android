@@ -923,9 +923,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     val gitChangedEvents: kotlinx.coroutines.flow.SharedFlow<String> get() = gitChanged
 
     /** Whether the app is in front (the web's `document.hidden`, inverted). */
-    var windowVisible = true
+    private var _windowVisible by mutableStateOf(true)
+    var windowVisible: Boolean
+        get() = _windowVisible
         set(value) {
-            field = value
+            _windowVisible = value
             // In the background Android may end the process at any time: the layout goes out now,
             // and so does each draft still waiting out its second.
             if (value) {
@@ -2321,10 +2323,21 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         }
     }
 
+    fun gitChangesKey(project: String, repoPath: String?): String =
+        com.hienlh.ppm.state.git.CommitDraftSync.draftKey(project, repoPath)
+
+    fun cachedGitChanges(project: String, repoPath: String? = null): com.hienlh.ppm.client.GitChanges? {
+        val resolvedPath = repoPath ?: com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(
+            gitDiscovery[project],
+            gitChosenRepoPath[project],
+        )?.path
+        return gitChangesCache[gitChangesKey(project, resolvedPath)]
+    }
+
     /** Sidebar badge count for Source Control (`selectChangeCount`). */
     fun gitChangeCount(project: String?): Int {
         if (project == null) return 0
-        gitChangesCache[project]?.let { return it.files.size }
+        cachedGitChanges(project)?.let { return it.files.size }
         val status = gitBranches[project] ?: return 0
         return status.staged.size + status.unstaged.size + status.untracked.size
     }
@@ -2346,7 +2359,6 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     fun chooseGitRepo(project: String, repoPath: String) {
         gitRepoChoices.choose(project, repoPath)
         gitChosenRepoPath[project] = repoPath
-        gitChangesCache.remove(project)
         gitChanged.tryEmit(project)
     }
 
@@ -2359,7 +2371,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     }
 
     fun applyGitChanges(project: String, repo: com.hienlh.ppm.client.GitRepo?, changes: com.hienlh.ppm.client.GitChanges) {
-        gitChangesCache[project] = changes
+        gitChangesCache[gitChangesKey(project, repo?.path)] = changes
         applyGitStatus(project, repo, com.hienlh.ppm.state.git.GitChangesView.changesToStatus(changes))
     }
 

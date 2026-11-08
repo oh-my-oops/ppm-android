@@ -19,7 +19,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -72,7 +75,9 @@ import com.hienlh.ppm.state.git.GitTreeNode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
@@ -131,7 +136,7 @@ fun GitStatusPanel(
     val needsPick = remember(discovery, chosenPath) { GitRepoScope.needsPick(discovery, chosenPath) }
     val noRepo = remember(discovery) { GitRepoScope.hasNoRepo(discovery) }
 
-    var changes by remember(project, repo?.path) { mutableStateOf(model.gitChangesCache[project]) }
+    var changes by remember(project, repo?.path) { mutableStateOf(model.cachedGitChanges(project, repo?.path)) }
     var loading by remember(project, repo?.path) { mutableStateOf(changes == null) }
     var error by remember(project, repo?.path) { mutableStateOf<String?>(null) }
     var busyAction by remember { mutableStateOf<String?>(null) }
@@ -139,7 +144,14 @@ fun GitStatusPanel(
     var moreMenuOpen by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<ConfirmState?>(null) }
     var hunkTarget by remember { mutableStateOf<HunkModalTarget?>(null) }
-    var changesRequestId by remember { mutableIntStateOf(0) }
+    var changesRequestId by remember(project, repo?.path) { mutableIntStateOf(0) }
+    val currentRepoKey by rememberUpdatedState(model.gitChangesKey(project, repo?.path))
+    var newestLoad by remember(project, repo?.path) {
+        mutableStateOf<Pair<Int, CompletableDeferred<GitChanges?>>?>(null)
+    }
+    DisposableEffect(project, repo?.path) {
+        onDispose { changesRequestId++ }
+    }
     val writeMutex = remember { kotlinx.coroutines.sync.Mutex() }
 
     val drafts by model.commitDrafts.drafts.collectAsState()
@@ -151,28 +163,52 @@ fun GitStatusPanel(
         }
     }
 
-    suspend fun loadChanges() {
-        val client = api ?: return
+    suspend fun loadChanges(): GitChanges? {
+        val client = api ?: return null
         if (repo == null || needsPick || noRepo) {
             loading = false
-            return
+            return null
         }
         val reqId = ++changesRequestId
         val reqProject = project
         val reqRepo = repo
+        val reqKey = model.gitChangesKey(reqProject, reqRepo.path)
+        val done = CompletableDeferred<GitChanges?>()
+        newestLoad = reqId to done
+        suspend fun overtaken(): GitChanges? {
+            val next = newestLoad
+            return if (next != null && next.first == changesRequestId && currentRepoKey == reqKey && next.second !== done) {
+                next.second.await()
+            } else {
+                null
+            }
+        }
+        loading = true
         try {
             val fresh = client.gitChanges(reqProject, reqRepo)
-            if (reqId != changesRequestId) return
+            if (reqId != changesRequestId || currentRepoKey != reqKey) {
+                done.complete(null)
+                return overtaken()
+            }
             changes = fresh
             error = null
             model.applyGitChanges(reqProject, reqRepo, fresh)
+            done.complete(fresh)
+            return fresh
         } catch (e: CancellationException) {
+            done.complete(null)
             throw e
         } catch (e: Exception) {
-            if (reqId != changesRequestId) return
+            if (reqId != changesRequestId || currentRepoKey != reqKey) {
+                done.complete(null)
+                return overtaken()
+            }
             error = model.describe(e)
+            done.complete(null)
+            return null
         } finally {
-            if (reqId == changesRequestId) loading = false
+            if (!done.isCompleted) done.complete(null)
+            if (reqId == changesRequestId && currentRepoKey == reqKey) loading = false
         }
     }
 
@@ -185,11 +221,21 @@ fun GitStatusPanel(
                     loadChanges()
                 }
             }
+            launch {
+                snapshotFlow { model.windowVisible }
+                    .drop(1)
+                    .filter { it }
+                    .collectLatest {
+                        delay(300)
+                        loadChanges()
+                    }
+            }
+            loadChanges()
             while (true) {
+                delay(5_000)
                 if (model.windowVisible) {
                     loadChanges()
                 }
-                delay(5_000)
             }
         }
     }
@@ -218,16 +264,20 @@ fun GitStatusPanel(
     val lastCommit = changes?.lastCommit
     val mode = remember(branch) { GitChangesView.syncMode(branch) }
 
-    fun runGit(key: String, fn: suspend () -> Unit) {
+    fun runGit(
+        key: String,
+        onAfterRefresh: ((GitChanges?) -> Unit)? = null,
+        fn: suspend () -> Unit,
+    ) {
         val client = api ?: return
         scope.launch {
             writeMutex.lock()
             busyAction = key
+            var succeeded = false
             try {
                 if (model.api === client) {
                     fn()
-                    loadChanges()
-                    refreshSignal++
+                    succeeded = true
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -236,6 +286,10 @@ fun GitStatusPanel(
             } finally {
                 busyAction = null
                 writeMutex.unlock()
+                val next = if (model.api === client) loadChanges() else null
+                if (succeeded) {
+                    onAfterRefresh?.invoke(next)
+                }
             }
         }
     }
@@ -446,9 +500,9 @@ fun GitStatusPanel(
         }
     }
 
-    fun handleSync() {
+    fun handleSync(syncMode: String? = mode) {
         val upstream = branch.upstream ?: "the remote"
-        when (mode) {
+        when (syncMode) {
             "publish" -> runGit("publish") {
                 api?.gitPublish(project, repo)
                 model.toast(ErrorToastMessage("Published ${branch.head ?: "branch"}", kind = ErrorToastMessage.Kind.SUCCESS))
@@ -471,20 +525,19 @@ fun GitStatusPanel(
                 api?.gitPush(project, repo = repo)
                 model.toast(ErrorToastMessage("In sync with $upstream", kind = ErrorToastMessage.Kind.SUCCESS))
             }
-            "synced" -> runGit("fetch") {
+            "synced" -> runGit(
+                key = "fetch",
+                onAfterRefresh = { next ->
+                    val behind = next?.branch?.behind ?: 0
+                    model.toast(
+                        ErrorToastMessage(
+                            if (behind > 0) "Fetched — $behind new ${if (behind == 1) "commit" else "commits"} to pull" else "Fetched — nothing new",
+                            kind = ErrorToastMessage.Kind.INFO,
+                        ),
+                    )
+                },
+            ) {
                 api?.gitFetch(project, repo = repo)
-                val fresh = api?.gitChanges(project, repo)
-                if (fresh != null) {
-                    changes = fresh
-                    model.applyGitChanges(project, repo, fresh)
-                }
-                val behind = fresh?.branch?.behind ?: 0
-                model.toast(
-                    ErrorToastMessage(
-                        if (behind > 0) "Fetched — $behind new ${if (behind == 1) "commit" else "commits"} to pull" else "Fetched — nothing new",
-                        kind = ErrorToastMessage.Kind.INFO,
-                    ),
-                )
             }
         }
     }
@@ -638,12 +691,9 @@ fun GitStatusPanel(
                     val discardable = remember(files) { files.filter(GitChangesView::hasUnstaged) }
                     @Composable
                     fun MoreMenuItems() {
-                        MoreMenuItem(ProductIcon.RefreshCw, "Fetch", enabled = busyAction == null) {
+                        MoreMenuItem(ProductIcon.RefreshCw, "Fetch", enabled = busyAction == null && branch.hasRemote) {
                             moreMenuOpen = false
-                            runGit("fetch") {
-                                api?.gitFetch(project, repo = repo)
-                                model.toast(ErrorToastMessage("Fetched from remote", kind = ErrorToastMessage.Kind.SUCCESS))
-                            }
+                            handleSync("synced")
                         }
                         MoreMenuItem(
                             ProductIcon.ArrowDown,
@@ -785,8 +835,23 @@ fun GitStatusPanel(
                         fileCount = files.size,
                         busyAction = busyAction,
                         onOpenPicker = { model.openBranchPicker(project) },
-                        onSync = ::handleSync,
+                        onSync = { handleSync(mode) },
                     )
+                    val pollError = error
+                    if (pollError != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(tokens.error.color.copy(alpha = 0.10f))
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .testTag("git-poll-error-banner"),
+                        ) {
+                            BasicText(
+                                text = pollError,
+                                style = PpmFont.sans(12, lineHeight = 16, color = tokens.error.color),
+                            )
+                        }
+                    }
                 }
 
                 // Operation banner

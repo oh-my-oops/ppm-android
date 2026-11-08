@@ -1830,8 +1830,9 @@ private fun GitReflogNativePanelBody(
 ) {
     val ext = model.extensions
     val projectName = tab.metaString("projectName") ?: tab.projectId ?: model.selectedProject
-    val hasDirtyWorkingTree = remember(projectName, model.gitChangesCache[projectName]) {
-        model.gitChangesCache[projectName]?.files?.isNotEmpty() == true
+    val cachedChanges = projectName?.let { model.cachedGitChanges(it) }
+    val hasDirtyWorkingTree = remember(projectName, cachedChanges) {
+        cachedChanges?.files?.isNotEmpty() == true
     }
 
     var entries by remember(panel.id) { mutableStateOf<List<GitReflogEntry>>(emptyList()) }
