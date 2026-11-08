@@ -867,25 +867,12 @@ data class ModelProblem(
 
 fun baseColumnId(name: String): String = "c:$name"
 
-private fun uniqueSignature(columns: List<String>): String = columns.joinToString("\u0000")
-
-fun ownIndexes(structure: DbTableStructure): List<DbIndex> {
-    val uniqueSets = structure.uniques.map { uniqueSignature(it.columns) }.toSet()
-    val uniqueNames = structure.uniques.mapNotNull { it.name }.toSet()
-    return structure.indexes.filter { idx ->
-        if (idx.primary) return@filter false
-        if (idx.name in uniqueNames) return@filter false
-        if (
-            idx.unique &&
-            idx.filter.isNullOrEmpty() &&
-            idx.keys.all { !it.isExpression && it.order == "ASC" } &&
-            uniqueSignature(idx.columns) in uniqueSets
-        ) {
-            return@filter false
+fun ownIndexes(structure: DbTableStructure): List<DbIndex> =
+    structure.indexes.filter { ix ->
+        !ix.primary && structure.uniques.none { u ->
+            if (u.name != null) u.name == ix.name else ix.unique && u.columns == ix.columns
         }
-        true
     }
-}
 
 data class SplitMysqlTypeResult(
     val dataType: String,

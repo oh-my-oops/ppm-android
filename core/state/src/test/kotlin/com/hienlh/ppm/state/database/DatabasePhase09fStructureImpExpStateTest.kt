@@ -159,6 +159,33 @@ class DatabasePhase09fStructureImpExpStateTest {
         assertEquals("BTREE", ownIdx[0].method)
         assertEquals("DESC", ownIdx[0].keys[0].order)
 
+        // ownIndexes matches named uniques by name only, and unnamed uniques by columns regardless of DESC/where (db-table-model.ts:120)
+        val sqliteUniquesStructure = structure.copy(
+            indexes = listOf(
+                DbIndex(
+                    name = "idx_email_extra",
+                    unique = true,
+                    primary = false,
+                    columns = listOf("email"),
+                    keys = listOf(DbIndexKey(column = "email", descending = false)),
+                ),
+                DbIndex(
+                    name = "sqlite_autoindex_employees_1",
+                    unique = true,
+                    primary = false,
+                    columns = listOf("manager_id"),
+                    keys = listOf(DbIndexKey(column = "manager_id", order = "DESC", descending = true)),
+                    where = "manager_id IS NOT NULL",
+                ),
+            ),
+            uniques = listOf(
+                DbUniqueConstraint(name = "uq_email", columns = listOf("email")),
+                DbUniqueConstraint(name = null, columns = listOf("manager_id")),
+            ),
+        )
+        val sqliteOwn = ownIndexes(sqliteUniquesStructure)
+        assertEquals(listOf("idx_email_extra"), sqliteOwn.map { it.name })
+
         // Read-only helpers
         val roCols = columnRows(structure)
         assertTrue(roCols[0].isPrimaryKey)
