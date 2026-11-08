@@ -216,7 +216,7 @@ class GitStatusPanelTest {
                     onOpen = {},
                     onOpenDiff = {},
                     onOpenFile = {},
-                    onDiscard = { _, _ -> },
+                    onDiscard = {},
                     onStageLines = { _, _ -> },
                     onMarkResolved = {},
                     onReviewAll = { reviewedAll = true },
@@ -433,7 +433,9 @@ class GitStatusPanelTest {
             compose.waitForIdle()
             compose.onNodeWithTag("git-row-discard-src/Partial.kt").performClick()
             compose.waitForIdle()
-            compose.onNodeWithText("Discard changes in \"Partial.kt\"?").assertIsDisplayed()
+            compose.onNodeWithText("Discard changes to Partial.kt?").assertIsDisplayed()
+            compose.onNodeWithText("This puts 1 unstaged block back to the staged version. The 1 staged block stays. You can undo it right after.").assertIsDisplayed()
+            compose.onNodeWithText("Discard 1 block").assertIsDisplayed()
             compose.onNodeWithTag("git-confirm-ok").performClick()
             compose.waitUntil(5_000) {
                 synchronized(recordedMethodsAndTargets) { recordedMethodsAndTargets.any { it.second.endsWith("/git/discard") } }

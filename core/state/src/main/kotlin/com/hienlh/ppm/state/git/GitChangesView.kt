@@ -227,34 +227,33 @@ object GitChangesView {
 
     /** Summary for a discard confirmation modal (`discardSummary` in `src/web/lib/git-changes-view.ts`). */
     fun discardSummary(files: List<ChangedFile>): DiscardSummary {
-        val added = files.count { it.untracked || it.x == "A" }
-        val modified = files.size - added
-        val single = files.singleOrNull()
-        val name = single?.path?.substringAfterLast('/')
-
-        if (single != null && name != null) {
-            return if (added == 1) {
-                DiscardSummary(
-                    title = "Delete \"$name\"?",
-                    body = "This file is not in any commit. Deleting it removes it from disk.",
+        if (files.size == 1) {
+            val file = files[0]
+            val name = file.path.substringAfterLast('/')
+            if (file.untracked) {
+                return DiscardSummary(
+                    title = "Delete $name?",
+                    body = "It is a new file git has never stored, so this deletes it. You can undo it right after.",
                     confirm = "Delete file",
                 )
-            } else {
-                DiscardSummary(
-                    title = "Discard changes in \"$name\"?",
-                    body = "Uncommitted edits in this file will be replaced with the last commit.",
-                    confirm = "Discard changes",
-                )
             }
+            val dots = blockDots(file)
+            val staged = dots.count { it }
+            val open = dots.size - staged
+            val back = if (staged > 0) "the staged version" else "the last commit's version"
+            val stays = if (staged > 0) " The ${plural(staged, "staged block")} ${if (staged == 1) "stays" else "stay"}." else ""
+            return DiscardSummary(
+                title = "Discard changes to $name?",
+                body = "This puts ${plural(open, "unstaged block")} back to $back.$stays You can undo it right after.",
+                confirm = "Discard ${plural(open, "block")}",
+            )
         }
-
-        val parts = mutableListOf<String>()
-        if (modified > 0) parts += "discard edits in $modified ${if (modified == 1) "file" else "files"}"
-        if (added > 0) parts += "delete $added untracked ${if (added == 1) "file" else "files"}"
+        val created = files.count { it.untracked }
+        val deletes = if (created > 0) ", and deletes ${plural(created, "new file")}" else ""
         return DiscardSummary(
-            title = "Discard ${files.size} changes?",
-            body = "This will ${parts.joinToString(" and ")}.",
-            confirm = "Discard ${files.size} files",
+            title = "Discard changes to ${plural(files.size, "file")}?",
+            body = "This puts the unstaged changes back the way the index has them$deletes. Staged changes stay. You can undo it right after.",
+            confirm = "Discard ${plural(files.size, "file")}",
         )
     }
 

@@ -227,9 +227,15 @@ class GitSourceControlLogicTest {
         )
 
         val untrackedSummary = GitChangesView.discardSummary(listOf(untrackedFile))
-        assertEquals("Delete \"C.kt\"?", untrackedSummary.title)
+        assertEquals("Delete C.kt?", untrackedSummary.title)
         assertEquals("Delete file", untrackedSummary.confirm)
-        assertTrue(untrackedSummary.body.contains("not in any commit"))
+        assertEquals("It is a new file git has never stored, so this deletes it. You can undo it right after.", untrackedSummary.body)
+
+        // Tracked file with x == "A" (staged addition + unstaged modification) is NOT treated as untracked
+        val partialSummary = GitChangesView.discardSummary(listOf(partialFile))
+        assertEquals("Discard changes to B.kt?", partialSummary.title)
+        assertEquals("This puts 1 unstaged block back to the staged version. The 1 staged block stays. You can undo it right after.", partialSummary.body)
+        assertEquals("Discard 1 block", partialSummary.confirm)
 
         val modifiedOnlyFile = ChangedFile(
             path = "src/Mod.kt",
@@ -237,10 +243,15 @@ class GitSourceControlLogicTest {
             y = "M",
             unstaged = ChangeSide("M", added = 1, removed = 1, blocks = emptyList()),
         )
+        val modSummary = GitChangesView.discardSummary(listOf(modifiedOnlyFile))
+        assertEquals("Discard changes to Mod.kt?", modSummary.title)
+        assertEquals("This puts 1 unstaged block back to the last commit's version. You can undo it right after.", modSummary.body)
+        assertEquals("Discard 1 block", modSummary.confirm)
+
         val mixedSummary = GitChangesView.discardSummary(listOf(modifiedOnlyFile, untrackedFile))
-        assertEquals("Discard 2 changes?", mixedSummary.title)
+        assertEquals("Discard changes to 2 files?", mixedSummary.title)
         assertEquals("Discard 2 files", mixedSummary.confirm)
-        assertEquals("This will discard edits in 1 file and delete 1 untracked file.", mixedSummary.body)
+        assertEquals("This puts the unstaged changes back the way the index has them, and deletes 1 new file. Staged changes stay. You can undo it right after.", mixedSummary.body)
 
         val branch = GitBranchState(head = "main", oid = "1234567", upstream = "origin/main", upstreamGone = false, ahead = 2, behind = 1)
         assertEquals("sync", GitChangesView.syncMode(branch))

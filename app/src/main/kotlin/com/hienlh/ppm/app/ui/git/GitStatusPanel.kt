@@ -357,11 +357,11 @@ fun GitStatusPanel(
         }
     }
 
-    fun askDiscardFiles(targets: List<ChangedFile>, label: String? = null) {
+    fun askDiscardFiles(targets: List<ChangedFile>) {
         val eligible = targets.filter(GitChangesView::hasUnstaged)
         if (eligible.isEmpty()) return
         val summary = GitChangesView.discardSummary(eligible)
-        val what = label ?: if (eligible.size == 1) {
+        val what = if (eligible.size == 1) {
             eligible[0].path.substringAfterLast('/')
         } else {
             "${eligible.size} files"
@@ -681,7 +681,7 @@ fun GitStatusPanel(
                                 destructive = true,
                             ) {
                                 moreMenuOpen = false
-                                askDiscardFiles(discardable, "all files")
+                                askDiscardFiles(discardable)
                             }
                         }
                     }
@@ -1041,7 +1041,7 @@ internal fun ChangeGroupSection(
     onOpen: (ChangedFile) -> Unit,
     onOpenDiff: (ChangedFile) -> Unit,
     onOpenFile: (ChangedFile) -> Unit,
-    onDiscard: (List<ChangedFile>, String?) -> Unit,
+    onDiscard: (List<ChangedFile>) -> Unit,
     onStageLines: (ChangedFile, String) -> Unit,
     onMarkResolved: (ChangedFile) -> Unit,
     onReviewAll: () -> Unit,
@@ -1137,7 +1137,7 @@ internal fun ChangeGroupSection(
                         onOpen = onOpen,
                         onOpenDiff = onOpenDiff,
                         onOpenFile = onOpenFile,
-                        onDiscard = { onDiscard(listOf(it), null) },
+                        onDiscard = { onDiscard(listOf(it)) },
                         onStageLines = onStageLines,
                         onMarkResolved = onMarkResolved,
                     )
@@ -1160,7 +1160,7 @@ private fun GitTreeNodeView(
     onOpen: (ChangedFile) -> Unit,
     onOpenDiff: (ChangedFile) -> Unit,
     onOpenFile: (ChangedFile) -> Unit,
-    onDiscard: (List<ChangedFile>, String?) -> Unit,
+    onDiscard: (List<ChangedFile>) -> Unit,
     onStageLines: (ChangedFile, String) -> Unit,
     onMarkResolved: (ChangedFile) -> Unit,
 ) {
@@ -1177,7 +1177,7 @@ private fun GitTreeNodeView(
             onOpen = onOpen,
             onOpenDiff = onOpenDiff,
             onOpenFile = onOpenFile,
-            onDiscard = { onDiscard(listOf(it), null) },
+            onDiscard = { onDiscard(listOf(it)) },
             onStageLines = onStageLines,
             onMarkResolved = onMarkResolved,
         )
@@ -1226,7 +1226,7 @@ private fun GitTreeNodeView(
                 modifier = Modifier
                     .size(20.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .clickable { onDiscard(leafFiles, node.name) },
+                    .clickable { onDiscard(leafFiles) },
                 contentAlignment = Alignment.Center,
             ) {
                 PpmIcon(ProductIcon.Trash2, size = 12.dp, tint = tokens.text3.color)
