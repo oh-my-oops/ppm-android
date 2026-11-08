@@ -85,10 +85,8 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     var selection by remember(emulator) { mutableStateOf<SelectionController?>(null) }
     var inputControl by remember(emulator) { mutableStateOf<ComposeController?>(null) }
     var imeController by remember(emulator) { mutableStateOf<TerminalImeController?>(null) }
-    var selecting by remember(emulator) { mutableStateOf(false) }
-    var terminalFocused by remember { mutableStateOf(false) }
-    var keyboardRequested by remember { mutableStateOf(false) }
-    var imeWasVisible by remember { mutableStateOf(false) }
+    val kb = remember { TerminalKeyboardState() }
+    LaunchedEffect(emulator) { kb.selecting = false }
     var links by remember { mutableStateOf<List<String>?>(null) }
     var oscLink by remember { mutableStateOf<String?>(null) }
     val modifiers = remember(emulator) { TerminalModifiers() }
@@ -107,17 +105,16 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
         onDispose { session.setShown(false); TextInputFocus.releaseNative(session) }
     }
     LaunchedEffect(windowFocused) {
-        if (!windowFocused) keyboardRequested = false
+        kb.onWindowFocusChanged(windowFocused)
     }
-    LaunchedEffect(inputReady, state.exited) {
-        if (!inputReady) {
-            keyboardRequested = false
-            imeController?.hideKeyboard()
-        }
-        if (state.exited) {
-            terminalFocused = false
-            TextInputFocus.releaseNative(session)
-        }
+    LaunchedEffect(visible, state.exited, state.error) {
+        kb.onTerminalLivenessChanged(
+            visible = visible,
+            exited = state.exited,
+            hasError = state.error != null,
+            hideKeyboard = { imeController?.hideKeyboard() },
+            releaseFocus = { TextInputFocus.releaseNative(session) },
+        )
     }
     LaunchedEffect(tab.metaString("pendingCommand")) {
         tab.metaString("pendingCommand")?.takeIf { it.isNotEmpty() }?.let {
@@ -133,13 +130,17 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
             if (session.send(command)) {
                 session.pendingCommand = null
                 // Like the web, type it without Enter; the user decides when to execute it.
-                terminalFocused = true
+                kb.terminalFocused = true
                 runCatching { focus.requestFocus() }
             }
         }
     }
-    LaunchedEffect(inputReady, terminalFocused, emulator) {
-        if (inputReady && terminalFocused) runCatching { focus.requestFocus() }
+    LaunchedEffect(inputReady, kb.terminalFocused, kb.keyboardRequested, kb.selecting, emulator, imeController) {
+        kb.onReadyStateChanged(
+            inputReady = inputReady,
+            requestFocus = { runCatching { focus.requestFocus() } },
+            showKeyboard = { imeController?.showKeyboard() },
+        )
     }
     // Rich IME composition stays independent of hardware typing. Sticky Ctrl asks the IME
     // for raw key events for the next key, then restores Unicode composition immediately.
@@ -161,13 +162,11 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     // The web's focusTerminal(): a key of the row keeps the terminal focused, so the soft keyboard stays up
     // (and comes up when the terminal had lost the focus), rather than taking it as a tap elsewhere does.
     fun focusTerminal() {
-        TextInputFocus.asked()
-        terminalFocused = true
-        if (!selecting) {
-            keyboardRequested = true
-            imeController?.showKeyboard()
-        }
-        runCatching { focus.requestFocus() }
+        kb.focusFromToolbar(
+            askFocus = TextInputFocus::asked,
+            requestFocus = { runCatching { focus.requestFocus() } },
+            showKeyboard = { imeController?.showKeyboard() },
+        )
     }
     // As handlePaste: an empty clipboard does nothing at all, and what was pasted leaves the terminal focused.
     fun paste() {
@@ -195,8 +194,8 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
             Box(Modifier.size(8.dp).background(color.color, CircleShape))
             BasicText(when { state.exited -> "Process exited"; state.connected -> "Connected"; state.reconnecting -> "Reconnecting..."; else -> "Disconnected" }, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color))
             if (state.exited) TerminalAction("Restart", ProductIcon.RotateCcw, compact = true) {
-                terminalFocused = false
-                keyboardRequested = false
+                kb.terminalFocused = false
+                kb.keyboardRequested = false
                 session.restart()
             }
             Spacer(Modifier.weight(1f))
@@ -225,16 +224,16 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
                             // A tap on nothing blurs the terminal as it does xterm's textarea: the keyboard goes with the
                             // focus, and the next tap on the terminal asks for it again like the first one did.
                             if (focusState.hasFocus) {
-                                terminalFocused = true
+                                kb.terminalFocused = true
                                 TextInputFocus.takeNative(session, focusManager, onBlur = {
-                                    terminalFocused = false
-                                    keyboardRequested = false
+                                    kb.terminalFocused = false
+                                    kb.keyboardRequested = false
                                     imeController?.hideKeyboard()
                                 }, keep = caret::keysIn, bounds = caret::cursorIn)
                             } else {
-                                if (TextInputFocus.field !== session && inputReady && session.emulator === emulator) {
-                                    terminalFocused = false
-                                    keyboardRequested = false
+                                if (TextInputFocus.field !== session && inputReady && !kb.selecting && session.emulator === emulator) {
+                                    kb.terminalFocused = false
+                                    kb.keyboardRequested = false
                                 }
                                 TextInputFocus.releaseNative(session)
                             }
@@ -243,28 +242,25 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
                     backgroundColor = tokens.bgSolid.color, foregroundColor = tokens.text.color,
                     selectionBackgroundColor = tokens.accentWash.color, selectionForegroundColor = tokens.text.color,
                     cursorColor = tokens.accent.color, cursorAccent = tokens.bgSolid.color, minimumContrastRatio = 4.5,
-                    keyboardEnabled = inputReady, showSoftKeyboard = keyboardRequested && !selecting, focusRequester = focus,
+                    keyboardEnabled = kb.keyboardEnabled(inputReady), showSoftKeyboard = kb.showSoftKeyboard(inputReady), focusRequester = focus,
                     imeMode = TerminalImeMode.CommittedText,
                     onComposeControllerAvailable = { inputControl = it },
                     onImeControllerAvailable = { imeController = it },
-                    onImeVisibilityChanged = { visible ->
-                        if (imeWasVisible && !visible) keyboardRequested = false
-                        imeWasVisible = visible
+                    onImeVisibilityChanged = { imeVisible ->
+                        kb.onImeVisibilityChanged(imeVisible = imeVisible, inputReady = inputReady)
                     },
                     // Every tap asks, as the web's touchend does, except in select mode, which raises nothing (it has no touchend).
                     onTerminalTap = {
-                        TextInputFocus.asked()
-                        terminalFocused = true
-                        if (!selecting) {
-                            keyboardRequested = true
-                            imeController?.showKeyboard()
-                        }
+                        kb.onTerminalTap(
+                            askFocus = TextInputFocus::asked,
+                            showKeyboard = { imeController?.showKeyboard() },
+                        )
                     },
                     onCursorBoundsChanged = caret::cursorMoved,
                     modifierManager = modifiers,
                     onSelectionControllerAvailable = { selection = it },
                     // Select mode: a one-finger drag selects from where it came down (useTerminalTouchSelection) and does not scroll.
-                    touchSelect = selecting,
+                    touchSelect = kb.selecting,
                     selectionActions = { selected ->
                         TerminalText.selectionContext(selected.getSelectionText())?.let { context ->
                             FlowRow(
@@ -302,16 +298,10 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
                 focusTerminal()
                 modifiers.ctrl = MobileKey.Ctrl.press(modifiers.ctrl).ctrlArmed
             },
-            selectMode = selecting,
+            selectMode = kb.selecting,
             // Like the web's, it selects nothing by itself: the drag does, and a selection outlives the mode.
             onToggleSelect = {
-                selecting = !selecting
-                keyboardRequested = false
-                imeController?.hideKeyboard()
-                if (terminalFocused) {
-                    TextInputFocus.asked()
-                    runCatching { focus.requestFocus() }
-                }
+                kb.onToggleSelect(hideKeyboard = { imeController?.hideKeyboard() })
             },
             onKey = { key, repeated ->
                 if (!repeated) {
@@ -348,6 +338,94 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
 
 /** How long terminal-tab.tsx's toasts stay (`duration: 1500`). */
 private const val TERMINAL_TOAST_MS = 1_500L
+
+internal class TerminalKeyboardState {
+    var terminalFocused by mutableStateOf(false)
+    var keyboardRequested by mutableStateOf(false)
+    var imeWasVisible by mutableStateOf(false)
+    var selecting by mutableStateOf(false)
+
+    fun keyboardEnabled(inputReady: Boolean): Boolean = inputReady && !selecting
+
+    fun showSoftKeyboard(inputReady: Boolean): Boolean = inputReady && keyboardRequested && !selecting
+
+    fun onWindowFocusChanged(windowFocused: Boolean) {
+        if (!windowFocused) keyboardRequested = false
+    }
+
+    /**
+     * A transient socket reconnect drops `connected` or `shellReady` (`inputReady == false`) while the tab stays
+     * visible and alive; keep `keyboardRequested` and `terminalFocused` across the reconnect so the soft keyboard
+     * returns when `inputReady` comes back. Only hide and clear when the tab is hidden, exited, or in error.
+     */
+    fun onTerminalLivenessChanged(
+        visible: Boolean,
+        exited: Boolean,
+        hasError: Boolean,
+        hideKeyboard: () -> Unit,
+        releaseFocus: () -> Unit,
+    ) {
+        if (!visible || exited || hasError) {
+            keyboardRequested = false
+            hideKeyboard()
+        }
+        if (exited) {
+            terminalFocused = false
+            releaseFocus()
+        }
+    }
+
+    fun onReadyStateChanged(
+        inputReady: Boolean,
+        requestFocus: () -> Unit,
+        showKeyboard: () -> Unit,
+    ) {
+        if (inputReady && !selecting) {
+            if (terminalFocused || keyboardRequested) requestFocus()
+            if (keyboardRequested) showKeyboard()
+        }
+    }
+
+    fun onImeVisibilityChanged(imeVisible: Boolean, inputReady: Boolean) {
+        if (imeWasVisible && !imeVisible && inputReady && !selecting) {
+            keyboardRequested = false
+        }
+        imeWasVisible = imeVisible
+    }
+
+    fun onTerminalTap(
+        askFocus: () -> Unit,
+        showKeyboard: () -> Unit,
+    ) {
+        if (!selecting) {
+            askFocus()
+            terminalFocused = true
+            keyboardRequested = true
+            showKeyboard()
+        }
+    }
+
+    fun onToggleSelect(hideKeyboard: () -> Unit) {
+        selecting = !selecting
+        if (selecting) {
+            keyboardRequested = false
+            hideKeyboard()
+        }
+    }
+
+    fun focusFromToolbar(
+        askFocus: () -> Unit,
+        requestFocus: () -> Unit,
+        showKeyboard: () -> Unit,
+    ) {
+        if (selecting) return
+        askFocus()
+        terminalFocused = true
+        keyboardRequested = true
+        showKeyboard()
+        requestFocus()
+    }
+}
 
 private class TerminalModifiers : ModifierManager {
     var ctrl by mutableStateOf(false)

@@ -892,7 +892,7 @@ def tap_asks_for_focus(text):
                                     }
                                 }
                                 // Every tap asks for the focus: one that cleared a selection or opened a link too.
-                                if (currentKeyboardEnabled) {
+                                if (currentKeyboardEnabled && !currentTouchSelect) {
                                     focusRequester.requestFocus()
                                     if (currentShouldShowIme) imeInputView?.showIme()
                                 }
@@ -983,11 +983,6 @@ def touch_select(text):
 """ + marker)
     text = replace(text, "                        val isDoubleTap = (down.uptimeMillis", "                        val isDoubleTap = !currentTouchSelect && !terminalEmulator.isMouseTracking && (down.uptimeMillis")
     text = replace(text, "                        val longPressJob = if (gestureType == GestureType.Undetermined) {", "                        val longPressJob = if (gestureType == GestureType.Undetermined && !currentTouchSelect && !terminalEmulator.isMouseTracking) {")
-    text = replace(
-        text,
-        "                                    selectionManager.endSelection()\n                                }\n                            }\n",
-        "                                    selectionManager.endSelection()\n                                }\n                                if (currentKeyboardEnabled) focusRequester.requestFocus()\n                            }\n",
-    )
     text = replace(text, "                        var pendingPageDrag = 0f\n", "                        var pendingPageDrag = 0f\n                        var pendingTouchScroll = 0f\n")
     text = replace(text, """                                        if (gestureType == GestureType.Page) {
                                             // Include movement accumulated during touch slop and the zoom grace period.
