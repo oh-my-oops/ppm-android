@@ -249,4 +249,32 @@ class RemoteDesktopStateTest {
         assertEquals(0x02.toByte(), polled.bytes[0])
         assertNull(queue.poll())
     }
+
+    @Test
+    fun `BoundedVideoFrameQueue markWaitingForKeyframe only waits when no keyframe remains queued`() {
+        val queue = BoundedVideoFrameQueue(capacity = 8)
+
+        // Case 1: K1 polled by worker, only deltas [d1, d2] remain queued -> markWaitingForKeyframe drops them and waits
+        assertTrue(queue.offer(byteArrayOf(0x01), isKeyframe = true))
+        assertTrue(queue.offer(byteArrayOf(0x11), isKeyframe = false))
+        assertTrue(queue.offer(byteArrayOf(0x12), isKeyframe = false))
+        assertNotNull(queue.poll()) // K1 polled by worker
+        queue.markWaitingForKeyframe()
+        assertTrue(queue.waitingForKeyframe)
+        assertEquals(0, queue.size)
+        assertEquals(2, queue.droppedDeltas)
+        assertEquals(false, queue.offer(byteArrayOf(0x13), isKeyframe = false))
+
+        // Case 2: K2 and d1 are queued while worker fails on previous frame -> markWaitingForKeyframe keeps [K2, d1] and accepts d2
+        assertTrue(queue.offer(byteArrayOf(0x02), isKeyframe = true))
+        assertTrue(queue.offer(byteArrayOf(0x21), isKeyframe = false))
+        queue.markWaitingForKeyframe()
+        assertEquals(false, queue.waitingForKeyframe)
+        assertEquals(2, queue.size)
+        assertTrue(queue.offer(byteArrayOf(0x22), isKeyframe = false))
+        assertEquals(3, queue.size)
+        assertEquals(0x02.toByte(), queue.poll()!!.bytes[0])
+        assertEquals(0x21.toByte(), queue.poll()!!.bytes[0])
+        assertEquals(0x22.toByte(), queue.poll()!!.bytes[0])
+    }
 }

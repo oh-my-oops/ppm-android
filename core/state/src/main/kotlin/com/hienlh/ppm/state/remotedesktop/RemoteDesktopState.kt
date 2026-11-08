@@ -364,11 +364,11 @@ class BoundedVideoFrameQueue(val capacity: Int = 8) {
 
     fun markWaitingForKeyframe() {
         synchronized(lock) {
-            waitingForKeyframe = true
-            while (queue.isNotEmpty() && !queue.last().isKeyframe) {
-                queue.removeLast()
+            while (queue.isNotEmpty() && !queue.first().isKeyframe) {
+                queue.removeFirst()
                 droppedDeltas++
             }
+            waitingForKeyframe = queue.none { it.isKeyframe }
         }
     }
 
