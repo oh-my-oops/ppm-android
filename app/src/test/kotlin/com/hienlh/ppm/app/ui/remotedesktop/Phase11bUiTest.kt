@@ -1,23 +1,36 @@
 package com.hienlh.ppm.app.ui.remotedesktop
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.view.KeyEvent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyPress
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ui.tablet.Sidebar
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
+import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.string
+import com.hienlh.ppm.state.remotedesktop.HostMode
+import com.hienlh.ppm.state.remotedesktop.HostResolutions
 import com.hienlh.ppm.state.remotedesktop.RdSize
 import com.hienlh.ppm.state.remotedesktop.RemoteDesktopCapabilities
 import com.hienlh.ppm.state.remotedesktop.RemoteDesktopRequirement
@@ -33,6 +46,7 @@ import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.File
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w900dp-h1200dp-xxhdpi")
@@ -354,5 +368,242 @@ class Phase11bUiTest {
             decoder.release()
             audioPlayer.release()
         }
+    }
+
+    @Test
+    fun `RemoteDesktopViewer receives hardware keys without focusing hidden input and drops both halves of Ctrl+V`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val model = AppModel(context)
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("test", "hello from clipboard"))
+
+        val sent = mutableListOf<JsonElement>()
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                Box(Modifier.size(width = 800.dp, height = 600.dp)) {
+                    RemoteDesktopViewer(
+                        model = model,
+                        onSendMessageOverride = { sent += it },
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        // Hardware KeyA down & up on stage (without focusing the 1dp soft-keyboard field)
+        composeRule.onNodeWithTag("remote-desktop-window").performKeyPress(
+            androidx.compose.ui.input.key.KeyEvent(
+                KeyEvent(0L, 0L, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_A, 0),
+            ),
+        )
+        composeRule.onNodeWithTag("remote-desktop-window").performKeyPress(
+            androidx.compose.ui.input.key.KeyEvent(
+                KeyEvent(0L, 10L, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_A, 0),
+            ),
+        )
+        assertTrue(sent.any { it.jsonObject["type"].string == "key" && it.jsonObject["code"].string == "KeyA" && it.jsonObject["down"].bool == true })
+        assertTrue(sent.any { it.jsonObject["type"].string == "key" && it.jsonObject["code"].string == "KeyA" && it.jsonObject["down"].bool == false })
+
+        // Ctrl+V down sends clipboard paste, and BOTH KeyDown and KeyUp of KeyV are dropped when clipboardSync is true
+        sent.clear()
+        composeRule.onNodeWithTag("remote-desktop-window").performKeyPress(
+            androidx.compose.ui.input.key.KeyEvent(
+                KeyEvent(0L, 20L, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_V, 0, KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON),
+            ),
+        )
+        composeRule.onNodeWithTag("remote-desktop-window").performKeyPress(
+            androidx.compose.ui.input.key.KeyEvent(
+                KeyEvent(0L, 30L, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_V, 0, KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON),
+            ),
+        )
+        assertEquals(1, sent.size)
+        assertEquals("clipboard", sent[0].jsonObject["type"].string)
+        assertEquals("hello from clipboard", sent[0].jsonObject["text"].string)
+        assertEquals(true, sent[0].jsonObject["paste"].bool)
+        assertTrue(sent.none { it.jsonObject["type"].string == "key" && it.jsonObject["code"].string == "KeyV" })
+    }
+
+    @Test
+    fun `RemoteDesktop preferences persist across AppModel recreation and warning gate dismissal is saved`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val model = AppModel(context)
+        model.setRemoteDesktopWarningDismissedPref(false)
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                RemoteDesktopAppBody(
+                    model = model,
+                    initialCaps = RemoteDesktopCapabilities(
+                        platform = "linux",
+                        videoReady = true,
+                        inputReady = true,
+                    ),
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("remote-desktop-warning-gate").assertIsDisplayed()
+        composeRule.onNodeWithTag("remote-desktop-warning-dont-show").performClick()
+        composeRule.onNodeWithTag("remote-desktop-warning-continue").performClick()
+        composeRule.waitForIdle()
+        assertTrue(model.remoteDesktopWarningDismissed)
+
+        model.setRemoteDesktopQualityPref("low")
+        model.setRemoteDesktopViewStylePref("custom")
+        model.setRemoteDesktopCustomScalePref(1.5)
+        model.setRemoteDesktopCustomQualityPref(percent = 120, fps = 45, more = true)
+        model.setRemoteDesktopShowCursorPref(false)
+        model.setRemoteDesktopClipboardSyncPref(false)
+        model.setRemoteDesktopCodecPref("h264_nvenc")
+        model.setRemoteDesktopStatsVisiblePref(true)
+
+        val reloaded = AppModel(context)
+        assertTrue(reloaded.remoteDesktopWarningDismissed)
+        assertTrue(reloaded.remoteDesktopStatsVisible)
+        assertEquals("low", reloaded.remoteDesktopQuality)
+        assertEquals("custom", reloaded.remoteDesktopViewStyle)
+        assertEquals(1.5, reloaded.remoteDesktopCustomScale, 1e-6)
+        assertEquals(120, reloaded.remoteDesktopCustomQualityPercent)
+        assertEquals(45, reloaded.remoteDesktopCustomFps)
+        assertEquals(true, reloaded.remoteDesktopCustomQualityMore)
+        assertEquals(false, reloaded.remoteDesktopShowCursor)
+        assertEquals(false, reloaded.remoteDesktopClipboardSync)
+        assertEquals("h264_nvenc", reloaded.remoteDesktopCodec)
+    }
+
+    @Test
+    fun `Fit local uses device screen dimensions and mobile settings panel renders Fit local and resolutionError and no-audio recording label`() {
+        val caps = RemoteDesktopCapabilities(
+            platform = "linux",
+            videoReady = true,
+            inputReady = true,
+            resolutions = HostResolutions(
+                output = "DP-1",
+                modes = listOf(
+                    HostMode(id = "m1", width = 1920, height = 1080, refresh = 60, current = true, preferred = true),
+                    HostMode(id = "m2", width = 1280, height = 800, refresh = 60, current = false, preferred = false),
+                ),
+            ),
+        )
+        var requestedMode: String? = null
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                Column {
+                    RemoteDesktopTabletToolbar(
+                        caps = caps,
+                        currentDisplayId = "0",
+                        onSelectDisplay = {},
+                        qualityChoice = "balanced",
+                        serverPreset = "balanced",
+                        qualityHeld = 1.0,
+                        onSetQuality = {},
+                        onOpenCustomQuality = {},
+                        codec = null,
+                        onSetCodec = {},
+                        hostModeId = "m1",
+                        hostOriginalModeId = null,
+                        resolutionError = null,
+                        onSetHostMode = { requestedMode = it },
+                        viewStyle = "adaptive",
+                        customScale = 1.0,
+                        onSetViewStyle = {},
+                        onSetCustomScale = {},
+                        showCursor = true,
+                        onSetShowCursor = {},
+                        audioOn = false,
+                        onSetAudioOn = {},
+                        privacyOn = false,
+                        privacyError = null,
+                        onSetPrivacyOn = {},
+                        clipboardEnabled = true,
+                        onSetClipboardEnabled = {},
+                        statsVisible = false,
+                        onToggleStats = {},
+                        recording = false,
+                        recordingElapsedSec = 0,
+                        onToggleRecording = {},
+                        onScreenshot = {},
+                        localScreenOverride = RdSize(1280, 800),
+                    )
+                    RemoteDesktopMobileSettingsPanel(
+                        caps = caps,
+                        statsVisible = false,
+                        onToggleStats = {},
+                        showCursor = true,
+                        onSetShowCursor = {},
+                        clipboardEnabled = true,
+                        onSetClipboardEnabled = {},
+                        audioOn = false,
+                        onSetAudioOn = {},
+                        privacyOn = false,
+                        privacyError = null,
+                        onSetPrivacyOn = {},
+                        hostModeId = "m1",
+                        hostOriginalModeId = null,
+                        resolutionError = "The host refused the mode.",
+                        onSetHostMode = { requestedMode = it },
+                        recording = false,
+                        onToggleRecording = {},
+                        onScreenshot = {},
+                        localScreenOverride = RdSize(1280, 800),
+                    )
+                }
+            }
+        }
+
+        // Mobile settings panel shows Fit local, resolutionError, and "Start recording (no audio)"
+        composeRule.onNodeWithTag("remote-desktop-mobile-resolution-fit-local").assertIsDisplayed()
+        composeRule.onNodeWithTag("remote-desktop-mobile-resolution-error").assertIsDisplayed()
+        composeRule.onNodeWithText("The host refused the mode.").assertIsDisplayed()
+        composeRule.onNodeWithText("Start recording (no audio)").assertIsDisplayed()
+
+        // Tablet toolbar settings menu shows Fit local (1280 × 800) for a 1280x800 device screen
+        composeRule.onNodeWithTag("remote-desktop-settings-trigger").performClick()
+        composeRule.onNodeWithTag("remote-desktop-resolution-fit-local").assertIsDisplayed()
+        composeRule.onNodeWithText("Fit local (1280 × 800)").performClick()
+        assertEquals("m2", requestedMode)
+    }
+
+    @Test
+    fun `Recording stops on viewer unmount and screenshot target bitmap uses decoded frameSize and Sidebar hides Remote Desktop when unsupported`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val model = AppModel(context)
+        model.remoteDesktopPlatformSupported = false
+        assertEquals(false, model.remoteDesktopAvailable)
+
+        val tempMp4 = File(context.cacheDir, "test-unmount-record.mp4")
+        val recorder = H264Mp4Recorder(tempMp4, 480, 360) { RdSize(480, 360) }
+        var showViewer by mutableStateOf(true)
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                Column {
+                    Sidebar(model = model)
+                    if (showViewer) {
+                        RemoteDesktopViewer(
+                            model = model,
+                            initialRecorder = recorder,
+                        )
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        // Sidebar hides Remote Desktop button when platformSupported is false
+        composeRule.onAllNodesWithTag("sidebar-remote-desktop").assertCountEquals(0)
+
+        // Unmounting RemoteDesktopViewer while recording stops the active recorder
+        assertEquals(false, recorder.isStopped)
+        showViewer = false
+        composeRule.waitForIdle()
+        assertTrue(recorder.isStopped)
+        tempMp4.delete()
+
+        // Screenshot target bitmap is allocated at decoded frameSize (1920x1080), not surfaceView layout size (800x450)
+        val bmp = createScreenshotTargetBitmap(surfaceWidth = 800, surfaceHeight = 450, frameSize = RdSize(1920, 1080))
+        assertEquals(1920, bmp!!.width)
+        assertEquals(1080, bmp.height)
     }
 }

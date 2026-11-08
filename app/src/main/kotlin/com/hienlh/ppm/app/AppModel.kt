@@ -52,6 +52,7 @@ import com.hienlh.ppm.client.webFile
 import com.hienlh.ppm.client.fullResourceSamples
 import com.hienlh.ppm.client.logsIssuesSummary
 import com.hienlh.ppm.client.androidCapabilities
+import com.hienlh.ppm.client.remoteDesktopCapabilities
 import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.IconFramework
 import com.hienlh.ppm.design.PpmTheme
@@ -446,6 +447,14 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** The Android entry surfaces only when `enabled` is true and `minimalMode` is off (`use-android-available.ts`). */
     val androidAvailable: Boolean
         get() = info?.minimalMode != true && androidEnabled
+
+    /** Whether `/api/remote-desktop/capabilities` reports `platformSupported: true` (`use-remote-desktop-available.ts`). */
+    var remoteDesktopPlatformSupported by mutableStateOf(true)
+        internal set
+
+    /** The Remote Desktop entry surfaces only when `platformSupported` is true and `minimalMode` is off (`use-remote-desktop-available.ts`). */
+    val remoteDesktopAvailable: Boolean
+        get() = info?.minimalMode != true && remoteDesktopPlatformSupported
     var projects by mutableStateOf(emptyList<ProjectInfo>())
         internal set
     var projectsLoad by mutableStateOf<Load>(Load.Idle)
@@ -584,6 +593,50 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     var jiraEnabled by mutableStateOf(false)
         private set
 
+    /** Remote Desktop stats overlay (`remoteDesktopStatsVisible`), shared through the server's UI prefs. */
+    var remoteDesktopStatsVisible by mutableStateOf(false)
+        internal set
+
+    /** Remote Desktop warning gate dismissed (`remoteDesktopWarningDismissed`), shared through the server's UI prefs. */
+    var remoteDesktopWarningDismissed by mutableStateOf(false)
+        internal set
+
+    /** Device-local Remote Desktop quality choice (`remoteDesktopQuality`). */
+    var remoteDesktopQuality by mutableStateOf(com.hienlh.ppm.state.remotedesktop.DEFAULT_PRESET_ID)
+        internal set
+
+    /** Device-local Remote Desktop view style (`remoteDesktopViewStyle`). */
+    var remoteDesktopViewStyle by mutableStateOf(com.hienlh.ppm.state.remotedesktop.DEFAULT_VIEW_STYLE)
+        internal set
+
+    /** Device-local Remote Desktop custom scale (`remoteDesktopCustomScale`). */
+    var remoteDesktopCustomScale by mutableStateOf(com.hienlh.ppm.state.remotedesktop.DEFAULT_CUSTOM_SCALE)
+        internal set
+
+    /** Device-local Remote Desktop custom quality "More" toggle (`remoteDesktopCustomQualityMore`). */
+    var remoteDesktopCustomQualityMore by mutableStateOf(false)
+        internal set
+
+    /** Device-local Remote Desktop custom bitrate percent (`remoteDesktopCustomQualityPercent`). */
+    var remoteDesktopCustomQualityPercent by mutableIntStateOf(com.hienlh.ppm.state.remotedesktop.CUSTOM_QUALITY_DEFAULT_PERCENT)
+        internal set
+
+    /** Device-local Remote Desktop custom FPS (`remoteDesktopCustomFps`). */
+    var remoteDesktopCustomFps by mutableIntStateOf(com.hienlh.ppm.state.remotedesktop.CUSTOM_FPS_DEFAULT)
+        internal set
+
+    /** Device-local Remote Desktop cursor visibility (`remoteDesktopShowCursor`). */
+    var remoteDesktopShowCursor by mutableStateOf(true)
+        internal set
+
+    /** Device-local Remote Desktop clipboard sync (`remoteDesktopClipboardSync`). */
+    var remoteDesktopClipboardSync by mutableStateOf(true)
+        internal set
+
+    /** Device-local Remote Desktop preferred H.264 encoder (`remoteDesktopCodec`). */
+    var remoteDesktopCodec by mutableStateOf<String?>(null)
+        internal set
+
     /** Requested Settings category when opened via deep link or `openSettings(category)`. */
     var requestedSettingsCategory by mutableStateOf<String?>(null)
         internal set
@@ -650,6 +703,79 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         jiraEnabled = enabled
         saveUiPrefs()
         putUiPref { put("jiraEnabled", enabled) }
+    }
+
+    fun setRemoteDesktopWarningDismissedPref(dismissed: Boolean) {
+        remoteDesktopWarningDismissed = dismissed
+        saveUiPrefs()
+        putUiPref { put("remoteDesktopWarningDismissed", dismissed) }
+    }
+
+    fun setRemoteDesktopStatsVisiblePref(visible: Boolean) {
+        remoteDesktopStatsVisible = visible
+        saveUiPrefs()
+        putUiPref { put("remoteDesktopStatsVisible", visible) }
+    }
+
+    fun toggleRemoteDesktopStatsVisiblePref() {
+        setRemoteDesktopStatsVisiblePref(!remoteDesktopStatsVisible)
+    }
+
+    fun setRemoteDesktopQualityPref(choice: String) {
+        val parsed = com.hienlh.ppm.state.remotedesktop.parseQualityChoice(choice)
+        remoteDesktopQuality = parsed
+        prefs.put("remoteDesktopQuality.$serverKey", parsed)
+    }
+
+    fun setRemoteDesktopViewStylePref(style: String) {
+        val parsed = com.hienlh.ppm.state.remotedesktop.parseViewStyle(style)
+        remoteDesktopViewStyle = parsed
+        prefs.put("remoteDesktopViewStyle.$serverKey", parsed)
+    }
+
+    fun setRemoteDesktopCustomScalePref(scale: Double) {
+        val clamped = com.hienlh.ppm.state.remotedesktop.clampCustomScale(scale)
+        remoteDesktopCustomScale = clamped
+        prefs.put("remoteDesktopCustomScale.$serverKey", clamped.toString())
+    }
+
+    fun setRemoteDesktopCustomQualityPref(
+        percent: Int,
+        fps: Int,
+        more: Boolean = remoteDesktopCustomQualityMore,
+    ) {
+        val p = com.hienlh.ppm.state.remotedesktop.clampCustomQualityPercent(percent, more)
+        val f = com.hienlh.ppm.state.remotedesktop.clampCustomFps(fps)
+        remoteDesktopCustomQualityMore = more
+        remoteDesktopCustomQualityPercent = p
+        remoteDesktopCustomFps = f
+        prefs.put("remoteDesktopCustomQualityMore.$serverKey", more.toString())
+        prefs.put("remoteDesktopCustomQualityPercent.$serverKey", p.toString())
+        prefs.put("remoteDesktopCustomFps.$serverKey", f.toString())
+    }
+
+    fun setRemoteDesktopCustomQualityMorePref(more: Boolean) {
+        val p = com.hienlh.ppm.state.remotedesktop.clampCustomQualityPercent(remoteDesktopCustomQualityPercent, more)
+        remoteDesktopCustomQualityMore = more
+        remoteDesktopCustomQualityPercent = p
+        prefs.put("remoteDesktopCustomQualityMore.$serverKey", more.toString())
+        prefs.put("remoteDesktopCustomQualityPercent.$serverKey", p.toString())
+    }
+
+    fun setRemoteDesktopShowCursorPref(show: Boolean) {
+        remoteDesktopShowCursor = show
+        prefs.put("remoteDesktopShowCursor.$serverKey", show.toString())
+    }
+
+    fun setRemoteDesktopClipboardSyncPref(enabled: Boolean) {
+        remoteDesktopClipboardSync = enabled
+        prefs.put("remoteDesktopClipboardSync.$serverKey", enabled.toString())
+    }
+
+    fun setRemoteDesktopCodecPref(encoder: String?) {
+        val clean = encoder?.takeIf { it.isNotEmpty() }
+        remoteDesktopCodec = clean
+        prefs.put("remoteDesktopCodec.$serverKey", clean)
     }
 
     fun updateDeviceNameLocal(name: String) {
@@ -1243,6 +1369,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         upgrade = null
         info = null
         androidEnabled = false
+        remoteDesktopPlatformSupported = true
         projects = emptyList()
         projectsLoad = Load.Idle
         selectedProject = null
@@ -1322,6 +1449,15 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 val capsJson = quietly { api.androidCapabilities() } ?: return@launch
                 if (this@AppModel.api !== api) return@launch
                 androidEnabled = com.hienlh.ppm.state.androiddevice.parseAndroidCapabilities(capsJson).enabled
+            }
+            launch {
+                val capsJson = quietly { api.remoteDesktopCapabilities() }
+                if (this@AppModel.api !== api) return@launch
+                remoteDesktopPlatformSupported = if (capsJson != null) {
+                    com.hienlh.ppm.state.remotedesktop.RemoteDesktopCapabilities.from(capsJson).platformSupported
+                } else {
+                    false
+                }
             }
         }
     }
@@ -1481,6 +1617,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                     prefs.editorTabStyle?.let { editorTabStyle = it }
                     prefs.inlineBlame?.let { inlineBlame = it }
                     prefs.designWindows?.let { designWindows = it }
+                    prefs.remoteDesktopStatsVisible?.let { remoteDesktopStatsVisible = it }
+                    prefs.remoteDesktopWarningDismissed?.let { remoteDesktopWarningDismissed = it }
                     prefs.jiraEnabled?.let { jiraEnabled = it }
                     saveUiPrefs()
                 }
@@ -1535,8 +1673,27 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         editorTabStyle = saved.editorTabStyle ?: "default"
         inlineBlame = saved.inlineBlame ?: true
         designWindows = saved.designWindows ?: false
+        remoteDesktopStatsVisible = saved.remoteDesktopStatsVisible ?: false
+        remoteDesktopWarningDismissed = saved.remoteDesktopWarningDismissed ?: false
         jiraEnabled = saved.jiraEnabled ?: false
         logsBadge = prefs.get("logsBadge.$serverKey")?.toBooleanStrictOrNull() ?: true
+        remoteDesktopQuality = com.hienlh.ppm.state.remotedesktop.parseQualityChoice(prefs.get("remoteDesktopQuality.$serverKey"))
+        remoteDesktopViewStyle = com.hienlh.ppm.state.remotedesktop.parseViewStyle(prefs.get("remoteDesktopViewStyle.$serverKey"))
+        remoteDesktopCustomScale = com.hienlh.ppm.state.remotedesktop.clampCustomScale(
+            prefs.get("remoteDesktopCustomScale.$serverKey")?.toDoubleOrNull(),
+        )
+        val rdMore = prefs.get("remoteDesktopCustomQualityMore.$serverKey")?.toBooleanStrictOrNull() ?: false
+        remoteDesktopCustomQualityMore = rdMore
+        remoteDesktopCustomQualityPercent = com.hienlh.ppm.state.remotedesktop.clampCustomQualityPercent(
+            prefs.get("remoteDesktopCustomQualityPercent.$serverKey")?.toIntOrNull(),
+            rdMore,
+        )
+        remoteDesktopCustomFps = com.hienlh.ppm.state.remotedesktop.clampCustomFps(
+            prefs.get("remoteDesktopCustomFps.$serverKey")?.toIntOrNull(),
+        )
+        remoteDesktopShowCursor = prefs.get("remoteDesktopShowCursor.$serverKey")?.toBooleanStrictOrNull() ?: true
+        remoteDesktopClipboardSync = prefs.get("remoteDesktopClipboardSync.$serverKey")?.toBooleanStrictOrNull() ?: true
+        remoteDesktopCodec = prefs.get("remoteDesktopCodec.$serverKey")?.takeIf { it.isNotEmpty() }
     }
 
     private fun saveUiPrefs() {
@@ -1556,6 +1713,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             editorTabStyle = editorTabStyle,
             inlineBlame = inlineBlame,
             designWindows = designWindows,
+            remoteDesktopStatsVisible = remoteDesktopStatsVisible,
+            remoteDesktopWarningDismissed = remoteDesktopWarningDismissed,
             jiraEnabled = jiraEnabled,
         )
         prefs.put("uiPrefs.$serverKey", saved.toJson().toString())

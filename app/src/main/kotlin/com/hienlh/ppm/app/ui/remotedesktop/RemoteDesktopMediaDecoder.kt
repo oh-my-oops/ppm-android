@@ -536,11 +536,13 @@ class OpusAudioPlayer(
 
 /**
  * Direct H.264 Annex-B stream muxer into MP4 using [MediaMuxer] without re-encoding.
+ * Video-only (no audio track).
  */
 class H264Mp4Recorder(
     private val outputFile: File,
     private val width: Int,
     private val height: Int,
+    private val sizeProvider: () -> RdSize = { RdSize(width, height) },
 ) {
     private val lock = Any()
     private var muxer: MediaMuxer? = null
@@ -548,17 +550,35 @@ class H264Mp4Recorder(
     private var started: Boolean = false
     private var startNs: Long = 0L
 
+    @Volatile
+    var recordedWidth: Int = width.coerceAtLeast(1)
+        private set
+
+    @Volatile
+    var recordedHeight: Int = height.coerceAtLeast(1)
+        private set
+
+    @Volatile
+    var isStopped: Boolean = false
+        private set
+
     fun writeAccessUnit(data: ByteArray, offset: Int, length: Int, isKeyframe: Boolean) {
         synchronized(lock) {
+            if (isStopped) return
             try {
                 if (!started) {
                     if (!isKeyframe) return
                     val spsPps = extractAnnexBSpsPps(data, offset, length) ?: return
+                    val liveSize = sizeProvider()
+                    val recW = (liveSize.width.takeIf { it > 0 } ?: width).coerceAtLeast(1)
+                    val recH = (liveSize.height.takeIf { it > 0 } ?: height).coerceAtLeast(1)
+                    recordedWidth = recW
+                    recordedHeight = recH
                     val m = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
                     val format = MediaFormat.createVideoFormat(
                         MediaFormat.MIMETYPE_VIDEO_AVC,
-                        width.coerceAtLeast(640),
-                        height.coerceAtLeast(480),
+                        recW,
+                        recH,
                     )
                     format.setByteBuffer("csd-0", ByteBuffer.wrap(spsPps.sps))
                     format.setByteBuffer("csd-1", ByteBuffer.wrap(spsPps.pps))
@@ -585,6 +605,7 @@ class H264Mp4Recorder(
 
     fun stop(): File? {
         synchronized(lock) {
+            isStopped = true
             val m = muxer
             muxer = null
             val wasStarted = started
@@ -599,16 +620,38 @@ class H264Mp4Recorder(
 }
 
 /**
- * Captures a PNG [Bitmap] from a live [SurfaceView] via [PixelCopy].
+ * Allocates the destination [Bitmap] for a screenshot at [frameSize] when positive, or
+ * falls back to [surfaceWidth] × [surfaceHeight].
  */
-fun captureSurfaceViewBitmap(surfaceView: SurfaceView, onResult: (Bitmap?) -> Unit) {
-    val w = surfaceView.width
-    val h = surfaceView.height
-    if (w <= 0 || h <= 0 || !surfaceView.holder.surface.isValid) {
+fun createScreenshotTargetBitmap(
+    surfaceWidth: Int,
+    surfaceHeight: Int,
+    frameSize: RdSize? = null,
+): Bitmap? {
+    val w = frameSize?.width?.takeIf { it > 0 } ?: surfaceWidth
+    val h = frameSize?.height?.takeIf { it > 0 } ?: surfaceHeight
+    if (w <= 0 || h <= 0) return null
+    return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+}
+
+/**
+ * Captures a PNG [Bitmap] from a live [SurfaceView] via [PixelCopy] scaled to [targetSize]
+ * (`frameSize.width` × `frameSize.height`).
+ */
+fun captureSurfaceViewBitmap(
+    surfaceView: SurfaceView,
+    targetSize: RdSize? = null,
+    onResult: (Bitmap?) -> Unit,
+) {
+    if (surfaceView.width <= 0 || surfaceView.height <= 0 || !surfaceView.holder.surface.isValid) {
         onResult(null)
         return
     }
-    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    val bitmap = createScreenshotTargetBitmap(surfaceView.width, surfaceView.height, targetSize)
+    if (bitmap == null) {
+        onResult(null)
+        return
+    }
     try {
         PixelCopy.request(
             surfaceView,

@@ -138,7 +138,8 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
     val bindings = model.keyBindings
     val extContribs = model.extensions?.contributions?.collectAsState()?.value
     val androidAvailable = model.androidAvailable
-    val actions = remember(model, bindings, extContribs, androidAvailable) {
+    val remoteDesktopAvailable = model.remoteDesktopAvailable
+    val actions = remember(model, bindings, extContribs, androidAvailable, remoteDesktopAvailable) {
         fun run(action: () -> Unit): () -> Unit = {
             onDismiss()
             action()
@@ -153,7 +154,9 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
             if (androidAvailable) {
                 add(action("Android Devices", ProductIcon.Smartphone, "android emulator avd device virtual phone tablet", null, run { model.openAndroid() }))
             }
-            add(action("Remote Desktop", ProductIcon.Monitor, "remote desktop screen share vnc viewer display", null, run { model.openRemoteDesktop() }))
+            if (remoteDesktopAvailable) {
+                add(action("Remote Desktop", ProductIcon.Monitor, "remote desktop screen share vnc viewer display", null, run { model.openRemoteDesktop() }))
+            }
             add(action("System Monitor", ProductIcon.Activity, "cpu memory ram disk network gpu processes services monitor", null, run { model.openSystemMonitor() }))
             add(action("Logs", ProductIcon.ScrollText, "logs output console errors warnings tail", null, run { model.openLogs() }))
             add(action("Report Bug", ProductIcon.Bug, "bug report github issue crash", null, run { model.openLogs("report") }))
