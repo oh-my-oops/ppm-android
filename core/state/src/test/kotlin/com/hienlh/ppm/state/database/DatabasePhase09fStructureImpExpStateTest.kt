@@ -250,8 +250,15 @@ class DatabasePhase09fStructureImpExpStateTest {
         assertEquals("true", applyReq["allowRecreate"]?.jsonPrimitive?.content)
         assertEquals("ALTER TABLE \"public\".\"new_table\" RENAME TO \"orders\";", applyReq["sql"]?.jsonPrimitive?.content)
 
-        val backupName = backupTableName("orders", 1730000000000L)
-        assertTrue(backupName.startsWith("_orders_"))
+        val prevTz = java.util.TimeZone.getDefault()
+        val (backupName, zipName) = try {
+            java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Asia/Ho_Chi_Minh"))
+            backupTableName("orders", 1730000000000L) to defaultZipName(1730000000000L)
+        } finally {
+            java.util.TimeZone.setDefault(prevTz)
+        }
+        assertEquals("_orders_2024-10-27-10-33-20", backupName)
+        assertEquals("zip-archive-2024-10-27-10-33-20.zip", zipName)
         val backupChange = StructureChange.BackupTable(schema = "public", table = "orders", backupName = backupName)
         assertEquals("backup-table", backupChange.toJsonObject()["kind"]?.jsonPrimitive?.content)
         assertEquals(backupName, backupChange.toJsonObject()["newName"]?.jsonPrimitive?.content)

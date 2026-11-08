@@ -2,7 +2,7 @@ package com.hienlh.ppm.state.database
 
 import java.text.NumberFormat
 import java.time.Instant
-import java.time.ZoneOffset
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
@@ -1902,10 +1902,12 @@ fun structureApplyRequestJson(
 }
 
 private val BACKUP_TIMESTAMP_FORMATTER: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm-ss", Locale.US).withZone(ZoneOffset.UTC)
+    DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm-ss", Locale.US)
 
 fun backupTableName(table: String, atEpochMillis: Long = System.currentTimeMillis()): String {
-    val stamp = BACKUP_TIMESTAMP_FORMATTER.format(Instant.ofEpochMilli(atEpochMillis))
+    val stamp = BACKUP_TIMESTAMP_FORMATTER
+        .withZone(ZoneId.systemDefault())
+        .format(Instant.ofEpochMilli(atEpochMillis))
     return "_${table}_$stamp"
 }
 
@@ -2290,18 +2292,17 @@ fun defaultExportFileName(sourceName: String, format: String): String {
 }
 
 private val ZIP_TIMESTAMP_FORMATTER: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm-ss", Locale.US).withZone(ZoneOffset.UTC)
+    DateTimeFormatter.ofPattern("yyyy-MM-dd-HH-mm-ss", Locale.US)
 
-fun defaultZipName(database: String? = null, atEpochMillis: Long? = null): String {
-    if (atEpochMillis != null) {
-        return "zip-archive-${ZIP_TIMESTAMP_FORMATTER.format(Instant.ofEpochMilli(atEpochMillis))}.zip"
-    }
-    if (!database.isNullOrBlank()) {
-        val base = database.trim().replace(NON_FILE_CHARS_RE, "_").replace(EDGE_UNDERSCORES_RE, "").ifEmpty { "export" }
-        return "$base.zip"
-    }
-    return "zip-archive-${ZIP_TIMESTAMP_FORMATTER.format(Instant.now())}.zip"
+fun defaultZipName(atEpochMillis: Long = System.currentTimeMillis()): String {
+    val stamp = ZIP_TIMESTAMP_FORMATTER
+        .withZone(ZoneId.systemDefault())
+        .format(Instant.ofEpochMilli(atEpochMillis))
+    return "zip-archive-$stamp.zip"
 }
+
+fun defaultZipName(database: String?, atEpochMillis: Long? = null): String =
+    defaultZipName(atEpochMillis ?: System.currentTimeMillis())
 
 fun importSourceName(fileName: String): String {
     val base = fileName.trim().replace('\\', '/').substringAfterLast('/')
@@ -3178,9 +3179,10 @@ fun formatImpExpDuration(startedAt: Long, finishedAt: Long? = null, now: Long = 
 }
 
 private val CLOCK_FORMATTER: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("HH:mm:ss", Locale.US).withZone(ZoneOffset.UTC)
+    DateTimeFormatter.ofPattern("HH:mm:ss", Locale.US)
 
-fun messageClock(at: Long): String = CLOCK_FORMATTER.format(Instant.ofEpochMilli(at))
+fun messageClock(at: Long): String =
+    CLOCK_FORMATTER.withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(at))
 
 fun messageLines(messages: List<ImpExpMessage>): String =
     messages.joinToString("\n") { m ->
