@@ -133,6 +133,23 @@ class GitSourceControlLogicTest {
             x = "U",
             y = "U",
             conflict = "both-modified",
+            staged = ChangeSide(
+                "U",
+                added = 2,
+                removed = 1,
+                blocks = listOf("c-staged"),
+                changeBlocks = listOf(ChangeBlock("c-staged", 0, 1, 1, 1, 2, 2, 1)),
+            ),
+            unstaged = ChangeSide(
+                "U",
+                added = 1,
+                removed = 1,
+                blocks = listOf("c-unstaged-1", "c-unstaged-2"),
+                changeBlocks = listOf(
+                    ChangeBlock("c-unstaged-1", 0, 10, 1, 10, 1, 1, 1),
+                    ChangeBlock("c-unstaged-2", 1, 20, 1, 20, 1, 1, 1),
+                ),
+            ),
         )
 
         assertEquals(CheckState.ALL, GitChangesView.fileCheckState(stagedFile))
@@ -154,9 +171,9 @@ class GitSourceControlLogicTest {
 
         val totalsWithConflict = GitChangesView.changeTotals(listOf(stagedFile, partialFile, untrackedFile, conflictFile))
         assertEquals(4, totalsWithConflict.files)
-        assertEquals(2, totalsWithConflict.filesStaged)
-        assertEquals(3, totalsWithConflict.blocksStaged)
-        assertEquals(5, totalsWithConflict.blocks)
+        assertEquals(3, totalsWithConflict.filesStaged)
+        assertEquals(4, totalsWithConflict.blocksStaged)
+        assertEquals(8, totalsWithConflict.blocks)
         assertEquals(1, totalsWithConflict.conflicts)
         assertEquals("Resolve 1 conflict to commit", GitChangesView.commitHint(totalsWithConflict, "msg"))
         assertFalse(GitChangesView.canCommit(totalsWithConflict, "msg", null))

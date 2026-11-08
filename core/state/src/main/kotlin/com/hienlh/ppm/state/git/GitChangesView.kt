@@ -182,22 +182,11 @@ object GitChangesView {
         var conflicts = 0
         for (file in files) {
             filesCount++
-            if (file.conflict != null) {
-                conflicts++
-                continue
-            }
-            val staged = file.staged
-            if (staged != null) {
-                filesStaged++
-                val count = if (staged.whole != null || staged.changeBlocks.isEmpty()) 1 else staged.changeBlocks.size
-                blocks += count
-                blocksStaged += count
-            }
-            val unstaged = file.unstaged
-            if (unstaged != null) {
-                val count = if (unstaged.whole != null || unstaged.changeBlocks.isEmpty()) 1 else unstaged.changeBlocks.size
-                blocks += count
-            }
+            if (file.conflict != null) conflicts++
+            if (file.staged != null) filesStaged++
+            val dots = blockDots(file, max = Int.MAX_VALUE).dots
+            blocks += dots.size
+            blocksStaged += dots.count { it }
         }
         return ChangeTotals(
             files = filesCount,
