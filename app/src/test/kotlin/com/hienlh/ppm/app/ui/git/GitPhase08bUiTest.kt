@@ -39,6 +39,9 @@ import com.hienlh.ppm.client.GitRepos
 import com.hienlh.ppm.state.git.BranchReviewState
 import com.hienlh.ppm.state.git.DiscardedEntry
 import com.hienlh.ppm.state.git.GitFileTree
+import com.hienlh.ppm.state.git.FileGitScope
+import com.hienlh.ppm.state.git.FileGitScopeKind
+import com.hienlh.ppm.state.git.GitRepoScope
 import com.hienlh.ppm.state.git.GitReviewModel
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import kotlinx.serialization.json.JsonPrimitive
@@ -456,17 +459,20 @@ class GitPhase08bUiTest {
     }
 
     @Test
-    fun `resolveFileRepoScope picks deepest nested repo and GitDiffViewer skips gitFileFullDiff for files outside all repos`() {
+    fun `fileGitScope picks deepest nested repo, skips gitFileFullDiff outside all repos, and binary preview uses nested repo and repo-relative path`() {
         val outer = GitRepo("/work/mono/apps", "apps", "apps")
         val inner = GitRepo("/work/mono/apps/web", "web", "apps/web")
         val discovery = GitRepos(rootIsRepo = false, repos = listOf(outer, inner), root = "/work/mono")
 
-        // Deepest prefix match wins regardless of discovery order
-        val scoped = resolveFileRepoScope("apps/web/src/App.tsx", discovery, outer)
-        assertEquals("src/App.tsx" to inner, scoped)
+        assertNull(GitRepoScope.fileGitScope(null, "apps/web/src/App.tsx"))
 
-        // File outside all repos when rootIsRepo == false returns null
-        assertNull(resolveFileRepoScope("README.md", discovery, inner))
+        // Deepest prefix match wins regardless of discovery order
+        val scoped = GitRepoScope.fileGitScope(discovery, "apps/web/src/App.tsx")
+        assertEquals(FileGitScope(repo = inner, filePath = "src/App.tsx", kind = FileGitScopeKind.REPO), scoped)
+
+        // File outside all repos when rootIsRepo == false returns NO_REPO
+        val outside = GitRepoScope.fileGitScope(discovery, "README.md")
+        assertEquals(FileGitScope(repo = null, filePath = "README.md", kind = FileGitScopeKind.NO_REPO), outside)
 
         val server = MockWebServer()
         val recordedTargets = mutableListOf<String>()
@@ -477,7 +483,11 @@ class GitPhase08bUiTest {
                 return when {
                     target.endsWith("/git/repos") -> MockResponse.Builder()
                         .addHeader("Content-Type", "application/json")
-                        .body("""{"ok":true,"data":{"projectPath":"/work/mono","rootIsRepo":false,"repos":[{"path":"/work/mono/apps","name":"apps","relative":"apps"}]}}""")
+                        .body("""{"ok":true,"data":{"projectPath":"/work/mono","rootIsRepo":false,"repos":[{"path":"/work/mono/apps","name":"apps","relative":"apps"},{"path":"/work/mono/apps/web","name":"web","relative":"apps/web"}]}}""")
+                        .build()
+                    target.contains("/git/file-full-diff") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"original":"","modified":"","binary":true,"originalSize":68,"modifiedSize":68}}""")
                         .build()
                     else -> MockResponse.Builder()
                         .addHeader("Content-Type", "application/json")
@@ -491,22 +501,44 @@ class GitPhase08bUiTest {
             val model = AppModel(ApplicationProvider.getApplicationContext())
             model.api = ApiClient(server.url("/"), "tok")
             model.selectedProject = "mono"
+            model.gitChosenRepoPath["mono"] = "/work/mono/apps"
 
             compose.setContent {
-                Box(Modifier.size(600.dp, 300.dp)) {
-                    GitDiffViewer(
-                        model = model,
-                        projectName = "mono",
-                        filePath = "outside/README.md",
-                    )
+                Column {
+                    Box(Modifier.size(600.dp, 200.dp)) {
+                        GitDiffViewer(
+                            model = model,
+                            projectName = "mono",
+                            filePath = "outside/README.md",
+                            ref1 = "HEAD~1",
+                            ref2 = "HEAD",
+                        )
+                    }
+                    Box(Modifier.size(600.dp, 300.dp)) {
+                        GitDiffViewer(
+                            model = model,
+                            projectName = "mono",
+                            filePath = "apps/web/src/logo.png",
+                            ref1 = "HEAD~1",
+                            ref2 = "HEAD",
+                        )
+                    }
                 }
             }
             compose.waitUntil(5_000) {
-                synchronized(recordedTargets) { recordedTargets.any { it.endsWith("/git/repos") } }
+                synchronized(recordedTargets) { recordedTargets.count { it.contains("/git/file-blob") } >= 2 }
             }
             compose.waitForIdle()
             val allTargets = synchronized(recordedTargets) { recordedTargets.toList() }
-            assertFalse("Expected no /git/file-full-diff for file outside all repos, got $allTargets", allTargets.any { it.contains("/git/file-full-diff") })
+            assertFalse("Expected no /git/file-full-diff for outside/README.md, got $allTargets",
+                allTargets.any { it.contains("README.md") })
+            val diffTargets = allTargets.filter { it.contains("/git/file-full-diff") }
+            assertEquals("Expected exactly one file-full-diff for logo.png, got $diffTargets", 1, diffTargets.size)
+            assertTrue("Expected file-full-diff to use repo-relative path and nested repo, got ${diffTargets.first()}",
+                diffTargets.first().contains("file=src%2Flogo.png") && diffTargets.first().contains("repo=%2Fwork%2Fmono%2Fapps%2Fweb"))
+            val blobTargets = allTargets.filter { it.contains("/git/file-blob") }
+            assertTrue("Expected file-blob requests to use repo-relative path src/logo.png and nested repo /work/mono/apps/web, got $blobTargets",
+                blobTargets.all { it.contains("file=src%2Flogo.png") && it.contains("repo=%2Fwork%2Fmono%2Fapps%2Fweb") })
         } finally {
             server.close()
         }
