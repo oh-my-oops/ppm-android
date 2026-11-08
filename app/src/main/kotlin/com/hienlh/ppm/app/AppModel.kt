@@ -440,7 +440,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     var projectsLoad by mutableStateOf<Load>(Load.Idle)
         private set
     var selectedProject by mutableStateOf<String?>(null)
-        private set
+        internal set
 
     /** The open project's file-naming framework, which file icons resolve `*.module.ts` by (`project-framework-store.ts`). */
     var iconFramework by mutableStateOf<IconFramework?>(null)

@@ -110,8 +110,14 @@ fun GitStatusPanel(
         return
     }
 
+    var repoLooking by remember(project) { mutableStateOf(project !in model.gitDiscovery) }
     LaunchedEffect(project, api) {
-        model.loadGitRepos(project)
+        if (project !in model.gitDiscovery) repoLooking = true
+        try {
+            model.loadGitRepos(project)
+        } finally {
+            repoLooking = false
+        }
     }
 
     val discovery = model.gitDiscovery[project]
@@ -133,14 +139,14 @@ fun GitStatusPanel(
     val commitMessage = drafts[com.hienlh.ppm.state.git.CommitDraftSync.draftKey(project, repo?.path)] ?: ""
 
     LaunchedEffect(project, repo?.path, api) {
-        if (api != null && !needsPick && !noRepo) {
+        if (api != null && repo != null && !needsPick && !noRepo) {
             model.commitDrafts.load(api, project, repo)
         }
     }
 
     suspend fun loadChanges() {
         val client = api ?: return
-        if (needsPick || noRepo) {
+        if (repo == null || needsPick || noRepo) {
             loading = false
             return
         }
@@ -159,7 +165,7 @@ fun GitStatusPanel(
     }
 
     LaunchedEffect(project, repo?.path, needsPick, noRepo, refreshSignal, api) {
-        if (api == null || needsPick || noRepo) return@LaunchedEffect
+        if (api == null || repo == null || needsPick || noRepo) return@LaunchedEffect
         coroutineScope {
             launch {
                 model.gitChangedEvents.filter { it == project }.collectLatest {
@@ -178,7 +184,17 @@ fun GitStatusPanel(
 
     fun triggerRefresh() {
         refreshSignal++
-        scope.launch { loadChanges() }
+        scope.launch {
+            if (repo == null) {
+                repoLooking = true
+                try {
+                    model.loadGitRepos(project, force = true)
+                } finally {
+                    repoLooking = false
+                }
+            }
+            loadChanges()
+        }
     }
 
     val files = changes?.files.orEmpty()
@@ -625,6 +641,35 @@ fun GitStatusPanel(
                     repos = discovery.repos,
                     onSelect = { chosen -> model.chooseGitRepo(project, chosen.path) },
                 )
+            }
+            repo == null -> {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(16.dp).testTag("git-looking-for-repo"),
+                    verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        PpmIcon(ProductIcon.Loader2, size = 16.dp, tint = tokens.text3.color)
+                        BasicText("Looking for a repository...", style = PpmFont.sans(13, lineHeight = 18, color = tokens.text3.color))
+                    }
+                    if (!repoLooking) {
+                        Box(
+                            modifier = Modifier
+                                .height(26.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
+                                .clickable(onClick = ::triggerRefresh)
+                                .padding(horizontal = 10.dp)
+                                .testTag("git-try-again"),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            BasicText("Try again", style = PpmFont.sans(12, lineHeight = 16, color = tokens.text.color))
+                        }
+                    }
+                }
             }
             else -> {
                 // Branch row

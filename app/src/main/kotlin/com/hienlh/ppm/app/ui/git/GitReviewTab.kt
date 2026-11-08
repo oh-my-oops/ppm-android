@@ -199,14 +199,14 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
     val commitMessage = drafts[CommitDraftSync.draftKey(projectName, repo?.path)] ?: ""
 
     LaunchedEffect(projectName, repo?.path, needsPick, noRepo, api) {
-        if (api != null && !needsPick && !noRepo) {
+        if (api != null && repo != null && !needsPick && !noRepo) {
             model.commitDrafts.load(api, projectName, repo)
         }
     }
 
     suspend fun refreshChanges(): GitChanges? {
         val client = api ?: return null
-        if (needsPick || noRepo) return null
+        if (repo == null || needsPick || noRepo) return null
         return try {
             val fresh = client.gitChanges(projectName, repo)
             changes = fresh
@@ -222,12 +222,13 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
     }
 
     LaunchedEffect(projectName, repo?.path, needsPick, noRepo, api) {
-        if (!needsPick && !noRepo && api != null) {
+        if (repo != null && !needsPick && !noRepo && api != null) {
             refreshChanges()
         }
     }
 
     LaunchedEffect(projectName, repo?.path, api) {
+        if (repo == null) return@LaunchedEffect
         model.gitChangedEvents.filter { it == projectName }.collectLatest {
             if (writeMutex.isLocked) return@collectLatest
             refreshChanges()

@@ -12,6 +12,7 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.files.ExplorerTreeRow
 import com.hienlh.ppm.app.ui.files.installBlankFileIcons
 import com.hienlh.ppm.app.withComposeActivity
+import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.ChangeSide
 import com.hienlh.ppm.client.ChangedFile
 import com.hienlh.ppm.client.GitBranchState
@@ -20,7 +21,12 @@ import com.hienlh.ppm.client.LastCommit
 import com.hienlh.ppm.state.files.FileTreeNode
 import com.hienlh.ppm.state.files.FileTreeRow
 import com.hienlh.ppm.state.git.GitChangesView
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -222,5 +228,98 @@ class GitStatusPanelTest {
 
         compose.onNodeWithText("Review").performClick()
         assertTrue(reviewedAll)
+    }
+
+    @Test
+    fun `git status panel and branch picker never call changes commit-draft or refs while repo is null and Try again retries loadGitRepos`() {
+        val server = MockWebServer()
+        val recorded = mutableListOf<String>()
+        var reposShouldSucceed = false
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                synchronized(recorded) { recorded += target }
+                return when {
+                    target.endsWith("/git/repos") -> {
+                        if (!reposShouldSucceed) {
+                            MockResponse.Builder()
+                                .code(500)
+                                .addHeader("Content-Type", "application/json")
+                                .body("""{"ok":false,"error":"repo scan failed"}""")
+                                .build()
+                        } else {
+                            MockResponse.Builder()
+                                .addHeader("Content-Type", "application/json")
+                                .body(
+                                    """{"ok":true,"data":{"projectPath":"/work/app","rootIsRepo":true,"repos":[{"path":"/work/app","name":"app","relative":"."}]}}""",
+                                )
+                                .build()
+                        }
+                    }
+                    target.contains("/git/changes") -> {
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body(
+                                """{"ok":true,"data":{"branch":{"head":"main","oid":"1111111","upstream":"origin/main","upstreamGone":false,"ahead":0,"behind":0,"hasRemote":true},"operation":null,"files":[],"stashes":0,"lastCommit":null,"truncated":false}}""",
+                            )
+                            .build()
+                    }
+                    target.contains("/git/commit-draft") -> {
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{"message":"","updatedAt":0}}""")
+                            .build()
+                    }
+                    else -> {
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{}}""")
+                            .build()
+                    }
+                }
+            }
+        }
+        server.start()
+        try {
+            val model = AppModel(ApplicationProvider.getApplicationContext())
+            model.api = ApiClient(server.url("/"), "tok")
+            model.selectedProject = "demo"
+
+            compose.setContent {
+                Column {
+                    GitStatusPanel(model = model)
+                    GitBranchPickerModal(
+                        model = model,
+                        project = "demo",
+                        repo = null,
+                        onClose = {},
+                        onChanged = {},
+                    )
+                }
+            }
+            compose.waitUntil(5_000) {
+                synchronized(recorded) { recorded.any { it.endsWith("/git/repos") } }
+            }
+            compose.waitForIdle()
+
+            // While repo == null, "Looking for a repository..." is shown and no /git/changes, /git/commit-draft, or /git/refs is called.
+            compose.onNodeWithText("Looking for a repository...").assertIsDisplayed()
+            val targetsBefore = synchronized(recorded) { recorded.toList() }
+            assertFalse("Expected no /git/changes while repo == null, got $targetsBefore", targetsBefore.any { it.contains("/git/changes") })
+            assertFalse("Expected no /git/commit-draft while repo == null, got $targetsBefore", targetsBefore.any { it.contains("/git/commit-draft") })
+            assertFalse("Expected no /git/refs while repo == null, got $targetsBefore", targetsBefore.any { it.contains("/git/refs") })
+
+            // Clicking "Try again" re-runs loadGitRepos(force = true), resolves repo, and then loads /git/changes.
+            reposShouldSucceed = true
+            compose.onNodeWithTag("git-try-again").performClick()
+            compose.waitUntil(5_000) {
+                synchronized(recorded) { recorded.any { it.contains("/git/changes") } }
+            }
+            val targetsAfter = synchronized(recorded) { recorded.toList() }
+            assertEquals(2, targetsAfter.count { it.endsWith("/git/repos") })
+            assertTrue(targetsAfter.any { it.contains("/git/changes") })
+        } finally {
+            server.close()
+        }
     }
 }

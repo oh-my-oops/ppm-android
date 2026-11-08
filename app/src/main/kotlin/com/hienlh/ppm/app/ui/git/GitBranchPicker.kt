@@ -88,7 +88,7 @@ internal fun GitBranchPickerModal(
     var selected by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(project, repo?.path, api) {
-        if (api == null) return@LaunchedEffect
+        if (api == null || repo == null) return@LaunchedEffect
         loading = true
         try {
             refs = api.gitRefs(project, repo)
