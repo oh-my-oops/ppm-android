@@ -73,12 +73,12 @@ val ANDROID_RECONNECT_BACKOFF_MS = listOf(500L, 1_000L, 2_000L, 4_000L, 8_000L)
 // -----------------------------------------------------------------------------
 
 data class AndroidGeometry(
-    val width: Int = 720,
-    val height: Int = 1600,
-    val deviceWidth: Int = 1080,
-    val deviceHeight: Int = 2400,
+    val width: Int = 0,
+    val height: Int = 0,
+    val deviceWidth: Int = 0,
+    val deviceHeight: Int = 0,
     val rotation: Int = 0,
-    val generation: Int = 1,
+    val generation: Int = 0,
 ) {
     val frameWidth: Int get() = width
     val frameHeight: Int get() = height
@@ -421,7 +421,7 @@ enum class AndroidLogLevel(
     companion object {
         fun fromWire(value: String?): AndroidLogLevel {
             val v = value?.trim()?.lowercase() ?: return INFO
-            return entries.firstOrNull { it.wire == v || it.shortLabel.lowercase() == v } ?: INFO
+            return entries.firstOrNull { it.wire == v } ?: INFO
         }
     }
 }
@@ -644,10 +644,8 @@ data class AndroidDeviceItem(
     val avdId: String,
     val name: String,
     val apiLevel: Int? = null,
-    val target: String = "",
     val abi: String? = null,
     val deviceProfile: String? = null,
-    val path: String = "",
     val displayWidth: Int? = null,
     val displayHeight: Int? = null,
     val hardwareKeyboard: Boolean = true,
@@ -767,31 +765,25 @@ fun parseAndroidCapabilities(element: JsonElement): AndroidCapabilities {
     val encoders = (obj["encoders"] as? JsonArray).orEmpty().mapNotNull {
         (it as? JsonPrimitive)?.contentOrNull
     }
-    val avdmanagerObj = sdkObj?.get("avdmanager") as? JsonObject
-    val hasAvdmanager = avdmanagerObj?.strOrNull("path") != null
     return AndroidCapabilities(
         enabled = obj.bool("enabled", false),
         authRequired = obj.bool("authRequired", true),
-        ready = obj.bool("ready", reqs.isNotEmpty() && reqs.all { it.met }),
+        ready = obj.bool("ready", false),
         avdCount = obj.int("avdCount", 0),
         accelerationOk = obj.bool("accelerationOk", false),
         accelerationDetail = obj.str("accelerationDetail"),
         encoders = encoders,
-        canCreateAvd = obj.bool("canCreateAvd", hasAvdmanager),
-        sdkRoot = sdkObj?.strOrNull("root") ?: obj.strOrNull("sdkRoot"),
+        canCreateAvd = obj.bool("canCreateAvd", false),
+        sdkRoot = sdkObj?.strOrNull("root"),
         requirements = reqs,
     )
 }
 
 fun parseAndroidDevices(element: JsonElement): List<AndroidDeviceItem> {
-    val arr = when (element) {
-        is JsonArray -> element
-        is JsonObject -> element["devices"] as? JsonArray ?: JsonArray(emptyList())
-        else -> JsonArray(emptyList())
-    }
+    val arr = (element as? JsonObject)?.get("devices") as? JsonArray ?: JsonArray(emptyList())
     return arr.mapNotNull { item ->
         val obj = item as? JsonObject ?: return@mapNotNull null
-        val avdId = obj.str("avdId").ifBlank { obj.str("name") }
+        val avdId = obj.str("avdId")
         if (avdId.isBlank()) return@mapNotNull null
         val rtObj = obj["runtime"] as? JsonObject
         val runtime = rtObj?.let {
@@ -807,17 +799,13 @@ fun parseAndroidDevices(element: JsonElement): List<AndroidDeviceItem> {
                 )
             }
         }
-        val state = AndroidDeviceStatus.fromWire(
-            obj.strOrNull("state") ?: if (runtime != null) "ready" else "stopped",
-        )
+        val state = AndroidDeviceStatus.fromWire(obj.strOrNull("state"))
         AndroidDeviceItem(
             avdId = avdId,
             name = obj.str("name", avdId),
             apiLevel = obj.intOrNull("apiLevel"),
-            target = obj.str("target"),
             abi = obj.strOrNull("abi"),
             deviceProfile = obj.strOrNull("deviceProfile"),
-            path = obj.str("path"),
             displayWidth = obj.intOrNull("displayWidth"),
             displayHeight = obj.intOrNull("displayHeight"),
             hardwareKeyboard = obj.bool("hardwareKeyboard", true),
@@ -829,11 +817,7 @@ fun parseAndroidDevices(element: JsonElement): List<AndroidDeviceItem> {
 }
 
 fun parseAndroidSystemImages(element: JsonElement): List<SystemImageRow> {
-    val arr = when (element) {
-        is JsonArray -> element
-        is JsonObject -> element["images"] as? JsonArray ?: JsonArray(emptyList())
-        else -> JsonArray(emptyList())
-    }
+    val arr = (element as? JsonObject)?.get("images") as? JsonArray ?: JsonArray(emptyList())
     return arr.mapNotNull { item ->
         val obj = item as? JsonObject ?: return@mapNotNull null
         val id = obj.str("id")
@@ -854,11 +838,7 @@ fun parseAndroidSystemImages(element: JsonElement): List<SystemImageRow> {
 }
 
 fun parseAndroidDeviceProfiles(element: JsonElement): List<AvdDeviceProfile> {
-    val arr = when (element) {
-        is JsonArray -> element
-        is JsonObject -> element["profiles"] as? JsonArray ?: JsonArray(emptyList())
-        else -> JsonArray(emptyList())
-    }
+    val arr = (element as? JsonObject)?.get("profiles") as? JsonArray ?: JsonArray(emptyList())
     return arr.mapNotNull { item ->
         val obj = item as? JsonObject ?: return@mapNotNull null
         val id = obj.str("id")
@@ -890,11 +870,7 @@ fun parseAndroidOperation(element: JsonElement): AndroidOperationStatus? {
 }
 
 fun parseProjectApks(element: JsonElement): List<ProjectApkItem> {
-    val arr = when (element) {
-        is JsonArray -> element
-        is JsonObject -> element["apks"] as? JsonArray ?: JsonArray(emptyList())
-        else -> JsonArray(emptyList())
-    }
+    val arr = (element as? JsonObject)?.get("apks") as? JsonArray ?: JsonArray(emptyList())
     return arr.mapNotNull { item ->
         val obj = item as? JsonObject ?: return@mapNotNull null
         val path = obj.str("path")
@@ -921,15 +897,13 @@ fun parseAndroidMintedSession(element: JsonElement): AndroidMintedSession? {
 
 fun parseAndroidGeometry(obj: JsonObject?): AndroidGeometry {
     if (obj == null) return AndroidGeometry()
-    val width = obj.int("width", 720)
-    val height = obj.int("height", 1600)
     return AndroidGeometry(
-        width = width,
-        height = height,
-        deviceWidth = obj.int("deviceWidth", width),
-        deviceHeight = obj.int("deviceHeight", height),
+        width = obj.int("width", 0),
+        height = obj.int("height", 0),
+        deviceWidth = obj.int("deviceWidth", 0),
+        deviceHeight = obj.int("deviceHeight", 0),
         rotation = obj.int("rotation", 0),
-        generation = obj.int("generation", 1),
+        generation = obj.int("generation", 0),
     )
 }
 

@@ -524,4 +524,60 @@ class AndroidDeviceStateTest {
         assertEquals("visibility", vis["type"]?.jsonPrimitive?.content)
         assertEquals(false, vis["visible"]?.jsonPrimitive?.boolean)
     }
+
+    @Test
+    fun `parsers reject bare arrays and dead fallbacks not sent by server`() {
+        // 1. sdkRoot top-level fallback is ignored; only sdk.root is read
+        val capsLegacy = parseAndroidCapabilities(
+            json.parseToJsonElement(
+                """{"enabled":true,"sdkRoot":"/legacy/sdk","requirements":[{"id":"sdk","met":true}]}""",
+            ),
+        )
+        assertNull(capsLegacy.sdkRoot)
+        assertFalse(capsLegacy.ready)
+        assertFalse(capsLegacy.canCreateAvd)
+
+        // 2. Bare-array roots are rejected
+        assertTrue(parseAndroidDevices(json.parseToJsonElement("""[{"avdId":"Pixel_8","name":"Pixel 8"}]""")).isEmpty())
+        assertTrue(parseAndroidSystemImages(json.parseToJsonElement("""[{"id":"img-1"}]""")).isEmpty())
+        assertTrue(parseAndroidDeviceProfiles(json.parseToJsonElement("""[{"id":"pixel_8"}]""")).isEmpty())
+        assertTrue(parseProjectApks(json.parseToJsonElement("""[{"path":"app.apk"}]""")).isEmpty())
+
+        // 3. avdId does not fall back to name, and missing state does not fall back to ready even with runtime
+        val devices = parseAndroidDevices(
+            json.parseToJsonElement(
+                """
+                {
+                  "devices": [
+                    { "name": "NoAvdId" },
+                    { "avdId": "Pixel_8", "name": "Pixel 8", "runtime": { "deviceId": "emu-5554-gen1", "generation": 1 } }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+        )
+        assertEquals(1, devices.size)
+        assertEquals("Pixel_8", devices[0].avdId)
+        assertEquals(AndroidDeviceStatus.STOPPED, devices[0].state)
+
+        // 4. Log levels only match server wire strings, not single-letter short labels
+        assertEquals(AndroidLogLevel.WARN, AndroidLogLevel.fromWire("warn"))
+        assertEquals(AndroidLogLevel.ERROR, AndroidLogLevel.fromWire("error"))
+        assertEquals(AndroidLogLevel.INFO, AndroidLogLevel.fromWire("W"))
+        assertEquals(AndroidLogLevel.INFO, AndroidLogLevel.fromWire("E"))
+        assertEquals(AndroidLogLevel.INFO, AndroidLogLevel.fromWire("v"))
+
+        // 5. Geometry has 0 defaults and does not copy width/height into deviceWidth/deviceHeight
+        val emptyGeo = parseAndroidGeometry(json.parseToJsonElement("{}").jsonObject)
+        assertEquals(0, emptyGeo.width)
+        assertEquals(0, emptyGeo.height)
+        assertEquals(0, emptyGeo.deviceWidth)
+        assertEquals(0, emptyGeo.deviceHeight)
+        assertEquals(0, emptyGeo.generation)
+        val partialGeo = parseAndroidGeometry(json.parseToJsonElement("""{"width":720,"height":1600}""").jsonObject)
+        assertEquals(720, partialGeo.width)
+        assertEquals(1600, partialGeo.height)
+        assertEquals(0, partialGeo.deviceWidth)
+        assertEquals(0, partialGeo.deviceHeight)
+    }
 }

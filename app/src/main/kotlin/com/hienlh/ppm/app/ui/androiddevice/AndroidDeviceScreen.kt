@@ -1232,7 +1232,7 @@ internal fun AndroidLiveViewer(
     val keyboardController = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
 
-    val deviceId = device.runtime?.deviceId ?: device.avdId
+    val deviceId = device.runtime?.deviceId ?: return
 
     var connState by remember { mutableStateOf(AndroidConnState.CONNECTING) }
     var geometry by remember { mutableStateOf(AndroidGeometry()) }
@@ -2171,13 +2171,9 @@ internal fun AndroidInstallPanel(
                     },
                 )
                 val op = parseAndroidOperation(res)
-                val opId = op?.id
-                if (!opId.isNullOrBlank()) {
-                    phase = InstallPhase.Installing(opId, "installing…", name)
-                    watchOperation(opId, name)
-                } else {
-                    phase = InstallPhase.Done(name)
-                }
+                val opId = op?.id ?: throw IllegalStateException("APK upload response missing operationId")
+                phase = InstallPhase.Installing(opId, "installing…", name)
+                watchOperation(opId, name)
             } catch (_: CancellationException) {
                 phase = InstallPhase.Idle
             } catch (e: Throwable) {
@@ -2404,13 +2400,9 @@ internal fun AndroidInstallPanel(
                                             downgrade = allowDowngrade,
                                         )
                                         val op = parseAndroidOperation(res)
-                                        val opId = op?.id
-                                        if (!opId.isNullOrBlank()) {
-                                            phase = InstallPhase.Installing(opId, "installing…", fname)
-                                            watchOperation(opId, fname)
-                                        } else {
-                                            phase = InstallPhase.Done(fname)
-                                        }
+                                        val opId = op?.id ?: throw IllegalStateException("APK install response missing operationId")
+                                        phase = InstallPhase.Installing(opId, "installing…", fname)
+                                        watchOperation(opId, fname)
                                     } catch (e: CancellationException) {
                                         throw e
                                     } catch (e: Throwable) {

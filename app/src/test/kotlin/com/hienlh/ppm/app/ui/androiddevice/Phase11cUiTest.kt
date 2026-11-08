@@ -460,4 +460,83 @@ class Phase11cUiTest {
             server.close()
         }
     }
+
+    @Test
+    fun `AndroidInstallPanel fails when APK response has no operationId and polls when operationId is present`() {
+        val server = MockWebServer()
+        var returnOperationId = false
+        var pollCount = 0
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.target
+                return when {
+                    path.contains("/projects/") && path.endsWith("/apks") ->
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{"apks":[{"path":"app/debug.apk","bytes":1024,"modifiedAt":1700000000000}]}}""")
+                            .build()
+                    path.endsWith("/apk/project") ->
+                        if (!returnOperationId) {
+                            MockResponse.Builder()
+                                .addHeader("Content-Type", "application/json")
+                                .body("""{"ok":true,"data":{}}""")
+                                .build()
+                        } else {
+                            MockResponse.Builder()
+                                .addHeader("Content-Type", "application/json")
+                                .body("""{"ok":true,"data":{"operationId":"op-apk-1"}}""")
+                                .build()
+                        }
+                    path.endsWith("/operations/op-apk-1") -> {
+                        pollCount++
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{"id":"op-apk-1","state":"succeeded","detail":"installed"}}""")
+                            .build()
+                    }
+                    else ->
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{}}""")
+                            .build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val api = ApiClient(server.url("/"), "secret")
+            rule.setContent {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    AndroidInstallPanel(
+                        api = api,
+                        deviceId = "emu-5554-gen1",
+                        deviceName = "Pixel 8",
+                        projects = listOf(com.hienlh.ppm.protocol.ProjectInfo(name = "demo", path = "/tmp/demo")),
+                        initialProject = "demo",
+                    )
+                }
+            }
+
+            rule.waitUntil(5_000) {
+                rule.onAllNodesWithTag("android-project-apk-app/debug.apk").fetchSemanticsNodes().isNotEmpty()
+            }
+
+            // 1. Missing operationId -> must NOT show android-install-done; shows error instead
+            rule.onNodeWithTag("android-project-apk-app/debug.apk").performClick()
+            rule.waitUntil(5_000) {
+                rule.onAllNodesWithTag("android-install-failed").fetchSemanticsNodes().isNotEmpty()
+            }
+            rule.onNodeWithTag("android-install-done").assertDoesNotExist()
+
+            // 2. With operationId -> polls /operations/op-apk-1 and transitions to Done
+            returnOperationId = true
+            rule.onNodeWithTag("android-project-apk-app/debug.apk").performClick()
+            rule.waitUntil(5_000) {
+                rule.onAllNodesWithTag("android-install-done").fetchSemanticsNodes().isNotEmpty()
+            }
+            assertTrue(pollCount >= 1)
+        } finally {
+            server.close()
+        }
+    }
 }
