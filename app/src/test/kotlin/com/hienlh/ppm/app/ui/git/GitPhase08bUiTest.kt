@@ -544,6 +544,7 @@ class GitPhase08bUiTest {
             val blobTargets = allTargets.filter { it.contains("/git/file-blob") }
             assertTrue("Expected file-blob requests to use repo-relative path src/logo.png and nested repo /work/mono/apps/web, got $blobTargets",
                 blobTargets.all { it.contains("file=src%2Flogo.png") && it.contains("repo=%2Fwork%2Fmono%2Fapps%2Fweb") })
+            assertEquals(1, compose.onAllNodesWithTag("git-diff-binary", useUnmergedTree = true).fetchSemanticsNodes().size)
         } finally {
             server.close()
         }

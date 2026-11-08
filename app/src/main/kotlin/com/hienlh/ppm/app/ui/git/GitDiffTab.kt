@@ -234,13 +234,13 @@ fun GitDiffViewer(
     }
 
     val full = fullFileDiff
-    if (full != null && full.binary && !openAsText && filePath != null && projectName != null) {
+    val scopePair = if (fileScope != null && fileScope.kind == FileGitScopeKind.REPO) {
+        fileScope.filePath to fileScope.repo
+    } else {
+        null
+    }
+    if (full != null && full.binary && !openAsText && filePath != null && projectName != null && scopePair != null) {
         val canPreview = remember(filePath) { GitLogRefBadges.canPreviewBinary(filePath) }
-        val scopePair = if (fileScope != null && fileScope.kind == FileGitScopeKind.REPO) {
-            fileScope.filePath to fileScope.repo
-        } else {
-            filePath to selectedRepo
-        }
         Column(modifier = modifier.fillMaxSize().background(tokens.bgSolid.color).testTag("git-diff-binary")) {
             if (canPreview) {
                 Row(
