@@ -405,7 +405,7 @@ class OpusAudioPlayer(private val maxPendingPackets: Int = 16) {
                                 val pcm = ByteArray(info.size)
                                 outBuf.position(info.offset)
                                 outBuf.get(pcm, 0, info.size)
-                                track.write(pcm, 0, pcm.size, AudioTrack.WRITE_NON_BLOCKING)
+                                writePcmToTrack(track, pcm)
                             }
                             mc.releaseOutputBuffer(outIdx, false)
                         } else {
@@ -421,6 +421,9 @@ class OpusAudioPlayer(private val maxPendingPackets: Int = 16) {
 
     internal val isWorkerAlive: Boolean
         get() = synchronized(lock) { workerThread?.isAlive == true }
+
+    internal fun writePcmToTrack(track: AudioTrack, pcm: ByteArray): Int =
+        track.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING)
 
     fun reset() {
         synchronized(lock) {

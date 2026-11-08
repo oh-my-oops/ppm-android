@@ -259,4 +259,31 @@ class Phase11bUiTest {
         assertEquals(false, decoder.isWorkerAlive)
         assertEquals(false, audioPlayer.isWorkerAlive)
     }
+
+    @Test
+    fun `OpusAudioPlayer writes PCM with AudioTrack WRITE_BLOCKING on worker thread`() {
+        val audioPlayer = OpusAudioPlayer()
+        var capturedMode = -1
+        var capturedSize = 0
+        val track = object : android.media.AudioTrack(
+            android.media.AudioManager.STREAM_MUSIC,
+            48_000,
+            android.media.AudioFormat.CHANNEL_OUT_STEREO,
+            android.media.AudioFormat.ENCODING_PCM_16BIT,
+            4096,
+            MODE_STREAM,
+        ) {
+            override fun write(audioData: ByteArray, offsetInBytes: Int, sizeInBytes: Int, writeMode: Int): Int {
+                capturedMode = writeMode
+                capturedSize = sizeInBytes
+                return sizeInBytes
+            }
+        }
+        val pcm = ByteArray(960) { 0x11 }
+        val written = audioPlayer.writePcmToTrack(track, pcm)
+        assertEquals(960, written)
+        assertEquals(960, capturedSize)
+        assertEquals(android.media.AudioTrack.WRITE_BLOCKING, capturedMode)
+        track.release()
+    }
 }
