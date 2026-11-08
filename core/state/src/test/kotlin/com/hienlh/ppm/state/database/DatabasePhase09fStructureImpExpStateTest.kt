@@ -143,7 +143,9 @@ class DatabasePhase09fStructureImpExpStateTest {
         assertEquals("employees", structure.table)
         assertEquals("InnoDB", structure.engine)
         assertEquals(4, structure.columns.size)
+        assertFalse(structure.columns[0].computedStored)
         assertTrue(structure.columns[3].isGenerated)
+        assertFalse(structure.columns[3].computedStored)
         assertEquals("substring_index(email, '@', -1)", structure.columns[3].computedExpression)
         assertEquals(1, structure.references.size)
         assertEquals("departments", structure.references[0].table)
@@ -172,16 +174,19 @@ class DatabasePhase09fStructureImpExpStateTest {
         assertFalse(primaryKeyHasName(baseModel.dialect))
         assertTrue(sameTableModel(baseModel, baseModel.copy()))
         assertEquals("int", baseModel.columns[0].dataType)
+        assertFalse(baseModel.columns[0].computedStored)
         assertTrue(baseModel.columns[0].isUnsigned)
         assertTrue(baseModel.columns[0].isZeroFill)
         assertEquals("int unsigned zerofill", declaredType(baseModel.columns[0], "mysql"))
         assertEquals("substring_index(email, '@', -1)", baseModel.columns[3].computedExpression)
+        assertFalse(baseModel.columns[3].computedStored)
 
         // Verify TableModel.toJsonObject matches server's structure-change-request.ts
         val modelJson = baseModel.toJsonObject()
         assertEquals("employees", modelJson["name"]?.jsonPrimitive?.content)
         val firstColJson = modelJson["columns"]!!.jsonArray[0].jsonObject
         assertEquals("c:id", firstColJson["id"]?.jsonPrimitive?.content)
+        assertEquals("false", firstColJson["computedStored"]?.jsonPrimitive?.content)
         assertTrue(firstColJson["defaultValue"]!!.isNullLiteral())
         val idxJson = modelJson["indexes"]!!.jsonArray[0].jsonObject
         assertEquals("ix:idx_manager_desc", idxJson["id"]?.jsonPrimitive?.content)
