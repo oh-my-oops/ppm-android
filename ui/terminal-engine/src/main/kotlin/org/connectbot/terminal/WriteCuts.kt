@@ -72,7 +72,7 @@ internal class WriteCuts(rows: Int = 24) {
     var origin = false
         private set
 
-    /** Whether a mouse-tracking mode with wheel events (`?1000`, `?1002` or `?1003`) is on, and the encoding protocol (`0` X10, `1005` UTF-8, `1006` SGR, `1015` rxvt). */
+    /** Whether a mouse-tracking mode with wheel events (`?1000`, `?1002` or `?1003`) is on, and the encoding protocol (`0` default X10, `1006` SGR, `1016` SGR-Pixels; `1005` and `1015` are ignored like xterm.js). */
     var mouseTracking = false
         private set
     var mouseProtocol = 0
@@ -223,34 +223,39 @@ internal class WriteCuts(rows: Int = 24) {
     }
 
     /**
-     * What xterm.js and libvterm (`output_mouse` in `state.c`) send for one wheel step at 0-based [row] and [col] while a mouse-tracking
-     * mode (`?1000`, `?1002` or `?1003`) is on, or null when mouse tracking is off. [down] is true for scrolling down into the document
-     * (wheel button 5, code 65) and false for scrolling up (wheel button 4, code 64); [modifiers] uses libvterm's bits (`1` Shift, `2` Alt,
-     * `4` Ctrl), shifted into `0x04 / 0x08 / 0x10`.
+     * What xterm.js (`MouseStateService`) sends for one wheel event at 0-based [row] and [col] (and 0-based pixel [xPx] and [yPx] for
+     * `SGR_PIXELS`) while a mouse-tracking mode (`?1000`, `?1002` or `?1003`) is on, or null when mouse tracking is off or default X10
+     * coordinates exceed 223 (`+ 32 > 255`). [down] is true for scrolling down into the document (wheel button 5, code 65) and false
+     * for scrolling up (wheel button 4, code 64); [modifiers] uses libvterm's bits (`1` Shift, `2` Alt, `4` Ctrl), shifted into
+     * `0x04 / 0x08 / 0x10`. `1005` and `1015` are ignored (removed in xterm.js #2507); `1006` is SGR and `1016` is SGR-Pixels.
      */
-    fun wheelReport(down: Boolean, row: Int, col: Int, modifiers: Int = 0): ByteArray? {
+    fun wheelReport(
+        down: Boolean,
+        row: Int,
+        col: Int,
+        modifiers: Int = 0,
+        xPx: Int = col,
+        yPx: Int = row,
+    ): ByteArray? {
         if (!mouseTracking) return null
         val code = (if (down) 0x41 else 0x40) or ((modifiers and 0x07) shl 2)
         val x = col.coerceAtLeast(0) + 1
         val y = row.coerceAtLeast(0) + 1
         return when (mouseProtocol) {
             1006 -> "$CSI<$code;$x;${y}M".toByteArray(Charsets.US_ASCII)
-            1015 -> "$CSI${code + 0x20};$x;${y}M".toByteArray(Charsets.US_ASCII)
-            1005 -> {
-                val uX = x.coerceAtMost(0x7ff - 0x20)
-                val uY = y.coerceAtMost(0x7ff - 0x20)
-                ("${CSI}M" + (code + 0x20).toChar() + (uX + 0x20).toChar() + (uY + 0x20).toChar()).toByteArray(Charsets.UTF_8)
-            }
+            1016 -> "$CSI<$code;${xPx.coerceAtLeast(0)};${yPx.coerceAtLeast(0)}M".toByteArray(Charsets.US_ASCII)
             else -> {
-                val bX = x.coerceAtMost(0xff - 0x20)
-                val bY = y.coerceAtMost(0xff - 0x20)
-                byteArrayOf(
+                val p0 = code + 0x20
+                val p1 = x + 0x20
+                val p2 = y + 0x20
+                if (p0 > 255 || p1 > 255 || p2 > 255) null
+                else byteArrayOf(
                     ESC_BYTE,
                     LEFT_BRACKET,
                     'M'.code.toByte(),
-                    (code + 0x20).toByte(),
-                    (bX + 0x20).toByte(),
-                    (bY + 0x20).toByte(),
+                    p0.toByte(),
+                    p1.toByte(),
+                    p2.toByte(),
                 )
             }
         }
@@ -594,7 +599,7 @@ internal class WriteCuts(rows: Int = 24) {
             when (mode) {
                 6 -> origin = on
                 1000, 1002, 1003 -> mouseTracking = on
-                1005, 1006, 1015 -> mouseProtocol = if (on) mode else 0
+                1006, 1016 -> mouseProtocol = if (on) mode else 0
                 1047, 1049 -> if (on) enterAlternate() else leaveAlternate()
             }
         }

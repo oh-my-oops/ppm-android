@@ -122,20 +122,30 @@ class TerminalTouchSelectionTest {
     }
 
     @Test
-    fun `touch scroll and wheel steps match xterm row steps and scrollback sensitivity`() {
+    fun `touch scroll and wheel accumulation match xterm MouseService`() {
         assertEquals(0 to 12f, touchScrollLines(12f, 25f))
         assertEquals(2 to 5f, touchScrollLines(55f, 25f))
         assertEquals(-2 to -5f, touchScrollLines(-55f, 25f))
 
-        assertEquals(0, wheelScrollSteps(0f))
-        assertEquals(1, wheelScrollSteps(1f))
-        assertEquals(-1, wheelScrollSteps(-1f))
-        assertEquals(1, wheelScrollSteps(0.2f))
-        assertEquals(-3, wheelScrollSteps(-2.8f))
+        // Fractional trackpad deltas accumulate in partialScroll until |total| >= 1, emitting one step and keeping total % 1.
+        val (step1, rem1) = consumeWheelDelta(0.4f, 0f)
+        assertEquals(0, step1)
+        assertEquals(0.4f, rem1, 1e-5f)
+        val (step2, rem2) = consumeWheelDelta(0.4f, rem1)
+        assertEquals(0, step2)
+        assertEquals(0.8f, rem2, 1e-5f)
+        val (step3, rem3) = consumeWheelDelta(0.4f, rem2)
+        assertEquals(1, step3)
+        assertEquals(0.2f, rem3, 1e-5f)
 
-        assertEquals(3, wheelScrollbackLines(-1f, altPressed = false))
-        assertEquals(15, wheelScrollbackLines(-1f, altPressed = true))
-        assertEquals(-3, wheelScrollbackLines(1f, altPressed = false))
-        assertEquals(-15, wheelScrollbackLines(1f, altPressed = true))
+        // Shift suppresses wheel consumption in MouseService._consumeWheelEvent; Alt/Ctrl multiply by fastScrollSensitivity (5).
+        assertEquals(0 to 0.2f, consumeWheelDelta(1f, 0.2f, shiftPressed = true))
+        val (fastUp, fastRem) = consumeWheelDelta(-1f, 0f, fastScroll = true)
+        assertEquals(-5, fastUp)
+        assertEquals(0f, fastRem, 1e-5f)
+
+        assertEquals(3, wheelScrollbackLines(-1))
+        assertEquals(15, wheelScrollbackLines(fastUp))
+        assertEquals(-3, wheelScrollbackLines(1))
     }
 }

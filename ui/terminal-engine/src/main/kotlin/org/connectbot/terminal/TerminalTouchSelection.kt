@@ -4,7 +4,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import kotlin.math.floor
-import kotlin.math.roundToInt
 
 /**
  * Select mode, as the web's `useTerminalTouchSelection` has it: while it is on, a one-finger drag is a selection, as a
@@ -61,18 +60,27 @@ internal fun touchScrollLines(accumulatedPx: Float, cellHeight: Float): Pair<Int
 }
 
 /**
- * Signed wheel steps for a `PointerEventType.Scroll` vertical delta (`> 0` wheel down, `< 0` wheel up). Each physical wheel notch has
- * magnitude `1.0f`; non-zero fractional trackpad deltas still step at least one notch in their direction.
+ * Accumulates vertical wheel/trackpad scroll [deltaY] (`> 0` wheel down, `< 0` wheel up) into [partialScroll] matching
+ * xterm.js's `MouseService._consumeWheelEvent`: multiplies by `fastScrollSensitivity` (`5`) when [fastScroll] (`alt` or `ctrl`)
+ * is held, adds to [partialScroll], and extracts whole steps via `floor(abs(total)) * sign` leaving `total % 1` for the next
+ * event. When the returned step count is non-zero, `MouseService` emits a single wheel report (or a single Up/Down key on the
+ * alternate screen) for that event.
  */
-internal fun wheelScrollSteps(scrollDeltaY: Float): Int {
-    if (scrollDeltaY == 0f) return 0
-    val count = abs(scrollDeltaY).roundToInt().coerceAtLeast(1)
-    return if (scrollDeltaY > 0f) count else -count
+internal fun consumeWheelDelta(
+    deltaY: Float,
+    partialScroll: Float,
+    fastScroll: Boolean = false,
+    shiftPressed: Boolean = false,
+): Pair<Int, Float> {
+    if (deltaY == 0f || shiftPressed) return 0 to partialScroll
+    val amount = deltaY * if (fastScroll) 5f else 1f
+    val total = partialScroll + amount
+    val lines = floor(abs(total)).toInt() * if (total > 0f) 1 else -1
+    return lines to (total - lines)
 }
 
 /**
- * How many rows `screenState.scrollBy` moves for a mouse wheel event on the primary screen: positive scrolls up into history (`scrollDeltaY < 0`),
- * negative scrolls down towards the live prompt (`scrollDeltaY > 0`), 3 rows per notch and 15 with Alt held (`fastScrollSensitivity = 5`).
+ * How many rows `screenState.scrollBy` moves for [wheelLines] whole wheel steps on the primary screen: positive scrolls up
+ * into history (`wheelLines < 0`), negative scrolls down towards the live prompt (`wheelLines > 0`), 3 rows per step.
  */
-internal fun wheelScrollbackLines(scrollDeltaY: Float, altPressed: Boolean): Int =
-    -wheelScrollSteps(scrollDeltaY) * (if (altPressed) 15 else 3)
+internal fun wheelScrollbackLines(wheelLines: Int): Int = -wheelLines * 3
