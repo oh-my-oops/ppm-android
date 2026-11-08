@@ -21,31 +21,48 @@ class DatabasePhase09fStructureImpExpStateTest {
               "dialect": "mysql",
               "database": "shop",
               "schema": null,
-              "table": "employees",
+              "name": "employees",
               "kind": "table",
               "comment": "Staff directory",
               "engine": "InnoDB",
+              "withoutRowid": false,
+              "rowKey": ["id"],
+              "rowKeyIsRowid": false,
               "columns": [
                 {
-                  "ordinal": 1,
+                  "ordinalPosition": 1,
                   "name": "id",
                   "type": "int unsigned zerofill",
                   "nullable": false,
-                  "autoIncrement": true
+                  "autoIncrement": true,
+                  "unsigned": true,
+                  "zerofill": true,
+                  "generated": false,
+                  "computedExpression": null
                 },
                 {
-                  "ordinal": 2,
+                  "ordinalPosition": 2,
                   "name": "email",
                   "type": "varchar(255)",
                   "nullable": false,
                   "defaultValue": "'a@b.c'",
-                  "comment": "Primary login"
+                  "comment": "Primary login",
+                  "generated": false
                 },
                 {
-                  "ordinal": 3,
+                  "ordinalPosition": 3,
                   "name": "manager_id",
                   "type": "int unsigned",
-                  "nullable": true
+                  "nullable": true,
+                  "generated": false
+                },
+                {
+                  "ordinalPosition": 4,
+                  "name": "email_domain",
+                  "type": "varchar(255)",
+                  "nullable": true,
+                  "generated": true,
+                  "computedExpression": "substring_index(email, '@', -1)"
                 }
               ],
               "primaryKey": {
@@ -57,20 +74,24 @@ class DatabasePhase09fStructureImpExpStateTest {
                   "name": "PRIMARY",
                   "unique": true,
                   "primary": true,
-                  "keys": [{ "column": "id", "order": "ASC" }]
+                  "columns": ["id"],
+                  "keys": [{ "column": "id", "expression": null, "descending": false }]
                 },
                 {
                   "name": "uq_email",
                   "unique": true,
                   "primary": false,
-                  "keys": [{ "column": "email", "order": "ASC" }]
+                  "columns": ["email"],
+                  "keys": [{ "column": "email", "expression": null, "descending": false }]
                 },
                 {
                   "name": "idx_manager_desc",
                   "unique": false,
                   "primary": false,
-                  "type": "BTREE",
-                  "keys": [{ "column": "manager_id", "order": "DESC" }]
+                  "method": "BTREE",
+                  "where": null,
+                  "columns": ["manager_id"],
+                  "keys": [{ "column": "manager_id", "expression": null, "descending": true }]
                 }
               ],
               "uniques": [
@@ -82,14 +103,30 @@ class DatabasePhase09fStructureImpExpStateTest {
               "foreignKeys": [
                 {
                   "name": "fk_emp_manager",
-                  "schema": null,
-                  "table": "employees",
                   "columns": ["manager_id"],
-                  "referencedSchema": null,
-                  "referencedTable": "employees",
-                  "referencedColumns": ["id"],
+                  "refSchema": null,
+                  "refTable": "employees",
+                  "refColumns": ["id"],
                   "onUpdate": "CASCADE",
                   "onDelete": "SET NULL"
+                }
+              ],
+              "references": [
+                {
+                  "name": "fk_dept_lead",
+                  "schema": null,
+                  "table": "departments",
+                  "columns": ["lead_id"],
+                  "refColumns": ["id"],
+                  "onUpdate": "NO ACTION",
+                  "onDelete": "SET NULL"
+                }
+              ],
+              "checks": [
+                {
+                  "name": "chk_email_nonempty",
+                  "expression": "email <> ''",
+                  "column": "email"
                 }
               ],
               "dependencies": [
@@ -104,13 +141,23 @@ class DatabasePhase09fStructureImpExpStateTest {
 
         val structure = parseDbTableStructure(rawStructure)
         assertEquals("mysql", structure.dialect)
+        assertEquals("employees", structure.name)
         assertEquals("employees", structure.table)
         assertEquals("InnoDB", structure.engine)
-        assertEquals(3, structure.columns.size)
+        assertEquals(4, structure.columns.size)
+        assertTrue(structure.columns[3].isGenerated)
+        assertEquals("substring_index(email, '@', -1)", structure.columns[3].computedExpression)
+        assertEquals(1, structure.references.size)
+        assertEquals("departments", structure.references[0].table)
+        assertEquals(1, structure.checks.size)
+        assertEquals("email <> ''", structure.checks[0].expression)
+
         // ownIndexes filters out PRIMARY and the index backing uq_email
         val ownIdx = ownIndexes(structure)
         assertEquals(1, ownIdx.size)
         assertEquals("idx_manager_desc", ownIdx[0].name)
+        assertEquals("BTREE", ownIdx[0].method)
+        assertEquals("DESC", ownIdx[0].keys[0].order)
 
         // Read-only helpers
         val roCols = columnRows(structure)
@@ -128,6 +175,22 @@ class DatabasePhase09fStructureImpExpStateTest {
         assertTrue(baseModel.columns[0].isUnsigned)
         assertTrue(baseModel.columns[0].isZeroFill)
         assertEquals("int unsigned zerofill", declaredType(baseModel.columns[0], "mysql"))
+        assertEquals("substring_index(email, '@', -1)", baseModel.columns[3].computedExpression)
+
+        // Verify TableModel.toJsonObject matches server's structure-change-request.ts
+        val modelJson = baseModel.toJsonObject()
+        assertEquals("employees", modelJson["name"]?.jsonPrimitive?.content)
+        val firstColJson = modelJson["columns"]!!.jsonArray[0].jsonObject
+        assertEquals("c:id", firstColJson["id"]?.jsonPrimitive?.content)
+        assertTrue(firstColJson["defaultValue"]!!.isNullLiteral())
+        val idxJson = modelJson["indexes"]!!.jsonArray[0].jsonObject
+        assertEquals("ix:idx_manager_desc", idxJson["id"]?.jsonPrimitive?.content)
+        assertEquals("true", idxJson["columns"]!!.jsonArray[0].jsonObject["descending"]?.jsonPrimitive?.content)
+        val fkJson = modelJson["foreignKeys"]!!.jsonArray[0].jsonObject
+        assertEquals("fk:fk_emp_manager", fkJson["id"]?.jsonPrimitive?.content)
+        assertEquals("employees", fkJson["refTable"]?.jsonPrimitive?.content)
+        assertEquals("CASCADE", fkJson["onUpdate"]?.jsonPrimitive?.content)
+        assertEquals("SET NULL", fkJson["onDelete"]?.jsonPrimitive?.content)
 
         // Rename PK column "id" -> "emp_id": preserves id="c:id" and updates self-referencing FK referencedColumns!
         val idCol = baseModel.columns[0]
@@ -142,12 +205,12 @@ class DatabasePhase09fStructureImpExpStateTest {
 
         // Removing manager_id removes idx_manager_desc and fk_emp_manager
         val afterRemoveManager = removeColumns(renamedModel, setOf("c:manager_id"))
-        assertEquals(2, afterRemoveManager.columns.size)
+        assertEquals(3, afterRemoveManager.columns.size)
         assertTrue(afterRemoveManager.indexes.isEmpty())
         assertTrue(afterRemoveManager.foreignKeys.isEmpty())
 
         // Validation problems
-        val clashCol = blankColumn("mysql", 4, "col:clash").copy(
+        val clashCol = blankColumn("mysql", 5, "col:clash").copy(
             name = "email",
             autoIncrement = true,
             computedExpression = "id + 1",
@@ -164,27 +227,42 @@ class DatabasePhase09fStructureImpExpStateTest {
 
     @Test
     fun structureSavePreviewAndFailureReports_distinguishRolledBackAndMySqlPartialCommits() {
-        val model = newTableModel("postgres", "public")
-        val createChange = StructureChange.Create(database = "app", target = model)
-        assertEquals("create", createChange.toJsonObject()["kind"]?.jsonPrimitive?.content)
+        val baseModel = newTableModel("postgres", "public")
+        val draftModel = baseModel.copy(name = "orders")
+        val createChange = StructureChange.Create(database = "app", target = draftModel)
+        val createJson = createChange.toJsonObject()
+        assertEquals("create", createJson["kind"]?.jsonPrimitive?.content)
+        assertEquals("orders", createJson["current"]?.jsonObject?.get("name")?.jsonPrimitive?.content)
+
+        val alterChange = StructureChange.Alter(database = "app", base = baseModel, current = draftModel)
+        val previewReq = structurePreviewRequestJson(alterChange)
+        assertEquals("alter", previewReq["change"]?.jsonObject?.get("kind")?.jsonPrimitive?.content)
+        assertEquals("new_table", previewReq["change"]?.jsonObject?.get("base")?.jsonObject?.get("name")?.jsonPrimitive?.content)
+        assertEquals("orders", previewReq["change"]?.jsonObject?.get("current")?.jsonObject?.get("name")?.jsonPrimitive?.content)
+
+        val applyReq = structureApplyRequestJson(alterChange, "ALTER TABLE \"public\".\"new_table\" RENAME TO \"orders\";", allowRecreate = true)
+        assertEquals("alter", applyReq["change"]?.jsonObject?.get("kind")?.jsonPrimitive?.content)
+        assertEquals("true", applyReq["allowRecreate"]?.jsonPrimitive?.content)
+        assertEquals("ALTER TABLE \"public\".\"new_table\" RENAME TO \"orders\";", applyReq["sql"]?.jsonPrimitive?.content)
 
         val backupName = backupTableName("orders", 1730000000000L)
-        assertTrue(backupName.startsWith("orders_backup_"))
+        assertTrue(backupName.startsWith("_orders_"))
+        val backupChange = StructureChange.BackupTable(schema = "public", table = "orders", backupName = backupName)
+        assertEquals("backup-table", backupChange.toJsonObject()["kind"]?.jsonPrimitive?.content)
+        assertEquals(backupName, backupChange.toJsonObject()["newName"]?.jsonPrimitive?.content)
 
+        // Server 200 / 409 StructurePreview payload: { sql, statements, recreate, warnings, transactional } (no dialect field!)
         val conflictPayload = Json.parseToJsonElement(
             """
             {
-              "error": "Structure changed since preview",
-              "preview": {
-                "dialect": "postgres",
-                "transactionalDdl": true,
-                "recreate": true,
-                "statements": [
-                  { "sql": "ALTER TABLE \"public\".\"new_table\" ADD COLUMN \"age\" integer", "recreatesTable": true }
-                ],
-                "sql": "ALTER TABLE \"public\".\"new_table\" ADD COLUMN \"age\" integer;",
-                "warnings": ["Recreates table"]
-              }
+              "sql": "ALTER TABLE \"public\".\"new_table\" ADD COLUMN \"age\" integer;\nCREATE INDEX \"idx_age\" ON \"public\".\"new_table\" (\"age\");",
+              "statements": [
+                { "sql": "ALTER TABLE \"public\".\"new_table\" ADD COLUMN \"age\" integer" },
+                { "sql": "CREATE INDEX \"idx_age\" ON \"public\".\"new_table\" (\"age\")" }
+              ],
+              "recreate": true,
+              "warnings": ["Recreates table"],
+              "transactional": true
             }
             """.trimIndent(),
         ).jsonObject
@@ -192,34 +270,57 @@ class DatabasePhase09fStructureImpExpStateTest {
         val newer = newerPreviewOf(conflictPayload)
         assertNotNull(newer)
         assertTrue(newer!!.recreate)
+        assertTrue(newer.transactional)
+        assertEquals(2, newer.statements.size)
         assertEquals(listOf("Recreates table"), newer.warnings)
 
+        // Server 400 StructureApplyFailure payload: { statement, index, applied, total }
+        val pgPreview = StructurePreview(
+            transactionalDdl = true,
+            recreate = false,
+            statements = listOf(
+                StructureStatement("ALTER TABLE t ADD a int"),
+                StructureStatement("ALTER TABLE t ADD b bad_type"),
+                StructureStatement("CREATE INDEX idx_a ON t(a)"),
+            ),
+            sql = "ALTER TABLE t ADD a int;\nALTER TABLE t ADD b bad_type;\nCREATE INDEX idx_a ON t(a);",
+        )
         val pgFailJson = Json.parseToJsonElement(
             """
             {
-              "error": "syntax error",
-              "failedIndex": 1,
-              "ranCount": 1,
-              "rolledBack": true,
-              "statements": ["ALTER TABLE t ADD a int", "ALTER TABLE t ADD b bad_type", "CREATE INDEX idx_a ON t(a)"]
+              "statement": "ALTER TABLE t ADD b bad_type",
+              "index": 1,
+              "applied": 0,
+              "total": 3
             }
             """.trimIndent(),
         ).jsonObject
         val pgFailure = failureOf(pgFailJson)!!
-        val pgReports = statementReports(pgFailure)
+        val pgReports = statementReports(pgPreview, pgFailure)
         assertEquals(StatementOutcome.ROLLED_BACK, pgReports[0].outcome)
         assertEquals(StatementOutcome.FAILED, pgReports[1].outcome)
         assertEquals(StatementOutcome.SKIPPED, pgReports[2].outcome)
 
-        val mysqlFailure = pgFailure.copy(rolledBack = false)
-        val mysqlReports = statementReports(mysqlFailure)
+        val mysqlPreview = pgPreview.copy(transactionalDdl = false)
+        val mysqlFailJson = Json.parseToJsonElement(
+            """
+            {
+              "statement": "ALTER TABLE t ADD b bad_type",
+              "index": 1,
+              "applied": 1,
+              "total": 3
+            }
+            """.trimIndent(),
+        ).jsonObject
+        val mysqlFailure = failureOf(mysqlFailJson)!!
+        val mysqlReports = statementReports(mysqlPreview, mysqlFailure)
         assertEquals(StatementOutcome.RAN, mysqlReports[0].outcome)
         assertEquals(StatementOutcome.FAILED, mysqlReports[1].outcome)
         assertEquals(StatementOutcome.SKIPPED, mysqlReports[2].outcome)
     }
 
     @Test
-    fun impExpFormState_handlesExportImportUploadsMultiSheetXlsxColumnMapAndRunBlockers() {
+    fun impExpFormState_handlesExportImportUploadsColumnMapPreviewAndJobStatusWireContracts() {
         val currentDb = ImpExpDatabase(connectionId = 1, database = "analytics", schema = "public")
         var form = databaseExportForm(currentDb, table = "users")
         assertEquals("Export (1)", impExpTitle(form))
@@ -228,8 +329,14 @@ class DatabasePhase09fStructureImpExpStateTest {
         form = addTables(form, listOf("orders"))
         assertEquals(2, activeRows(form).size)
         val exportJson = exportRequest(form)
-        assertEquals("csv", exportJson["targetKind"]?.jsonPrimitive?.content)
-        assertEquals(2, exportJson["source"]?.jsonObject?.get("items")?.jsonArray?.size)
+        assertEquals("csv", exportJson["format"]?.jsonPrimitive?.content)
+        val exportSource = exportJson["source"]!!.jsonObject
+        assertEquals("database", exportSource["type"]?.jsonPrimitive?.content)
+        assertEquals("public", exportSource["schema"]?.jsonPrimitive?.content)
+        val exportTables = exportSource["tables"]!!.jsonArray
+        assertEquals(2, exportTables.size)
+        assertEquals("users", exportTables[0].jsonObject["name"]?.jsonPrimitive?.content)
+        assertEquals("users.csv", exportTables[0].jsonObject["target"]?.jsonPrimitive?.content)
 
         // Duplicate output file name blocks run
         val secondRowId = activeRows(form)[1].id
@@ -239,61 +346,143 @@ class DatabasePhase09fStructureImpExpStateTest {
             runBlocker(dupForm),
         )
 
-        // Switch to import with XLSX multi-sheet upload
+        // Switch to import with CSV upload (only csv, json, jsonl are importable)
         var impForm = importIntoForm(currentDb)
         assertEquals("Add at least one file to import", runBlocker(impForm))
 
         // 128 MB upload limit check
         assertNotNull(uploadProblem("huge.csv", IMPORT_MAX_FILE_BYTES + 1))
-        assertNull(uploadProblem("valid.xlsx", 1024L))
+        assertNull(uploadProblem("valid.csv", 1024L))
 
         val upload = ImpExpUpload(
             localId = "up-1",
-            fileName = "workbook.xlsx",
+            fileName = "customers.csv",
             size = 4096L,
-            format = "xlsx",
+            format = "csv",
             state = "uploading",
             progress = 0.5,
         )
         impForm = addUploads(impForm, listOf(upload))
-        assertEquals("xlsx", impForm.sourceType)
-        assertEquals("Wait for \"workbook.xlsx\" to finish uploading", runBlocker(impForm))
+        assertEquals("csv", impForm.sourceType)
+        assertEquals("Wait for \"customers.csv\" to finish uploading", runBlocker(impForm))
 
-        // Patch upload as ready with 2 sheets
+        // Patch upload as ready
         impForm = patchUpload(
             impForm,
             localId = "up-1",
             state = "ready",
             progress = 1.0,
             uploadId = "srv-up-1",
-            sources = listOf("Customers", "Invoices"),
         )
-        val sheetRows = activeRows(impForm)
-        assertEquals(2, sheetRows.size)
-        assertEquals("Customers", sheetRows[0].source)
-        assertEquals("workbook.xlsx · Customers", sheetRows[0].sourceLabel)
-        assertEquals("Invoices", sheetRows[1].source)
+        val fileRows = activeRows(impForm)
+        assertEquals(1, fileRows.size)
+        assertEquals("customers", fileRows[0].source)
+        assertEquals("customers.csv", fileRows[0].sourceLabel)
         assertNull(runBlocker(impForm, targetReadonly = false))
         assertEquals("Target database connection is read-only", runBlocker(impForm, targetReadonly = true))
 
-        // Template row updates action across all rows
-        impForm = updateRow(impForm, "row-template", action = "truncateAppend")
-        assertTrue(activeRows(impForm).all { it.action == "truncateAppend" })
+        // Template row updates action across all rows using server ImportAction ("truncate")
+        impForm = updateRow(impForm, "row-template", action = "truncate")
+        assertTrue(activeRows(impForm).all { it.action == "truncate" })
 
-        // Column map validation & confirmation
+        // Column map validation & confirmation ({ src, dst, skip })
         val defaultMap = resetColumnMap(listOf("id", "name"))
         assertNull(confirmedColumnMap(defaultMap, listOf("id", "name")))
         val customMap = listOf(
-            ColumnMapEntry(source = "id", dst = "customer_id", ignore = false),
-            ColumnMapEntry(source = "name", dst = "name", ignore = true),
+            ColumnMapEntry(src = "id", dst = "customer_id", skip = false),
+            ColumnMapEntry(src = "name", dst = "name", skip = true),
         )
         val confirmed = confirmedColumnMap(customMap, listOf("id", "name"))
         assertNotNull(confirmed)
-        impForm = updateRow(impForm, sheetRows[0].id, columnMap = confirmed, updateColumnMap = true)
+        impForm = updateRow(impForm, fileRows[0].id, columnMap = confirmed, updateColumnMap = true)
         assertEquals("1 / 2", columnsLinkText(activeRows(impForm)[0]))
 
+        // Upload preview request & response (`rows: unknown[][]`, `warnings: string[]`)
+        val previewReq = uploadPreviewRequest(impForm, activeRows(impForm)[0])
+        assertEquals("csv", previewReq["format"]?.jsonPrimitive?.content)
+        assertEquals("", previewReq["options"]?.jsonObject?.get("csv")?.jsonObject?.get("delimiter")?.jsonPrimitive?.content)
+        assertEquals(2, previewReq["columns"]?.jsonArray?.size)
+
+        val previewResp = parseImportPreview(
+            Json.parseToJsonElement(
+                """
+                {
+                  "columns": ["customer_id"],
+                  "rows": [
+                    [101],
+                    [null]
+                  ],
+                  "warnings": ["Skipped column name"]
+                }
+                """.trimIndent(),
+            ).jsonObject,
+            source = "customers.csv",
+        )
+        assertEquals(listOf("customer_id"), previewResp.columns)
+        assertEquals(2, previewResp.rows.size)
+        assertEquals("101", (previewResp.rows[0]["customer_id"] as DbCellValue.Num).rawText)
+        assertEquals(DbCellValue.Null, previewResp.rows[1]["customer_id"])
+        assertEquals(listOf("Skipped column name"), previewResp.warnings)
+
+        // Import job request wire shape: { format, options, schema, files: [{ upload, source, target, action, columns }] }
         val impReq = importRequest(impForm)
-        assertEquals("xlsx", impReq["sourceFormat"]?.jsonPrimitive?.content)
-        assertEquals(2, impReq["items"]?.jsonArray?.size)
+        assertEquals("csv", impReq["format"]?.jsonPrimitive?.content)
+        assertEquals("public", impReq["schema"]?.jsonPrimitive?.content)
+        val impFiles = impReq["files"]!!.jsonArray
+        assertEquals(1, impFiles.size)
+        val firstFile = impFiles[0].jsonObject
+        assertEquals("srv-up-1", firstFile["upload"]?.jsonPrimitive?.content)
+        assertEquals("customers", firstFile["source"]?.jsonPrimitive?.content)
+        assertEquals("customers", firstFile["target"]?.jsonPrimitive?.content)
+        assertEquals("truncate", firstFile["action"]?.jsonPrimitive?.content)
+        val firstColMap = firstFile["columns"]!!.jsonArray[0].jsonObject
+        assertEquals("id", firstColMap["src"]?.jsonPrimitive?.content)
+        assertEquals("customer_id", firstColMap["dst"]?.jsonPrimitive?.content)
+        assertNull(firstColMap["skip"])
+        val secondColMap = firstFile["columns"]!!.jsonArray[1].jsonObject
+        assertEquals("name", secondColMap["src"]?.jsonPrimitive?.content)
+        assertEquals("true", secondColMap["skip"]?.jsonPrimitive?.content)
+
+        // Job status response wire shape: { endedAt, items: [{ rowsRead, rowsWritten }], messages: [{ level: "warning", text, time }], messageCount }
+        val statusResp = parseImpExpJobStatus(
+            Json.parseToJsonElement(
+                """
+                {
+                  "id": "job-99",
+                  "kind": "import",
+                  "state": "stopped",
+                  "startedAt": 1000,
+                  "endedAt": 2500,
+                  "items": [
+                    {
+                      "source": "customers.csv",
+                      "target": "customers",
+                      "state": "stopped",
+                      "rowsRead": 500,
+                      "rowsWritten": 400
+                    }
+                  ],
+                  "messages": [
+                    { "level": "warning", "text": "Stopped by user", "time": 2500 }
+                  ],
+                  "messageCount": 3,
+                  "files": []
+                }
+                """.trimIndent(),
+            ).jsonObject,
+            sinceOffset = 2,
+        )
+        assertEquals("stopped", statusResp.state)
+        assertEquals(2500L, statusResp.endedAt)
+        assertEquals(3, statusResp.messageCount)
+        assertEquals(500L, statusResp.items[0].rowsRead)
+        assertEquals(400L, statusResp.items[0].rowsWritten)
+        assertEquals(3, statusResp.messages[0].id)
+        assertEquals("warning", statusResp.messages[0].level)
+        assertEquals(2500L, statusResp.messages[0].time)
+        assertEquals(1, levelCounts(statusResp.messages)["warn"])
     }
 }
+
+private fun kotlinx.serialization.json.JsonElement.isNullLiteral(): Boolean =
+    this is kotlinx.serialization.json.JsonNull

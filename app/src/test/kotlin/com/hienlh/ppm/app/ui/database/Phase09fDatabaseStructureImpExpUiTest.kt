@@ -70,7 +70,7 @@ class Phase09fDatabaseStructureImpExpUiTest {
                 name = "idx_email",
                 unique = false,
                 primary = false,
-                type = "BTREE",
+                method = "BTREE",
                 keys = listOf(DbIndexKey(column = "email", order = "ASC")),
             ),
         ),
@@ -134,21 +134,19 @@ class Phase09fDatabaseStructureImpExpUiTest {
                         if (applyAttempt == 1) {
                             throw PpmError.Server(
                                 status = 409,
-                                serverMessage = "Conflict",
+                                serverMessage = "Structure changed since preview",
                                 data = Json.parseToJsonElement(
                                     """
                                     {
-                                      "error": "Structure changed since preview",
-                                      "preview": {
-                                        "dialect": "mysql",
-                                        "transactionalDdl": false,
-                                        "recreate": false,
-                                        "statements": [
-                                          { "sql": "ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2) NOT NULL", "recreatesTable": false }
-                                        ],
-                                        "sql": "ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2) NOT NULL;",
-                                        "warnings": []
-                                      }
+                                      "sql": "ALTER TABLE `employees` COMMENT = 'Staff';\nALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2) NOT NULL;\nCREATE INDEX `idx_sal` ON `employees`(`salary`);",
+                                      "statements": [
+                                        { "sql": "ALTER TABLE `employees` COMMENT = 'Staff'" },
+                                        { "sql": "ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2) NOT NULL" },
+                                        { "sql": "CREATE INDEX `idx_sal` ON `employees`(`salary`)" }
+                                      ],
+                                      "recreate": false,
+                                      "warnings": [],
+                                      "transactional": false
                                     }
                                     """.trimIndent(),
                                 ),
@@ -156,19 +154,14 @@ class Phase09fDatabaseStructureImpExpUiTest {
                         } else {
                             throw PpmError.Server(
                                 status = 400,
-                                serverMessage = "DDL failed",
+                                serverMessage = "Duplicate column name 'salary'",
                                 data = Json.parseToJsonElement(
                                     """
                                     {
-                                      "error": "Duplicate column name 'salary'",
-                                      "failedIndex": 1,
-                                      "ranCount": 1,
-                                      "rolledBack": false,
-                                      "statements": [
-                                        "ALTER TABLE `employees` COMMENT = 'Staff'",
-                                        "ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2)",
-                                        "CREATE INDEX `idx_sal` ON `employees`(`salary`)"
-                                      ]
+                                      "statement": "ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2) NOT NULL",
+                                      "index": 1,
+                                      "applied": 1,
+                                      "total": 3
                                     }
                                     """.trimIndent(),
                                 ),
@@ -210,7 +203,10 @@ class Phase09fDatabaseStructureImpExpUiTest {
         // 2nd attempt -> sends updated SQL -> 400 statement failure report
         composeRule.onNodeWithTag("db-structure-save-execute-btn").performClick()
         composeRule.waitForIdle()
-        assertEquals("ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2) NOT NULL;", lastAppliedSql)
+        assertEquals(
+            "ALTER TABLE `employees` COMMENT = 'Staff';\nALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2) NOT NULL;\nCREATE INDEX `idx_sal` ON `employees`(`salary`);",
+            lastAppliedSql,
+        )
         composeRule.onNodeWithTag("db-structure-failure-report").assertIsDisplayed()
         composeRule.onNodeWithTag("db-structure-stmt-outcome-0").assertIsDisplayed()
         composeRule.onNodeWithTag("db-structure-stmt-outcome-1").assertIsDisplayed()

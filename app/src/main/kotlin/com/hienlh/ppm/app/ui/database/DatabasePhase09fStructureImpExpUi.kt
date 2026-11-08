@@ -221,11 +221,14 @@ import com.hienlh.ppm.state.database.setTables
 import com.hienlh.ppm.state.database.setTargetType
 import com.hienlh.ppm.state.database.startingStatus
 import com.hienlh.ppm.state.database.statementReports
+import com.hienlh.ppm.state.database.structureApplyRequestJson
+import com.hienlh.ppm.state.database.structurePreviewRequestJson
 import com.hienlh.ppm.state.database.tableModelProblems
 import com.hienlh.ppm.state.database.tableReferences
 import com.hienlh.ppm.state.database.uid
 import com.hienlh.ppm.state.database.uniqueRows
 import com.hienlh.ppm.state.database.updateRow
+import com.hienlh.ppm.state.database.uploadPreviewRequest
 import com.hienlh.ppm.state.database.uploadProblem
 import com.hienlh.ppm.state.database.upsertColumn
 import com.hienlh.ppm.state.database.upsertForeignKey
@@ -435,21 +438,17 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
                 val client = api ?: error("Not connected")
                 val obj = client.dbStructurePreview(
                     connectionId = connId,
-                    body = change.toJsonObject(),
+                    body = structurePreviewRequestJson(change),
                     database = database,
                     path = filePath,
                     project = project,
                     loginCoordinator = loginCoordinator,
                 )
-                parseStructurePreview(obj) ?: error("Invalid structure preview response")
+                parseStructurePreview(obj, defaultDialect = dialect) ?: error("Invalid structure preview response")
             },
             onApplyChange = { change, sql, allowRecreate ->
                 val client = api ?: error("Not connected")
-                val body = buildJsonObject {
-                    for ((k, v) in change.toJsonObject()) put(k, v)
-                    put("sql", sql)
-                    if (allowRecreate) put("allowRecreate", true)
-                }
+                val body = structureApplyRequestJson(change, sql, allowRecreate)
                 client.dbStructureApply(
                     connectionId = connId,
                     body = body,
@@ -557,7 +556,7 @@ internal fun DatabaseStructureTabContent(
         activeSaveChange = if (isNewTable) {
             StructureChange.Create(database = database, target = draftModel)
         } else {
-            StructureChange.Alter(database = database, target = draftModel)
+            StructureChange.Alter(database = database, base = baseModel, current = draftModel)
         }
     }
 
@@ -1564,7 +1563,7 @@ internal fun DatabaseStructureTabContent(
             keyProblems(
                 "Index",
                 idxDraft.constraintName,
-                idxDraft.columns.map { it.columnId },
+                idxDraft.columns.mapNotNull { it.columnId },
                 requireName = true,
                 model = draftModel,
                 editingId = if (isAdding) null else initialIdx.id,
@@ -2080,7 +2079,13 @@ fun StructureSaveDialog(
 
             val curFailure = failure
             if (curFailure != null) {
-                val reports = remember(curFailure) { statementReports(curFailure) }
+                val reports = remember(curPreview, curFailure) {
+                    if (curPreview != null && curPreview.statements.isNotEmpty()) {
+                        statementReports(curPreview, curFailure)
+                    } else {
+                        statementReports(curFailure)
+                    }
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -2091,7 +2096,7 @@ fun StructureSaveDialog(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     BasicText(
-                        curFailure.error,
+                        curFailure.error.ifBlank { applyError.orEmpty() },
                         style = ppmText(12f, FontWeight.SemiBold).copy(color = tokens.error.color),
                     )
                     for (rep in reports) {
@@ -2171,7 +2176,9 @@ fun StructureSaveDialog(
                                             conflictNotice = "The table structure changed on the server. Review the updated SQL script and click Execute again."
                                         }
                                         failReport != null -> {
-                                            failure = failReport
+                                            failure = failReport.copy(
+                                                error = failReport.error.ifBlank { err.message.orEmpty() },
+                                            )
                                         }
                                         else -> {
                                             applyError = err.message ?: "Failed to execute DDL"
@@ -2255,7 +2262,7 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
     LaunchedEffect(api, activeJob) {
         val job = activeJob ?: return@LaunchedEffect
         val client = api ?: return@LaunchedEffect
-        var since = 1
+        var since = 0
         while (true) {
             val res = runCatching { client.dbImpExpJobStatus(job.id, since = since) }
             val obj = res.getOrElse { err ->
@@ -2266,12 +2273,12 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
                 }
                 break
             }
-            val next = parseImpExpJobStatus(obj)
+            val next = parseImpExpJobStatus(obj, sinceOffset = since)
             val prevMessages = jobStatus?.messages.orEmpty()
             val mergedMessages = (prevMessages + next.messages).distinctBy { it.id }
-            since = next.nextMessageId
+            since = next.messageCount
             jobStatus = next.copy(messages = mergedMessages)
-            if (next.state != "running") break
+            if (next.state != "running" && next.state != "queued") break
             delay(1_000L)
         }
     }
@@ -2397,13 +2404,9 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
                 val u = form.uploads.firstOrNull { it.localId == row.uploadLocalId }
                     ?: error("Upload missing")
                 val uidStr = u.uploadId ?: error("Upload not ready")
-                val body = buildJsonObject {
-                    put("format", form.sourceType)
-                    if (row.sheetName != null) put("source", row.sheetName)
-                    put("formatOptions", form.importOptions.toJsonObject())
-                }
+                val body = uploadPreviewRequest(form, row)
                 val obj = client.dbImpExpUploadPreview(uidStr, body)
-                parseImportPreview(obj)
+                parseImportPreview(obj, source = row.source)
             } else {
                 val cid = form.sourceDb.connectionId ?: error("No source connection")
                 val reqJson = buildGridRequestJson(
@@ -2437,10 +2440,10 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
                 runCatching {
                     if (isImportForm(form) && form.sourceType != "database" && form.sourceType != "query") {
                         val cid = form.targetDb.connectionId ?: error("Choose a target connection")
-                        client.dbImpExpImport(cid.toString(), importRequest(form))
+                        client.dbImpExpImport(cid.toString(), importRequest(form), database = form.targetDb.database)
                     } else {
                         val cid = form.sourceDb.connectionId ?: error("Choose a source connection")
-                        client.dbImpExpExport(cid.toString(), exportRequest(form))
+                        client.dbImpExpExport(cid.toString(), exportRequest(form), database = form.sourceDb.database)
                     }
                 }.onSuccess { jobIdStr ->
                     val jid = jobIdStr.ifBlank { "job-1" }
@@ -2906,14 +2909,14 @@ internal fun DatabaseImpExpTabContent(
                         // Export format options + Archive as ZIP
                         if (form.targetType == "xlsx") {
                             SettingsButton(
-                                label = "${if (form.exportOptions.xlsxInSingleFile) "☑" else "☐"} All tables in one Excel file",
-                                primary = form.exportOptions.xlsxInSingleFile,
+                                label = "${if (form.exportOptions.xlsxSingleFile) "☑" else "☐"} All tables in one Excel file",
+                                primary = form.exportOptions.xlsxSingleFile,
                                 modifier = Modifier.testTag("db-impexp-xlsx-single-checkbox"),
                                 onClick = {
                                     onFormChange(
                                         form.copy(
                                             exportOptions = form.exportOptions.copy(
-                                                xlsxInSingleFile = !form.exportOptions.xlsxInSingleFile,
+                                                xlsxSingleFile = !form.exportOptions.xlsxSingleFile,
                                             ),
                                         ),
                                     )
@@ -3225,12 +3228,12 @@ internal fun DatabaseImpExpTabContent(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         SettingsButton(
-                            label = if (!entry.ignore) "☑" else "☐",
-                            primary = !entry.ignore,
-                            modifier = Modifier.testTag("db-impexp-col-map-check-${entry.source}"),
+                            label = if (!entry.skip) "☑" else "☐",
+                            primary = !entry.skip,
+                            modifier = Modifier.testTag("db-impexp-col-map-check-${entry.src}"),
                             onClick = {
                                 entries = entries.mapIndexed { i, e ->
-                                    if (i == idx) e.copy(ignore = !e.ignore) else e
+                                    if (i == idx) e.copy(skip = !e.skip) else e
                                 }
                             },
                         )
