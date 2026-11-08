@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -34,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.client.FileHunks
 import com.hienlh.ppm.client.GitRepo
@@ -130,17 +132,28 @@ internal fun GitHunkStageDialog(
         }
     }
 
-    Dialog(onDismissRequest = onClose) {
-        val shape = RoundedCornerShape(if (mobile) 12.dp else 8.dp)
-        Column(
-            modifier = Modifier
-                .width(if (mobile) 360.dp else 640.dp)
-                .heightIn(max = if (mobile) 560.dp else 520.dp)
-                .clip(shape)
-                .background(tokens.bgSolid.color)
-                .cssBorder(tokens.border.color, shape)
-                .testTag("git-hunk-stage-dialog"),
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = !mobile),
+    ) {
+        val shape = if (mobile) {
+            RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+        } else {
+            RoundedCornerShape(8.dp)
+        }
+        Box(
+            modifier = if (mobile) Modifier.fillMaxSize() else Modifier,
+            contentAlignment = if (mobile) Alignment.BottomCenter else Alignment.Center,
         ) {
+            Column(
+                modifier = Modifier
+                    .then(if (mobile) Modifier.fillMaxWidth() else Modifier.width(640.dp))
+                    .heightIn(max = if (mobile) 560.dp else 520.dp)
+                    .clip(shape)
+                    .background(tokens.bgSolid.color)
+                    .cssBorder(tokens.border.color, shape)
+                    .testTag("git-hunk-stage-dialog"),
+            ) {
             // Header
             Column(
                 modifier = Modifier
@@ -439,6 +452,7 @@ internal fun GitHunkStageDialog(
                         )
                     }
                 }
+            }
             }
         }
     }

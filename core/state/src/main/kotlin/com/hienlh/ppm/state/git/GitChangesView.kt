@@ -37,6 +37,12 @@ data class ChangeTotals(
     val commitCount: Int get() = filesStaged
 }
 
+data class DiscardSummary(
+    val title: String,
+    val body: String,
+    val confirm: String,
+)
+
 /**
  * Pure derivations for the Source Control panel (`src/web/lib/git-changes-view.ts` and
  * `src/web/stores/git-status-store.ts`).
@@ -88,8 +94,10 @@ object GitChangesView {
     /** Primary status letter shown in the 14px tile (`U`, `A`, `M`, `D`, `R`). */
     fun changeLetter(file: ChangedFile): String {
         if (file.conflict != null) return "U"
-        // Prefer worktree status when partially staged so user sees what is still changing.
-        return (file.unstaged?.status ?: file.staged?.status ?: "M")
+        if (file.untracked || file.x == "A") return "A"
+        if (file.oldPath != null) return "R"
+        if (file.x == "D" || file.y == "D") return "D"
+        return "M"
     }
 
     /** True if the text still contains Git conflict markers at the start of a line. */
@@ -140,10 +148,10 @@ object GitChangesView {
         add("staged", file.staged)
         add("unstaged", file.unstaged)
         val sorted = raw.sortedBy { it.first }.map { it.second }
-        val shown = sorted.take(max)
-        val overflow = maxOf(0, sorted.size - max)
+        val shown = if (sorted.size <= max) sorted else sorted.take(max - 1)
+        val overflow = if (sorted.size <= max) 0 else sorted.size - (max - 1)
         return BlockDotsResult(
-            dots = sorted,
+            dots = shown,
             blocks = shown.map { if (it) "staged" else "unstaged" },
             overflow = overflow,
             staged = file.staged != null,
@@ -174,11 +182,22 @@ object GitChangesView {
         var conflicts = 0
         for (file in files) {
             filesCount++
-            if (file.conflict != null) conflicts++
-            if (file.staged != null) filesStaged++
-            val dots = blockDots(file).dots
-            blocks += dots.size
-            blocksStaged += dots.count { it }
+            if (file.conflict != null) {
+                conflicts++
+                continue
+            }
+            val staged = file.staged
+            if (staged != null) {
+                filesStaged++
+                val count = if (staged.whole != null || staged.changeBlocks.isEmpty()) 1 else staged.changeBlocks.size
+                blocks += count
+                blocksStaged += count
+            }
+            val unstaged = file.unstaged
+            if (unstaged != null) {
+                val count = if (unstaged.whole != null || unstaged.changeBlocks.isEmpty()) 1 else unstaged.changeBlocks.size
+                blocks += count
+            }
         }
         return ChangeTotals(
             files = filesCount,
@@ -232,18 +251,37 @@ object GitChangesView {
         return totals.filesStaged > 0 && message.trim().isNotEmpty() && totals.conflicts == 0
     }
 
-    /** Summary text for a discard confirmation modal. */
-    fun discardSummary(files: List<ChangedFile>): String {
-        var tracked = 0
-        var untracked = 0
-        for (f in files) {
-            if (f.unstaged?.status == "A" && f.staged == null) untracked++
-            else if (f.unstaged != null) tracked++
+    /** Summary for a discard confirmation modal (`discardSummary` in `src/web/lib/git-changes-view.ts`). */
+    fun discardSummary(files: List<ChangedFile>): DiscardSummary {
+        val added = files.count { it.untracked || it.x == "A" }
+        val modified = files.size - added
+        val single = files.singleOrNull()
+        val name = single?.path?.substringAfterLast('/')
+
+        if (single != null && name != null) {
+            return if (added == 1) {
+                DiscardSummary(
+                    title = "Delete \"$name\"?",
+                    body = "This file is not in any commit. Deleting it removes it from disk.",
+                    confirm = "Delete file",
+                )
+            } else {
+                DiscardSummary(
+                    title = "Discard changes in \"$name\"?",
+                    body = "Uncommitted edits in this file will be replaced with the last commit.",
+                    confirm = "Discard changes",
+                )
+            }
         }
+
         val parts = mutableListOf<String>()
-        if (tracked > 0) parts += "revert $tracked modified ${if (tracked == 1) "file" else "files"}"
-        if (untracked > 0) parts += "delete $untracked new ${if (untracked == 1) "file" else "files"}"
-        return if (parts.isNotEmpty()) parts.joinToString(" and ") else "discard changes"
+        if (modified > 0) parts += "discard edits in $modified ${if (modified == 1) "file" else "files"}"
+        if (added > 0) parts += "delete $added untracked ${if (added == 1) "file" else "files"}"
+        return DiscardSummary(
+            title = "Discard ${files.size} changes?",
+            body = "This will ${parts.joinToString(" and ")}.",
+            confirm = "Discard ${files.size} files",
+        )
     }
 
     fun operationTitle(op: GitOperation, branch: GitBranchState): String {
@@ -270,31 +308,37 @@ object GitChangesView {
         return path.substring(idx + 1) to path.substring(0, idx)
     }
 
-    /** Convert [GitChanges] (`GET /git/changes`) to [GitBranchStatus] for the shared store. */
+    /** Convert [GitChanges] (`GET /git/changes`) to [GitBranchStatus] for the shared store (`changesToStatus`). */
     fun changesToStatus(changes: GitChanges): GitBranchStatus {
         val staged = mutableListOf<GitFileChange>()
         val unstaged = mutableListOf<GitFileChange>()
         val untracked = mutableListOf<String>()
+
+        fun letter(code: String): String = when (code) {
+            "A" -> "A"
+            "D" -> "D"
+            "R" -> "R"
+            else -> "M"
+        }
+
         for (file in changes.files) {
-            if (file.conflict != null) {
-                unstaged += GitFileChange(path = file.path, status = "U")
+            if (file.untracked) {
+                untracked += file.path
                 continue
             }
-            val stagedSide = file.staged
-            if (stagedSide != null) {
-                staged += GitFileChange(path = file.path, status = stagedSide.status, oldPath = file.oldPath)
+            if (file.conflict != null) {
+                unstaged += GitFileChange(path = file.path, status = "M")
+                continue
             }
-            val unstagedSide = file.unstaged
-            if (unstagedSide != null) {
-                if (unstagedSide.status == "A" && stagedSide == null) {
-                    untracked += file.path
-                } else {
-                    unstaged += GitFileChange(path = file.path, status = unstagedSide.status, oldPath = file.oldPath)
-                }
+            if (file.staged != null) {
+                staged += GitFileChange(path = file.path, status = letter(file.x), oldPath = file.oldPath)
+            }
+            if (file.unstaged != null) {
+                unstaged += GitFileChange(path = file.path, status = letter(file.y), oldPath = file.oldPath)
             }
         }
         return GitBranchStatus(
-            branch = changes.branch.head ?: changes.branch.oid?.take(7) ?: "",
+            branch = changes.branch.head ?: "HEAD",
             tracking = changes.branch.upstream,
             ahead = changes.branch.ahead,
             behind = changes.branch.behind,
@@ -307,6 +351,7 @@ object GitChangesView {
     /**
      * Build a map of `filePath -> statusLetter` (`"M"`, `"A"`, `"D"`, `"R"`, `"C"`, `"U"`)
      * for Explorer file rows (`buildFileStatusMap` in `git-status-store.ts`).
+     * Priority: staged > unstaged > untracked.
      */
     fun buildFileStatusMap(status: GitBranchStatus): Map<String, String> {
         val map = LinkedHashMap<String, String>()
@@ -314,14 +359,12 @@ object GitChangesView {
             map[u.trimEnd('/')] = "U"
         }
         for (change in status.unstaged) {
-            val s = change.status.uppercase()
+            val s = if (change.status == "?") "U" else change.status.uppercase()
             if (s in STATUS_PRIORITY) map[change.path] = s
         }
         for (change in status.staged) {
-            if (change.path !in map) {
-                val s = change.status.uppercase()
-                if (s in STATUS_PRIORITY) map[change.path] = s
-            }
+            val s = if (change.status == "?") "U" else change.status.uppercase()
+            if (s in STATUS_PRIORITY) map[change.path] = s
         }
         return map
     }

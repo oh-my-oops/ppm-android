@@ -811,6 +811,18 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     var branchPickerProject by mutableStateOf<String?>(null)
         private set
 
+    /** Mounted `GitStatusPanel` count per project so `watchGit` stands down while Source Control is open. */
+    val gitStatusPanelOpenCount = mutableStateMapOf<String, Int>()
+
+    fun onGitStatusPanelMounted(project: String) {
+        gitStatusPanelOpenCount[project] = (gitStatusPanelOpenCount[project] ?: 0) + 1
+    }
+
+    fun onGitStatusPanelUnmounted(project: String) {
+        val next = (gitStatusPanelOpenCount[project] ?: 0) - 1
+        if (next <= 0) gitStatusPanelOpenCount.remove(project) else gitStatusPanelOpenCount[project] = next
+    }
+
     fun openBranchPicker(project: String) {
         branchPickerProject = project
     }
@@ -2331,6 +2343,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         val api = api ?: return
         loadGitRepos(project)
         suspend fun read() {
+            if ((gitStatusPanelOpenCount[project] ?: 0) > 0) return
             val discovery = gitDiscovery[project] ?: quietly { api.gitRepos(project) } ?: return
             val repo = com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(discovery, gitChosenRepoPath[project]) ?: return
             // A failed read keeps the branch last shown.

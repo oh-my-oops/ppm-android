@@ -137,9 +137,9 @@ fun GitDiffViewer(
     val chosenPath = projectName?.let { model.gitChosenRepoPath[it] }
     val selectedRepo = remember(discovery, chosenPath) { GitRepoScope.resolveRepo(discovery, chosenPath) }
 
-    val fileScope = remember(filePath, discovery, selectedRepo) {
+    val fileScope = remember(filePath, discovery) {
         if (filePath == null) null
-        else resolveFileRepoScope(filePath, discovery, selectedRepo)
+        else GitRepoScope.fileGitScope(discovery, filePath)
     }
 
     LaunchedEffect(projectName, filePath, ref1, ref2, file1, file2, isInline, openAsText, discovery, selectedRepo?.path, api) {
@@ -165,22 +165,22 @@ fun GitDiffViewer(
                         model.loadGitRepos(proj)
                     }
                     val disc = model.gitDiscovery[proj]
-                    val chosen = model.gitChosenRepoPath[proj]
-                    val fallbackRepo = GitRepoScope.resolveRepo(disc, chosen)
-                    val scope = resolveFileRepoScope(filePath, disc, fallbackRepo)
-                    if (scope == null && disc != null && GitRepoScope.hasNoRepo(disc)) {
+                    val scope = GitRepoScope.fileGitScope(disc, filePath)
+                    if (scope == null) {
+                        // Discovery has not finished yet
+                        return@LaunchedEffect
+                    }
+                    if (scope.kind == "no-repo") {
                         loading = false
                         return@LaunchedEffect
                     }
-                    val relPath = scope?.first ?: filePath
-                    val targetRepo = scope?.second ?: fallbackRepo
                     fullFileDiff = client.gitFileFullDiff(
                         project = proj,
-                        file = relPath,
+                        file = scope.filePath,
                         ref = ref1 ?: "HEAD",
                         ref2 = ref2,
                         text = openAsText,
-                        repo = targetRepo,
+                        repo = scope.repo,
                     )
                     fileContents = null
                     diffText = null
@@ -239,7 +239,11 @@ fun GitDiffViewer(
     val full = fullFileDiff
     if (full != null && full.binary && !openAsText && filePath != null && projectName != null) {
         val canPreview = remember(filePath) { GitLogRefBadges.canPreviewBinary(filePath) }
-        val scopePair = fileScope ?: (filePath to selectedRepo)
+        val scopePair = if (fileScope != null && fileScope.kind == "ready") {
+            fileScope.filePath to fileScope.repo
+        } else {
+            filePath to selectedRepo
+        }
         Column(modifier = modifier.fillMaxSize().background(tokens.bgSolid.color).testTag("git-diff-binary")) {
             if (canPreview) {
                 Row(
@@ -541,20 +545,9 @@ internal fun resolveFileRepoScope(
     selectedRepo: GitRepo?,
 ): Pair<String, GitRepo?>? {
     if (discovery == null) return filePath to selectedRepo
-    if (!discovery.rootIsRepo && discovery.repos.isEmpty()) return null
-    for (repo in discovery.repos) {
-        if (repo.relative != ".") {
-            val rel = GitRepoScope.repoRelativePath(filePath, repo)
-            if (rel != null) return rel to repo
-        }
-    }
-    if (selectedRepo != null) {
-        val rel = GitRepoScope.repoRelativePath(filePath, selectedRepo)
-        if (rel != null) return rel to selectedRepo
-    }
-    val rootRepo = discovery.repos.firstOrNull { it.relative == "." }
-    if (discovery.rootIsRepo || rootRepo != null) return filePath to rootRepo
-    return null
+    val scope = GitRepoScope.fileGitScope(discovery, filePath) ?: return null
+    if (scope.kind == "no-repo") return null
+    return scope.filePath to scope.repo
 }
 
 @Composable

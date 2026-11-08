@@ -132,6 +132,54 @@ internal fun TruncatedText(
     )
 }
 
+/**
+ * Start-ellipsized single-line text (`StartTruncatedText` in `git-change-parts.tsx`), keeping
+ * the filename/folder tail visible when space is tight while exposing the full string to
+ * semantics/tests.
+ */
+@Composable
+internal fun StartTruncatedText(
+    text: String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+) {
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {
+        val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+        val maxPx = constraints.maxWidth
+        val display = remember(text, style, maxPx) {
+            if (text.isEmpty() || maxPx <= 0 || maxPx == Int.MAX_VALUE) {
+                text
+            } else {
+                val fullWidth = measurer.measure(AnnotatedString(text), style = style, maxLines = 1, softWrap = false).size.width
+                if (fullWidth <= maxPx) {
+                    text
+                } else {
+                    var lo = 1
+                    var hi = text.length
+                    var best = "…${text.takeLast(1)}"
+                    while (lo <= hi) {
+                        val mid = (lo + hi) ushr 1
+                        val cand = "…${text.takeLast(mid)}"
+                        val w = measurer.measure(AnnotatedString(cand), style = style, maxLines = 1, softWrap = false).size.width
+                        if (w <= maxPx) {
+                            best = cand
+                            lo = mid + 1
+                        } else {
+                            hi = mid - 1
+                        }
+                    }
+                    best
+                }
+            }
+        }
+        BasicText(
+            text = display,
+            style = style,
+            maxLines = 1,
+        )
+    }
+}
+
 internal fun Modifier.rightClick(onClick: () -> Unit): Modifier = pointerInput(onClick) {
     awaitEachGesture {
         val event = awaitPointerEvent(PointerEventPass.Main)
@@ -186,29 +234,26 @@ internal fun StatusTile(file: ChangedFile) {
 @Composable
 internal fun BlockDots(file: ChangedFile) {
     val tokens = LocalPpmTokens.current
-    val res = remember(file) { GitChangesView.blockDots(file) }
-    if (res.blocks.isEmpty()) return
+    val res = remember(file) { GitChangesView.blockDots(file, 6) }
+    if (res.dots.isEmpty()) return
     Row(
+        modifier = Modifier.testTag("git-block-dots-${file.path}"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        for (block in res.blocks) {
-            val tone = when (block) {
-                "add" -> tokens.success
-                "delete" -> tokens.error
-                else -> tokens.warning
-            }
+        res.dots.forEachIndexed { i, on ->
             Box(
                 modifier = Modifier
                     .size(5.dp)
-                    .clip(RoundedCornerShape(1.dp))
+                    .clip(CircleShape)
                     .then(
-                        if (res.staged) {
-                            Modifier.background(tone.color)
+                        if (on) {
+                            Modifier.background(tokens.accent.color)
                         } else {
-                            Modifier.cssBorder(tone.opacity(0.8).color, RoundedCornerShape(1.dp))
+                            Modifier.cssBorder(tokens.text3.opacity(0.6).color, CircleShape)
                         },
-                    ),
+                    )
+                    .testTag("git-block-dot-${file.path}-$i-${if (on) "on" else "off"}"),
             )
         }
         if (res.overflow > 0) {
@@ -979,15 +1024,13 @@ internal fun GitCommitComposer(
                             menuOpen = false
                             onCommit(false, true, false)
                         }
-                        if (canUndo) {
-                            Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(tokens.border.color))
-                            CommitMenuItem(
-                                label = "Undo last commit",
-                                enabled = true,
-                            ) {
-                                menuOpen = false
-                                onUndoLast()
-                            }
+                        Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(tokens.border.color))
+                        CommitMenuItem(
+                            label = "Undo last commit",
+                            enabled = canUndo,
+                        ) {
+                            menuOpen = false
+                            onUndoLast()
                         }
                     }
                 }

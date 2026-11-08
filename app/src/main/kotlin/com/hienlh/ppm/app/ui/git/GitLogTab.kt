@@ -93,6 +93,7 @@ fun GitLogBody(model: AppModel, tab: WorkspaceTab) {
     var data by remember(projectName, repo?.path) { mutableStateOf<GitGraphData?>(null) }
     var loading by remember(projectName, repo?.path) { mutableStateOf(false) }
     var hasMore by remember(projectName, repo?.path) { mutableStateOf(true) }
+    var loadMoreFailedSkip by remember(projectName, repo?.path) { mutableStateOf<Int?>(null) }
 
     suspend fun fetchData(skip: Int = 0, append: Boolean = false) {
         val client = api ?: return
@@ -107,10 +108,14 @@ fun GitLogBody(model: AppModel, tab: WorkspaceTab) {
                 res
             }
             hasMore = res.commits.size == GIT_LOG_PAGE_SIZE
+            loadMoreFailedSkip = null
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
-            // Silent, matching git-log-panel.tsx
+            // Silent, matching git-log-panel.tsx; record failed skip so pagination does not loop infinitely
+            if (append) {
+                loadMoreFailedSkip = skip
+            }
         } finally {
             loading = false
         }
@@ -150,9 +155,16 @@ fun GitLogBody(model: AppModel, tab: WorkspaceTab) {
         }
     }
 
-    LaunchedEffect(shouldLoadMore, loading, hasMore, data?.commits?.size) {
+    LaunchedEffect(shouldLoadMore, loading, hasMore, data?.commits?.size, loadMoreFailedSkip) {
         val current = data
-        if (shouldLoadMore && !loading && hasMore && current != null && current.commits.isNotEmpty()) {
+        if (
+            shouldLoadMore &&
+            !loading &&
+            hasMore &&
+            current != null &&
+            current.commits.isNotEmpty() &&
+            loadMoreFailedSkip != current.commits.size
+        ) {
             fetchData(skip = current.commits.size, append = true)
         }
     }

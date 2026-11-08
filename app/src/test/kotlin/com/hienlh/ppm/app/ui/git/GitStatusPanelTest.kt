@@ -1,12 +1,17 @@
 package com.hienlh.ppm.app.ui.git
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.files.ExplorerTreeRow
@@ -205,6 +210,8 @@ class GitStatusPanelTest {
                     viewMode = "flat",
                     onToggleFile = { toggledFile = it.path },
                     onToggleBatch = { toggledBatchCount = it.size },
+                    onStageFile = {},
+                    onUnstageFile = {},
                     onOpen = {},
                     onOpenDiff = {},
                     onOpenFile = {},
@@ -318,6 +325,124 @@ class GitStatusPanelTest {
             val targetsAfter = synchronized(recorded) { recorded.toList() }
             assertEquals(2, targetsAfter.count { it.endsWith("/git/repos") })
             assertTrue(targetsAfter.any { it.contains("/git/changes") })
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `git status panel unstages partly-staged file via Unstage file menu and handles null stash and mixed discard undo+skipped`() {
+        installBlankFileIcons()
+        val server = MockWebServer()
+        val recordedMethodsAndTargets = mutableListOf<Pair<String, String>>()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                synchronized(recordedMethodsAndTargets) {
+                    recordedMethodsAndTargets += (request.method ?: "GET") to target
+                }
+                return when {
+                    target.endsWith("/git/repos") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"projectPath":"/work/app","rootIsRepo":true,"repos":[{"path":"/work/app","name":"app","relative":"."}]}}""")
+                        .build()
+                    target.contains("/git/changes") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body(
+                            """{"ok":true,"data":{"branch":{"head":"main","oid":"1111111","upstream":"origin/main","upstreamGone":false,"ahead":0,"behind":0,"hasRemote":true},"operation":null,"files":[{"path":"src/Partial.kt","oldPath":null,"x":"M","y":"M","untracked":false,"conflict":null,"staged":{"status":"M","added":2,"removed":0,"blocks":[{"id":"b1","index":0,"oldStart":1,"oldLines":0,"newStart":1,"newLines":2,"added":2,"removed":0}]},"unstaged":{"status":"M","added":3,"removed":1,"blocks":[{"id":"b2","index":0,"oldStart":10,"oldLines":1,"newStart":12,"newLines":3,"added":3,"removed":1}]}}],"stashes":0,"lastCommit":null,"truncated":false}}""",
+                        )
+                        .build()
+                    target.contains("/git/commit-draft") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"message":"","updatedAt":0}}""")
+                        .build()
+                    target.endsWith("/git/unstage") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"unstaged":true}}""")
+                        .build()
+                    target.endsWith("/git/stash") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"stashed":false,"stash":null}}""")
+                        .build()
+                    target.endsWith("/git/discard") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"undo":{"id":"undo-99","createdAt":1700000000,"paths":["src/Partial.kt"],"skipped":["assets/huge.bin"]}}}""")
+                        .build()
+                    else -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{}}""")
+                        .build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val model = AppModel(ApplicationProvider.getApplicationContext())
+            model.api = ApiClient(server.url("/"), "tok")
+            model.selectedProject = "demo"
+
+            var isMobile by androidx.compose.runtime.mutableStateOf(true)
+            compose.setContent {
+                androidx.compose.runtime.CompositionLocalProvider(com.hienlh.ppm.design.LocalPpmMobile provides isMobile) {
+                    GitStatusPanel(model = model)
+                }
+            }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithTag("git-change-row-src/Partial.kt").fetchSemanticsNodes().isNotEmpty()
+            }
+
+            // Open row bottom-sheet menu on partly-staged file via long-click and click "Unstage file" -> must call /git/unstage, NOT /git/stage
+            compose.onNodeWithTag("git-change-row-src/Partial.kt").performTouchInput {
+                down(center)
+                advanceEventTime(1_000L)
+                up()
+            }
+            compose.waitForIdle()
+            compose.onNodeWithText("Unstage file").performClick()
+            compose.waitUntil(5_000) {
+                synchronized(recordedMethodsAndTargets) {
+                    recordedMethodsAndTargets.any { it.second.endsWith("/git/unstage") } &&
+                        recordedMethodsAndTargets.count { it.second.contains("/git/changes") } >= 2
+                }
+            }
+            compose.waitForIdle()
+            val afterUnstage = synchronized(recordedMethodsAndTargets) { recordedMethodsAndTargets.toList() }
+            assertFalse("Unstage file on partly-staged file must not call /git/stage", afterUnstage.any { it.second.endsWith("/git/stage") })
+
+            // Click More -> wait until busyAction clears so "Stash all changes" is enabled -> click -> shows "Nothing was stashed" toast
+            compose.onNodeWithTag("git-more-button").performClick()
+            compose.waitUntil(5_000) {
+                runCatching {
+                    compose.onNodeWithText("Stash all changes").assertIsEnabled()
+                    true
+                }.getOrDefault(false)
+            }
+            compose.onNodeWithText("Stash all changes").performClick()
+            compose.waitUntil(5_000) {
+                synchronized(recordedMethodsAndTargets) { recordedMethodsAndTargets.any { it.second.endsWith("/git/stash") } }
+            }
+            compose.waitUntil(5_000) {
+                model.toasts.any { it.message.title == "Nothing was stashed" }
+            }
+            val stashToast = model.toasts.firstOrNull { it.message.title == "Nothing was stashed" }
+            assertTrue("Expected 'Nothing was stashed' toast, got ${model.toasts.map { it.message }}", stashToast != null)
+
+            // Switch to tablet/desktop mode (`isMobile = false`) and click Discard row tool -> confirm dialog uses DiscardSummary
+            isMobile = false
+            compose.waitForIdle()
+            compose.onNodeWithTag("git-row-discard-src/Partial.kt").performClick()
+            compose.waitForIdle()
+            compose.onNodeWithText("Discard changes in \"Partial.kt\"?").assertIsDisplayed()
+            compose.onNodeWithTag("git-confirm-ok").performClick()
+            compose.waitUntil(5_000) {
+                synchronized(recordedMethodsAndTargets) { recordedMethodsAndTargets.any { it.second.endsWith("/git/discard") } }
+            }
+            compose.waitUntil(5_000) {
+                model.toasts.any { it.message.title == "Discarded changes to Partial.kt" }
+            }
+            val toasts = model.toasts.map { it.message }
+            assertTrue("Expected Undo toast 'Discarded changes to Partial.kt', got $toasts", toasts.any { it.title == "Discarded changes to Partial.kt" && it.action?.label == "Undo" })
+            assertTrue("Expected warning toast for skipped file, got $toasts", toasts.any { it.title.contains("could not be kept") })
         } finally {
             server.close()
         }

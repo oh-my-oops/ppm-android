@@ -136,7 +136,7 @@ class GitTest {
 
         api.gitStageHunks("ppm", "src/App.kt", listOf(HunkSelectionItem(0, "hunk-0", listOf(1))), nestedRepo)
         val discard = api.gitDiscard("ppm", listOf("src/App.kt"), nestedRepo)
-        assertEquals("disc-1", discard.id)
+        assertEquals("disc-1", discard?.id)
 
         val commit = api.gitCommit("ppm", "feat: commit", amend = false, signoff = true, repo = nestedRepo)
         assertEquals("abcdef1234567", commit.hash)
@@ -275,11 +275,11 @@ class GitTest {
         assertEquals(2, hunks.hunks[0].lines[2].newNumber)
 
         val discard = api.gitDiscard("s3-git", listOf("src/App.kt"))
-        assertEquals("undo-99", discard.id)
-        assertEquals(listOf("src/App.kt"), discard.files)
+        assertEquals("undo-99", discard?.id)
+        assertEquals(listOf("src/App.kt"), discard?.files)
 
         val stash = api.gitStash("s3-git")
-        assertEquals("bbbb222", stash.hash)
+        assertEquals("bbbb222", stash?.hash)
 
         val refs = api.gitRefs("s3-git")
         assertEquals("branch", refs[0].kind)

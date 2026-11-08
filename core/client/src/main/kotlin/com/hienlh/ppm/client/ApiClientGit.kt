@@ -62,9 +62,6 @@ data class ChangeBlock(
 ) {
     companion object {
         fun from(json: JsonElement?, fallbackIndex: Int = 0): ChangeBlock? {
-            json?.string?.let { id ->
-                return ChangeBlock(id = id, index = fallbackIndex)
-            }
             val obj = json.obj ?: return null
             val id = obj["id"].string ?: return null
             return ChangeBlock(
@@ -88,18 +85,7 @@ data class ChangeSide(
     val removed: Int,
     val blocks: List<String>,
     val whole: String? = null,
-    val changeBlocks: List<ChangeBlock> = blocks.mapIndexed { idx, id ->
-        ChangeBlock(
-            id = id,
-            index = idx,
-            oldStart = idx * 10 + 1,
-            oldLines = 1,
-            newStart = idx * 10 + 1,
-            newLines = 1,
-            added = if (idx == 0) added else 0,
-            removed = if (idx == 0) removed else 0,
-        )
-    },
+    val changeBlocks: List<ChangeBlock> = emptyList(),
 ) {
     companion object {
         fun from(json: JsonElement?, fallbackStatus: String = "M"): ChangeSide? {
@@ -382,13 +368,15 @@ data class DiscardRecord(
     val skipped: List<String>,
 ) {
     companion object {
-        fun from(json: JsonElement?): DiscardRecord {
-            val target = json?.obj?.get("undo")?.takeIf { it.obj != null } ?: json
+        fun from(json: JsonElement?): DiscardRecord? {
+            val root = json?.obj ?: return null
+            val target = if ("undo" in root) root["undo"].obj ?: return null else root
+            val id = target["id"].string?.takeIf { it.isNotEmpty() } ?: return null
             return DiscardRecord(
-                id = target["id"].string ?: "",
+                id = id,
                 createdAt = target["createdAt"].long ?: 0L,
-                files = (target["files"].array ?: target["paths"].array).orEmpty().mapNotNull { it.string },
-                skipped = target["skipped"].array.orEmpty().mapNotNull { it.string },
+                files = (target["paths"].array ?: target["files"].array).orEmpty().mapNotNull { it.string },
+                skipped = (target["skipped"].array ?: root["skipped"].array).orEmpty().mapNotNull { it.string },
             )
         }
     }
@@ -714,7 +702,8 @@ data class StashEntry(
 ) {
     companion object {
         fun from(json: JsonElement?): StashEntry? {
-            val obj = json?.obj?.get("stash")?.obj ?: json.obj ?: return null
+            val root = json?.obj ?: return null
+            val obj = if ("stash" in root) root["stash"].obj ?: return null else root
             val index = obj["index"].int ?: return null
             val hash = obj["hash"].string ?: return null
             return StashEntry(
@@ -821,7 +810,7 @@ suspend fun ApiClient.gitUnstage(project: String, files: List<String>, repo: Git
     call("POST", "/api/project/${ApiClient.escape(project)}/git/unstage", gitRepoScope(repo), body)
 }
 
-suspend fun ApiClient.gitDiscard(project: String, files: List<String>, repo: GitRepo? = null): DiscardRecord {
+suspend fun ApiClient.gitDiscard(project: String, files: List<String>, repo: GitRepo? = null): DiscardRecord? {
     val body = buildJsonObject { put("files", JsonArray(files.map(::JsonPrimitive))) }
     return DiscardRecord.from(call("POST", "/api/project/${ApiClient.escape(project)}/git/discard", gitRepoScope(repo), body))
 }
@@ -872,7 +861,7 @@ suspend fun ApiClient.gitDiscardHunks(
     path: String,
     hunks: List<HunkSelectionItem>,
     repo: GitRepo? = null,
-): DiscardRecord {
+): DiscardRecord? {
     val body = buildJsonObject {
         put("path", path)
         put("hunks", JsonArray(hunks.map { it.toJson() }))
@@ -1097,13 +1086,14 @@ suspend fun ApiClient.gitStash(
     message: String? = null,
     includeUntracked: Boolean = true,
     repo: GitRepo? = null,
-): StashEntry {
+): StashEntry? {
     val body = buildJsonObject {
         if (!message.isNullOrEmpty()) put("message", message)
         put("includeUntracked", includeUntracked)
     }
     val data = call("POST", "/api/project/${ApiClient.escape(project)}/git/stash", gitRepoScope(repo), body)
-    return StashEntry.from(data) ?: StashEntry(0, "", message ?: "stash@{0}", "")
+    if (data["stashed"].bool == false) return null
+    return StashEntry.from(data)
 }
 
 suspend fun ApiClient.gitStashAction(
