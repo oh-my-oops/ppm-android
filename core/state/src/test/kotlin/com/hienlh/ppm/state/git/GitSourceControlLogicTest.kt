@@ -280,6 +280,25 @@ class GitSourceControlLogicTest {
         val folderMap = GitChangesView.buildFolderStatusMap(fileMap)
         assertEquals("A", folderMap["src"]) // D (6) > A (5) > M (4) > R (3) > C (2) > U (1)
         assertEquals("U", folderMap["src/new"])
+
+        val copiedFile = ChangedFile(
+            path = "src/Copied.kt",
+            oldPath = "src/Orig.kt",
+            x = "C",
+            y = " ",
+            staged = ChangeSide("C", added = 4, removed = 0, blocks = listOf("add")),
+        )
+        val detachedChanges = GitChanges(
+            branch = GitBranchState(head = null, oid = "abcdef0", upstream = null, upstreamGone = false, ahead = 0, behind = 0),
+            operation = null,
+            lastCommit = null,
+            files = listOf(copiedFile),
+            truncated = false,
+            stashes = 0,
+        )
+        val detachedStatus = GitChangesView.changesToStatus(detachedChanges)
+        assertNull(detachedStatus.branch)
+        assertEquals(listOf(GitFileChange(path = "src/Copied.kt", status = "C", oldPath = "src/Orig.kt")), detachedStatus.staged)
     }
 
     @Test

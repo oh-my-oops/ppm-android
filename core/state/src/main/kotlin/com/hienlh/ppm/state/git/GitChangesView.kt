@@ -288,9 +288,7 @@ object GitChangesView {
         val untracked = mutableListOf<String>()
 
         fun letter(code: String): String = when (code) {
-            "A" -> "A"
-            "D" -> "D"
-            "R" -> "R"
+            "A", "D", "R", "C" -> code
             else -> "M"
         }
 
@@ -307,11 +305,11 @@ object GitChangesView {
                 staged += GitFileChange(path = file.path, status = letter(file.x), oldPath = file.oldPath)
             }
             if (file.unstaged != null) {
-                unstaged += GitFileChange(path = file.path, status = letter(file.y), oldPath = file.oldPath)
+                unstaged += GitFileChange(path = file.path, status = letter(file.y))
             }
         }
         return GitBranchStatus(
-            branch = changes.branch.head ?: "HEAD",
+            branch = changes.branch.head,
             tracking = changes.branch.upstream,
             ahead = changes.branch.ahead,
             behind = changes.branch.behind,
