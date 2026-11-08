@@ -2,6 +2,7 @@ package com.hienlh.ppm.app.ui.git
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -40,6 +41,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -866,7 +870,7 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
 }
 
 @Composable
-private fun GitReviewDesktopLayout(
+internal fun GitReviewDesktopLayout(
     branch: String?,
     changes: GitChanges,
     error: String?,
@@ -908,6 +912,17 @@ private fun GitReviewDesktopLayout(
     var showKeys by remember { mutableStateOf(false) }
     var filesDrawerOpen by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<ReviewConfirmState?>(null) }
+    val rootFocusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    var rootHasFocus by remember { mutableStateOf(false) }
+    var commitInputFocused by remember { mutableStateOf(false) }
+
+    // Match web `git-review-desktop.tsx:40-44`: keep focus on the root when opening or when a
+    // block action removes the focused element, but never steal focus from a text input.
+    LaunchedEffect(focus?.path, focus?.key) {
+        if (!commitInputFocused && !com.hienlh.ppm.app.TextInputFocus.focused && !rootHasFocus) {
+            runCatching { rootFocusRequester.requestFocus() }
+        }
+    }
 
     val openCount = totals.blocks - totals.staged
     val operation = changes.operation
@@ -980,6 +995,7 @@ private fun GitReviewDesktopLayout(
                     onCommit = onCommit,
                     onUndoLast = onUndoCommit,
                     isBottom = true,
+                    onInputFocusChanged = { commitInputFocused = it },
                 )
             }
         }
@@ -989,8 +1005,19 @@ private fun GitReviewDesktopLayout(
         modifier = Modifier
             .fillMaxSize()
             .background(tokens.bgSolid.color)
+            .focusRequester(rootFocusRequester)
+            .onFocusChanged { rootHasFocus = it.hasFocus }
+            .focusable()
             .onPreviewKeyEvent { ev ->
-                if (ev.type != KeyEventType.KeyDown || ev.isCtrlPressed || ev.isMetaPressed || ev.isAltPressed) {
+                if (
+                    ev.type != KeyEventType.KeyDown ||
+                    ev.isCtrlPressed ||
+                    ev.isMetaPressed ||
+                    ev.isAltPressed ||
+                    commitInputFocused ||
+                    com.hienlh.ppm.app.TextInputFocus.focused ||
+                    confirm != null
+                ) {
                     return@onPreviewKeyEvent false
                 }
                 val cur = focusedTriple

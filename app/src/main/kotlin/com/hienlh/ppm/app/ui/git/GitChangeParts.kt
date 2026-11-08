@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -831,9 +833,13 @@ internal fun GitCommitComposer(
     onCommit: (amend: Boolean, signoff: Boolean, andPush: Boolean) -> Unit,
     onUndoLast: () -> Unit,
     isBottom: Boolean = false,
+    onInputFocusChanged: ((Boolean) -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     var menuOpen by remember { mutableStateOf(false) }
+    DisposableEffect(onInputFocusChanged) {
+        onDispose { onInputFocusChanged?.invoke(false) }
+    }
 
     val canSend = GitChangesView.canCommit(totals, message, operation, amend = false, hasLastCommit = lastCommit != null)
     val canAmend = GitChangesView.canCommit(totals, message, operation, amend = true, hasLastCommit = lastCommit != null)
@@ -874,6 +880,7 @@ internal fun GitCommitComposer(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("git-commit-input")
+                    .onFocusChanged { onInputFocusChanged?.invoke(it.isFocused) }
                     .onPreviewKeyEvent { ev ->
                         if (ev.type == KeyEventType.KeyDown && ev.key == Key.Enter && (ev.isCtrlPressed || ev.isMetaPressed)) {
                             if (canSend && busyAction == null) onCommit(false, false, false)

@@ -3,12 +3,20 @@ package com.hienlh.ppm.app.ui.git
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
@@ -303,5 +311,134 @@ class GitPhase08bUiTest {
 
         compose.onNodeWithTag("git-review-toast-undo", useUnmergedTree = true).performClick()
         assertTrue(toastUndone)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `typing n j k y l in commit message box does not discard or stage or step the focused block`() {
+        installBlankFileIcons()
+        val hunk = ChangeHunk(
+            "hunk-0",
+            0,
+            10,
+            2,
+            10,
+            3,
+            2,
+            1,
+            "@@ -10,2 +10,3 @@",
+            listOf(
+                ChangeLine(kind = " ", text = "val x = 1"),
+                ChangeLine(kind = "-", text = "val y = 2"),
+                ChangeLine(kind = "+", text = "val y = 20"),
+            ),
+        )
+        val block0 = ChangeBlock("hunk-0", 0, 10, 2, 10, 3, added = 2, removed = 1)
+        val file = ChangedFile(
+            path = "src/App.kt",
+            unstaged = ChangeSide(status = "M", added = 2, removed = 1, blocks = listOf("hunk-0"), changeBlocks = listOf(block0)),
+        )
+        val detail = FileChangeDetail(
+            path = "src/App.kt",
+            unstaged = ChangeSideDetail(whole = null, hunks = listOf(hunk)),
+        )
+        val changes = com.hienlh.ppm.client.GitChanges(
+            branch = com.hienlh.ppm.client.GitBranchState(
+                head = "main",
+                oid = "abcdef1234567890",
+                upstream = "origin/main",
+                upstreamGone = false,
+                ahead = 0,
+                behind = 0,
+                hasRemote = true,
+            ),
+            operation = null,
+            files = listOf(file),
+            stashes = 0,
+            lastCommit = null,
+            truncated = false,
+        )
+        val reviews = GitReviewModel.fileReviews(
+            files = listOf(file),
+            details = mapOf("src/App.kt" to detail),
+            discards = emptyList(),
+            pending = emptyMap(),
+        )
+        val rev = reviews.single()
+        val openBlock = rev.blocks.first()
+        val focus = com.hienlh.ppm.state.git.GitReviewFocus(rev.path, openBlock.key)
+        val focusedTriple = Triple(rev, openBlock, 0)
+        val items = GitReviewModel.paneItems(rev.blocks)
+        val totals = GitReviewModel.reviewTotals(reviews)
+        val commitTotals = com.hienlh.ppm.state.git.GitChangesView.changeTotals(listOf(file))
+
+        var message by mutableStateOf("")
+        val discarded = mutableListOf<String>()
+        val staged = mutableListOf<String>()
+        val stepped = mutableListOf<Int>()
+        var pickStarted = false
+
+        compose.setContent {
+            Box(Modifier.size(900.dp, 700.dp)) {
+                GitReviewDesktopLayout(
+                    branch = "main",
+                    changes = changes,
+                    error = null,
+                    reviews = reviews,
+                    conflicts = emptyList(),
+                    totals = totals,
+                    commitTotals = commitTotals,
+                    focus = focus,
+                    focusedTriple = focusedTriple,
+                    items = items,
+                    pickSet = null,
+                    busy = null,
+                    toast = null,
+                    commitMessage = message,
+                    onCommitMessageChange = { message = it },
+                    onDismissToast = {},
+                    onFocusBlock = { _, _ -> },
+                    onFocusFile = {},
+                    onStep = { stepped += it },
+                    onNextFile = {},
+                    onStage = { p, k -> staged += "$p:$k" },
+                    onDiscard = { p, k -> discarded += "$p:$k" },
+                    onUnstage = { _, _ -> },
+                    onUndoDiscard = {},
+                    onStageFile = {},
+                    onDiscardFile = {},
+                    onStageAll = {},
+                    onStartPick = { pickStarted = true },
+                    onTogglePickLine = {},
+                    onSetPick = {},
+                    onStagePicked = {},
+                    onCommit = { _, _, _ -> },
+                    onUndoCommit = {},
+                    onOpenFile = {},
+                    onResolveConflict = {},
+                    onOpenGraph = {},
+                )
+            }
+        }
+        compose.waitForIdle()
+
+        // Focus the commit message input and press n, j, k, y, l via hardware keys and text input.
+        compose.onNodeWithTag("git-commit-input", useUnmergedTree = true).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("git-commit-input", useUnmergedTree = true).performKeyInput {
+            pressKey(Key.N)
+            pressKey(Key.J)
+            pressKey(Key.K)
+            pressKey(Key.Y)
+            pressKey(Key.L)
+        }
+        compose.onNodeWithTag("git-commit-input", useUnmergedTree = true).performTextInput("no block discarded")
+        compose.waitForIdle()
+
+        assertTrue("typing 'n' in commit box must NOT discard focused block", discarded.isEmpty())
+        assertTrue("typing 'y' in commit box must NOT stage focused block", staged.isEmpty())
+        assertTrue("typing 'j'/'k' in commit box must NOT step blocks", stepped.isEmpty())
+        assertTrue("typing 'l' in commit box must NOT start line pick", !pickStarted)
+        assertTrue(message.contains("no block discarded"))
     }
 }
