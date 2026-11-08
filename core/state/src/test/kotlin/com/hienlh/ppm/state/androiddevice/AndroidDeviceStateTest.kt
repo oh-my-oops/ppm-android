@@ -1,6 +1,14 @@
 package com.hienlh.ppm.state.androiddevice
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -8,189 +16,463 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.math.abs
+import java.time.ZoneOffset
 
 class AndroidDeviceStateTest {
+    private val json = Json { ignoreUnknownKeys = true }
 
     @Test
-    fun `encode and decode 22-byte video frame round-trip`() {
-        val payload = byteArrayOf(0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1F)
-        val header = AndroidVideoHeader(
-            version = ANDROID_PROTOCOL_VERSION,
-            keyframe = true,
-            codecConfig = true,
-            sessionGeneration = 7,
-            geometryGeneration = 3,
-            sequence = 42_000L,
-            ptsMs = 1234.5,
-            payloadLength = payload.size,
+    fun `quality presets match ANDROID_QUALITY_PRESETS in android-protocol ts`() {
+        assertEquals(720, AndroidQuality.LOW.maxHeight)
+        assertEquals(24, AndroidQuality.LOW.fps)
+        assertEquals(1_500_000, AndroidQuality.LOW.bitrateBps)
+        assertEquals("1.5M", AndroidQuality.LOW.bitrateLabel)
+
+        assertEquals(1280, AndroidQuality.BALANCED.maxHeight)
+        assertEquals(30, AndroidQuality.BALANCED.fps)
+        assertEquals(4_000_000, AndroidQuality.BALANCED.bitrateBps)
+        assertEquals("4M", AndroidQuality.BALANCED.bitrateLabel)
+
+        assertEquals(1920, AndroidQuality.HIGH.maxHeight)
+        assertEquals(30, AndroidQuality.HIGH.fps)
+        assertEquals(8_000_000, AndroidQuality.HIGH.bitrateBps)
+        assertEquals("8M", AndroidQuality.HIGH.bitrateLabel)
+    }
+
+    @Test
+    fun `computeAndroidLetterbox and pointerToFrame reject letterbox bars`() {
+        val rect = computeAndroidLetterbox(
+            stageWidth = 1000f,
+            stageHeight = 1000f,
+            frameWidth = 500,
+            frameHeight = 1000,
         )
-        val encoded = encodeAndroidVideoFrame(header, payload)
-        assertEquals(ANDROID_VIDEO_HEADER_BYTES + payload.size, encoded.size)
+        assertEquals(1f, rect.scale, 0.001f)
+        assertEquals(500f, rect.width, 0.001f)
+        assertEquals(1000f, rect.height, 0.001f)
+        assertEquals(250f, rect.left, 0.001f)
+        assertEquals(0f, rect.top, 0.001f)
 
-        val decoded = decodeAndroidVideoFrame(encoded)
-        assertNotNull(decoded)
-        assertEquals(header, decoded!!.header)
-        assertArrayEquals(payload, decoded.payload)
+        // Left & right letterbox bars return null
+        assertNull(pointerToFrame(100f, 500f, rect, 500, 1000))
+        assertNull(pointerToFrame(800f, 500f, rect, 500, 1000))
 
-        // Reject short buffer, wrong version, or mismatched payload length
-        assertNull(decodeAndroidVideoFrame(ByteArray(21)))
-        val badVersion = encoded.copyOf().also { it[0] = 2 }
-        assertNull(decodeAndroidVideoFrame(badVersion))
-        assertNull(decodeAndroidVideoFrame(encoded + byteArrayOf(0x99.toByte())))
+        // Inside active video rect
+        val inside = pointerToFrame(500f, 500f, rect, 500, 1000)
+        assertNotNull(inside)
+        assertEquals(250f, inside!!.first, 0.01f)
+        assertEquals(500f, inside.second, 0.01f)
     }
 
     @Test
-    fun `containedRect and pointerToFrame reject letterbox taps and map inside rect`() {
-        // 1000 x 1000 box holding a 500 x 1000 portrait frame -> scaled to 500 x 1000 centered at left = 250
-        val rect = containedRect(boxWidth = 1000.0, boxHeight = 1000.0, frameWidth = 500, frameHeight = 1000)
-        assertEquals(250.0, rect.left, 0.001)
-        assertEquals(0.0, rect.top, 0.001)
-        assertEquals(500.0, rect.width, 0.001)
-        assertEquals(1000.0, rect.height, 0.001)
+    fun `frameToDevice rotates coordinates across 0, 90, 180 and 270 degrees`() {
+        val baseGeo = AndroidGeometry(
+            width = 720,
+            height = 1600,
+            deviceWidth = 1080,
+            deviceHeight = 2400,
+            rotation = 0,
+            generation = 3,
+        )
 
-        // Tap on left pillarbox bar -> null
-        assertNull(pointerToFrame(1000.0, 1000.0, 500, 1000, offsetX = 100.0, offsetY = 500.0))
-        // Tap on right pillarbox bar -> null
-        assertNull(pointerToFrame(1000.0, 1000.0, 500, 1000, offsetX = 800.0, offsetY = 500.0))
+        // 0°: top-left -> (0, 0), center -> (540, 1200)
+        assertEquals(AndroidIntPoint(0, 0), frameToDevice(0f, 0f, baseGeo))
+        assertEquals(AndroidIntPoint(540, 1200), frameToDevice(360f, 800f, baseGeo))
 
-        // Tap center -> (250, 500)
-        val center = pointerToFrame(1000.0, 1000.0, 500, 1000, offsetX = 500.0, offsetY = 500.0)
-        assertNotNull(center)
-        assertEquals(250.0, center!!.x, 0.001)
-        assertEquals(500.0, center.y, 0.001)
+        // 90°: u=0.25, v=0.75 => pu = 1 - 0.75 = 0.25, pv = 0.25
+        val geo90 = baseGeo.copy(width = 1600, height = 720, rotation = 90)
+        val pt90 = frameToDevice(400f, 540f, geo90)
+        assertEquals(270, pt90.x)
+        assertEquals(600, pt90.y)
 
-        // Tap exact far edge -> clamped to (499, 999)
-        val edge = pointerToFrame(1000.0, 1000.0, 500, 1000, offsetX = 750.0, offsetY = 1000.0)
-        assertNotNull(edge)
-        assertEquals(499.0, edge!!.x, 0.001)
-        assertEquals(999.0, edge.y, 0.001)
+        // 180°: u=0.25, v=0.25 => pu = 0.75, pv = 0.75
+        val geo180 = baseGeo.copy(rotation = 180)
+        val pt180 = frameToDevice(180f, 400f, geo180)
+        assertEquals(810, pt180.x)
+        assertEquals(1800, pt180.y)
+
+        // 270°: u=0.25, v=0.75 => pu = 0.75, pv = 1 - 0.25 = 0.75
+        val geo270 = baseGeo.copy(width = 1600, height = 720, rotation = 270)
+        val pt270 = frameToDevice(400f, 540f, geo270)
+        assertEquals(810, pt270.x)
+        assertEquals(1800, pt270.y)
     }
 
     @Test
-    fun `frameToDevice unrotates across 0 90 180 and 270 degrees`() {
-        val g0 = AndroidGeometry(1000, 2000, 1000, 2000, rotation = 0, generation = 1)
-        assertEquals(AndroidIntPoint(250, 500), frameToDevice(AndroidPoint(250.0, 500.0), g0))
-
-        // 90 deg: pu = 1 - v, pv = u
-        val g90 = AndroidGeometry(2000, 1000, 1000, 2000, rotation = 90, generation = 2)
-        val p90 = frameToDevice(AndroidPoint(500.0, 200.0), g90) // u = 0.25, v = 0.20 -> pu = 0.80, pv = 0.25
-        assertTrue(abs(800 - p90.x) <= 2)
-        assertTrue(abs(500 - p90.y) <= 2)
-
-        // 180 deg: pu = 1 - u, pv = 1 - v
-        val g180 = AndroidGeometry(1000, 2000, 1000, 2000, rotation = 180, generation = 3)
-        val p180 = frameToDevice(AndroidPoint(250.0, 500.0), g180) // u = 0.25, v = 0.25 -> pu = 0.75, pv = 0.75
-        assertTrue(abs(749 - p180.x) <= 2)
-        assertTrue(abs(1499 - p180.y) <= 2)
-
-        // 270 deg: pu = v, pv = 1 - u
-        val g270 = AndroidGeometry(2000, 1000, 1000, 2000, rotation = 270, generation = 4)
-        val p270 = frameToDevice(AndroidPoint(500.0, 200.0), g270) // u = 0.25, v = 0.20 -> pu = 0.20, pv = 0.75
-        assertTrue(abs(200 - p270.x) <= 2)
-        assertTrue(abs(1499 - p270.y) <= 2)
-
-        assertEquals(90, nextAndroidRotation(0))
-        assertEquals(180, nextAndroidRotation(90))
-        assertEquals(270, nextAndroidRotation(180))
-        assertEquals(0, nextAndroidRotation(270))
-    }
-
-    @Test
-    fun `AndroidTouchTracker manages multi-touch slots and releasing pressure`() {
+    fun `AndroidTouchTracker emits all active contacts plus pressure 0 on release`() {
         val tracker = AndroidTouchTracker()
-        val down0 = tracker.onDown(pointerId = 10, point = AndroidIntPoint(100, 200))
-        assertNotNull(down0)
-        assertEquals(listOf(AndroidTouchPoint(slot = 0, x = 100, y = 200, pressure = 1f)), down0)
+        val down0 = tracker.onDown(100L, AndroidIntPoint(10, 20))
+        assertEquals(listOf(AndroidTouchPoint(id = 0, x = 10, y = 20, pressure = 1)), down0)
 
-        val down1 = tracker.onDown(pointerId = 20, point = AndroidIntPoint(300, 400))
-        assertNotNull(down1)
+        val down1 = tracker.onDown(200L, AndroidIntPoint(30, 40))
         assertEquals(
             listOf(
-                AndroidTouchPoint(slot = 0, x = 100, y = 200, pressure = 1f),
-                AndroidTouchPoint(slot = 1, x = 300, y = 400, pressure = 1f),
+                AndroidTouchPoint(id = 0, x = 10, y = 20, pressure = 1),
+                AndroidTouchPoint(id = 1, x = 30, y = 40, pressure = 1),
             ),
             down1,
         )
 
-        val moved = tracker.onMove(listOf(20 to AndroidIntPoint(350, 450)))
-        assertNotNull(moved)
+        // Release first finger: slot 1 stays pressure=1, slot 0 is emitted with pressure=0
+        val up0 = tracker.onUpOrCancel(100L)
         assertEquals(
             listOf(
-                AndroidTouchPoint(slot = 0, x = 100, y = 200, pressure = 1f),
-                AndroidTouchPoint(slot = 1, x = 350, y = 450, pressure = 1f),
-            ),
-            moved,
-        )
-
-        // Lift first finger (pointerId = 10): slot 1 stays pressure=1f, slot 0 included with pressure=0f
-        val up0 = tracker.onUpOrCancel(pointerId = 10, finalPoint = AndroidIntPoint(110, 210))
-        assertNotNull(up0)
-        assertEquals(
-            listOf(
-                AndroidTouchPoint(slot = 1, x = 350, y = 450, pressure = 1f),
-                AndroidTouchPoint(slot = 0, x = 110, y = 210, pressure = 0f),
+                AndroidTouchPoint(id = 1, x = 30, y = 40, pressure = 1),
+                AndroidTouchPoint(id = 0, x = 10, y = 20, pressure = 0),
             ),
             up0,
         )
-        assertEquals(1, tracker.activeCount)
-        assertTrue(tracker.clear())
-        assertEquals(0, tracker.activeCount)
-    }
 
-    @Test
-    fun `classifyAndroidTextInput routes ASCII to text and Unicode to paste`() {
-        assertEquals(AndroidTextInputKind.ASCII_TEXT, classifyAndroidTextInput("hello 123!"))
-        assertEquals(AndroidTextInputKind.UNICODE_PASTE, classifyAndroidTextInput("Xin chào"))
-        assertEquals(AndroidTextInputKind.UNICODE_PASTE, classifyAndroidTextInput("line1\nline2"))
-    }
-
-    @Test
-    fun `logcat filter and bounded ring buffer work as expected`() {
-        val e1 = AndroidLogEntry(1, 1_000L, AndroidLogLevel.D, 100, 101, "ActivityManager", "Start proc")
-        val e2 = AndroidLogEntry(2, 2_000L, AndroidLogLevel.E, 200, 201, "AndroidRuntime", "FATAL EXCEPTION")
-        val filter = AndroidLogFilter(minLevel = AndroidLogLevel.W, tag = "runtime", pid = "200", search = "fatal")
-        assertFalse(matchesAndroidLogFilter(e1, filter))
-        assertTrue(matchesAndroidLogFilter(e2, filter))
-
-        val res = appendBoundedLogs(listOf(e1, e2), listOf(e1, e2), limit = 3)
-        assertEquals(3, res.entries.size)
-        assertEquals(1, res.dropped)
-        assertEquals(2L, res.entries.first().seq)
-    }
-
-    @Test
-    fun `validateAvdName filenameFromDisposition and server message parsing`() {
-        assertNull(validateAvdName("Pixel_8_API_34.test-1"))
-        assertNotNull(validateAvdName(""))
-        assertNotNull(validateAvdName("has space"))
-
+        // Next finger reuses freed slot 0
+        val down2 = tracker.onDown(300L, AndroidIntPoint(50, 60))
         assertEquals(
-            "pixel-2026.png",
-            filenameFromDisposition("""attachment; filename="pixel-2026.png"""", "fallback"),
-        )
-        assertEquals(
-            "my-avd-screenshot.png",
-            filenameFromDisposition(null, "my avd!"),
+            listOf(
+                AndroidTouchPoint(id = 1, x = 30, y = 40, pressure = 1),
+                AndroidTouchPoint(id = 0, x = 50, y = 60, pressure = 1),
+            ),
+            down2,
         )
 
-        val readyMsg = parseAndroidServerMessage(
-            """{"type":"ready","sessionId":"s1","deviceId":"Pixel_7","generation":2,"controller":true,"quality":"high","geometry":{"frameWidth":1080,"frameHeight":2400,"deviceWidth":1080,"deviceHeight":2400,"rotation":90,"generation":4},"hardwareKeyboard":true}""",
-        ) as? AndroidServerMessage.Ready
-        assertNotNull(readyMsg)
-        assertEquals("Pixel_7", readyMsg!!.deviceId)
-        assertTrue(readyMsg.controller)
-        assertEquals(AndroidQuality.HIGH, readyMsg.quality)
-        assertEquals(90, readyMsg.geometry.rotation)
+        assertTrue(tracker.reset())
+        assertFalse(tracker.reset())
+    }
 
+    @Test
+    fun `encodeAndroidVideoFrame and decodeAndroidVideoFrame round-trip 16-byte header`() {
+        val annexB = byteArrayOf(0x00, 0x00, 0x00, 0x01, 0x65, 0x11, 0x22, 0x33)
+        val encoded = encodeAndroidVideoFrame(
+            payload = annexB,
+            isKeyframe = true,
+            isCodecConfig = false,
+            sessionGeneration = 7,
+            geometryGeneration = 3,
+            sequence = 42L,
+            ptsMs = 123_456L,
+        )
+        assertEquals(16 + annexB.size, encoded.size)
+        assertEquals(0x41, encoded[0].toInt() and 0xFF)
+        assertEquals(1, encoded[1].toInt() and 0xFF)
+
+        val decoded = decodeAndroidVideoFrame(encoded)
+        assertNotNull(decoded)
+        assertTrue(decoded!!.isKeyframe)
+        assertFalse(decoded.isCodecConfig)
+        assertEquals(7, decoded.sessionGeneration)
+        assertEquals(3, decoded.geometryGeneration)
+        assertEquals(42L, decoded.sequence)
+        assertEquals(123_456L, decoded.ptsMs)
+        assertArrayEquals(annexB, decoded.payload)
+
+        // Rejects wrong magic or version or truncated header
+        val badMagic = encoded.clone().apply { this[0] = 0x42 }
+        assertNull(decodeAndroidVideoFrame(badMagic))
+        assertNull(decodeAndroidVideoFrame(ByteArray(16)))
+    }
+
+    @Test
+    fun `filterAndroidLogs and appendBoundedLogs dedupe by id and cap ring`() {
+        val entries = listOf(
+            AndroidLogEntry(1L, 1_700_000_000_123L, 100, 101, AndroidLogLevel.DEBUG, "ActivityManager", "Start proc"),
+            AndroidLogEntry(2L, 1_700_000_000_456L, 200, 201, AndroidLogLevel.WARN, "WindowManager", "Slow layout"),
+            AndroidLogEntry(3L, 1_700_000_000_789L, 200, 202, AndroidLogLevel.ERROR, "AndroidRuntime", "FATAL EXCEPTION: main"),
+        )
+        val warnOrHigher = filterAndroidLogs(entries, AndroidLogFilter(minimum = AndroidLogLevel.WARN))
+        assertEquals(2, warnOrHigher.size)
+
+        val runtimeOnly = filterAndroidLogs(entries, AndroidLogFilter(text = "exception"))
+        assertEquals(1, runtimeOnly.size)
+        assertEquals(3L, runtimeOnly.single().id)
+
+        // Replay of ids 2..3 plus new id 4 dedupes ids <= 3
+        val replayed = listOf(
+            entries[1],
+            entries[2],
+            AndroidLogEntry(4L, 1_700_000_000_999L, 200, 202, AndroidLogLevel.INFO, "System", "Boot completed"),
+        )
+        val merged = appendBoundedLogs(entries, replayed, max = 10)
+        assertEquals(listOf(1L, 2L, 3L, 4L), merged.map { it.id })
+
+        // Cap ring at 3
+        val capped = appendBoundedLogs(entries, replayed, max = 3)
+        assertEquals(listOf(2L, 3L, 4L), capped.map { it.id })
+
+        val formatted = formatAndroidLogText(listOf(entries[2]), ZoneOffset.UTC)
+        assertTrue(formatted.contains("200   202 E AndroidRuntime: FATAL EXCEPTION: main"))
+    }
+
+    @Test
+    fun `AVD validation matches src shared android-avd ts`() {
+        assertNull(validateAvdName("Pixel_9_API_35", listOf("Other_AVD")))
+        assertNotNull(validateAvdName("", emptyList()))
+        assertNotNull(validateAvdName("_leading_underscore", emptyList()))
+        assertNotNull(validateAvdName("-leading-dash", emptyList()))
+        assertNotNull(validateAvdName("bad space", emptyList()))
+        assertNotNull(validateAvdName("a".repeat(64), emptyList()))
+        assertEquals(
+            "an AVD with that name already exists",
+            validateAvdName("pixel_9_api_35", listOf("Pixel_9_API_35")),
+        )
+
+        assertNull(validateAvdRam(512))
+        assertNull(validateAvdRam(2048))
+        assertNull(validateAvdRam(16384))
+        assertNotNull(validateAvdRam(256))
+        assertNotNull(validateAvdRam(32768))
+
+        assertNull(validateAvdStorage(1024))
+        assertNull(validateAvdStorage(6144))
+        assertNull(validateAvdStorage(131072))
+        assertNotNull(validateAvdStorage(512))
+        assertNotNull(validateAvdStorage(262144))
+    }
+
+    @Test
+    fun `classifyCommittedText ignores active IME composition and emits committed text`() {
+        assertEquals(
+            AndroidTextInputKind.None,
+            classifyCommittedText(previous = "", current = "Tie", hasComposition = true),
+        )
+        assertEquals(
+            AndroidTextInputKind.Commit("Tiếng"),
+            classifyCommittedText(previous = "", current = "Tiếng", hasComposition = false),
+        )
+        assertEquals(
+            AndroidTextInputKind.Backspace(1),
+            classifyCommittedText(previous = "abc", current = "ab", hasComposition = false),
+        )
+        assertEquals(
+            AndroidTextInputKind.Enter,
+            classifyCommittedText(previous = "abc", current = "abc\n", hasComposition = false),
+        )
+    }
+
+    @Test
+    fun `filenameFromDisposition parses RFC 5987 and quoted filenames safely`() {
+        assertEquals(
+            "Pixel_8-20261107.png",
+            filenameFromDisposition("""attachment; filename="Pixel_8-20261107.png""""),
+        )
+        assertEquals(
+            "Pixel 9.png",
+            filenameFromDisposition("""attachment; filename*=UTF-8''Pixel%209.png"""),
+        )
+        assertEquals(
+            "fallback.png",
+            filenameFromDisposition(null, "fallback.png"),
+        )
+    }
+
+    @Test
+    fun `parsers decode exact server JSON payloads from routes android ts and android-session ts`() {
+        // 1. GET /api/android/capabilities
         val caps = parseAndroidCapabilities(
-            Json.parseToJsonElement(
-                """{"enabled":true,"ready":false,"avdCount":2,"accelerationOk":true,"accelerationDetail":"KVM","requirements":[{"id":"emulator","label":"Android Emulator","met":false,"detail":"missing","fix":"sdkmanager emulator"}],"encoders":["h264_nvenc"],"authRequired":false,"canCreateAvd":true}""",
+            json.parseToJsonElement(
+                """
+                {
+                  "enabled": true,
+                  "authRequired": true,
+                  "ready": false,
+                  "avdCount": 1,
+                  "encoders": ["h264_vaapi", "libx264"],
+                  "accelerationOk": true,
+                  "accelerationDetail": "KVM (version 12) is installed and usable.",
+                  "canCreateAvd": true,
+                  "sdk": {
+                    "root": "/home/user/Android/Sdk",
+                    "avdmanager": { "path": "/home/user/Android/Sdk/cmdline-tools/latest/bin/avdmanager", "version": "12.0" }
+                  },
+                  "requirements": [
+                    { "id": "sdk", "label": "Android SDK", "met": true, "detail": "/home/user/Android/Sdk", "fix": null },
+                    { "id": "avd", "label": "At least one AVD", "met": false, "detail": "none created yet", "fix": "avdmanager create avd" }
+                  ]
+                }
+                """.trimIndent(),
             ),
         )
         assertTrue(caps.enabled)
         assertFalse(caps.ready)
-        assertEquals(1, caps.requirements.size)
-        assertEquals("sdkmanager emulator", caps.requirements.first().fix)
+        assertTrue(caps.canCreateAvd)
+        assertEquals(listOf("h264_vaapi", "libx264"), caps.encoders)
+        assertEquals(2, caps.requirements.size)
+        assertEquals("avdmanager create avd", caps.requirements[1].fix)
+
+        // 2. GET /api/android/devices
+        val devices = parseAndroidDevices(
+            json.parseToJsonElement(
+                """
+                {
+                  "devices": [
+                    {
+                      "avdId": "Pixel_8_API_34",
+                      "name": "Pixel 8 API 34",
+                      "apiLevel": 34,
+                      "abi": "x86_64",
+                      "displayWidth": 1080,
+                      "displayHeight": 2400,
+                      "hardwareKeyboard": false,
+                      "lockedByAnotherProcess": false,
+                      "state": "ready",
+                      "runtime": {
+                        "deviceId": "emu-5554-gen1",
+                        "generation": 2,
+                        "adbSerial": "emulator-5554",
+                        "ownedByPpm": true
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+        )
+        assertEquals(1, devices.size)
+        val dev = devices.single()
+        assertEquals("Pixel_8_API_34", dev.avdId)
+        assertEquals("Pixel 8 API 34", dev.name)
+        assertEquals(AndroidDeviceStatus.READY, dev.state)
+        assertFalse(dev.hardwareKeyboard)
+        assertEquals("emu-5554-gen1", dev.runtime?.deviceId)
+        assertEquals(2, dev.runtime?.generation)
+        assertEquals("emulator-5554", dev.runtime?.adbSerial)
+        assertEquals(true, dev.runtime?.ownedByPpm)
+
+        // 3. GET /api/android/system-images
+        val images = parseAndroidSystemImages(
+            json.parseToJsonElement(
+                """
+                {
+                  "images": [
+                    {
+                      "id": "system-images;android-35;google_apis;x86_64",
+                      "apiLevel": 35,
+                      "abi": "x86_64",
+                      "tag": "google_apis",
+                      "tagDisplay": "Google APIs",
+                      "description": "Google APIs Intel x86_64 Atom System Image",
+                      "playStore": false,
+                      "bytes": 1610612736,
+                      "hostCompatible": true
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+        )
+        assertEquals(1, images.size)
+        assertEquals("Google APIs", images[0].tagDisplay)
+        assertTrue(images[0].hostCompatible)
+
+        // 4. GET /api/android/projects/:project/apks
+        val apks = parseProjectApks(
+            json.parseToJsonElement(
+                """
+                {
+                  "apks": [
+                    {
+                      "path": "app/build/outputs/apk/debug/app-debug.apk",
+                      "bytes": 12582912,
+                      "modifiedAt": 1700000000000
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            ),
+        )
+        assertEquals(1, apks.size)
+        assertEquals("app/build/outputs/apk/debug/app-debug.apk", apks[0].path)
+        assertEquals("app-debug.apk", apks[0].fileName)
+        assertEquals(12582912L, apks[0].bytes)
+
+        // 5. POST /api/android/avds/:avdId/start and GET /api/android/operations/:id
+        val startOp = parseAndroidOperation(
+            json.parseToJsonElement("""{"operationId":"op-123","state":"running","detail":"Cold booting…"}"""),
+        )
+        assertNotNull(startOp)
+        assertEquals("op-123", startOp!!.id)
+        assertEquals("Cold booting…", startOp.detail)
+
+        // 6. Server WS messages (`ready`, `codec`, `geometry`, `controller`, `log`, `error`)
+        val ready = parseAndroidServerMessage(
+            """
+            {
+              "type": "ready",
+              "sessionId": "viewer-1",
+              "sessionGeneration": 4,
+              "geometry": { "width": 720, "height": 1600, "deviceWidth": 1080, "deviceHeight": 2400, "rotation": 90, "generation": 2 },
+              "controller": true,
+              "codec": "avc1.42E01F",
+              "encoder": "libx264"
+            }
+            """.trimIndent(),
+        ) as AndroidServerMessage.Ready
+        assertEquals("viewer-1", ready.sessionId)
+        assertEquals(4, ready.sessionGeneration)
+        assertEquals(720, ready.geometry.width)
+        assertEquals(1600, ready.geometry.height)
+        assertEquals(90, ready.geometry.rotation)
+        assertEquals(2, ready.geometry.generation)
+        assertTrue(ready.controller)
+        assertEquals("avc1.42E01F", ready.codec)
+        assertEquals("libx264", ready.encoder)
+
+        val logMsg = parseAndroidServerMessage(
+            """
+            {
+              "type": "log",
+              "entries": [
+                { "id": 15, "timestamp": 1700000001234, "pid": 1234, "tid": 1250, "level": "warn", "tag": "ActivityTaskManager", "message": "Displayed MainActivity" }
+              ]
+            }
+            """.trimIndent(),
+        ) as AndroidServerMessage.Log
+        assertEquals(1, logMsg.entries.size)
+        assertEquals(15L, logMsg.entries[0].id)
+        assertEquals(AndroidLogLevel.WARN, logMsg.entries[0].level)
+
+        val errMsg = parseAndroidServerMessage(
+            """{"type":"error","message":"emulator exited","fatal":true}""",
+        ) as AndroidServerMessage.Error
+        assertEquals("emulator exited", errMsg.message)
+        assertTrue(errMsg.fatal)
+    }
+
+    @Test
+    fun `client WS JSON builders match AndroidClientMessage in android-protocol ts`() {
+        val auth = json.parseToJsonElement(buildAndroidAuthJson("nonce-xyz", AndroidQuality.HIGH)).jsonObject
+        assertEquals("auth", auth["type"]?.jsonPrimitive?.content)
+        assertEquals("nonce-xyz", auth["nonce"]?.jsonPrimitive?.content)
+        assertEquals("high", auth["quality"]?.jsonPrimitive?.content)
+
+        val touch = json.parseToJsonElement(
+            buildAndroidTouchJson(3, listOf(AndroidTouchPoint(id = 0, x = 120, y = 340, pressure = 1))),
+        ).jsonObject
+        assertEquals("touch", touch["type"]?.jsonPrimitive?.content)
+        assertEquals(3, touch["geometryGeneration"]?.jsonPrimitive?.int)
+        val pt = touch["touches"]!!.jsonArray.single().jsonObject
+        assertEquals(0, pt["id"]?.jsonPrimitive?.int)
+        assertEquals(120, pt["x"]?.jsonPrimitive?.int)
+        assertEquals(340, pt["y"]?.jsonPrimitive?.int)
+        assertEquals(1, pt["pressure"]?.jsonPrimitive?.int)
+
+        val key = json.parseToJsonElement(buildAndroidKeyJson(5, "Backspace", "press")).jsonObject
+        assertEquals("key", key["type"]?.jsonPrimitive?.content)
+        assertEquals(5, key["geometryGeneration"]?.jsonPrimitive?.int)
+        assertEquals("Backspace", key["key"]?.jsonPrimitive?.content)
+        assertEquals("press", key["action"]?.jsonPrimitive?.content)
+
+        val hw = json.parseToJsonElement(buildAndroidHardwareKeyJson(AndroidHardwareKey.RECENT)).jsonObject
+        assertEquals("hardware", hw["type"]?.jsonPrimitive?.content)
+        assertEquals("recent", hw["key"]?.jsonPrimitive?.content)
+
+        val qual = json.parseToJsonElement(buildAndroidQualityJson(AndroidQuality.LOW)).jsonObject
+        assertEquals("quality", qual["type"]?.jsonPrimitive?.content)
+        assertEquals("low", qual["quality"]?.jsonPrimitive?.content)
+
+        val logcat = json.parseToJsonElement(buildAndroidLogcatJson(true)).jsonObject
+        assertEquals("logcat", logcat["type"]?.jsonPrimitive?.content)
+        assertEquals(true, logcat["subscribe"]?.jsonPrimitive?.boolean)
+
+        val vis = json.parseToJsonElement(buildAndroidVisibilityJson(false)).jsonObject
+        assertEquals("visibility", vis["type"]?.jsonPrimitive?.content)
+        assertEquals(false, vis["visible"]?.jsonPrimitive?.boolean)
     }
 }

@@ -6,17 +6,17 @@ import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
-import android.util.Base64
-import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,11 +24,11 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -37,18 +37,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -57,19 +56,35 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.hienlh.ppm.app.AppModel
-import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.app.ui.BottomSheet
 import com.hienlh.ppm.app.ui.remotedesktop.H264SurfaceDecoder
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.androidCancelOperation
@@ -77,7 +92,6 @@ import com.hienlh.ppm.client.androidCapabilities
 import com.hienlh.ppm.client.androidCreateAvd
 import com.hienlh.ppm.client.androidCreateSession
 import com.hienlh.ppm.client.androidDeleteAvd
-import com.hienlh.ppm.client.androidDeviceBootLog
 import com.hienlh.ppm.client.androidDeviceProfiles
 import com.hienlh.ppm.client.androidDevices
 import com.hienlh.ppm.client.androidGetClipboard
@@ -93,29 +107,28 @@ import com.hienlh.ppm.client.androidUploadApk
 import com.hienlh.ppm.client.androidWipeAvd
 import com.hienlh.ppm.client.openAndroidSocket
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
-import com.hienlh.ppm.design.cssBorder
-import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.state.androiddevice.ANDROID_HEARTBEAT_INTERVAL_MS
+import com.hienlh.ppm.state.androiddevice.ANDROID_LOGCAT_MAX_ROWS
+import com.hienlh.ppm.state.androiddevice.ANDROID_LOGCAT_RING_LIMIT
+import com.hienlh.ppm.state.androiddevice.ANDROID_PROTOCOL_VERSION
 import com.hienlh.ppm.state.androiddevice.ANDROID_RECONNECT_BACKOFF_MS
 import com.hienlh.ppm.state.androiddevice.AndroidCapabilities
 import com.hienlh.ppm.state.androiddevice.AndroidConnState
 import com.hienlh.ppm.state.androiddevice.AndroidDeviceItem
-import com.hienlh.ppm.state.androiddevice.AndroidDeviceStatus
 import com.hienlh.ppm.state.androiddevice.AndroidGeometry
-import com.hienlh.ppm.state.androiddevice.AndroidIntPoint
-import com.hienlh.ppm.state.androiddevice.AndroidKey
+import com.hienlh.ppm.state.androiddevice.AndroidHardwareKey
 import com.hienlh.ppm.state.androiddevice.AndroidLogEntry
 import com.hienlh.ppm.state.androiddevice.AndroidLogFilter
 import com.hienlh.ppm.state.androiddevice.AndroidLogLevel
-import com.hienlh.ppm.state.androiddevice.AndroidOperationStatus
 import com.hienlh.ppm.state.androiddevice.AndroidQuality
 import com.hienlh.ppm.state.androiddevice.AndroidServerMessage
 import com.hienlh.ppm.state.androiddevice.AndroidTextInputKind
-import com.hienlh.ppm.state.androiddevice.AndroidTouchPhase
 import com.hienlh.ppm.state.androiddevice.AndroidTouchTracker
 import com.hienlh.ppm.state.androiddevice.AvdDeviceProfile
 import com.hienlh.ppm.state.androiddevice.AvdLimits
@@ -124,607 +137,328 @@ import com.hienlh.ppm.state.androiddevice.ProjectApkItem
 import com.hienlh.ppm.state.androiddevice.SystemImageRow
 import com.hienlh.ppm.state.androiddevice.appendBoundedLogs
 import com.hienlh.ppm.state.androiddevice.buildAndroidAuthJson
+import com.hienlh.ppm.state.androiddevice.buildAndroidHardwareKeyJson
 import com.hienlh.ppm.state.androiddevice.buildAndroidHeartbeatJson
 import com.hienlh.ppm.state.androiddevice.buildAndroidInputResetJson
 import com.hienlh.ppm.state.androiddevice.buildAndroidKeyJson
-import com.hienlh.ppm.state.androiddevice.buildAndroidPasteJson
-import com.hienlh.ppm.state.androiddevice.buildAndroidRequestKeyframeJson
+import com.hienlh.ppm.state.androiddevice.buildAndroidLogcatJson
+import com.hienlh.ppm.state.androiddevice.buildAndroidQualityJson
 import com.hienlh.ppm.state.androiddevice.buildAndroidRotateJson
-import com.hienlh.ppm.state.androiddevice.buildAndroidSetQualityJson
-import com.hienlh.ppm.state.androiddevice.buildAndroidSubscribeLogsJson
 import com.hienlh.ppm.state.androiddevice.buildAndroidTakeControlJson
 import com.hienlh.ppm.state.androiddevice.buildAndroidTextJson
 import com.hienlh.ppm.state.androiddevice.buildAndroidTouchJson
-import com.hienlh.ppm.state.androiddevice.classifyAndroidTextInput
-import com.hienlh.ppm.state.androiddevice.containedRect
+import com.hienlh.ppm.state.androiddevice.buildAndroidVisibilityJson
+import com.hienlh.ppm.state.androiddevice.classifyCommittedText
+import com.hienlh.ppm.state.androiddevice.computeAndroidLetterbox
 import com.hienlh.ppm.state.androiddevice.decodeAndroidVideoFrame
 import com.hienlh.ppm.state.androiddevice.filenameFromDisposition
+import com.hienlh.ppm.state.androiddevice.filterAndroidLogs
 import com.hienlh.ppm.state.androiddevice.formatAndroidLogText
 import com.hienlh.ppm.state.androiddevice.formatAndroidLogTime
-import com.hienlh.ppm.state.androiddevice.matchesAndroidLogFilter
 import com.hienlh.ppm.state.androiddevice.nextAndroidRotation
 import com.hienlh.ppm.state.androiddevice.parseAndroidCapabilities
 import com.hienlh.ppm.state.androiddevice.parseAndroidDeviceProfiles
 import com.hienlh.ppm.state.androiddevice.parseAndroidDevices
-import com.hienlh.ppm.state.androiddevice.parseAndroidOperationStatus
+import com.hienlh.ppm.state.androiddevice.parseAndroidMintedSession
+import com.hienlh.ppm.state.androiddevice.parseAndroidOperation
 import com.hienlh.ppm.state.androiddevice.parseAndroidServerMessage
-import com.hienlh.ppm.state.androiddevice.parseAndroidSessionTicket
 import com.hienlh.ppm.state.androiddevice.parseAndroidSystemImages
 import com.hienlh.ppm.state.androiddevice.parseProjectApks
 import com.hienlh.ppm.state.androiddevice.pointerToDevice
-import com.hienlh.ppm.state.androiddevice.validateAvdLimits
+import com.hienlh.ppm.state.androiddevice.shouldDecodeAndroidAccessUnit
 import com.hienlh.ppm.state.androiddevice.validateAvdName
+import com.hienlh.ppm.state.androiddevice.validateAvdRam
+import com.hienlh.ppm.state.androiddevice.validateAvdStorage
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonArray
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import java.io.File
+import kotlin.math.roundToInt
+
+private const val DEVICE_POLL_MS = 1_500L
+private const val INSTALL_POLL_MS = 800L
 
 /**
  * Android Device / Emulator Controller workspace tab (`Phase 11c`).
  *
- * Mirrors `src/web/components/android/android-tab.tsx`:
- * - Resolves any pinned `avdId` from tab metadata against `/api/android/devices`.
- * - Shows [AndroidDeviceList] when no running device is selected.
- * - Shows [AndroidViewer] when an active device is selected, pinning `avdId` and device name on the tab.
+ * Mirrors:
+ * - `src/web/components/android/android-tab.tsx`
+ * - `src/web/components/android/android-device-list.tsx`
+ * - `src/web/components/android/android-avd-create-dialog.tsx`
+ * - `src/web/components/android/android-avd-destroy-dialog.tsx`
+ * - `src/web/components/android/android-viewer.tsx`
+ * - `src/web/components/android/android-controls.tsx`
+ * - `src/web/components/android/android-tools-drawer.tsx`
+ * - `src/web/components/android/android-install-panel.tsx`
+ * - `src/web/components/android/android-logcat-panel.tsx`
+ * - `src/web/components/android/android-clipboard-panel.tsx`
  */
 @Composable
-fun AndroidTabBody(model: AppModel, tab: WorkspaceTab) {
-    val api = model.api
-    val pinnedAvdId = tab.metaString("avdId")
-    var selectedDevice by remember(tab.id) { mutableStateOf<AndroidDeviceItem?>(null) }
-    var resolvedInitial by remember(tab.id, pinnedAvdId) { mutableStateOf(pinnedAvdId.isNullOrEmpty()) }
-
-    LaunchedEffect(api, pinnedAvdId) {
-        if (api == null || pinnedAvdId.isNullOrEmpty()) {
-            resolvedInitial = true
-            return@LaunchedEffect
-        }
-        try {
-            val list = parseAndroidDevices(api.androidDevices())
-            val found = list.firstOrNull { it.avdId == pinnedAvdId && it.runtime != null }
-            if (found != null) {
-                selectedDevice = found
-            }
-        } catch (_: Throwable) {
-        } finally {
-            resolvedInitial = true
-        }
-    }
-
-    val tokens = LocalPpmTokens.current
-    if (!resolvedInitial) {
-        Box(Modifier.fillMaxSize().background(tokens.bgSolid.color), contentAlignment = Alignment.Center) {
-            BasicText("Loading Android devices…", style = ppmText(12f).copy(color = tokens.text3.color))
-        }
-        return
-    }
-
-    val current = selectedDevice
-    if (current == null) {
-        AndroidDeviceList(
-            model = model,
-            onSelectDevice = { device ->
-                selectedDevice = device
-                model.updateAndroidTabDevice(tab.id, device.avdId, device.name)
-            },
-        )
-    } else {
-        AndroidViewer(
-            model = model,
-            device = current,
-            onBack = {
-                selectedDevice = null
-                model.updateAndroidTabDevice(tab.id, null, "Android")
-            },
-        )
-    }
-}
-
-// ===========================================================================
-// 1. Device List, Capabilities, Wipe/Delete Dialog, Create AVD Dialog
-// ===========================================================================
-
-private enum class DestructiveAvdAction { WIPE, DELETE }
-
-@Composable
-internal fun AndroidDeviceList(
+fun AndroidTabBody(
     model: AppModel,
-    onSelectDevice: (AndroidDeviceItem) -> Unit,
+    tab: WorkspaceTab,
+    modifier: Modifier = Modifier,
 ) {
     val api = model.api
+    val tokens = LocalPpmTokens.current
+    val scope = rememberCoroutineScope()
+
+    val pinnedAvdId = (tab.metadata["avdId"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+
     var capabilities by remember { mutableStateOf<AndroidCapabilities?>(null) }
     var devices by remember { mutableStateOf<List<AndroidDeviceItem>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    val operations = remember { mutableStateMapOf<String, AndroidOperationStatus>() }
-    var createOpen by remember { mutableStateOf(false) }
-    var confirmTarget by remember { mutableStateOf<Pair<AndroidDeviceItem, DestructiveAvdAction>?>(null) }
-    var bootLogTarget by remember { mutableStateOf<Pair<String, List<String>>?>(null) }
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
+    var busyByAvd by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var activeDevice by remember { mutableStateOf<AndroidDeviceItem?>(null) }
+    var checkingPinned by remember(pinnedAvdId) { mutableStateOf(pinnedAvdId != null) }
 
-    suspend fun loadAll(quiet: Boolean = false) {
-        if (api == null) {
-            loading = false
-            error = "Not connected to a PPM server."
-            return
-        }
-        if (!quiet) loading = true
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var destroyDialog by remember { mutableStateOf<Pair<String, AndroidDeviceItem>?>(null) }
+    var postActionPollJob by remember { mutableStateOf<Job?>(null) }
+
+    suspend fun refreshAll() {
+        val client = api ?: return
         try {
-            val capsJson = api.androidCapabilities()
-            val devsJson = api.androidDevices()
-            capabilities = parseAndroidCapabilities(capsJson)
-            devices = parseAndroidDevices(devsJson)
+            val capsJson = client.androidCapabilities()
+            val parsedCaps = parseAndroidCapabilities(capsJson)
+            capabilities = parsedCaps
+            if (parsedCaps.enabled) {
+                val devJson = client.androidDevices()
+                val parsedDevices = parseAndroidDevices(devJson)
+                devices = parsedDevices
+                if (pinnedAvdId != null && activeDevice == null && checkingPinned) {
+                    activeDevice = parsedDevices.firstOrNull { it.avdId == pinnedAvdId && it.runtime != null }
+                }
+            } else {
+                devices = emptyList()
+            }
             error = null
-        } catch (ce: CancellationException) {
-            throw ce
-        } catch (t: Throwable) {
-            error = t.message ?: "Failed to load Android devices"
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            error = e.message ?: "Failed to load Android devices"
         } finally {
             loading = false
+            checkingPinned = false
         }
     }
 
-    LaunchedEffect(api) {
-        loadAll(quiet = false)
+    fun schedulePostActionPolls() {
+        postActionPollJob?.cancel()
+        postActionPollJob = scope.launch {
+            repeat(4) {
+                delay(DEVICE_POLL_MS)
+                refreshAll()
+            }
+        }
+    }
+
+    LaunchedEffect(api, pinnedAvdId) {
+        if (api == null) return@LaunchedEffect
+        loading = true
+        refreshAll()
         while (isActive) {
-            delay(5_000L)
-            loadAll(quiet = true)
-        }
-    }
-
-    fun pollOperation(avdId: String, opId: String, autoOpenOnSuccess: Boolean) {
-        if (api == null) return
-        scope.launch {
-            while (isActive) {
-                try {
-                    val op = parseAndroidOperationStatus(api.androidOperationStatus(opId))
-                    if (op != null) {
-                        operations[avdId] = op
-                        if (op.isTerminal) {
-                            val list = parseAndroidDevices(api.androidDevices())
-                            devices = list
-                            if (op.status == "succeeded" && autoOpenOnSuccess) {
-                                val started = list.firstOrNull { it.avdId == avdId && it.runtime != null }
-                                if (started != null) onSelectDevice(started)
-                            }
-                            break
-                        }
-                    }
-                } catch (ce: CancellationException) {
-                    throw ce
-                } catch (_: Throwable) {
-                    break
-                }
-                delay(1_000L)
+            delay(DEVICE_POLL_MS * 4)
+            if (activeDevice == null) {
+                refreshAll()
             }
         }
     }
 
-    AndroidDeviceListView(
-        capabilities = capabilities,
-        devices = devices,
-        operations = operations,
-        loading = loading,
-        error = error,
-        onRefresh = { scope.launch { loadAll(quiet = false) } },
-        onOpenCreateAvd = { createOpen = true },
-        onCopyFix = { cmd ->
-            copyToHostClipboard(context, cmd)
-            model.toast(ErrorToastMessage("Copied fix command", kind = ErrorToastMessage.Kind.SUCCESS))
-        },
-        onStartAvd = { device ->
-            if (api != null) {
-                scope.launch {
-                    try {
-                        val res = api.androidStartAvd(device.avdId)
-                        val op = parseAndroidOperationStatus(res)
-                        if (op != null) {
-                            operations[device.avdId] = op
-                            pollOperation(device.avdId, op.id, autoOpenOnSuccess = true)
-                        } else {
-                            loadAll(quiet = true)
-                        }
-                    } catch (t: Throwable) {
-                        model.toast(ErrorToastMessage("Failed to start ${device.name}", t.message))
-                    }
-                }
-            }
-        },
-        onStopDevice = { device ->
-            if (api != null) {
-                scope.launch {
-                    try {
-                        api.androidStopDevice(device.avdId, device.runtime?.generation)
-                        loadAll(quiet = true)
-                    } catch (t: Throwable) {
-                        model.toast(ErrorToastMessage("Failed to stop ${device.name}", t.message))
-                    }
-                }
-            }
-        },
-        onCancelOperation = { opId ->
-            if (api != null) {
-                scope.launch {
-                    runCatching { api.androidCancelOperation(opId) }
-                    loadAll(quiet = true)
-                }
-            }
-        },
-        onSelectDevice = onSelectDevice,
-        onRequestWipe = { confirmTarget = it to DestructiveAvdAction.WIPE },
-        onRequestDelete = { confirmTarget = it to DestructiveAvdAction.DELETE },
-        onShowBootLog = { device ->
-            if (api != null) {
-                scope.launch {
-                    try {
-                        val res = api.androidDeviceBootLog(device.avdId) as? JsonObject
-                        val lines = (res?.get("lines") as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
-                        bootLogTarget = device.name to lines
-                    } catch (t: Throwable) {
-                        model.toast(ErrorToastMessage("Could not read boot log", t.message))
-                    }
-                }
-            }
-        },
-    )
-
-    if (createOpen && api != null) {
-        AndroidAvdCreateDialog(
-            api = api,
-            onDismiss = { createOpen = false },
-            onCreated = {
-                createOpen = false
-                scope.launch { loadAll(quiet = false) }
-            },
+    fun selectDevice(device: AndroidDeviceItem?) {
+        activeDevice = device
+        model.updateAndroidTabDevice(
+            tabId = tab.id,
+            avdId = device?.avdId,
+            title = device?.name ?: "Android",
         )
     }
 
-    confirmTarget?.let { (targetDevice, action) ->
-        AndroidDestructiveConfirmDialog(
-            device = targetDevice,
-            isDelete = action == DestructiveAvdAction.DELETE,
-            onDismiss = { confirmTarget = null },
-            onConfirm = {
-                val chosen = targetDevice
-                val act = action
-                confirmTarget = null
-                if (api != null) {
-                    scope.launch {
-                        try {
-                            if (act == DestructiveAvdAction.WIPE) {
-                                api.androidWipeAvd(chosen.avdId)
-                                model.toast(ErrorToastMessage("Wiped ${chosen.name}", kind = ErrorToastMessage.Kind.SUCCESS))
-                                loadAll(quiet = true)
-                            } else {
-                                val res = api.androidDeleteAvd(chosen.avdId)
-                                val op = parseAndroidOperationStatus(res)
-                                if (op != null && !op.isTerminal) {
-                                    operations[chosen.avdId] = op
-                                    pollOperation(chosen.avdId, op.id, autoOpenOnSuccess = false)
-                                } else {
-                                    loadAll(quiet = true)
+    val currentActive = activeDevice
+    if (currentActive?.runtime != null && api != null) {
+        AndroidLiveViewer(
+            api = api,
+            device = currentActive,
+            projects = model.projects,
+            selectedProject = model.selectedProject,
+            onBackToList = {
+                selectDevice(null)
+                scope.launch { refreshAll() }
+            },
+            modifier = modifier.fillMaxSize().background(tokens.bgSolid.color),
+        )
+        return
+    }
+
+    Box(modifier.fillMaxSize().background(tokens.bgSolid.color)) {
+        AndroidDeviceListView(
+            capabilities = capabilities,
+            devices = devices,
+            loading = loading,
+            error = error,
+            busyByAvd = busyByAvd,
+            onRefresh = { scope.launch { refreshAll() } },
+            onOpenCreateAvd = { showCreateDialog = true },
+            onConnect = { dev -> selectDevice(dev) },
+            onStart = { dev ->
+                val client = api ?: return@AndroidDeviceListView
+                scope.launch {
+                    busyByAvd = busyByAvd + (dev.avdId to "Starting…")
+                    try {
+                        val res = client.androidStartAvd(dev.avdId)
+                        val initialOp = parseAndroidOperation(res)
+                        val opId = initialOp?.id
+                        if (!opId.isNullOrBlank()) {
+                            while (isActive) {
+                                delay(DEVICE_POLL_MS)
+                                val pollJson = client.androidOperationStatus(opId)
+                                val op = parseAndroidOperation(pollJson) ?: break
+                                busyByAvd = busyByAvd + (dev.avdId to (op.detail ?: "Starting…"))
+                                if (op.state == "succeeded") break
+                                if (op.state == "failed" || op.state == "cancelled") {
+                                    error = op.error ?: "the emulator failed to start"
+                                    break
                                 }
                             }
-                        } catch (t: Throwable) {
-                            model.toast(ErrorToastMessage("Action failed", t.message))
                         }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        error = e.message ?: "Failed to start ${dev.name}"
+                    } finally {
+                        busyByAvd = busyByAvd - dev.avdId
+                        refreshAll()
+                        schedulePostActionPolls()
                     }
                 }
             },
+            onStop = { dev ->
+                val client = api ?: return@AndroidDeviceListView
+                val rt = dev.runtime ?: return@AndroidDeviceListView
+                scope.launch {
+                    busyByAvd = busyByAvd + (dev.avdId to "Stopping…")
+                    try {
+                        client.androidStopDevice(rt.deviceId, rt.generation)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        error = e.message ?: "Failed to stop ${dev.name}"
+                    } finally {
+                        busyByAvd = busyByAvd - dev.avdId
+                        refreshAll()
+                        schedulePostActionPolls()
+                    }
+                }
+            },
+            onWipe = { dev -> destroyDialog = "wipe" to dev },
+            onDelete = { dev -> destroyDialog = "delete" to dev },
         )
-    }
 
-    bootLogTarget?.let { (name, lines) ->
-        Dialog(onDismissRequest = { bootLogTarget = null }) {
-            val tokens = LocalPpmTokens.current
-            val shape = RoundedCornerShape(12.dp)
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(shape)
-                    .background(tokens.panel.color)
-                    .cssBorder(tokens.border.color, shape)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    BasicText("Boot log · $name", style = ppmText(14f, FontWeight.SemiBold).copy(color = tokens.text.color))
-                    SmallActionPill("Close", onClick = { bootLogTarget = null })
-                }
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 120.dp, max = 320.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(tokens.bgSolid.color)
-                        .padding(10.dp)
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    BasicText(
-                        if (lines.isEmpty()) "No emulator log output yet." else lines.joinToString("\n"),
-                        style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color),
-                    )
-                }
-            }
+        if (showCreateDialog && api != null) {
+            AndroidAvdCreateDialog(
+                api = api,
+                existingNames = devices.map { it.name },
+                onDismiss = { showCreateDialog = false },
+                onCreated = {
+                    showCreateDialog = false
+                    scope.launch {
+                        refreshAll()
+                        schedulePostActionPolls()
+                    }
+                },
+            )
+        }
+
+        val destroy = destroyDialog
+        if (destroy != null && api != null) {
+            val (kind, targetDev) = destroy
+            AndroidAvdDestroyDialog(
+                action = kind,
+                device = targetDev,
+                onDismiss = { destroyDialog = null },
+                onConfirm = { confirmName ->
+                    val client = api
+                    destroyDialog = null
+                    scope.launch {
+                        busyByAvd = busyByAvd + (targetDev.avdId to if (kind == "delete") "Deleting…" else "Wiping…")
+                        try {
+                            if (kind == "delete") {
+                                client.androidDeleteAvd(targetDev.avdId, confirmName)
+                            } else {
+                                client.androidWipeAvd(targetDev.avdId, confirmName)
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
+                            error = e.message ?: "Failed to $kind ${targetDev.name}"
+                        } finally {
+                            busyByAvd = busyByAvd - targetDev.avdId
+                            refreshAll()
+                            schedulePostActionPolls()
+                        }
+                    }
+                },
+            )
         }
     }
 }
+
+// =============================================================================
+// 1. Device List & Host Diagnostics (`android-device-list.tsx`)
+// =============================================================================
 
 @Composable
 internal fun AndroidDeviceListView(
     capabilities: AndroidCapabilities?,
     devices: List<AndroidDeviceItem>,
-    operations: Map<String, AndroidOperationStatus>,
     loading: Boolean,
     error: String?,
+    busyByAvd: Map<String, String>,
     onRefresh: () -> Unit,
     onOpenCreateAvd: () -> Unit,
-    onCopyFix: (String) -> Unit,
-    onStartAvd: (AndroidDeviceItem) -> Unit,
-    onStopDevice: (AndroidDeviceItem) -> Unit,
-    onCancelOperation: (String) -> Unit,
-    onSelectDevice: (AndroidDeviceItem) -> Unit,
-    onRequestWipe: (AndroidDeviceItem) -> Unit,
-    onRequestDelete: (AndroidDeviceItem) -> Unit,
-    onShowBootLog: (AndroidDeviceItem) -> Unit,
+    onConnect: (AndroidDeviceItem) -> Unit,
+    onStart: (AndroidDeviceItem) -> Unit,
+    onStop: (AndroidDeviceItem) -> Unit,
+    onWipe: (AndroidDeviceItem) -> Unit,
+    onDelete: (AndroidDeviceItem) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
-    val unmet = remember(capabilities) { capabilities?.requirements?.filter { !it.met }.orEmpty() }
-    val canCreate = capabilities?.canCreateAvd == true && !capabilities.authRequired
+
+    if (capabilities == null && loading) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            BasicText(
+                "Checking this host…",
+                style = ppmText(13f, lineHeight = 18f).copy(color = tokens.text3.color),
+            )
+        }
+        return
+    }
+
+    val unmet = capabilities?.requirements?.filter { !it.met }.orEmpty()
+    val canCreateAvd = capabilities?.canCreateAvd ?: true
+    val hostReady = capabilities?.ready ?: true
 
     Column(
         Modifier
             .fillMaxSize()
-            .background(tokens.bgSolid.color)
-            .testTag("android-device-list"),
-    ) {
-        // Header bar
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .background(tokens.panel.color)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PpmIcon(ProductIcon.Smartphone, 16.dp, tokens.text2.color)
-                BasicText(
-                    "Android Devices",
-                    style = ppmText(14f, FontWeight.SemiBold).copy(color = tokens.text.color),
-                )
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (canCreate) {
-                    SmallActionPill(
-                        label = "+ Create AVD",
-                        primary = true,
-                        modifier = Modifier.testTag("android-create-avd-btn"),
-                        onClick = onOpenCreateAvd,
-                    )
-                }
-                SmallActionPill(
-                    label = "Refresh",
-                    modifier = Modifier.testTag("android-refresh-btn"),
-                    onClick = onRefresh,
-                )
-            }
-        }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
-
-        LazyColumn(
-            Modifier.fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            if (error != null) {
-                item {
-                    val shape = RoundedCornerShape(8.dp)
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(shape)
-                            .background(tokens.error.opacity(0.12).color)
-                            .cssBorder(tokens.error.opacity(0.35).color, shape)
-                            .padding(12.dp),
-                    ) {
-                        BasicText(error, style = ppmText(12f).copy(color = tokens.error.color))
-                    }
-                }
-            }
-
-            if (unmet.isNotEmpty()) {
-                item {
-                    val shape = RoundedCornerShape(10.dp)
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(shape)
-                            .background(tokens.panel.color)
-                            .cssBorder(tokens.border.color, shape)
-                            .padding(12.dp)
-                            .testTag("android-requirements-card"),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            PpmIcon(ProductIcon.TriangleAlert, 14.dp, tokens.warning.color)
-                            BasicText(
-                                "Host setup required",
-                                style = ppmText(12f, FontWeight.SemiBold).copy(color = tokens.text.color),
-                            )
-                        }
-                        for (req in unmet) {
-                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                BasicText(
-                                    req.label + (if (!req.detail.isNullOrBlank()) " — ${req.detail}" else ""),
-                                    style = ppmText(11f).copy(color = tokens.text2.color),
-                                )
-                                if (!req.fix.isNullOrBlank()) {
-                                    val fixShape = RoundedCornerShape(6.dp)
-                                    Row(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .clip(fixShape)
-                                            .background(tokens.bgSolid.color)
-                                            .ppmClickable(
-                                                pressedColor = tokens.panel2.color,
-                                                hoverColor = tokens.panel2.color,
-                                                shape = fixShape,
-                                                onClick = { onCopyFix(req.fix!!) },
-                                            )
-                                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        BasicText(
-                                            req.fix!!,
-                                            style = ppmText(10f, kind = FontKind.MONO).copy(color = tokens.text2.color),
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        BasicText(
-                                            "Copy",
-                                            style = ppmText(10f, FontWeight.Medium).copy(color = tokens.accent.color),
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (capabilities != null && !capabilities.accelerationOk && capabilities.accelerationDetail.isNotBlank()) {
-                item {
-                    val shape = RoundedCornerShape(8.dp)
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(shape)
-                            .background(tokens.warning.opacity(0.1).color)
-                            .cssBorder(tokens.warning.opacity(0.3).color, shape)
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        PpmIcon(ProductIcon.TriangleAlert, 14.dp, tokens.warning.color)
-                        BasicText(
-                            capabilities.accelerationDetail,
-                            style = ppmText(11f).copy(color = tokens.text2.color),
-                        )
-                    }
-                }
-            }
-
-            if (loading && devices.isEmpty()) {
-                item {
-                    Box(Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
-                        BasicText("Loading Android Virtual Devices…", style = ppmText(12f).copy(color = tokens.text3.color))
-                    }
-                }
-            } else if (devices.isEmpty()) {
-                item {
-                    val shape = RoundedCornerShape(10.dp)
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(shape)
-                            .background(tokens.panel.color)
-                            .cssBorder(tokens.border.color, shape)
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        PpmIcon(ProductIcon.Smartphone, 24.dp, tokens.text3.color)
-                        BasicText(
-                            "No Android Virtual Devices configured",
-                            style = ppmText(13f, FontWeight.Medium).copy(color = tokens.text.color),
-                        )
-                        BasicText(
-                            "Create an AVD on the host to start an emulator.",
-                            style = ppmText(11f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
-                        )
-                        if (canCreate) {
-                            SmallActionPill("+ Create AVD", primary = true, onClick = onOpenCreateAvd)
-                        }
-                    }
-                }
-            } else {
-                items(devices, key = { it.avdId }) { device ->
-                    AndroidDeviceRow(
-                        device = device,
-                        operation = operations[device.avdId],
-                        readyToStart = capabilities?.ready != false && !capabilities?.authRequired.orFalse(),
-                        canMutateAvd = canCreate,
-                        onStart = { onStartAvd(device) },
-                        onStop = { onStopDevice(device) },
-                        onCancelOp = { opId -> onCancelOperation(opId) },
-                        onView = { onSelectDevice(device) },
-                        onWipe = { onRequestWipe(device) },
-                        onDelete = { onRequestDelete(device) },
-                        onShowBootLog = { onShowBootLog(device) },
-                    )
-                }
-            }
-        }
-    }
-}
-
-private fun Boolean?.orFalse(): Boolean = this ?: false
-
-@Composable
-private fun AndroidDeviceRow(
-    device: AndroidDeviceItem,
-    operation: AndroidOperationStatus?,
-    readyToStart: Boolean,
-    canMutateAvd: Boolean,
-    onStart: () -> Unit,
-    onStop: () -> Unit,
-    onCancelOp: (String) -> Unit,
-    onView: () -> Unit,
-    onWipe: () -> Unit,
-    onDelete: () -> Unit,
-    onShowBootLog: () -> Unit,
-) {
-    val tokens = LocalPpmTokens.current
-    val status = device.runtime?.status ?: AndroidDeviceStatus.STOPPED
-    val opRunning = operation != null && !operation.isTerminal
-    var menuOpen by remember { mutableStateOf(false) }
-
-    val dotColor = when {
-        status == AndroidDeviceStatus.READY -> tokens.success.color
-        status == AndroidDeviceStatus.STARTING ||
-            status == AndroidDeviceStatus.BOOTING ||
-            status == AndroidDeviceStatus.STOPPING ||
-            opRunning -> tokens.warning.color
-        status == AndroidDeviceStatus.ERROR -> tokens.error.color
-        else -> tokens.text3.opacity(0.45).color
-    }
-
-    val shape = RoundedCornerShape(10.dp)
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(tokens.panel.color)
-            .cssBorder(tokens.border.color, shape)
-            .padding(12.dp)
-            .testTag("android-device-row-${device.avdId}"),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(
             Modifier.fillMaxWidth(),
@@ -732,72 +466,94 @@ private fun AndroidDeviceRow(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Row(
-                Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(dotColor))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        BasicText(
-                            device.name,
-                            style = ppmText(13f, FontWeight.Medium).copy(color = tokens.text.color),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        StatusPill(status)
-                    }
-                    val metaParts = buildList {
-                        device.target?.takeIf { it.isNotBlank() }?.let(::add)
-                        device.abi?.takeIf { it.isNotBlank() }?.let(::add)
-                        device.runtime?.serial?.takeIf { it.isNotBlank() }?.let(::add)
-                    }
-                    if (metaParts.isNotEmpty()) {
-                        BasicText(
-                            metaParts.joinToString(" · "),
-                            style = ppmText(11f).copy(color = tokens.text3.color),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
+                PpmIcon(ProductIcon.Smartphone, 16.dp, tokens.text2.color)
+                BasicText(
+                    "Android devices",
+                    style = ppmText(15f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color),
+                )
             }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (canCreateAvd) {
+                    SmallActionButton(
+                        label = "New device",
+                        icon = ProductIcon.Plus,
+                        primary = true,
+                        tag = "android-create-avd",
+                        onClick = onOpenCreateAvd,
+                    )
+                }
+                SmallActionButton(
+                    label = "Refresh",
+                    icon = ProductIcon.RefreshCw,
+                    tag = "android-refresh",
+                    onClick = onRefresh,
+                )
+            }
+        }
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                when {
-                    opRunning && operation != null -> {
-                        SmallActionPill("Cancel", onClick = { onCancelOp(operation.id) })
-                    }
-                    status == AndroidDeviceStatus.READY -> {
-                        SmallActionPill(
-                            label = "View",
-                            primary = true,
-                            modifier = Modifier.testTag("android-view-${device.avdId}"),
-                            onClick = onView,
-                        )
-                        SmallActionPill(
-                            label = "Stop",
-                            modifier = Modifier.testTag("android-stop-${device.avdId}"),
-                            onClick = onStop,
-                        )
-                    }
-                    status == AndroidDeviceStatus.STARTING || status == AndroidDeviceStatus.BOOTING -> {
-                        SmallActionPill("View", onClick = onView)
-                        SmallActionPill("Stop", onClick = onStop)
-                    }
-                    status == AndroidDeviceStatus.STOPPED || status == AndroidDeviceStatus.ERROR -> {
-                        SmallActionPill(
-                            label = "Start",
-                            primary = readyToStart,
-                            enabled = readyToStart,
-                            modifier = Modifier.testTag("android-start-${device.avdId}"),
-                            onClick = onStart,
-                        )
-                        if (canMutateAvd) {
-                            SmallActionPill(
-                                label = "•••",
-                                modifier = Modifier.testTag("android-more-${device.avdId}"),
-                                onClick = { menuOpen = !menuOpen },
+        if (error != null) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(tokens.error.color.copy(alpha = 0.12f))
+                    .border(1.dp, tokens.error.color.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                    .padding(12.dp),
+            ) {
+                BasicText(error, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.error.color))
+            }
+        }
+
+        if (capabilities != null && unmet.isNotEmpty()) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(tokens.panel.color)
+                    .border(1.dp, tokens.border.color, RoundedCornerShape(10.dp))
+                    .padding(12.dp)
+                    .testTag("android-capabilities-card"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                BasicText(
+                    "This host is not ready yet",
+                    style = ppmText(13f, FontWeight.SemiBold, lineHeight = 18f).copy(color = tokens.text.color),
+                )
+                for (req in capabilities.requirements) {
+                    val fixCmd = req.fix
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(tokens.panel2.color)
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            PpmIcon(
+                                if (req.met) ProductIcon.Check else ProductIcon.AlertTriangle,
+                                13.dp,
+                                if (req.met) tokens.success.color else tokens.error.color,
+                            )
+                            BasicText(
+                                req.label,
+                                style = ppmText(12f, if (!req.met) FontWeight.SemiBold else FontWeight.Normal, lineHeight = 16f)
+                                    .copy(color = tokens.text.color),
+                            )
+                        }
+                        if (req.detail.isNotBlank()) {
+                            BasicText(req.detail, style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color))
+                        }
+                        if (!req.met && !fixCmd.isNullOrBlank()) {
+                            BasicText(
+                                fixCmd,
+                                style = ppmText(11f, lineHeight = 15f, kind = FontKind.MONO).copy(color = tokens.accent.color),
                             )
                         }
                     }
@@ -805,839 +561,1054 @@ private fun AndroidDeviceRow(
             }
         }
 
-        if (menuOpen) {
-            Row(
+        if (devices.isEmpty() && unmet.isEmpty()) {
+            Box(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(tokens.bgSolid.color)
-                    .padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(tokens.panel.color)
+                    .border(1.dp, tokens.border.color, RoundedCornerShape(10.dp))
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                BasicText("AVD actions:", style = ppmText(11f).copy(color = tokens.text3.color))
-                SmallActionPill(
-                    label = "Wipe data…",
-                    modifier = Modifier.testTag("android-wipe-${device.avdId}"),
-                    onClick = {
-                        menuOpen = false
-                        onWipe()
-                    },
-                )
-                SmallActionPill(
-                    label = "Delete AVD…",
-                    danger = true,
-                    modifier = Modifier.testTag("android-delete-${device.avdId}"),
-                    onClick = {
-                        menuOpen = false
-                        onDelete()
-                    },
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    BasicText(
+                        "No AVDs on this host yet.",
+                        style = ppmText(13f, lineHeight = 18f).copy(color = tokens.text2.color),
+                    )
+                    if (canCreateAvd) {
+                        SmallActionButton(
+                            label = "New device",
+                            icon = ProductIcon.Plus,
+                            primary = true,
+                            tag = "android-empty-create-avd",
+                            onClick = onOpenCreateAvd,
+                        )
+                    } else {
+                        BasicText(
+                            "Create one in Android Studio, or with avdmanager create avd.",
+                            style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
+                        )
+                    }
+                }
             }
-        }
+        } else {
+            for (dev in devices) {
+                val running = dev.runtime != null
+                val busyLabel = busyByAvd[dev.avdId]
+                val isBusy = busyLabel != null
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(tokens.panel.color)
+                        .border(1.dp, tokens.border.color, RoundedCornerShape(10.dp))
+                        .padding(12.dp)
+                        .testTag("android-device-row-${dev.avdId}"),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            BasicText(
+                                dev.name,
+                                style = ppmText(14f, FontWeight.SemiBold, lineHeight = 18f).copy(color = tokens.text.color),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            val metaParts = buildList {
+                                if (dev.apiLevel != null) add("API ${dev.apiLevel}")
+                                if (!dev.abi.isNullOrBlank()) add(dev.abi)
+                                if (dev.displayWidth != null && dev.displayHeight != null) {
+                                    add("${dev.displayWidth}x${dev.displayHeight}")
+                                }
+                                if (running) {
+                                    add(if (dev.runtime?.ownedByPpm == true) "running (PPM)" else "running (external)")
+                                }
+                            }
+                            if (metaParts.isNotEmpty()) {
+                                BasicText(
+                                    metaParts.joinToString(" · "),
+                                    style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+                                )
+                            }
+                            if (dev.lockedByAnotherProcess) {
+                                BasicText(
+                                    "Locked by another process — it is probably open in Android Studio.",
+                                    style = ppmText(11f, lineHeight = 15f).copy(color = tokens.error.color),
+                                    modifier = Modifier.testTag("android-locked-${dev.avdId}"),
+                                )
+                            }
+                            if (!dev.hardwareKeyboard) {
+                                BasicText(
+                                    "This AVD has no hardware keyboard, so typing will not reach it. Set hw.keyboard=yes in its config.ini.",
+                                    style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+                                    modifier = Modifier.testTag("android-no-hw-keyboard-${dev.avdId}"),
+                                )
+                            }
+                        }
 
-        if (opRunning && operation != null && operation.step.isNotBlank()) {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                BasicText(operation.step, style = ppmText(11f).copy(color = tokens.text2.color))
-                if (operation.progress != null) {
-                    BasicText("${operation.progress}%", style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text3.color))
+                        if (busyLabel != null) {
+                            BasicText(
+                                busyLabel,
+                                style = ppmText(11f, FontWeight.Medium, lineHeight = 14f).copy(color = tokens.text3.color),
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        }
+                    }
+
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (running) {
+                            SmallActionButton(
+                                label = "View",
+                                icon = ProductIcon.Monitor,
+                                primary = true,
+                                tag = "android-connect-${dev.avdId}",
+                                onClick = { onConnect(dev) },
+                            )
+                            if (dev.runtime?.ownedByPpm == true) {
+                                SmallActionButton(
+                                    label = "Stop",
+                                    icon = ProductIcon.Square,
+                                    enabled = !isBusy,
+                                    tag = "android-stop-${dev.avdId}",
+                                    onClick = { onStop(dev) },
+                                )
+                            }
+                        } else {
+                            SmallActionButton(
+                                label = "Start",
+                                icon = ProductIcon.Play,
+                                primary = true,
+                                enabled = !isBusy && !dev.lockedByAnotherProcess && hostReady,
+                                tag = "android-start-${dev.avdId}",
+                                onClick = { onStart(dev) },
+                            )
+                        }
+                        SmallActionButton(
+                            label = "Wipe data",
+                            icon = ProductIcon.RotateCcw,
+                            enabled = !running && !dev.lockedByAnotherProcess && !isBusy,
+                            tag = "android-wipe-${dev.avdId}",
+                            onClick = { onWipe(dev) },
+                        )
+                        SmallActionButton(
+                            label = "Delete device",
+                            icon = ProductIcon.Trash2,
+                            danger = true,
+                            enabled = !running && !dev.lockedByAnotherProcess && !isBusy && canCreateAvd,
+                            tag = "android-delete-${dev.avdId}",
+                            onClick = { onDelete(dev) },
+                        )
+                    }
                 }
             }
         }
+    }
+}
 
-        val errText = device.runtime?.lastError ?: operation?.error
-        if (!errText.isNullOrBlank()) {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+// =============================================================================
+// 2. AVD Create & Destroy Dialogs (`android-avd-create-dialog.tsx`, `android-avd-destroy-dialog.tsx`)
+// =============================================================================
+
+@Composable
+internal fun AndroidAvdCreateDialog(
+    api: ApiClient,
+    existingNames: List<String> = emptyList(),
+    onDismiss: () -> Unit,
+    onCreated: (String) -> Unit,
+) {
+    val mobile = LocalPpmMobile.current
+    var images by remember { mutableStateOf<List<SystemImageRow>?>(null) }
+    var profiles by remember { mutableStateOf<List<AvdDeviceProfile>?>(null) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+
+    var name by remember { mutableStateOf("") }
+    var selectedImageId by remember { mutableStateOf("") }
+    var selectedProfileId by remember { mutableStateOf("") }
+    var ramMbText by remember { mutableStateOf(AvdLimits.RAM_DEFAULT_MB.toString()) }
+    var storageMbText by remember { mutableStateOf(AvdLimits.STORAGE_DEFAULT_MB.toString()) }
+    var submitting by remember { mutableStateOf(false) }
+    var submitError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(api) {
+        try {
+            val imgRes = api.androidSystemImages()
+            val profRes = api.androidDeviceProfiles()
+            val parsedImages = parseAndroidSystemImages(imgRes)
+            val parsedProfiles = parseAndroidDeviceProfiles(profRes)
+            images = parsedImages
+            profiles = parsedProfiles
+            val usable = parsedImages.filter { it.hostCompatible }
+            val newest = usable.maxByOrNull { it.apiLevel ?: 0 }
+            if (newest != null && selectedImageId.isEmpty()) {
+                selectedImageId = newest.id
+            }
+            val defaultProfile = parsedProfiles.firstOrNull { it.id == "pixel_9" } ?: parsedProfiles.firstOrNull()
+            if (defaultProfile != null && selectedProfileId.isEmpty()) {
+                selectedProfileId = defaultProfile.id
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            loadError = e.message ?: "Failed to load SDK profiles"
+        }
+    }
+
+    val content: @Composable () -> Unit = {
+        AndroidAvdCreateFormContent(
+            name = name,
+            onNameChange = { name = it },
+            existingNames = existingNames,
+            images = images.orEmpty(),
+            selectedImageId = selectedImageId,
+            onSelectImage = { selectedImageId = it },
+            profiles = profiles.orEmpty(),
+            selectedProfileId = selectedProfileId,
+            onSelectProfile = { selectedProfileId = it },
+            ramMbText = ramMbText,
+            onRamChange = { ramMbText = it },
+            storageMbText = storageMbText,
+            onStorageChange = { storageMbText = it },
+            loading = loadError == null && (images == null || profiles == null),
+            error = submitError ?: loadError,
+            submitting = submitting,
+            onDismiss = onDismiss,
+            onSubmit = { validName, imgId, profId, ram, storage ->
+                scope.launch {
+                    submitting = true
+                    submitError = null
+                    try {
+                        api.androidCreateAvd(
+                            name = validName,
+                            systemImage = imgId,
+                            deviceProfile = profId,
+                            ramMb = ram,
+                            storageMb = storage,
+                        )
+                        onCreated(validName)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        submitError = e.message ?: "Failed to create AVD"
+                        submitting = false
+                    }
+                }
+            },
+        )
+    }
+
+    if (mobile) {
+        BottomSheet(onDismiss = onDismiss) {
+            Box(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                content()
+            }
+        }
+    } else {
+        val tokens = LocalPpmTokens.current
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f))
+                .padding(24.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .widthIn(max = 520.dp)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(tokens.panel.color)
+                    .border(1.dp, tokens.border.color, RoundedCornerShape(12.dp))
+                    .padding(16.dp),
             ) {
-                BasicText(
-                    errText,
-                    style = ppmText(11f).copy(color = tokens.error.color),
-                    modifier = Modifier.weight(1f),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                SmallActionPill("Boot log", onClick = onShowBootLog)
+                content()
             }
         }
     }
 }
 
 @Composable
-private fun StatusPill(status: AndroidDeviceStatus) {
-    val tokens = LocalPpmTokens.current
-    val (bg, fg, label) = when (status) {
-        AndroidDeviceStatus.READY -> Triple(tokens.success.opacity(0.15).color, tokens.success.color, "Ready")
-        AndroidDeviceStatus.STARTING -> Triple(tokens.warning.opacity(0.15).color, tokens.warning.color, "Starting")
-        AndroidDeviceStatus.BOOTING -> Triple(tokens.warning.opacity(0.15).color, tokens.warning.color, "Booting")
-        AndroidDeviceStatus.STOPPING -> Triple(tokens.warning.opacity(0.15).color, tokens.warning.color, "Stopping")
-        AndroidDeviceStatus.ERROR -> Triple(tokens.error.opacity(0.15).color, tokens.error.color, "Error")
-        AndroidDeviceStatus.STOPPED -> Triple(tokens.panel2.color, tokens.text3.color, "Stopped")
-    }
-    Box(
-        Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .background(bg)
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-    ) {
-        BasicText(label, style = ppmText(10f, FontWeight.Medium).copy(color = fg))
-    }
-}
-
-@Composable
-internal fun AndroidDestructiveConfirmDialog(
-    device: AndroidDeviceItem,
-    isDelete: Boolean,
+internal fun AndroidAvdCreateFormContent(
+    name: String,
+    onNameChange: (String) -> Unit,
+    existingNames: List<String> = emptyList(),
+    images: List<SystemImageRow>,
+    selectedImageId: String,
+    onSelectImage: (String) -> Unit,
+    profiles: List<AvdDeviceProfile>,
+    selectedProfileId: String,
+    onSelectProfile: (String) -> Unit,
+    ramMbText: String,
+    onRamChange: (String) -> Unit,
+    storageMbText: String,
+    onStorageChange: (String) -> Unit,
+    loading: Boolean,
+    error: String?,
+    submitting: Boolean,
     onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
-) {
-    Dialog(onDismissRequest = onDismiss) {
-        AndroidDestructiveConfirmContent(
-            device = device,
-            isDelete = isDelete,
-            onDismiss = onDismiss,
-            onConfirm = onConfirm,
-        )
-    }
-}
-
-@Composable
-internal fun AndroidDestructiveConfirmContent(
-    device: AndroidDeviceItem,
-    isDelete: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit,
+    onSubmit: (name: String, systemImage: String, deviceProfile: String, ramMb: Int, storageMb: Int) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
-    var typed by remember(device.avdId, isDelete) { mutableStateOf("") }
-    val matches = typed.trim() == device.avdId
-    val shape = RoundedCornerShape(12.dp)
+    val nameErr = if (name.isEmpty()) null else validateAvdName(name, existingNames)
+    val ramVal = ramMbText.toIntOrNull()
+    val ramErr = if (ramVal == null) {
+        "RAM must be between ${AvdLimits.RAM_MIN_MB} and ${AvdLimits.RAM_MAX_MB} MB"
+    } else {
+        validateAvdRam(ramVal)
+    }
+    val storageVal = storageMbText.toIntOrNull()
+    val storageErr = if (storageVal == null) {
+        "Storage must be between ${AvdLimits.STORAGE_MIN_MB} and ${AvdLimits.STORAGE_MAX_MB} MB"
+    } else {
+        validateAvdStorage(storageVal)
+    }
+    val canSubmit = !loading && !submitting &&
+        name.isNotEmpty() && nameErr == null &&
+        ramErr == null && storageErr == null &&
+        selectedImageId.isNotBlank() && selectedProfileId.isNotBlank()
+
+    val compatibleImages = remember(images) { images.filter { it.hostCompatible } }
+    val incompatibleImages = remember(images) { images.filter { !it.hostCompatible } }
 
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(shape)
-            .background(tokens.panel.color)
-            .cssBorder(tokens.border.color, shape)
-            .padding(16.dp)
-            .testTag("android-confirm-dialog"),
+            .verticalScroll(rememberScrollState())
+            .testTag("android-create-avd-dialog"),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         BasicText(
-            if (isDelete) "Delete AVD \"${device.name}\"" else "Wipe data for \"${device.name}\"",
-            style = ppmText(14f, FontWeight.SemiBold).copy(color = tokens.text.color),
+            "New Android device",
+            style = ppmText(15f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color),
         )
         BasicText(
-            if (isDelete) {
-                "This permanently deletes the AVD and all disk images. Type \"${device.avdId}\" to confirm:"
-            } else {
-                "This resets the emulator to factory state, erasing installed apps and data. Type \"${device.avdId}\" to confirm:"
-            },
-            style = ppmText(12f, lineHeight = 17f).copy(color = tokens.text2.color),
+            "Built from a system image already installed on this host.",
+            style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
         )
-        AndroidSingleLineInput(
-            value = typed,
-            onValueChange = { typed = it },
-            placeholder = device.avdId,
-            modifier = Modifier.fillMaxWidth().testTag("android-confirm-input"),
-            mono = true,
-        )
+
+        if (loading) {
+            BasicText("Reading the SDK…", style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color))
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                BasicText("Name", style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color))
+                DialogTextInput(
+                    value = name,
+                    onValueChange = onNameChange,
+                    placeholder = "Pixel_9_API_35",
+                    tag = "avd-name-input",
+                )
+                if (nameErr != null) {
+                    BasicText(
+                        nameErr,
+                        style = ppmText(11f, lineHeight = 14f).copy(color = tokens.error.color),
+                        modifier = Modifier.testTag("avd-name-error"),
+                    )
+                } else {
+                    BasicText(
+                        "This becomes a folder name, so no spaces.",
+                        style = ppmText(11f, lineHeight = 14f).copy(color = tokens.text3.color),
+                    )
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                BasicText("System image", style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color))
+                if (images.isEmpty()) {
+                    BasicText(
+                        "No system images are installed",
+                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.error.color),
+                    )
+                } else {
+                    Column(
+                        Modifier.heightIn(max = 140.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        if (compatibleImages.isNotEmpty()) {
+                            BasicText(
+                                "Runs on this host",
+                                style = ppmText(10f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tokens.text3.color),
+                            )
+                            for (img in compatibleImages) {
+                                val selected = img.id == selectedImageId
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (selected) tokens.accent.color.copy(alpha = 0.15f) else tokens.panel2.color)
+                                        .border(
+                                            1.dp,
+                                            if (selected) tokens.accent.color else tokens.border.color,
+                                            RoundedCornerShape(6.dp),
+                                        )
+                                        .clickable { onSelectImage(img.id) }
+                                        .padding(8.dp)
+                                        .testTag("avd-image-${img.id}"),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    BasicText(
+                                        "API ${img.apiLevel ?: "?"} · ${img.tagDisplay} · ${img.abi}",
+                                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text.color),
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
+                        }
+                        if (incompatibleImages.isNotEmpty()) {
+                            BasicText(
+                                "Wrong CPU for this host",
+                                style = ppmText(10f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tokens.text3.color),
+                            )
+                            for (img in incompatibleImages) {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(tokens.panel2.color.copy(alpha = 0.5f))
+                                        .border(1.dp, tokens.border.color, RoundedCornerShape(6.dp))
+                                        .padding(8.dp)
+                                        .testTag("avd-image-incompatible-${img.id}"),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    BasicText(
+                                        "API ${img.apiLevel ?: "?"} · ${img.tagDisplay} · ${img.abi}",
+                                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    BasicText(
+                                        "needs ${img.abi}",
+                                        style = ppmText(11f, lineHeight = 14f).copy(color = tokens.text3.color),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                BasicText("Device", style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color))
+                Column(
+                    Modifier.heightIn(max = 110.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    for (prof in profiles) {
+                        val selected = prof.id == selectedProfileId
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (selected) tokens.accent.color.copy(alpha = 0.15f) else tokens.panel2.color)
+                                .border(
+                                    1.dp,
+                                    if (selected) tokens.accent.color else tokens.border.color,
+                                    RoundedCornerShape(6.dp),
+                                )
+                                .clickable { onSelectProfile(prof.id) }
+                                .padding(8.dp)
+                                .testTag("avd-profile-${prof.id}"),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            BasicText(
+                                prof.name,
+                                style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text.color),
+                            )
+                            if (prof.oem.isNotBlank()) {
+                                BasicText(
+                                    prof.oem,
+                                    style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    BasicText("RAM (MB)", style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color))
+                    DialogTextInput(
+                        value = ramMbText,
+                        onValueChange = onRamChange,
+                        placeholder = "2048",
+                        numeric = true,
+                        tag = "avd-ram-input",
+                    )
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    BasicText("Storage (MB)", style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color))
+                    DialogTextInput(
+                        value = storageMbText,
+                        onValueChange = onStorageChange,
+                        placeholder = "6144",
+                        numeric = true,
+                        tag = "avd-storage-input",
+                    )
+                }
+            }
+            if (ramErr != null || storageErr != null) {
+                BasicText(
+                    ramErr ?: storageErr.orEmpty(),
+                    style = ppmText(11f, lineHeight = 14f).copy(color = tokens.error.color),
+                    modifier = Modifier.testTag("avd-limits-error"),
+                )
+            }
+        }
+
+        if (error != null) {
+            BasicText(error, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.error.color))
+        }
+
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SmallActionPill("Cancel", onClick = onDismiss)
+            SmallActionButton(label = "Cancel", tag = "avd-create-cancel", onClick = onDismiss)
             Spacer(Modifier.width(8.dp))
-            SmallActionPill(
-                label = if (isDelete) "Delete permanently" else "Wipe data",
-                danger = true,
-                enabled = matches,
-                modifier = Modifier.testTag("android-confirm-submit"),
-                onClick = { if (matches) onConfirm() },
+            SmallActionButton(
+                label = if (submitting) "Creating…" else "Create device",
+                primary = true,
+                enabled = canSubmit,
+                tag = "avd-create-submit",
+                onClick = {
+                    if (canSubmit && ramVal != null && storageVal != null) {
+                        onSubmit(name, selectedImageId, selectedProfileId, ramVal, storageVal)
+                    }
+                },
             )
         }
     }
 }
 
 @Composable
-internal fun AndroidAvdCreateDialog(
-    api: ApiClient,
+internal fun AndroidAvdDestroyDialog(
+    action: String,
+    device: AndroidDeviceItem,
     onDismiss: () -> Unit,
-    onCreated: () -> Unit,
+    onConfirm: (confirmName: String) -> Unit,
 ) {
+    val mobile = LocalPpmMobile.current
     val tokens = LocalPpmTokens.current
-    var images by remember { mutableStateOf<List<SystemImageRow>>(emptyList()) }
-    var profiles by remember { mutableStateOf<List<AvdDeviceProfile>>(emptyList()) }
-    var loadingCatalogs by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var typedName by remember(action, device.avdId) { mutableStateOf("") }
+    val isDelete = action == "delete"
+    val matches = typedName == device.name
 
-    var name by remember { mutableStateOf("") }
-    var nameTouched by remember { mutableStateOf(false) }
-    var systemImageId by remember { mutableStateOf("") }
-    var deviceProfileId by remember { mutableStateOf("") }
-    var imageSearch by remember { mutableStateOf("") }
-    var ramMb by remember { mutableStateOf(AvdLimits.RAM_DEFAULT_MB.toString()) }
-    var storageMb by remember { mutableStateOf(AvdLimits.STORAGE_DEFAULT_MB.toString()) }
-    var showAdvanced by remember { mutableStateOf(false) }
-
-    var submitting by remember { mutableStateOf(false) }
-    var operation by remember { mutableStateOf<AndroidOperationStatus?>(null) }
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(api) {
-        loadingCatalogs = true
-        try {
-            val loadedImages = parseAndroidSystemImages(api.androidSystemImages())
-                .sortedWith(compareByDescending<SystemImageRow> { it.installed }.thenByDescending { it.apiLevel })
-            val loadedProfiles = parseAndroidDeviceProfiles(api.androidDeviceProfiles())
-            images = loadedImages
-            profiles = loadedProfiles
-            val defImg = loadedImages.firstOrNull { it.installed } ?: loadedImages.firstOrNull()
-            val defProf = loadedProfiles.firstOrNull { it.id.contains("pixel_7", ignoreCase = true) } ?: loadedProfiles.firstOrNull()
-            if (defImg != null) systemImageId = defImg.id
-            if (defProf != null) deviceProfileId = defProf.id
-            if (defImg != null && defProf != null) {
-                val base = "${defProf.id}_API_${defImg.apiLevel}".replace(Regex("[^A-Za-z0-9._-]"), "_")
-                name = base.take(64)
-            }
-        } catch (t: Throwable) {
-            error = t.message ?: "Failed to load SDK catalogs"
-        } finally {
-            loadingCatalogs = false
-        }
-    }
-
-    val nameError = validateAvdName(name)
-    val limitsError = validateAvdLimits(ramMb.toIntOrNull(), storageMb.toIntOrNull())
-    val opRunning = operation != null && !operation!!.isTerminal
-    val canSubmit = !loadingCatalogs && !submitting && !opRunning &&
-        nameError == null && limitsError == null &&
-        systemImageId.isNotBlank() && deviceProfileId.isNotBlank()
-
-    val shape = RoundedCornerShape(12.dp)
-    Dialog(onDismissRequest = { if (!opRunning) onDismiss() }) {
+    val content: @Composable () -> Unit = {
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(shape)
-                .background(tokens.panel.color)
-                .cssBorder(tokens.border.color, shape)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState())
-                .testTag("android-create-avd-dialog"),
+                .testTag("android-destroy-dialog"),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                BasicText("Create Android Virtual Device", style = ppmText(14f, FontWeight.SemiBold).copy(color = tokens.text.color))
-                if (!opRunning) {
-                    SmallActionPill("Close", onClick = onDismiss)
-                }
-            }
-
-            if (loadingCatalogs) {
-                BasicText("Loading SDK system images and hardware profiles…", style = ppmText(12f).copy(color = tokens.text3.color))
-            } else {
-                BasicText("AVD Name", style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text2.color))
-                AndroidSingleLineInput(
-                    value = name,
-                    onValueChange = {
-                        nameTouched = true
-                        name = it
-                    },
-                    placeholder = "Pixel_7_API_34",
-                    modifier = Modifier.fillMaxWidth().testTag("android-avd-name-input"),
-                    mono = true,
-                )
-                if (nameTouched && nameError != null) {
-                    BasicText(nameError, style = ppmText(11f).copy(color = tokens.error.color))
-                }
-
-                BasicText("System Image (${images.size})", style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text2.color))
-                AndroidSingleLineInput(
-                    value = imageSearch,
-                    onValueChange = { imageSearch = it },
-                    placeholder = "Filter images by API, ABI, or tag…",
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                val filteredImages = remember(images, imageSearch) {
-                    val q = imageSearch.trim().lowercase()
-                    if (q.isEmpty()) images.take(25)
-                    else images.filter {
-                        it.displayName.lowercase().contains(q) ||
-                            it.id.lowercase().contains(q) ||
-                            it.abi.lowercase().contains(q)
-                    }.take(25)
-                }
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 140.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(tokens.bgSolid.color)
-                        .verticalScroll(rememberScrollState())
-                        .padding(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    for (img in filteredImages) {
-                        val selected = img.id == systemImageId
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (selected) tokens.accent.opacity(0.15).color else Color.Transparent)
-                                .clickable { systemImageId = img.id }
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                BasicText(
-                                    img.displayName,
-                                    style = ppmText(11f, FontWeight.Medium).copy(color = if (selected) tokens.accent.color else tokens.text.color),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                BasicText(
-                                    "API ${img.apiLevel} · ${img.tag} · ${img.abi}",
-                                    style = ppmText(10f).copy(color = tokens.text3.color),
-                                )
-                            }
-                            BasicText(
-                                if (img.installed) "Installed" else "Download",
-                                style = ppmText(10f, FontWeight.Medium).copy(
-                                    color = if (img.installed) tokens.success.color else tokens.warning.color,
-                                ),
-                            )
-                        }
-                    }
-                }
-
-                BasicText("Device Profile (${profiles.size})", style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text2.color))
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 110.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(tokens.bgSolid.color)
-                        .verticalScroll(rememberScrollState())
-                        .padding(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    for (prof in profiles.take(30)) {
-                        val selected = prof.id == deviceProfileId
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (selected) tokens.accent.opacity(0.15).color else Color.Transparent)
-                                .clickable { deviceProfileId = prof.id }
-                                .padding(horizontal = 8.dp, vertical = 5.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            BasicText(
-                                prof.name + (if (!prof.oem.isNullOrBlank()) " (${prof.oem})" else ""),
-                                style = ppmText(11f).copy(color = if (selected) tokens.accent.color else tokens.text.color),
-                            )
-                        }
-                    }
-                }
-
-                SmallActionPill(
-                    label = if (showAdvanced) "Hide advanced" else "Advanced (RAM / Storage)",
-                    onClick = { showAdvanced = !showAdvanced },
-                )
-                if (showAdvanced) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            BasicText("RAM (MB)", style = ppmText(10f).copy(color = tokens.text3.color))
-                            AndroidSingleLineInput(value = ramMb, onValueChange = { ramMb = it }, placeholder = "2048", mono = true)
-                        }
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            BasicText("Storage (MB)", style = ppmText(10f).copy(color = tokens.text3.color))
-                            AndroidSingleLineInput(value = storageMb, onValueChange = { storageMb = it }, placeholder = "6144", mono = true)
-                        }
-                    }
-                    if (limitsError != null) {
-                        BasicText(limitsError, style = ppmText(11f).copy(color = tokens.error.color))
-                    }
-                }
-            }
-
-            operation?.let { op ->
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(tokens.bgSolid.color)
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        BasicText(op.step.ifBlank { op.status }, style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text.color))
-                        if (op.progress != null) {
-                            BasicText("${op.progress}%", style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text3.color))
-                        }
-                    }
-                    if (op.logTail.isNotEmpty()) {
-                        BasicText(
-                            op.logTail.takeLast(4).joinToString("\n"),
-                            style = ppmText(10f, kind = FontKind.MONO).copy(color = tokens.text3.color),
-                        )
-                    }
-                }
-            }
-
-            if (error != null) {
-                BasicText(error!!, style = ppmText(11f).copy(color = tokens.error.color))
-            }
-
+            BasicText(
+                if (isDelete) "Delete this device" else "Wipe this device",
+                style = ppmText(15f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color),
+            )
+            BasicText(
+                if (isDelete) {
+                    "${device.name} and everything in it will be removed from disk. The AVD, its settings and its installed apps are gone for good — this is not a recycle bin."
+                } else {
+                    "Everything inside ${device.name} goes back to factory: installed apps, accounts, files and saved snapshots. The device itself and its settings stay, and the next start is a cold boot."
+                },
+                style = ppmText(12f, lineHeight = 17f).copy(color = tokens.text2.color),
+            )
+            BasicText(
+                "Type ${device.name} to confirm",
+                style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color),
+            )
+            DialogTextInput(
+                value = typedName,
+                onValueChange = { typedName = it },
+                placeholder = device.name,
+                tag = "avd-destroy-confirm-input",
+            )
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (opRunning && operation != null) {
-                    SmallActionPill(
-                        label = "Cancel operation",
-                        danger = true,
-                        onClick = {
-                            val id = operation!!.id
-                            scope.launch { runCatching { api.androidCancelOperation(id) } }
-                        },
-                    )
-                } else {
-                    SmallActionPill("Cancel", onClick = onDismiss)
-                    Spacer(Modifier.width(8.dp))
-                    SmallActionPill(
-                        label = if (submitting) "Starting…" else "Create AVD",
-                        primary = true,
-                        enabled = canSubmit,
-                        modifier = Modifier.testTag("android-create-avd-submit"),
-                        onClick = {
-                            if (!canSubmit) return@SmallActionPill
-                            submitting = true
-                            error = null
-                            scope.launch {
-                                try {
-                                    val res = api.androidCreateAvd(
-                                        name = name.trim(),
-                                        systemImageId = systemImageId,
-                                        deviceProfileId = deviceProfileId,
-                                        ramMb = ramMb.toIntOrNull(),
-                                        storageMb = storageMb.toIntOrNull(),
-                                    )
-                                    val op = parseAndroidOperationStatus(res)
-                                    if (op == null) {
-                                        onCreated()
-                                        return@launch
-                                    }
-                                    operation = op
-                                    submitting = false
-                                    while (isActive) {
-                                        delay(1_000L)
-                                        val next = parseAndroidOperationStatus(api.androidOperationStatus(op.id)) ?: break
-                                        operation = next
-                                        if (next.isTerminal) {
-                                            if (next.status == "succeeded") {
-                                                onCreated()
-                                            } else {
-                                                error = next.error ?: "AVD creation ${next.status}."
-                                            }
-                                            break
-                                        }
-                                    }
-                                } catch (t: Throwable) {
-                                    error = t.message ?: "Failed to create AVD"
-                                } finally {
-                                    submitting = false
-                                }
-                            }
-                        },
-                    )
-                }
+                SmallActionButton(label = "Cancel", tag = "avd-destroy-cancel", onClick = onDismiss)
+                Spacer(Modifier.width(8.dp))
+                SmallActionButton(
+                    label = if (isDelete) "Delete device" else "Wipe data",
+                    danger = true,
+                    enabled = matches,
+                    tag = "avd-destroy-confirm",
+                    onClick = { if (matches) onConfirm(device.name) },
+                )
+            }
+        }
+    }
+
+    if (mobile) {
+        BottomSheet(onDismiss = onDismiss) {
+            Box(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                content()
+            }
+        }
+    } else {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f))
+                .padding(24.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .widthIn(max = 460.dp)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(tokens.panel.color)
+                    .border(1.dp, tokens.border.color, RoundedCornerShape(12.dp))
+                    .padding(16.dp),
+            ) {
+                content()
             }
         }
     }
 }
 
-// ===========================================================================
-// 2. Android Viewer (H.264 Stream, Multi-Touch, Controls Bar, Tools Drawer)
-// ===========================================================================
+// =============================================================================
+// 3. Live Emulator Viewer (`android-viewer.tsx`, `use-android-session.ts`, `android-controls.tsx`)
+// =============================================================================
 
-enum class AndroidToolTab(val label: String) {
-    INSTALL("Install"),
-    LOGS("Logs"),
-    CLIPBOARD("Clipboard"),
+private enum class AndroidDrawerTool(val wire: String, val label: String, val icon: ProductIcon) {
+    INSTALL("install", "Install", ProductIcon.Smartphone),
+    LOGS("logs", "Logs", ProductIcon.ScrollText),
+    CLIPBOARD("clipboard", "Clipboard", ProductIcon.Clipboard),
 }
 
 @Composable
-internal fun AndroidViewer(
-    model: AppModel,
+internal fun AndroidLiveViewer(
+    api: ApiClient,
     device: AndroidDeviceItem,
-    onBack: () -> Unit,
+    projects: List<ProjectInfo>,
+    selectedProject: String?,
+    onBackToList: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val api = model.api
+    val tokens = LocalPpmTokens.current
     val context = LocalContext.current
+    val density = LocalDensity.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
 
+    val deviceId = device.runtime?.deviceId ?: device.avdId
+
     var connState by remember { mutableStateOf(AndroidConnState.CONNECTING) }
-    var deviceStatus by remember { mutableStateOf(device.runtime?.status ?: AndroidDeviceStatus.READY) }
+    var geometry by remember { mutableStateOf(AndroidGeometry()) }
+    var sessionGeneration by remember { mutableIntStateOf(1) }
     var controller by remember { mutableStateOf(false) }
+    var controllerReason by remember { mutableStateOf<String?>(null) }
     var quality by remember { mutableStateOf(AndroidQuality.BALANCED) }
-    var geometry by remember {
-        mutableStateOf(
-            AndroidGeometry(
-                frameWidth = 1080,
-                frameHeight = 2400,
-                deviceWidth = 1080,
-                deviceHeight = 2400,
-                rotation = 0,
-                generation = 1,
-            ),
-        )
-    }
-    var streamError by remember { mutableStateOf<String?>(null) }
-    var hasVideoFrame by remember { mutableStateOf(false) }
-    var connectAttempt by remember { mutableIntStateOf(0) }
+    var encoder by remember { mutableStateOf<String?>(null) }
+    var hasPicture by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var toolBanner by remember { mutableStateOf<String?>(null) }
+    var reconnectTick by remember { mutableIntStateOf(0) }
+    var shooting by remember { mutableStateOf(false) }
 
-    var keyboardOpen by remember { mutableStateOf(false) }
-    var keyboardText by remember { mutableStateOf("") }
-    var activeDrawerTab by remember { mutableStateOf<AndroidToolTab?>(null) }
-    var tallDrawer by remember { mutableStateOf(false) }
-    var takingScreenshot by remember { mutableStateOf(false) }
-
-    // Logcat state
-    val logLimit = if (model.wide) 1000 else 400
+    var activeTool by remember { mutableStateOf<AndroidDrawerTool?>(null) }
     var logEntries by remember { mutableStateOf<List<AndroidLogEntry>>(emptyList()) }
-    var droppedLogs by remember { mutableIntStateOf(0) }
-    var logFilter by remember { mutableStateOf(EMPTY_ANDROID_LOG_FILTER) }
-    var logsPaused by remember { mutableStateOf(false) }
-    val logsPausedRef by rememberUpdatedState(logsPaused)
-    val logLimitRef by rememberUpdatedState(logLimit)
+    var logPaused by remember { mutableStateOf(false) }
+    val currentLogPaused by rememberUpdatedState(logPaused)
+
+    var keyboardVisible by remember { mutableStateOf(false) }
+    var imeText by remember { mutableStateOf(TextFieldValue("")) }
+    val imeFocusRequester = remember { FocusRequester() }
+    val stageFocusRequester = remember { FocusRequester() }
 
     val decoder = remember {
         H264SurfaceDecoder(
             onFrameSizeChanged = { _ -> },
-            onStatusChanged = { st, err ->
-                if (st == "error" && !err.isNullOrBlank()) streamError = err
-            },
+            onStatusChanged = { _, _ -> },
         )
     }
-    val activeSocketRef = remember { arrayOfNulls<WebSocket>(1) }
-    val touchTracker = remember { AndroidTouchTracker() }
 
-    fun sendWs(json: String) {
-        activeSocketRef[0]?.send(json)
+    var activeWs by remember { mutableStateOf<WebSocket?>(null) }
+    val touchTracker = remember { AndroidTouchTracker() }
+    val currentQuality by rememberUpdatedState(quality)
+    val currentActiveTool by rememberUpdatedState(activeTool)
+
+    fun sendWs(jsonText: String) {
+        activeWs?.send(jsonText)
     }
 
-    DisposableEffect(decoder) {
+    DisposableEffect(Unit) {
         onDispose {
-            activeSocketRef[0]?.close(1000, "viewer disposed")
-            activeSocketRef[0] = null
+            activeWs?.close(1000, "viewer disposed")
+            activeWs = null
+            decoder.attachSurface(null)
             decoder.reset()
         }
     }
 
-    // Stream connection + single-use session nonce + heartbeat + exponential backoff
-    LaunchedEffect(api, device.avdId, connectAttempt) {
-        if (api == null) {
-            connState = AndroidConnState.FAILED
-            streamError = "Not connected to a PPM server."
-            return@LaunchedEffect
-        }
-        var attempt = 0
-        var sessionGeneration = -1
-        while (isActive) {
-            connState = if (attempt == 0) AndroidConnState.CONNECTING else AndroidConnState.RECONNECTING
-            streamError = null
-            val ticket = try {
-                parseAndroidSessionTicket(api.androidCreateSession(device.avdId))
-            } catch (ce: CancellationException) {
-                throw ce
-            } catch (t: Throwable) {
-                streamError = t.message ?: "Failed to create Android session"
-                null
-            }
-            if (ticket == null) {
-                if (attempt >= ANDROID_RECONNECT_BACKOFF_MS.size) {
-                    connState = AndroidConnState.FAILED
-                    break
+    // Lifecycle visibility observer (`visibility{visible}` on ON_STOP / ON_START)
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    if (touchTracker.reset()) {
+                        sendWs(buildAndroidInputResetJson())
+                    }
+                    sendWs(buildAndroidVisibilityJson(false))
                 }
-                delay(ANDROID_RECONNECT_BACKOFF_MS[attempt])
-                attempt++
-                continue
+                Lifecycle.Event.ON_START -> {
+                    sendWs(buildAndroidVisibilityJson(true))
+                }
+                else -> {}
             }
-            sessionGeneration = ticket.generation
-            var closedSignal = false
-            var retryableDisconnect = true
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // Blur soft keyboard if lease is lost
+    LaunchedEffect(controller) {
+        if (!controller && keyboardVisible) {
+            keyboardVisible = false
+            keyboardController?.hide()
+        }
+    }
+
+    // Subscribe/unsubscribe logcat when Logs drawer opens/closes
+    LaunchedEffect(activeTool, activeWs, connState) {
+        if (connState == AndroidConnState.LIVE) {
+            sendWs(buildAndroidLogcatJson(activeTool == AndroidDrawerTool.LOGS))
+        }
+    }
+
+    // Main WebSocket connection & immediate-close reconnect loop (`use-android-session.ts`)
+    LaunchedEffect(api, deviceId, reconnectTick) {
+        var attempt = 0
+        var fatalError = false
+
+        while (isActive && !fatalError) {
+            connState = if (attempt == 0) AndroidConnState.CONNECTING else AndroidConnState.RECONNECTING
+            errorMessage = null
+
+            val minted = try {
+                parseAndroidMintedSession(api.androidCreateSession(deviceId))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                errorMessage = e.message ?: "Could not connect."
+                connState = AndroidConnState.FAILED
+                break
+            }
+
+            if (minted == null) {
+                errorMessage = "Could not mint session nonce."
+                connState = AndroidConnState.FAILED
+                break
+            }
+
+            val closedSignal = CompletableDeferred<Unit>()
+            var configuredCodec: String? = null
+            var localHasPicture = false
+            var localSessionGen = 1
 
             val ws = api.openAndroidSocket(
                 object : WebSocketListener() {
                     override fun onOpen(webSocket: WebSocket, response: Response) {
-                        webSocket.send(buildAndroidAuthJson(ticket.nonce, quality))
-                        if (activeDrawerTab == AndroidToolTab.LOGS) {
-                            webSocket.send(
-                                buildAndroidSubscribeLogsJson(
-                                    enabled = true,
-                                    minLevel = logFilter.minLevel,
-                                    tag = logFilter.tag,
-                                    pid = logFilter.pid.toIntOrNull(),
-                                ),
-                            )
-                        }
+                        webSocket.send(buildAndroidAuthJson(minted.nonce, currentQuality))
                     }
 
                     override fun onMessage(webSocket: WebSocket, text: String) {
                         val msg = parseAndroidServerMessage(text) ?: return
-                        when (msg) {
-                            is AndroidServerMessage.Ready -> {
-                                attempt = 0
-                                sessionGeneration = msg.generation
-                                connState = AndroidConnState.CONNECTED
-                                controller = msg.controller
-                                quality = msg.quality
-                                geometry = msg.geometry
-                                streamError = null
-                            }
-                            is AndroidServerMessage.Codec -> {
-                                val configBytes = runCatching {
-                                    Base64.decode(msg.configBase64, Base64.DEFAULT)
-                                }.getOrNull() ?: ByteArray(0)
-                                decoder.configure()
-                                if (configBytes.isNotEmpty()) {
-                                    decoder.decodeAccessUnit(configBytes, 0, configBytes.size, true)
+                        scope.launch {
+                            when (msg) {
+                                is AndroidServerMessage.Ready -> {
+                                    attempt = 0
+                                    connState = AndroidConnState.LIVE
+                                    errorMessage = null
+                                    localSessionGen = msg.sessionGeneration
+                                    sessionGeneration = msg.sessionGeneration
+                                    geometry = msg.geometry
+                                    controller = msg.controller
+                                    controllerReason = null
+                                    encoder = msg.encoder
+                                    if (msg.codec != null && msg.codec != configuredCodec) {
+                                        configuredCodec = msg.codec
+                                        decoder.configure()
+                                    }
+                                    if (currentActiveTool == AndroidDrawerTool.LOGS) {
+                                        webSocket.send(buildAndroidLogcatJson(true))
+                                    }
                                 }
-                                webSocket.send(buildAndroidRequestKeyframeJson())
-                            }
-                            is AndroidServerMessage.Geometry -> {
-                                geometry = msg.geometry
-                            }
-                            is AndroidServerMessage.Controller -> {
-                                controller = msg.controller
-                            }
-                            is AndroidServerMessage.Quality -> {
-                                quality = msg.quality
-                            }
-                            is AndroidServerMessage.Status -> {
-                                deviceStatus = msg.status
-                                if (!msg.message.isNullOrBlank()) streamError = msg.message
-                            }
-                            is AndroidServerMessage.Log -> {
-                                if (!logsPausedRef) {
-                                    val res = appendBoundedLogs(logEntries, msg.entries, logLimitRef)
-                                    logEntries = res.entries
-                                    droppedLogs += res.dropped + (msg.dropped ?: 0)
+                                is AndroidServerMessage.Codec -> {
+                                    if (msg.codec != configuredCodec) {
+                                        configuredCodec = msg.codec
+                                        decoder.configure()
+                                    }
                                 }
+                                is AndroidServerMessage.Geometry -> {
+                                    geometry = msg.geometry
+                                    decoder.reset()
+                                    localHasPicture = false
+                                    hasPicture = false
+                                }
+                                is AndroidServerMessage.Controller -> {
+                                    controller = msg.controller
+                                    controllerReason = msg.reason
+                                }
+                                is AndroidServerMessage.Quality -> {
+                                    quality = msg.quality
+                                }
+                                is AndroidServerMessage.Status -> {}
+                                is AndroidServerMessage.Log -> {
+                                    if (!currentLogPaused) {
+                                        logEntries = appendBoundedLogs(logEntries, msg.entries, ANDROID_LOGCAT_RING_LIMIT)
+                                    }
+                                }
+                                is AndroidServerMessage.Error -> {
+                                    errorMessage = msg.message
+                                    if (msg.fatal) {
+                                        fatalError = true
+                                        connState = AndroidConnState.FAILED
+                                        closedSignal.complete(Unit)
+                                    }
+                                }
+                                is AndroidServerMessage.Heartbeat -> {}
+                                is AndroidServerMessage.Unknown -> {}
                             }
-                            is AndroidServerMessage.Error -> {
-                                streamError = msg.message
-                                retryableDisconnect = msg.retryable
-                            }
-                            is AndroidServerMessage.Heartbeat -> Unit
                         }
                     }
 
                     override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                        val packet = decodeAndroidVideoFrame(bytes.toByteArray()) ?: return
-                        if (sessionGeneration != -1 && packet.header.sessionGeneration != sessionGeneration) return
-                        hasVideoFrame = true
-                        decoder.decodeAccessUnit(
-                            packet.payload,
-                            0,
-                            packet.payload.size,
-                            packet.header.keyframe || packet.header.codecConfig,
-                        )
-                    }
-
-                    override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                        webSocket.close(code, reason)
-                        closedSignal = true
+                        val frame = decodeAndroidVideoFrame(bytes.toByteArray()) ?: return
+                        if (frame.version != ANDROID_PROTOCOL_VERSION) return
+                        if (frame.sessionGeneration != localSessionGen) return
+                        if (!shouldDecodeAndroidAccessUnit(localHasPicture, frame.isKeyframe)) return
+                        if (!localHasPicture) {
+                            localHasPicture = true
+                            scope.launch { hasPicture = true }
+                        }
+                        decoder.enqueueAccessUnit(frame.payload, 0, frame.payload.size, frame.isKeyframe)
                     }
 
                     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                        closedSignal = true
+                        closedSignal.complete(Unit)
                     }
 
                     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                        streamError = t.message ?: "WebSocket connection failed"
-                        closedSignal = true
+                        scope.launch {
+                            if (errorMessage == null) errorMessage = t.message ?: "Connection lost"
+                        }
+                        closedSignal.complete(Unit)
                     }
                 },
             )
-            activeSocketRef[0] = ws
+            activeWs = ws
 
             try {
-                while (isActive && !closedSignal) {
-                    delay(ANDROID_HEARTBEAT_INTERVAL_MS)
-                    if (!closedSignal) {
-                        ws.send(buildAndroidHeartbeatJson())
+                coroutineScope {
+                    val heartbeatJob = launch {
+                        while (isActive) {
+                            delay(ANDROID_HEARTBEAT_INTERVAL_MS)
+                            ws.send(buildAndroidHeartbeatJson())
+                        }
                     }
+                    closedSignal.await()
+                    heartbeatJob.cancel()
                 }
             } finally {
-                if (activeSocketRef[0] === ws) {
-                    activeSocketRef[0] = null
-                }
                 ws.close(1000, "closing")
+                if (activeWs === ws) activeWs = null
             }
 
-            if (!isActive) break
-            if (!retryableDisconnect || attempt >= ANDROID_RECONNECT_BACKOFF_MS.size) {
+            hasPicture = false
+            decoder.reset()
+
+            if (fatalError || !isActive) break
+            attempt += 1
+            if (attempt > ANDROID_RECONNECT_BACKOFF_MS.size) {
                 connState = AndroidConnState.FAILED
                 break
             }
             connState = AndroidConnState.RECONNECTING
-            delay(ANDROID_RECONNECT_BACKOFF_MS[attempt])
-            attempt++
+            val delayMs = ANDROID_RECONNECT_BACKOFF_MS[(attempt - 1).coerceAtMost(ANDROID_RECONNECT_BACKOFF_MS.lastIndex)]
+            delay(delayMs)
         }
     }
 
-    // Subscribe/unsubscribe logs when the Logs drawer tab opens/closes or filter changes
-    LaunchedEffect(activeDrawerTab, logFilter.minLevel, logFilter.tag, logFilter.pid, connState) {
-        if (connState != AndroidConnState.CONNECTED) return@LaunchedEffect
-        val enabled = activeDrawerTab == AndroidToolTab.LOGS
-        sendWs(
-            buildAndroidSubscribeLogsJson(
-                enabled = enabled,
-                minLevel = logFilter.minLevel,
-                tag = logFilter.tag,
-                pid = logFilter.pid.toIntOrNull(),
-            ),
-        )
-    }
-
-    val tokens = LocalPpmTokens.current
-    val currentGeom by rememberUpdatedState(geometry)
-    val currentController by rememberUpdatedState(controller)
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(tokens.bgSolid.color)
-            .testTag("android-viewer"),
-    ) {
-        // Top header bar
+    Column(modifier.fillMaxSize()) {
+        // 1. Viewer Header (`android-viewer.tsx:75-102`)
         Row(
             Modifier
                 .fillMaxWidth()
                 .background(tokens.panel.color)
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-                .horizontalScroll(rememberScrollState()),
+                .border(1.dp, tokens.border.color)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            SmallActionPill("← Devices", modifier = Modifier.testTag("android-back-btn"), onClick = onBack)
-            BasicText(device.name, style = ppmText(13f, FontWeight.SemiBold).copy(color = tokens.text.color))
-            ConnBadge(connState)
-            Box(
+            SmallActionButton(
+                label = "All devices",
+                icon = ProductIcon.ArrowLeft,
+                tag = "android-back-to-list",
+                onClick = onBackToList,
+            )
+            BasicText(
+                device.name,
+                style = ppmText(14f, FontWeight.SemiBold, lineHeight = 18f).copy(color = tokens.text.color),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+            )
+            SmallActionButton(
+                label = "Save a screenshot",
+                icon = ProductIcon.Image,
+                enabled = !shooting,
+                tag = "android-screenshot",
+                onClick = {
+                    scope.launch {
+                        shooting = true
+                        toolBanner = null
+                        try {
+                            val shot = api.androidTakeScreenshot(deviceId)
+                            val fileName = filenameFromDisposition(shot.contentDisposition, "${device.name}.png")
+                            val msg = savePngToDevice(context, fileName, shot.pngBytes)
+                            toolBanner = msg
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
+                            toolBanner = e.message ?: "Screenshot failed"
+                        } finally {
+                            shooting = false
+                        }
+                    }
+                },
+            )
+            for (tool in AndroidDrawerTool.entries) {
+                SmallActionButton(
+                    label = tool.label,
+                    icon = tool.icon,
+                    primary = activeTool == tool,
+                    tag = "android-tool-${tool.wire}",
+                    onClick = { activeTool = if (activeTool == tool) null else tool },
+                )
+            }
+        }
+
+        // Tool banner or non-hardware-keyboard notice
+        if (toolBanner != null) {
+            Row(
                 Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(if (controller) tokens.accent.opacity(0.15).color else tokens.panel2.color)
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                    .fillMaxWidth()
+                    .background(tokens.panel2.color)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 BasicText(
-                    if (controller) "Controlling" else "View only",
-                    style = ppmText(10f, FontWeight.Medium).copy(color = if (controller) tokens.accent.color else tokens.text3.color),
+                    toolBanner.orEmpty(),
+                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text.color),
+                    modifier = Modifier.weight(1f),
+                )
+                BasicText(
+                    "Dismiss",
+                    style = ppmText(11f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tokens.accent.color),
+                    modifier = Modifier.clickable { toolBanner = null }.padding(4.dp),
                 )
             }
-            if (!controller && connState == AndroidConnState.CONNECTED) {
-                SmallActionPill(
-                    label = "Take control",
-                    primary = true,
-                    modifier = Modifier.testTag("android-take-control-btn"),
-                    onClick = { sendWs(buildAndroidTakeControlJson()) },
-                )
-            }
-            SmallActionPill(
-                label = if (takingScreenshot) "Saving…" else "Screenshot",
-                enabled = !takingScreenshot,
-                modifier = Modifier.testTag("android-screenshot-btn"),
-                onClick = {
-                    if (api == null || takingScreenshot) return@SmallActionPill
-                    takingScreenshot = true
-                    scope.launch {
-                        try {
-                            val shot = api.androidTakeScreenshot(device.avdId)
-                            val fileName = filenameFromDisposition(shot.contentDisposition, device.avdId)
-                            val savedWhere = savePngScreenshot(context, fileName, shot.pngBytes)
-                            model.toast(
-                                ErrorToastMessage(
-                                    title = "Saved screenshot ($fileName)",
-                                    description = savedWhere,
-                                    kind = ErrorToastMessage.Kind.SUCCESS,
-                                ),
-                            )
-                        } catch (t: Throwable) {
-                            model.toast(ErrorToastMessage("Screenshot failed", t.message))
-                        } finally {
-                            takingScreenshot = false
-                        }
-                    }
-                },
-            )
-            SmallActionPill(
-                label = "Tools",
-                primary = activeDrawerTab != null,
-                modifier = Modifier.testTag("android-tools-btn"),
-                onClick = {
-                    activeDrawerTab = if (activeDrawerTab == null) AndroidToolTab.INSTALL else null
-                },
-            )
-            SmallActionPill(
-                label = "Reconnect",
-                onClick = { connectAttempt++ },
-            )
-            SmallActionPill(
-                label = "Stop",
-                danger = true,
-                onClick = {
-                    if (api != null) {
-                        scope.launch {
-                            runCatching { api.androidStopDevice(device.avdId, device.runtime?.generation) }
-                            onBack()
-                        }
-                    }
-                },
-            )
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
 
-        // Main stage: H.264 SurfaceView contained inside letterbox box
+        if (!device.hardwareKeyboard) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .background(tokens.panel2.color)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .testTag("android-viewer-no-hw-keyboard"),
+            ) {
+                BasicText(
+                    "This AVD has no hardware keyboard, so typing will not reach it. Set hw.keyboard=yes in its config.ini.",
+                    style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+                )
+            }
+        }
+
+        // Take-control banner (`android-viewer.tsx:107-115`)
+        AndroidTakeControlBanner(
+            visible = !controller && connState == AndroidConnState.LIVE,
+            controllerReason = controllerReason,
+            onTakeControl = { sendWs(buildAndroidTakeControlJson()) },
+        )
+
+        // 2. Video Stage (`android-viewer.tsx:117-156`)
+        val currentGeometry by rememberUpdatedState(geometry)
+        val currentController by rememberUpdatedState(controller)
+
         BoxWithConstraints(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(Color(0xFF09090B)),
-            contentAlignment = Alignment.Center,
+                .background(Color.Black)
+                .focusRequester(stageFocusRequester)
+                .focusable()
+                .onPreviewKeyEvent { ev ->
+                    if (!currentController || ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    val w3cKey = when (ev.key) {
+                        Key.Enter, Key.NumPadEnter -> "Enter"
+                        Key.Backspace -> "Backspace"
+                        Key.Delete -> "Delete"
+                        Key.Tab -> "Tab"
+                        Key.Escape -> "Escape"
+                        Key.DirectionUp -> "ArrowUp"
+                        Key.DirectionDown -> "ArrowDown"
+                        Key.DirectionLeft -> "ArrowLeft"
+                        Key.DirectionRight -> "ArrowRight"
+                        Key.MoveHome -> "Home"
+                        Key.MoveEnd -> "End"
+                        Key.PageUp -> "PageUp"
+                        Key.PageDown -> "PageDown"
+                        else -> null
+                    }
+                    if (w3cKey != null) {
+                        sendWs(buildAndroidKeyJson(currentGeometry.generation, w3cKey, "press"))
+                        true
+                    } else {
+                        false
+                    }
+                },
         ) {
-            val density = LocalDensity.current
-            val boxW = with(density) { maxWidth.toPx().toDouble() }
-            val boxH = with(density) { maxHeight.toPx().toDouble() }
-            val rect = containedRect(boxW, boxH, geometry.frameWidth, geometry.frameHeight)
-            val surfW = with(density) { rect.width.toFloat().toDp() }
-            val surfH = with(density) { rect.height.toFloat().toDp() }
+            val stageW = constraints.maxWidth.toFloat()
+            val stageH = constraints.maxHeight.toFloat()
+            val displayRect = remember(stageW, stageH, geometry.width, geometry.height) {
+                computeAndroidLetterbox(stageW, stageH, geometry.width, geometry.height)
+            }
+            val currentRect by rememberUpdatedState(displayRect)
+
+            val surfaceW = with(density) { displayRect.width.coerceAtLeast(1f).toDp() }
+            val surfaceH = with(density) { displayRect.height.coerceAtLeast(1f).toDp() }
+            val offsetX = displayRect.left.roundToInt()
+            val offsetY = displayRect.top.roundToInt()
 
             AndroidView(
-                modifier = Modifier
-                    .size(width = surfW.coerceAtLeast(1.dp), height = surfH.coerceAtLeast(1.dp))
-                    .testTag("android-video-surface"),
                 factory = { ctx ->
                     SurfaceView(ctx).apply {
+                        holder.setFixedSize(geometry.width.coerceAtLeast(1), geometry.height.coerceAtLeast(1))
                         holder.addCallback(
                             object : SurfaceHolder.Callback {
                                 override fun surfaceCreated(holder: SurfaceHolder) {
                                     decoder.attachSurface(holder.surface)
-                                    sendWs(buildAndroidRequestKeyframeJson())
                                 }
 
                                 override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -1645,419 +1616,552 @@ internal fun AndroidViewer(
                                 }
 
                                 override fun surfaceDestroyed(holder: SurfaceHolder) {
-                                    if (touchTracker.clear()) {
-                                        sendWs(buildAndroidInputResetJson())
-                                    }
                                     decoder.attachSurface(null)
                                 }
                             },
                         )
-                        setOnTouchListener { v, event ->
-                            if (!currentController) return@setOnTouchListener false
-                            v.parent?.requestDisallowInterceptTouchEvent(true)
-                            val geom = currentGeom
-                            val vw = v.width.toDouble().coerceAtLeast(1.0)
-                            val vh = v.height.toDouble().coerceAtLeast(1.0)
-
-                            fun mapPointer(idx: Int): AndroidIntPoint? = pointerToDevice(
-                                boxWidth = vw,
-                                boxHeight = vh,
-                                offsetX = event.getX(idx).toDouble(),
-                                offsetY = event.getY(idx).toDouble(),
-                                geometry = geom,
-                            )
-
-                            when (event.actionMasked) {
-                                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
-                                    val idx = event.actionIndex
-                                    val pid = event.getPointerId(idx)
-                                    val pt = mapPointer(idx) ?: return@setOnTouchListener true
-                                    val contacts = touchTracker.onDown(pid, pt)
-                                    if (contacts != null) {
-                                        sendWs(buildAndroidTouchJson(AndroidTouchPhase.DOWN, contacts, geom.generation))
-                                    }
-                                }
-                                MotionEvent.ACTION_MOVE -> {
-                                    val updates = ArrayList<Pair<Int, AndroidIntPoint>>(event.pointerCount)
-                                    for (i in 0 until event.pointerCount) {
-                                        val pid = event.getPointerId(i)
-                                        val pt = mapPointer(i) ?: continue
-                                        updates.add(pid to pt)
-                                    }
-                                    val contacts = touchTracker.onMove(updates)
-                                    if (contacts != null) {
-                                        sendWs(buildAndroidTouchJson(AndroidTouchPhase.MOVE, contacts, geom.generation))
-                                    }
-                                }
-                                MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
-                                    val idx = event.actionIndex
-                                    val pid = event.getPointerId(idx)
-                                    val pt = mapPointer(idx)
-                                    val contacts = touchTracker.onUpOrCancel(pid, pt)
-                                    if (contacts != null) {
-                                        sendWs(buildAndroidTouchJson(AndroidTouchPhase.UP, contacts, geom.generation))
-                                    }
-                                }
-                                MotionEvent.ACTION_CANCEL -> {
-                                    val idx = event.actionIndex
-                                    val pid = event.getPointerId(idx)
-                                    val pt = mapPointer(idx)
-                                    val contacts = touchTracker.onUpOrCancel(pid, pt)
-                                    if (contacts != null) {
-                                        sendWs(buildAndroidTouchJson(AndroidTouchPhase.CANCEL, contacts, geom.generation))
-                                    }
-                                    touchTracker.clear()
-                                    sendWs(buildAndroidInputResetJson())
-                                }
-                            }
-                            true
-                        }
                     }
                 },
+                update = { view ->
+                    view.holder.setFixedSize(geometry.width.coerceAtLeast(1), geometry.height.coerceAtLeast(1))
+                },
+                modifier = Modifier
+                    .offset { IntOffset(offsetX, offsetY) }
+                    .size(surfaceW, surfaceH)
+                    .testTag("android-video-surface"),
             )
 
-            // Status / loading / error overlay
-            if (!hasVideoFrame || connState != AndroidConnState.CONNECTED || streamError != null) {
-                Column(
-                    Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color.Black.copy(alpha = 0.72f))
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+            // Multitouch pointer overlay (`use-android-touch.ts`)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .testTag("android-stage")
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Main)
+                                if (!currentController) continue
+                                val geo = currentGeometry
+                                val rect = currentRect
+                                for (change in event.changes) {
+                                    val pid = change.id.value
+                                    val devPt = pointerToDevice(change.position.x, change.position.y, rect, geo)
+                                    if (!change.previousPressed && change.pressed) {
+                                        if (devPt != null) {
+                                            val touches = touchTracker.onDown(pid, devPt)
+                                            if (!touches.isNullOrEmpty()) {
+                                                sendWs(buildAndroidTouchJson(geo.generation, touches))
+                                            }
+                                            change.consume()
+                                        }
+                                    } else if (change.previousPressed && change.pressed) {
+                                        val touches = touchTracker.onMove(pid, devPt)
+                                        if (!touches.isNullOrEmpty()) {
+                                            sendWs(buildAndroidTouchJson(geo.generation, touches))
+                                            change.consume()
+                                        }
+                                    } else if (change.previousPressed && !change.pressed) {
+                                        val touches = touchTracker.onUpOrCancel(pid, devPt)
+                                        if (!touches.isNullOrEmpty()) {
+                                            sendWs(buildAndroidTouchJson(geo.generation, touches))
+                                        }
+                                        change.consume()
+                                    }
+                                }
+                            }
+                        }
+                    },
+            )
+
+            // Waiting / Failed overlay (`android-viewer.tsx:132-155`)
+            if (!hasPicture) {
+                Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    val statusLabel = when {
-                        streamError != null -> streamError!!
-                        connState == AndroidConnState.CONNECTING -> "Connecting to ${device.name}…"
-                        connState == AndroidConnState.RECONNECTING -> "Reconnecting stream…"
-                        connState == AndroidConnState.FAILED -> "Connection failed"
-                        deviceStatus == AndroidDeviceStatus.BOOTING -> "Android is booting…"
-                        else -> "Waiting for H.264 keyframe…"
+                    if (connState == AndroidConnState.FAILED) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            BasicText(
+                                errorMessage ?: "Could not connect.",
+                                style = ppmText(13f, lineHeight = 18f).copy(color = Color.White.copy(alpha = 0.85f)),
+                            )
+                            SmallActionButton(
+                                label = "Try again",
+                                icon = ProductIcon.RefreshCw,
+                                primary = true,
+                                tag = "android-try-again",
+                                onClick = { reconnectTick++ },
+                            )
+                        }
+                    } else {
+                        val connecting = connState == AndroidConnState.CONNECTING || connState == AndroidConnState.RECONNECTING
+                        BasicText(
+                            if (connecting) "Connecting to ${device.name}…" else "Waiting for the first frame…",
+                            style = ppmText(13f, lineHeight = 18f).copy(color = Color.White.copy(alpha = 0.75f)),
+                            modifier = Modifier.testTag("android-waiting-overlay"),
+                        )
                     }
+                }
+            } else if (errorMessage != null) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopCenter)
+                        .background(tokens.error.color.copy(alpha = 0.9f))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
                     BasicText(
-                        statusLabel,
-                        style = ppmText(12f, FontWeight.Medium).copy(color = Color.White, textAlign = TextAlign.Center),
+                        errorMessage.orEmpty(),
+                        style = ppmText(12f, lineHeight = 16f).copy(color = Color.White),
                     )
-                    if (connState == AndroidConnState.FAILED || streamError != null) {
-                        SmallActionPill("Retry now", primary = true, onClick = { connectAttempt++ })
-                    }
                 }
             }
         }
 
-        // Optional soft/hardware keyboard input strip
-        if (keyboardOpen) {
-            Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
+        // Hidden / live IME text capture (`use-android-keyboard.ts`)
+        if (keyboardVisible && controller) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(tokens.panel2.color)
+                    .border(1.dp, tokens.border.color)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                BasicTextField(
+                    value = imeText,
+                    onValueChange = { next ->
+                        val prev = imeText
+                        imeText = next
+                        val kind = classifyCommittedText(
+                            previous = prev.text,
+                            current = next.text,
+                            hasComposition = next.composition != null,
+                        )
+                        when (kind) {
+                            is AndroidTextInputKind.None -> {}
+                            is AndroidTextInputKind.Backspace -> {
+                                repeat(kind.count) {
+                                    sendWs(buildAndroidKeyJson(geometry.generation, "Backspace", "press"))
+                                }
+                                imeText = TextFieldValue("")
+                            }
+                            is AndroidTextInputKind.Enter -> {
+                                sendWs(buildAndroidKeyJson(geometry.generation, "Enter", "press"))
+                                imeText = TextFieldValue("")
+                            }
+                            is AndroidTextInputKind.Commit -> {
+                                sendWs(buildAndroidTextJson(kind.text))
+                                imeText = TextFieldValue("")
+                            }
+                        }
+                    },
+                    textStyle = ppmText(13f, lineHeight = 18f).copy(color = tokens.text.color),
+                    cursorBrush = SolidColor(tokens.accent.color),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(tokens.bgSolid.color)
+                        .border(1.dp, tokens.border.color, RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                        .focusRequester(imeFocusRequester)
+                        .testTag("android-ime-input"),
+                    decorationBox = { inner ->
+                        Box {
+                            if (imeText.text.isEmpty()) {
+                                BasicText(
+                                    "Type to send to ${device.name}…",
+                                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
+                                )
+                            }
+                            inner()
+                        }
+                    },
+                )
+                SmallActionButton(
+                    label = "Enter",
+                    tag = "android-ime-enter",
+                    onClick = { sendWs(buildAndroidKeyJson(geometry.generation, "Enter", "press")) },
+                )
+                SmallActionButton(
+                    label = "Backspace",
+                    tag = "android-ime-backspace",
+                    onClick = { sendWs(buildAndroidKeyJson(geometry.generation, "Backspace", "press")) },
+                )
+            }
+            LaunchedEffect(Unit) {
+                runCatching { imeFocusRequester.requestFocus() }
+                keyboardController?.show()
+            }
+        }
+
+        // 3. Tools Drawer (`android-tools-drawer.tsx`)
+        val openTool = activeTool
+        if (openTool != null) {
             Column(
                 Modifier
                     .fillMaxWidth()
+                    .height(260.dp)
                     .background(tokens.panel.color)
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
-                    .testTag("android-keyboard-bar"),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                    .border(1.dp, tokens.border.color)
+                    .testTag("android-tools-drawer"),
             ) {
                 Row(
-                    Modifier.fillMaxWidth(),
+                    Modifier
+                        .fillMaxWidth()
+                        .background(tokens.panel2.color)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    AndroidSingleLineInput(
-                        value = keyboardText,
-                        onValueChange = { keyboardText = it },
-                        placeholder = "Type ASCII or Unicode/Vietnamese text to send…",
-                        modifier = Modifier.weight(1f).testTag("android-keyboard-input"),
-                    )
-                    SmallActionPill(
-                        label = "Send",
-                        primary = true,
-                        enabled = controller && keyboardText.isNotEmpty(),
-                        modifier = Modifier.testTag("android-keyboard-send"),
-                        onClick = {
-                            if (!controller || keyboardText.isEmpty()) return@SmallActionPill
-                            val payload = when (classifyAndroidTextInput(keyboardText)) {
-                                AndroidTextInputKind.ASCII_TEXT -> buildAndroidTextJson(keyboardText)
-                                AndroidTextInputKind.UNICODE_PASTE -> buildAndroidPasteJson(keyboardText)
-                            }
-                            sendWs(payload)
-                            keyboardText = ""
-                        },
+                    for (t in AndroidDrawerTool.entries) {
+                        SmallActionButton(
+                            label = t.label,
+                            icon = t.icon,
+                            primary = openTool == t,
+                            tag = "android-drawer-tab-${t.wire}",
+                            onClick = { activeTool = t },
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    SmallActionButton(
+                        label = "Hide the tools",
+                        icon = ProductIcon.ChevronDown,
+                        tag = "android-tools-close",
+                        onClick = { activeTool = null },
                     )
                 }
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    SmallActionPill("Enter", enabled = controller) { sendWs(buildAndroidKeyJson(AndroidKey.ENTER)) }
-                    SmallActionPill("Bksp", enabled = controller) { sendWs(buildAndroidKeyJson(AndroidKey.BACKSPACE)) }
-                    SmallActionPill("Tab", enabled = controller) { sendWs(buildAndroidKeyJson(AndroidKey.TAB)) }
-                    SmallActionPill("Esc", enabled = controller) { sendWs(buildAndroidKeyJson(AndroidKey.ESCAPE)) }
-                    SmallActionPill("◀", enabled = controller) { sendWs(buildAndroidKeyJson(AndroidKey.DPAD_LEFT)) }
-                    SmallActionPill("▲", enabled = controller) { sendWs(buildAndroidKeyJson(AndroidKey.DPAD_UP)) }
-                    SmallActionPill("▼", enabled = controller) { sendWs(buildAndroidKeyJson(AndroidKey.DPAD_DOWN)) }
-                    SmallActionPill("▶", enabled = controller) { sendWs(buildAndroidKeyJson(AndroidKey.DPAD_RIGHT)) }
+
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    when (openTool) {
+                        AndroidDrawerTool.INSTALL -> AndroidInstallPanel(
+                            api = api,
+                            deviceId = deviceId,
+                            deviceName = device.name,
+                            projects = projects,
+                            initialProject = selectedProject,
+                        )
+                        AndroidDrawerTool.LOGS -> AndroidLogcatPanel(
+                            entries = logEntries,
+                            paused = logPaused,
+                            onTogglePause = { logPaused = !logPaused },
+                            onClear = { logEntries = emptyList() },
+                        )
+                        AndroidDrawerTool.CLIPBOARD -> AndroidClipboardPanel(
+                            api = api,
+                            deviceId = deviceId,
+                        )
+                    }
                 }
             }
         }
 
-        // Bottom Android Navigation & Hardware Controls (`android-controls.tsx`)
-        Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
+        // 4. Bottom Hardware & Quality Controls Bar (`android-controls.tsx`)
         AndroidControlsBar(
-            controller = controller && connState == AndroidConnState.CONNECTED,
+            controller = controller,
+            rotation = geometry.rotation,
             quality = quality,
-            keyboardOpen = keyboardOpen,
-            onKey = { key -> sendWs(buildAndroidKeyJson(key)) },
-            onRotate = {
-                val next = nextAndroidRotation(geometry.rotation)
-                sendWs(buildAndroidRotateJson(next))
+            keyboardOpen = keyboardVisible,
+            onHardwareKey = { key -> sendWs(buildAndroidHardwareKeyJson(key)) },
+            onToggleKeyboard = {
+                keyboardVisible = !keyboardVisible
+                if (!keyboardVisible) keyboardController?.hide()
             },
-            onQuality = { q ->
+            onRotate = { sendWs(buildAndroidRotateJson(nextAndroidRotation(geometry.rotation))) },
+            onQualityChange = { q ->
                 quality = q
-                sendWs(buildAndroidSetQualityJson(q))
+                sendWs(buildAndroidQualityJson(q))
             },
-            onToggleKeyboard = { keyboardOpen = !keyboardOpen },
         )
+    }
+}
 
-        // Collapsible Bottom Tools Drawer (`android-tools-drawer.tsx`)
-        activeDrawerTab?.let { tab ->
-            Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
-            AndroidToolsDrawer(
-                model = model,
-                deviceId = device.avdId,
-                activeTab = tab,
-                tall = tallDrawer,
-                onSelectTab = { activeDrawerTab = it },
-                onToggleTall = { tallDrawer = !tallDrawer },
-                onClose = { activeDrawerTab = null },
-                logEntries = logEntries,
-                droppedLogs = droppedLogs,
-                logFilter = logFilter,
-                logsPaused = logsPaused,
-                onLogFilterChange = { logFilter = it },
-                onToggleLogsPaused = { logsPaused = !logsPaused },
-                onClearLogs = {
-                    logEntries = emptyList()
-                    droppedLogs = 0
-                },
-            )
-        }
+@Composable
+internal fun AndroidTakeControlBanner(
+    visible: Boolean,
+    controllerReason: String?,
+    onTakeControl: () -> Unit,
+) {
+    if (!visible) return
+    val tokens = LocalPpmTokens.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(tokens.panel.color)
+            .border(1.dp, tokens.border.color)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .testTag("android-take-control-banner"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        BasicText(
+            controllerReason ?: "Someone else is controlling this device.",
+            style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+            modifier = Modifier.weight(1f).testTag("android-controller-reason"),
+        )
+        SmallActionButton(
+            label = "Take control",
+            primary = true,
+            tag = "android-take-control",
+            onClick = onTakeControl,
+        )
     }
 }
 
 @Composable
 internal fun AndroidControlsBar(
     controller: Boolean,
+    rotation: Int,
     quality: AndroidQuality,
     keyboardOpen: Boolean,
-    onKey: (AndroidKey) -> Unit,
-    onRotate: () -> Unit,
-    onQuality: (AndroidQuality) -> Unit,
+    onHardwareKey: (AndroidHardwareKey) -> Unit,
     onToggleKeyboard: () -> Unit,
+    onRotate: () -> Unit,
+    onQualityChange: (AndroidQuality) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
-    var moreOpen by remember { mutableStateOf(false) }
+    var extrasOpen by remember { mutableStateOf(false) }
+    var qualityMenuOpen by remember { mutableStateOf(false) }
 
-    Column(
+    Row(
         Modifier
             .fillMaxWidth()
             .background(tokens.panel.color)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .border(1.dp, tokens.border.color)
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 8.dp, vertical = 6.dp)
             .testTag("android-controls-bar"),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            SmallActionPill("Back", enabled = controller, modifier = Modifier.testTag("android-key-back")) {
-                onKey(AndroidKey.BACK)
-            }
-            SmallActionPill("Home", enabled = controller, modifier = Modifier.testTag("android-key-home")) {
-                onKey(AndroidKey.HOME)
-            }
-            SmallActionPill("Recent", enabled = controller, modifier = Modifier.testTag("android-key-recent")) {
-                onKey(AndroidKey.APP_SWITCH)
-            }
-            SmallActionPill(
-                label = "Keyboard",
-                primary = keyboardOpen,
+        SmallActionButton(
+            label = "Back",
+            icon = ProductIcon.ArrowLeft,
+            enabled = controller,
+            tag = "android-hw-back",
+            onClick = { onHardwareKey(AndroidHardwareKey.BACK) },
+        )
+        SmallActionButton(
+            label = "Home",
+            icon = ProductIcon.Circle,
+            enabled = controller,
+            tag = "android-hw-home",
+            onClick = { onHardwareKey(AndroidHardwareKey.HOME) },
+        )
+        SmallActionButton(
+            label = "Recent apps",
+            icon = ProductIcon.Square,
+            enabled = controller,
+            tag = "android-hw-recent",
+            onClick = { onHardwareKey(AndroidHardwareKey.RECENT) },
+        )
+
+        SmallActionButton(
+            label = "Keyboard",
+            icon = ProductIcon.Terminal,
+            primary = keyboardOpen,
+            enabled = controller,
+            tag = "android-toggle-keyboard",
+            onClick = onToggleKeyboard,
+        )
+        SmallActionButton(
+            label = "Rotate (now ${rotation}°)",
+            icon = ProductIcon.RotateCcw,
+            enabled = controller,
+            tag = "android-rotate",
+            onClick = onRotate,
+        )
+        SmallActionButton(
+            label = "More keys",
+            icon = ProductIcon.MoreHorizontal,
+            primary = extrasOpen,
+            enabled = controller,
+            tag = "android-more-keys",
+            onClick = { extrasOpen = !extrasOpen },
+        )
+        if (extrasOpen) {
+            SmallActionButton(
+                label = "Volume up",
                 enabled = controller,
-                modifier = Modifier.testTag("android-key-keyboard"),
-                onClick = onToggleKeyboard,
+                tag = "android-hw-volume-up",
+                onClick = { onHardwareKey(AndroidHardwareKey.VOLUME_UP) },
             )
-            SmallActionPill("Rotate", enabled = controller, modifier = Modifier.testTag("android-key-rotate"), onClick = onRotate)
-            SmallActionPill(
-                label = "More",
-                primary = moreOpen,
+            SmallActionButton(
+                label = "Volume down",
                 enabled = controller,
-                modifier = Modifier.testTag("android-key-more"),
-                onClick = { moreOpen = !moreOpen },
+                tag = "android-hw-volume-down",
+                onClick = { onHardwareKey(AndroidHardwareKey.VOLUME_DOWN) },
             )
-            Spacer(Modifier.width(4.dp))
-            for (preset in AndroidQuality.entries) {
-                SmallActionPill(
-                    label = preset.label,
-                    primary = quality == preset,
-                    modifier = Modifier.testTag("android-quality-${preset.wire}"),
-                    onClick = { onQuality(preset) },
-                )
-            }
+            SmallActionButton(
+                label = "Power",
+                enabled = controller,
+                tag = "android-hw-power",
+                onClick = { onHardwareKey(AndroidHardwareKey.POWER) },
+            )
         }
-        if (moreOpen) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                BasicText("Hardware:", style = ppmText(11f).copy(color = tokens.text3.color))
-                SmallActionPill("Volume +", enabled = controller) { onKey(AndroidKey.VOLUME_UP) }
-                SmallActionPill("Volume −", enabled = controller) { onKey(AndroidKey.VOLUME_DOWN) }
-                SmallActionPill("Power", enabled = controller) { onKey(AndroidKey.POWER) }
-            }
-        }
-    }
-}
 
-// ===========================================================================
-// 3. Tools Drawer (APK Install, Live Logcat, Device Clipboard)
-// ===========================================================================
+        Spacer(Modifier.width(8.dp))
 
-@Composable
-internal fun AndroidToolsDrawer(
-    model: AppModel,
-    deviceId: String,
-    activeTab: AndroidToolTab,
-    tall: Boolean,
-    onSelectTab: (AndroidToolTab) -> Unit,
-    onToggleTall: () -> Unit,
-    onClose: () -> Unit,
-    logEntries: List<AndroidLogEntry>,
-    droppedLogs: Int,
-    logFilter: AndroidLogFilter,
-    logsPaused: Boolean,
-    onLogFilterChange: (AndroidLogFilter) -> Unit,
-    onToggleLogsPaused: () -> Unit,
-    onClearLogs: () -> Unit,
-) {
-    val tokens = LocalPpmTokens.current
-    val drawerHeight = if (tall) 340.dp else 220.dp
-
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .height(drawerHeight)
-            .background(tokens.panel.color)
-            .testTag("android-tools-drawer"),
-    ) {
+        // Quality select (`android-controls.tsx:100-113`)
         Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                for (tab in AndroidToolTab.entries) {
-                    SmallActionPill(
-                        label = tab.label,
-                        primary = activeTab == tab,
-                        modifier = Modifier.testTag("android-drawer-tab-${tab.name.lowercase()}"),
-                        onClick = { onSelectTab(tab) },
+            SmallActionButton(
+                label = quality.label,
+                enabled = controller,
+                tag = "android-quality-select",
+                onClick = { qualityMenuOpen = !qualityMenuOpen },
+            )
+            if (qualityMenuOpen) {
+                for (q in AndroidQuality.entries) {
+                    SmallActionButton(
+                        label = q.label,
+                        primary = quality == q,
+                        enabled = controller,
+                        tag = "android-quality-${q.wire}",
+                        onClick = {
+                            qualityMenuOpen = false
+                            onQualityChange(q)
+                        },
                     )
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                SmallActionPill(if (tall) "Compact" else "Expand", onClick = onToggleTall)
-                SmallActionPill("Close", onClick = onClose)
-            }
-        }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
-
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            when (activeTab) {
-                AndroidToolTab.INSTALL -> AndroidApkPanel(model = model, deviceId = deviceId)
-                AndroidToolTab.LOGS -> AndroidLogcatPanel(
-                    model = model,
-                    entries = logEntries,
-                    dropped = droppedLogs,
-                    filter = logFilter,
-                    paused = logsPaused,
-                    onFilterChange = onLogFilterChange,
-                    onTogglePaused = onToggleLogsPaused,
-                    onClear = onClearLogs,
-                )
-                AndroidToolTab.CLIPBOARD -> AndroidClipboardPanel(model = model, deviceId = deviceId)
-            }
         }
     }
 }
 
+// =============================================================================
+// 4. Install Panel (`android-install-panel.tsx`)
+// =============================================================================
+
+private sealed interface InstallPhase {
+    data object Idle : InstallPhase
+    data class Uploading(val fraction: Float, val filename: String) : InstallPhase
+    data class Installing(val operationId: String, val detail: String, val filename: String) : InstallPhase
+    data class Done(val filename: String) : InstallPhase
+    data class Failed(val message: String) : InstallPhase
+}
+
 @Composable
-private fun AndroidApkPanel(
-    model: AppModel,
+internal fun AndroidInstallPanel(
+    api: ApiClient,
     deviceId: String,
+    deviceName: String,
+    projects: List<ProjectInfo>,
+    initialProject: String?,
 ) {
-    val api = model.api
-    val project = model.selectedProject
+    val tokens = LocalPpmTokens.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val tokens = LocalPpmTokens.current
 
-    var projectApks by remember { mutableStateOf<List<ProjectApkItem>>(emptyList()) }
-    var loadingApks by remember { mutableStateOf(false) }
-    var statusMessage by remember { mutableStateOf<String?>(null) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var uploadingBytes by remember { mutableLongStateOf(0L) }
-    var uploadTotalBytes by remember { mutableLongStateOf(0L) }
-    var uploadJob by remember { mutableStateOf<Job?>(null) }
+    var selectedProject by remember { mutableStateOf(initialProject.orEmpty()) }
+    var apks by remember { mutableStateOf<List<ProjectApkItem>?>(null) }
+    var scanning by remember { mutableStateOf(false) }
+    var allowDowngrade by remember { mutableStateOf(false) }
+    var phase by remember { mutableStateOf<InstallPhase>(InstallPhase.Idle) }
+    var activeJob by remember { mutableStateOf<Job?>(null) }
 
-    suspend fun loadApks() {
-        if (api == null || project.isNullOrBlank()) return
-        loadingApks = true
-        try {
-            projectApks = parseProjectApks(api.androidProjectApks(project))
-        } catch (_: Throwable) {
-        } finally {
-            loadingApks = false
+    val busy = phase is InstallPhase.Uploading || phase is InstallPhase.Installing
+
+    suspend fun watchOperation(operationId: String, filename: String) {
+        while (true) {
+            delay(INSTALL_POLL_MS)
+            val current = phase
+            if (current !is InstallPhase.Installing || current.operationId != operationId) return
+            val op = try {
+                parseAndroidOperation(api.androidOperationStatus(operationId))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                phase = InstallPhase.Failed(e.message ?: "the install failed")
+                return
+            }
+            if (op == null) {
+                phase = InstallPhase.Failed("the install failed")
+                return
+            }
+            when (op.state) {
+                "succeeded" -> {
+                    phase = InstallPhase.Done(filename)
+                    return
+                }
+                "failed" -> {
+                    phase = InstallPhase.Failed(op.error ?: "the install failed")
+                    return
+                }
+                "cancelled" -> {
+                    phase = InstallPhase.Idle
+                    return
+                }
+                else -> {
+                    phase = InstallPhase.Installing(operationId, op.detail ?: "installing…", filename)
+                }
+            }
         }
     }
 
-    LaunchedEffect(api, project) {
-        loadApks()
+    suspend fun scanProject(name: String) {
+        if (name.isBlank()) {
+            apks = null
+            return
+        }
+        scanning = true
+        try {
+            apks = parseProjectApks(api.androidProjectApks(name))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            apks = emptyList()
+        } finally {
+            scanning = false
+        }
     }
 
-    val apkPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri == null || api == null) return@rememberLauncherForActivityResult
-        val (fileName, length) = queryDocumentMeta(context, uri)
-        errorMessage = null
-        statusMessage = "Uploading $fileName…"
-        uploadingBytes = 0L
-        uploadTotalBytes = length
-        uploadJob = scope.launch {
+    LaunchedEffect(selectedProject) {
+        scanProject(selectedProject)
+    }
+
+    val fileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val (name, size) = queryUriMetadata(context, uri)
+        activeJob?.cancel()
+        activeJob = scope.launch {
+            phase = InstallPhase.Uploading(0f, name)
             try {
-                api.androidUploadApk(
+                val res = api.androidUploadApk(
                     deviceId = deviceId,
-                    fileName = fileName,
-                    contentLength = length,
+                    fileName = name,
+                    contentLength = size,
+                    allowDowngrade = allowDowngrade,
                     openStream = {
                         context.contentResolver.openInputStream(uri)
-                            ?: throw IllegalStateException("Cannot open selected APK")
+                            ?: throw IllegalStateException("Cannot open APK file")
                     },
                     onProgress = { loaded, total ->
-                        uploadingBytes = loaded
-                        uploadTotalBytes = total
+                        val frac = if (total > 0L) (loaded.toFloat() / total.toFloat()).coerceIn(0f, 1f) else 0f
+                        phase = InstallPhase.Uploading(frac, name)
                     },
                 )
-                statusMessage = "Installed $fileName"
-                model.toast(ErrorToastMessage("Installed $fileName", kind = ErrorToastMessage.Kind.SUCCESS))
-            } catch (ce: CancellationException) {
-                statusMessage = "Upload cancelled"
-                throw ce
-            } catch (t: Throwable) {
-                errorMessage = t.message ?: "APK install failed"
-                statusMessage = null
-            } finally {
-                uploadJob = null
+                val op = parseAndroidOperation(res)
+                val opId = op?.id
+                if (!opId.isNullOrBlank()) {
+                    phase = InstallPhase.Installing(opId, "installing…", name)
+                    watchOperation(opId, name)
+                } else {
+                    phase = InstallPhase.Done(name)
+                }
+            } catch (_: CancellationException) {
+                phase = InstallPhase.Idle
+            } catch (e: Throwable) {
+                phase = InstallPhase.Failed(e.message ?: "APK upload failed")
             }
         }
     }
@@ -2065,365 +2169,663 @@ private fun AndroidApkPanel(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(10.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        BasicText(
+            "Installing on $deviceName.",
+            style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+        )
+
         Row(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            SmallActionPill(
-                label = "Choose .apk file…",
+            SmallActionButton(
+                label = "Choose an APK",
+                icon = ProductIcon.Upload,
                 primary = true,
-                enabled = uploadJob == null,
-                modifier = Modifier.testTag("android-choose-apk-btn"),
-                onClick = { apkPicker.launch(arrayOf("application/vnd.android.package-archive", "application/octet-stream", "*/*")) },
+                enabled = !busy,
+                tag = "android-choose-apk",
+                onClick = { fileLauncher.launch(arrayOf("application/vnd.android.package-archive", "*/*")) },
             )
-            if (uploadJob != null) {
-                val pct = if (uploadTotalBytes > 0L) ((uploadingBytes * 100L) / uploadTotalBytes).toInt() else 0
-                BasicText("Uploading ($pct%)…", style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text2.color))
-                SmallActionPill("Cancel", danger = true, onClick = { uploadJob?.cancel() })
-            }
-            if (!project.isNullOrBlank()) {
-                Spacer(Modifier.weight(1f))
-                SmallActionPill("Refresh project APKs", onClick = { scope.launch { loadApks() } })
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(enabled = !busy) { allowDowngrade = !allowDowngrade }
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                    .testTag("android-allow-downgrade"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                PpmIcon(
+                    if (allowDowngrade) ProductIcon.Check else ProductIcon.Square,
+                    14.dp,
+                    if (allowDowngrade) tokens.accent.color else tokens.text3.color,
+                )
+                BasicText(
+                    "Allow downgrade",
+                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text.color),
+                )
             }
         }
 
-        if (statusMessage != null) {
-            BasicText(statusMessage!!, style = ppmText(11f).copy(color = tokens.success.color))
-        }
-        if (errorMessage != null) {
-            BasicText(errorMessage!!, style = ppmText(11f).copy(color = tokens.error.color))
+        when (val p = phase) {
+            is InstallPhase.Idle -> {}
+            is InstallPhase.Uploading -> {
+                val pct = (p.fraction * 100).roundToInt()
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(tokens.panel2.color)
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        BasicText(p.filename, style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
+                        BasicText("Uploading — $pct%", style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color))
+                    }
+                    SmallActionButton(
+                        label = "Cancel",
+                        danger = true,
+                        tag = "android-install-cancel",
+                        onClick = {
+                            activeJob?.cancel()
+                            phase = InstallPhase.Idle
+                        },
+                    )
+                }
+            }
+            is InstallPhase.Installing -> {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(tokens.panel2.color)
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        BasicText(p.filename, style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
+                        BasicText(p.detail, style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color))
+                    }
+                    SmallActionButton(
+                        label = "Cancel",
+                        danger = true,
+                        tag = "android-install-cancel",
+                        onClick = {
+                            val opId = p.operationId
+                            activeJob?.cancel()
+                            phase = InstallPhase.Idle
+                            if (opId.isNotBlank()) {
+                                scope.launch {
+                                    runCatching { api.androidCancelOperation(opId) }
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+            is InstallPhase.Done -> {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(tokens.success.color.copy(alpha = 0.12f))
+                        .padding(8.dp)
+                        .testTag("android-install-done"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    BasicText(
+                        "${p.filename} installed",
+                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.success.color),
+                    )
+                    SmallActionButton(
+                        label = "Dismiss",
+                        tag = "android-install-dismiss",
+                        onClick = { phase = InstallPhase.Idle },
+                    )
+                }
+            }
+            is InstallPhase.Failed -> {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(tokens.error.color.copy(alpha = 0.12f))
+                        .padding(8.dp)
+                        .testTag("android-install-failed"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    BasicText(
+                        p.message,
+                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.error.color),
+                        modifier = Modifier.weight(1f),
+                    )
+                    SmallActionButton(
+                        label = "Dismiss",
+                        tag = "android-install-dismiss",
+                        onClick = { phase = InstallPhase.Idle },
+                    )
+                }
+            }
         }
 
-        if (!project.isNullOrBlank()) {
-            BasicText(
-                "Project APKs ($project)",
-                style = ppmText(11f, FontWeight.SemiBold).copy(color = tokens.text2.color),
-            )
-            if (loadingApks) {
-                BasicText("Scanning project for built APKs…", style = ppmText(11f).copy(color = tokens.text3.color))
-            } else if (projectApks.isEmpty()) {
-                BasicText("No .apk files found in $project.", style = ppmText(11f).copy(color = tokens.text3.color))
+        // From a project section (`android-install-panel.tsx:170-220`)
+        Column(
+            Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                BasicText(
+                    "From a project",
+                    style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color),
+                )
+                Row(
+                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    for (proj in projects) {
+                        SmallActionButton(
+                            label = proj.name,
+                            primary = selectedProject == proj.name,
+                            tag = "android-apk-project-${proj.name}",
+                            onClick = { selectedProject = proj.name },
+                        )
+                    }
+                }
+                if (selectedProject.isNotBlank()) {
+                    SmallActionButton(
+                        label = "Rescan",
+                        icon = ProductIcon.RefreshCw,
+                        enabled = !scanning,
+                        tag = "android-apk-rescan",
+                        onClick = { scope.launch { scanProject(selectedProject) } },
+                    )
+                }
+            }
+
+            if (scanning) {
+                BasicText("Looking for APKs…", style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color))
+            } else if (apks != null && apks.orEmpty().isEmpty()) {
+                BasicText(
+                    "No .apk files in that project yet — build one and press rescan.",
+                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
+                )
             } else {
-                for (apk in projectApks) {
+                for (apk in apks.orEmpty()) {
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(6.dp))
-                            .background(tokens.bgSolid.color)
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                            .background(tokens.panel2.color)
+                            .border(1.dp, tokens.border.color, RoundedCornerShape(6.dp))
+                            .clickable(enabled = !busy) {
+                                val fname = apk.fileName
+                                activeJob?.cancel()
+                                activeJob = scope.launch {
+                                    phase = InstallPhase.Installing("", "starting…", fname)
+                                    try {
+                                        val res = api.androidInstallProjectApk(
+                                            deviceId = deviceId,
+                                            project = selectedProject,
+                                            path = apk.path,
+                                            downgrade = allowDowngrade,
+                                        )
+                                        val op = parseAndroidOperation(res)
+                                        val opId = op?.id
+                                        if (!opId.isNullOrBlank()) {
+                                            phase = InstallPhase.Installing(opId, "installing…", fname)
+                                            watchOperation(opId, fname)
+                                        } else {
+                                            phase = InstallPhase.Done(fname)
+                                        }
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (e: Throwable) {
+                                        phase = InstallPhase.Failed(e.message ?: "the install failed")
+                                    }
+                                }
+                            }
+                            .padding(8.dp)
+                            .testTag("android-project-apk-${apk.path}"),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            BasicText(apk.fileName, style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text.color))
-                            BasicText(apk.relativePath, style = ppmText(10f, kind = FontKind.MONO).copy(color = tokens.text3.color))
+                            BasicText(
+                                apk.path,
+                                style = ppmText(12f, FontWeight.Medium, lineHeight = 16f, kind = FontKind.MONO).copy(color = tokens.text.color),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            BasicText(
+                                formatApkBytes(apk.bytes),
+                                style = ppmText(11f, lineHeight = 14f).copy(color = tokens.text3.color),
+                            )
                         }
-                        SmallActionPill(
-                            label = "Install",
-                            primary = true,
-                            onClick = {
-                                if (api == null) return@SmallActionPill
-                                errorMessage = null
-                                statusMessage = "Installing ${apk.fileName}…"
-                                scope.launch {
-                                    try {
-                                        api.androidInstallProjectApk(deviceId, project, apk.relativePath)
-                                        statusMessage = "Installed ${apk.fileName}"
-                                    } catch (t: Throwable) {
-                                        errorMessage = t.message ?: "Failed to install ${apk.fileName}"
-                                        statusMessage = null
-                                    }
-                                }
-                            },
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// 5. Logcat Panel (`android-logcat-panel.tsx`)
+// =============================================================================
+
+@Composable
+internal fun AndroidLogcatPanel(
+    entries: List<AndroidLogEntry>,
+    paused: Boolean,
+    onTogglePause: () -> Unit,
+    onClear: () -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    val context = LocalContext.current
+    var filter by remember { mutableStateOf<AndroidLogFilter>(EMPTY_ANDROID_LOG_FILTER) }
+    var following by remember { mutableStateOf(true) }
+    var levelMenuOpen by remember { mutableStateOf(false) }
+
+    val visible by remember(entries, filter) {
+        derivedStateOf {
+            val matched = filterAndroidLogs(entries, filter)
+            if (matched.size > ANDROID_LOGCAT_MAX_ROWS) {
+                matched.subList(matched.size - ANDROID_LOGCAT_MAX_ROWS, matched.size)
+            } else {
+                matched
+            }
+        }
+    }
+
+    val listState = rememberLazyListState()
+    val lastVisibleId = visible.lastOrNull()?.id
+
+    // Follow scroll keyed on the newest visible entry's monotonic `id` (never `visible.size`,
+    // which stops changing once the ring / row cap is full).
+    LaunchedEffect(lastVisibleId, following) {
+        if (following && visible.isNotEmpty()) {
+            listState.scrollToItem(visible.lastIndex)
+        }
+    }
+
+    // Suspend following when the reader scrolls up
+    LaunchedEffect(listState.isScrollInProgress, listState.canScrollForward) {
+        if (listState.isScrollInProgress && listState.canScrollForward) {
+            following = false
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(tokens.panel2.color)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(Modifier.weight(1f)) {
+                DialogTextInput(
+                    value = filter.text,
+                    onValueChange = { filter = filter.copy(text = it) },
+                    placeholder = "Filter tag or message",
+                    tag = "android-log-search",
+                )
+            }
+            SmallActionButton(
+                label = filter.minimum.displayLabel,
+                tag = "android-log-level-select",
+                onClick = { levelMenuOpen = !levelMenuOpen },
+            )
+            if (levelMenuOpen) {
+                for (lvl in AndroidLogLevel.entries) {
+                    SmallActionButton(
+                        label = lvl.displayLabel,
+                        primary = filter.minimum == lvl,
+                        tag = "android-log-level-${lvl.wire}",
+                        onClick = {
+                            levelMenuOpen = false
+                            filter = filter.copy(minimum = lvl)
+                        },
+                    )
+                }
+            }
+            SmallActionButton(
+                label = if (paused) "Resume" else "Pause the view",
+                primary = paused,
+                tag = "android-log-pause",
+                onClick = onTogglePause,
+            )
+            SmallActionButton(
+                label = "Clear the view",
+                tag = "android-log-clear",
+                onClick = onClear,
+            )
+            SmallActionButton(
+                label = "Copy what is shown",
+                tag = "android-log-copy",
+                onClick = {
+                    val text = formatAndroidLogText(visible)
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    cm?.setPrimaryClip(ClipData.newPlainText("Android Logcat", text))
+                },
+            )
+        }
+
+        if (visible.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                BasicText(
+                    if (entries.isEmpty()) "Waiting for the device to log something…" else "Nothing matches that filter.",
+                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
+                )
+            }
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .testTag("android-logcat-list"),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                items(
+                    items = visible,
+                    key = { it.id },
+                ) { entry ->
+                    val lvlColor = when (entry.level) {
+                        AndroidLogLevel.ERROR, AndroidLogLevel.FATAL -> tokens.error.color
+                        AndroidLogLevel.WARN -> tokens.warning.color
+                        AndroidLogLevel.INFO -> tokens.text.color
+                        else -> tokens.text3.color
+                    }
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        BasicText(
+                            formatAndroidLogTime(entry.timestamp),
+                            style = ppmText(11f, lineHeight = 15f, kind = FontKind.MONO).copy(color = tokens.text3.color),
+                        )
+                        BasicText(
+                            entry.level.shortLabel,
+                            style = ppmText(11f, FontWeight.Bold, lineHeight = 15f, kind = FontKind.MONO).copy(color = lvlColor),
+                        )
+                        if (entry.tag.isNotBlank()) {
+                            BasicText(
+                                entry.tag,
+                                style = ppmText(11f, lineHeight = 15f, kind = FontKind.MONO).copy(color = tokens.text2.color),
+                                modifier = Modifier.clickable { filter = filter.copy(text = entry.tag) },
+                            )
+                        }
+                        BasicText(
+                            entry.message,
+                            style = ppmText(11f, lineHeight = 15f, kind = FontKind.MONO).copy(color = lvlColor),
+                            modifier = Modifier.weight(1f),
                         )
                     }
                 }
             }
         }
-    }
-}
 
-@Composable
-private fun AndroidLogcatPanel(
-    model: AppModel,
-    entries: List<AndroidLogEntry>,
-    dropped: Int,
-    filter: AndroidLogFilter,
-    paused: Boolean,
-    onFilterChange: (AndroidLogFilter) -> Unit,
-    onTogglePaused: () -> Unit,
-    onClear: () -> Unit,
-) {
-    val tokens = LocalPpmTokens.current
-    val context = LocalContext.current
-    val filtered = remember(entries, filter) {
-        entries.filter { matchesAndroidLogFilter(it, filter) }
-    }
-    var autoFollow by remember { mutableStateOf(true) }
-    val listState = rememberLazyListState()
-
-    LaunchedEffect(filtered.size, autoFollow, paused) {
-        if (autoFollow && !paused && filtered.isNotEmpty()) {
-            listState.scrollToItem(filtered.size - 1)
-        }
-    }
-
-    Column(Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            for (lvl in AndroidLogLevel.entries) {
-                SmallActionPill(
-                    label = lvl.wire,
-                    primary = filter.minLevel == lvl,
-                    onClick = { onFilterChange(filter.copy(minLevel = lvl)) },
-                )
-            }
-            AndroidSingleLineInput(
-                value = filter.tag,
-                onValueChange = { onFilterChange(filter.copy(tag = it)) },
-                placeholder = "Tag",
-                modifier = Modifier.width(96.dp),
-                mono = true,
-            )
-            AndroidSingleLineInput(
-                value = filter.pid,
-                onValueChange = { onFilterChange(filter.copy(pid = it)) },
-                placeholder = "PID",
-                modifier = Modifier.width(68.dp),
-                mono = true,
-            )
-            AndroidSingleLineInput(
-                value = filter.search,
-                onValueChange = { onFilterChange(filter.copy(search = it)) },
-                placeholder = "Search message…",
-                modifier = Modifier.width(140.dp),
-            )
-            SmallActionPill(if (paused) "Resume" else "Pause", primary = paused, onClick = onTogglePaused)
-            SmallActionPill(if (autoFollow) "Following" else "Follow", primary = autoFollow, onClick = { autoFollow = !autoFollow })
-            SmallActionPill(
-                label = "Copy",
-                onClick = {
-                    copyToHostClipboard(context, formatAndroidLogText(filtered))
-                    model.toast(ErrorToastMessage("Copied ${filtered.size} log lines", kind = ErrorToastMessage.Kind.SUCCESS))
-                },
-            )
-            SmallActionPill("Clear", onClick = onClear)
-            if (dropped > 0) {
-                BasicText("+$dropped dropped", style = ppmText(10f, kind = FontKind.MONO).copy(color = tokens.warning.color))
-            }
-        }
-
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .weight(1f)
+            Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(6.dp))
-                .background(tokens.bgSolid.color)
-                .padding(6.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            items(filtered, key = { it.seq }) { entry ->
-                val lvlColor = when (entry.level) {
-                    AndroidLogLevel.E, AndroidLogLevel.F -> tokens.error.color
-                    AndroidLogLevel.W -> tokens.warning.color
-                    AndroidLogLevel.I -> tokens.accent.color
-                    else -> tokens.text2.color
-                }
-                BasicText(
-                    "${formatAndroidLogTime(entry.ts)} ${entry.level.wire}/${entry.tag}(${entry.pid}): ${entry.message}",
-                    style = ppmText(10f, kind = FontKind.MONO, lineHeight = 14f).copy(color = lvlColor),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun AndroidClipboardPanel(
-    model: AppModel,
-    deviceId: String,
-) {
-    val api = model.api
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val tokens = LocalPpmTokens.current
-    var text by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf<String?>(null) }
-
-    Column(
-        Modifier.fillMaxSize().padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(
-            Modifier.fillMaxWidth(),
+                .background(tokens.panel2.color)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            SmallActionPill(
-                label = "Read from device",
-                enabled = !busy,
-                modifier = Modifier.testTag("android-clipboard-read"),
-                onClick = {
-                    if (api == null || busy) return@SmallActionPill
-                    busy = true
-                    scope.launch {
-                        try {
-                            val res = api.androidGetClipboard(deviceId) as? JsonObject
-                            val readText = res?.get("text")?.jsonPrimitive?.contentOrNull.orEmpty()
-                            text = readText
-                            copyToHostClipboard(context, readText)
-                            status = "Read ${readText.length} chars from device"
-                        } catch (t: Throwable) {
-                            status = t.message ?: "Failed to read clipboard"
-                        } finally {
-                            busy = false
-                        }
-                    }
-                },
+            BasicText(
+                if (visible.size == entries.size) "${entries.size} lines" else "${visible.size} of ${entries.size} lines",
+                style = ppmText(11f, lineHeight = 14f).copy(color = tokens.text3.color),
             )
-            SmallActionPill(
-                label = "Send to device",
-                primary = true,
-                enabled = !busy,
-                modifier = Modifier.testTag("android-clipboard-send"),
-                onClick = {
-                    if (api == null || busy) return@SmallActionPill
-                    busy = true
-                    scope.launch {
-                        try {
-                            api.androidSetClipboard(deviceId, text)
-                            status = "Sent ${text.length} chars to device"
-                        } catch (t: Throwable) {
-                            status = t.message ?: "Failed to write clipboard"
-                        } finally {
-                            busy = false
+            if (paused) {
+                BasicText(
+                    "paused",
+                    style = ppmText(11f, FontWeight.Medium, lineHeight = 14f).copy(color = tokens.warning.color),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            if (!following) {
+                SmallActionButton(
+                    label = "Follow",
+                    tag = "android-log-follow",
+                    onClick = { following = true },
+                )
+            }
+        }
+    }
+}
+
+// =============================================================================
+// 6. Clipboard Panel (`android-clipboard-panel.tsx`)
+// =============================================================================
+
+@Composable
+internal fun AndroidClipboardPanel(
+    api: ApiClient,
+    deviceId: String,
+) {
+    val tokens = LocalPpmTokens.current
+    val scope = rememberCoroutineScope()
+
+    var fromDevice by remember { mutableStateOf<String?>(null) }
+    var toDevice by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf<String?>(null) }
+    var sent by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // From the device
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                BasicText(
+                    "From the device",
+                    style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.text.color),
+                )
+                SmallActionButton(
+                    label = "Read",
+                    icon = ProductIcon.Clipboard,
+                    enabled = busy == null,
+                    tag = "android-clipboard-read",
+                    onClick = {
+                        scope.launch {
+                            busy = "read"
+                            error = null
+                            try {
+                                val res = api.androidGetClipboard(deviceId) as? JsonObject
+                                fromDevice = (res?.get("text") as? JsonPrimitive)?.contentOrNull.orEmpty()
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Throwable) {
+                                error = e.message ?: "Failed to read device clipboard"
+                            } finally {
+                                busy = null
+                            }
                         }
-                    }
-                },
-            )
-            if (status != null) {
-                BasicText(status!!, style = ppmText(11f).copy(color = tokens.text3.color))
+                    },
+                )
+            }
+            val readValue = fromDevice
+            if (readValue != null) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(tokens.panel2.color)
+                        .border(1.dp, tokens.border.color, RoundedCornerShape(6.dp))
+                        .padding(8.dp)
+                        .testTag("android-clipboard-from-text"),
+                ) {
+                    BasicText(
+                        readValue.ifEmpty { "(the device's clipboard is empty)" },
+                        style = ppmText(12f, lineHeight = 16f, kind = FontKind.MONO).copy(
+                            color = if (readValue.isEmpty()) tokens.text3.color else tokens.text.color,
+                        ),
+                    )
+                }
             }
         }
 
-        AndroidSingleLineInput(
-            value = text,
-            onValueChange = { text = it },
-            placeholder = "Device clipboard contents…",
-            modifier = Modifier.fillMaxWidth().weight(1f).testTag("android-clipboard-input"),
+        // To the device
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            BasicText(
+                "To the device",
+                style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.text.color),
+            )
+            DialogTextInput(
+                value = toDevice,
+                onValueChange = {
+                    toDevice = it
+                    sent = false
+                },
+                placeholder = "Text to put on the device's clipboard",
+                tag = "android-clipboard-input",
+            )
+            SmallActionButton(
+                label = if (sent) "Sent" else "Send to device",
+                icon = if (sent) ProductIcon.Check else ProductIcon.Upload,
+                primary = true,
+                enabled = busy == null && toDevice.isNotEmpty(),
+                tag = "android-clipboard-write",
+                onClick = {
+                    scope.launch {
+                        busy = "write"
+                        error = null
+                        try {
+                            api.androidSetClipboard(deviceId, toDevice)
+                            sent = true
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
+                            error = e.message ?: "Failed to write device clipboard"
+                        } finally {
+                            busy = null
+                        }
+                    }
+                },
+            )
+            BasicText(
+                "Paste it in the guest with a long press, or with the keyboard's paste key.",
+                style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+            )
+        }
+
+        if (error != null) {
+            BasicText(
+                error.orEmpty(),
+                style = ppmText(12f, lineHeight = 16f).copy(color = tokens.error.color),
+            )
+        }
+    }
+}
+
+// =============================================================================
+// 7. Shared UI primitives & helpers
+// =============================================================================
+
+@Composable
+private fun SmallActionButton(
+    label: String,
+    icon: ProductIcon? = null,
+    primary: Boolean = false,
+    danger: Boolean = false,
+    enabled: Boolean = true,
+    tag: String? = null,
+    onClick: () -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    val bg: Color = when {
+        !enabled -> tokens.panel2.color.copy(alpha = 0.5f)
+        danger -> tokens.error.color.copy(alpha = 0.16f)
+        primary -> tokens.accent.color
+        else -> tokens.panel2.color
+    }
+    val fg: Color = when {
+        !enabled -> tokens.text3.color.copy(alpha = 0.5f)
+        danger -> tokens.error.color
+        primary -> Color.White
+        else -> tokens.text.color
+    }
+    val borderColor: Color = when {
+        danger -> tokens.error.color.copy(alpha = 0.4f)
+        primary -> tokens.accent.color
+        else -> tokens.border.color
+    }
+    Row(
+        Modifier
+            .heightIn(min = 34.dp)
+            .clip(RoundedCornerShape(7.dp))
+            .background(bg)
+            .border(1.dp, borderColor, RoundedCornerShape(7.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .then(if (tag != null) Modifier.testTag(tag) else Modifier),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        if (icon != null) {
+            PpmIcon(icon, 13.dp, fg)
+        }
+        BasicText(
+            label,
+            style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = fg),
+            maxLines = 1,
         )
     }
 }
 
-// ===========================================================================
-// Shared UI Atoms & Platform Helpers
-// ===========================================================================
-
 @Composable
-private fun ConnBadge(state: AndroidConnState) {
-    val tokens = LocalPpmTokens.current
-    val (bg, fg, label) = when (state) {
-        AndroidConnState.CONNECTED -> Triple(tokens.success.opacity(0.15).color, tokens.success.color, "Connected")
-        AndroidConnState.CONNECTING -> Triple(tokens.warning.opacity(0.15).color, tokens.warning.color, "Connecting")
-        AndroidConnState.RECONNECTING -> Triple(tokens.warning.opacity(0.15).color, tokens.warning.color, "Reconnecting")
-        AndroidConnState.FAILED -> Triple(tokens.error.opacity(0.15).color, tokens.error.color, "Failed")
-    }
-    Box(
-        Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .background(bg)
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-    ) {
-        BasicText(label, style = ppmText(10f, FontWeight.Medium).copy(color = fg))
-    }
-}
-
-@Composable
-private fun SmallActionPill(
-    label: String,
-    modifier: Modifier = Modifier,
-    primary: Boolean = false,
-    danger: Boolean = false,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-) {
-    val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(6.dp)
-    val bg = when {
-        !enabled -> tokens.panel2.opacity(0.45).color
-        danger -> tokens.error.opacity(0.16).color
-        primary -> tokens.accent.color
-        else -> tokens.panel2.color
-    }
-    val fg = when {
-        !enabled -> tokens.text3.opacity(0.5).color
-        danger -> tokens.error.color
-        primary -> tokens.accentFg.color
-        else -> tokens.text.color
-    }
-    Box(
-        modifier
-            .clip(shape)
-            .background(bg)
-            .then(
-                if (enabled) {
-                    Modifier.ppmClickable(
-                        pressedColor = tokens.panel2.color,
-                        hoverColor = bg,
-                        shape = shape,
-                        onClick = onClick,
-                    )
-                } else {
-                    Modifier
-                },
-            )
-            .padding(horizontal = 9.dp, vertical = 5.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        BasicText(label, style = ppmText(11f, FontWeight.Medium).copy(color = fg))
-    }
-}
-
-@Composable
-private fun AndroidSingleLineInput(
+private fun DialogTextInput(
     value: String,
     onValueChange: (String) -> Unit,
     placeholder: String,
-    modifier: Modifier = Modifier,
-    mono: Boolean = false,
+    numeric: Boolean = false,
+    tag: String? = null,
 ) {
     val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(6.dp)
-    val textStyle = if (mono) {
-        ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text.color)
-    } else {
-        ppmText(12f).copy(color = tokens.text.color)
-    }
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
         singleLine = true,
-        textStyle = textStyle,
+        textStyle = ppmText(12f, lineHeight = 16f).copy(color = tokens.text.color),
         cursorBrush = SolidColor(tokens.accent.color),
-        modifier = modifier
-            .clip(shape)
-            .background(tokens.bgSolid.color)
-            .cssBorder(tokens.border.color, shape)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+        keyboardOptions = if (numeric) KeyboardOptions(keyboardType = KeyboardType.Number) else KeyboardOptions.Default,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(tokens.panel2.color)
+            .border(1.dp, tokens.border.color, RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 7.dp)
+            .then(if (tag != null) Modifier.testTag(tag) else Modifier),
         decorationBox = { inner ->
-            Box(contentAlignment = Alignment.CenterStart) {
+            Box {
                 if (value.isEmpty()) {
-                    BasicText(placeholder, style = textStyle.copy(color = tokens.text3.color))
+                    BasicText(placeholder, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color))
                 }
                 inner()
             }
@@ -2431,46 +2833,56 @@ private fun AndroidSingleLineInput(
     )
 }
 
-private fun copyToHostClipboard(context: Context, text: String) {
-    runCatching {
-        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-        cm.setPrimaryClip(ClipData.newPlainText("PPM Android", text))
-    }
+private fun formatApkBytes(bytes: Long): String = when {
+    bytes < 1024L -> "$bytes B"
+    bytes < 1024L * 1024L -> "${bytes / 1024L} KB"
+    else -> String.format(java.util.Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
 }
 
-private fun queryDocumentMeta(context: Context, uri: Uri): Pair<String, Long> {
-    var name = "app.apk"
+private fun queryUriMetadata(context: Context, uri: Uri): Pair<String, Long> {
+    var name = "upload.apk"
     var size = -1L
     runCatching {
-        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
-            if (c.moveToFirst()) {
-                val nameIdx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                val sizeIdx = c.getColumnIndex(OpenableColumns.SIZE)
-                if (nameIdx >= 0 && !c.isNull(nameIdx)) name = c.getString(nameIdx)
-                if (sizeIdx >= 0 && !c.isNull(sizeIdx)) size = c.getLong(sizeIdx)
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIdx >= 0) {
+                    val n = cursor.getString(nameIdx)
+                    if (!n.isNullOrBlank()) name = n
+                }
+                val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) {
+                    size = cursor.getLong(sizeIdx)
+                }
             }
         }
     }
     return name to size
 }
 
-private fun savePngScreenshot(context: Context, fileName: String, bytes: ByteArray): String {
+internal suspend fun savePngToDevice(
+    context: Context,
+    fileName: String,
+    bytes: ByteArray,
+): String = withContext(Dispatchers.IO) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        runCatching {
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                put(MediaStore.Downloads.MIME_TYPE, "image/png")
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-            }
-            val resolver = context.contentResolver
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            if (uri != null) {
-                resolver.openOutputStream(uri)?.use { it.write(bytes) }
-                return "Downloads/$fileName"
-            }
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+            put(MediaStore.Downloads.MIME_TYPE, "image/png")
+            put(MediaStore.Downloads.IS_PENDING, 1)
         }
+        val resolver = context.contentResolver
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: throw IllegalStateException("MediaStore refused $fileName")
+        resolver.openOutputStream(uri)?.use { out -> out.write(bytes) }
+        values.clear()
+        values.put(MediaStore.Downloads.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+        "Saved $fileName to Downloads"
+    } else {
+        val dir = File(context.cacheDir, "android_screenshots").apply { mkdirs() }
+        val file = File(dir, fileName)
+        file.writeBytes(bytes)
+        "Prepared $fileName in cache"
     }
-    val outFile = File(context.cacheDir, fileName)
-    outFile.writeBytes(bytes)
-    return outFile.absolutePath
 }

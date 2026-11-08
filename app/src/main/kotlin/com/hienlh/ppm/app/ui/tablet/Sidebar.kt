@@ -381,7 +381,9 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
         ) {
             NotificationBell(model)
             FooterUtil(ProductIcon.FolderTree, "File Explorer") { model.openExplorer() }
-            FooterUtil(ProductIcon.Smartphone, "Android") { model.openAndroid() }
+            if (model.androidAvailable) {
+                FooterUtil(ProductIcon.Smartphone, "Android") { model.openAndroid() }
+            }
             FooterUtil(ProductIcon.Monitor, "Remote Desktop") { model.openRemoteDesktop() }
             FooterUtil(ProductIcon.Activity, "System Monitor") { model.openSystemMonitor() }
             FooterUtil(ProductIcon.ScrollText, "Logs", dot = model.logsLikelyBugs > 0) { model.openLogs() }

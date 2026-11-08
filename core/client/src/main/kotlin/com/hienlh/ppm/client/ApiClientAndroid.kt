@@ -18,6 +18,7 @@ import kotlin.coroutines.coroutineContext
 /**
  * Android Device / Emulator Controller REST & WebSocket client (`Phase 11c`).
  *
+ * Mirrors `src/server/routes/android.ts` and `src/web/components/android/`.
  * All requests omit the `Origin` header so the server's browser cross-origin guard allows native
  * Android client traffic.
  */
@@ -36,7 +37,7 @@ suspend fun ApiClient.androidCapabilities(): JsonElement =
 suspend fun ApiClient.androidDevices(): JsonElement =
     call("GET", "/api/android/devices")
 
-/** Start an AVD (`POST /api/android/avds/:avdId/start`). */
+/** Start an AVD (`POST /api/android/avds/:avdId/start`). Returns `{operationId, state, detail}`. */
 suspend fun ApiClient.androidStartAvd(avdId: String): JsonElement =
     call(
         method = "POST",
@@ -56,7 +57,7 @@ suspend fun ApiClient.androidCancelOperation(operationId: String): JsonElement =
         body = buildJsonObject {},
     )
 
-/** Stop a running emulator (`POST /api/android/devices/:deviceId/stop`). */
+/** Stop a running emulator (`POST /api/android/devices/:deviceId/stop?generation=...`). */
 suspend fun ApiClient.androidStopDevice(
     deviceId: String,
     generation: Int? = null,
@@ -66,9 +67,7 @@ suspend fun ApiClient.androidStopDevice(
         method = "POST",
         path = "/api/android/devices/${ApiClient.escape(deviceId)}/stop",
         query = query,
-        body = buildJsonObject {
-            if (generation != null) put("generation", generation)
-        },
+        body = buildJsonObject {},
     )
 }
 
@@ -92,37 +91,48 @@ suspend fun ApiClient.androidSystemImages(): JsonElement =
 suspend fun ApiClient.androidDeviceProfiles(): JsonElement =
     call("GET", "/api/android/device-profiles")
 
-/** Start creating an AVD (downloads system image if needed) (`POST /api/android/avds`). */
+/** Create an AVD (`POST /api/android/avds`). Returns `{avd}`. */
 suspend fun ApiClient.androidCreateAvd(
     name: String,
-    systemImageId: String,
-    deviceProfileId: String,
+    systemImage: String,
+    deviceProfile: String,
     ramMb: Int? = null,
     storageMb: Int? = null,
+    sdCardMb: Int? = null,
 ): JsonElement =
     call(
         method = "POST",
         path = "/api/android/avds",
         body = buildJsonObject {
             put("name", name)
-            put("systemImageId", systemImageId)
-            put("deviceProfileId", deviceProfileId)
+            put("systemImage", systemImage)
+            put("deviceProfile", deviceProfile)
             if (ramMb != null) put("ramMb", ramMb)
             if (storageMb != null) put("storageMb", storageMb)
+            if (sdCardMb != null) put("sdCardMb", sdCardMb)
         },
     )
 
 /** Wipe an AVD's user data (`POST /api/android/avds/:avdId/wipe`). */
-suspend fun ApiClient.androidWipeAvd(avdId: String): JsonElement =
+suspend fun ApiClient.androidWipeAvd(avdId: String, confirmName: String): JsonElement =
     call(
         method = "POST",
         path = "/api/android/avds/${ApiClient.escape(avdId)}/wipe",
-        body = buildJsonObject {},
+        body = buildJsonObject {
+            put("confirmName", confirmName)
+        },
     )
 
 /** Delete an AVD permanently (`DELETE /api/android/avds/:avdId`). */
-suspend fun ApiClient.androidDeleteAvd(avdId: String): JsonElement =
-    call("DELETE", "/api/android/avds/${ApiClient.escape(avdId)}")
+suspend fun ApiClient.androidDeleteAvd(avdId: String, confirmName: String): JsonElement =
+    call(
+        method = "DELETE",
+        path = "/api/android/avds/${ApiClient.escape(avdId)}",
+        query = listOf("confirmName" to confirmName),
+        body = buildJsonObject {
+            put("confirmName", confirmName)
+        },
+    )
 
 /** Read the device's clipboard (`GET /api/android/devices/:deviceId/clipboard`). */
 suspend fun ApiClient.androidGetClipboard(deviceId: String): JsonElement =
@@ -155,35 +165,40 @@ suspend fun ApiClient.androidTakeScreenshot(deviceId: String): AndroidScreenshot
 }
 
 /** List built `.apk` files in a project (`GET /api/android/projects/:project/apks`). */
-suspend fun ApiClient.androidProjectApks(projectName: String): JsonElement =
-    call("GET", "/api/android/projects/${ApiClient.escape(projectName)}/apks")
+suspend fun ApiClient.androidProjectApks(project: String): JsonElement =
+    call("GET", "/api/android/projects/${ApiClient.escape(project)}/apks")
 
 /** Install a project `.apk` directly on the server (`POST /api/android/devices/:deviceId/apk/project`). */
 suspend fun ApiClient.androidInstallProjectApk(
     deviceId: String,
-    projectName: String,
-    relativePath: String,
+    project: String,
+    path: String,
+    downgrade: Boolean = false,
 ): JsonElement =
     call(
         method = "POST",
         path = "/api/android/devices/${ApiClient.escape(deviceId)}/apk/project",
         body = buildJsonObject {
-            put("projectName", projectName)
-            put("relativePath", relativePath)
+            put("project", project)
+            put("path", path)
+            put("downgrade", downgrade)
         },
     )
 
 /**
- * Stream an `.apk` binary upload (`POST /api/android/devices/:deviceId/apk?name=...`) with
+ * Stream an `.apk` binary upload (`POST /api/android/devices/:deviceId/apk?filename=...`) with
  * byte-level progress reporting and coroutine cancellation support.
  */
 suspend fun ApiClient.androidUploadApk(
     deviceId: String,
     fileName: String,
     contentLength: Long,
+    allowDowngrade: Boolean = false,
+    reinstall: Boolean = true,
     openStream: () -> InputStream,
     onProgress: (loaded: Long, total: Long) -> Unit = { _, _ -> },
 ): JsonElement = withContext(Dispatchers.IO) {
+    val callerContext = coroutineContext
     val body = object : RequestBody() {
         override fun contentType() = "application/vnd.android.package-archive".toMediaType()
         override fun contentLength(): Long = if (contentLength >= 0L) contentLength else -1L
@@ -196,6 +211,7 @@ suspend fun ApiClient.androidUploadApk(
                 val total = if (contentLength > 0L) contentLength else 0L
                 onProgress(0L, total)
                 while (true) {
+                    callerContext.ensureActive()
                     val read = input.read(buf)
                     if (read < 0) break
                     sink.write(buf, 0, read)
@@ -206,10 +222,15 @@ suspend fun ApiClient.androidUploadApk(
             }
         }
     }
+    val query = buildList {
+        add("filename" to fileName)
+        if (!reinstall) add("reinstall" to "0")
+        if (allowDowngrade) add("downgrade" to "1")
+    }
     val req = request(
         method = "POST",
         path = "/api/android/devices/${ApiClient.escape(deviceId)}/apk",
-        query = listOf("name" to fileName),
+        query = query,
         body = body,
     )
     val response = PpmHttp.streamClient.newCall(req).await()
@@ -231,7 +252,3 @@ fun ApiClient.openAndroidSocket(listener: WebSocketListener): WebSocket {
         .build()
     return PpmHttp.socketClient.newWebSocket(req, listener)
 }
-
-/** Open a channel-based [SocketConnection] to `/ws/android?token=…`. */
-fun ApiClient.openAndroidConnection(): SocketConnection =
-    SocketConnection(androidSocketUrl())

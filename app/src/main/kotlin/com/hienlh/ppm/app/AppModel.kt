@@ -50,6 +50,7 @@ import com.hienlh.ppm.client.uiPrefs
 import com.hienlh.ppm.client.updateTag
 import com.hienlh.ppm.client.webFile
 import com.hienlh.ppm.client.logsIssuesSummary
+import com.hienlh.ppm.client.androidCapabilities
 import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.IconFramework
 import com.hienlh.ppm.design.PpmTheme
@@ -434,7 +435,15 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** The versions Later was chosen for on each server while the app runs, as the web's `sessionStorage` keeps them. */
     private val upgradeDismissals = HashMap<String, MutableSet<String>>()
     var info by mutableStateOf<ServerInfo?>(null)
-        private set
+        internal set
+
+    /** Whether `/api/android/capabilities` reports `enabled: true` on the open server (`use-android-available.ts`). */
+    var androidEnabled by mutableStateOf(false)
+        internal set
+
+    /** The Android entry surfaces only when `enabled` is true and `minimalMode` is off (`use-android-available.ts`). */
+    val androidAvailable: Boolean
+        get() = info?.minimalMode != true && androidEnabled
     var projects by mutableStateOf(emptyList<ProjectInfo>())
         private set
     var projectsLoad by mutableStateOf<Load>(Load.Idle)
@@ -1052,6 +1061,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         upgrade?.close()
         upgrade = null
         info = null
+        androidEnabled = false
         projects = emptyList()
         projectsLoad = Load.Idle
         selectedProject = null
@@ -1131,6 +1141,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 val summaryJson = quietly { api.logsIssuesSummary() } ?: return@launch
                 if (this@AppModel.api !== api) return@launch
                 logsLikelyBugs = com.hienlh.ppm.state.logs.LogIssuesSummary.from(summaryJson).likelyBugs
+            }
+            launch {
+                val capsJson = quietly { api.androidCapabilities() } ?: return@launch
+                if (this@AppModel.api !== api) return@launch
+                androidEnabled = com.hienlh.ppm.state.androiddevice.parseAndroidCapabilities(capsJson).enabled
             }
         }
     }
