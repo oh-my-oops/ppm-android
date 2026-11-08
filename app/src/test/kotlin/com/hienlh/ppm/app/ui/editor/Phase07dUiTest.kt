@@ -315,4 +315,86 @@ class Phase07dUiTest {
 
         assertEquals("#a\r\nb", savedContent)
     }
+
+    @Test
+    fun conflictEditorTabBody_showsSaveErrorAndHaltsWhenWriteAnswers403() {
+        val server = mockwebserver3.MockWebServer()
+        server.start()
+        try {
+            val conflicted = listOf(
+                "<<<<<<< HEAD",
+                "const v = 1;",
+                "=======",
+                "const v = 2;",
+                ">>>>>>> branch",
+            ).joinToString("\n")
+            val escaped = conflicted.replace("\n", "\\n")
+            // 1. GET /files/read succeeds
+            server.enqueue(
+                mockwebserver3.MockResponse.Builder()
+                    .code(200)
+                    .addHeader("Content-Type", "application/json")
+                    .body("""{"ok":true,"data":{"content":"$escaped","path":"src/Conflict.ts"}}""")
+                    .build(),
+            )
+            // 2. PUT /files/write answers 403 Forbidden
+            server.enqueue(
+                mockwebserver3.MockResponse.Builder()
+                    .code(403)
+                    .addHeader("Content-Type", "application/json")
+                    .body("""{"ok":false,"error":"Read-only conflict file"}""")
+                    .build(),
+            )
+
+            val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()
+            val model = com.hienlh.ppm.app.AppModel(app).apply {
+                api = com.hienlh.ppm.client.ApiClient(server.url("/"), "secret")
+            }
+            val tab = com.hienlh.ppm.state.workspace.WorkspaceTab(
+                id = "tab-conflict-1",
+                type = "conflict-editor",
+                title = "Conflict.ts",
+                projectId = "ppm",
+                closable = true,
+                metadata = kotlinx.serialization.json.buildJsonObject {
+                    put("projectName", kotlinx.serialization.json.JsonPrimitive("ppm"))
+                    put("filePath", kotlinx.serialization.json.JsonPrimitive("src/Conflict.ts"))
+                },
+            )
+
+            composeRule.setContent {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    ConflictEditorTabBody(model = model, tab = tab)
+                }
+            }
+
+            composeRule.waitUntil(5_000) {
+                composeRule.mainClock.advanceTimeBy(50)
+                composeRule.waitForIdle()
+                server.requestCount >= 1
+            }
+            composeRule.onNodeWithTag("conflict-accept-current-0").assertIsDisplayed()
+            composeRule.onNodeWithTag("conflict-accept-current-0").performClick()
+
+            composeRule.waitUntil(5_000) {
+                composeRule.mainClock.advanceTimeBy(50)
+                composeRule.waitForIdle()
+                server.requestCount >= 2
+            }
+            composeRule.waitUntil(5_000) {
+                runCatching {
+                    composeRule.onNodeWithTag("editor-save-error-banner").assertIsDisplayed()
+                    true
+                }.getOrDefault(false)
+            }
+
+            // Save error banner and toast must be shown, and 403 must not loop retries
+            assertTrue(model.toasts.isNotEmpty())
+            composeRule.mainClock.advanceTimeBy(2_500)
+            composeRule.waitForIdle()
+            assertEquals(2, server.requestCount)
+        } finally {
+            server.close()
+        }
+    }
 }

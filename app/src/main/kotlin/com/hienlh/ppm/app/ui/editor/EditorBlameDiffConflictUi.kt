@@ -556,6 +556,8 @@ fun ConflictEditorTabBody(model: AppModel, tab: WorkspaceTab) {
     var content by remember(projectName, filePath) { mutableStateOf<String?>(null) }
     var loading by remember(projectName, filePath) { mutableStateOf(true) }
     var error by remember(projectName, filePath) { mutableStateOf<String?>(null) }
+    var saveError by remember(projectName, filePath) { mutableStateOf<String?>(null) }
+    var haltedOn4xx by remember(projectName, filePath) { mutableStateOf(false) }
 
     LaunchedEffect(api, projectName, filePath) {
         if (api == null || projectName.isNullOrBlank() || filePath.isBlank()) {
@@ -565,14 +567,45 @@ fun ConflictEditorTabBody(model: AppModel, tab: WorkspaceTab) {
         }
         loading = true
         error = null
-        runCatching {
-            api.readProjectFile(projectName, filePath)
-        }.onSuccess { loaded ->
+        try {
+            val loaded = api.readProjectFile(projectName, filePath)
             content = loaded
             loading = false
-        }.onFailure { err ->
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
+        } catch (err: Throwable) {
             error = err.message ?: "Failed to load file"
             loading = false
+        }
+    }
+
+    suspend fun saveConflictToServer(newText: String) {
+        content = newText
+        val client = api ?: return
+        val proj = projectName?.takeIf { it.isNotBlank() } ?: return
+        if (filePath.isBlank()) return
+        try {
+            client.writeFile(proj, filePath, newText)
+            saveError = null
+            haltedOn4xx = false
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
+        } catch (err: Throwable) {
+            val msg = err.message ?: "Failed to save $filePath"
+            saveError = msg
+            val is4xx = (err is com.hienlh.ppm.client.PpmError.Server && err.status in 400..499) ||
+                err is com.hienlh.ppm.client.PpmError.Unauthorized ||
+                err is IllegalArgumentException
+            if (is4xx) {
+                haltedOn4xx = true
+            }
+            model.toast(
+                com.hienlh.ppm.app.ErrorToastMessage(
+                    title = "Failed to save $filePath",
+                    description = msg,
+                ),
+            )
+            throw err
         }
     }
 
@@ -593,11 +626,17 @@ fun ConflictEditorTabBody(model: AppModel, tab: WorkspaceTab) {
     ConflictEditorContent(
         fileName = filePath.substringAfterLast('/').substringAfterLast('\\').ifBlank { "unknown" },
         initialContent = content!!,
+        saveError = saveError,
+        haltedOn4xx = haltedOn4xx,
+        onSaveSuspend = { newText -> saveConflictToServer(newText) },
         onSaveContent = { newText ->
-            content = newText
-            if (api != null && !projectName.isNullOrBlank() && filePath.isNotBlank()) {
-                scope.launch {
-                    runCatching { api.writeFile(projectName, filePath, newText) }
+            model.scope.launch {
+                try {
+                    saveConflictToServer(newText)
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    throw ce
+                } catch (_: Throwable) {
+                    // Error state and toast already recorded by saveConflictToServer
                 }
             }
         },
@@ -608,10 +647,14 @@ fun ConflictEditorTabBody(model: AppModel, tab: WorkspaceTab) {
 internal fun ConflictEditorContent(
     fileName: String,
     initialContent: String,
-    onSaveContent: (String) -> Unit,
+    saveError: String? = null,
+    haltedOn4xx: Boolean = false,
+    onSaveSuspend: (suspend (String) -> Unit)? = null,
+    onSaveContent: (String) -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
+    val scope = rememberCoroutineScope()
     val language = remember(fileName) { conflictEditorLanguage(fileName) }
     val session = remember(fileName) {
         EditorSessionState(initialText = initialContent, language = language)
@@ -622,15 +665,40 @@ internal fun ConflictEditorContent(
     val currentText = remember(editTick) { session.buffer.toString() }
     val regions = remember(currentText) { parseConflicts(currentText) }
     var lastSavedDiskText by remember(fileName) { mutableStateOf(session.buffer.toDiskString()) }
+    var localSaveError by remember(fileName) { mutableStateOf<String?>(null) }
+    var localHaltedOn4xx by remember(fileName) { mutableStateOf(false) }
+
+    suspend fun performSave(diskText: String) {
+        try {
+            if (onSaveSuspend != null) {
+                onSaveSuspend(diskText)
+            } else {
+                onSaveContent(diskText)
+            }
+            lastSavedDiskText = diskText
+            localSaveError = null
+            localHaltedOn4xx = false
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
+        } catch (err: Throwable) {
+            localSaveError = err.message ?: "Failed to save file"
+            val is4xx = (err is com.hienlh.ppm.client.PpmError.Server && err.status in 400..499) ||
+                err is com.hienlh.ppm.client.PpmError.Unauthorized ||
+                err is IllegalArgumentException
+            if (is4xx) {
+                localHaltedOn4xx = true
+            }
+        }
+    }
 
     // Autosave manual edits after 1000 ms (fixes web bug where manual typing in ConflictEditor is lost)
-    LaunchedEffect(editTick) {
-        if (editTick <= 0L) return@LaunchedEffect
+    LaunchedEffect(editTick, haltedOn4xx, localHaltedOn4xx) {
+        if (editTick <= 0L || haltedOn4xx || localHaltedOn4xx) return@LaunchedEffect
         delay(1000L)
+        if (haltedOn4xx || localHaltedOn4xx) return@LaunchedEffect
         val diskText = session.buffer.toDiskString()
         if (diskText != lastSavedDiskText) {
-            lastSavedDiskText = diskText
-            onSaveContent(diskText)
+            performSave(diskText)
         }
     }
 
@@ -638,7 +706,7 @@ internal fun ConflictEditorContent(
     androidx.compose.runtime.DisposableEffect(session) {
         onDispose {
             val diskText = session.buffer.toDiskString()
-            if (diskText != lastSavedDiskText) {
+            if (diskText != lastSavedDiskText && !haltedOn4xx && !localHaltedOn4xx) {
                 lastSavedDiskText = diskText
                 onSaveContent(diskText)
             }
@@ -648,9 +716,13 @@ internal fun ConflictEditorContent(
     fun applyResolution(region: ConflictRegion, action: ConflictResolutionAction) {
         val updated = resolveConflictRegion(session.buffer.toDiskString(), region.id, action)
         session.reloadExternalContent(updated)
-        lastSavedDiskText = updated
         editTick++
-        onSaveContent(updated)
+        if (onSaveSuspend != null) {
+            scope.launch { performSave(updated) }
+        } else {
+            lastSavedDiskText = updated
+            onSaveContent(updated)
+        }
     }
 
     Column(
@@ -659,6 +731,37 @@ internal fun ConflictEditorContent(
             .background(tokens.bgSolid.color)
             .testTag("conflict-editor"),
     ) {
+        val currentSaveError = saveError ?: localSaveError
+        if (!currentSaveError.isNullOrBlank()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(tokens.error.opacity(0.14).color)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .testTag("editor-save-error-banner"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BasicText(
+                    currentSaveError,
+                    style = ppmText(11f).copy(color = tokens.error.color),
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(tokens.accent.color)
+                        .ppmClickable { scope.launch { performSave(session.buffer.toDiskString()) } }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .testTag("conflict-editor-retry-save-btn"),
+                ) {
+                    BasicText(
+                        "Retry Save",
+                        style = ppmText(11f, FontWeight.Medium, lineHeight = 14f).copy(color = Color.White),
+                    )
+                }
+            }
+        }
         // Status header
         Row(
             modifier = Modifier
