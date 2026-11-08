@@ -42,10 +42,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.client.cloudGetAlias
+import com.hienlh.ppm.client.cloudGetLoginUrl
 import com.hienlh.ppm.client.cloudGetStatus
 import com.hienlh.ppm.client.cloudLink
 import com.hienlh.ppm.client.cloudLogin
 import com.hienlh.ppm.client.cloudLogout
+import com.hienlh.ppm.client.cloudPollDeviceCode
+import com.hienlh.ppm.client.cloudRequestDeviceCode
 import com.hienlh.ppm.client.cloudSetAlias
 import com.hienlh.ppm.client.cloudUnlink
 import com.hienlh.ppm.client.extensionsDevLink
@@ -114,6 +117,7 @@ import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.int
 import com.hienlh.ppm.protocol.obj
 import com.hienlh.ppm.protocol.string
+import com.hienlh.ppm.state.settings.CloudDeviceCodeFlowState
 import com.hienlh.ppm.state.settings.CloudStatusState
 import com.hienlh.ppm.state.settings.ExtensionItemRow
 import com.hienlh.ppm.state.settings.JiraConfigRow
@@ -129,10 +133,16 @@ import com.hienlh.ppm.state.settings.ProxySettingsState
 import com.hienlh.ppm.state.settings.PublicTunnelState
 import com.hienlh.ppm.state.settings.PushStatusState
 import com.hienlh.ppm.state.settings.ScheduleLogBufferState
+import com.hienlh.ppm.state.settings.ScheduleProjectOption
 import com.hienlh.ppm.state.settings.ScheduleRowState
 import com.hienlh.ppm.state.settings.TailscaleState
 import com.hienlh.ppm.state.settings.TailscaleStepId
 import com.hienlh.ppm.state.settings.TelegramNotifyState
+import com.hienlh.ppm.state.settings.applyNamedTunnelDisableResult
+import com.hienlh.ppm.state.settings.applyNamedTunnelLoginSnapshot
+import com.hienlh.ppm.state.settings.applyNamedTunnelSetupResult
+import com.hienlh.ppm.state.settings.applyPublicTunnelEnabledResult
+import com.hienlh.ppm.state.settings.applyTailscaleLoginSnapshot
 import com.hienlh.ppm.state.settings.blockingTailscaleSetupStep
 import com.hienlh.ppm.state.settings.buildProxyEndpointUrl
 import com.hienlh.ppm.state.settings.clampJiraIntervalMs
@@ -140,6 +150,9 @@ import com.hienlh.ppm.state.settings.currentTailscaleSetupStep
 import com.hienlh.ppm.state.settings.isConnectedViaAddress
 import com.hienlh.ppm.state.settings.mergeScheduleLogs
 import com.hienlh.ppm.state.settings.normalizeNtfyServer
+import com.hienlh.ppm.state.settings.parseCloudDeviceCodePoll
+import com.hienlh.ppm.state.settings.parseCloudDeviceCodeStart
+import com.hienlh.ppm.state.settings.parseCloudLoginUrl
 import com.hienlh.ppm.state.settings.parseCloudStatus
 import com.hienlh.ppm.state.settings.parseExtensionsList
 import com.hienlh.ppm.state.settings.parseJiraConfigs
@@ -647,6 +660,9 @@ internal fun RemoteAccessSettingsSection(model: AppModel) {
     var publicTunnel by remember { mutableStateOf(PublicTunnelState()) }
     var namedTunnel by remember { mutableStateOf(NamedTunnelState()) }
 
+    var lastOpenedTailscaleLoginUrl by remember { mutableStateOf<String?>(null) }
+    var lastOpenedNamedTunnelLoginUrl by remember { mutableStateOf<String?>(null) }
+
     suspend fun reloadAll() {
         val client = api ?: return
         runCatching { parseTailscaleState(client.tailscaleGetState()) }.getOrNull()?.let { tailscale = it }
@@ -656,6 +672,51 @@ internal fun RemoteAccessSettingsSection(model: AppModel) {
 
     LaunchedEffect(api) {
         reloadAll()
+    }
+
+    // Public Link polling: every 2s while starting (`enabled && !active`), 10s otherwise (`public-link-pane.tsx:58-67`)
+    val publicTunnelStarting = publicTunnel.enabled && !publicTunnel.active
+    LaunchedEffect(api, publicTunnelStarting) {
+        val client = api ?: return@LaunchedEffect
+        val intervalMs = if (publicTunnelStarting) 2_000L else 10_000L
+        while (true) {
+            delay(intervalMs)
+            runCatching { parsePublicTunnelState(client.tunnelGetStatus()) }.getOrNull()?.let { publicTunnel = it }
+        }
+    }
+
+    // Tailscale login polling while `starting` or `waiting` (`tailscale-settings-section.tsx`)
+    val tailscaleLoginActive = tailscale.login.state == "starting" || tailscale.login.state == "waiting"
+    LaunchedEffect(api, tailscaleLoginActive) {
+        val client = api ?: return@LaunchedEffect
+        if (!tailscaleLoginActive) return@LaunchedEffect
+        while (tailscale.login.state == "starting" || tailscale.login.state == "waiting") {
+            delay(1_500L)
+            val fresh = runCatching { parseTailscaleState(client.tailscaleGetState()) }.getOrNull() ?: continue
+            tailscale = fresh
+            val url = fresh.login.url
+            if (!url.isNullOrBlank() && url != lastOpenedTailscaleLoginUrl) {
+                lastOpenedTailscaleLoginUrl = url
+                runCatching { uriHandler.openUri(url) }
+            }
+        }
+    }
+
+    // Named Tunnel login polling while `starting`, `waiting`, or `slow` (`use-named-tunnel-setup.ts`)
+    val namedLoginActive = namedTunnel.loginState in setOf("starting", "waiting", "slow")
+    LaunchedEffect(api, namedLoginActive) {
+        val client = api ?: return@LaunchedEffect
+        if (!namedLoginActive) return@LaunchedEffect
+        while (namedTunnel.loginState in setOf("starting", "waiting", "slow")) {
+            delay(2_000L)
+            val fresh = runCatching { parseNamedTunnelState(client.namedTunnelGetStatus()) }.getOrNull() ?: continue
+            namedTunnel = fresh
+            val url = fresh.loginUrl
+            if (!url.isNullOrBlank() && url != lastOpenedNamedTunnelLoginUrl) {
+                lastOpenedNamedTunnelLoginUrl = url
+                runCatching { uriHandler.openUri(url) }
+            }
+        }
     }
 
     val activeServerUrl: String? = model.debug?.url?.toString()
@@ -669,18 +730,25 @@ internal fun RemoteAccessSettingsSection(model: AppModel) {
         onRunInTerminal = { cmd -> model.runInTerminal(cmd) },
         onStartTailscaleLogin = {
             val client = api ?: return@RemoteAccessSettingsContent
+            lastOpenedTailscaleLoginUrl = null
             scope.launch {
-                val res = runCatching { parseTailscaleState(client.tailscaleStartLogin()) }.getOrNull()
+                val res = runCatching { applyTailscaleLoginSnapshot(tailscale, client.tailscaleStartLogin()) }.getOrNull()
                 if (res != null) {
                     tailscale = res
-                    res.login.authUrl?.let { runCatching { uriHandler.openUri(it) } }
+                    val url = res.login.url
+                    if (!url.isNullOrBlank()) {
+                        lastOpenedTailscaleLoginUrl = url
+                        runCatching { uriHandler.openUri(url) }
+                    }
                 }
             }
         },
         onCancelTailscaleLogin = {
             val client = api ?: return@RemoteAccessSettingsContent
             scope.launch {
-                runCatching { parseTailscaleState(client.tailscaleCancelLogin()) }.getOrNull()?.let { tailscale = it }
+                runCatching { applyTailscaleLoginSnapshot(tailscale, client.tailscaleCancelLogin()) }
+                    .getOrNull()
+                    ?.let { tailscale = it }
             }
         },
         onConfigureTailscaleService = { enabled, name, replace ->
@@ -695,37 +763,59 @@ internal fun RemoteAccessSettingsSection(model: AppModel) {
             publicTunnel = publicTunnel.copy(enabled = enabled)
             val client = api ?: return@RemoteAccessSettingsContent
             scope.launch {
-                runCatching { parsePublicTunnelState(client.tunnelSetEnabled(enabled)) }.getOrNull()?.let {
-                    publicTunnel = it
-                }
+                runCatching { applyPublicTunnelEnabledResult(publicTunnel, client.tunnelSetEnabled(enabled)) }
+                    .getOrNull()
+                    ?.let { publicTunnel = it }
+                runCatching { parsePublicTunnelState(client.tunnelGetStatus()) }
+                    .getOrNull()
+                    ?.let { publicTunnel = it }
             }
         },
         onStartNamedTunnelLogin = { relogin ->
             val client = api ?: return@RemoteAccessSettingsContent
+            lastOpenedNamedTunnelLoginUrl = null
             scope.launch {
-                val res = runCatching { parseNamedTunnelState(client.namedTunnelStartLogin(relogin)) }.getOrNull()
+                val res = runCatching {
+                    applyNamedTunnelLoginSnapshot(namedTunnel, client.namedTunnelStartLogin(relogin))
+                }.getOrNull()
                 if (res != null) {
                     namedTunnel = res
-                    res.loginUrl?.let { runCatching { uriHandler.openUri(it) } }
+                    val url = res.loginUrl
+                    if (!url.isNullOrBlank()) {
+                        lastOpenedNamedTunnelLoginUrl = url
+                        runCatching { uriHandler.openUri(url) }
+                    }
                 }
             }
         },
         onCancelNamedTunnelLogin = {
             val client = api ?: return@RemoteAccessSettingsContent
             scope.launch {
-                runCatching { parseNamedTunnelState(client.namedTunnelCancelLogin()) }.getOrNull()?.let { namedTunnel = it }
+                runCatching { applyNamedTunnelLoginSnapshot(namedTunnel, client.namedTunnelCancelLogin()) }
+                    .getOrNull()
+                    ?.let { namedTunnel = it }
             }
         },
         onSetupNamedTunnel = { hostname ->
             val client = api ?: return@RemoteAccessSettingsContent
             scope.launch {
-                runCatching { parseNamedTunnelState(client.namedTunnelSetup(hostname)) }.getOrNull()?.let { namedTunnel = it }
+                runCatching { applyNamedTunnelSetupResult(namedTunnel, client.namedTunnelSetup(hostname)) }
+                    .getOrNull()
+                    ?.let { namedTunnel = it }
+                runCatching { parseNamedTunnelState(client.namedTunnelGetStatus()) }
+                    .getOrNull()
+                    ?.let { namedTunnel = it }
+                runCatching { parsePublicTunnelState(client.tunnelGetStatus()) }
+                    .getOrNull()
+                    ?.let { publicTunnel = it }
             }
         },
         onDisableNamedTunnel = {
             val client = api ?: return@RemoteAccessSettingsContent
             scope.launch {
-                runCatching { parseNamedTunnelState(client.namedTunnelDisable()) }.getOrNull()?.let { namedTunnel = it }
+                runCatching { applyNamedTunnelDisableResult(namedTunnel, client.namedTunnelDisable()) }
+                    .getOrNull()
+                    ?.let { namedTunnel = it }
                 reloadAll()
             }
         },
@@ -755,24 +845,26 @@ internal fun RemoteAccessSettingsContent(
     var serviceNameDraft by remember(tailscale.service.name) { mutableStateOf(tailscale.service.name) }
     val serviceNameError = validateTailscaleServiceName(serviceNameDraft)
     var namedHostnameDraft by remember(namedTunnel.hostname) { mutableStateOf(namedTunnel.hostname.orEmpty()) }
+    val selfDnsName = tailscale.device?.dnsName
+    val operatorCmd = tailscale.operatorCommand
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         // 1. Tailscale Card
         IntegrationCard(Modifier.testTag("remote-tailscale-card")) {
             SettingsSectionTitle("Tailscale Private Network")
             BasicText(
-                "Status: ${tailscale.backendState}" + (tailscale.tailnetName?.let { " ($it)" } ?: ""),
+                "Status: ${tailscale.backendState ?: "Unknown"}" + (tailscale.tailnet?.let { " ($it)" } ?: ""),
                 style = ppmText(11f).copy(color = tokens.text2.color),
             )
-            if (!tailscale.selfDnsName.isNullOrBlank()) {
-                val connected = isConnectedViaAddress(currentServerUrl, tailscale.selfDnsName)
+            if (!selfDnsName.isNullOrBlank()) {
+                val connected = isConnectedViaAddress(currentServerUrl, selfDnsName)
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     BasicText(
-                        "https://${tailscale.selfDnsName}",
+                        "https://$selfDnsName",
                         style = ppmText(12f, kind = FontKind.MONO).copy(color = tokens.text.color),
                     )
                     if (connected) {
@@ -804,10 +896,9 @@ internal fun RemoteAccessSettingsContent(
                 }
             }
 
-            if (currentStep == TailscaleStepId.Operator && !tailscale.operatorCommand.isNullOrBlank()) {
-                val cmd = tailscale.operatorCommand!!
+            if (currentStep == TailscaleStepId.Operator && !operatorCmd.isNullOrBlank()) {
                 BasicText(
-                    cmd,
+                    operatorCmd,
                     style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text.color),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -815,11 +906,11 @@ internal fun RemoteAccessSettingsContent(
                         label = "Run in Terminal",
                         primary = true,
                         modifier = Modifier.testTag("tailscale-run-operator-cmd"),
-                        onClick = { onRunInTerminal(cmd) },
+                        onClick = { onRunInTerminal(operatorCmd) },
                     )
                     SettingsButton(
                         label = "Copy Command",
-                        onClick = { copyToClipboard12c(context, "Tailscale Operator Command", cmd) },
+                        onClick = { copyToClipboard12c(context, "Tailscale Operator Command", operatorCmd) },
                     )
                 }
             }
@@ -832,7 +923,7 @@ internal fun RemoteAccessSettingsContent(
                         modifier = Modifier.testTag("tailscale-signin-btn"),
                         onClick = onStartTailscaleLogin,
                     )
-                    if (tailscale.login.status == "starting" || tailscale.login.status == "url_ready") {
+                    if (tailscale.login.state == "starting" || tailscale.login.state == "waiting") {
                         SettingsButton(
                             label = "Cancel",
                             onClick = onCancelTailscaleLogin,
@@ -859,7 +950,8 @@ internal fun RemoteAccessSettingsContent(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val isSvcEnabled = tailscale.service.status != "disabled"
+                val isSvcEnabled = tailscale.enabled
+                val hasServiceConflict = tailscale.service.defined && !tailscale.service.pointsAtPpm
                 SettingsButton(
                     label = if (isSvcEnabled) "Update Service" else "Enable Service",
                     primary = true,
@@ -873,7 +965,7 @@ internal fun RemoteAccessSettingsContent(
                         onClick = { onConfigureTailscaleService(false, null, null) },
                     )
                 }
-                if (tailscale.service.status == "conflict") {
+                if (hasServiceConflict) {
                     SettingsButton(
                         label = "Replace Existing",
                         danger = true,
@@ -893,6 +985,13 @@ internal fun RemoteAccessSettingsContent(
                 testTag = "public-tunnel-toggle",
                 onCheckedChange = onTogglePublicTunnel,
             )
+            if (publicTunnel.enabled && !publicTunnel.active && publicTunnel.url.isNullOrBlank()) {
+                BasicText(
+                    "Starting public tunnel…",
+                    style = ppmText(11f).copy(color = tokens.text3.color),
+                    modifier = Modifier.testTag("public-tunnel-starting"),
+                )
+            }
             if (!publicTunnel.url.isNullOrBlank()) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -922,6 +1021,9 @@ internal fun RemoteAccessSettingsContent(
             if (!namedTunnel.tunnelWarning.isNullOrBlank()) {
                 BasicText(namedTunnel.tunnelWarning!!, style = ppmText(11f).copy(color = tokens.warning.color))
             }
+            if (!namedTunnel.loginError.isNullOrBlank()) {
+                BasicText(namedTunnel.loginError!!, style = ppmText(11f).copy(color = tokens.error.color))
+            }
             SettingsTextInput(
                 value = namedHostnameDraft,
                 onValueChange = { namedHostnameDraft = it },
@@ -934,7 +1036,7 @@ internal fun RemoteAccessSettingsContent(
                     label = if (namedTunnel.certState == "valid") "Re-login Cloudflare" else "Sign in with Cloudflare",
                     onClick = { onStartNamedTunnelLogin(namedTunnel.certState == "valid") },
                 )
-                if (namedTunnel.loginState == "starting" || namedTunnel.loginState == "url_ready") {
+                if (namedTunnel.loginState in setOf("starting", "waiting", "slow", "url_ready")) {
                     SettingsButton(label = "Cancel Login", onClick = onCancelNamedTunnelLogin)
                 }
                 SettingsButton(
@@ -964,8 +1066,10 @@ internal fun RemoteAccessSettingsContent(
 internal fun CloudSettingsSection(model: AppModel) {
     val api = model.api
     val scope = rememberCoroutineScope()
+    val uriHandler = LocalUriHandler.current
 
     var status by remember { mutableStateOf(CloudStatusState()) }
+    var deviceCodeFlow by remember { mutableStateOf(CloudDeviceCodeFlowState()) }
     var aliasSlug by remember { mutableStateOf<String?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
@@ -981,20 +1085,94 @@ internal fun CloudSettingsSection(model: AppModel) {
         reload()
     }
 
+    // Poll device-code flow while `status == "waiting"` (`cloud-share-popover.tsx:125-162`)
+    LaunchedEffect(api, deviceCodeFlow.deviceCode, deviceCodeFlow.status) {
+        val client = api ?: return@LaunchedEffect
+        if (deviceCodeFlow.status != "waiting" || deviceCodeFlow.deviceCode.isBlank()) return@LaunchedEffect
+        val activeFlow = deviceCodeFlow
+        val intervalMs = (activeFlow.intervalSec.coerceAtLeast(1)) * 1_000L
+        val deadlineMs = System.currentTimeMillis() + (activeFlow.expiresInSec.coerceAtLeast(10)) * 1_000L
+        while (deviceCodeFlow.status == "waiting" && deviceCodeFlow.deviceCode == activeFlow.deviceCode) {
+            delay(intervalMs)
+            if (System.currentTimeMillis() > deadlineMs) {
+                deviceCodeFlow = deviceCodeFlow.copy(status = "expired", error = "Device code expired. Please try again.")
+                break
+            }
+            val poll = runCatching {
+                parseCloudDeviceCodePoll(client.cloudPollDeviceCode(activeFlow.cloudUrl, activeFlow.deviceCode))
+            }.getOrNull() ?: continue
+            when (poll.status) {
+                "approved" -> {
+                    val token = poll.accessToken
+                    val email = poll.email
+                    if (!token.isNullOrBlank() && !email.isNullOrBlank()) {
+                        runCatching {
+                            client.cloudLogin(accessToken = token, email = email, cloudUrl = activeFlow.cloudUrl)
+                        }.onSuccess {
+                            deviceCodeFlow = CloudDeviceCodeFlowState()
+                            statusMessage = "Signed in to PPM Cloud"
+                            reload()
+                        }.onFailure { err ->
+                            deviceCodeFlow = deviceCodeFlow.copy(
+                                status = "error",
+                                error = err.message ?: "Cloud login failed",
+                            )
+                        }
+                    } else {
+                        deviceCodeFlow = deviceCodeFlow.copy(
+                            status = "error",
+                            error = "Cloud sign-in did not return credentials",
+                        )
+                    }
+                    break
+                }
+                "expired" -> {
+                    deviceCodeFlow = deviceCodeFlow.copy(
+                        status = "expired",
+                        error = poll.error ?: "Device code expired. Please try again.",
+                    )
+                    break
+                }
+                "error" -> {
+                    deviceCodeFlow = deviceCodeFlow.copy(
+                        status = "error",
+                        error = poll.error ?: "Cloud sign-in failed",
+                    )
+                    break
+                }
+            }
+        }
+    }
+
     CloudSettingsContent(
         status = status,
+        deviceCodeFlow = deviceCodeFlow,
         aliasSlug = aliasSlug,
         statusMessage = statusMessage,
-        onLogin = { email, token, cloudUrl ->
+        onStartDeviceLogin = {
             val client = api ?: return@CloudSettingsContent
+            deviceCodeFlow = CloudDeviceCodeFlowState(status = "starting")
             scope.launch {
-                runCatching { client.cloudLogin(accessToken = token, email = email, cloudUrl = cloudUrl) }
-                    .onSuccess {
-                        statusMessage = "Signed in to PPM Cloud"
-                        reload()
+                val cloudUrl = runCatching { parseCloudLoginUrl(client.cloudGetLoginUrl()) }
+                    .getOrDefault(status.cloudUrl.ifBlank { "https://ppm.bot" })
+                runCatching {
+                    parseCloudDeviceCodeStart(client.cloudRequestDeviceCode(cloudUrl), cloudUrl)
+                }.onSuccess { started ->
+                    deviceCodeFlow = started
+                    if (started.verificationUri.isNotBlank()) {
+                        runCatching { uriHandler.openUri(started.verificationUri) }
                     }
-                    .onFailure { statusMessage = it.message ?: "Cloud login failed" }
+                }.onFailure { err ->
+                    deviceCodeFlow = CloudDeviceCodeFlowState(
+                        cloudUrl = cloudUrl,
+                        status = "error",
+                        error = err.message ?: "Failed to start device code sign-in",
+                    )
+                }
             }
+        },
+        onCancelDeviceLogin = {
+            deviceCodeFlow = CloudDeviceCodeFlowState()
         },
         onLogout = {
             val client = api ?: return@CloudSettingsContent
@@ -1034,17 +1212,19 @@ internal fun CloudSettingsSection(model: AppModel) {
 @Composable
 internal fun CloudSettingsContent(
     status: CloudStatusState,
+    deviceCodeFlow: CloudDeviceCodeFlowState = CloudDeviceCodeFlowState(),
     aliasSlug: String?,
     statusMessage: String? = null,
-    onLogin: (String, String, String?) -> Unit,
+    onStartDeviceLogin: () -> Unit = {},
+    onCancelDeviceLogin: () -> Unit = {},
     onLogout: () -> Unit,
     onLinkDevice: (String?) -> Unit,
     onUnlinkDevice: () -> Unit,
     onSaveAlias: (String?) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
-    var emailDraft by remember { mutableStateOf("") }
-    var tokenDraft by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
     var deviceNameDraft by remember(status.deviceName) { mutableStateOf(status.deviceName.orEmpty()) }
     var aliasDraft by remember(aliasSlug) { mutableStateOf(aliasSlug.orEmpty()) }
 
@@ -1073,26 +1253,60 @@ internal fun CloudSettingsContent(
                     )
                 }
             } else {
-                SettingsTextInput(
-                    value = emailDraft,
-                    onValueChange = { emailDraft = it },
-                    placeholder = "Email address",
-                    modifier = Modifier.fillMaxWidth().testTag("cloud-email-input"),
+                BasicText(
+                    "Sign in to PPM Cloud (${status.cloudUrl}) using a browser device code.",
+                    style = ppmText(11f).copy(color = tokens.text2.color),
                 )
-                SettingsTextInput(
-                    value = tokenDraft,
-                    onValueChange = { tokenDraft = it },
-                    placeholder = "Cloud access token",
-                    mono = true,
-                    modifier = Modifier.fillMaxWidth().testTag("cloud-token-input"),
-                )
-                SettingsButton(
-                    label = "Sign In",
-                    primary = true,
-                    enabled = emailDraft.isNotBlank() && tokenDraft.isNotBlank(),
-                    modifier = Modifier.testTag("cloud-login-btn"),
-                    onClick = { onLogin(emailDraft.trim(), tokenDraft.trim(), null) },
-                )
+                if (deviceCodeFlow.status == "waiting" && deviceCodeFlow.userCode.isNotBlank()) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(tokens.bgSolid.color)
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        BasicText("Enter this code on the verification page:", style = ppmText(11f).copy(color = tokens.text2.color))
+                        BasicText(
+                            deviceCodeFlow.userCode,
+                            style = ppmText(16f, FontWeight.Bold, FontKind.MONO).copy(color = tokens.accent.color),
+                            modifier = Modifier.testTag("cloud-device-user-code"),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SettingsButton(
+                                label = "Copy Code",
+                                onClick = { copyToClipboard12c(context, "PPM Cloud Device Code", deviceCodeFlow.userCode) },
+                            )
+                            if (deviceCodeFlow.verificationUri.isNotBlank()) {
+                                SettingsButton(
+                                    label = "Open Verification Page",
+                                    primary = true,
+                                    modifier = Modifier.testTag("cloud-device-open-url"),
+                                    onClick = { runCatching { uriHandler.openUri(deviceCodeFlow.verificationUri) } },
+                                )
+                            }
+                            SettingsButton(
+                                label = "Cancel",
+                                onClick = onCancelDeviceLogin,
+                            )
+                        }
+                    }
+                } else {
+                    deviceCodeFlow.error?.let { errText ->
+                        BasicText(
+                            errText,
+                            style = ppmText(11f).copy(color = tokens.error.color),
+                            modifier = Modifier.testTag("cloud-device-error"),
+                        )
+                    }
+                    SettingsButton(
+                        label = if (deviceCodeFlow.status == "starting") "Requesting Code…" else "Sign In with Device Code",
+                        primary = true,
+                        enabled = deviceCodeFlow.status != "starting",
+                        modifier = Modifier.testTag("cloud-login-btn"),
+                        onClick = onStartDeviceLogin,
+                    )
+                }
             }
         }
 
@@ -1866,16 +2080,18 @@ internal fun SchedulesSettingsSection(model: AppModel) {
         }
     }
 
-    val projectNames = remember(model.projects, model.selectedProject) {
-        val names = model.projects.map { it.name }.distinct().toMutableList()
+    val projects = remember(model.projects, model.selectedProject) {
+        val list = model.projects.map { ScheduleProjectOption(name = it.name, path = it.path) }.toMutableList()
         val sel = model.selectedProject
-        if (!sel.isNullOrBlank() && sel !in names) names.add(0, sel)
-        if (names.isEmpty()) listOf("default") else names
+        if (!sel.isNullOrBlank() && list.none { it.name == sel }) {
+            list.add(0, ScheduleProjectOption(name = sel, path = sel))
+        }
+        list.toList()
     }
 
     SchedulesSettingsContent(
         schedules = schedules,
-        projectNames = projectNames,
+        projects = projects,
         enabledOnly = enabledOnly,
         statusMessage = statusMessage,
         activeLogsSchedule = activeLogsSchedule,
@@ -1919,7 +2135,12 @@ internal fun SchedulesSettingsSection(model: AppModel) {
             scope.launch {
                 runCatching { client.schedulesExport(id) }
                     .onSuccess { json ->
-                        copyToClipboard12c(context, "Schedule Template", PrettyJson12c.encodeToString( kotlinx.serialization.json.JsonElement.serializer(), json))
+                        val templateJson = json.obj?.get("template") ?: json
+                        copyToClipboard12c(
+                            context,
+                            "Schedule Template",
+                            PrettyJson12c.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), templateJson),
+                        )
                         statusMessage = "Schedule template copied to clipboard"
                     }
             }
@@ -1951,7 +2172,7 @@ internal fun SchedulesSettingsSection(model: AppModel) {
 @Composable
 internal fun SchedulesSettingsContent(
     schedules: List<ScheduleRowState>,
-    projectNames: List<String>,
+    projects: List<ScheduleProjectOption>,
     enabledOnly: Boolean = false,
     statusMessage: String? = null,
     activeLogsSchedule: ScheduleRowState? = null,
@@ -2017,10 +2238,12 @@ internal fun SchedulesSettingsContent(
             }
         } else {
             for (row in schedules) {
+                val projectDisplay = projects.firstOrNull { it.path == row.projectPath }?.name
+                    ?: row.projectPath.substringAfterLast('/').ifBlank { row.projectPath }
                 IntegrationCard(Modifier.testTag("schedule-card-${row.id}")) {
                     SettingsToggleRow(
                         title = row.name,
-                        subtitle = "${row.projectName} · ${row.kind}/${row.mode} · ${if (row.mode == "always-on") "daemon" else row.cron}",
+                        subtitle = "$projectDisplay · ${row.kind}/${row.mode} · ${if (row.mode == "always-on") "daemon" else row.cronExpr}",
                         checked = row.enabled,
                         testTag = "schedule-toggle-${row.id}",
                         onCheckedChange = { onToggleScheduleEnabled(row.id, it) },
@@ -2031,7 +2254,11 @@ internal fun SchedulesSettingsContent(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         BasicText(
-                            "Status: ${row.status.state}" + (row.lastStatus?.let { " · Last: $it" } ?: ""),
+                            buildString {
+                                append("Status: ${row.status.state}")
+                                row.lastRunAt?.let { append(" · Last: $it") }
+                                row.nextFireAt?.let { append(" · Next: $it") }
+                            },
                             style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text3.color),
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2067,7 +2294,7 @@ internal fun SchedulesSettingsContent(
 
     if (showCreateDialog) {
         ScheduleCreateDialog(
-            projectNames = projectNames,
+            projects = projects,
             onDismiss = { showCreateDialog = false },
             onSubmit = { payload ->
                 showCreateDialog = false
@@ -2078,7 +2305,7 @@ internal fun SchedulesSettingsContent(
 
     if (showImportDialog) {
         ScheduleImportDialog(
-            projectNames = projectNames,
+            projects = projects,
             onDismiss = { showImportDialog = false },
             onImport = { json, proj ->
                 showImportDialog = false
@@ -2098,28 +2325,29 @@ internal fun SchedulesSettingsContent(
 
 @Composable
 private fun ScheduleCreateDialog(
-    projectNames: List<String>,
+    projects: List<ScheduleProjectOption>,
     onDismiss: () -> Unit,
     onSubmit: (kotlinx.serialization.json.JsonObject) -> Unit,
 ) {
     Dialog(onDismissRequest = onDismiss) {
         ScheduleCreateFormContent(
-            projectNames = projectNames,
+            projects = projects,
             onDismiss = onDismiss,
             onSubmit = onSubmit,
         )
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ScheduleCreateFormContent(
-    projectNames: List<String>,
+    projects: List<ScheduleProjectOption>,
     onDismiss: () -> Unit,
     onSubmit: (kotlinx.serialization.json.JsonObject) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
     var name by remember { mutableStateOf("") }
-    var projectName by remember { mutableStateOf(projectNames.firstOrNull() ?: "default") }
+    var selectedProjectPath by remember(projects) { mutableStateOf(projects.firstOrNull()?.path.orEmpty()) }
     var kind by remember { mutableStateOf("prompt") } // "prompt" | "script"
     var mode by remember { mutableStateOf("tick") } // "tick" | "always-on"
     var cron by remember { mutableStateOf("0 * * * *") }
@@ -2128,7 +2356,7 @@ internal fun ScheduleCreateFormContent(
 
     val problems = scheduleFormProblems(
         name = name,
-        projectName = projectName,
+        projectPath = selectedProjectPath,
         kind = kind,
         mode = mode,
         cron = cron,
@@ -2155,6 +2383,22 @@ internal fun ScheduleCreateFormContent(
             placeholder = "Schedule name",
             modifier = Modifier.fillMaxWidth().testTag("schedule-form-name"),
         )
+        if (projects.isNotEmpty()) {
+            BasicText("Project", style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text2.color))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                for (proj in projects) {
+                    FilterChip12c(
+                        label = proj.name,
+                        selected = selectedProjectPath == proj.path,
+                        testTag = "schedule-project-${proj.name}",
+                        onClick = { selectedProjectPath = proj.path },
+                    )
+                }
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             FilterChip12c(
                 label = "Prompt",
@@ -2225,10 +2469,11 @@ internal fun ScheduleCreateFormContent(
                     onSubmit(
                         buildJsonObject {
                             put("name", name.trim())
-                            put("projectName", projectName)
+                            put("project_path", selectedProjectPath)
                             put("kind", kind)
                             put("mode", mode)
-                            put("cron", cron.trim())
+                            put("cron_expr", cron.trim())
+                            put("timeout_ms", 900_000)
                             if (kind == "prompt") put("prompt", prompt.trim()) else put("script", script.trim())
                             put("enabled", true)
                         },
@@ -2239,15 +2484,16 @@ internal fun ScheduleCreateFormContent(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ScheduleImportDialog(
-    projectNames: List<String>,
+    projects: List<ScheduleProjectOption>,
     onDismiss: () -> Unit,
     onImport: (String, String) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
     var jsonText by remember { mutableStateOf("") }
-    var projectName by remember { mutableStateOf(projectNames.firstOrNull() ?: "default") }
+    var projectName by remember(projects) { mutableStateOf(projects.firstOrNull()?.name ?: "default") }
 
     Dialog(onDismissRequest = onDismiss) {
         val shape = RoundedCornerShape(12.dp)
@@ -2261,6 +2507,20 @@ private fun ScheduleImportDialog(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             SettingsSectionTitle("Import Schedule Template")
+            if (projects.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    for (proj in projects) {
+                        FilterChip12c(
+                            label = proj.name,
+                            selected = projectName == proj.name,
+                            onClick = { projectName = proj.name },
+                        )
+                    }
+                }
+            }
             SettingsTextInput(
                 value = jsonText,
                 onValueChange = { jsonText = it },

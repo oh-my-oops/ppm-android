@@ -8,6 +8,8 @@ import androidx.compose.ui.test.performTextReplacement
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
+import com.hienlh.ppm.state.settings.CloudDeviceCodeFlowState
+import com.hienlh.ppm.state.settings.CloudStatusState
 import com.hienlh.ppm.state.settings.ExtensionItemRow
 import com.hienlh.ppm.state.settings.NamedTunnelState
 import com.hienlh.ppm.state.settings.NotificationSettingsState
@@ -15,9 +17,12 @@ import com.hienlh.ppm.state.settings.NtfyStatusState
 import com.hienlh.ppm.state.settings.ProxySettingsState
 import com.hienlh.ppm.state.settings.PublicTunnelState
 import com.hienlh.ppm.state.settings.PushStatusState
+import com.hienlh.ppm.state.settings.ScheduleProjectOption
 import com.hienlh.ppm.state.settings.ScheduleRowState
+import com.hienlh.ppm.state.settings.TailscaleDeviceInfo
 import com.hienlh.ppm.state.settings.TailscaleState
 import com.hienlh.ppm.state.settings.TelegramNotifyState
+import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -101,11 +106,16 @@ class Phase12cUiTest {
                     currentServerUrl = "https://box.tail123.ts.net",
                     tailscale = TailscaleState(
                         platform = "linux",
-                        cliInstalled = true,
+                        installed = true,
                         backendState = "Running",
-                        selfDnsName = "box.tail123.ts.net",
-                        operatorReady = false,
-                        operatorCommand = "sudo tailscale set --operator=thawngho",
+                        canManage = false,
+                        osUser = "thawngho",
+                        device = TailscaleDeviceInfo(
+                            name = "box",
+                            dnsName = "box.tail123.ts.net",
+                            ips = listOf("100.64.0.1"),
+                            tags = emptyList(),
+                        ),
                     ),
                     publicTunnel = PublicTunnelState(enabled = false),
                     namedTunnel = NamedTunnelState(),
@@ -176,27 +186,47 @@ class Phase12cUiTest {
     }
 
     @Test
-    fun schedulesSettingsContent_triggersRunNowAndCreatesScheduleWithValidation() {
+    fun schedulesSettingsContent_triggersRunNowAndCreatesScheduleWithProjectPathAndCronExpr() {
         var ranScheduleId: Int? = null
-        var createdName: String? = null
+        var createdPayload: JsonObject? = null
+        var startedCloudDeviceLogin = false
+
+        val projectOptions = listOf(
+            ScheduleProjectOption(name = "ppm", path = "/home/thawngho/Projects/ppm"),
+            ScheduleProjectOption(name = "web", path = "/home/thawngho/Projects/web"),
+        )
 
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
                 androidx.compose.foundation.layout.Column {
+                    CloudSettingsContent(
+                        status = CloudStatusState(loggedIn = false),
+                        deviceCodeFlow = CloudDeviceCodeFlowState(
+                            deviceCode = "dev_123",
+                            userCode = "WXYZ-9876",
+                            verificationUri = "https://ppm.bot/activate",
+                            status = "waiting",
+                        ),
+                        aliasSlug = null,
+                        onStartDeviceLogin = { startedCloudDeviceLogin = true },
+                        onLogout = {},
+                        onLinkDevice = {},
+                        onUnlinkDevice = {},
+                        onSaveAlias = {},
+                    )
                     SchedulesSettingsContent(
                         schedules = listOf(
                             ScheduleRowState(
                                 id = 7,
-                                projectId = 1,
-                                projectName = "ppm",
                                 name = "Hourly Sync",
                                 kind = "script",
                                 mode = "tick",
-                                cron = "0 * * * *",
+                                cronExpr = "0 * * * *",
+                                projectPath = "/home/thawngho/Projects/ppm",
                                 enabled = true,
                             ),
                         ),
-                        projectNames = listOf("ppm"),
+                        projects = projectOptions,
                         onToggleEnabledOnly = {},
                         onRunNow = { ranScheduleId = it },
                         onToggleScheduleEnabled = { _, _ -> },
@@ -208,22 +238,27 @@ class Phase12cUiTest {
                         onCloseLogs = {},
                     )
                     ScheduleCreateFormContent(
-                        projectNames = listOf("ppm"),
+                        projects = projectOptions,
                         onDismiss = {},
                         onSubmit = { obj ->
-                            createdName = obj["name"]?.toString()?.trim('"')
+                            createdPayload = obj
                         },
                     )
                 }
             }
         }
 
+        composeRule.onNodeWithTag("cloud-device-user-code").assertIsDisplayed()
+
         composeRule.onNodeWithTag("schedule-run-7").performClick()
         assertEquals(7, ranScheduleId)
 
+        composeRule.onNodeWithTag("schedule-project-web").performClick()
         composeRule.onNodeWithTag("schedule-form-name").performTextReplacement("Daily Summary")
         composeRule.onNodeWithTag("schedule-form-prompt").performTextReplacement("Summarize commits")
         composeRule.onNodeWithTag("schedule-form-submit").performClick()
-        assertEquals("Daily Summary", createdName)
+        assertEquals("Daily Summary", createdPayload?.get("name")?.toString()?.trim('"'))
+        assertEquals("/home/thawngho/Projects/web", createdPayload?.get("project_path")?.toString()?.trim('"'))
+        assertEquals("0 * * * *", createdPayload?.get("cron_expr")?.toString()?.trim('"'))
     }
 }
