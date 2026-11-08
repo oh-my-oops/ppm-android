@@ -555,7 +555,9 @@ internal fun GitGraphNativeContent(
                                     "operation:abort",
                                     { reqId -> GitGraphWebviewMessages.operation("abort", reqId) },
                                     { res ->
-                                        onShowToast(if (res.ok) "Aborted ${op.kind}" else (res.error ?: "Abort failed"), null)
+                                        if (!res.ok) {
+                                            onShowToast(res.error ?: "Abort failed", null)
+                                        }
                                     },
                                 )
                             },

@@ -636,16 +636,18 @@ class GitStatusPanelTest {
     fun `strings and controls match web git-status-panel git-commit-composer git-repo-picker and hunk-stage-dialog`() {
         installBlankFileIcons()
         val server = MockWebServer()
-        var binaryHunks = true
+        var hunkResponseMode = "binary"
+        val hunkGate = java.util.concurrent.CountDownLatch(1)
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val target = request.target
                 return when {
                     target.contains("/git/hunks") -> {
-                        val body = if (binaryHunks) {
-                            """{"ok":true,"data":{"binary":true,"hunks":[]}}"""
-                        } else {
-                            """{"ok":true,"data":{"binary":false,"hunks":[]}}"""
+                        hunkGate.await(2, java.util.concurrent.TimeUnit.SECONDS)
+                        val body = when (hunkResponseMode) {
+                            "binary" -> """{"ok":true,"data":{"binary":true,"hunks":[]}}"""
+                            "with-hunk" -> """{"ok":true,"data":{"binary":false,"hunks":[{"id":"h0","index":0,"header":"@@ -1,2 +1,2 @@","oldStart":1,"oldLines":2,"newStart":1,"newLines":2,"lines":[{"type":"-","content":"old"},{"type":"+","content":"new"}]}]}}"""
+                            else -> """{"ok":true,"data":{"binary":false,"hunks":[]}}"""
                         }
                         MockResponse.Builder().addHeader("Content-Type", "application/json").body(body).build()
                     }
@@ -723,16 +725,22 @@ class GitStatusPanelTest {
                             onMarkResolved = {},
                             onReviewAll = null,
                         )
-                        GitChangeRow(
+                        ChangeGroupSection(
                             model = model,
-                            file = stagedOnly,
-                            onToggle = {},
+                            label = "Changes",
+                            files = listOf(stagedOnly),
+                            errorTone = false,
+                            showCheckAll = true,
+                            viewMode = "flat",
+                            onToggleFile = {},
+                            onToggleBatch = {},
                             onOpen = {},
                             onOpenDiff = {},
                             onOpenFile = {},
                             onDiscard = {},
                             onStageLines = { _, _ -> },
                             onMarkResolved = {},
+                            onReviewAll = {},
                         )
                         if (showHunkDialog) {
                             GitHunkStageDialog(
@@ -759,17 +767,36 @@ class GitStatusPanelTest {
             viewStep = "controls"
             compose.waitForIdle()
 
-            // Composer placeholder includes branch name; menu has "Commit and push" (never "Commit and publish")
-            compose.onNodeWithText("Message (⌘↵ to commit on feat/demo)", useUnmergedTree = true).assertIsDisplayed()
-            // Conflicts group has no Review button
-            assertTrue(compose.onAllNodesWithTag("git-group-review-Conflicts").fetchSemanticsNodes().isEmpty())
+            // While hunkGate is held, loading state shows "Loading diff…" next to spinner
+            compose.onNodeWithText("Loading diff…", useUnmergedTree = true).assertIsDisplayed()
+            hunkGate.countDown()
 
-            // Tablet row tools on staged-only file: Discard is present and carries "Only staged changes left"
+            // Composer placeholder uses Ctrl+↵ on Android (not ⌘↵)
+            compose.onNodeWithText("Message (Ctrl+↵ to commit on feat/demo)", useUnmergedTree = true).assertIsDisplayed()
+            // Conflicts group has no Review button; Changes group Review button has contentDescription "Review block by block"
+            assertTrue(compose.onAllNodesWithTag("git-group-review-Conflicts").fetchSemanticsNodes().isEmpty())
+            val reviewNode = compose.onNodeWithTag("git-group-review-Changes", useUnmergedTree = true).fetchSemanticsNode()
+            assertEquals(
+                listOf("Review block by block"),
+                reviewNode.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription],
+            )
+
+            // Tablet row tools on staged-only file: Open {name} and Discard changes to {name}
+            val openNode = compose.onNodeWithTag("git-row-open-file-src/StagedOnly.kt", useUnmergedTree = true).fetchSemanticsNode()
+            assertEquals(
+                listOf("Open StagedOnly.kt"),
+                openNode.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription],
+            )
             val discardNode = compose.onNodeWithTag("git-row-discard-src/StagedOnly.kt", useUnmergedTree = true).fetchSemanticsNode()
             assertEquals(
-                 listOf("Only staged changes left"),
+                listOf("Discard changes to StagedOnly.kt"),
                 discardNode.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription],
             )
+
+            // CheckCell is full row height
+            val rowBounds = compose.onNodeWithTag("git-change-row-src/StagedOnly.kt", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val checkBounds = compose.onNodeWithTag("git-change-check-src/StagedOnly.kt", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertEquals(rowBounds.height, checkBounds.height, 1f)
 
             // Hunk dialog binary message and no "Tap a line or hunk header to toggle"
             compose.waitUntil(5_000) {
@@ -779,14 +806,27 @@ class GitStatusPanelTest {
                 }.getOrDefault(false)
             }
             compose.onNodeWithText("This is a binary file — it can only be staged whole.").assertIsDisplayed()
-            assertTrue(
-                compose.onAllNodesWithTag("git-hunk-stage-dialog")
-                    .fetchSemanticsNodes()
-                    .none { it.config.toString().contains("Tap a line or hunk header to toggle") },
-            )
 
-            // Switch hunk dialog to empty non-binary unstaged & staged
-            binaryHunks = false
+            // Switch hunk dialog to worktree with 2 changed lines: verify trash button description and destructive button text
+            hunkResponseMode = "with-hunk"
+            showHunkDialog = false
+            compose.waitForIdle()
+            showHunkDialog = true
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithTag("git-hunk-discard-toggle").fetchSemanticsNodes().isNotEmpty()
+            }
+            val trashToggle = compose.onNodeWithTag("git-hunk-discard-toggle", useUnmergedTree = true).fetchSemanticsNode()
+            assertEquals(
+                listOf("Discard selected lines"),
+                trashToggle.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription],
+            )
+            compose.onNodeWithTag("git-hunk-discard-toggle").performClick()
+            compose.waitForIdle()
+            compose.onNodeWithTag("git-hunk-discard-confirm").assertIsDisplayed()
+            compose.onNodeWithText("Discard 2 lines — cannot be undone", useUnmergedTree = true).assertIsDisplayed()
+
+            // Switch hunk dialog to empty non-binary staged
+            hunkResponseMode = "empty"
             scopeMode = "index"
             compose.waitUntil(5_000) {
                 runCatching {
@@ -827,7 +867,7 @@ class GitStatusPanelTest {
                         MockResponse.Builder()
                             .addHeader("Content-Type", "application/json")
                             .body("""{"ok":true,"data":{}}""")
-                            .build()
+                        .build()
                     }
                     target.contains("/git/publish") -> MockResponse.Builder()
                         .addHeader("Content-Type", "application/json")
@@ -864,10 +904,35 @@ class GitStatusPanelTest {
             }
             compose.onNodeWithText("Applying patches (1 of 2)").assertIsDisplayed()
 
+            // Verify header button descriptions on GitStatusPanel: list/tree toggle and History button
+            val viewToggleNode = compose.onNodeWithTag("git-view-mode-toggle", useUnmergedTree = true).fetchSemanticsNode()
+            assertEquals(
+                listOf("Group by folder"),
+                viewToggleNode.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription],
+            )
+            val historyNode = compose.onNodeWithTag("git-history-button", useUnmergedTree = true).fetchSemanticsNode()
+            assertEquals(
+                listOf("View Git Log"),
+                historyNode.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription],
+            )
+
+            // Verify phone CheckCell is 48dp wide and full row height
+            val phoneRowBounds = compose.onNodeWithTag("git-change-row-src/A.kt", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val phoneCheckBounds = compose.onNodeWithTag("git-change-check-src/A.kt", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertEquals(phoneRowBounds.height, phoneCheckBounds.height, 1f)
+
             // Click Abort patch series -> shows web abort confirm dialog on phone bottom sheet
+            // Confirm stacks above Cancel (flex-col-reverse), carries X icon, and title has TriangleAlert icon
             compose.onNodeWithText("Abort patch series").performClick()
             compose.waitForIdle()
             compose.onNodeWithTag("git-confirm-bottom-sheet").assertIsDisplayed()
+            compose.onNodeWithTag("git-confirm-alert-icon", useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithTag("git-confirm-icon-X", useUnmergedTree = true).assertIsDisplayed()
+            val okBounds = compose.onNodeWithTag("git-confirm-ok", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val cancelBounds = compose.onNodeWithTag("git-confirm-cancel", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertTrue("Confirm button must be stacked above Cancel on phone, got ok=${okBounds.top} cancel=${cancelBounds.top}", okBounds.top < cancelBounds.top)
+            assertEquals(okBounds.width, cancelBounds.width, 6f)
+            assertEquals(okBounds.height, cancelBounds.height, 1f)
             compose.onNodeWithText("Abort the patch series?").assertIsDisplayed()
             compose.onNodeWithText("This puts the branch back where it was before the patch series started. Conflicts you resolved so far are lost.").assertIsDisplayed()
             compose.onNodeWithText("Cancel").performClick()

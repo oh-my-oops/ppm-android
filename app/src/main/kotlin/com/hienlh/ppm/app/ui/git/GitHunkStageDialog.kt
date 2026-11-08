@@ -32,6 +32,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -186,6 +188,7 @@ internal fun GitHunkStageDialog(
                                 .size(if (mobile) 44.dp else 32.dp)
                                 .clip(RoundedCornerShape(6.dp))
                                 .alpha(if (selectedCount == 0 || busy) 0.4f else 1f)
+                                .semantics { contentDescription = "Discard selected lines" }
                                 .clickable(enabled = selectedCount > 0 && !busy) { confirmDiscard = !confirmDiscard }
                                 .testTag("git-hunk-discard-toggle"),
                             contentAlignment = Alignment.Center,
@@ -206,7 +209,7 @@ internal fun GitHunkStageDialog(
 
                 if (totalChanged > 0) {
                     Row(
-                        modifier = Modifier.heightIn(min = if (mobile) 44.dp else 28.dp),
+                        modifier = Modifier.height(if (mobile) 44.dp else 28.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -233,11 +236,16 @@ internal fun GitHunkStageDialog(
             ) {
                 when {
                     loading -> {
-                        Box(
+                        Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 36.dp),
-                            contentAlignment = Alignment.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                         ) {
                             PpmIcon(ProductIcon.Loader2, size = 18.dp, tint = tokens.text3.color)
+                            BasicText(
+                                "Loading diff…",
+                                style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color),
+                            )
                         }
                     }
                     data?.binary == true -> {
@@ -272,14 +280,14 @@ internal fun GitHunkStageDialog(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .heightIn(min = if (mobile) 44.dp else 28.dp)
+                                        .height(if (mobile) 44.dp else 28.dp)
                                         .background(tokens.panel2.color)
                                         .edge(Edge.Bottom, tokens.border.color)
                                         .clickable {
                                             confirmDiscard = false
                                             selected = HunkSelection.toggleHunk(hunk, selected)
                                         }
-                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                        .padding(horizontal = 10.dp)
                                         .testTag("git-hunk-header-${hunk.index}"),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -323,7 +331,7 @@ internal fun GitHunkStageDialog(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .heightIn(min = if (mobile) 44.dp else 22.dp)
+                                                .height(if (mobile) 44.dp else 22.dp)
                                                 .background(rowBg)
                                                 .then(
                                                     if (isChanged) {
@@ -392,11 +400,6 @@ internal fun GitHunkStageDialog(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (confirmDiscard) {
-                    BasicText(
-                        text = "Discard $selectedCount ${if (selectedCount == 1) "line" else "lines"} — cannot be undone",
-                        style = PpmFont.sans(11, FontWeight.Medium, lineHeight = 14, color = tokens.error.color),
-                        modifier = Modifier.weight(1f),
-                    )
                     Box(
                         modifier = Modifier
                             .height(footerBtnHeight)
@@ -410,6 +413,7 @@ internal fun GitHunkStageDialog(
                     }
                     Box(
                         modifier = Modifier
+                            .weight(1f)
                             .height(footerBtnHeight)
                             .clip(RoundedCornerShape(6.dp))
                             .background(tokens.error.color)
@@ -419,7 +423,14 @@ internal fun GitHunkStageDialog(
                             .testTag("git-hunk-discard-confirm"),
                         contentAlignment = Alignment.Center,
                     ) {
-                        BasicText("Discard", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = Color.White))
+                        if (busy) {
+                            PpmIcon(ProductIcon.Loader2, size = 14.dp, tint = Color.White)
+                        } else {
+                            BasicText(
+                                "Discard $selectedCount ${if (selectedCount == 1) "line" else "lines"} — cannot be undone",
+                                style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = Color.White),
+                            )
+                        }
                     }
                 } else {
                     Spacer(Modifier.weight(1f))

@@ -1001,10 +1001,9 @@ data class GitPublishResult(
 
 suspend fun ApiClient.gitPublish(project: String, repo: GitRepo? = null): GitPublishResult {
     val data = call("POST", "/api/project/${ApiClient.escape(project)}/git/publish", gitRepoScope(repo), buildJsonObject {})
-    return GitPublishResult(
-        remote = data["remote"].string ?: "origin",
-        branch = data["branch"].string ?: "",
-    )
+    val remote = data["remote"].string ?: throw PpmError.BadResponse("Missing remote in gitPublish response")
+    val branch = data["branch"].string ?: throw PpmError.BadResponse("Missing branch in gitPublish response")
+    return GitPublishResult(remote = remote, branch = branch)
 }
 
 suspend fun ApiClient.gitPull(
@@ -1100,7 +1099,12 @@ suspend fun ApiClient.gitStashAction(
         put("hash", hash)
     }
     val data = call("POST", "/api/project/${ApiClient.escape(project)}/git/stash/${ApiClient.escape(action)}", gitRepoScope(repo), body)
-    return StashApplyResult(indexRestored = data["indexRestored"].bool ?: true)
+    val indexRestored = if (action == "drop") {
+        true
+    } else {
+        data["indexRestored"].bool ?: throw PpmError.BadResponse("Missing indexRestored in gitStashAction response")
+    }
+    return StashApplyResult(indexRestored = indexRestored)
 }
 
 suspend fun ApiClient.gitWorktrees(project: String, repo: GitRepo? = null): List<GitWorktree> =

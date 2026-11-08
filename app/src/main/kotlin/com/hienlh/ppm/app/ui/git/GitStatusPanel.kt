@@ -69,6 +69,7 @@ import com.hienlh.ppm.client.readProjectFile
 import com.hienlh.ppm.design.FileIcon
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.LucideIcon
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
@@ -91,6 +92,7 @@ private data class ConfirmState(
     val title: String,
     val detail: String,
     val confirmLabel: String,
+    val confirmIcon: ProductIcon = ProductIcon.Trash2,
     val destructive: Boolean = true,
     val run: () -> Unit,
 )
@@ -324,6 +326,7 @@ fun GitStatusPanel(
                         title = "$name still has conflict markers",
                         detail = "Marking it resolved stages the file as it is, markers and all.",
                         confirmLabel = "Mark resolved",
+                        confirmIcon = ProductIcon.Check,
                         destructive = true,
                         run = stageNow,
                     )
@@ -657,6 +660,7 @@ fun GitStatusPanel(
                 modifier = Modifier
                     .size(headerIconSize)
                     .clip(RoundedCornerShape(4.dp))
+                    .semantics { contentDescription = if (isTree) "Show as a list" else "Group by folder" }
                     .clickable { model.setGitViewMode(if (isTree) "flat" else "tree") }
                     .testTag("git-view-mode-toggle"),
                 contentAlignment = Alignment.Center,
@@ -672,6 +676,7 @@ fun GitStatusPanel(
                 modifier = Modifier
                     .size(headerIconSize)
                     .clip(RoundedCornerShape(4.dp))
+                    .semantics { contentDescription = if (gitGraphAvailable) "Open Git Graph (⌘G)" else "View Git Log" }
                     .clickable(onClick = ::openGraph)
                     .testTag("git-history-button"),
                 contentAlignment = Alignment.Center,
@@ -878,6 +883,7 @@ fun GitStatusPanel(
                                 title = "Abort the $noun?",
                                 detail = "This puts the branch back where it was before the $noun started. Conflicts you resolved so far are lost.",
                                 confirmLabel = "Abort $noun",
+                                confirmIcon = ProductIcon.X,
                                 destructive = true,
                                 run = {
                                     runGit("abort", "Could not abort the $noun") {
@@ -1052,6 +1058,7 @@ fun GitStatusPanel(
             title = c.title,
             detail = c.detail,
             confirmLabel = c.confirmLabel,
+            confirmIcon = c.confirmIcon,
             destructive = c.destructive,
             onConfirm = {
                 val run = c.run
@@ -1132,8 +1139,8 @@ internal fun ChangeGroupSection(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (mobile) 44.dp else 26.dp)
-                .padding(horizontal = 8.dp),
+                .height(if (mobile) 44.dp else 34.dp)
+                .padding(start = 8.dp, end = if (showCheckAll) 0.dp else 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -1161,15 +1168,18 @@ internal fun ChangeGroupSection(
                 CountChip(files.size, errorTone = errorTone)
             }
             if (onReviewAll != null) {
-                Box(
+                Row(
                     modifier = Modifier
-                        .height(if (mobile) 44.dp else 20.dp)
+                        .height(if (mobile) 44.dp else 24.dp)
                         .clip(RoundedCornerShape(4.dp))
+                        .semantics { contentDescription = "Review block by block" }
                         .clickable(onClick = onReviewAll)
                         .padding(horizontal = 6.dp)
                         .testTag("git-group-review-$label"),
-                    contentAlignment = Alignment.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
+                    PpmIcon(LucideIcon.FileDiff, size = 14.dp, tint = tokens.text2.color)
                     BasicText("Review", style = PpmFont.sans(11, lineHeight = 14, color = tokens.text2.color))
                 }
             }
@@ -1282,7 +1292,7 @@ private fun GitTreeNodeView(
             .fillMaxWidth()
             .height(if (mobile) 44.dp else 28.dp)
             .clickable { closedPaths[node.path] = open }
-            .padding(start = (depth * 12 + 6).dp, end = 8.dp)
+            .padding(start = (depth * 12 + 6).dp)
             .testTag("git-tree-folder-${node.path}"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -1411,13 +1421,13 @@ internal fun GitChangeRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = if (mobile) 44.dp else 36.dp)
+                .height(if (mobile) 56.dp else 40.dp)
                 .rightClick { menuOpen = true }
                 .combinedClickable(
                     onClick = { onOpen(file) },
                     onLongClick = { menuOpen = true },
                 )
-                .padding(start = (depth * 12 + 8).dp, end = 4.dp, top = 3.dp, bottom = 3.dp)
+                .padding(start = (depth * 12 + 8).dp)
                 .testTag("git-change-row-${file.path}"),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1427,7 +1437,7 @@ internal fun GitChangeRow(
                 size = 14.dp,
             )
             Column(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).padding(vertical = 3.dp),
                 verticalArrangement = Arrangement.Center,
             ) {
                 StartTruncatedText(
@@ -1477,7 +1487,7 @@ internal fun GitChangeRow(
                         modifier = Modifier
                             .size(24.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .semantics { contentDescription = "Open file" }
+                            .semantics { contentDescription = "Open $name" }
                             .clickable { onOpenFile(file) }
                             .testTag("git-row-open-file-${file.path}"),
                         contentAlignment = Alignment.Center,
@@ -1485,13 +1495,12 @@ internal fun GitChangeRow(
                         PpmIcon(ProductIcon.FileCode, size = 12.dp, tint = tokens.text3.color)
                     }
                     val canDiscardRow = discardable && !busy
-                    val discardTitle = if (discardable) "Discard changes…" else "Only staged changes left"
                     Box(
                         modifier = Modifier
                             .size(24.dp)
                             .clip(RoundedCornerShape(4.dp))
                             .alpha(if (canDiscardRow) 1f else 0.4f)
-                            .semantics { contentDescription = discardTitle }
+                            .semantics { contentDescription = "Discard changes to $name" }
                             .clickable(enabled = canDiscardRow) { onDiscard(file) }
                             .testTag("git-row-discard-${file.path}"),
                         contentAlignment = Alignment.Center,

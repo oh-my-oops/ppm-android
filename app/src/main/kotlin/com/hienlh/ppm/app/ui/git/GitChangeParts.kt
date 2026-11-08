@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -317,7 +318,7 @@ internal fun CheckCell(
     Box(
         modifier = Modifier
             .width(if (mobile) 48.dp else 30.dp)
-            .heightIn(min = if (mobile) 44.dp else 28.dp)
+            .fillMaxHeight()
             .then(if (tag != null) Modifier.testTag(tag) else Modifier)
             .alpha(if (disabled) 0.4f else 1f)
             .clickable(enabled = !disabled, role = Role.Checkbox, onClick = onToggle),
@@ -367,6 +368,7 @@ internal fun GitConfirm(
     title: String,
     detail: String,
     confirmLabel: String,
+    confirmIcon: ProductIcon = ProductIcon.Trash2,
     destructive: Boolean = false,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
@@ -379,6 +381,52 @@ internal fun GitConfirm(
     } else {
         RoundedCornerShape(8.dp)
     }
+    val btnBg = if (destructive) tokens.error.color else tokens.accent.color
+    val btnFg = if (destructive) Color.White else tokens.accentFg.color
+
+    @Composable
+    fun CancelButton(modifier: Modifier = Modifier) {
+        Box(
+            modifier = modifier
+                .height(btnHeight)
+                .testTag("git-confirm-cancel")
+                .clip(RoundedCornerShape(6.dp))
+                .clickable(onClick = onCancel)
+                .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText("Cancel", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text.color))
+        }
+    }
+
+    @Composable
+    fun ConfirmButton(modifier: Modifier = Modifier) {
+        Box(
+            modifier = modifier
+                .height(btnHeight)
+                .testTag("git-confirm-ok")
+                .clip(RoundedCornerShape(6.dp))
+                .background(btnBg)
+                .clickable(onClick = onConfirm)
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                PpmIcon(
+                    confirmIcon,
+                    size = 14.dp,
+                    tint = btnFg,
+                    modifier = Modifier.testTag("git-confirm-icon-${confirmIcon.name}"),
+                )
+                BasicText(confirmLabel, style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = btnFg))
+            }
+        }
+    }
+
     Dialog(
         onDismissRequest = onCancel,
         properties = DialogProperties(usePlatformDefaultWidth = !mobile),
@@ -406,7 +454,12 @@ internal fun GitConfirm(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    PpmIcon(ProductIcon.AlertTriangle, size = 16.dp, tint = tokens.error.color)
+                    PpmIcon(
+                        ProductIcon.AlertTriangle,
+                        size = 16.dp,
+                        tint = tokens.error.color,
+                        modifier = Modifier.testTag("git-confirm-alert-icon"),
+                    )
                     BasicText(
                         text = title,
                         style = PpmFont.sans(13, FontWeight.SemiBold, lineHeight = 18, color = tokens.text.color),
@@ -416,34 +469,21 @@ internal fun GitConfirm(
                     text = detail,
                     style = PpmFont.sans(12, lineHeight = 16, color = tokens.text2.color),
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .height(btnHeight)
-                            .clip(RoundedCornerShape(6.dp))
-                            .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
-                            .clickable(onClick = onCancel)
-                            .padding(horizontal = 12.dp),
-                        contentAlignment = Alignment.Center,
+                if (mobile) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        BasicText("Cancel", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text.color))
+                        ConfirmButton(Modifier.fillMaxWidth())
+                        CancelButton(Modifier.fillMaxWidth())
                     }
-                    val btnBg = if (destructive) tokens.error.color else tokens.accent.color
-                    val btnFg = if (destructive) Color.White else tokens.accentFg.color
-                    Box(
-                        modifier = Modifier
-                            .height(btnHeight)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(btnBg)
-                            .clickable(onClick = onConfirm)
-                            .padding(horizontal = 12.dp)
-                            .testTag("git-confirm-ok"),
-                        contentAlignment = Alignment.Center,
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
                     ) {
-                        BasicText(confirmLabel, style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = btnFg))
+                        CancelButton()
+                        ConfirmButton()
                     }
                 }
             }
@@ -832,7 +872,7 @@ internal fun GitOperationBanner(
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     val noun = GitChangesView.OPERATION_NOUN[operation.kind] ?: operation.kind
-    val title = remember(operation, branch) { GitChangesView.operationTitle(operation, branch) }
+    val title = remember(operation, branch.head) { GitChangesView.operationTitle(operation, branch.head) }
     val continuing = busyAction == "continue" || busyAction == "op:continue"
     val aborting = busyAction == "abort" || busyAction == "op:abort"
     val btnHeight = if (mobile) 44.dp else 26.dp
@@ -940,9 +980,9 @@ internal fun GitCommitComposer(
     val barHeight = if (mobile) 44.dp else 32.dp
     val triggerWidth = if (mobile) 44.dp else 32.dp
     val placeholderText = if (!branch.isNullOrEmpty()) {
-        "Message (⌘↵ to commit on $branch)"
+        "Message (Ctrl+↵ to commit on $branch)"
     } else {
-        "Message (⌘↵ to commit)"
+        "Message (Ctrl+↵ to commit)"
     }
 
     Column(

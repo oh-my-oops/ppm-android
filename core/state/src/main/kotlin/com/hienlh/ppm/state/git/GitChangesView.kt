@@ -272,9 +272,6 @@ object GitChangesView {
         }
     }
 
-    fun operationTitle(op: GitOperation, branch: GitBranchState): String =
-        operationTitle(op, branch.head)
-
     /** Split `"src/web/app.tsx"` into `Pair("app.tsx", "src/web")`. */
     fun splitPath(path: String): Pair<String, String> {
         val idx = path.lastIndexOf('/')

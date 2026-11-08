@@ -391,4 +391,25 @@ class GitTest {
         assertEquals("/api/project/s4-git/git/graph?max=100&skip=0", server.takeRequest().target)
         assertEquals("/api/project/s4-git/git/file-full-diff?file=src%2FApp.kt&ref=abc1111&ref2=def2222", server.takeRequest().target)
     }
+
+    @Test
+    fun `gitPublish and gitStashAction fail parse when required response fields are missing`() = withServer(
+        ok("""{"branch":"feat/demo"}"""),
+        ok("""{"remote":"origin"}"""),
+        ok("""{}"""),
+        ok("""{}"""),
+    ) { _, api ->
+        val missingRemote = runCatching { api.gitPublish("s4-git") }.exceptionOrNull()
+        assertTrue("Expected BadResponse on missing remote, got $missingRemote", missingRemote is PpmError.BadResponse)
+
+        val missingBranch = runCatching { api.gitPublish("s4-git") }.exceptionOrNull()
+        assertTrue("Expected BadResponse on missing branch, got $missingBranch", missingBranch is PpmError.BadResponse)
+
+        val missingIndexRestored = runCatching { api.gitStashAction("s4-git", "pop", 0, "abc1234") }.exceptionOrNull()
+        assertTrue("Expected BadResponse on missing indexRestored for pop, got $missingIndexRestored", missingIndexRestored is PpmError.BadResponse)
+
+        // drop returns {} on the server and succeeds
+        val dropRes = api.gitStashAction("s4-git", "drop", 0, "abc1234")
+        assertTrue(dropRes.indexRestored)
+    }
 }
