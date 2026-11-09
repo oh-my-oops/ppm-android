@@ -59,13 +59,16 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.FocusAnchor
 import com.hienlh.ppm.app.FocusStartAnchor
 import com.hienlh.ppm.app.focusStartArea
+import com.hienlh.ppm.app.ui.CloudSharePopover
 import com.hienlh.ppm.app.ui.FeatureBadge
 import com.hienlh.ppm.app.ui.FeatureBadgeKind
 import com.hienlh.ppm.app.ui.GroupList
+import com.hienlh.ppm.app.ui.PlacedPopup
 import com.hienlh.ppm.app.ui.ProjectAvatar
 import com.hienlh.ppm.app.ui.SessionHistoryPanel
 import com.hienlh.ppm.app.ui.unreadSessions
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -139,6 +142,7 @@ fun Sidebar(model: AppModel) {
                             sec == "database" -> com.hienlh.ppm.app.ui.database.DatabaseSidebarPane(model)
                             sec == "designs" -> com.hienlh.ppm.app.ui.design.DesignsSidebarPane(model)
                             sec == "tunnels" -> com.hienlh.ppm.app.ui.tunnels.PortForwardingPanel(model)
+                            sec == "ai-resources" -> com.hienlh.ppm.app.ui.AiResourcesSidebarPanel(model)
                             sec.startsWith("ext:") -> {
                                 val viewId = sec.removePrefix("ext:")
                                 val contribs = model.extensions?.contributions?.collectAsState()?.value
@@ -352,13 +356,15 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
                         model.pickSidebarSection(section)
                     }
                 } else if (section == "designs") {
-                    NavItem(ProductIcon.Palette, "Designs", active, badge = 0) {
+                    NavItem(ProductIcon.Palette, "Designs", active, badge = 0, featureBadge = FeatureBadgeKind.NEW) {
                         model.pickSidebarSection(section)
                     }
                 } else if (section == "teams") {
                     NavItem(ProductIcon.Users, "Teams", active, badge = 0, featureBadge = FeatureBadgeKind.BETA) { model.pickSidebarSection(section) }
                 } else if (section == "tunnels") {
                     NavItem(ProductIcon.Globe, "Port Forwarding", active, badge = 0) { model.pickSidebarSection(section) }
+                } else if (section == "ai-resources") {
+                    NavItem(ProductIcon.Sparkles, "AI Resources", active, badge = 0) { model.pickSidebarSection(section) }
                 } else {
                     NavItem(ProductIcon.BotMessageSquare, "Chat History", active, badge = model.unread(model.selectedProject, unread).size) {
                         model.pickSidebarSection(section)
@@ -380,16 +386,57 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             NotificationBell(model)
-            FooterUtil(ProductIcon.FolderTree, "File Explorer") { model.openExplorer() }
-            if (model.remoteDesktopAvailable) {
-                FooterUtil(ProductIcon.Monitor, "Remote Desktop") { model.openRemoteDesktop() }
+            if (model.info?.minimalMode != true) {
+                CloudShareButton(model)
+                FooterUtil(ProductIcon.FolderTree, "File Explorer", featureBadge = FeatureBadgeKind.NEW) { model.openExplorer() }
+                if (model.remoteDesktopAvailable) {
+                    FooterUtil(ProductIcon.MonitorSmartphone, "Remote Desktop", featureBadge = FeatureBadgeKind.BETA) { model.openRemoteDesktop() }
+                }
+                if (model.androidAvailable) {
+                    FooterUtil(ProductIcon.Smartphone, "Android", featureBadge = FeatureBadgeKind.BETA) { model.openAndroid() }
+                }
+                FooterUtil(ProductIcon.ScrollText, "Logs", dot = model.showLogsBadgeDot) { model.openLogs() }
             }
-            if (model.androidAvailable) {
-                FooterUtil(ProductIcon.Smartphone, "Android") { model.openAndroid() }
-            }
-            FooterUtil(ProductIcon.Activity, "System Monitor") { model.openSystemMonitor() }
-            FooterUtil(ProductIcon.ScrollText, "Logs", dot = model.showLogsBadgeDot) { model.openLogs() }
             FooterUtil(ProductIcon.Settings, "Settings") { model.openSettings() }
+        }
+    }
+}
+
+@Composable
+private fun CloudShareButton(model: AppModel) {
+    val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
+    val open = model.cloudShareOpen
+    val shape = RoundedCornerShape(7.dp)
+    val hover = rememberHover(enabled = !open)
+    Box(Modifier.size(32.dp)) {
+        Box(
+            Modifier
+                .size(32.dp)
+                .clip(shape)
+                .background(if (open) tokens.accent.opacity(0.1).color else Color.Transparent)
+                .semantics { contentDescription = "Cloud & Share" }
+                .ppmClickable(
+                    pressedColor = if (open) Color.Transparent else tokens.panel2.color,
+                    hoverColor = if (open) Color.Transparent else tokens.panel2.color,
+                    shape = shape,
+                    onClickLabel = "Cloud & Share",
+                    source = hover.source,
+                ) { model.cloudShareOpen = !open },
+            contentAlignment = Alignment.Center,
+        ) {
+            PpmIcon(ProductIcon.Cloud, 16.dp, (if (open) tokens.accent else tokens.text.mix(tokens.text3, hover.lit.toDouble())).color)
+        }
+        if (open && !mobile) {
+            val gap = with(LocalDensity.current) { 6.dp.roundToPx() }
+            val place = remember(gap) {
+                { anchor: androidx.compose.ui.unit.IntRect, _: androidx.compose.ui.unit.IntSize, box: androidx.compose.ui.unit.IntSize ->
+                    androidx.compose.ui.unit.IntOffset(anchor.right + gap, anchor.bottom - box.height)
+                }
+            }
+            PlacedPopup(place, onDismiss = { model.cloudShareOpen = false }) {
+                CloudSharePopover(model, onClose = { model.cloudShareOpen = false })
+            }
         }
     }
 }
@@ -467,29 +514,32 @@ private fun NavTile(icon: ProductIcon, label: String, active: Boolean, badge: In
 
 /** A footer utility (`size-8 rounded-[7px]`, a 16 px icon in the subtle colour, lit as a section is). */
 @Composable
-private fun FooterUtil(icon: ProductIcon, label: String, dot: Boolean = false, onClick: () -> Unit) {
+private fun FooterUtil(icon: ProductIcon, label: String, dot: Boolean = false, featureBadge: FeatureBadgeKind? = null, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(7.dp)
     val hover = rememberHover()
-    Box(
-        Modifier
-            .size(32.dp)
-            .clip(shape)
-            .semantics { contentDescription = label }
-            .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, shape = shape, onClickLabel = label, source = hover.source, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        PpmIcon(icon, 16.dp, tokens.text.mix(tokens.text3, hover.lit.toDouble()).color)
-        if (dot) {
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 5.dp, end = 5.dp)
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(tokens.error.color),
-            )
+    Box(Modifier.size(32.dp)) {
+        Box(
+            Modifier
+                .size(32.dp)
+                .clip(shape)
+                .semantics { contentDescription = label }
+                .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, shape = shape, onClickLabel = label, source = hover.source, onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            PpmIcon(icon, 16.dp, tokens.text.mix(tokens.text3, hover.lit.toDouble()).color)
+            if (dot) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 5.dp, end = 5.dp)
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(tokens.error.color),
+                )
+            }
         }
+        if (featureBadge != null) FeatureBadge(featureBadge, Modifier.align(Alignment.TopEnd).offset(2.dp, (-2).dp), corner = true)
     }
 }
 

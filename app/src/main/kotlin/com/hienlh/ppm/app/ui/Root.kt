@@ -161,6 +161,11 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
                 model.explorerSheetPath?.let { com.hienlh.ppm.app.ui.osexplorer.HostExplorerSheet(model, it) }
                 model.agentSheet?.let { AgentSessionSheet(model, it) }
                 model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }
+                if (mobile && model.cloudShareOpen) {
+                    BottomSheet(onDismiss = { model.cloudShareOpen = false }) {
+                        CloudSharePopover(model, onClose = { model.cloudShareOpen = false }, sheet = true)
+                    }
+                }
                 model.backgroundOutput?.let { BackgroundOutputPanel(model, it) }
                 // A new sheet for each sign-in, as the web mounts a new body per server.
                 model.mcpSignIn?.let { key(it) { McpSignInPanel(model, it) } }

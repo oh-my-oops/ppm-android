@@ -914,6 +914,8 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                     com.hienlh.ppm.app.ui.design.DesignsSidebarPane(model, onNavigate = onClose)
                 } else if (shown == "tunnels") {
                     com.hienlh.ppm.app.ui.tunnels.PortForwardingPanel(model, onNavigate = onClose)
+                } else if (shown == "ai-resources") {
+                    AiResourcesSidebarPanel(model, onNavigate = onClose)
                 } else if (shown.startsWith("ext:")) {
                     val viewId = shown.removePrefix("ext:")
                     val contribs = model.extensions?.contributions?.collectAsState()?.value
@@ -932,110 +934,101 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                 }
             }
             Column(Modifier.fillMaxWidth().line(top = true, tokens.border.color).navigationBarsPadding()) {
-                // The tab bar (`MobileDrawerTabBar`): 64 px slots in the rail's order. Too few to need its
-                // "More", and dragging them into another order is not built yet.
-                Row(Modifier.fillMaxWidth()) {
-                    for (id in sections) {
-                        val teams = id == "teams"
-                        val extView = if (id.startsWith("ext:")) {
-                            val viewId = id.removePrefix("ext:")
-                            extViews.firstOrNull { it.id == viewId }
-                        } else {
-                            null
+                var moreOpen by remember { mutableStateOf(false) }
+                fun tabIcon(id: String): ProductIcon = when {
+                    id == "explorer" -> ProductIcon.FolderOpen
+                    id == "search" -> ProductIcon.Search
+                    id == "git" -> ProductIcon.GitBranch
+                    id == "database" -> ProductIcon.Database
+                    id == "designs" -> ProductIcon.Palette
+                    id == "teams" -> ProductIcon.Users
+                    id == "tunnels" -> ProductIcon.Globe
+                    id == "ai-resources" -> ProductIcon.Sparkles
+                    id.startsWith("ext:") -> ProductIcon.Puzzle
+                    else -> ProductIcon.BotMessageSquare
+                }
+                fun tabShortLabel(id: String): String = when {
+                    id == "explorer" -> "Explorer"
+                    id == "search" -> "Search"
+                    id == "git" -> "Git"
+                    id == "database" -> "Database"
+                    id == "designs" -> "Designs"
+                    id == "teams" -> "Teams"
+                    id == "tunnels" -> "Ports"
+                    id == "ai-resources" -> "AI"
+                    id.startsWith("ext:") -> extViews.firstOrNull { it.id == id.removePrefix("ext:") }?.name ?: id.removePrefix("ext:")
+                    else -> "History"
+                }
+                fun tabFullLabel(id: String): String = when {
+                    id == "history" -> "Chat History"
+                    id == "tunnels" -> "Port Forwarding"
+                    id == "ai-resources" -> "AI Resources"
+                    else -> tabShortLabel(id)
+                }
+                fun tabBadge(id: String): FeatureBadgeKind? = when (id) {
+                    "teams" -> FeatureBadgeKind.BETA
+                    "designs" -> FeatureBadgeKind.NEW
+                    else -> null
+                }
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val slotCount = maxOf(1, (maxWidth / 64.dp).toInt())
+                    val needMore = sections.size > slotCount
+                    val visibleCount = if (needMore) maxOf(1, slotCount - 1) else sections.size
+                    val baseVisible = sections.take(visibleCount)
+                    val activeInOverflow = needMore && shown !in baseVisible && shown in sections
+                    val visible = if (activeInOverflow) sections.take(maxOf(0, visibleCount - 1)) + shown else baseVisible
+                    val overflow = sections.filter { it !in visible }
+                    Row(Modifier.fillMaxWidth()) {
+                        for (id in visible) {
+                            DrawerTabSlot(tabIcon(id), tabShortLabel(id), active = id == shown, badge = tabBadge(id)) { onSection(id) }
                         }
-                        DrawerTabSlot(
-                            when {
-                                id == "explorer" -> ProductIcon.FolderOpen
-                                id == "search" -> ProductIcon.Search
-                                id == "git" -> ProductIcon.GitBranch
-                                id == "database" -> ProductIcon.Database
-                                id == "designs" -> ProductIcon.Palette
-                                id == "teams" -> ProductIcon.Users
-                                id == "tunnels" -> ProductIcon.Globe
-                                id.startsWith("ext:") -> ProductIcon.Puzzle
-                                else -> ProductIcon.BotMessageSquare
-                            },
-                            when {
-                                id == "explorer" -> "Explorer"
-                                id == "search" -> "Search"
-                                id == "git" -> "Git"
-                                id == "database" -> "DB"
-                                id == "designs" -> "Designs"
-                                id == "teams" -> "Teams"
-                                id == "tunnels" -> "Ports"
-                                id.startsWith("ext:") -> extView?.name ?: id.removePrefix("ext:")
-                                else -> "History"
-                            },
-                            active = id == shown,
-                            badge = if (teams) FeatureBadgeKind.BETA else null,
-                        ) { onSection(id) }
+                        if (needMore) {
+                            DrawerTabSlot(ProductIcon.MoreHorizontal, "More", active = activeInOverflow, badge = null) { moreOpen = true }
+                        }
+                    }
+                    if (moreOpen) {
+                        BottomSheet(onDismiss = { moreOpen = false }) {
+                            Column(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 12.dp)) {
+                                BasicText(
+                                    "More tabs",
+                                    Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+                                )
+                                for (id in overflow) {
+                                    val rowColor = (if (id == shown) tokens.accent else tokens.text).color
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .ppmClickable(pressedColor = tokens.panel2.color) { onSection(id); moreOpen = false }
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        PpmIcon(tabIcon(id), 16.dp, rowColor)
+                                        BasicText(tabFullLabel(id), style = ppmText(14f, lineHeight = 20f).copy(color = rowColor))
+                                        tabBadge(id)?.let { FeatureBadge(it) }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 Column(Modifier.fillMaxWidth().line(top = true, tokens.border.color).padding(horizontal = 12.dp, vertical = 8.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Column(
-                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
-                                .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openExplorer() }
-                                .padding(vertical = 10.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            PpmIcon(ProductIcon.FolderTree, 16.dp, tokens.text3.color)
-                            BasicText("Files", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
-                        }
-                        if (model.androidAvailable) {
-                            Column(
-                                Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
-                                    .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openAndroid() }
-                                    .padding(vertical = 10.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                PpmIcon(ProductIcon.Smartphone, 16.dp, tokens.text3.color)
-                                BasicText("Android", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
+                        if (model.info?.minimalMode != true) {
+                            DrawerFooterTile(ProductIcon.FolderTree, "Files", modifier = Modifier.weight(1f), badge = FeatureBadgeKind.NEW) { onClose(); model.openExplorer() }
+                            if (model.remoteDesktopAvailable) {
+                                DrawerFooterTile(ProductIcon.MonitorSmartphone, "Remote", modifier = Modifier.weight(1f), badge = FeatureBadgeKind.BETA) { onClose(); model.openRemoteDesktop() }
                             }
-                        }
-                        if (model.remoteDesktopAvailable) {
-                            Column(
-                                Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
-                                    .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openRemoteDesktop() }
-                                    .padding(vertical = 10.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                PpmIcon(ProductIcon.Monitor, 16.dp, tokens.text3.color)
-                                BasicText("Desktop", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
+                            if (model.androidAvailable) {
+                                DrawerFooterTile(ProductIcon.Smartphone, "Android", modifier = Modifier.weight(1f), badge = FeatureBadgeKind.BETA) { onClose(); model.openAndroid() }
                             }
+                            DrawerFooterTile(ProductIcon.Cloud, "Cloud", modifier = Modifier.weight(1f)) { model.cloudShareOpen = true }
                         }
-                        Column(
-                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
-                                .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openSystemMonitor() }
-                                .padding(vertical = 10.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            PpmIcon(ProductIcon.Activity, 16.dp, tokens.text3.color)
-                            BasicText("Monitor", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
-                        }
-                        Column(
-                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
-                                .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openLogs() }
-                                .padding(vertical = 10.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            PpmIcon(ProductIcon.ScrollText, 16.dp, if (model.showLogsBadgeDot) tokens.error.color else tokens.text3.color)
-                            BasicText("Logs", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
-                        }
-                        Column(
-                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
-                                .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openSettings() }
-                                .padding(vertical = 10.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            PpmIcon(ProductIcon.Settings, 16.dp, tokens.text3.color)
-                            BasicText("Settings", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
+                        DrawerFooterTile(ProductIcon.Settings, "Settings", modifier = Modifier.weight(1f)) { onClose(); model.openSettings() }
+                        if (model.info?.minimalMode != true) {
+                            DrawerFooterTile(ProductIcon.ScrollText, "Logs", modifier = Modifier.weight(1f), alertDot = model.showLogsBadgeDot) { onClose(); model.openLogs() }
                         }
                     }
                     // `mt-2 border-t border-border px-1 text-[11px]`, there with or without the version.
@@ -1073,5 +1066,43 @@ private fun DrawerTabSlot(icon: ProductIcon, label: String, active: Boolean, bad
             BasicText(label, style = ppmText(10f, lineHeight = 15f).copy(color = color))
         }
         if (badge != null) FeatureBadge(badge, Modifier.align(Alignment.TopEnd).padding(top = 4.dp, end = 8.dp), corner = true, shadow = false)
+    }
+}
+
+@Composable
+private fun DrawerFooterTile(
+    icon: ProductIcon,
+    label: String,
+    modifier: Modifier = Modifier,
+    badge: FeatureBadgeKind? = null,
+    alertDot: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    Column(
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .ppmClickable(pressedColor = tokens.panel2.color, onClick = onClick)
+            .padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box {
+            PpmIcon(icon, 16.dp, tokens.text3.color)
+            if (badge != null) {
+                FeatureBadge(badge, Modifier.align(Alignment.TopEnd).offset(12.dp, (-8).dp), corner = true)
+            }
+            if (alertDot) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(4.dp, (-2).dp)
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(tokens.error.color),
+                )
+            }
+        }
+        BasicText(label, style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color), maxLines = 1)
     }
 }

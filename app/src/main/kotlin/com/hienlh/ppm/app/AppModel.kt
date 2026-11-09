@@ -810,11 +810,16 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     /** This app's sections in the rail's order: those dragged into place first, then the rest as the web lists them (`resolveTabOrder`). */
     val sidebarSections: List<String>
-        get() = (sidebarTabOrder.filter { it in SIDEBAR_SECTIONS } + SIDEBAR_SECTIONS).distinct()
+        get() {
+            val ordered = (sidebarTabOrder.filter { it in SIDEBAR_SECTIONS } + SIDEBAR_SECTIONS).distinct()
+            return if (info?.minimalMode == true) ordered.filter { it in MINIMAL_SIDEBAR_SECTIONS } else ordered
+        }
 
     /** The section shown: the one opened last, or the rail's first when that is one this app has not (the drawer's fallback). */
     val sidebarSection: String
-        get() = sidebarTab.takeIf { it in SIDEBAR_SECTIONS || it.startsWith("ext:") } ?: sidebarSections.first()
+        get() = sidebarTab
+            .takeIf { (it in SIDEBAR_SECTIONS || it.startsWith("ext:")) && (info?.minimalMode != true || it in MINIMAL_SIDEBAR_SECTIONS) }
+            ?: sidebarSections.first()
 
     /** The open server's OS (`/api/system/host`), kept per server so the first frame already knows it. */
     var hostPlatform by mutableStateOf<String?>(null)
@@ -1255,6 +1260,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** What the command palette opened with while it is open; null while it is closed. */
     var paletteQuery by mutableStateOf<String?>(null)
         private set
+
+    /** Whether the Cloud & Share popover (tablet rail) or bottom sheet (phone) is open. */
+    var cloudShareOpen by mutableStateOf(false)
 
     /** The keyboard shortcuts in force: the server's overrides over the web's defaults. */
     var keyBindings by mutableStateOf(KeyBindings())
@@ -3895,6 +3903,43 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         paletteQuery = null
     }
 
+    /** Opens or focuses an AI resource editor tab (`src/web/components/ai-resources/open-resource-tab.ts`). */
+    fun openAiResourceTab(item: com.hienlh.ppm.state.settings.AiResourceItem, projectPath: String) {
+        withWorkspace { store ->
+            val st = store.state.value
+            for (pid in st.gridPanelIds) {
+                val existing = st.panels[pid]?.tabs?.firstOrNull { tab ->
+                    tab.type == "ai-resource" && tab.metadata["filePath"].string == item.filePath
+                }
+                if (existing != null) {
+                    store.setActiveTab(existing.id, pid)
+                    store.setFocusedPanel(pid)
+                    return@withWorkspace
+                }
+            }
+            store.openTab(
+                NewTab(
+                    type = "ai-resource",
+                    title = item.name,
+                    projectId = null,
+                    closable = true,
+                    metadata = buildJsonObject {
+                        put("filePath", item.filePath)
+                        put("name", item.name)
+                        put("resourceType", item.type)
+                        put("scope", item.scope)
+                        put("readOnly", item.readOnly)
+                        put("shadowed", item.shadowed)
+                        item.shadowedBySource?.let { src ->
+                            put("shadowedBy", buildJsonObject { put("source", src) })
+                        }
+                        put("project", projectPath)
+                    },
+                ),
+            )
+        }
+    }
+
     /** Alt+] / Alt+[: the focused panel's next or previous tab, round the ends. */
     fun cycleTab(forward: Boolean) {
         val state = layout ?: return
@@ -4512,9 +4557,9 @@ internal fun filePathTab(path: String, projectName: String?) = NewTab(
 
 private val DOCK_POSITIONS = setOf("bottom", "left", "right")
 
-/** The sidebar sections this app has, in the web's order (`BUILTIN_SIDEBAR_TABS`). */
-/** The sections this app has, in the web's default rail order (`BUILTIN_SIDEBAR_TABS`); AI Resources and Jira are not ported. */
-private val SIDEBAR_SECTIONS = listOf("history", "teams", "designs", "explorer", "search", "git", "database", "tunnels")
+/** The sections this app has, in the web's default rail order (`BUILTIN_SIDEBAR_TABS`). */
+private val SIDEBAR_SECTIONS = listOf("history", "teams", "designs", "explorer", "search", "git", "database", "tunnels", "ai-resources")
+private val MINIMAL_SIDEBAR_SECTIONS = setOf("history", "explorer", "search")
 
 private val PROJECT_SORT_MODES = setOf("recent", "priority", "name")
 

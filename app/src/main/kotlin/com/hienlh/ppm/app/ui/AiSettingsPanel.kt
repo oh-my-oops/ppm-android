@@ -931,7 +931,13 @@ private fun TokenLimitSelect(label: String, field: TokenField, disabled: Boolean
  * again; each one's own sign-in comes with the MCP sign-in dialog.
  */
 @Composable
-internal fun McpSignInList(model: AppModel, modifier: Modifier) {
+internal fun McpSignInList(
+    model: AppModel,
+    modifier: Modifier = Modifier,
+    project: String? = null,
+    search: String = "",
+    showWhenEmpty: Boolean = true,
+) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     val scope = rememberCoroutineScope()
@@ -944,7 +950,7 @@ internal fun McpSignInList(model: AppModel, modifier: Modifier) {
         loading = true
         scope.launch {
             try {
-                val next = (model.api ?: throw IllegalStateException("Not connected")).mcpAuthStatus(null, fresh)
+                val next = (model.api ?: throw IllegalStateException("Not connected")).mcpAuthStatus(project, fresh)
                 if (mine == sequence[0]) servers = next
             } catch (e: CancellationException) {
                 throw e
@@ -956,8 +962,10 @@ internal fun McpSignInList(model: AppModel, modifier: Modifier) {
             }
         }
     }
-    LaunchedEffect(Unit) { load(fresh = false) }
-    val pending = servers.filter { it.status == "needs-auth" }
+    LaunchedEffect(project) { load(fresh = false) }
+    val q = search.trim().lowercase()
+    val pending = servers.filter { it.status == "needs-auth" && (q.isEmpty() || it.name.lowercase().contains(q)) }
+    if (pending.isEmpty() && !showWhenEmpty) return
     CssColumn(modifier, bottom = 4.dp) {
         // `flex items-center gap-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-subtle`,
         // as tall as its button.
@@ -993,7 +1001,7 @@ internal fun McpSignInList(model: AppModel, modifier: Modifier) {
         }
         for (server in pending) {
             McpSignInRow(server, mobile) {
-                model.openMcpSignIn(null, server.name)
+                model.openMcpSignIn(project, server.name)
             }
         }
     }
