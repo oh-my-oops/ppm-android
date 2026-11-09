@@ -1300,6 +1300,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** One-shot request to open the phone navigation drawer on a given section id. */
     var mobileDrawerOpenRequest by mutableStateOf<String?>(null)
 
+    /** Non-null when Learn PPM is open (`false` = guided tour, `true` = quick orientation). */
+    var learnPpmMode by mutableStateOf<Boolean?>(null)
+
     /** The keyboard shortcuts in force: the server's overrides over the web's defaults. */
     var keyBindings by mutableStateOf(KeyBindings())
         private set

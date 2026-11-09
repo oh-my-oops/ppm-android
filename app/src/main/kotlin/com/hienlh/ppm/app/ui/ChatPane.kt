@@ -382,6 +382,9 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                                     SessionListPanel(model, list, onOpen = { model.replaceTab(tab.tabId, it) }, Modifier.padding(horizontal = 16.dp))
                                 }
                             },
+                            welcomeActions = if (model.info?.minimalMode == true) null else ({
+                                com.hienlh.ppm.app.ui.shell.OnboardingEntryRow(model, compact = true)
+                            }),
                             onDismiss = chat::dismissMessage,
                             onClearErrors = chat::clearErrors,
                             jumpRequest = model.chatJump?.takeIf { it.sessionId == state.sessionId },

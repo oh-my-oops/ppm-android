@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -282,5 +283,55 @@ private fun Dialogs(model: AppModel) {
                 onClose = { model.comparePickerOpen = false },
             )
         }
+    }
+    val learnMode = model.learnPpmMode
+    if (learnMode != null) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        var onboardingState by remember(learnMode) {
+            val saved = com.hienlh.ppm.app.ui.shell.loadOnboardingStateFromPrefs(context)
+            mutableStateOf(if (learnMode) saved.openQuickOrientation() else saved.resumeGuide().copy(quickOrientationPage = null))
+        }
+        fun updateOnboarding(next: com.hienlh.ppm.state.shell.OnboardingState) {
+            val closedOrientation = learnMode && next.quickOrientationPage == null
+            onboardingState = next
+            com.hienlh.ppm.app.ui.shell.saveOnboardingStateToPrefs(context, next)
+            if (closedOrientation) model.learnPpmMode = null
+        }
+        com.hienlh.ppm.app.ui.shell.LearnPpmDialog(
+            state = onboardingState,
+            onStateChange = ::updateOnboarding,
+            onRefreshEvidence = {
+                val openTabs = model.layout?.panels?.values?.flatMap { p -> p.tabs }.orEmpty()
+                val ev = com.hienlh.ppm.state.shell.OnboardingEvidence(
+                    hasProjectSelected = model.selectedProject != null,
+                    chatSessionCount = model.sessions.size,
+                    hasOpenedFileTab = openTabs.any { t -> t.type == "editor" || t.type == "file" },
+                    hasOpenedTerminalTab = openTabs.any { t -> t.type == "terminal" },
+                    hasOpenedGitTab = openTabs.any { t -> t.type == "git-status" || t.type == "git-graph" },
+                )
+                updateOnboarding(onboardingState.mergeEvidence(ev))
+            },
+            onInsertSuggestedPrompt = { prompt ->
+                val openTabs = model.layout?.panels?.values?.flatMap { p -> p.tabs }.orEmpty()
+                val existingChat = model.activeTab?.let { model.chat(it.id) }
+                    ?: openTabs.firstNotNullOfOrNull { t -> model.chat(t.id) }
+                if (existingChat != null) {
+                    val updated = com.hienlh.ppm.state.shell.applySuggestedPromptToDraft(existingChat.draft.text.toString(), prompt)
+                    existingChat.draft.setTextAndPlaceCursorAtEnd(updated)
+                    model.activate(existingChat.tabId)
+                    existingChat.requestFocus()
+                } else if (model.selectedProject != null) {
+                    model.newChat(pendingMessage = prompt)
+                } else {
+                    model.terminalToChat(prompt, newTab = true, asContext = false)
+                }
+                updateOnboarding(onboardingState.markStepCompleted("ai.send"))
+                model.learnPpmMode = null
+            },
+            onDismiss = {
+                if (!learnMode) updateOnboarding(onboardingState.pauseOnEscape())
+                model.learnPpmMode = null
+            },
+        )
     }
 }
