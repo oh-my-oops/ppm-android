@@ -14,7 +14,6 @@ import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
-import android.view.ViewTreeObserver
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -81,7 +80,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextRange
@@ -1037,15 +1035,6 @@ fun RemoteDesktopViewer(
         stageInput.onWindowFocusChanged(windowFocused)
     }
 
-    val localView = LocalView.current
-    DisposableEffect(localView, stageInput) {
-        val listener = ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
-            stageInput.onWindowFocusChanged(hasFocus)
-        }
-        localView.viewTreeObserver.addOnWindowFocusChangeListener(listener)
-        onDispose { localView.viewTreeObserver.removeOnWindowFocusChangeListener(listener) }
-    }
-
     // Re-ping on resume or reconnect once if died while backgrounded; release held keys & buttons on pause
     DisposableEffect(lifecycleOwner, stageInput) {
         val observer = LifecycleEventObserver { _, event ->
@@ -1070,15 +1059,16 @@ fun RemoteDesktopViewer(
 
     fun takeScreenshot() {
         val sv = surfaceViewRef ?: return
+        val appContext = context.applicationContext ?: context
         captureSurfaceViewBitmap(sv, targetSize = frameSize) { bmp ->
             if (bmp != null) {
                 model.scope.launch(Dispatchers.IO) {
-                    val preQFile = saveBitmapToDownloads(context, bmp)
+                    val preQFile = saveBitmapToDownloads(appContext, bmp)
                     if (preQFile != null) {
                         withContext(Dispatchers.Main) {
                             runCatching {
                                 android.widget.Toast.makeText(
-                                    context,
+                                    appContext,
                                     "Screenshot saved to ${preQFile.absolutePath}",
                                     android.widget.Toast.LENGTH_SHORT,
                                 ).show()
@@ -1581,14 +1571,15 @@ internal fun stopAndSaveRecordingAsync(
     context: Context,
     rec: H264Mp4Recorder,
 ) {
+    val appContext = context.applicationContext ?: context
     scope.launch(Dispatchers.IO) {
         val saved = runCatching { rec.stop() }.getOrNull() ?: return@launch
-        val preQFile = copyMp4ToDownloads(context, saved)
+        val preQFile = copyMp4ToDownloads(appContext, saved)
         if (preQFile != null) {
             withContext(Dispatchers.Main) {
                 runCatching {
                     android.widget.Toast.makeText(
-                        context,
+                        appContext,
                         "Recording saved to ${preQFile.absolutePath}",
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
@@ -1612,9 +1603,6 @@ internal class StageInputController(
     private var lastDensityScale: Double = 1.0
     private var stageFocused: Boolean = false
     private var windowFocused: Boolean = true
-
-    val heldMouseButtons: Set<String>
-        get() = mouseHeldButtons.toSet()
 
     fun onStageFocusChanged(isFocused: Boolean) {
         val wasFocused = stageFocused
@@ -3171,20 +3159,10 @@ private fun MobileSettingSwitchRow(
 
 // ── 8. File Export Helpers ────────────────────────────────────────────
 
-@Suppress("DEPRECATION")
-private fun resolvePreQDownloadsDir(context: Context, downloadsDirOverride: File? = null): File {
-    val candidates = buildList {
-        if (downloadsDirOverride != null) add(downloadsDirOverride)
-        runCatching { Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) }
-            .getOrNull()?.let(::add)
-        runCatching { context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) }
-            .getOrNull()?.let(::add)
-        add(context.cacheDir)
-    }
-    for (dir in candidates) {
-        if ((dir.exists() || dir.mkdirs()) && dir.canWrite()) {
-            return dir
-        }
+private fun resolvePreQDownloadsDir(context: Context): File {
+    val externalDownloads = runCatching { context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) }.getOrNull()
+    if (externalDownloads != null && (externalDownloads.exists() || externalDownloads.mkdirs()) && externalDownloads.canWrite()) {
+        return externalDownloads
     }
     return context.cacheDir
 }
@@ -3193,7 +3171,6 @@ internal fun saveBitmapToDownloads(
     context: Context,
     bitmap: Bitmap,
     sdkInt: Int = Build.VERSION.SDK_INT,
-    downloadsDirOverride: File? = null,
 ): File? {
     return runCatching {
         val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss", Locale.US))
@@ -3212,7 +3189,7 @@ internal fun saveBitmapToDownloads(
                 return null
             }
         }
-        val dir = resolvePreQDownloadsDir(context, downloadsDirOverride)
+        val dir = resolvePreQDownloadsDir(context)
         val file = File(dir, name)
         FileOutputStream(file).use { out ->
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
@@ -3225,7 +3202,6 @@ internal fun copyMp4ToDownloads(
     context: Context,
     file: File,
     sdkInt: Int = Build.VERSION.SDK_INT,
-    downloadsDirOverride: File? = null,
 ): File? {
     return runCatching {
         if (sdkInt >= Build.VERSION_CODES.Q) {
@@ -3243,14 +3219,10 @@ internal fun copyMp4ToDownloads(
                 return null
             }
         }
-        val dir = resolvePreQDownloadsDir(context, downloadsDirOverride)
+        val dir = resolvePreQDownloadsDir(context)
         val dest = File(dir, file.name)
         if (dest.canonicalPath != file.canonicalPath) {
-            file.inputStream().use { inp ->
-                FileOutputStream(dest).use { out ->
-                    inp.copyTo(out)
-                }
-            }
+            file.copyTo(dest, overwrite = true)
             file.delete()
         }
         dest

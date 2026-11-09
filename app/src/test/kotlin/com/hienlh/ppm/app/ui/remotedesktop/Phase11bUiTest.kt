@@ -670,23 +670,21 @@ class Phase11bUiTest {
         )
         tempMp4.delete()
 
-        // Below API 29 (e.g. API 28), copyMp4ToDownloads saves the MP4 into the Downloads directory instead of losing it
+        // Below API 29 (e.g. API 28), copyMp4ToDownloads saves the MP4 into the app's Downloads directory and deletes the cache copy
         val sourceMp4 = File(context.cacheDir, "ppm-remote-pre-q.mp4").apply {
             writeBytes(byteArrayOf(0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70))
         }
-        val fakeDownloadsDir = File(context.cacheDir, "fake-downloads").apply { mkdirs() }
+        val expectedDownloadsDir = checkNotNull(context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS))
         val savedPreQ = copyMp4ToDownloads(
             context = context,
             file = sourceMp4,
             sdkInt = android.os.Build.VERSION_CODES.P,
-            downloadsDirOverride = fakeDownloadsDir,
         )
         assertTrue(savedPreQ != null && savedPreQ.exists())
-        assertEquals(fakeDownloadsDir.canonicalPath, savedPreQ!!.parentFile!!.canonicalPath)
+        assertEquals(expectedDownloadsDir.canonicalPath, savedPreQ!!.parentFile!!.canonicalPath)
         assertEquals(8L, savedPreQ.length())
         assertEquals(false, sourceMp4.exists())
         savedPreQ.delete()
-        fakeDownloadsDir.deleteRecursively()
 
         // Screenshot target bitmap is allocated at decoded frameSize (1920x1080), not surfaceView layout size (800x450)
         val bmp = createScreenshotTargetBitmap(surfaceWidth = 800, surfaceHeight = 450, frameSize = RdSize(1920, 1080))
@@ -843,7 +841,9 @@ class Phase11bUiTest {
             controller.onMotionEvent(it, stageSize)
             it.recycle()
         }
-        assertEquals(setOf("left"), controller.heldMouseButtons)
+        assertEquals(1, sent.size)
+        assertEquals("left", sent[0].jsonObject["button"].string)
+        assertEquals(true, sent[0].jsonObject["down"].bool)
 
         // 2. Press right mouse button while left is still held
         mouseEvent(
@@ -853,29 +853,25 @@ class Phase11bUiTest {
             controller.onMotionEvent(it, stageSize)
             it.recycle()
         }
-        assertEquals(setOf("left", "right"), controller.heldMouseButtons)
+        assertEquals(2, sent.size)
+        assertEquals("right", sent[1].jsonObject["button"].string)
+        assertEquals(true, sent[1].jsonObject["down"].bool)
 
         // 3. Release right mouse button while left stays held
         mouseEvent(android.view.MotionEvent.ACTION_BUTTON_RELEASE, android.view.MotionEvent.BUTTON_PRIMARY).also {
             controller.onMotionEvent(it, stageSize)
             it.recycle()
         }
-        assertEquals(setOf("left"), controller.heldMouseButtons)
+        assertEquals(3, sent.size)
+        assertEquals("right", sent[2].jsonObject["button"].string)
+        assertEquals(false, sent[2].jsonObject["down"].bool)
 
         // 4. Release left mouse button
         mouseEvent(android.view.MotionEvent.ACTION_UP, 0).also {
             controller.onMotionEvent(it, stageSize)
             it.recycle()
         }
-        assertEquals(emptySet<String>(), controller.heldMouseButtons)
-
         assertEquals(4, sent.size)
-        assertEquals("left", sent[0].jsonObject["button"].string)
-        assertEquals(true, sent[0].jsonObject["down"].bool)
-        assertEquals("right", sent[1].jsonObject["button"].string)
-        assertEquals(true, sent[1].jsonObject["down"].bool)
-        assertEquals("right", sent[2].jsonObject["button"].string)
-        assertEquals(false, sent[2].jsonObject["down"].bool)
         assertEquals("left", sent[3].jsonObject["button"].string)
         assertEquals(false, sent[3].jsonObject["down"].bool)
 
@@ -888,14 +884,23 @@ class Phase11bUiTest {
             controller.onMotionEvent(it, stageSize)
             it.recycle()
         }
-        assertEquals(setOf("left", "right"), controller.heldMouseButtons)
+        assertEquals(2, sent.size)
+        assertEquals("left", sent[0].jsonObject["button"].string)
+        assertEquals(true, sent[0].jsonObject["down"].bool)
+        assertEquals("right", sent[1].jsonObject["button"].string)
+        assertEquals(true, sent[1].jsonObject["down"].bool)
         sent.clear()
 
         controller.onWindowFocusChanged(false)
-        assertEquals(emptySet<String>(), controller.heldMouseButtons)
         assertTrue(sent.any { it.jsonObject["type"].string == "pointer" && it.jsonObject["button"].string == "left" && it.jsonObject["down"].bool == false })
         assertTrue(sent.any { it.jsonObject["type"].string == "pointer" && it.jsonObject["button"].string == "right" && it.jsonObject["down"].bool == false })
         assertTrue(sent.any { it.jsonObject["type"].string == "releaseAll" })
+
+        // Repeated window blur after release emits no duplicate pointer up messages
+        sent.clear()
+        controller.onWindowFocusChanged(true)
+        controller.onWindowFocusChanged(false)
+        assertTrue(sent.none { it.jsonObject["type"].string == "pointer" })
 
         // 6. Stage focus loss in RemoteDesktopViewer sends releaseAll
         val context = ApplicationProvider.getApplicationContext<Context>()
