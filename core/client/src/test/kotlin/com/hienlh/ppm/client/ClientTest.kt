@@ -140,6 +140,13 @@ class ClientTest {
         assertEquals(work.id, reopened.selectedId.value)
         assertEquals("secret", reopened.token(home))
 
+        // Log out: the password goes, the server and the selection stay.
+        reopened.forgetToken(work)
+        assertNull(reopened.token(work))
+        assertEquals(listOf("Home", "Work"), reopened.servers.value.map { it.name })
+        assertEquals(work.id, reopened.selectedId.value)
+        assertEquals("secret", reopened.token(home))
+
         reopened.remove(work)
         assertEquals(home.id, reopened.selectedId.value)
         assertNull(secrets[work.id])

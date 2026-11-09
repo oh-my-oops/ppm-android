@@ -55,6 +55,9 @@ class ServerStore(private val values: KeyValueStore, private val secrets: Secret
 
     fun updateToken(token: String, server: ServerProfile) = secrets.write(server.id, token)
 
+    /** Forgets the password saved for [server] and keeps the server itself. */
+    fun forgetToken(server: ServerProfile) = secrets.delete(server.id)
+
     fun rename(server: ServerProfile, name: String) {
         refresh()
         _servers.value = _servers.value.map { if (it.id == server.id) it.copy(name = name) else it }

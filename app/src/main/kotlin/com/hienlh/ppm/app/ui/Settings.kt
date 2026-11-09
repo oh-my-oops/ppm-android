@@ -550,6 +550,7 @@ private fun ServersSection(model: AppModel) {
     val servers by model.store.servers.collectAsState()
     val selected by model.store.selectedId.collectAsState()
     var removing by remember { mutableStateOf<ServerProfile?>(null) }
+    var loggingOut by remember { mutableStateOf<ServerProfile?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (model.debug != null) {
             BasicText(
@@ -588,23 +589,20 @@ private fun ServersSection(model: AppModel) {
                 ) { PpmIcon(ProductIcon.Trash2, 16.dp, tokens.text2.color) }
             }
         }
-        val shape = RoundedCornerShape(8.dp)
-        val hover = rememberHover()
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .height(36.dp)
-                .ppmShadow(SHADOW_XS, shape)
-                .clip(shape)
-                .background(outlineFill(tokens, isSystemInDarkTheme(), hover.lit.toDouble()))
-                .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, source = hover.source) { model.addingServer = true }
-                .cssBorder(outlineBorder(tokens, isSystemInDarkTheme()), shape),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-        ) {
-            PpmIcon(ProductIcon.Plus, 16.dp, tokens.text.color)
-            BasicText("Add server", style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color))
+        val current = servers.firstOrNull { it.id == selected }
+        if (current != null && model.debug == null) {
+            OutlineButton(ProductIcon.LogOut, "Log out") { loggingOut = current }
         }
+        OutlineButton(ProductIcon.Plus, "Add server") { model.addingServer = true }
+    }
+    loggingOut?.let { server ->
+        ConfirmDialog(
+            title = "Log out of ${server.name}?",
+            message = "This device forgets the password saved for this server and asks for it again. The server stays in the list.",
+            confirm = "Log out",
+            onConfirm = { model.logOut() },
+            onDismiss = { loggingOut = null },
+        )
     }
     removing?.let { server ->
         ConfirmDialog(
@@ -614,5 +612,28 @@ private fun ServersSection(model: AppModel) {
             onConfirm = { model.remove(server) },
             onDismiss = { removing = null },
         )
+    }
+}
+
+/** A full-width `outline` button, 36 dp tall. */
+@Composable
+private fun OutlineButton(icon: ProductIcon, label: String, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(8.dp)
+    val hover = rememberHover()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .ppmShadow(SHADOW_XS, shape)
+            .clip(shape)
+            .background(outlineFill(tokens, isSystemInDarkTheme(), hover.lit.toDouble()))
+            .ppmClickable(pressedColor = tokens.panel2.color, shape = shape, source = hover.source, onClick = onClick)
+            .cssBorder(outlineBorder(tokens, isSystemInDarkTheme()), shape),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+    ) {
+        PpmIcon(icon, 16.dp, tokens.text.color)
+        BasicText(label, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color))
     }
 }

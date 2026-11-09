@@ -1327,6 +1327,17 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     fun remove(server: ServerProfile) = store.remove(server)
 
+    /**
+     * Forgets the open server's password and opens it again, which closes its sockets and, with no
+     * password left, asks for one (`showSignIn`). The server keeps its single token; nothing to revoke.
+     */
+    fun logOut() {
+        val server = store.selected ?: return
+        store.forgetToken(server)
+        opening?.cancel()
+        opening = scope.launch { openSelectedServer() }
+    }
+
     private var opened: String? = null
     private var opening: Job? = null
 
