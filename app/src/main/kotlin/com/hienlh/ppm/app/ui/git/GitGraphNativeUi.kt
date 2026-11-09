@@ -2118,7 +2118,7 @@ internal fun GitGraphNativeContent(
                 )
                 if (menuCommit.isWip) {
                     val discardable = changedFiles.filter { GitChangesView.hasUnstaged(it) }
-                    val untracked = changedFiles.filter { it.untracked && it.conflict == null }
+                    val untracked = changedFiles.filter { it.untracked && !it.conflict }
                     SettingsButton(
                         label = "Stash all changes",
                         enabled = changedFiles.isNotEmpty(),
