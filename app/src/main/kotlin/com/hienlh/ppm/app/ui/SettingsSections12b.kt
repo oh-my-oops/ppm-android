@@ -29,6 +29,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
@@ -67,6 +68,14 @@ import com.hienlh.ppm.client.clawbotListTasks
 import com.hienlh.ppm.client.clawbotPutConfig
 import com.hienlh.ppm.client.clawbotPutTelegramToken
 import com.hienlh.ppm.client.clawbotStartTelegramConnect
+import com.hienlh.ppm.client.antigravityAccountsOverview
+import com.hienlh.ppm.client.antigravityCancelLogin
+import com.hienlh.ppm.client.antigravityDeleteAccount
+import com.hienlh.ppm.client.antigravityLoginStatus
+import com.hienlh.ppm.client.antigravitySetStrategy
+import com.hienlh.ppm.client.antigravityStartLogin
+import com.hienlh.ppm.client.antigravitySubmitLoginCode
+import com.hienlh.ppm.client.antigravityUsages
 import com.hienlh.ppm.client.codexAccounts
 import com.hienlh.ppm.client.codexAccountsOverview
 import com.hienlh.ppm.client.codexAddApiKey
@@ -94,6 +103,7 @@ import com.hienlh.ppm.client.mcpImportFromClaude
 import com.hienlh.ppm.client.mcpListServers
 import com.hienlh.ppm.client.mcpUpdateServer
 import com.hienlh.ppm.client.setAccountStatus
+import com.hienlh.ppm.client.setAntigravityAccountStatus
 import com.hienlh.ppm.client.setCodexAccountStatus
 import com.hienlh.ppm.client.setCodexDailyGuard
 import com.hienlh.ppm.client.updateAiSettings
@@ -106,13 +116,21 @@ import com.hienlh.ppm.protocol.AccountInfo
 import com.hienlh.ppm.protocol.AccountUsage
 import com.hienlh.ppm.protocol.AccountUsageEntry
 import com.hienlh.ppm.protocol.AiSettingsPatch
+import com.hienlh.ppm.protocol.AntigravityAccount
 import com.hienlh.ppm.protocol.CodexAccount
 import com.hienlh.ppm.protocol.UsageInfo
+import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.int
 import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.codexPlanLabel
+import com.hienlh.ppm.state.currentAntigravityUsage
 import com.hienlh.ppm.state.dailyGuardState
+import com.hienlh.ppm.state.formatLastUpdated
+import com.hienlh.ppm.state.formatResetTime
+import com.hienlh.ppm.state.isAntigravityUsageStale
+import com.hienlh.ppm.state.isoMillis
+import com.hienlh.ppm.state.settings.AntigravityLoginFlow
 import com.hienlh.ppm.state.settings.duplicateAiResourceTargetScope
 import com.hienlh.ppm.state.settings.AccountRotationSettings
 import com.hienlh.ppm.state.settings.AiResourceFilter
@@ -144,6 +162,8 @@ import com.hienlh.ppm.state.settings.looksLikeAnthropicOAuthCode
 import com.hienlh.ppm.state.settings.looksLikeCodexLoopbackUrl
 import com.hienlh.ppm.state.settings.parseAccountRotationSettings
 import com.hienlh.ppm.state.settings.parseAiResources
+import com.hienlh.ppm.state.settings.parseAntigravityLoginStart
+import com.hienlh.ppm.state.settings.parseAntigravityLoginStatus
 import com.hienlh.ppm.state.settings.parseClawbotConfig
 import com.hienlh.ppm.state.settings.parseClawbotMemories
 import com.hienlh.ppm.state.settings.parseClawbotTasks
@@ -162,6 +182,7 @@ import com.hienlh.ppm.state.settings.utf8ByteCount
 import com.hienlh.ppm.state.settings.validateAiResourceName
 import com.hienlh.ppm.state.settings.validateMcpConfig
 import com.hienlh.ppm.state.settings.validateMcpName
+import com.hienlh.ppm.state.usagePercent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -275,16 +296,24 @@ internal fun ToolsSettingsContent(
 }
 
 // ===========================================================================
-// 3. Accounts Section (Claude + Codex Accounts)
+// 3. Accounts Section (Claude + Codex + Antigravity Accounts)
 // ===========================================================================
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun AccountsSettingsSection(model: AppModel) {
     var activeTab by remember { mutableStateOf("claude") }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for ((id, label) in listOf("claude" to "Claude Accounts", "codex" to "Codex Accounts")) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            for ((id, label) in listOf(
+                "claude" to "Claude Accounts",
+                "codex" to "Codex Accounts",
+                "antigravity" to "Antigravity Accounts",
+            )) {
                 val selected = activeTab == id
                 SettingsButton(
                     label = label,
@@ -295,10 +324,10 @@ internal fun AccountsSettingsSection(model: AppModel) {
             }
         }
         Separator()
-        if (activeTab == "claude") {
-            ClaudeAccountsPane(model)
-        } else {
-            CodexAccountsPane(model)
+        when (activeTab) {
+            "claude" -> ClaudeAccountsPane(model)
+            "codex" -> CodexAccountsPane(model)
+            "antigravity" -> AntigravityAccountsPane(model)
         }
     }
 }
@@ -1565,6 +1594,672 @@ private fun CodexAccountsPane(model: AppModel) {
             },
             onDismiss = { deletingAccount = null },
         )
+    }
+}
+
+private data class AntigravityStrategyOption(
+    val value: String,
+    val label: String,
+    val hint: String,
+)
+
+private val ANTIGRAVITY_STRATEGIES = listOf(
+    AntigravityStrategyOption("round-robin", "Round-robin", "Take the next account each time."),
+    AntigravityStrategyOption("fill-first", "Fill-first", "Stay on one account until it runs out."),
+    AntigravityStrategyOption("lowest-usage", "Lowest usage", "Pick whichever has the most left."),
+)
+
+@Composable
+private fun AntigravityAccountsPane(model: AppModel) {
+    val api = model.api
+    val scope = rememberCoroutineScope()
+    val uriHandler = LocalUriHandler.current
+
+    var accounts by remember { mutableStateOf<List<AntigravityAccount>>(emptyList()) }
+    var usages by remember { mutableStateOf<Map<String, UsageInfo>>(emptyMap()) }
+    var strategy by remember { mutableStateOf("round-robin") }
+    var loading by remember { mutableStateOf(true) }
+    var refreshing by remember { mutableStateOf(false) }
+    var statusMsg by remember { mutableStateOf<String?>(null) }
+    var isError by remember { mutableStateOf(false) }
+
+    // Add / Re-login dialog state
+    var showAddDialog by remember { mutableStateOf(false) }
+    var reloginAccount by remember { mutableStateOf<AntigravityAccount?>(null) }
+    var loginLabel by remember { mutableStateOf("") }
+    var loginFlow by remember { mutableStateOf<AntigravityLoginFlow?>(null) }
+    var startingLogin by remember { mutableStateOf(false) }
+    var authCode by remember { mutableStateOf("") }
+    var submittingCode by remember { mutableStateOf(false) }
+
+    suspend fun reload(showSpinner: Boolean = false) {
+        val client = api ?: return
+        if (showSpinner) refreshing = true
+        try {
+            val overview = client.antigravityAccountsOverview()
+            accounts = overview["accounts"].array.orEmpty().mapNotNull(AntigravityAccount::from)
+            strategy = overview["strategy"].string ?: "round-robin"
+            usages = runCatching { client.antigravityUsages() }.getOrDefault(emptyMap())
+        } catch (t: Throwable) {
+            isError = true
+            statusMsg = t.message ?: "Failed to load Antigravity accounts"
+        } finally {
+            loading = false
+            refreshing = false
+        }
+    }
+
+    LaunchedEffect(api) {
+        if (api != null) reload() else loading = false
+    }
+
+    // Poll pending Google OAuth PKCE login every 2s up to 610s (matching antigravity-accounts-section.tsx)
+    LaunchedEffect(loginFlow?.id) {
+        val current = loginFlow ?: return@LaunchedEffect
+        val client = api ?: return@LaunchedEffect
+        val deadline = System.currentTimeMillis() + 610_000L
+        while (isActive && System.currentTimeMillis() < deadline) {
+            delay(2_000L)
+            val polled = runCatching { parseAntigravityLoginStatus(client.antigravityLoginStatus(current.id)) }.getOrNull()
+            if (polled != null) {
+                if (polled.isDone) {
+                    loginFlow = null
+                    showAddDialog = false
+                    reloginAccount = null
+                    loginLabel = ""
+                    authCode = ""
+                    isError = false
+                    statusMsg = "Antigravity Google account connected."
+                    reload()
+                    break
+                } else if (polled.isError) {
+                    loginFlow = null
+                    isError = true
+                    statusMsg = polled.error ?: "Login failed."
+                    break
+                }
+            }
+        }
+    }
+
+    fun resetDialogState(cancelRemote: Boolean) {
+        val pendingId = loginFlow?.id
+        val client = api
+        loginFlow = null
+        showAddDialog = false
+        reloginAccount = null
+        loginLabel = ""
+        authCode = ""
+        if (cancelRemote && pendingId != null && client != null) {
+            scope.launch { runCatching { client.antigravityCancelLogin(pendingId) } }
+        }
+    }
+
+    AntigravityAccountsContent(
+        accounts = accounts,
+        usages = usages,
+        strategy = strategy,
+        loading = loading,
+        refreshing = refreshing,
+        statusMsg = statusMsg,
+        isError = isError,
+        enabled = api != null,
+        onDismissStatus = { statusMsg = null },
+        onRefresh = {
+            scope.launch { reload(showSpinner = true) }
+        },
+        onSelectStrategy = { next ->
+            val client = api ?: return@AntigravityAccountsContent
+            val prev = strategy
+            strategy = next
+            scope.launch {
+                try {
+                    client.antigravitySetStrategy(next)
+                } catch (t: Throwable) {
+                    strategy = prev
+                    isError = true
+                    statusMsg = t.message ?: "Failed to update strategy."
+                }
+            }
+        },
+        onToggleAccount = { account ->
+            val client = api ?: return@AntigravityAccountsContent
+            val next = if (account.status == "disabled") "active" else "disabled"
+            accounts = accounts.map { if (it.id == account.id) it.copy(status = next) else it }
+            scope.launch {
+                try {
+                    val updated = client.setAntigravityAccountStatus(account.id, next)
+                    if (updated != null) {
+                        accounts = accounts.map { if (it.id == account.id) updated else it }
+                    }
+                } catch (t: Throwable) {
+                    isError = true
+                    statusMsg = t.message ?: "Failed to update account."
+                    reload()
+                }
+            }
+        },
+        onDeleteAccount = { account ->
+            val client = api ?: return@AntigravityAccountsContent
+            scope.launch {
+                try {
+                    client.antigravityDeleteAccount(account.id)
+                    accounts = accounts.filterNot { it.id == account.id }
+                    isError = false
+                    statusMsg = "Account removed."
+                } catch (t: Throwable) {
+                    isError = true
+                    statusMsg = t.message ?: "Failed to remove account."
+                }
+            }
+        },
+        onOpenAddAccount = {
+            reloginAccount = null
+            loginLabel = ""
+            loginFlow = null
+            authCode = ""
+            showAddDialog = true
+        },
+        onOpenRelogin = { account ->
+            reloginAccount = account
+            loginLabel = ""
+            loginFlow = null
+            authCode = ""
+            showAddDialog = true
+        },
+        showAddDialog = showAddDialog,
+        reloginAccount = reloginAccount,
+        loginLabel = loginLabel,
+        onLoginLabelChange = { loginLabel = it },
+        loginFlow = loginFlow,
+        startingLogin = startingLogin,
+        authCode = authCode,
+        onAuthCodeChange = { authCode = it },
+        submittingCode = submittingCode,
+        onStartLogin = {
+            val client = api ?: return@AntigravityAccountsContent
+            startingLogin = true
+            isError = false
+            statusMsg = null
+            scope.launch {
+                try {
+                    val started = parseAntigravityLoginStart(
+                        client.antigravityStartLogin(
+                            label = loginLabel.trim().ifEmpty { null },
+                            accountId = reloginAccount?.id,
+                        ),
+                    )
+                    if (started != null) {
+                        loginFlow = started
+                        authCode = ""
+                        runCatching { uriHandler.openUri(started.authUrl) }
+                    } else {
+                        isError = true
+                        statusMsg = "Failed to start Google sign-in."
+                    }
+                } catch (t: Throwable) {
+                    isError = true
+                    statusMsg = t.message ?: "Failed to start Google sign-in."
+                } finally {
+                    startingLogin = false
+                }
+            }
+        },
+        onOpenAuthUrl = { url -> runCatching { uriHandler.openUri(url) } },
+        onStartOver = {
+            val pendingId = loginFlow?.id
+            val client = api
+            loginFlow = null
+            authCode = ""
+            if (pendingId != null && client != null) {
+                scope.launch { runCatching { client.antigravityCancelLogin(pendingId) } }
+            }
+        },
+        onSubmitAuthCode = {
+            val client = api ?: return@AntigravityAccountsContent
+            val flow = loginFlow ?: return@AntigravityAccountsContent
+            val trimmed = authCode.trim()
+            if (trimmed.isEmpty()) return@AntigravityAccountsContent
+            submittingCode = true
+            isError = false
+            statusMsg = null
+            scope.launch {
+                try {
+                    val polled = parseAntigravityLoginStatus(client.antigravitySubmitLoginCode(flow.id, trimmed))
+                    if (polled?.isDone == true) {
+                        resetDialogState(cancelRemote = false)
+                        isError = false
+                        statusMsg = "Antigravity Google account connected."
+                        reload()
+                    } else if (polled?.isError == true) {
+                        loginFlow = null
+                        isError = true
+                        statusMsg = polled.error ?: "Login failed."
+                    }
+                } catch (t: Throwable) {
+                    isError = true
+                    statusMsg = t.message ?: "Failed to exchange authorization code."
+                } finally {
+                    submittingCode = false
+                }
+            }
+        },
+        onCancelDialog = { resetDialogState(cancelRemote = true) },
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun AntigravityAccountsContent(
+    accounts: List<AntigravityAccount>,
+    usages: Map<String, UsageInfo>,
+    strategy: String,
+    loading: Boolean = false,
+    refreshing: Boolean = false,
+    statusMsg: String? = null,
+    isError: Boolean = false,
+    enabled: Boolean = true,
+    onDismissStatus: () -> Unit = {},
+    onRefresh: () -> Unit = {},
+    onSelectStrategy: (String) -> Unit = {},
+    onToggleAccount: (AntigravityAccount) -> Unit = {},
+    onDeleteAccount: (AntigravityAccount) -> Unit = {},
+    onOpenAddAccount: () -> Unit = {},
+    onOpenRelogin: (AntigravityAccount) -> Unit = {},
+    showAddDialog: Boolean = false,
+    reloginAccount: AntigravityAccount? = null,
+    loginLabel: String = "",
+    onLoginLabelChange: (String) -> Unit = {},
+    loginFlow: AntigravityLoginFlow? = null,
+    startingLogin: Boolean = false,
+    authCode: String = "",
+    onAuthCodeChange: (String) -> Unit = {},
+    submittingCode: Boolean = false,
+    onStartLogin: () -> Unit = {},
+    onOpenAuthUrl: (String) -> Unit = {},
+    onStartOver: () -> Unit = {},
+    onSubmitAuthCode: () -> Unit = {},
+    onCancelDialog: () -> Unit = {},
+    now: Long = System.currentTimeMillis(),
+) {
+    val tokens = LocalPpmTokens.current
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        BasicText(
+            "Each Antigravity account keeps its own Google OAuth login (~/.ppm/antigravity-accounts) alongside your local IDE login (~/.gemini). One is picked per chat by the rotation setting.",
+            style = ppmText(11f, lineHeight = 16f).copy(color = tokens.text3.color),
+        )
+
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SettingsButton(
+                label = "+ Add account",
+                primary = true,
+                enabled = enabled,
+                modifier = Modifier.testTag("antigravity-add-account-btn"),
+                onClick = onOpenAddAccount,
+            )
+            SettingsButton(
+                label = if (refreshing) "Refreshing…" else "Refresh",
+                enabled = enabled && !refreshing,
+                modifier = Modifier.testTag("antigravity-refresh-btn"),
+                onClick = onRefresh,
+            )
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+                BasicText("Rotation", style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text2.color))
+                for (opt in ANTIGRAVITY_STRATEGIES) {
+                    SettingsButton(
+                        label = opt.label,
+                        primary = strategy == opt.value,
+                        enabled = enabled,
+                        modifier = Modifier.testTag("antigravity-strategy-${opt.value}"),
+                        onClick = { onSelectStrategy(opt.value) },
+                    )
+                }
+            }
+            val activeHint = ANTIGRAVITY_STRATEGIES.firstOrNull { it.value == strategy }?.hint
+            if (activeHint != null) {
+                BasicText(activeHint, style = ppmText(11f, lineHeight = 16f).copy(color = tokens.text3.color))
+            }
+        }
+
+        if (statusMsg != null) {
+            val bannerShape = RoundedCornerShape(8.dp)
+            val bannerBorder = if (isError) tokens.error.opacity(0.4).color else tokens.border.color
+            val bannerBg = if (isError) tokens.error.opacity(0.1).color else tokens.panel.color
+            val bannerFg = if (isError) tokens.error.color else tokens.text.color
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(bannerShape)
+                    .background(bannerBg)
+                    .cssBorder(bannerBorder, bannerShape)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .testTag("antigravity-status-banner"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                BasicText(
+                    statusMsg,
+                    Modifier.weight(1f),
+                    style = ppmText(11f, lineHeight = 16f).copy(color = bannerFg),
+                )
+                BasicText(
+                    "×",
+                    Modifier
+                        .clickable(onClick = onDismissStatus)
+                        .padding(horizontal = 4.dp)
+                        .testTag("antigravity-dismiss-msg"),
+                    style = ppmText(14f, FontWeight.Medium).copy(color = tokens.text3.color),
+                )
+            }
+        }
+
+        if (loading && accounts.isEmpty()) {
+            BasicText(
+                "Loading Antigravity accounts…",
+                style = ppmText(11f).copy(color = tokens.text3.color),
+            )
+        } else if (!loading && accounts.isEmpty()) {
+            val emptyShape = RoundedCornerShape(10.dp)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(emptyShape)
+                    .background(tokens.panel.color)
+                    .cssBorder(tokens.border.color, emptyShape)
+                    .padding(16.dp)
+                    .testTag("antigravity-empty-state"),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                BasicText(
+                    "No Antigravity accounts yet.",
+                    style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text2.color),
+                )
+                BasicText(
+                    "Click Add account to sign in with Google, or start Antigravity Desktop to auto-detect your local account.",
+                    style = ppmText(11f, lineHeight = 16f).copy(color = tokens.text3.color),
+                )
+            }
+        }
+
+        for (account in accounts) {
+            val u = currentAntigravityUsage(usages[account.id] ?: UsageInfo(), now)
+            val unread = u.session == null && u.weekly == null && u.weeklyScoped.isEmpty()
+            val cardShape = RoundedCornerShape(10.dp)
+            val badgeShape = RoundedCornerShape(999.dp)
+            val disabled = account.status == "disabled"
+
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .alpha(if (disabled) 0.6f else 1f)
+                    .clip(cardShape)
+                    .background(tokens.panel.color)
+                    .cssBorder(tokens.border.color, cardShape)
+                    .padding(12.dp)
+                    .testTag("antigravity-account-card-${account.id}"),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    itemVerticalAlignment = Alignment.CenterVertically,
+                ) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        itemVerticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BasicText(
+                            account.label,
+                            style = ppmText(13f, FontWeight.SemiBold, lineHeight = 18f).copy(color = tokens.text.color),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (!account.email.isNullOrEmpty() && account.email != account.label) {
+                            BasicText(
+                                account.email!!,
+                                style = ppmText(11f, lineHeight = 16f).copy(color = tokens.text3.color),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Box(
+                            Modifier
+                                .clip(badgeShape)
+                                .background(tokens.panel2.color)
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                .testTag("antigravity-source-${account.id}"),
+                        ) {
+                            BasicText(
+                                if (account.isDefault) "~/.gemini" else "Google",
+                                style = ppmText(10f, FontWeight.Medium).copy(color = tokens.text3.color),
+                            )
+                        }
+                        if (!account.planType.isNullOrEmpty()) {
+                            Box(
+                                Modifier
+                                    .clip(badgeShape)
+                                    .background(tokens.accent.opacity(0.1).color)
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    .testTag("antigravity-plan-${account.id}"),
+                            ) {
+                                BasicText(
+                                    account.planType!!,
+                                    style = ppmText(10f, FontWeight.Medium).copy(color = tokens.accent.color),
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(Modifier.testTag("antigravity-toggle-${account.id}")) {
+                            PpmSwitch(checked = !disabled, enabled = enabled) {
+                                onToggleAccount(account)
+                            }
+                        }
+                        if (!account.isDefault) {
+                            SettingsButton(
+                                label = "Sign in again",
+                                enabled = enabled,
+                                modifier = Modifier.testTag("antigravity-relogin-${account.id}"),
+                                onClick = { onOpenRelogin(account) },
+                            )
+                            SettingsButton(
+                                label = "Delete",
+                                danger = true,
+                                enabled = enabled,
+                                modifier = Modifier.testTag("antigravity-delete-${account.id}"),
+                                onClick = { onDeleteAccount(account) },
+                            )
+                        }
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (unread || u.session != null) {
+                        AccountUsageBar(
+                            label = "Gemini · 5-Hour Session",
+                            pct = u.fiveHour?.let(::usagePercent),
+                            reset = formatResetTime(u.session, now),
+                        )
+                    }
+                    if (unread || u.weekly != null) {
+                        AccountUsageBar(
+                            label = "Gemini · Weekly",
+                            pct = u.sevenDay?.let(::usagePercent),
+                            reset = formatResetTime(u.weekly, now),
+                        )
+                    }
+                    for (b in u.weeklyScoped) {
+                        AccountUsageBar(
+                            label = b.label.orEmpty(),
+                            pct = usagePercent(b.utilization),
+                            reset = formatResetTime(b, now),
+                        )
+                    }
+                }
+
+                if (u.lastFetchedAt != null && isAntigravityUsageStale(u.lastFetchedAt, now)) {
+                    val fetchedMs = isoMillis(u.lastFetchedAt!!) ?: now
+                    BasicText(
+                        "Last read ${formatLastUpdated(fetchedMs, now)}. Neither agy nor the Antigravity app has answered since.",
+                        style = ppmText(11f, lineHeight = 16f).copy(color = tokens.warning.color),
+                        modifier = Modifier.testTag("antigravity-stale-${account.id}"),
+                    )
+                }
+            }
+        }
+    }
+
+    if (showAddDialog) {
+        Dialog(onDismissRequest = {
+            if (!startingLogin && !submittingCode) onCancelDialog()
+        }) {
+            AntigravityLoginDialogContent(
+                reloginAccount = reloginAccount,
+                loginLabel = loginLabel,
+                onLoginLabelChange = onLoginLabelChange,
+                loginFlow = loginFlow,
+                startingLogin = startingLogin,
+                authCode = authCode,
+                onAuthCodeChange = onAuthCodeChange,
+                submittingCode = submittingCode,
+                onStartLogin = onStartLogin,
+                onOpenAuthUrl = onOpenAuthUrl,
+                onStartOver = onStartOver,
+                onSubmitAuthCode = onSubmitAuthCode,
+                onCancelDialog = onCancelDialog,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun AntigravityLoginDialogContent(
+    reloginAccount: AntigravityAccount? = null,
+    loginLabel: String = "",
+    onLoginLabelChange: (String) -> Unit = {},
+    loginFlow: AntigravityLoginFlow? = null,
+    startingLogin: Boolean = false,
+    authCode: String = "",
+    onAuthCodeChange: (String) -> Unit = {},
+    submittingCode: Boolean = false,
+    onStartLogin: () -> Unit = {},
+    onOpenAuthUrl: (String) -> Unit = {},
+    onStartOver: () -> Unit = {},
+    onSubmitAuthCode: () -> Unit = {},
+    onCancelDialog: () -> Unit = {},
+) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(tokens.bgSolid.color)
+            .cssBorder(tokens.border.color, shape)
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SettingsSectionTitle(
+            if (reloginAccount != null) {
+                "Sign in again — ${reloginAccount.label}"
+            } else {
+                "Add Antigravity Account"
+            },
+        )
+        BasicText(
+            if (reloginAccount != null) {
+                "Sign in with Google to refresh this account's OAuth credentials."
+            } else {
+                "Sign in with a Google account using Antigravity's OAuth PKCE flow. Each account is stored in its own isolated directory."
+            },
+            style = ppmText(11f, lineHeight = 16f).copy(color = tokens.text3.color),
+        )
+
+        if (reloginAccount == null) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                BasicText("Label (optional)", style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text2.color))
+                SettingsTextInput(
+                    value = loginLabel,
+                    onValueChange = onLoginLabelChange,
+                    placeholder = "e.g. Personal, Work, Shopee 2",
+                    modifier = Modifier.fillMaxWidth().testTag("antigravity-login-label-input"),
+                )
+            }
+        }
+
+        if (loginFlow == null) {
+            SettingsButton(
+                label = if (startingLogin) "Preparing…" else "Sign in with Google",
+                primary = true,
+                enabled = !startingLogin,
+                modifier = Modifier.fillMaxWidth().testTag("antigravity-start-login-btn"),
+                onClick = onStartLogin,
+            )
+        } else {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                SettingsButton(
+                    label = "Open Google Sign-In page",
+                    modifier = Modifier.testTag("antigravity-open-auth-url-btn"),
+                    onClick = { onOpenAuthUrl(loginFlow.authUrl) },
+                )
+                SettingsButton(
+                    label = "Start over",
+                    modifier = Modifier.testTag("antigravity-start-over-btn"),
+                    onClick = onStartOver,
+                )
+            }
+            BasicText(
+                "1. Open the link above and sign in with your Google account.\n" +
+                    "2. Copy the authorization code (or the full callback URL) shown after signing in and paste it below:",
+                style = ppmText(11f, lineHeight = 16f).copy(color = tokens.text3.color),
+            )
+            SettingsTextInput(
+                value = authCode,
+                onValueChange = onAuthCodeChange,
+                placeholder = "4/0A... or https://antigravity.google/oauth-callback?code=...",
+                mono = true,
+                modifier = Modifier.fillMaxWidth().testTag("antigravity-auth-code-input"),
+            )
+            SettingsButton(
+                label = if (submittingCode) "Verifying…" else "Verify & Save Account",
+                primary = true,
+                enabled = !submittingCode && authCode.isNotBlank(),
+                modifier = Modifier.fillMaxWidth().testTag("antigravity-submit-code-btn"),
+                onClick = onSubmitAuthCode,
+            )
+        }
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            SettingsButton(
+                label = "Cancel",
+                enabled = !startingLogin && !submittingCode,
+                modifier = Modifier.testTag("antigravity-cancel-login-btn"),
+                onClick = onCancelDialog,
+            )
+        }
     }
 }
 

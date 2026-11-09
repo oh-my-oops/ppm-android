@@ -1,11 +1,18 @@
 package com.hienlh.ppm.app.ui
 
+import android.app.Application
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
+import androidx.test.core.app.ApplicationProvider
+import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
@@ -13,6 +20,7 @@ import com.hienlh.ppm.protocol.AntigravityAccount
 import com.hienlh.ppm.protocol.LimitBucket
 import com.hienlh.ppm.protocol.UsageInfo
 import com.hienlh.ppm.state.AntigravityAccountsData
+import com.hienlh.ppm.state.settings.AntigravityLoginFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -197,5 +205,147 @@ class AntigravityUiTest {
         useButtons[0].performClick()
         composeRule.waitForIdle()
         assertEquals("acc-pro" to "Work · Pro", picked)
+    }
+
+    @Test
+    fun accountsSettingsSection_switchesToAntigravityTabAndShowsEmptyState() {
+        assertEquals("Claude, Codex and Antigravity sign-ins, rotation", SettingsCategory.Accounts.subtitle)
+        val model = AppModel(ApplicationProvider.getApplicationContext<Application>())
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                AccountsSettingsSection(model)
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("accounts-tab-antigravity").assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("antigravity-empty-state").assertIsDisplayed()
+        composeRule.onNodeWithText("No Antigravity accounts yet.").assertIsDisplayed()
+    }
+
+    @Test
+    fun antigravityAccountsContent_rendersDefaultVsIsolatedCardsActionsStrategyAndStaleWarning() {
+        val nowMs = 1_794_270_000_000L // 2026-11-10T00:20:00Z
+        val freshIso = "2026-11-10T00:18:00Z"
+        val staleIso = "2026-11-10T00:00:00Z"
+        val defaultAcc = AntigravityAccount(id = "default", label = "Default", email = "local@example.com", planType = "Free")
+        val isolatedAcc = AntigravityAccount(id = "acc-google", label = "Work", email = "work@example.com", planType = "Pro")
+
+        var selectedStrategy by mutableStateOf("round-robin")
+        var toggledId: String? = null
+        var reloginId: String? = null
+        var deletedId: String? = null
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                AntigravityAccountsContent(
+                    accounts = listOf(defaultAcc, isolatedAcc),
+                    usages = mapOf(
+                        "default" to UsageInfo(
+                            fiveHour = 0.25,
+                            session = bucket(0.25, "2026-11-10T04:00:00Z"),
+                            lastFetchedAt = freshIso,
+                        ),
+                        "acc-google" to UsageInfo(
+                            fiveHour = 0.40,
+                            session = bucket(0.40, "2026-11-10T04:00:00Z"),
+                            weeklyScoped = listOf(bucket(0.55, "2026-11-12T00:00:00Z", "Claude · 5-Hour")),
+                            lastFetchedAt = staleIso,
+                        ),
+                    ),
+                    strategy = selectedStrategy,
+                    onSelectStrategy = { selectedStrategy = it },
+                    onToggleAccount = { toggledId = it.id },
+                    onOpenRelogin = { reloginId = it.id },
+                    onDeleteAccount = { deletedId = it.id },
+                    now = nowMs,
+                )
+            }
+        }
+
+        // Default account shows ~/.gemini badge and hides Sign in again / Delete
+        composeRule.onNodeWithText("~/.gemini").assertIsDisplayed()
+        composeRule.onNodeWithText("local@example.com").assertIsDisplayed()
+        composeRule.onNodeWithTag("antigravity-relogin-default").assertDoesNotExist()
+        composeRule.onNodeWithTag("antigravity-delete-default").assertDoesNotExist()
+        composeRule.onNodeWithTag("antigravity-stale-default").assertDoesNotExist()
+
+        // Isolated account shows Google badge, scoped bar, stale warning, and action buttons
+        composeRule.onNodeWithText("Google").assertIsDisplayed()
+        composeRule.onNodeWithText("work@example.com").assertIsDisplayed()
+        composeRule.onNodeWithText("Claude · 5-Hour").assertIsDisplayed()
+        composeRule.onNodeWithTag("antigravity-stale-acc-google").assertIsDisplayed()
+
+        // Strategy switching updates hint
+        composeRule.onNodeWithText("Take the next account each time.").assertIsDisplayed()
+        composeRule.onNodeWithTag("antigravity-strategy-lowest-usage").performClick()
+        composeRule.waitForIdle()
+        assertEquals("lowest-usage", selectedStrategy)
+        composeRule.onNodeWithText("Pick whichever has the most left.").assertIsDisplayed()
+
+        // Toggle, re-login, and delete callbacks
+        composeRule.onNodeWithTag("antigravity-toggle-acc-google").performClick()
+        assertEquals("acc-google", toggledId)
+
+        composeRule.onNodeWithTag("antigravity-relogin-acc-google").performClick()
+        assertEquals("acc-google", reloginId)
+
+        composeRule.onNodeWithTag("antigravity-delete-acc-google").performClick()
+        assertEquals("acc-google", deletedId)
+    }
+
+    @Test
+    fun antigravityLoginDialogContent_runsPkceStepOneStepTwoAndReloginTitle() {
+        var relogin by mutableStateOf<AntigravityAccount?>(null)
+        var label by mutableStateOf("")
+        var flow by mutableStateOf<AntigravityLoginFlow?>(null)
+        var code by mutableStateOf("")
+        var startedLabel: String? = null
+        var submittedCode: String? = null
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                AntigravityLoginDialogContent(
+                    reloginAccount = relogin,
+                    loginLabel = label,
+                    onLoginLabelChange = { label = it },
+                    loginFlow = flow,
+                    authCode = code,
+                    onAuthCodeChange = { code = it },
+                    onStartLogin = {
+                        startedLabel = label
+                        flow = AntigravityLoginFlow(id = "login-1", authUrl = "https://accounts.google.com/o/oauth2/v2/auth")
+                    },
+                    onSubmitAuthCode = {
+                        submittedCode = code
+                    },
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Add Antigravity Account").assertIsDisplayed()
+        composeRule.onNodeWithTag("antigravity-login-label-input").performTextReplacement("Shopee 2")
+        composeRule.onNodeWithTag("antigravity-start-login-btn").performClick()
+        composeRule.waitForIdle()
+
+        assertEquals("Shopee 2", startedLabel)
+        composeRule.onNodeWithTag("antigravity-open-auth-url-btn").assertIsDisplayed()
+        composeRule.onNodeWithTag("antigravity-auth-code-input").assertIsDisplayed()
+        composeRule.onNodeWithTag("antigravity-submit-code-btn").performClick()
+        assertNull(submittedCode)
+        composeRule.onNodeWithTag("antigravity-auth-code-input")
+            .performTextReplacement("https://antigravity.google/oauth-callback?code=4/0Axyz")
+        composeRule.onNodeWithTag("antigravity-submit-code-btn").performClick()
+        assertEquals("https://antigravity.google/oauth-callback?code=4/0Axyz", submittedCode)
+
+        // Re-login mode hides optional label input and shows Sign in again header
+        flow = null
+        relogin = AntigravityAccount(id = "acc-google", label = "Work")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Sign in again — Work").assertIsDisplayed()
+        composeRule.onNodeWithTag("antigravity-login-label-input").assertDoesNotExist()
     }
 }
