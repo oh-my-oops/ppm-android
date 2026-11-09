@@ -606,4 +606,69 @@ class Phase11bUiTest {
         assertEquals(1920, bmp!!.width)
         assertEquals(1080, bmp.height)
     }
+
+    @Test
+    fun `Mouse wheel scroll preserves AXIS_VSCROLL sign and magnitude in both directions`() {
+        val sent = mutableListOf<JsonElement>()
+        val controller = StageInputController(
+            moveCoalescer = com.hienlh.ppm.state.remotedesktop.PointerMoveCoalescer(send = { sent += it }),
+        )
+
+        fun scrollEvent(vScroll: Float): android.view.MotionEvent {
+            val props = arrayOf(
+                android.view.MotionEvent.PointerProperties().apply {
+                    id = 0
+                    toolType = android.view.MotionEvent.TOOL_TYPE_MOUSE
+                },
+            )
+            val coords = arrayOf(
+                android.view.MotionEvent.PointerCoords().apply {
+                    x = 400f
+                    y = 300f
+                    setAxisValue(android.view.MotionEvent.AXIS_VSCROLL, vScroll)
+                },
+            )
+            return android.view.MotionEvent.obtain(
+                0L,
+                0L,
+                android.view.MotionEvent.ACTION_SCROLL,
+                1,
+                props,
+                coords,
+                0,
+                0,
+                1f,
+                1f,
+                0,
+                0,
+                android.view.InputDevice.SOURCE_MOUSE,
+                0,
+            )
+        }
+
+        // Positive AXIS_VSCROLL (wheel rolled away from user = scroll up) -> positive dy = vScroll * 120
+        val upNotch = scrollEvent(1.0f)
+        controller.onMotionEvent(upNotch, androidx.compose.ui.unit.IntSize(800, 600))
+        upNotch.recycle()
+
+        val upSmooth = scrollEvent(0.5f)
+        controller.onMotionEvent(upSmooth, androidx.compose.ui.unit.IntSize(800, 600))
+        upSmooth.recycle()
+
+        // Negative AXIS_VSCROLL (wheel rolled toward user = scroll down) -> negative dy = vScroll * 120
+        val downNotch = scrollEvent(-1.0f)
+        controller.onMotionEvent(downNotch, androidx.compose.ui.unit.IntSize(800, 600))
+        downNotch.recycle()
+
+        val downSmooth = scrollEvent(-0.25f)
+        controller.onMotionEvent(downSmooth, androidx.compose.ui.unit.IntSize(800, 600))
+        downSmooth.recycle()
+
+        assertEquals(4, sent.size)
+        assertEquals("wheel", sent[0].jsonObject["type"].string)
+        assertEquals(120.0, sent[0].jsonObject["dy"]!!.toString().toDouble(), 1e-3)
+        assertEquals(60.0, sent[1].jsonObject["dy"]!!.toString().toDouble(), 1e-3)
+        assertEquals(-120.0, sent[2].jsonObject["dy"]!!.toString().toDouble(), 1e-3)
+        assertEquals(-30.0, sent[3].jsonObject["dy"]!!.toString().toDouble(), 1e-3)
+    }
 }

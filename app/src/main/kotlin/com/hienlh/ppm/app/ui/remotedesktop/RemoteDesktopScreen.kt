@@ -1061,9 +1061,16 @@ fun RemoteDesktopViewer(
     }
 
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
-    var singleTrack by remember { mutableStateOf<SingleTrack?>(null) }
-    var twoTrack by remember { mutableStateOf<TwoFingerTrack?>(null) }
-    var mouseHeldButton by remember { mutableStateOf<String?>(null) }
+    val stageInput = remember(moveCoalescer) {
+        StageInputController(
+            moveCoalescer = moveCoalescer,
+            onRequestStageFocus = {
+                if (!keyBarOpen) {
+                    runCatching { stageFocusRequester.requestFocus() }
+                }
+            },
+        )
+    }
 
     Box(
         Modifier
@@ -1121,221 +1128,20 @@ fun RemoteDesktopViewer(
                 .fillMaxSize()
                 .onSizeChanged { containerSize = it }
                 .pointerInteropFilter { motion ->
-                    val curDensityScale = density.density.toDouble().coerceAtLeast(0.1)
-                    val videoRect = computeStageVideoRect(
-                        containerWidthPx = containerSize.width.toDouble(),
-                        containerHeightPx = containerSize.height.toDouble(),
+                    stageInput.onMotionEvent(
+                        motion = motion,
+                        containerSize = containerSize,
                         frameSize = frameSize,
                         viewStyle = viewStyle,
                         customScale = customScale,
                         mobile = mobile,
-                        densityScale = curDensityScale,
+                        inputMode = inputMode,
+                        densityScale = density.density.toDouble().coerceAtLeast(0.1),
+                        transform = transform,
+                        onTransformChange = { transform = it },
+                        virtualCursor = virtualCursor,
+                        onVirtualCursorChange = { virtualCursor = it },
                     )
-                    val pointerCount = motion.pointerCount
-                    val isMouse = motion.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE ||
-                        motion.buttonState != 0 ||
-                        mouseHeldButton != null ||
-                        motion.actionMasked == MotionEvent.ACTION_HOVER_MOVE ||
-                        motion.actionMasked == MotionEvent.ACTION_SCROLL ||
-                        motion.actionMasked == MotionEvent.ACTION_BUTTON_PRESS ||
-                        motion.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE
-
-                    if (isMouse) {
-                        when (motion.actionMasked) {
-                            MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_MOVE -> {
-                                val frac = fractionFromZoomedPoint(
-                                    motion.x.toDouble(),
-                                    motion.y.toDouble(),
-                                    videoRect,
-                                    transform,
-                                )
-                                moveCoalescer.enqueueMove(frac.xFrac, frac.yFrac)
-                            }
-                            MotionEvent.ACTION_SCROLL -> {
-                                val vScroll = motion.getAxisValue(MotionEvent.AXIS_VSCROLL).toDouble()
-                                if (vScroll != 0.0) {
-                                    val dy = if (vScroll < 0.0) WHEEL_DELTA.toDouble() else -WHEEL_DELTA.toDouble()
-                                    moveCoalescer.sendImmediate(
-                                        buildJsonObject {
-                                            put("type", "wheel")
-                                            put("dy", dy)
-                                        },
-                                    )
-                                }
-                            }
-                            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_BUTTON_PRESS -> {
-                                if (!keyBarOpen) {
-                                    runCatching { stageFocusRequester.requestFocus() }
-                                }
-                                val rawBits = if (motion.actionMasked == MotionEvent.ACTION_BUTTON_PRESS && motion.actionButton != 0) {
-                                    motion.actionButton
-                                } else if (motion.buttonState != 0) {
-                                    motion.buttonState
-                                } else {
-                                    MotionEvent.BUTTON_PRIMARY
-                                }
-                                val btn = androidMouseButtonToProtocol(rawBits)
-                                if (btn != null && mouseHeldButton == null) {
-                                    mouseHeldButton = btn
-                                    val frac = fractionFromZoomedPoint(
-                                        motion.x.toDouble(),
-                                        motion.y.toDouble(),
-                                        videoRect,
-                                        transform,
-                                    )
-                                    moveCoalescer.sendImmediate(pointerJsonMessage(frac.xFrac, frac.yFrac, btn, true))
-                                }
-                            }
-                            MotionEvent.ACTION_UP, MotionEvent.ACTION_BUTTON_RELEASE -> {
-                                val rawBits = if (motion.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE && motion.actionButton != 0) {
-                                    motion.actionButton
-                                } else {
-                                    motion.buttonState
-                                }
-                                val btn = mouseHeldButton ?: androidMouseButtonToProtocol(rawBits)
-                                mouseHeldButton = null
-                                if (btn != null) {
-                                    val frac = fractionFromZoomedPoint(
-                                        motion.x.toDouble(),
-                                        motion.y.toDouble(),
-                                        videoRect,
-                                        transform,
-                                    )
-                                    moveCoalescer.sendImmediate(pointerJsonMessage(frac.xFrac, frac.yFrac, btn, false))
-                                }
-                            }
-                            MotionEvent.ACTION_CANCEL -> {
-                                val btn = mouseHeldButton
-                                mouseHeldButton = null
-                                if (btn != null) {
-                                    val frac = fractionFromZoomedPoint(
-                                        motion.x.toDouble(),
-                                        motion.y.toDouble(),
-                                        videoRect,
-                                        transform,
-                                    )
-                                    moveCoalescer.sendImmediate(pointerJsonMessage(frac.xFrac, frac.yFrac, btn, false))
-                                }
-                            }
-                        }
-                        return@pointerInteropFilter true
-                    }
-
-                    when (motion.actionMasked) {
-                        MotionEvent.ACTION_DOWN -> {
-                            if (!keyBarOpen) {
-                                runCatching { stageFocusRequester.requestFocus() }
-                            }
-                            twoTrack = null
-                            singleTrack = beginSingleTouch(motion.x.toDouble(), motion.y.toDouble(), videoRect)
-                        }
-                        MotionEvent.ACTION_POINTER_DOWN -> {
-                            if (pointerCount == 2) {
-                                singleTrack = null
-                                twoTrack = beginTwoFingerTouch(
-                                    RdPoint(motion.getX(0).toDouble(), motion.getY(0).toDouble()),
-                                    RdPoint(motion.getX(1).toDouble(), motion.getY(1).toDouble()),
-                                    transform.scale,
-                                )
-                            } else {
-                                singleTrack = null
-                                twoTrack = null
-                            }
-                        }
-                        MotionEvent.ACTION_MOVE -> {
-                            val st = singleTrack
-                            val tt = twoTrack
-                            if (st != null && pointerCount == 1) {
-                                val effectiveMode = if (mobile) inputMode else "touch"
-                                val r = advanceSingleTouch(
-                                    track = st,
-                                    x = motion.x.toDouble(),
-                                    y = motion.y.toDouble(),
-                                    mode = effectiveMode,
-                                    transform = transform,
-                                    cursor = virtualCursor,
-                                    densityScale = curDensityScale,
-                                )
-                                r.message?.let { msg ->
-                                    val obj = msg.jsonObject
-                                    if (obj.containsKey("button")) {
-                                        moveCoalescer.sendImmediate(msg)
-                                    } else {
-                                        val xf = obj["xFrac"].double ?: 0.0
-                                        val yf = obj["yFrac"].double ?: 0.0
-                                        moveCoalescer.enqueueMove(xf, yf)
-                                    }
-                                }
-                                r.cursor?.let { cur ->
-                                    virtualCursor = cur
-                                    if (r.sendCursorMove) {
-                                        moveCoalescer.enqueueMove(cur.xFrac, cur.yFrac)
-                                    }
-                                }
-                            } else if (tt != null && pointerCount == 2) {
-                                val r = advanceTwoFingerTouch(
-                                    track = tt,
-                                    pa = RdPoint(motion.getX(0).toDouble(), motion.getY(0).toDouble()),
-                                    pb = RdPoint(motion.getX(1).toDouble(), motion.getY(1).toDouble()),
-                                    currentTransform = transform,
-                                    densityScale = curDensityScale,
-                                )
-                                r.transform?.let { nextTransform ->
-                                    transform = nextTransform
-                                }
-                                r.wheelDeltaPx?.let { wPx ->
-                                    if (wPx != 0.0) {
-                                        val dy = wheelDeltaForTouchDrag(wPx, curDensityScale)
-                                        moveCoalescer.sendImmediate(
-                                            buildJsonObject {
-                                                put("type", "wheel")
-                                                put("dy", dy)
-                                            },
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
-                            val st = singleTrack
-                            val tt = twoTrack
-                            if (st != null && pointerCount == 1) {
-                                val effectiveMode = if (mobile) inputMode else "touch"
-                                val msgs = resolveSingleTouchEnd(
-                                    track = st,
-                                    x = motion.x.toDouble(),
-                                    y = motion.y.toDouble(),
-                                    mode = effectiveMode,
-                                    transform = transform,
-                                    cursor = virtualCursor,
-                                    densityScale = curDensityScale,
-                                )
-                                moveCoalescer.sendImmediateAll(msgs)
-                                singleTrack = null
-                            } else if (tt != null) {
-                                val msgs = resolveTwoFingerEnd(tt, videoRect, transform)
-                                moveCoalescer.sendImmediateAll(msgs)
-                                twoTrack = null
-                            }
-                        }
-                        MotionEvent.ACTION_CANCEL -> {
-                            val st = singleTrack
-                            if (st != null) {
-                                val effectiveMode = if (mobile) inputMode else "touch"
-                                val msgs = resolveSingleTouchCancel(
-                                    track = st,
-                                    mode = effectiveMode,
-                                    transform = transform,
-                                    cursor = virtualCursor,
-                                    densityScale = curDensityScale,
-                                )
-                                moveCoalescer.sendImmediateAll(msgs)
-                            }
-                            singleTrack = null
-                            twoTrack = null
-                        }
-                    }
-                    true
                 }
                 .testTag("remote-desktop-stage"),
             contentAlignment = Alignment.Center,
@@ -1723,6 +1529,240 @@ fun RemoteDesktopViewer(
             onCommit = ::commitCustomQuality,
             onDismiss = { customQualityDialogOpen = false },
         )
+    }
+}
+
+internal class StageInputController(
+    private val moveCoalescer: PointerMoveCoalescer,
+    private val onRequestStageFocus: () -> Unit = {},
+) {
+    private var singleTrack: SingleTrack? = null
+    private var twoTrack: TwoFingerTrack? = null
+    private var mouseHeldButton: String? = null
+
+    fun onMotionEvent(
+        motion: MotionEvent,
+        containerSize: IntSize,
+        frameSize: RdSize = RdSize(1920, 1080),
+        viewStyle: String = DEFAULT_VIEW_STYLE,
+        customScale: Double = DEFAULT_CUSTOM_SCALE,
+        mobile: Boolean = false,
+        inputMode: String = "mouse",
+        densityScale: Double = 1.0,
+        transform: ZoomPanTransform = IDENTITY_TRANSFORM,
+        onTransformChange: (ZoomPanTransform) -> Unit = {},
+        virtualCursor: RdFraction = RdFraction(0.5, 0.5),
+        onVirtualCursorChange: (RdFraction) -> Unit = {},
+    ): Boolean {
+        val curDensityScale = densityScale.coerceAtLeast(0.1)
+        val videoRect = computeStageVideoRect(
+            containerWidthPx = containerSize.width.toDouble(),
+            containerHeightPx = containerSize.height.toDouble(),
+            frameSize = frameSize,
+            viewStyle = viewStyle,
+            customScale = customScale,
+            mobile = mobile,
+            densityScale = curDensityScale,
+        )
+        val pointerCount = motion.pointerCount
+        val isMouse = motion.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE ||
+            motion.buttonState != 0 ||
+            mouseHeldButton != null ||
+            motion.actionMasked == MotionEvent.ACTION_HOVER_MOVE ||
+            motion.actionMasked == MotionEvent.ACTION_SCROLL ||
+            motion.actionMasked == MotionEvent.ACTION_BUTTON_PRESS ||
+            motion.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE
+
+        if (isMouse) {
+            when (motion.actionMasked) {
+                MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_MOVE -> {
+                    val frac = fractionFromZoomedPoint(
+                        motion.x.toDouble(),
+                        motion.y.toDouble(),
+                        videoRect,
+                        transform,
+                    )
+                    moveCoalescer.enqueueMove(frac.xFrac, frac.yFrac)
+                }
+                MotionEvent.ACTION_SCROLL -> {
+                    val vScroll = motion.getAxisValue(MotionEvent.AXIS_VSCROLL).toDouble()
+                    if (vScroll != 0.0) {
+                        val dy = vScroll * WHEEL_DELTA
+                        moveCoalescer.sendImmediate(
+                            buildJsonObject {
+                                put("type", "wheel")
+                                put("dy", dy)
+                            },
+                        )
+                    }
+                }
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_BUTTON_PRESS -> {
+                    onRequestStageFocus()
+                    val rawBits = if (motion.actionMasked == MotionEvent.ACTION_BUTTON_PRESS && motion.actionButton != 0) {
+                        motion.actionButton
+                    } else if (motion.buttonState != 0) {
+                        motion.buttonState
+                    } else {
+                        MotionEvent.BUTTON_PRIMARY
+                    }
+                    val btn = androidMouseButtonToProtocol(rawBits)
+                    if (btn != null && mouseHeldButton == null) {
+                        mouseHeldButton = btn
+                        val frac = fractionFromZoomedPoint(
+                            motion.x.toDouble(),
+                            motion.y.toDouble(),
+                            videoRect,
+                            transform,
+                        )
+                        moveCoalescer.sendImmediate(pointerJsonMessage(frac.xFrac, frac.yFrac, btn, true))
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_BUTTON_RELEASE -> {
+                    val rawBits = if (motion.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE && motion.actionButton != 0) {
+                        motion.actionButton
+                    } else {
+                        motion.buttonState
+                    }
+                    val btn = mouseHeldButton ?: androidMouseButtonToProtocol(rawBits)
+                    mouseHeldButton = null
+                    if (btn != null) {
+                        val frac = fractionFromZoomedPoint(
+                            motion.x.toDouble(),
+                            motion.y.toDouble(),
+                            videoRect,
+                            transform,
+                        )
+                        moveCoalescer.sendImmediate(pointerJsonMessage(frac.xFrac, frac.yFrac, btn, false))
+                    }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    val btn = mouseHeldButton
+                    mouseHeldButton = null
+                    if (btn != null) {
+                        val frac = fractionFromZoomedPoint(
+                            motion.x.toDouble(),
+                            motion.y.toDouble(),
+                            videoRect,
+                            transform,
+                        )
+                        moveCoalescer.sendImmediate(pointerJsonMessage(frac.xFrac, frac.yFrac, btn, false))
+                    }
+                }
+            }
+            return true
+        }
+
+        when (motion.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                onRequestStageFocus()
+                twoTrack = null
+                singleTrack = beginSingleTouch(motion.x.toDouble(), motion.y.toDouble(), videoRect)
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (pointerCount == 2) {
+                    singleTrack = null
+                    twoTrack = beginTwoFingerTouch(
+                        RdPoint(motion.getX(0).toDouble(), motion.getY(0).toDouble()),
+                        RdPoint(motion.getX(1).toDouble(), motion.getY(1).toDouble()),
+                        transform.scale,
+                    )
+                } else {
+                    singleTrack = null
+                    twoTrack = null
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val st = singleTrack
+                val tt = twoTrack
+                if (st != null && pointerCount == 1) {
+                    val effectiveMode = if (mobile) inputMode else "touch"
+                    val r = advanceSingleTouch(
+                        track = st,
+                        x = motion.x.toDouble(),
+                        y = motion.y.toDouble(),
+                        mode = effectiveMode,
+                        transform = transform,
+                        cursor = virtualCursor,
+                        densityScale = curDensityScale,
+                    )
+                    r.message?.let { msg ->
+                        val obj = msg.jsonObject
+                        if (obj.containsKey("button")) {
+                            moveCoalescer.sendImmediate(msg)
+                        } else {
+                            val xf = obj["xFrac"].double ?: 0.0
+                            val yf = obj["yFrac"].double ?: 0.0
+                            moveCoalescer.enqueueMove(xf, yf)
+                        }
+                    }
+                    r.cursor?.let { cur ->
+                        onVirtualCursorChange(cur)
+                        if (r.sendCursorMove) {
+                            moveCoalescer.enqueueMove(cur.xFrac, cur.yFrac)
+                        }
+                    }
+                } else if (tt != null && pointerCount == 2) {
+                    val r = advanceTwoFingerTouch(
+                        track = tt,
+                        pa = RdPoint(motion.getX(0).toDouble(), motion.getY(0).toDouble()),
+                        pb = RdPoint(motion.getX(1).toDouble(), motion.getY(1).toDouble()),
+                        currentTransform = transform,
+                        densityScale = curDensityScale,
+                    )
+                    r.transform?.let(onTransformChange)
+                    r.wheelDeltaPx?.let { wPx ->
+                        if (wPx != 0.0) {
+                            val dy = wheelDeltaForTouchDrag(wPx, curDensityScale)
+                            moveCoalescer.sendImmediate(
+                                buildJsonObject {
+                                    put("type", "wheel")
+                                    put("dy", dy)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
+                val st = singleTrack
+                val tt = twoTrack
+                if (st != null && pointerCount == 1) {
+                    val effectiveMode = if (mobile) inputMode else "touch"
+                    val msgs = resolveSingleTouchEnd(
+                        track = st,
+                        x = motion.x.toDouble(),
+                        y = motion.y.toDouble(),
+                        mode = effectiveMode,
+                        transform = transform,
+                        cursor = virtualCursor,
+                        densityScale = curDensityScale,
+                    )
+                    moveCoalescer.sendImmediateAll(msgs)
+                    singleTrack = null
+                } else if (tt != null) {
+                    val msgs = resolveTwoFingerEnd(tt, videoRect, transform)
+                    moveCoalescer.sendImmediateAll(msgs)
+                    twoTrack = null
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                val st = singleTrack
+                if (st != null) {
+                    val effectiveMode = if (mobile) inputMode else "touch"
+                    val msgs = resolveSingleTouchCancel(
+                        track = st,
+                        mode = effectiveMode,
+                        transform = transform,
+                        cursor = virtualCursor,
+                        densityScale = curDensityScale,
+                    )
+                    moveCoalescer.sendImmediateAll(msgs)
+                }
+                singleTrack = null
+                twoTrack = null
+            }
+        }
+        return true
     }
 }
 
