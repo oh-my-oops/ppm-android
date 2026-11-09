@@ -18,10 +18,14 @@ data class AccountInfo(
     val reauthRequired: Boolean,
     /** When the sign-in stops working, where the server knows. */
     val grantExpiresAt: Long?,
+    /** Plan flags from `profileData.account` (`claudePlanLabel`). */
+    val hasClaudeMax: Boolean = false,
+    val hasClaudePro: Boolean = false,
 ) {
     companion object {
         fun from(value: JsonElement?): AccountInfo? {
             val id = value["id"].string ?: return null
+            val profileAccount = value["profileData"]["account"]
             return AccountInfo(
                 id = id,
                 label = value["label"].string,
@@ -31,6 +35,8 @@ data class AccountInfo(
                 hasRefreshToken = value["hasRefreshToken"].bool == true,
                 reauthRequired = value["reauthRequired"].bool == true,
                 grantExpiresAt = value["grantExpiresAt"].long,
+                hasClaudeMax = profileAccount["has_claude_max"].bool == true,
+                hasClaudePro = profileAccount["has_claude_pro"].bool == true,
             )
         }
     }

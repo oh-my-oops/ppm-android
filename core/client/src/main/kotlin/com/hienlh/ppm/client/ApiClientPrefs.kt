@@ -1,5 +1,6 @@
 package com.hienlh.ppm.client
 
+import com.hienlh.ppm.protocol.LinkedSessionUnlinks
 import com.hienlh.ppm.protocol.McpSignInDismissals
 import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.bool
@@ -52,6 +53,8 @@ data class UiPrefs(
     val remoteDesktopWarningDismissed: Boolean? = null,
     /** Jira integration enabled (`jiraEnabled`). */
     val jiraEnabled: Boolean? = null,
+    /** Per-chat hidden linked sessions (`unlinkedSessions`: `chatId -> linkedSessionId -> epochMs`). */
+    val unlinkedSessions: Map<String, Map<String, Long>> = emptyMap(),
 ) {
     /** The same keys as the server's, which [from] reads back: what a device keeps between starts. */
     fun toJson(): JsonObject = buildJsonObject {
@@ -73,6 +76,7 @@ data class UiPrefs(
         remoteDesktopStatsVisible?.let { put("remoteDesktopStatsVisible", it) }
         remoteDesktopWarningDismissed?.let { put("remoteDesktopWarningDismissed", it) }
         jiraEnabled?.let { put("jiraEnabled", it) }
+        if (unlinkedSessions.isNotEmpty()) put("unlinkedSessions", LinkedSessionUnlinks.encode(unlinkedSessions))
     }
 
     companion object {
@@ -96,6 +100,7 @@ data class UiPrefs(
             remoteDesktopStatsVisible = json["remoteDesktopStatsVisible"].bool,
             remoteDesktopWarningDismissed = json["remoteDesktopWarningDismissed"].bool,
             jiraEnabled = json["jiraEnabled"].bool,
+            unlinkedSessions = LinkedSessionUnlinks.parse(json["unlinkedSessions"]) ?: emptyMap(),
         )
 
         private val EXPLORER_SKINS = setOf("auto", "windows", "macos")

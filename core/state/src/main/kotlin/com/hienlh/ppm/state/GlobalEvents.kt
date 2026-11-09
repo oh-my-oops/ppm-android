@@ -5,7 +5,11 @@ import com.hienlh.ppm.client.SocketConnection
 import com.hienlh.ppm.client.markAllRead
 import com.hienlh.ppm.client.markUnread
 import com.hienlh.ppm.protocol.AgentTranscriptFrame
+import com.hienlh.ppm.protocol.SessionCollabApprovalPush
+import com.hienlh.ppm.protocol.SessionCreatedPush
 import com.hienlh.ppm.protocol.SessionFileChangesPush
+import com.hienlh.ppm.protocol.SessionLink
+import com.hienlh.ppm.protocol.SessionLinkChangedPush
 import com.hienlh.ppm.protocol.SessionUnread
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.bool
@@ -52,6 +56,11 @@ class GlobalEvents(
     /** Sessions waiting to be read, on any project. */
     val unread: StateFlow<Map<String, SessionUnread>> = _unread.asStateFlow()
 
+    private val _collab = MutableStateFlow(SessionCollabState())
+
+    /** Live session links, announced titles, and pending collaboration approvals across sessions. */
+    val collab: StateFlow<SessionCollabState> = _collab.asStateFlow()
+
     /**
      * The project open on this device: the server watches its files, and its routes carry the
      * read and unread calls.
@@ -91,6 +100,15 @@ class GlobalEvents(
 
     /** The agent changed files of a session whose list someone asked for (`session:file-changes`): just those rows. */
     var onSessionFileChanges: ((SessionFileChangesPush) -> Unit)? = null
+
+    /** A session tool created a session (`session:created`): session lists refresh without a reload. */
+    var onSessionCreated: ((SessionCreatedPush) -> Unit)? = null
+
+    /** Seeds server-known links for [sessionId] (`GET …/sessions/:id/links`). */
+    fun seedSessionLinks(sessionId: String, links: List<SessionLink>) {
+        if (links.isEmpty()) return
+        _collab.value = _collab.value.seedLinks(sessionId, links)
+    }
 
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
     private val readyListeners = LinkedHashSet<() -> Unit>()
@@ -258,6 +276,16 @@ class GlobalEvents(
             }
             // Every phase from now on carries the new id, so the old one's `idle` never comes.
             "session:migrated" -> frame["oldSessionId"].string?.let { _running.value -= it }
+            "session:created" -> SessionCreatedPush.from(frame)?.let { created ->
+                _collab.value = _collab.value.onSessionCreated(created)
+                onSessionCreated?.invoke(created)
+            }
+            "session:link_changed" -> SessionLinkChangedPush.from(frame)?.let { changed ->
+                _collab.value = _collab.value.onLinkChanged(changed)
+            }
+            "session:collab_approval" -> SessionCollabApprovalPush.from(frame)?.let { approval ->
+                _collab.value = _collab.value.onApprovalChanged(approval)
+            }
             "git:changed" -> frame["projectName"].string?.let { onGitChanged?.invoke(it) }
             "git:commit-draft" -> frame["projectName"].string?.let { proj ->
                 onGitCommitDraft?.invoke(

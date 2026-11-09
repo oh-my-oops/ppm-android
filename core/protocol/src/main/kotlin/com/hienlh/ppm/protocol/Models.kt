@@ -267,6 +267,8 @@ data class SessionInfo(
     val updatedAt: Instant? = null,
     val pinned: Boolean = false,
     val tag: SessionTag? = null,
+    val spawnedBy: String? = null,
+    val parentTitle: String? = null,
 ) {
     /** When the session was last active, for sorting and display. */
     val lastActive: Instant? get() = updatedAt ?: createdAt
@@ -282,6 +284,8 @@ data class SessionInfo(
                 updatedAt = WireDate.parse(json["updatedAt"]),
                 pinned = json["pinned"].bool ?: false,
                 tag = json["tag"]?.let(SessionTag::from),
+                spawnedBy = json["spawnedBy"].string,
+                parentTitle = json["parentTitle"].string,
             )
         }
     }

@@ -2,6 +2,7 @@ package com.hienlh.ppm.client
 
 import com.hienlh.ppm.protocol.ChatSearchPage
 import com.hienlh.ppm.protocol.ModelOption
+import com.hienlh.ppm.protocol.SessionLink
 import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.int
@@ -93,3 +94,12 @@ suspend fun ApiClient.providerModels(project: String, providerId: String): List<
         val value = entry["value"].string ?: return@mapNotNull null
         ModelOption(value, entry["label"].string ?: value)
     }
+
+/** The links the server holds for [sessionId]: its creator, its children, and sessions it messaged (`fetchSessionLinks`). */
+suspend fun ApiClient.sessionLinks(project: String, sessionId: String): List<SessionLink> =
+    SessionLink.parseList(call("GET", "${chatPath(project)}/sessions/${ApiClient.escape(sessionId)}/links"))
+
+/** Stops every running direct child session created by [sessionId] (`stopChildSessions`). */
+suspend fun ApiClient.stopChildSessions(project: String, sessionId: String) {
+    call("POST", "${chatPath(project)}/sessions/${ApiClient.escape(sessionId)}/stop-children", body = JsonObject(emptyMap()))
+}
