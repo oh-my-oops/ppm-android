@@ -1,5 +1,7 @@
 package com.hienlh.ppm.app.ui.files
 
+import android.app.Activity
+import android.view.WindowManager
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -63,6 +65,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -130,12 +133,34 @@ fun SearchBody(model: AppModel, onNavigate: () -> Unit = {}) {
     // TextFieldState/project can change before its effect runs: even that frame must hide old hits.
     val current = state.project == project && state.options.query == query.text.toString() && state.options.include == include.text.toString()
     val locked = state.replacing || project == null
+    val context = LocalContext.current
+    val softwareKeyboard = LocalSoftwareKeyboardController.current
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
     val focus = remember { FocusRequester() }
-    var quietFocus by remember { mutableStateOf(true) }
-    LaunchedEffect(project) {
-        if (project != null) {
-            quietFocus = true
+    var quietFocus by remember(project) { mutableStateOf(true) }
+    DisposableEffect(context, quietFocus) {
+        val window = (context as? Activity)?.window
+        if (window != null) {
+            val adjust = window.attributes.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST
+            val stateFlag = if (quietFocus) {
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+            } else {
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
+            }
+            window.setSoftInputMode(adjust or stateFlag)
+        }
+        onDispose {
+            val w = (context as? Activity)?.window
+            if (w != null) {
+                val adjust = w.attributes.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST
+                w.setSoftInputMode(adjust or WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED)
+            }
+        }
+    }
+    LaunchedEffect(project, windowFocused) {
+        if (project != null && windowFocused && quietFocus) {
             focus.requestFocus()
+            softwareKeyboard?.hide()
         }
     }
     val colors = LocalPpmTokens.current
