@@ -96,6 +96,12 @@ private val EffortOptions = listOf(
     SelectOption("max", "Max"),
 )
 
+internal val AntigravityEffortOptions = listOf(
+    SelectOption("low", "Low"),
+    SelectOption("medium", "Medium"),
+    SelectOption("high", "High"),
+)
+
 private val PermissionModeOptions = listOf(
     SelectOption("bypassPermissions", "Bypass permissions (default)"),
     SelectOption("default", "Ask before edits"),
@@ -108,7 +114,13 @@ private val NewChatProviderOptions = listOf(
     SelectOption("default", "Always use default provider"),
 )
 
-private val ProviderNames = mapOf("claude" to "Claude", "cursor" to "Cursor", "codex" to "Codex", "gemini" to "Gemini")
+private val ProviderNames = mapOf(
+    "claude" to "Claude",
+    "cursor" to "Cursor",
+    "codex" to "Codex",
+    "gemini" to "Gemini",
+    "antigravity" to "Antigravity",
+)
 
 private fun providerName(id: String) = ProviderNames[id] ?: id
 
@@ -382,8 +394,12 @@ private fun ProviderSettings(
     val revision = state.revision
     CssColumn(Modifier.fillMaxWidth(), gap = 6.dp) {
         if (unavailable != null) UnavailableBox(provider, unavailable, state.probing, retryProbe)
-        // Codex's sign-ins live with the Claude ones in Settings, Accounts.
-        if (provider == "codex") CodexAccountsLink { model.openSettings("accounts") }
+        // Codex's and Antigravity's sign-ins live with the Claude ones in Settings, Accounts.
+        if (provider == "codex" || provider == "antigravity") {
+            ProviderAccountsLink(
+                if (provider == "antigravity") "Antigravity account & quota" else "Codex accounts & login",
+            ) { model.openSettings("accounts") }
+        }
         val models = state.models
         if (models.isNotEmpty()) {
             val target = rememberLabelTarget()
@@ -396,6 +412,17 @@ private fun ProviderSettings(
                     enabled = !state.modelsLoading,
                     placeholder = if (state.modelsLoading) "Loading models..." else "Select model",
                     label = target,
+                )
+            }
+        }
+        if (provider == "antigravity") {
+            val effortTarget = rememberLabelTarget()
+            Field("Effort", effortTarget) {
+                SelectField(
+                    config?.effort ?: "high",
+                    AntigravityEffortOptions,
+                    onValueChange = { state.saveField(provider, "effort", it) },
+                    label = effortTarget,
                 )
             }
         }
@@ -483,7 +510,15 @@ private fun ProviderSettings(
         }
         val promptTarget = rememberLabelTarget()
         val prompt = rememberFieldText(revision, config?.systemPrompt.orEmpty())
-        Field("Additional Instructions", promptTarget) {
+        Field(
+            "Additional Instructions",
+            promptTarget,
+            help = if (provider == "antigravity") {
+                "Antigravity reads these only when PPM starts a new chat, and a chat keeps the ones it started with."
+            } else {
+                null
+            },
+        ) {
             FormTextArea(
                 prompt.state,
                 "Enter additional instructions for $provider...",
@@ -741,7 +776,7 @@ private fun CheckAgainButton(probing: Boolean, onClick: () -> Unit) {
 
 /** `w-full flex items-center justify-between gap-2 rounded-md border px-2.5 py-2`, `hover:bg-surface-elevated`. */
 @Composable
-private fun CodexAccountsLink(onClick: () -> Unit) {
+private fun ProviderAccountsLink(label: String, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(8.dp)
     // `py-2` around a 16.5 px line, and the border snapped as Chrome snaps it.
@@ -758,7 +793,7 @@ private fun CodexAccountsLink(onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BasicText(
-            "Codex accounts & login",
+            label,
             Modifier.weight(1f, fill = false).padding(end = 8.dp),
             style = ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text2.color),
         )

@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.withComposeActivity
+import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.protocol.AntigravityAccount
@@ -21,6 +22,10 @@ import com.hienlh.ppm.protocol.LimitBucket
 import com.hienlh.ppm.protocol.UsageInfo
 import com.hienlh.ppm.state.AntigravityAccountsData
 import com.hienlh.ppm.state.settings.AntigravityLoginFlow
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -347,5 +352,80 @@ class AntigravityUiTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Sign in again — Work").assertIsDisplayed()
         composeRule.onNodeWithTag("antigravity-login-label-input").assertDoesNotExist()
+    }
+
+    @Test
+    fun aiSettingsSection_antigravityTabShowsAccountsLinkThreeEffortsAndSystemPromptNote() {
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val body = when (request.url.encodedPath) {
+                    "/api/settings/ai" -> """
+                        {
+                          "ok": true,
+                          "data": {
+                            "default_provider": "antigravity",
+                            "providers": {
+                              "claude": { "type": "agent-sdk" },
+                              "antigravity": { "type": "cli", "effort": "medium" }
+                            }
+                          }
+                        }
+                    """.trimIndent()
+                    "/api/settings/ai/providers/status" -> """{"ok":true,"data":[]}"""
+                    "/api/settings/ai/providers/antigravity/models" -> """
+                        {
+                          "ok": true,
+                          "data": [
+                            { "value": "gemini-4-argon", "label": "Gemini 4 Argon" },
+                            { "value": "gemini-3.8-flash", "label": "Gemini 3.8 Flash" }
+                          ]
+                        }
+                    """.trimIndent()
+                    else -> """{"ok":true,"data":[]}"""
+                }
+                return MockResponse.Builder()
+                    .addHeader("Content-Type", "application/json")
+                    .body(body)
+                    .build()
+            }
+        }
+        server.start()
+        try {
+            val model = AppModel(ApplicationProvider.getApplicationContext<Application>())
+            model.api = ApiClient(server.url("/"), "secret")
+
+            composeRule.setContent {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    AiSettingsSection(model)
+                }
+            }
+            composeRule.waitUntil(5_000L) {
+                composeRule.onAllNodes(androidx.compose.ui.test.hasText("Antigravity account & quota"))
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+
+            composeRule.onNodeWithText("Antigravity account & quota").assertIsDisplayed()
+            composeRule.onNodeWithText("Codex accounts & login").assertDoesNotExist()
+            composeRule.onNodeWithText("Effort").assertIsDisplayed()
+            composeRule.onNodeWithText("Medium").assertIsDisplayed()
+            composeRule.onNodeWithText(
+                "Antigravity reads these only when PPM starts a new chat, and a chat keeps the ones it started with.",
+            ).assertIsDisplayed()
+            assertEquals(
+                listOf("low" to "Low", "medium" to "Medium", "high" to "High"),
+                AntigravityEffortOptions.map { it.value to it.label },
+            )
+
+            // Switching to the Claude tab hides Antigravity-only link and system-prompt helper note
+            composeRule.onNodeWithText("Claude").performClick()
+            composeRule.waitForIdle()
+            composeRule.onNodeWithText("Antigravity account & quota").assertDoesNotExist()
+            composeRule.onNodeWithText(
+                "Antigravity reads these only when PPM starts a new chat, and a chat keeps the ones it started with.",
+            ).assertDoesNotExist()
+        } finally {
+            server.close()
+        }
     }
 }
