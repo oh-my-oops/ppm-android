@@ -79,6 +79,18 @@ class FileMentionTest {
         assertEquals(1, list.step(0, -1))
         assertEquals(0, list.step(1, 1))
         assertEquals(0, FilePickerList(emptyList(), "").step(0, 1))
+        val full = FilePickerList(entries, "")
+        assertEquals(50, full.items.size)
+        assertEquals(69, full.totalCount)
+    }
+
+    @Test
+    fun `splitFilePath separates basename and parent directory, keeping trailing slash on folders`() {
+        assertEquals(SplitFilePath("chat-tab.tsx", "src/web/components/chat/"), splitFilePath("src/web/components/chat/chat-tab.tsx", isDirectory = false))
+        assertEquals(SplitFilePath("chat/", "src/web/components/"), splitFilePath("src/web/components/chat", isDirectory = true))
+        assertEquals(SplitFilePath("chat/", "src/web/components/"), splitFilePath("src/web/components/chat/", isDirectory = true))
+        assertEquals(SplitFilePath("README.md", ""), splitFilePath("README.md", isDirectory = false))
+        assertEquals(SplitFilePath("win.ts", "dir\\sub\\"), splitFilePath("dir\\sub\\win.ts", isDirectory = false))
     }
 
     @Test

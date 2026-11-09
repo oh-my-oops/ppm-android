@@ -354,11 +354,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     /** Each project's `/` list per provider (`slash-items-cache.ts`), for the open server. */
     var slashItems by mutableStateOf<SlashItemsStore?>(null)
-        private set
+        internal set
 
     /** The open project's file list, which the `@` picker searches (the web's file-store index). */
     var fileIndex by mutableStateOf<FileIndexStore?>(null)
-        private set
+        internal set
 
     var fileTree by mutableStateOf<com.hienlh.ppm.state.files.ProjectFileTree?>(null)
         private set
@@ -4891,8 +4891,18 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     var fileQuery by mutableStateOf<String?>(null)
         private set
 
-    /** The slash picker's highlighted row (`selectedIndex`), the first again whenever its query changes. */
+    /** The slash picker's highlighted row (`selectedIndex`), the first again whenever its query or tab changes. */
     var slashSelection by mutableIntStateOf(0)
+
+    /** Active kind tab (`All`, `Skills`, `Commands`, `Agents`) in the slash picker; resets to `All` when closed. */
+    var slashKind by mutableStateOf(com.hienlh.ppm.state.SlashKindFilter.ALL)
+
+    fun pickSlashKind(kind: com.hienlh.ppm.state.SlashKindFilter) {
+        if (slashKind != kind) {
+            slashKind = kind
+            slashSelection = 0
+        }
+    }
 
     /** The file picker's highlighted row, the first again whenever its query changes. */
     var fileSelection by mutableIntStateOf(0)
@@ -4934,9 +4944,11 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         showFiles(null)
     }
 
-    // A closed picker's filter is "" on the web, so one opened again on nothing typed keeps its row.
+    // A closed picker's filter is "" on the web, so one opened again on nothing typed keeps its row;
+    // each new opening starts on the All tab (`if (!visible) setKind("all")`).
     private fun showSlash(query: String?) {
         if ((query ?: "") != (slashQuery ?: "")) slashSelection = 0
+        if (query == null) slashKind = com.hienlh.ppm.state.SlashKindFilter.ALL
         slashQuery = query
     }
 

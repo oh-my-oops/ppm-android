@@ -25,7 +25,9 @@ import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -205,5 +207,37 @@ class SlashPickerTest {
         // Sent from this thread too, so waited for without blocking it.
         withTimeout(5_000) { store.revision.first { store.payload("p", "claude")?.items?.firstOrNull()?.name == "model" } }
         assertEquals("GET", server.takeRequest().method)
+    }
+
+    @Test
+    fun `slashScopeLabel and SlashKindFilter match the floating picker's rules`() {
+        val items = listOf(
+            SlashItem("skill", "ak-research", "Research technical solutions.", argumentHint = "[topic]", scope = "user"),
+            SlashItem("agent", "Explore", "Fast read-only search.", scope = "bundled"),
+            SlashItem("command", "deploy-staging", "Deploy to staging.", scope = "project"),
+            SlashItem("builtin", "compact", "Summarize the conversation.", scope = "bundled"),
+        )
+        assertEquals("Global", slashScopeLabel(items[0]))
+        assertEquals("PPM", slashScopeLabel(items[1]))
+        assertEquals("Project", slashScopeLabel(items[2]))
+        assertEquals("PPM", slashScopeLabel(items[3]))
+        assertEquals("Built-in", slashScopeLabel(SlashItem("builtin", "help")))
+        assertEquals("Codex", slashScopeLabel(items[0].copy(invokeSigil = "$")))
+
+        // Commands covers both project commands and built-ins.
+        val commands = SlashPickerList(items, "", emptyList(), SlashKindFilter.COMMAND)
+        assertEquals(listOf("deploy-staging", "compact"), commands.items.map { it.name })
+        assertTrue(commands.anyMatch)
+
+        // Query matching only in Skills keeps the Commands tab open (anyMatch = true, items = empty).
+        val emptyCommands = SlashPickerList(items, "research", emptyList(), SlashKindFilter.COMMAND)
+        assertTrue(emptyCommands.items.isEmpty())
+        assertTrue(emptyCommands.anyMatch)
+
+        // Query matching nothing anywhere closes the picker (anyMatch = false).
+        val noMatchAll = SlashPickerList(items, "zzzzzzzzzzqqqq", emptyList(), SlashKindFilter.ALL)
+        assertFalse(noMatchAll.anyMatch)
+        val noMatchCommands = SlashPickerList(items, "zzzzzzzzzzqqqq", emptyList(), SlashKindFilter.COMMAND)
+        assertFalse(noMatchCommands.anyMatch)
     }
 }

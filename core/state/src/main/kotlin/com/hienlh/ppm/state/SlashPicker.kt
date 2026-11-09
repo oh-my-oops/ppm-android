@@ -17,25 +17,74 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * What the slash picker lists (`displayItems` in slash-command-picker.tsx): with a query, the
- * search's best twenty; without one, everything, the recently picked first.
+ * Filter tabs in `slash-command-picker.tsx`: `Commands` covers both project commands and built-ins.
  */
-class SlashPickerList(items: List<SlashItem>, query: String, recentNames: List<String>) {
+enum class SlashKindFilter(val id: String, val label: String) {
+    ALL("all", "All"),
+    SKILL("skill", "Skills"),
+    COMMAND("command", "Commands"),
+    AGENT("agent", "Agents"),
+    ;
+
+    fun matches(item: SlashItem): Boolean = when (this) {
+        ALL -> true
+        COMMAND -> item.type == "command" || item.type == "builtin"
+        else -> item.type == id
+    }
+}
+
+/**
+ * Scope pill text in `slash-command-picker-row.tsx` (`slashScopeLabel`):
+ * `Codex` for `$` skills, `PPM` for `bundled`, `Global` for `user`, `Project` for `project`,
+ * `Built-in` for `builtin`, else capitalized `type`.
+ */
+fun slashScopeLabel(item: SlashItem): String = when {
+    item.invokeSigil == "$" -> "Codex"
+    item.scope == "bundled" -> "PPM"
+    item.scope == "user" -> "Global"
+    item.scope == "project" -> "Project"
+    item.type == "builtin" -> "Built-in"
+    item.type.isEmpty() -> ""
+    else -> item.type.replaceFirstChar { it.uppercase() }
+}
+
+/**
+ * What the slash picker lists (`displayItems` and `anyMatch` in `slash-command-picker.tsx`):
+ * scoped by [kind], fuzzy-searched up to 20 when [query] is non-empty, or recents-first when idle.
+ * An empty non-`ALL` tab stays open (`anyMatch == true`) when another tab has matches so the user
+ * can switch tabs, while a query matching nothing anywhere closes the picker (`anyMatch == false`).
+ */
+class SlashPickerList(
+    allItems: List<SlashItem>,
+    val query: String,
+    recentNames: List<String>,
+    val kind: SlashKindFilter = SlashKindFilter.ALL,
+) {
     val items: List<SlashItem>
 
     /** How many lead under "Recent"; none while searching. */
     val recentCount: Int
 
+    /** Whether anything matches across any tab (`anyMatch` in `slash-command-picker.tsx`). */
+    val anyMatch: Boolean
+
     init {
+        val scoped = if (kind == SlashKindFilter.ALL) allItems else allItems.filter(kind::matches)
         if (query.isNotEmpty()) {
-            this.items = FuzzySearch.search(items, query, 20, recentNames)
+            this.items = FuzzySearch.search(scoped, query, 20, recentNames)
             recentCount = 0
         } else {
             val place = HashMap<String, Int>()
             recentNames.forEachIndexed { index, name -> place.putIfAbsent(name, index) }
-            val recents = items.filter { it.name in place }.sortedBy { place.getValue(it.name) }
-            this.items = recents + items.filter { it.name !in place }
+            val recents = scoped.filter { it.name in place }.sortedBy { place.getValue(it.name) }
+            this.items = recents + scoped.filter { it.name !in place }
             recentCount = recents.size
+        }
+        anyMatch = when {
+            this.items.isNotEmpty() -> true
+            kind == SlashKindFilter.ALL -> false
+            query.isNotEmpty() -> FuzzySearch.search(allItems, query, 1).isNotEmpty()
+            else -> allItems.isNotEmpty()
         }
     }
 

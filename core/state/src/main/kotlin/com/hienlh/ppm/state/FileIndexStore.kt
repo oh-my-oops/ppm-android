@@ -15,23 +15,45 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * What the `@` picker lists (`filtered` in file-picker.tsx): with nothing typed the first fifty
- * entries; else the first fifty whose path or name holds what is typed, in any case, in the
- * list's own order. Compared by UTF-16 unit, as JavaScript's `includes` compares.
+ * A file row's two halves (`splitFilePath` in `file-picker.tsx`): the basename (with a trailing
+ * `/` for a directory) and the parent directory holding it (`""` at the project root).
  */
-class FilePickerList(entries: List<FileEntry>, query: String) {
-    val items: List<FileEntry> = if (query.isEmpty()) {
-        entries.take(LIMIT)
-    } else {
-        val needle = jsLowercase(query)
-        val found = ArrayList<FileEntry>()
-        for (entry in entries) {
-            if (jsLowercase(entry.path).contains(needle) || jsLowercase(entry.name).contains(needle)) {
-                found += entry
-                if (found.size == LIMIT) break
+data class SplitFilePath(val name: String, val dir: String)
+
+fun splitFilePath(path: String, isDirectory: Boolean): SplitFilePath {
+    val trimmed = path.trimEnd('/', '\\')
+    val cut = maxOf(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
+    val name = trimmed.substring(cut + 1) + if (isDirectory) "/" else ""
+    val dir = if (cut >= 0) trimmed.substring(0, cut + 1) else ""
+    return SplitFilePath(name = name, dir = dir)
+}
+
+/**
+ * What the `@` picker lists (`matches` and `filtered` in `file-picker.tsx`): [totalCount] counts
+ * every matching entry for the header (`"N matches"`), while [items] holds the first fifty.
+ * Compared by UTF-16 unit, as JavaScript's `includes` compares.
+ */
+class FilePickerList(entries: List<FileEntry>, val query: String) {
+    val items: List<FileEntry>
+    val totalCount: Int
+
+    init {
+        if (query.isEmpty()) {
+            items = entries.take(LIMIT)
+            totalCount = entries.size
+        } else {
+            val needle = jsLowercase(query)
+            val found = ArrayList<FileEntry>(minOf(entries.size, LIMIT))
+            var count = 0
+            for (entry in entries) {
+                if (jsLowercase(entry.path).contains(needle) || jsLowercase(entry.name).contains(needle)) {
+                    count++
+                    if (found.size < LIMIT) found += entry
+                }
             }
+            items = found
+            totalCount = count
         }
-        found
     }
 
     /** ArrowUp (-1) or ArrowDown (+1) from [index], round from either end. */

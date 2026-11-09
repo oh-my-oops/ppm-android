@@ -4,6 +4,7 @@ import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.ui.text.TextRange
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SlashItem
+import com.hienlh.ppm.state.SlashKindFilter
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -87,5 +88,17 @@ class ChatTabPickersTest {
         tab.pickFile("a.ts", raiseKeyboard = false)
         assertEquals("no trigger@a.ts ", tab.draft.text.toString())
         assertEquals(TextRange(16), tab.draft.selection)
+    }
+
+    @Test
+    fun `switching slash kind resets row selection, and closing the picker resets the kind tab to All`() {
+        type("/")
+        tab.slashSelection = 2
+        tab.pickSlashKind(SlashKindFilter.COMMAND)
+        assertEquals(SlashKindFilter.COMMAND, tab.slashKind)
+        assertEquals(0, tab.slashSelection)
+        tab.slashSelection = 1
+        tab.closePickers()
+        assertEquals(SlashKindFilter.ALL, tab.slashKind)
     }
 }
