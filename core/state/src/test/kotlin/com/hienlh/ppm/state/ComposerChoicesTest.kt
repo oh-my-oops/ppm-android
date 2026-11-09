@@ -55,11 +55,40 @@ class ComposerChoicesTest {
         assertEquals("Sonnet 4", ModelNames.displayName("claude-sonnet-4-20250514"))
         assertEquals("Haiku 5.5", ModelNames.displayName("claude-haiku-5-5-20261001"))
         assertEquals("gpt-5-codex", ModelNames.displayName("gpt-5-codex"))
+        // Antigravity known model IDs
+        assertEquals("Gemini 4 Argon", ModelNames.displayName("gemini-4-argon"))
+        assertEquals("Gemini 4 Argon", ModelNames.displayName("gemini-4-argon-high"))
+        assertEquals("Gemini 3.8 Flash", ModelNames.displayName("gemini-3.8-flash-low"))
+        assertEquals("Claude Opus 5.5", ModelNames.displayName("claude-opus-5-5-medium"))
+        assertEquals("Claude Sonnet 5.5", ModelNames.displayName("claude-sonnet-5-5-high"))
+        assertEquals("GPT-OSS 120B", ModelNames.displayName("gpt-oss-120b"))
+        assertEquals("GPT-OSS 120B", ModelNames.displayName("gpt-oss-120b-medium"))
         assertEquals("Opus 5", ModelNames.shortLabel("Claude Opus 5"))
+        assertEquals("Opus 5", ModelNames.shortLabel("Claude Opus 5", "claude"))
+        assertEquals("Claude Opus 5.5", ModelNames.shortLabel("Claude Opus 5.5", "antigravity"))
         assertEquals("Fable 5.1", ModelNames.shortLabel("claude  Fable 5.1"))
         assertEquals("Opus Claude", ModelNames.shortLabel("Opus Claude"))
         assertEquals("Opus 5.5 · Extra", ModelNames.chipLabel("Opus 5.5", "xhigh"))
         assertEquals("Model", ModelNames.chipLabel("Model", null))
+    }
+
+    @Test
+    fun `Antigravity effective model, suffix effort and effort options match web selector`() {
+        assertEquals("gemini-4-argon", ModelNames.effectiveModel(null, "antigravity"))
+        assertEquals("gemini-4-argon", ModelNames.effectiveModel("", "antigravity"))
+        assertEquals("gemini-4-argon", ModelNames.effectiveModel("pro", "antigravity"))
+        assertEquals("claude-opus-5-5", ModelNames.effectiveModel("claude-opus-5-5-medium", "antigravity"))
+        assertEquals("gemini-3.8-flash", ModelNames.effectiveModel("gemini-3.8-flash-HIGH", "antigravity"))
+        assertNull(ModelNames.effectiveModel(null, "claude"))
+        assertEquals("pro", ModelNames.effectiveModel("pro", "gemini"))
+
+        assertEquals("medium", ModelNames.suffixEffort("claude-opus-5-5-medium", "antigravity"))
+        assertEquals("high", ModelNames.suffixEffort("gemini-4-argon-HIGH", "antigravity"))
+        assertNull(ModelNames.suffixEffort("gemini-4-argon", "antigravity"))
+        assertNull(ModelNames.suffixEffort("claude-opus-5-5-medium", "claude"))
+
+        assertEquals(listOf(Effort.LOW, Effort.MEDIUM, Effort.HIGH), Effort.optionsFor("antigravity"))
+        assertEquals(Effort.entries, Effort.optionsFor("claude"))
     }
 
     @Test

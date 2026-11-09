@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -427,5 +428,31 @@ class AntigravityUiTest {
         } finally {
             server.close()
         }
+    }
+
+    @Test
+    fun composerModelChip_antigravityReadsSuffixEffortAndHidesThinkingInLabel() {
+        var clicked = 0
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                ComposerModelChip(
+                    name = "Gemini 4 Argon",
+                    state = com.hienlh.ppm.state.ChatState(
+                        sessionId = null,
+                        model = "gemini-4-argon-medium",
+                        effort = null,
+                        thinking = true,
+                    ),
+                    providerId = "antigravity",
+                    onClick = { clicked++ },
+                )
+            }
+        }
+
+        // Chip text uses suffix effort ("Medium") and aria-label omits ", thinking on" even when state.thinking is true
+        composeRule.onNodeWithContentDescription("Model Gemini 4 Argon, effort medium")
+            .assertIsDisplayed()
+            .performClick()
+        assertEquals(1, clicked)
     }
 }

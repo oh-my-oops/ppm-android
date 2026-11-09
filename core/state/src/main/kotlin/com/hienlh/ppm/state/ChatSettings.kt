@@ -137,11 +137,11 @@ class ModelCatalog(
         return null
     }
 
-    /** The chip's name for [model]: the list's label without "Claude ", else a readable id. */
+    /** The chip's name for [model]: the list's label (without "Claude " on Claude), else a readable id. */
     fun displayName(model: String?, providerId: String): String {
-        model ?: return "Model"
-        models(providerId).firstOrNull { it.value == model }?.let { return ModelNames.shortLabel(it.label) }
-        return ModelNames.displayName(model)
+        val effective = ModelNames.effectiveModel(model, providerId) ?: return "Model"
+        models(providerId).firstOrNull { it.value == effective }?.let { return ModelNames.shortLabel(it.label, providerId) }
+        return ModelNames.displayName(effective)
     }
 
     /** Asks the server unless a fresh list is at hand. */

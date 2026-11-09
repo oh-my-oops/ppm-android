@@ -63,14 +63,21 @@ class ComposerModelColumnsTest {
     @Before
     fun setUp() {
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest) = MockResponse.Builder().code(200)
-                .addHeader("Content-Type", "application/json")
-                .body("""{"ok":true,"data":[{"value":"opus","label":"Claude Opus"},{"value":"sonnet","label":"Claude Sonnet"}]}""").build()
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val body = if (request.url.encodedPath.endsWith("/antigravity/models")) {
+                    """{"ok":true,"data":[{"value":"gemini-4-argon","label":"Gemini 4 Argon"},{"value":"claude-opus-5-5","label":"Claude Opus 5.5"}]}"""
+                } else {
+                    """{"ok":true,"data":[{"value":"opus","label":"Claude Opus"},{"value":"sonnet","label":"Claude Sonnet"}]}"""
+                }
+                return MockResponse.Builder().code(200)
+                    .addHeader("Content-Type", "application/json")
+                    .body(body).build()
+            }
         }
         server.start()
         val api = ApiClient(server.url("/"), "secret")
         catalog = ModelCatalog(api, "p")
-        chat = ChatController(api, "p", null, scope, providerId = "mock")
+        chat = ChatController(api, "p", null, scope, providerId = "claude")
     }
 
     @After
@@ -152,5 +159,34 @@ class ComposerModelColumnsTest {
         assertEquals("opus", chat.state.value.model)
         assertEquals(Effort.LOW.value, chat.state.value.effort)
         assertEquals(true, chat.state.value.thinking)
+    }
+
+    @Test
+    fun `Antigravity defaults to Gemini 4 Argon, keeps Claude prefix, offers three efforts and hides Thinking`() {
+        val api = ApiClient(server.url("/"), "secret")
+        chat = ChatController(api, "p", null, scope, providerId = "antigravity")
+        compose.setContent {
+            accent = LocalPpmTokens.current.accent.color
+            val state by chat.state.collectAsState()
+            ModelColumns(catalog, chat, state, Modifier.width(320.dp), Modifier, onPicked = { closed++ })
+        }
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Gemini 4 Argon").fetchSemanticsNodes().isNotEmpty() }
+
+        // Default null model resolves to gemini-4-argon; Claude Opus 5.5 keeps "Claude "; only Low/Medium/High exist; no Thinking switch
+        assertEquals(
+            listOf("Gemini 4 Argon", "High"),
+            checked("Gemini 4 Argon", "Claude Opus 5.5", "Low", "Medium", "High"),
+        )
+        compose.onNodeWithText("Extra").assertDoesNotExist()
+        compose.onNodeWithText("Max").assertDoesNotExist()
+        compose.onNodeWithText("Thinking").assertDoesNotExist()
+
+        // Legacy suffixed model id highlights base model + suffixed effort
+        chat.setModel("claude-opus-5-5-medium")
+        compose.waitForIdle()
+        assertEquals(
+            listOf("Claude Opus 5.5", "Medium"),
+            checked("Gemini 4 Argon", "Claude Opus 5.5", "Low", "Medium", "High"),
+        )
     }
 }

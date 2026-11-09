@@ -666,7 +666,7 @@ private fun ChipsRow(model: AppModel, tab: ChatTab, chat: ChatController, state:
         if (!tab.providerPending && !tab.firstSendPending) {
             // `relative min-w-0`: a block around the chip, as tall as the line the chip stands on.
             CssColumn(bottom = chipStrut(14.dp)) {
-                ComposerModelChip(name, state, onModel)
+                ComposerModelChip(name, state, chat.providerId, onModel)
             }
         }
         if (running) {
@@ -726,7 +726,7 @@ private fun DesktopChipsRow(
         if (!tab.providerPending && !tab.firstSendPending) {
             // On one line, the chip that gives way.
             CssColumn(Modifier.cssShrink(), bottom = chipStrut(14.dp)) {
-                ComposerModelChip(name, state, onModel)
+                ComposerModelChip(name, state, chat.providerId, onModel)
                 if (modelOpen) ModelPopover(model, chat, state, onDismiss = onModelDismiss)
             }
         }
@@ -743,7 +743,9 @@ private fun modelName(model: AppModel, chat: ChatController, state: ChatState): 
     val catalog = model.models
     val entries = catalog?.entries?.collectAsState()?.value
     return remember(entries, state.model, chat.providerId) {
-        catalog?.displayName(state.model, chat.providerId) ?: state.model?.let(ModelNames::displayName) ?: "Model"
+        catalog?.displayName(state.model, chat.providerId)
+            ?: ModelNames.effectiveModel(state.model, chat.providerId)?.let(ModelNames::displayName)
+            ?: "Model"
     }
 }
 
@@ -842,16 +844,19 @@ internal fun modeChipName(mode: PermissionMode) = "Permission mode: ${mode.label
  * `aria-label` ([modelChipName]).
  */
 @Composable
-private fun ComposerModelChip(name: String, state: ChatState, onClick: () -> Unit) {
-    val effort = state.effort ?: Effort.DEFAULT.value
+internal fun ComposerModelChip(name: String, state: ChatState, providerId: String = "claude", onClick: () -> Unit) {
+    val isAntigravity = providerId == "antigravity"
+    val effort = state.effort ?: ModelNames.suffixEffort(state.model, providerId) ?: Effort.DEFAULT.value
+    val showThinking = !isAntigravity && state.thinking
     val text = ModelNames.chipLabel(name, effort)
     val running = state.isRunning
     ModelChip(
         text,
-        modelChipName(name, effort, state.thinking),
-        state.thinking,
+        modelChipName(name, effort, showThinking),
+        showThinking,
         disabled = running,
         modifier = Modifier.webTitle(modelChipTitle(running, text)),
+        labelMax = if (isAntigravity) 180.dp else 140.dp,
         onClick = onClick,
     )
 }
@@ -1357,10 +1362,13 @@ private fun ModelPopover(model: AppModel, chat: ChatController, state: ChatState
 internal fun ModelColumns(catalog: ModelCatalog?, chat: ChatController, state: ChatState, box: Modifier, inner: Modifier, onPicked: () -> Unit) {
     val entries = catalog?.entries?.collectAsState()?.value
     LaunchedEffect(catalog, chat.providerId) { catalog?.load(chat.providerId) }
-    val models: List<ModelOption> = remember(catalog, entries) { catalog?.models(chat.providerId).orEmpty() }
-    val status: ModelListStatus? = remember(catalog, entries) { catalog?.status(chat.providerId) ?: ModelListStatus.LOADING }
+    val models: List<ModelOption> = remember(catalog, entries, chat.providerId) { catalog?.models(chat.providerId).orEmpty() }
+    val status: ModelListStatus? = remember(catalog, entries, chat.providerId) { catalog?.status(chat.providerId) ?: ModelListStatus.LOADING }
+    val effectiveModel = ModelNames.effectiveModel(state.model, chat.providerId)
+    val effectiveEffort = Effort.of(state.effort ?: ModelNames.suffixEffort(state.model, chat.providerId)) ?: Effort.DEFAULT
     ModelPickerColumns(
-        models, status, state.model, Effort.of(state.effort) ?: Effort.DEFAULT, state.thinking, box, inner,
+        models, status, effectiveModel, effectiveEffort, state.thinking, box, inner,
+        providerId = chat.providerId,
         onModel = {
             chat.setModel(it)
             onPicked()
@@ -1381,9 +1389,11 @@ internal fun ModelColumns(catalog: ModelCatalog?, chat: ChatController, state: C
 internal fun ModelPickerColumns(
     models: List<ModelOption>, status: ModelListStatus?, model: String?, effort: Effort, thinking: Boolean,
     box: Modifier, inner: Modifier,
+    providerId: String = "claude",
     onModel: (String) -> Unit, onEffort: (Effort) -> Unit, onThinking: (Boolean) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
+    val isAntigravity = providerId == "antigravity"
     // The tablet's popover scrolls with the web's thumb; the phone's sheet does not scroll on the web.
     val scroll = rememberScrollState()
     Row(
@@ -1404,7 +1414,7 @@ internal fun ModelPickerColumns(
             for (option in models) {
                 OptionRow(active = option.value == model, onClick = { onModel(option.value) }) {
                     BasicText(
-                        ModelNames.shortLabel(option.label),
+                        ModelNames.shortLabel(option.label, providerId),
                         Modifier.weight(1f),
                         style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color),
                         maxLines = 1,
@@ -1415,7 +1425,7 @@ internal fun ModelPickerColumns(
         }
         Column(Modifier.weight(1f).fillMaxHeight().cssBorder(tokens.border.color, sides = CssSides.Start).padding(vertical = 4.dp)) {
             SectionLabel("Effort")
-            for (option in Effort.entries) {
+            for (option in Effort.optionsFor(providerId)) {
                 OptionRow(active = option == effort, onClick = { onEffort(option) }) {
                     Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                         BasicText(option.label, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1)
@@ -1430,8 +1440,10 @@ internal fun ModelPickerColumns(
                     }
                 }
             }
-            Box(Modifier.padding(vertical = 4.dp).fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top))
-            ThinkingRow(thinking) { onThinking(!thinking) }
+            if (!isAntigravity) {
+                Box(Modifier.padding(vertical = 4.dp).fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top))
+                ThinkingRow(thinking) { onThinking(!thinking) }
+            }
         }
     }
 }
