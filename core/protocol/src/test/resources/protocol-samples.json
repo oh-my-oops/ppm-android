@@ -1,0 +1,207 @@
+{
+  "info": {
+    "ok": true,
+    "data": {
+      "version": "0.23.33",
+      "minimal_mode": false,
+      "device_name": null,
+      "tunnel_active": false,
+      "protocol": 1,
+      "capabilities": [
+        "chat",
+        "push.webpush"
+      ]
+    }
+  },
+  "projects": {
+    "ok": true,
+    "data": [
+      {
+        "name": "demo",
+        "path": "/tmp/ppm-android-scratch.uP2u/demo"
+      }
+    ]
+  },
+  "sessions": {
+    "ok": true,
+    "data": {
+      "sessions": [
+        {
+          "id": "23b3bdfc-87ca-42d9-9e3e-b6f555e35725",
+          "providerId": "mock",
+          "title": "samples",
+          "projectName": "demo",
+          "createdAt": "2026-11-09T04:54:58.063Z",
+          "pinned": false,
+          "tag": null,
+          "designSlug": null,
+          "spawnedBy": null,
+          "parentTitle": null
+        }
+      ],
+      "hasMore": false
+    }
+  },
+  "history": {
+    "ok": true,
+    "data": {
+      "messages": [
+        {
+          "id": "b5e0ca39-b3e0-4ce8-a787-e3c5b3ae38be",
+          "role": "user",
+          "content": "hello",
+          "timestamp": "2026-11-09T04:54:58.083Z"
+        },
+        {
+          "id": "f3f8ba16-8184-45f7-990e-6b178e9c6ae3",
+          "role": "assistant",
+          "content": "Here's what I found after analyzing the project structure.",
+          "timestamp": "2026-11-09T04:54:59.140Z"
+        }
+      ],
+      "start": 0,
+      "total": 2,
+      "userOrdinalOffset": 0,
+      "predecessorId": null,
+      "versionMap": {}
+    }
+  },
+  "chat": [
+    {
+      "type": "session_state",
+      "sessionId": "23b3bdfc-87ca-42d9-9e3e-b6f555e35725",
+      "phase": "idle",
+      "pendingApproval": null,
+      "sessionTitle": "samples",
+      "compactStatus": null,
+      "turnStop": null
+    },
+    {
+      "type": "phase_changed",
+      "phase": "initializing"
+    },
+    {
+      "type": "phase_changed",
+      "phase": "connecting"
+    },
+    {
+      "type": "phase_changed",
+      "phase": "thinking"
+    },
+    {
+      "type": "phase_changed",
+      "phase": "streaming"
+    },
+    {
+      "type": "tool_use",
+      "tool": "Read",
+      "input": {
+        "path": "src/index.ts"
+      },
+      "streamSeq": 1
+    },
+    {
+      "type": "tool_result",
+      "output": "// Main entry point\nconsole.log(\"Hello\");",
+      "streamSeq": 2
+    },
+    {
+      "type": "text",
+      "content": "Here's",
+      "streamSeq": 3
+    },
+    {
+      "type": "text",
+      "content": " what",
+      "streamSeq": 4
+    },
+    {
+      "type": "text",
+      "content": " I",
+      "streamSeq": 5
+    },
+    {
+      "type": "text",
+      "content": " found",
+      "streamSeq": 6
+    },
+    {
+      "type": "text",
+      "content": " after",
+      "streamSeq": 7
+    },
+    {
+      "type": "text",
+      "content": " analyzing",
+      "streamSeq": 8
+    },
+    {
+      "type": "text",
+      "content": " the",
+      "streamSeq": 9
+    },
+    {
+      "type": "text",
+      "content": " project",
+      "streamSeq": 10
+    },
+    {
+      "type": "text",
+      "content": " structure.",
+      "streamSeq": 11
+    },
+    {
+      "type": "done",
+      "sessionId": "23b3bdfc-87ca-42d9-9e3e-b6f555e35725",
+      "streamSeq": 12
+    }
+  ],
+  "global": [
+    {
+      "type": "global_ready"
+    },
+    {
+      "type": "session:phase_changed",
+      "sessionId": "23b3bdfc-87ca-42d9-9e3e-b6f555e35725",
+      "phase": "initializing",
+      "projectName": "demo"
+    },
+    {
+      "type": "session:phase_changed",
+      "sessionId": "23b3bdfc-87ca-42d9-9e3e-b6f555e35725",
+      "phase": "connecting",
+      "projectName": "demo"
+    },
+    {
+      "type": "session:phase_changed",
+      "sessionId": "23b3bdfc-87ca-42d9-9e3e-b6f555e35725",
+      "phase": "thinking",
+      "projectName": "demo"
+    },
+    {
+      "type": "session:phase_changed",
+      "sessionId": "23b3bdfc-87ca-42d9-9e3e-b6f555e35725",
+      "phase": "streaming",
+      "projectName": "demo"
+    },
+    {
+      "type": "session:unread_changed",
+      "sessionId": "23b3bdfc-87ca-42d9-9e3e-b6f555e35725",
+      "unreadCount": -1,
+      "unreadType": "done",
+      "projectName": "demo",
+      "sessionTitle": "samples"
+    },
+    {
+      "type": "session:phase_changed",
+      "sessionId": "23b3bdfc-87ca-42d9-9e3e-b6f555e35725",
+      "phase": "idle",
+      "projectName": "demo"
+    }
+  ],
+  "lsp": [
+    {
+      "t": "hello"
+    }
+  ]
+}
