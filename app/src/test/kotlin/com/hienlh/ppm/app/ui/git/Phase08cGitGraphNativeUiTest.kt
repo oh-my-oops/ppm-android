@@ -388,7 +388,14 @@ class Phase08cGitGraphNativeUiTest {
                       "x": "M",
                       "y": ".",
                       "untracked": false,
-                      "staged": { "status": "M", "added": 2, "removed": 1, "blocks": ["h1"] },
+                      "conflict": false,
+                      "staged": {
+                        "added": 2,
+                        "removed": 1,
+                        "blocks": [
+                          {"id": "h1", "index": 0, "oldStart": 1, "oldLines": 1, "newStart": 1, "newLines": 2, "added": 2, "removed": 1}
+                        ]
+                      },
                       "unstaged": null
                     },
                     {
@@ -396,16 +403,29 @@ class Phase08cGitGraphNativeUiTest {
                       "x": ".",
                       "y": "M",
                       "untracked": false,
+                      "conflict": false,
                       "staged": null,
-                      "unstaged": { "status": "M", "added": 4, "removed": 1, "blocks": ["h2"] }
+                      "unstaged": {
+                        "added": 4,
+                        "removed": 1,
+                        "blocks": [
+                          {"id": "h2", "index": 0, "oldStart": 5, "oldLines": 1, "newStart": 5, "newLines": 4, "added": 4, "removed": 1}
+                        ]
+                      }
                     },
                     {
                       "path": "src/NewFile.tsx",
                       "x": "?",
                       "y": "?",
                       "untracked": true,
+                      "conflict": false,
                       "staged": null,
-                      "unstaged": { "status": "A", "added": 5, "removed": 0, "blocks": [], "whole": "new" }
+                      "unstaged": {
+                        "added": 5,
+                        "removed": 0,
+                        "blocks": [],
+                        "whole": "new"
+                      }
                     }
                   ],
                   "truncated": false,

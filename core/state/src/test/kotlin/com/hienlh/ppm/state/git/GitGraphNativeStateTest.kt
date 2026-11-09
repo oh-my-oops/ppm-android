@@ -1,5 +1,6 @@
 package com.hienlh.ppm.state.git
 
+import com.hienlh.ppm.client.ChangeBlock
 import com.hienlh.ppm.client.ChangeSide
 import com.hienlh.ppm.client.ChangedFile
 import kotlinx.serialization.json.Json
@@ -302,18 +303,23 @@ class GitGraphNativeStateTest {
 
     @Test
     fun gitGraphDiscardSummary_matchesWipModelTitlesMessagesAndButtonLabels() {
+        val block0 = ChangeBlock("h0", 0, 1, 1, 1, 3, added = 3, removed = 1)
         val tracked = ChangedFile(
             path = "src/App.kt",
             staged = null,
-            unstaged = ChangeSide(status = "M", added = 3, removed = 1, blocks = listOf("h0")),
-            conflict = null,
+            unstaged = ChangeSide(added = 3, removed = 1, blocks = listOf("h0"), changeBlocks = listOf(block0)),
+            conflict = false,
+            x = ".",
+            y = "M",
             untracked = false,
         )
         val untracked = ChangedFile(
             path = "src/New.kt",
             staged = null,
-            unstaged = ChangeSide(status = "A", added = 5, removed = 0, blocks = emptyList(), whole = "new"),
-            conflict = null,
+            unstaged = ChangeSide(added = 5, removed = 0, blocks = emptyList(), whole = "new"),
+            conflict = false,
+            x = "?",
+            y = "?",
             untracked = true,
         )
 
