@@ -221,9 +221,9 @@ class Phase11aUiTest {
 
         composeRule.onNodeWithText("PORT FORWARDING").assertIsDisplayed()
         composeRule.onNodeWithText(":3000").assertIsDisplayed()
-        composeRule.onNodeWithText("Tailnet").assertIsDisplayed()
+        composeRule.onNodeWithText("TAILNET").assertIsDisplayed()
         composeRule.onNodeWithText(":8080").assertIsDisplayed()
-        composeRule.onNodeWithText("Started outside PPM").assertIsDisplayed()
+        composeRule.onNodeWithText("STARTED OUTSIDE PPM").assertIsDisplayed()
 
         // Clicking stop on external tunnel opens ConfirmDialog
         composeRule.onNodeWithTag("tunnel-stop-402").performClick()

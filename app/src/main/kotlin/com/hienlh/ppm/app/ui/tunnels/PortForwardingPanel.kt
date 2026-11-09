@@ -9,16 +9,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardOptions
@@ -40,13 +40,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.ui.ConfirmDialog
 import com.hienlh.ppm.app.ui.PpmTextField
-import com.hienlh.ppm.app.ui.pressable
 import com.hienlh.ppm.client.namedTunnelStatus
 import com.hienlh.ppm.client.tunnelStart
 import com.hienlh.ppm.client.tunnelStop
@@ -55,6 +56,7 @@ import com.hienlh.ppm.client.tunnelsTransports
 import com.hienlh.ppm.app.ui.tablet.Edge
 import com.hienlh.ppm.app.ui.tablet.edge
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -77,6 +79,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PortForwardingPanel(
     model: AppModel,
@@ -86,13 +89,14 @@ fun PortForwardingPanel(
     onNavigate: () -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
     var tunnels by remember { mutableStateOf(initialTunnels.orEmpty()) }
     var loading by remember { mutableStateOf(initialTunnels == null) }
     val portInput = remember { TextFieldState("") }
-    var via by remember { mutableStateOf("cloudflare") }
+    var via by remember { mutableStateOf(if (initialTailscale?.available == true) "tailscale" else "cloudflare") }
     var tailscale by remember { mutableStateOf(initialTailscale) }
     var cloudflare by remember { mutableStateOf(initialCloudflare) }
     var cloudflareError by remember { mutableStateOf(false) }
@@ -245,36 +249,40 @@ fun PortForwardingPanel(
 
     val tsSetup = TunnelsModel.tailscaleSetup(tailscale)
     val cfSetup = TunnelsModel.cloudflareSetup(cloudflare, cloudflareError)
-    val cfDomainLine = if (cloudflare?.mode == "named" && !cloudflare?.hostname.isNullOrBlank() && cloudflare?.tunnelWarning.isNullOrBlank() && cloudflare?.certState != "invalid" && cloudflare?.certState != "mismatch") {
-        "<port>-${cloudflare!!.hostname}"
-    } else {
-        "trycloudflare.com"
-    }
+    val controlHeight = if (mobile) 44.dp else 32.dp
+    val iconBtnSize = if (mobile) 44.dp else 32.dp
 
     Column(
         Modifier
             .fillMaxSize()
             .testTag("port-forwarding-panel"),
     ) {
-        // Header
+        // Header (matches SidebarHeader icon={Globe} title="Port Forwarding")
         Row(
             Modifier
                 .fillMaxWidth()
                 .height(36.dp)
                 .edge(Edge.Bottom, tokens.border.color)
-                .padding(horizontal = 12.dp),
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            PpmIcon(ProductIcon.Globe, 16.dp, tokens.accent.color)
             BasicText(
                 "PORT FORWARDING",
-                style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color),
+                Modifier.weight(1f),
+                style = ppmText(12f, FontWeight.SemiBold, lineHeight = 16f).copy(
+                    color = tokens.text2.color,
+                    letterSpacing = 0.3.sp,
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Box(
                 Modifier
-                    .size(24.dp)
+                    .size(if (mobile) 44.dp else 24.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .ppmClickable(pressedColor = tokens.surfaceHover.color) {
+                    .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color) {
                         scope.launch {
                             fetchTunnels(force = true)
                             fetchSetup()
@@ -283,7 +291,7 @@ fun PortForwardingPanel(
                     .testTag("tunnels-refresh"),
                 contentAlignment = Alignment.Center,
             ) {
-                PpmIcon(ProductIcon.RefreshCw, 14.dp, tokens.text2.color, spinning = loading)
+                PpmIcon(ProductIcon.RefreshCw, 14.dp, tokens.text3.color, spinning = loading)
             }
         }
 
@@ -297,22 +305,24 @@ fun PortForwardingPanel(
                 Modifier
                     .fillMaxWidth()
                     .edge(Edge.Bottom, tokens.border.color)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 SetupRow(
                     name = "Tailscale",
                     setup = tsSetup,
+                    mobile = mobile,
                     onOpen = {
-                        model.openSettings()
+                        model.openSettings("remote-access")
                         onNavigate()
                     },
                 )
                 SetupRow(
                     name = "Cloudflare",
                     setup = cfSetup,
+                    mobile = mobile,
                     onOpen = {
-                        model.openSettings()
+                        model.openSettings("remote-access")
                         onNavigate()
                     },
                 )
@@ -326,306 +336,326 @@ fun PortForwardingPanel(
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                val inputShape = RoundedCornerShape(6.dp)
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(32.dp)
-                        .clip(inputShape)
-                        .background(tokens.bgSolid.color)
-                        .cssBorder(tokens.border.color, inputShape),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        Modifier
-                            .edge(Edge.Right, tokens.border.color)
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                    ) {
-                        BasicText(
-                            "localhost:",
-                            style = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text2.color),
-                        )
-                    }
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .padding(horizontal = 8.dp),
-                        contentAlignment = Alignment.CenterStart,
-                    ) {
-                        PpmTextField(
-                            state = portInput,
-                            placeholder = "3000",
-                            modifier = Modifier.fillMaxWidth().testTag("tunnel-port-input"),
-                            style = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            onKeyboardAction = { handleStart() },
-                        )
-                    }
-                }
+                BasicText(
+                    "Port on this machine",
+                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+                )
 
-                // Transport radio rows
                 val tsAvailable = tailscale?.available == true
-                TransportRadioRow(
-                    selected = via == "tailscale",
-                    enabled = !starting && tsAvailable,
-                    title = "Tailscale",
-                    badge = "Only your devices",
-                    subtitle = if (tsAvailable) tailscale!!.dnsName else (tailscale?.reason ?: "Checking Tailscale…"),
-                    onClick = { if (tsAvailable) via = "tailscale" },
-                )
-                TransportRadioRow(
-                    selected = via == "cloudflare",
-                    enabled = !starting,
-                    title = "Cloudflare",
-                    badge = "Anyone with the link",
-                    subtitle = cfDomainLine,
-                    onClick = { via = "cloudflare" },
-                )
-
                 val canStart = !starting && portInput.text.isNotBlank() && (via != "tailscale" || tsAvailable)
+                val inputShape = RoundedCornerShape(6.dp)
                 val btnShape = RoundedCornerShape(6.dp)
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(32.dp)
-                        .alpha(if (canStart) 1f else 0.45f)
-                        .clip(btnShape)
-                        .background(tokens.accent.color)
-                        .ppmClickable(enabled = canStart, shape = btnShape, onClick = ::handleStart)
-                        .testTag("tunnel-forward-btn"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    PpmIcon(
-                        if (starting) ProductIcon.Loader2 else ProductIcon.Plus,
-                        14.dp,
-                        tokens.accentFg.color,
-                        spinning = starting,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    BasicText(
-                        if (starting) "Starting…" else "Forward",
-                        style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.accentFg.color),
-                    )
-                }
-            }
 
-            // Error banner
-            if (error != null) {
                 Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(tokens.error.opacity(0.1).color)
-                        .edge(Edge.Bottom, tokens.error.opacity(0.2).color)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    BasicText(
-                        error!!,
-                        Modifier.weight(1f),
-                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.error.color),
-                    )
+                    Row(
+                        Modifier
+                            .weight(1f)
+                            .height(controlHeight)
+                            .clip(inputShape)
+                            .background(tokens.bgSolid.color)
+                            .cssBorder(tokens.border.color, inputShape)
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BasicText(
+                            "localhost:",
+                            style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+                        )
+                        Box(
+                            Modifier.weight(1f),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            PpmTextField(
+                                state = portInput,
+                                placeholder = "3000",
+                                modifier = Modifier.fillMaxWidth().testTag("tunnel-port-input"),
+                                style = ppmText(14f, lineHeight = 20f),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                onKeyboardAction = { handleStart() },
+                            )
+                        }
+                    }
+
                     Box(
                         Modifier
-                            .size(18.dp)
-                            .ppmClickable { error = null },
+                            .height(controlHeight)
+                            .alpha(if (canStart) 1f else 0.5f)
+                            .clip(btnShape)
+                            .background(tokens.accent.color)
+                            .ppmClickable(enabled = canStart, shape = btnShape, onClick = ::handleStart)
+                            .padding(horizontal = 12.dp)
+                            .testTag("tunnel-forward-btn"),
                         contentAlignment = Alignment.Center,
                     ) {
-                        BasicText("×", style = ppmText(14f, lineHeight = 16f).copy(color = tokens.error.color))
+                        if (starting) {
+                            PpmIcon(ProductIcon.Loader2, 16.dp, tokens.accentFg.color, spinning = true)
+                        } else {
+                            BasicText(
+                                "Forward",
+                                style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.accentFg.color),
+                            )
+                        }
                     }
+                }
+
+                // 2-column transport radio grid
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TransportOptionButton(
+                        label = "Tailscale",
+                        selected = via == "tailscale",
+                        enabled = !starting && tsAvailable,
+                        mobile = mobile,
+                        modifier = Modifier.weight(1f),
+                        onClick = { if (tsAvailable) via = "tailscale" },
+                    )
+                    TransportOptionButton(
+                        label = "Cloudflare",
+                        selected = via == "cloudflare",
+                        enabled = !starting,
+                        mobile = mobile,
+                        modifier = Modifier.weight(1f),
+                        onClick = { via = "cloudflare" },
+                    )
+                }
+
+                BasicText(
+                    if (via == "tailscale") {
+                        "Private: only devices in your tailnet can open it."
+                    } else {
+                        "Public: anyone with the link can open it."
+                    },
+                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+                )
+
+                if (error != null) {
+                    BasicText(
+                        error!!,
+                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.error.color),
+                    )
                 }
             }
 
-            // Tunnel list
-            if (loading && tunnels.isEmpty()) {
-                Box(Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
-                    PpmIcon(ProductIcon.Loader2, 18.dp, tokens.text2.color, spinning = true)
-                }
-            } else if (tunnels.isEmpty()) {
-                Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    PpmIcon(ProductIcon.Globe, 32.dp, tokens.text2.opacity(0.4).color)
-                    BasicText("No ports forwarded", style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color))
-                    BasicText(
-                        "Enter a local port above to get a link",
-                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text2.opacity(0.7).color),
-                    )
-                }
-            } else {
-                Column(
-                    Modifier.fillMaxWidth().padding(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    for (t in tunnels) {
-                        val cardShape = RoundedCornerShape(6.dp)
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(cardShape)
-                                .background(tokens.bgSolid.color)
-                                .cssBorder(tokens.border.color, cardShape)
-                                .padding(10.dp)
-                                .testTag("tunnel-row-${t.pid}"),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
+            // Forwarded list section
+            Column(
+                Modifier.fillMaxWidth().padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                BasicText(
+                    "Forwarded",
+                    style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color),
+                )
+
+                if (loading && tunnels.isEmpty()) {
+                    Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                        PpmIcon(ProductIcon.Loader2, 20.dp, tokens.text2.color, spinning = true)
+                    }
+                } else if (tunnels.isEmpty()) {
+                    val emptyShape = RoundedCornerShape(8.dp)
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(emptyShape)
+                            .cssBorder(tokens.border.color, emptyShape)
+                            .padding(horizontal = 12.dp, vertical = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        BasicText(
+                            "Nothing is forwarded yet.",
+                            style = ppmText(if (mobile) 14f else 12f, lineHeight = 18f).copy(
+                                color = tokens.text2.color,
+                                textAlign = TextAlign.Center,
+                            ),
+                        )
+                        BasicText(
+                            "A cloudflared tunnel started outside PPM shows up here too.",
+                            style = ppmText(12f, lineHeight = 16f).copy(
+                                color = tokens.text2.color,
+                                textAlign = TextAlign.Center,
+                            ),
+                        )
+                    }
+                } else {
+                    Column(
+                        Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        for (t in tunnels) {
+                            val cardShape = RoundedCornerShape(8.dp)
+                            val isPrivate = t.via == "tailscale"
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(cardShape)
+                                    .background(tokens.bgSolid.color)
+                                    .cssBorder(tokens.border.color, cardShape)
+                                    .padding(10.dp)
+                                    .testTag("tunnel-row-${t.pid}"),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 Row(
+                                    Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    val dotColor = when (t.status) {
-                                        "running" -> Color(0xFF22C55E)
-                                        "starting" -> Color(0xFFEAB308)
-                                        else -> Color(0xFFEF4444)
-                                    }
-                                    Box(Modifier.size(8.dp).clip(CircleShape).background(dotColor))
-                                    BasicText(
-                                        if (t.port != null) ":${t.port}" else "External tunnel",
-                                        style = ppmText(12f, FontWeight.Medium, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text.color),
-                                    )
-                                    if (t.via != null) {
-                                        Box(
-                                            Modifier
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(tokens.panel2.color)
-                                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                                        ) {
-                                            BasicText(
-                                                if (t.via == "tailscale") "Tailnet" else "Public",
-                                                style = ppmText(10f, lineHeight = 14f).copy(color = tokens.text2.color),
-                                            )
-                                        }
-                                    }
-                                    if (t.source == "external") {
-                                        Box(
-                                            Modifier
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(tokens.panel2.color)
-                                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                                        ) {
-                                            BasicText(
-                                                "Started outside PPM",
-                                                style = ppmText(10f, lineHeight = 14f).copy(color = tokens.text2.color),
-                                            )
-                                        }
-                                    }
-                                }
-
-                                if (t.protected) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    FlowRow(
+                                        Modifier.weight(1f),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                                        itemVerticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        PpmIcon(ProductIcon.Lock, 12.dp, tokens.text2.color)
-                                        BasicText("Public link", style = ppmText(10f, lineHeight = 14f).copy(color = tokens.text2.color))
-                                    }
-                                } else {
-                                    Box(
-                                        Modifier
-                                            .size(22.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .ppmClickable(
-                                                enabled = stoppingPid != t.pid,
-                                                pressedColor = tokens.error.opacity(0.15).color,
-                                            ) {
-                                                if (t.source == "external") {
-                                                    confirmStop = t
-                                                } else {
-                                                    handleStop(t.pid)
-                                                }
-                                            }
-                                            .testTag("tunnel-stop-${t.pid}"),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        PpmIcon(
-                                            if (stoppingPid == t.pid) ProductIcon.Loader2 else ProductIcon.Square,
-                                            12.dp,
-                                            if (stoppingPid == t.pid) tokens.text2.color else tokens.error.color,
-                                            spinning = stoppingPid == t.pid,
+                                        BasicText(
+                                            if (t.port != null) ":${t.port}" else "—",
+                                            style = ppmText(14f, FontWeight.Medium, kind = FontKind.MONO, lineHeight = 20f).copy(color = tokens.text.color),
                                         )
+                                        TunnelChip(
+                                            label = if (isPrivate) "TAILNET" else "PUBLIC",
+                                            bg = if (isPrivate) tokens.accent.opacity(0.1).color else tokens.panel2.color,
+                                            fg = if (isPrivate) tokens.accent.color else tokens.text2.color,
+                                        )
+                                        if (t.source == "external") {
+                                            TunnelChip(
+                                                label = "STARTED OUTSIDE PPM",
+                                                bg = tokens.panel2.color,
+                                                fg = tokens.text2.color,
+                                            )
+                                        }
+                                    }
+
+                                    if (t.protected) {
+                                        Row(
+                                            Modifier
+                                                .heightIn(min = controlHeight)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .ppmClickable(pressedColor = tokens.surfaceHover.color) {
+                                                    model.openSettings("remote-access")
+                                                    onNavigate()
+                                                }
+                                                .padding(horizontal = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
+                                            PpmIcon(ProductIcon.Lock, 14.dp, tokens.text2.color)
+                                            BasicText("Public link", style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color))
+                                        }
+                                    } else {
+                                        Box(
+                                            Modifier
+                                                .size(iconBtnSize)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .ppmClickable(
+                                                    enabled = stoppingPid != t.pid,
+                                                    pressedColor = tokens.error.opacity(0.15).color,
+                                                    hoverColor = tokens.error.opacity(0.1).color,
+                                                ) {
+                                                    if (t.source == "external") {
+                                                        confirmStop = t
+                                                    } else {
+                                                        handleStop(t.pid)
+                                                    }
+                                                }
+                                                .testTag("tunnel-stop-${t.pid}"),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            PpmIcon(
+                                                if (stoppingPid == t.pid) ProductIcon.Loader2 else ProductIcon.Square,
+                                                16.dp,
+                                                tokens.text2.color,
+                                                spinning = stoppingPid == t.pid,
+                                            )
+                                        }
                                     }
                                 }
-                            }
 
-                            if (t.status == "running" && !t.url.isNullOrBlank()) {
-                                val urlShape = RoundedCornerShape(4.dp)
+                                val hasUrl = !t.url.isNullOrBlank()
+                                val urlShape = RoundedCornerShape(6.dp)
                                 Row(
                                     Modifier
                                         .fillMaxWidth()
                                         .clip(urlShape)
-                                        .background(tokens.panel2.opacity(0.5).color)
-                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                        .background(tokens.panel2.opacity(0.75).color)
+                                        .padding(start = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 ) {
                                     BasicText(
-                                        t.url!!,
+                                        if (hasUrl) t.url!! else "Address not known",
                                         Modifier
                                             .weight(1f)
-                                            .ppmClickable {
-                                                model.openWebPreviewTab(
-                                                    url = t.url!!,
-                                                    port = t.port,
-                                                    via = t.via ?: "cloudflare",
-                                                )
-                                                onNavigate()
-                                            }
-                                            .testTag("tunnel-open-tab-${t.pid}"),
-                                        style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.accent.color),
+                                            .then(
+                                                if (hasUrl) {
+                                                    Modifier
+                                                        .ppmClickable {
+                                                            model.openWebPreviewTab(
+                                                                url = t.url!!,
+                                                                port = t.port,
+                                                                via = t.via ?: "cloudflare",
+                                                            )
+                                                            onNavigate()
+                                                        }
+                                                        .testTag("tunnel-open-tab-${t.pid}")
+                                                } else {
+                                                    Modifier
+                                                },
+                                            )
+                                            .padding(vertical = if (hasUrl) 0.dp else 8.dp),
+                                        style = ppmText(12f, lineHeight = 16f).copy(
+                                            color = if (hasUrl) tokens.text.color else tokens.text2.color,
+                                        ),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
-                                    Box(
-                                        Modifier
-                                            .size(20.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .ppmClickable {
-                                                model.openWebPreviewTab(
-                                                    url = t.url!!,
-                                                    port = t.port,
-                                                    via = t.via ?: "cloudflare",
-                                                )
-                                                onNavigate()
-                                            },
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        PpmIcon(ProductIcon.AppWindow, 12.dp, tokens.text2.color)
-                                    }
-                                    Box(
-                                        Modifier
-                                            .size(20.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .ppmClickable { openExternalBrowser(t.url!!) },
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        PpmIcon(ProductIcon.ExternalLink, 12.dp, tokens.text2.color)
-                                    }
-                                    Box(
-                                        Modifier
-                                            .size(20.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .ppmClickable { copyUrl(t.pid, t.url!!) },
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        PpmIcon(
-                                            if (copiedPid == t.pid) ProductIcon.Check else ProductIcon.Copy,
-                                            12.dp,
-                                            if (copiedPid == t.pid) Color(0xFF22C55E) else tokens.text2.color,
-                                        )
+                                    if (hasUrl) {
+                                        Box(
+                                            Modifier
+                                                .size(iconBtnSize)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .ppmClickable(hoverColor = tokens.surfaceHover.color) {
+                                                    model.openWebPreviewTab(
+                                                        url = t.url!!,
+                                                        port = t.port,
+                                                        via = t.via ?: "cloudflare",
+                                                    )
+                                                    onNavigate()
+                                                },
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            PpmIcon(ProductIcon.AppWindow, 16.dp, tokens.text2.color)
+                                        }
+                                        Box(
+                                            Modifier
+                                                .size(iconBtnSize)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .ppmClickable(hoverColor = tokens.surfaceHover.color) { openExternalBrowser(t.url!!) },
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            PpmIcon(ProductIcon.ExternalLink, 16.dp, tokens.text2.color)
+                                        }
+                                        Box(
+                                            Modifier
+                                                .size(iconBtnSize)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .ppmClickable(hoverColor = tokens.surfaceHover.color) { copyUrl(t.pid, t.url!!) },
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            PpmIcon(
+                                                if (copiedPid == t.pid) ProductIcon.Check else ProductIcon.Copy,
+                                                16.dp,
+                                                if (copiedPid == t.pid) Color(0xFF22C55E) else tokens.text2.color,
+                                            )
+                                        }
                                     }
                                 }
-                            } else if (t.status == "starting") {
+
                                 BasicText(
-                                    "Starting tunnel…",
-                                    style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text2.color),
+                                    "pid ${t.pid}",
+                                    style = ppmText(10f, kind = FontKind.MONO, lineHeight = 14f).copy(color = tokens.text2.color),
                                 )
                             }
                         }
@@ -649,93 +679,126 @@ fun PortForwardingPanel(
 }
 
 @Composable
-private fun SetupRow(
-    name: String,
-    setup: SetupState,
-    onOpen: () -> Unit,
+private fun TunnelChip(
+    label: String,
+    bg: Color,
+    fg: Color,
 ) {
-    val tokens = LocalPpmTokens.current
-    val dotColor = when {
-        setup.warn -> Color(0xFFEAB308)
-        setup.done -> Color(0xFF22C55E)
-        else -> tokens.text2.opacity(0.4).color
-    }
-    val shape = RoundedCornerShape(4.dp)
-    Row(
+    Box(
         Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .pressable(shape = shape, onClick = onOpen)
-            .padding(horizontal = 6.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .clip(RoundedCornerShape(4.dp))
+            .background(bg)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
     ) {
-        Box(Modifier.size(8.dp).clip(CircleShape).background(dotColor))
         BasicText(
-            name,
-            style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color),
+            label,
+            style = ppmText(10f, FontWeight.Medium, lineHeight = 14f).copy(
+                color = fg,
+                letterSpacing = 0.25.sp,
+            ),
         )
-        BasicText(
-            setup.status,
-            Modifier.weight(1f),
-            style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        PpmIcon(ProductIcon.Settings, 13.dp, tokens.text2.color)
     }
 }
 
 @Composable
-private fun TransportRadioRow(
+private fun SetupRow(
+    name: String,
+    setup: SetupState,
+    mobile: Boolean,
+    onOpen: () -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    val btnShape = RoundedCornerShape(6.dp)
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Column(
+            Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            BasicText(
+                name,
+                style = ppmText(if (mobile) 14f else 12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color),
+            )
+            Row(
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (setup.warn) {
+                    PpmIcon(ProductIcon.AlertTriangle, 14.dp, tokens.warning.color, Modifier.padding(top = 1.dp))
+                }
+                BasicText(
+                    setup.status,
+                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+                )
+            }
+        }
+        Box(
+            Modifier
+                .heightIn(min = if (mobile) 44.dp else 32.dp)
+                .clip(btnShape)
+                .then(
+                    if (setup.done) {
+                        Modifier
+                    } else {
+                        Modifier
+                            .background(tokens.bgSolid.color)
+                            .cssBorder(tokens.border.color, btnShape)
+                    },
+                )
+                .ppmClickable(
+                    pressedColor = tokens.surfaceHover.color,
+                    hoverColor = tokens.surfaceHover.color,
+                    shape = btnShape,
+                    onClick = onOpen,
+                )
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                if (setup.done) "Manage" else "Set up",
+                style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TransportOptionButton(
+    label: String,
     selected: Boolean,
     enabled: Boolean,
-    title: String,
-    badge: String,
-    subtitle: String,
+    mobile: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(6.dp)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .alpha(if (enabled) 1f else 0.55f)
+    Box(
+        modifier
+            .height(if (mobile) 44.dp else 32.dp)
+            .alpha(if (enabled) 1f else 0.5f)
             .clip(shape)
-            .background(if (selected) tokens.accent.opacity(0.08).color else Color.Transparent)
+            .background(if (selected) tokens.accent.opacity(0.1).color else Color.Transparent)
             .cssBorder((if (selected) tokens.accent else tokens.border).color, shape)
-            .ppmClickable(enabled = enabled, shape = shape, onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Box(
-            Modifier
-                .padding(top = 2.dp)
-                .size(14.dp)
-                .clip(CircleShape)
-                .cssBorder((if (selected) tokens.accent else tokens.text2).color, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (selected) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(tokens.accent.color))
-            }
-        }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                BasicText(title, style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color))
-                BasicText(badge, style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text2.color))
-            }
-            BasicText(
-                subtitle,
-                style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            .ppmClickable(
+                enabled = enabled,
+                hoverColor = if (selected) tokens.accent.opacity(0.12).color else tokens.surfaceHover.color,
+                shape = shape,
+                onClick = onClick,
             )
-        }
+            .padding(horizontal = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            label,
+            style = ppmText(
+                if (mobile) 14f else 12f,
+                if (selected) FontWeight.Medium else FontWeight.Normal,
+                lineHeight = 16f,
+            ).copy(color = if (selected) tokens.accent.color else tokens.text.color),
+        )
     }
 }
