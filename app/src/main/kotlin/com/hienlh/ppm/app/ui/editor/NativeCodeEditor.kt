@@ -105,6 +105,7 @@ import com.hienlh.ppm.design.SyntaxHighlighter
 import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssScrollbar
+import com.hienlh.ppm.design.monacoEditorShikiTheme
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.get
@@ -339,6 +340,7 @@ internal fun EditableFileCodeView(
     revealAt: String? = null,
     isUntitled: Boolean = false,
     readOnly: Boolean = false,
+    useWebHeader: Boolean = false,
     onDirtyChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -353,6 +355,12 @@ internal fun EditableFileCodeView(
         )
     }
     var editTick by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(initialLanguage) {
+        if (docState.session.language != initialLanguage) {
+            docState.session.language = initialLanguage
+            editTick++
+        }
+    }
     var conflictVisible by remember { mutableStateOf(false) }
     var latestDiskContent by remember { mutableStateOf(initialContent) }
     var saveError by remember(path, project) { mutableStateOf<String?>(null) }
@@ -842,6 +850,7 @@ internal fun EditableFileCodeView(
             lineNumber = lineNumber,
             endLine = endLine,
             revealAt = revealAt,
+            showActionStrip = !useWebHeader,
             lspSlot = {
                 if (isRelativeProjectFile) {
                     InlineBlameToolbarChip(
@@ -889,6 +898,7 @@ internal fun NativeCodeEditorCanvas(
     lineNumber: Long? = null,
     endLine: Long? = null,
     revealAt: String? = null,
+    showActionStrip: Boolean = true,
     lspSlot: @Composable () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -896,7 +906,8 @@ internal fun NativeCodeEditorCanvas(
     val mobile = LocalPpmMobile.current
     val context = LocalContext.current
     val density = LocalDensity.current
-    val shikiTheme = LocalPpmTheme.current.shikiTheme
+    val ppmTheme = LocalPpmTheme.current
+    val shikiTheme = remember(ppmTheme.isDark, colors) { monacoEditorShikiTheme(ppmTheme.isDark, colors) }
     val highlighter = SyntaxHighlighter.get(context)
 
     val listState = rememberLazyListState()
@@ -963,7 +974,7 @@ internal fun NativeCodeEditorCanvas(
         val viewport = snapshotFlow {
             listState.layoutInfo.viewportEndOffset - listState.layoutInfo.viewportStartOffset
         }.first { it > 0 }
-        val rowHeight = with(density) { 20.sp.toPx() }
+        val rowHeight = with(density) { 19.sp.toPx() }
         listState.scrollToItem(range.first, -((viewport - rowHeight).coerceAtLeast(0f) / 2).toInt())
     }
 
@@ -1114,128 +1125,130 @@ internal fun NativeCodeEditorCanvas(
         )
 
         // Editor Action Strip (status, cursor Ln/Col, Find, Go to Line, Language, Save)
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .background(colors.panel.color)
-                .cssBorder(colors.border.color, sides = CssSides.Bottom)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                BasicText(
-                    "Ln ${cursorLineCol.line + 1}, Col ${cursorLineCol.column + 1}" + (if (isDirty) " ●" else ""),
-                    style = ppmText(11f, kind = FontKind.MONO).copy(
-                        color = if (isDirty) colors.accent.color else colors.text2.color,
-                    ),
-                    modifier = Modifier.testTag("editor-cursor-status"),
-                )
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(colors.bgSolid.color)
-                        .cssBorder(colors.border.color, RoundedCornerShape(4.dp))
-                        .clickable { showLanguageMenu = !showLanguageMenu }
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                        .testTag("editor-language-chip"),
-                ) {
-                    BasicText(
-                        currentLanguage,
-                        style = ppmText(10f, kind = FontKind.MONO).copy(color = colors.text2.color),
-                    )
-                }
-                lspSlot()
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (onRequestCompletions != null) {
-                    SettingsButton(
-                        label = "Complete",
-                        modifier = Modifier.testTag("editor-lsp-complete-btn"),
-                        onClick = onRequestCompletions,
-                    )
-                }
-                if (onRequestHover != null) {
-                    SettingsButton(
-                        label = "Hover",
-                        modifier = Modifier.testTag("editor-lsp-hover-btn"),
-                        onClick = onRequestHover,
-                    )
-                }
-                if (onRequestDefinition != null) {
-                    SettingsButton(
-                        label = "Def",
-                        modifier = Modifier.testTag("editor-lsp-def-btn"),
-                        onClick = onRequestDefinition,
-                    )
-                }
-                if (onRequestFormatting != null) {
-                    SettingsButton(
-                        label = "Format",
-                        modifier = Modifier.testTag("editor-lsp-format-btn"),
-                        onClick = onRequestFormatting,
-                    )
-                }
-                SettingsButton(
-                    label = "Find",
-                    modifier = Modifier.testTag("editor-toggle-find"),
-                    onClick = { showFindBar = !showFindBar },
-                )
-                SettingsButton(
-                    label = "Go to Line",
-                    modifier = Modifier.testTag("editor-toggle-goto"),
-                    onClick = { showGoToLineBar = !showGoToLineBar },
-                )
-                if (!session.readOnly) {
-                    SettingsButton(
-                        label = "Undo",
-                        enabled = session.canUndo,
-                        modifier = Modifier.testTag("editor-undo-btn"),
-                        onClick = {
-                            if (session.undo()) onMutated()
-                        },
-                    )
-                    SettingsButton(
-                        label = "Redo",
-                        enabled = session.canRedo,
-                        modifier = Modifier.testTag("editor-redo-btn"),
-                        onClick = {
-                            if (session.redo()) onMutated()
-                        },
-                    )
-                    if (isDirty) {
-                        SettingsButton(
-                            label = "Save",
-                            primary = true,
-                            modifier = Modifier.testTag("editor-save-btn"),
-                            onClick = onSaveNow,
-                        )
-                    }
-                }
-            }
-        }
-
-        if (showLanguageMenu) {
+        if (showActionStrip) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .background(colors.panel2.color)
-                    .horizontalScroll(rememberScrollState())
+                    .background(colors.panel.color)
+                    .cssBorder(colors.border.color, sides = CssSides.Bottom)
                     .padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                for ((langId, label) in EDITOR_LANGUAGE_OPTIONS) {
-                    SettingsButton(
-                        label = label,
-                        primary = currentLanguage == langId,
-                        modifier = Modifier.testTag("editor-lang-opt-$langId"),
-                        onClick = {
-                            currentLanguage = langId
-                            session.language = langId
-                            showLanguageMenu = false
-                            onMutated()
-                        },
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    BasicText(
+                        "Ln ${cursorLineCol.line + 1}, Col ${cursorLineCol.column + 1}" + (if (isDirty) " ●" else ""),
+                        style = ppmText(11f, kind = FontKind.MONO).copy(
+                            color = if (isDirty) colors.accent.color else colors.text2.color,
+                        ),
+                        modifier = Modifier.testTag("editor-cursor-status"),
                     )
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(colors.bgSolid.color)
+                            .cssBorder(colors.border.color, RoundedCornerShape(4.dp))
+                            .clickable { showLanguageMenu = !showLanguageMenu }
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .testTag("editor-language-chip"),
+                    ) {
+                        BasicText(
+                            currentLanguage,
+                            style = ppmText(10f, kind = FontKind.MONO).copy(color = colors.text2.color),
+                        )
+                    }
+                    lspSlot()
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (onRequestCompletions != null) {
+                        SettingsButton(
+                            label = "Complete",
+                            modifier = Modifier.testTag("editor-lsp-complete-btn"),
+                            onClick = onRequestCompletions,
+                        )
+                    }
+                    if (onRequestHover != null) {
+                        SettingsButton(
+                            label = "Hover",
+                            modifier = Modifier.testTag("editor-lsp-hover-btn"),
+                            onClick = onRequestHover,
+                        )
+                    }
+                    if (onRequestDefinition != null) {
+                        SettingsButton(
+                            label = "Def",
+                            modifier = Modifier.testTag("editor-lsp-def-btn"),
+                            onClick = onRequestDefinition,
+                        )
+                    }
+                    if (onRequestFormatting != null) {
+                        SettingsButton(
+                            label = "Format",
+                            modifier = Modifier.testTag("editor-lsp-format-btn"),
+                            onClick = onRequestFormatting,
+                        )
+                    }
+                    SettingsButton(
+                        label = "Find",
+                        modifier = Modifier.testTag("editor-toggle-find"),
+                        onClick = { showFindBar = !showFindBar },
+                    )
+                    SettingsButton(
+                        label = "Go to Line",
+                        modifier = Modifier.testTag("editor-toggle-goto"),
+                        onClick = { showGoToLineBar = !showGoToLineBar },
+                    )
+                    if (!session.readOnly) {
+                        SettingsButton(
+                            label = "Undo",
+                            enabled = session.canUndo,
+                            modifier = Modifier.testTag("editor-undo-btn"),
+                            onClick = {
+                                if (session.undo()) onMutated()
+                            },
+                        )
+                        SettingsButton(
+                            label = "Redo",
+                            enabled = session.canRedo,
+                            modifier = Modifier.testTag("editor-redo-btn"),
+                            onClick = {
+                                if (session.redo()) onMutated()
+                            },
+                        )
+                        if (isDirty) {
+                            SettingsButton(
+                                label = "Save",
+                                primary = true,
+                                modifier = Modifier.testTag("editor-save-btn"),
+                                onClick = onSaveNow,
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (showLanguageMenu) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(colors.panel2.color)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    for ((langId, label) in EDITOR_LANGUAGE_OPTIONS) {
+                        SettingsButton(
+                            label = label,
+                            primary = currentLanguage == langId,
+                            modifier = Modifier.testTag("editor-lang-opt-$langId"),
+                            onClick = {
+                                currentLanguage = langId
+                                session.language = langId
+                                showLanguageMenu = false
+                                onMutated()
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -1371,12 +1384,13 @@ internal fun NativeCodeEditorCanvas(
         }
 
         // Virtualized Code Canvas
-        val style = ppmText(14f, kind = FontKind.MONO, lineHeight = 20f).copy(
+        val style = ppmText(14f, kind = FontKind.MONO, lineHeight = 19f).copy(
             color = highlighted?.code?.foreground ?: colors.text.color,
             textDirection = TextDirection.Ltr,
+            fontFeatureSettings = PpmFonts.EDITOR_FONT_LIGATURES,
         )
         val advance = with(density) { (14.sp.toPx() * PpmFonts.MONO_ADVANCE).toDp() }
-        val gutterWidth = advance * maxOf(3, lineCount.toString().length) + 20.dp
+        val gutterWidth = 36.dp + advance * maxOf(3, lineCount.toString().length) + 28.dp
 
         BoxWithConstraints(
             Modifier
@@ -1396,7 +1410,7 @@ internal fun NativeCodeEditorCanvas(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 4.dp),
+                    contentPadding = PaddingValues(vertical = 0.dp),
                 ) {
                     items(lineCount, contentType = { "editor-line" }) { row ->
                         val plainLine = remember(editTick, row) { session.buffer.line(row) }
@@ -1442,17 +1456,15 @@ internal fun NativeCodeEditorCanvas(
 
                         val isCursorRow = cursorLineCol.line == row
                         val isRevealedRow = targetRange?.contains(row) == true
+                        val codeRowBg = when {
+                            isRevealedRow -> colors.accent.color.copy(alpha = 0.14f)
+                            isCursorRow -> colors.accent.opacity(0x12 / 255.0).color
+                            else -> Color.Transparent
+                        }
 
                         Row(
                             Modifier
-                                .heightIn(min = 20.dp)
-                                .background(
-                                    when {
-                                        isRevealedRow -> colors.accent.color.copy(alpha = 0.14f)
-                                        isCursorRow -> colors.panel2.opacity(0.45).color
-                                        else -> Color.Transparent
-                                    },
-                                )
+                                .heightIn(min = 19.dp)
                                 .clickable {
                                     session.setSelection(rowEndOffset, rowEndOffset)
                                     onMutated()
@@ -1462,9 +1474,9 @@ internal fun NativeCodeEditorCanvas(
                         ) {
                             BasicText(
                                 "${row + 1}",
-                                Modifier.width(gutterWidth).padding(end = 12.dp),
+                                Modifier.width(gutterWidth).padding(end = 28.dp),
                                 style = style.copy(
-                                    color = if (isCursorRow) colors.text.color else colors.text3.color,
+                                    color = if (isCursorRow) colors.text2.color else colors.text3.color,
                                     textAlign = TextAlign.End,
                                 ),
                                 softWrap = false,
@@ -1472,11 +1484,11 @@ internal fun NativeCodeEditorCanvas(
                             if (wrap) {
                                 BasicText(
                                     decoratedLine,
-                                    Modifier.width(codeWidth).padding(end = 12.dp),
+                                    Modifier.width(codeWidth).background(codeRowBg).padding(end = 12.dp),
                                     style = style,
                                 )
                             } else {
-                                Box(Modifier.width(codeWidth).horizontalScroll(horizontalScroll)) {
+                                Box(Modifier.width(codeWidth).background(codeRowBg).horizontalScroll(horizontalScroll)) {
                                     BasicText(
                                         decoratedLine,
                                         Modifier.width(scrollWidth).padding(end = 12.dp),
@@ -1498,7 +1510,7 @@ internal fun NativeCodeEditorCanvas(
             }
         }
 
-        // Mobile 44dp Soft-Keyboard Key Row (Phase 07b.3)
+        // Mobile Soft-Keyboard Key Row (`src/web/components/editor/editor-mobile-toolbar.tsx`)
         if (mobile && !session.readOnly) {
             MobileEditorSymbolBar(
                 session = session,
@@ -1577,7 +1589,8 @@ private fun decorateEditorLine(
 }
 
 /**
- * 44dp-tall mobile soft-keyboard bar with Paste, Undo, Redo, Tab, Wrap, and the 18 code symbols (`phase-07b.3`).
+ * Mobile soft-keyboard bar (`src/web/components/editor/editor-mobile-toolbar.tsx`):
+ * Paste, Undo, Redo, Wrap icon buttons, Tab, and the 18 code symbols.
  */
 @Composable
 internal fun MobileEditorSymbolBar(
@@ -1592,32 +1605,36 @@ internal fun MobileEditorSymbolBar(
     Row(
         Modifier
             .fillMaxWidth()
-            .height(44.dp)
             .background(tokens.panel.color)
             .cssBorder(tokens.border.color, sides = CssSides.Top)
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 6.dp)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
             .testTag("mobile-editor-symbol-bar"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        MobileKeyButton("Paste", testTag = "mobile-key-paste") {
+        MobileKeyIconButton(ProductIcon.ClipboardPaste, testTag = "mobile-key-paste") {
             val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             val clip = cm?.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
             if (!clip.isNullOrEmpty() && session.commitText(clip, 1)) {
                 onMutated()
             }
         }
-        MobileKeyButton("Undo", enabled = session.canUndo, testTag = "mobile-key-undo") {
+        MobileKeyIconButton(ProductIcon.Undo2, enabled = session.canUndo, testTag = "mobile-key-undo") {
             if (session.undo()) onMutated()
         }
-        MobileKeyButton("Redo", enabled = session.canRedo, testTag = "mobile-key-redo") {
+        MobileKeyIconButton(ProductIcon.Redo2, enabled = session.canRedo, testTag = "mobile-key-redo") {
             if (session.redo()) onMutated()
         }
-        MobileKeyButton("Tab", testTag = "mobile-key-tab") {
+        MobileKeyIconButton(ProductIcon.WrapText, active = wrap, testTag = "mobile-key-wrap", onClick = onToggleWrap)
+
+        Box(Modifier.padding(horizontal = 2.dp).width(1.dp).height(20.dp).background(tokens.border.color))
+
+        MobileKeyButton("Tab", mono = true, testTag = "mobile-key-tab") {
             if (session.indentSelection()) onMutated()
         }
-        MobileKeyButton(if (wrap) "Unwrap" else "Wrap", testTag = "mobile-key-wrap", onClick = onToggleWrap)
+
+        Box(Modifier.padding(horizontal = 2.dp).width(1.dp).height(20.dp).background(tokens.border.color))
 
         for (sym in MOBILE_EDITOR_SYMBOLS) {
             MobileKeyButton(sym, mono = true, testTag = "mobile-key-sym-$sym") {
@@ -1632,6 +1649,39 @@ internal fun MobileEditorSymbolBar(
 }
 
 @Composable
+private fun MobileKeyIconButton(
+    icon: ProductIcon,
+    enabled: Boolean = true,
+    active: Boolean = false,
+    testTag: String? = null,
+    onClick: () -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(4.dp)
+    Box(
+        Modifier
+            .width(36.dp)
+            .height(32.dp)
+            .clip(shape)
+            .background(tokens.panel2.color)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        PpmIcon(
+            icon,
+            14.dp,
+            when {
+                !enabled -> tokens.text3.color
+                active -> tokens.accent.color
+                else -> tokens.text.color
+            },
+        )
+    }
+}
+
+@Composable
 private fun MobileKeyButton(
     label: String,
     mono: Boolean = false,
@@ -1640,21 +1690,20 @@ private fun MobileKeyButton(
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(6.dp)
+    val shape = RoundedCornerShape(4.dp)
     Box(
         Modifier
-            .height(36.dp)
+            .height(32.dp)
             .clip(shape)
-            .background(tokens.bgSolid.color)
-            .cssBorder(tokens.border.color, shape)
+            .background(tokens.panel2.color)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 10.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
             .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
         BasicText(
             label,
-            style = ppmText(12f, if (mono) FontWeight.SemiBold else FontWeight.Medium, kind = if (mono) FontKind.MONO else FontKind.SANS).copy(
+            style = ppmText(12f, FontWeight.Normal, kind = if (mono) FontKind.MONO else FontKind.SANS, lineHeight = 16f).copy(
                 color = if (enabled) tokens.text.color else tokens.text3.color,
             ),
         )

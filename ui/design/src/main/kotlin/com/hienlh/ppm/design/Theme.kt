@@ -52,6 +52,13 @@ data class Rgba(val r: Double, val g: Double, val b: Double, val a: Double) {
     /** This colour painted over an opaque [base]. */
     fun over(base: Rgba) = Rgba(r * a + base.r * (1 - a), g * a + base.g * (1 - a), b * a + base.b * (1 - a), 1.0)
 
+    /** `#RRGGBB` hex string for Shiki / Monaco theme definitions. */
+    fun toHexRgb(): String = "#%02X%02X%02X".format(
+        (r * 255.0 + 0.5).toInt().coerceIn(0, 255),
+        (g * 255.0 + 0.5).toInt().coerceIn(0, 255),
+        (b * 255.0 + 0.5).toInt().coerceIn(0, 255),
+    )
+
     companion object {
         /** `#rgb`, `#rrggbb` or `#rrggbbaa`; null for anything else. */
         fun hex(text: String): Rgba? {

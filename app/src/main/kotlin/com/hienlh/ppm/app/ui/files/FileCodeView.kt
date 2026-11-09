@@ -39,6 +39,7 @@ import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.SyntaxHighlighter
 import com.hienlh.ppm.design.chromeScrollbar
 import com.hienlh.ppm.design.cssScrollbar
+import com.hienlh.ppm.design.monacoEditorShikiTheme
 import com.hienlh.ppm.design.ppmText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -58,7 +59,8 @@ internal fun FileCodeView(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalPpmTokens.current
-    val theme = LocalPpmTheme.current.shikiTheme
+    val ppmTheme = LocalPpmTheme.current
+    val theme = remember(ppmTheme.isDark, colors) { monacoEditorShikiTheme(ppmTheme.isDark, colors) }
     val highlighter = SyntaxHighlighter.get(LocalContext.current)
     // Retain scroll positions while a refreshed buffer is indexed off the main thread.
     val list = rememberLazyListState()
@@ -80,36 +82,37 @@ internal fun FileCodeView(
     LaunchedEffect(document, target, revealAt) {
         if (target == null) return@LaunchedEffect
         val viewport = snapshotFlow { list.layoutInfo.viewportEndOffset - list.layoutInfo.viewportStartOffset }.first { it > 0 }
-        val rowHeight = with(density) { 20.sp.toPx() }
+        val rowHeight = with(density) { 19.sp.toPx() }
         list.scrollToItem(target.first, -((viewport - rowHeight).coerceAtLeast(0f) / 2).toInt())
     }
-    val style = ppmText(14f, kind = FontKind.MONO, lineHeight = 20f).copy(
-        color = highlighted?.code?.foreground ?: colors.text.color, textDirection = TextDirection.Ltr,
+    val style = ppmText(14f, kind = FontKind.MONO, lineHeight = 19f).copy(
+        color = highlighted?.code?.foreground ?: colors.text.color,
+        textDirection = TextDirection.Ltr,
+        fontFeatureSettings = PpmFonts.EDITOR_FONT_LIGATURES,
     )
     val advance = with(density) { (14.sp.toPx() * PpmFonts.MONO_ADVANCE).toDp() }
-    val gutter = advance * maxOf(3, document.count.toString().length) + 20.dp
+    val gutter = 36.dp + advance * maxOf(3, document.count.toString().length) + 28.dp
     BoxWithConstraints(modifier.fillMaxSize().clipToBounds().background(highlighted?.code?.background ?: colors.bgSolid.color)) {
         val codeWidth = maxOf(0.dp, maxWidth - gutter)
         val scrollWidth = maxOf(codeWidth, advance * document.maxColumns + 24.dp)
         SelectionContainer {
             Box(Modifier.fillMaxSize().cssScrollbar(list)) {
                 // A single scroll state drives every visible row; the gutter never moves sideways.
-                LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 4.dp)) {
+                LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 0.dp)) {
                     items(document.count, contentType = { "file-line" }) { row ->
                         val plain = remember(document, row) { document.line(row) }
                         val tokenLine = highlighted?.rows?.getOrNull(row)
                         val line = remember(plain, tokenLine) { fileCodeDisplayLine(plain, tokenLine) }
-                        Row(Modifier.heightIn(min = 20.dp).background(
-                            if (target?.contains(row) == true) colors.accent.color.copy(alpha = 0.12f) else Color.Transparent,
-                        )) {
+                        val rowBg = if (target?.contains(row) == true) colors.accent.color.copy(alpha = 0.12f) else Color.Transparent
+                        Row(Modifier.heightIn(min = 19.dp)) {
                             DisableSelection {
-                                BasicText("${row + 1}", Modifier.width(gutter).padding(end = 12.dp),
+                                BasicText("${row + 1}", Modifier.width(gutter).padding(end = 28.dp),
                                     style = style.copy(color = colors.text3.color, textAlign = TextAlign.End), softWrap = false)
                             }
                             if (wrap) {
-                                BasicText(line, Modifier.width(codeWidth).padding(end = 12.dp), style = style)
+                                BasicText(line, Modifier.width(codeWidth).background(rowBg).padding(end = 12.dp), style = style)
                             } else {
-                                Box(Modifier.width(codeWidth).horizontalScroll(horizontal)) {
+                                Box(Modifier.width(codeWidth).background(rowBg).horizontalScroll(horizontal)) {
                                     BasicText(line, Modifier.width(scrollWidth).padding(end = 12.dp), style = style, softWrap = false)
                                 }
                             }

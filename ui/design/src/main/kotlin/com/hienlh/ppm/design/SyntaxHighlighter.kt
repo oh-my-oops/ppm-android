@@ -136,7 +136,8 @@ class SyntaxHighlighter private constructor(private val context: Context) {
     private suspend fun tokens(engine: Engine, key: Key): HighlightedCode {
         val language = resolve(key.language)
         load(engine, language)
-        val json = engine.isolate.evaluateJavaScriptAsync("ppmHighlight(${quote(key.code)},${quote(language)},${quote(key.theme)})").await()
+        val themeArg = if (key.theme.startsWith("{")) key.theme else quote(key.theme)
+        val json = engine.isolate.evaluateJavaScriptAsync("ppmHighlight(${quote(key.code)},${quote(language)},$themeArg)").await()
         return withContext(Dispatchers.Default) { parse(json) }
     }
 
@@ -277,5 +278,49 @@ class SyntaxHighlighter private constructor(private val context: Context) {
             }
             return HighlightedCode(text, colour("fg"), colour("bg"))
         }
+    }
+}
+
+/**
+ * Shiki JSON theme matching Monaco's inherited `vs` / `vs-dark` base (`src/web/theme/adapters/monaco-adapter.ts`):
+ * workbench foreground/background come from [tokens], while syntax tokens follow VS Code's `vs` / `vs-dark`.
+ */
+fun monacoEditorShikiTheme(isDark: Boolean, tokens: ThemeTokens): String {
+    val fg = tokens.text.toHexRgb()
+    val bg = tokens.bgSolid.toHexRgb()
+    return if (isDark) {
+        """{"name":"ppm-monaco-dark","type":"dark","colors":{"editor.foreground":"$fg","editor.background":"$bg"},"tokenColors":[""" +
+            """{"scope":["comment","punctuation.definition.comment"],"settings":{"foreground":"#608B4E"}},""" +
+            """{"scope":["comment.line.shebang","comment.line.shebang punctuation.definition.comment"],"settings":{"foreground":"#DD6A6F"}},""" +
+            """{"scope":["string","punctuation.definition.string"],"settings":{"foreground":"#CE9178"}},""" +
+            """{"scope":["meta.template.expression"],"settings":{"foreground":"$fg"}},""" +
+            """{"scope":["punctuation.definition.template-expression"],"settings":{"foreground":"#CE9178"}},""" +
+            """{"scope":["constant.numeric"],"settings":{"foreground":"#B5CEA8"}},""" +
+            """{"scope":["string.regexp"],"settings":{"foreground":"#B46695"}},""" +
+            """{"scope":["keyword","storage","constant.language","variable.language"],"settings":{"foreground":"#569CD6"}},""" +
+            """{"scope":["keyword.operator","storage.type.function.arrow"],"settings":{"foreground":"$fg"}},""" +
+            """{"scope":["keyword.operator.new","keyword.operator.expression","keyword.operator.word","keyword.operator.Logical"],"settings":{"foreground":"#569CD6"}},""" +
+            """{"scope":["entity.name.tag"],"settings":{"foreground":"#569CD6"}},""" +
+            """{"scope":["entity.other.attribute-name"],"settings":{"foreground":"#9CDCFE"}},""" +
+            """{"scope":["support.type.property-name.json"],"settings":{"foreground":"#9CDCFE"}},""" +
+            """{"scope":["string.quoted.double.json"],"settings":{"foreground":"#CE9178"}}""" +
+            """]}"""
+    } else {
+        """{"name":"ppm-monaco-light","type":"light","colors":{"editor.foreground":"$fg","editor.background":"$bg"},"tokenColors":[""" +
+            """{"scope":["comment","punctuation.definition.comment"],"settings":{"foreground":"#008000"}},""" +
+            """{"scope":["comment.line.shebang","comment.line.shebang punctuation.definition.comment"],"settings":{"foreground":"#E00000"}},""" +
+            """{"scope":["string","punctuation.definition.string"],"settings":{"foreground":"#A31515"}},""" +
+            """{"scope":["meta.template.expression"],"settings":{"foreground":"$fg"}},""" +
+            """{"scope":["punctuation.definition.template-expression"],"settings":{"foreground":"#A31515"}},""" +
+            """{"scope":["constant.numeric"],"settings":{"foreground":"#098658"}},""" +
+            """{"scope":["string.regexp"],"settings":{"foreground":"#800000"}},""" +
+            """{"scope":["keyword","storage","constant.language","variable.language"],"settings":{"foreground":"#0000FF"}},""" +
+            """{"scope":["keyword.operator","storage.type.function.arrow"],"settings":{"foreground":"$fg"}},""" +
+            """{"scope":["keyword.operator.new","keyword.operator.expression","keyword.operator.word","keyword.operator.Logical"],"settings":{"foreground":"#0000FF"}},""" +
+            """{"scope":["entity.name.tag"],"settings":{"foreground":"#800000"}},""" +
+            """{"scope":["entity.other.attribute-name"],"settings":{"foreground":"#FF0000"}},""" +
+            """{"scope":["support.type.property-name.json"],"settings":{"foreground":"#A31515"}},""" +
+            """{"scope":["string.quoted.double.json"],"settings":{"foreground":"#0451A5"}}""" +
+            """]}"""
     }
 }

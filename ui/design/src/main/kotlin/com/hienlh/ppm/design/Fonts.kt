@@ -111,6 +111,10 @@ object PpmFonts {
     /** Monaspace's one advance, 1240 of its 2000 units. */
     const val MONO_ADVANCE = 0.62f
 
+    /** Monaspace Argon's ligatures and texture-healing stylistic sets (`src/web/lib/editor-font.ts`). */
+    const val EDITOR_FONT_LIGATURES =
+        "\"calt\", \"liga\", \"ss01\", \"ss02\", \"ss03\", \"ss04\", \"ss05\", \"ss06\", \"ss07\", \"ss08\", \"ss09\""
+
     /**
      * What an inline code's edges are set in (`scripts/code-edge-font.py`): an empty U+E000 one em
      * wide, with no ascent or descent, so it takes room on the line and leaves the line's height be.
