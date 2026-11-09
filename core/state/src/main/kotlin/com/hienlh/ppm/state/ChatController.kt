@@ -125,7 +125,7 @@ class ChatController(
         data class Reconnecting(val reason: String?) : Connection
     }
 
-    val transcript = ChatTranscript().also { it.showStale(stale) }
+    val transcript = ChatTranscript(providerId).also { it.showStale(stale) }
     val settings = ChatSettings()
 
     /**
@@ -183,6 +183,7 @@ class ChatController(
         if (sessionId != null || stopped) return
         sessionId = session.id
         providerId = session.providerId
+        transcript.providerId = session.providerId
         publish()
         open()
     }
@@ -191,6 +192,7 @@ class ChatController(
     fun chooseProvider(id: String) {
         if (sessionId != null || id == providerId) return
         providerId = id
+        transcript.providerId = id
         publish()
     }
 

@@ -222,6 +222,40 @@ suspend fun ApiClient.codexImportEncrypted(data: String, password: String): Json
     )
 
 // ===========================================================================
+// 2b. Antigravity Accounts Management (/api/antigravity-accounts/*)
+// ===========================================================================
+
+suspend fun ApiClient.antigravityAccountsOverview(): JsonElement =
+    call("GET", "/api/antigravity-accounts")
+
+suspend fun ApiClient.antigravitySetStrategy(strategy: String): JsonElement =
+    call("PUT", "/api/antigravity-accounts/strategy", body = buildJsonObject { put("strategy", strategy) })
+
+suspend fun ApiClient.antigravityDeleteAccount(id: String): JsonElement =
+    call("DELETE", "/api/antigravity-accounts/${ApiClient.escape(id)}")
+
+suspend fun ApiClient.antigravityStartLogin(label: String? = null, accountId: String? = null): JsonElement {
+    val body = buildJsonObject {
+        if (!label.isNullOrBlank()) put("label", label)
+        if (!accountId.isNullOrBlank()) put("accountId", accountId)
+    }
+    return call("POST", "/api/antigravity-accounts/login", body = body)
+}
+
+suspend fun ApiClient.antigravitySubmitLoginCode(id: String, code: String): JsonElement =
+    call(
+        "POST",
+        "/api/antigravity-accounts/login/${ApiClient.escape(id)}/callback",
+        body = buildJsonObject { put("code", code) },
+    )
+
+suspend fun ApiClient.antigravityLoginStatus(id: String): JsonElement =
+    call("GET", "/api/antigravity-accounts/login/${ApiClient.escape(id)}/status")
+
+suspend fun ApiClient.antigravityCancelLogin(id: String): JsonElement =
+    call("DELETE", "/api/antigravity-accounts/login/${ApiClient.escape(id)}")
+
+// ===========================================================================
 // 3. MCP Servers (/api/settings/mcp/*)
 // ===========================================================================
 

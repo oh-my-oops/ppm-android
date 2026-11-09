@@ -52,13 +52,14 @@ suspend fun ApiClient.prewarmChat(
 }
 
 /**
- * `pickAccountForTab`: claims the account a new chat will run on, round robin. Only Claude and
- * Codex keep accounts; any other provider answers null without asking.
+ * `pickAccountForTab`: claims the account a new chat will run on, round robin. Only Claude,
+ * Codex and Antigravity keep accounts; any other provider answers null without asking.
  */
 suspend fun ApiClient.pickAccount(providerId: String): PickedAccount? {
     val path = when (providerId) {
         "claude" -> "/api/accounts/pick"
         "codex" -> "/api/codex-accounts/pick"
+        "antigravity" -> "/api/antigravity-accounts/pick"
         else -> return null
     }
     return PickedAccount.from(call("POST", path))

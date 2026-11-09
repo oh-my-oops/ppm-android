@@ -50,7 +50,7 @@ data class RejectedSend(val content: String, val replyTo: ReplyReference?, val m
  * effects come out, so every rule here runs in a plain unit test. It follows
  * `src/web/hooks/use-chat.ts`. Not thread-safe: one thread (the main one) drives it.
  */
-class ChatTranscript {
+class ChatTranscript(var providerId: String? = null) {
     var items: List<ChatItem> = emptyList()
         private set
 
@@ -389,7 +389,15 @@ class ChatTranscript {
         } else if (stop is Reported.Value) {
             turnStop = stop.value
         }
-        if (!state.title.isNullOrEmpty()) title = state.title
+        val stateTitle = state.title
+        if (
+            !stateTitle.isNullOrEmpty() &&
+            stateTitle != "Resumed Chat" &&
+            stateTitle != "Chat" &&
+            !(providerId == "antigravity" && stateTitle == "New Chat")
+        ) {
+            title = stateTitle
+        }
         val approval = state.pendingApproval
         if (approval is Reported.Value) pendingApproval = approval.value
         compacting = state.compacting

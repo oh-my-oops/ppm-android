@@ -2,6 +2,7 @@ package com.hienlh.ppm.client
 
 import com.hienlh.ppm.protocol.AccountInfo
 import com.hienlh.ppm.protocol.AccountUsageEntry
+import com.hienlh.ppm.protocol.AntigravityAccount
 import com.hienlh.ppm.protocol.CodexAccount
 import com.hienlh.ppm.protocol.UsageInfo
 import com.hienlh.ppm.protocol.array
@@ -76,3 +77,15 @@ suspend fun ApiClient.setCodexDailyGuard(id: String, enabled: Boolean) {
  */
 suspend fun ApiClient.spendCodexResetCredit(id: String): String =
     call("POST", "/api/codex-accounts/${ApiClient.escape(id)}/reset-credit")["outcome"].string.orEmpty()
+
+/** `GET /api/antigravity-accounts`: the Antigravity accounts PPM manages (ambient `~/.gemini` + isolated logins). */
+suspend fun ApiClient.antigravityAccounts(): List<AntigravityAccount> =
+    call("GET", "/api/antigravity-accounts")["accounts"].array.orEmpty().mapNotNull(AntigravityAccount::from)
+
+/** `GET /api/antigravity-accounts/usage`: each Antigravity account's quota, by account id. */
+suspend fun ApiClient.antigravityUsages(): Map<String, UsageInfo> =
+    call("GET", "/api/antigravity-accounts/usage").obj.orEmpty().mapNotNull { (id, usage) -> UsageInfo.from(usage)?.let { id to it } }.toMap()
+
+/** `PATCH /api/antigravity-accounts/:id {status}`: switches an Antigravity account on or off and returns the updated account. */
+suspend fun ApiClient.setAntigravityAccountStatus(id: String, status: String): AntigravityAccount? =
+    AntigravityAccount.from(call("PATCH", "/api/antigravity-accounts/${ApiClient.escape(id)}", body = buildJsonObject { put("status", status) }))

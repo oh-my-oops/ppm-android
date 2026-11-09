@@ -1,5 +1,6 @@
 package com.hienlh.ppm.state.settings
 
+import com.hienlh.ppm.protocol.AntigravityAccount
 import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.double
@@ -284,6 +285,48 @@ fun looksLikeCodexLoopbackUrl(text: String?): Boolean {
     val trimmed = text?.trim().orEmpty()
     return (trimmed.startsWith("http://localhost:") || trimmed.startsWith("http://127.0.0.1:")) &&
         trimmed.contains("code=")
+}
+
+/**
+ * Server `AntigravityLoginStatus` returned by `GET /api/antigravity-accounts/login/:id/status`
+ * and `POST /api/antigravity-accounts/login/:id/callback` (`src/services/antigravity-account-login.ts`):
+ * `{ state: "pending" } | { state: "done", account } | { state: "error", error }`.
+ */
+data class AntigravityLoginPollStatus(
+    val state: String,
+    val account: AntigravityAccount? = null,
+    val error: String? = null,
+) {
+    val isDone: Boolean get() = state == "done"
+    val isError: Boolean get() = state == "error"
+    val isPending: Boolean get() = state == "pending"
+}
+
+fun parseAntigravityLoginStatus(json: JsonElement?): AntigravityLoginPollStatus? {
+    val state = json?.get("state")?.string?.takeIf { it.isNotBlank() } ?: return null
+    return AntigravityLoginPollStatus(
+        state = state,
+        account = AntigravityAccount.from(json["account"]),
+        error = json["error"].string,
+    )
+}
+
+data class AntigravityLoginFlow(
+    val id: String,
+    val authUrl: String,
+    val status: String = "pending",
+    val error: String? = null,
+)
+
+fun parseAntigravityLoginStart(json: JsonElement?): AntigravityLoginFlow? {
+    val id = json?.get("id")?.string?.takeIf { it.isNotBlank() } ?: return null
+    val authUrl = json["authUrl"].string?.takeIf { it.isNotBlank() } ?: return null
+    return AntigravityLoginFlow(
+        id = id,
+        authUrl = authUrl,
+        status = json["state"].string ?: json["status"].string ?: "pending",
+        error = json["error"].string,
+    )
 }
 
 // ===========================================================================

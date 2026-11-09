@@ -85,10 +85,11 @@ class AgentTranscriptTest {
     }
 
     @Test
-    fun `one window per session source, and only Codex has a hub of its own besides Claude`() {
+    fun `one window per session source, and Codex and Antigravity have hubs of their own besides Claude`() {
         assertEquals("s1:toolu_1", agentSessionKey("s1", AgentSource.Card("toolu_1")))
         assertEquals("s1:t:tester", agentSessionKey("s1", AgentSource.Member("t", "tester")))
         assertEquals("codex", agentTranscriptProvider("codex"))
+        assertEquals("antigravity", agentTranscriptProvider("antigravity"))
         assertEquals("claude", agentTranscriptProvider("mock"))
         assertEquals("claude", agentTranscriptProvider(null))
     }

@@ -110,3 +110,41 @@ data class CodexAccount(
         }
     }
 }
+
+/**
+ * An Antigravity account as `GET /api/antigravity-accounts` lists it (`AntigravityAccount` of
+ * antigravity-account.service.ts). The ambient IDE/CLI account has `id == "default"` and `home == ""`.
+ */
+data class AntigravityAccount(
+    val id: String,
+    val label: String,
+    val email: String? = null,
+    val planType: String? = null,
+    val home: String = "",
+    val status: String = "active",
+    val addedAt: String = "",
+) {
+    val isDefault: Boolean
+        get() = id == DEFAULT_ID
+
+    /** `formatAntigravityAccountLabel`: label with its plan badge for the chat toolbar. */
+    val displayLabel: String
+        get() = if (!planType.isNullOrEmpty()) "$label · $planType" else label
+
+    companion object {
+        const val DEFAULT_ID = "default"
+
+        fun from(value: JsonElement?): AntigravityAccount? {
+            val id = value["id"].string ?: return null
+            return AntigravityAccount(
+                id = id,
+                label = value["label"].string.orEmpty(),
+                email = value["email"].string,
+                planType = value["planType"].string,
+                home = value["home"].string.orEmpty(),
+                status = value["status"].string ?: "active",
+                addedAt = value["addedAt"].string.orEmpty(),
+            )
+        }
+    }
+}

@@ -12,8 +12,9 @@ import kotlinx.serialization.json.put
  * The client names only an [AgentSource] and a cursor of offsets the server handed out earlier.
  */
 
-/** Claude and Codex are the only hubs there are; anything else is read as Claude (`normalizeProviderId`). */
-fun agentTranscriptProvider(providerId: String?): String = if (providerId == "codex") "codex" else "claude"
+/** Claude, Codex and Antigravity are the hubs there are; anything else is read as Claude (`normalizeProviderId`). */
+fun agentTranscriptProvider(providerId: String?): String =
+    if (providerId == "codex" || providerId == "antigravity") providerId else "claude"
 
 /** Whose session a window streams: an Agent/Task card this session spawned, or a named teammate. */
 sealed interface AgentSource {

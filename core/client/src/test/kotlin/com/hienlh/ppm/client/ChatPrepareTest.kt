@@ -71,16 +71,19 @@ class ChatPrepareTest {
     }
 
     @Test
-    fun `an account is picked from its provider's pool, and only Claude and Codex have one`() = withServer(
+    fun `an account is picked from its provider's pool for Claude, Codex and Antigravity`() = withServer(
         MockResponse.Builder().body("""{"ok":true,"data":{"id":"acc-2","label":null}}""").build(),
         MockResponse.Builder().body("""{"ok":true,"data":null}""").build(),
+        MockResponse.Builder().body("""{"ok":true,"data":{"id":"default","label":"Alice · Pro"}}""").build(),
     ) { server, api ->
         assertEquals(PickedAccount("acc-2", null), api.pickAccount("claude"))
         assertEquals("POST /api/accounts/pick", server.takeRequest().let { "${it.method} ${it.target}" })
         assertNull(api.pickAccount("codex"))
         assertEquals("POST /api/codex-accounts/pick", server.takeRequest().let { "${it.method} ${it.target}" })
+        assertEquals(PickedAccount("default", "Alice · Pro"), api.pickAccount("antigravity"))
+        assertEquals("POST /api/antigravity-accounts/pick", server.takeRequest().let { "${it.method} ${it.target}" })
         assertNull(api.pickAccount("mock"))
-        assertEquals(2, server.requestCount)
+        assertEquals(3, server.requestCount)
     }
 
     @Test

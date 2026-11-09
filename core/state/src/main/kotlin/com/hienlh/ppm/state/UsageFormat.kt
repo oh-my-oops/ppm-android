@@ -2,6 +2,7 @@ package com.hienlh.ppm.state
 
 import com.hienlh.ppm.protocol.AccountInfo
 import com.hienlh.ppm.protocol.AccountUsageEntry
+import com.hienlh.ppm.protocol.AntigravityAccount
 import com.hienlh.ppm.protocol.CodexAccount
 import com.hienlh.ppm.protocol.LimitBucket
 import com.hienlh.ppm.protocol.UsageInfo
@@ -209,4 +210,58 @@ fun resetCreditOutcome(outcome: String, label: String): String = when (outcome) 
     "noCredit" -> "$label has no free reset left."
     "alreadyRedeemed" -> "$label: that reset had already been used."
     else -> "$label: $outcome"
+}
+
+/**
+ * PPM reads Antigravity's quota every 5 minutes; a reading older than two missed sweeps
+ * (`antigravity-usage-view.ts`) means neither the language server nor `agy` answered.
+ */
+const val STALE_ANTIGRAVITY_USAGE_MS = 11 * 60_000L
+
+fun isAntigravityUsageStale(lastFetchedAt: String?, now: Long): Boolean {
+    val at = isoMillis(lastFetchedAt) ?: return false
+    return now - at > STALE_ANTIGRAVITY_USAGE_MS
+}
+
+private fun currentAntigravityBucket(bucket: LimitBucket, now: Long): LimitBucket {
+    val resetAt = isoMillis(bucket.resetsAt)
+    val restarted = resetAt != null && resetAt <= now
+    if (!restarted && bucket.utilization > 0.0) return bucket
+    return bucket.copy(
+        utilization = if (restarted) 0.0 else bucket.utilization,
+        resetsAt = "",
+        resetsInMinutes = null,
+        resetsInHours = null,
+    )
+}
+
+/** `usage` with every Antigravity bucket brought up to [now], flat mirror fields included. */
+fun currentAntigravityUsage(usage: UsageInfo, now: Long): UsageInfo {
+    val session = usage.session?.let { currentAntigravityBucket(it, now) }
+    val weekly = usage.weekly?.let { currentAntigravityBucket(it, now) }
+    val scoped = usage.weeklyScoped.map { currentAntigravityBucket(it, now) }
+    return usage.copy(
+        fiveHour = session?.utilization ?: usage.fiveHour,
+        sevenDay = weekly?.utilization ?: usage.sevenDay,
+        session = session,
+        weekly = weekly,
+        weeklyScoped = scoped,
+    )
+}
+
+/** Why an Antigravity account cannot take this chat (`antigravity-usage-panel.tsx`). */
+fun antigravityUnselectableReason(account: AntigravityAccount, usage: UsageInfo?, now: Long): String? {
+    if (account.status == "disabled") return "Disabled"
+    val u = usage?.let { currentAntigravityUsage(it, now) }
+    if (atCap(u?.fiveHour)) return "5-hour limit reached" + resetsSuffix(u?.session, now)
+    if (atCap(u?.sevenDay)) return "Weekly limit reached" + resetsSuffix(u?.weekly, now)
+    return null
+}
+
+private val ScopedWindowWord = Regex("\\b(weekly|hour|session)\\b", RegexOption.IGNORE_CASE)
+
+/** `ScopedBucketRows`: keeps a label that already names its window or `·` separator, else `Weekly (label)`. */
+fun scopedBucketLabel(label: String?): String {
+    val text = label.orEmpty()
+    return if (text.contains("·") || ScopedWindowWord.containsMatchIn(text)) text else "Weekly ($text)"
 }
