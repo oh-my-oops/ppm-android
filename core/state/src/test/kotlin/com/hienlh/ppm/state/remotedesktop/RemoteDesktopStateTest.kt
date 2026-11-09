@@ -409,6 +409,24 @@ class RemoteDesktopStateTest {
         assertNotNull(deleteMsgs)
         assertEquals(2, deleteMsgs!!.size)
         assertEquals("Delete", deleteMsgs[0]["code"].string)
+
+        // Emoji (surrogate pair \uD83D\uDE00) at UTF-16 index 511 must not be split into two broken halves
+        val emojiAt511 = "a".repeat(511) + "\uD83D\uDE00" + "b"
+        assertEquals('\uD83D', emojiAt511[511])
+        assertEquals('\uDE00', emojiAt511[512])
+        val emojiChunks = resolveSoftKeyboardCommit(
+            text = SOFT_KEYBOARD_SENTINEL + emojiAt511,
+            selectionStart = emojiAt511.length + 2,
+            hasActiveComposition = false,
+        )
+        assertNotNull(emojiChunks)
+        assertEquals(2, emojiChunks!!.size)
+        val firstChunk = emojiChunks[0]["text"].string!!
+        val secondChunk = emojiChunks[1]["text"].string!!
+        assertEquals("a".repeat(511) + "\uD83D\uDE00", firstChunk)
+        assertEquals("b", secondChunk)
+        assertEquals(false, firstChunk.last().isHighSurrogate())
+        assertEquals(false, secondChunk.first().isLowSurrogate())
     }
 
     @Test

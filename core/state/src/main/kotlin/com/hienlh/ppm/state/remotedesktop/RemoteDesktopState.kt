@@ -1071,13 +1071,32 @@ fun forwardBeforeInput(
     }
 }
 
+internal fun chunkByCodePoints(text: String, maxCodePoints: Int = SOFT_KEYBOARD_TEXT_CHUNK_SIZE): List<String> {
+    if (text.isEmpty()) return emptyList()
+    val step = maxCodePoints.coerceAtLeast(1)
+    val out = ArrayList<String>()
+    var index = 0
+    while (index < text.length) {
+        val remainingCodePoints = text.codePointCount(index, text.length)
+        val end = if (remainingCodePoints <= step) {
+            text.length
+        } else {
+            text.offsetByCodePoints(index, step)
+        }
+        out += text.substring(index, end)
+        index = end
+    }
+    return out
+}
+
 /**
  * Resolves an Android soft-keyboard `TextFieldValue` update (`use-remote-desktop-virtual-keyboard.ts`):
  * - While [hasActiveComposition] is `true` (Telex / CJK / predictive IME composition in flight),
  *   returns `null` so the caller keeps the composing buffer untouched and sends nothing yet.
  * - Once [hasActiveComposition] is `false` (`compositionend` or direct non-composing input),
- *   returns the committed `{type:"text"}` chunks and/or `Enter` / `Backspace` / `Delete` key taps,
- *   after which the caller resets the field to [SOFT_KEYBOARD_SENTINEL] with cursor at 1.
+ *   returns the committed `{type:"text"}` chunks (split on Unicode code-point boundaries) and/or
+ *   `Enter` / `Backspace` / `Delete` key taps, after which the caller resets the field to
+ *   [SOFT_KEYBOARD_SENTINEL] with cursor at 1.
  */
 fun resolveSoftKeyboardCommit(
     text: String,
@@ -1094,7 +1113,7 @@ fun resolveSoftKeyboardCommit(
         val parts = normalized.split('\n')
         for ((idx, part) in parts.withIndex()) {
             if (part.isNotEmpty()) {
-                for (chunk in part.chunked(step)) {
+                for (chunk in chunkByCodePoints(part, step)) {
                     out += buildJsonObject { put("type", "text"); put("text", chunk) }
                 }
             }
