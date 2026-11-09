@@ -212,7 +212,9 @@ private fun TranscriptList(
             delay(60_000)
         }
     }.value
-    val trailing = state.pendingApproval != null || indicatorLabel(state) != null
+    // `hasTrailing = !!liveApproval || isStreaming`: the whole turn, so its 16 px padding keeps a
+    // running tool card off the bars below even while the thinking line itself shows nothing.
+    val trailing = state.pendingApproval != null || state.isRunning
     val count = head + rows.size + (if (!live.isNullOrEmpty()) 1 else 0) + (if (idleCache != null) 1 else 0) + (if (trailing) 1 else 0)
     // Opened at its end, so the first frame is already the newest, and the sentinel, which loads
     // what is above once it is near the screen, is not passed on the way there.
@@ -670,7 +672,7 @@ private suspend fun LazyListState.toNextMessage(items: List<Int>, density: Densi
     if (target != null) scrollToItem(items[target]) else toEnd()
 }
 
-/** The approval or question the AI waits on, and the thinking line: shown only while there is one (`hasTrailing`). */
+/** The approval or question the AI waits on, and the thinking line: there while either is, or a turn runs (`hasTrailing`). */
 @Composable
 private fun Trailing(state: ChatState, onRespond: (ApprovalRequest, Boolean, JsonElement?) -> Unit) {
     val indicator = indicatorLabel(state)
