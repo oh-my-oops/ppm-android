@@ -304,6 +304,12 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         }
     }
 
+    /** Opens the Problems list in the dock on desktop, or as a tab on mobile (`useOpenProblems`). */
+    fun openProblems() {
+        val tab = NewTab(type = "problems", title = "Problems", projectId = null, closable = true)
+        withWorkspace { store -> if (wide) store.openInDock(tab) else store.openTab(tab) }
+    }
+
     /**
      * "Open in Terminal" (`openTerminalAt`): a shell in the dock that starts in [dir], an absolute
      * host path. [project] keeps the tab on a project when the folder belongs to one; a folder of the
