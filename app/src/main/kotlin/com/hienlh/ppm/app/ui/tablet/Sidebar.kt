@@ -381,11 +381,11 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier) {
         ) {
             NotificationBell(model)
             FooterUtil(ProductIcon.FolderTree, "File Explorer") { model.openExplorer() }
-            if (model.androidAvailable) {
-                FooterUtil(ProductIcon.Smartphone, "Android") { model.openAndroid() }
-            }
             if (model.remoteDesktopAvailable) {
                 FooterUtil(ProductIcon.Monitor, "Remote Desktop") { model.openRemoteDesktop() }
+            }
+            if (model.androidAvailable) {
+                FooterUtil(ProductIcon.Smartphone, "Android") { model.openAndroid() }
             }
             FooterUtil(ProductIcon.Activity, "System Monitor") { model.openSystemMonitor() }
             FooterUtil(ProductIcon.ScrollText, "Logs", dot = model.showLogsBadgeDot) { model.openLogs() }
