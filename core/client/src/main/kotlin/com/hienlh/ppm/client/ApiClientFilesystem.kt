@@ -25,13 +25,13 @@ suspend fun ApiClient.fsInfo(path: String): HostFileInfo =
         ?: throw PpmError.BadResponse("File properties could not be read.")
 
 /**
- * `gitInit` defaults to `false` for OS Explorer (`fs-api.ts:162`); pass `null` from `HostPathPicker`
- * (`file-browser-picker.tsx:179`) so the server sends `{path}` only and runs its default `git init`.
+ * `gitInit` is always sent: the server defaults to a plain folder, but servers before 02a ran
+ * `git init` when it was missing. Only a picker choosing a project folder passes `true`.
  */
-suspend fun ApiClient.fsMkdir(path: String, gitInit: Boolean? = false) {
+suspend fun ApiClient.fsMkdir(path: String, gitInit: Boolean = false) {
     call("POST", "/api/fs/mkdir", body = buildJsonObject {
         put("path", path)
-        if (gitInit != null) put("gitInit", gitInit)
+        put("gitInit", gitInit)
     })
 }
 

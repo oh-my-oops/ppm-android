@@ -119,7 +119,7 @@ fun AddProjectDialog(model: AppModel) {
                 !busy && if (clone) gitUrl.text.isNotBlank() && cloneDir.text.isNotBlank() else path.text.isNotBlank(), onClick = ::submit)
         }
     }
-    if (browse) HostPathPicker(model, HostPickerMode.FOLDER, onSelect = { selected ->
+    if (browse) HostPathPicker(model, HostPickerMode.FOLDER, gitInitNewFolder = !clone, onSelect = { selected ->
         if (clone) cloneDir.setTextAndPlaceCursorAtEnd(selected)
         else {
             path.setTextAndPlaceCursorAtEnd(selected)

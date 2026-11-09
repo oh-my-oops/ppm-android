@@ -120,7 +120,7 @@ class HostPathPickerTest {
     }
 
     @Test
-    fun `new folder submits path only on Enter and delete folder sends rmdir after confirmation`() {
+    fun `new folder is a plain folder submitted on Enter and delete folder sends rmdir after confirmation`() {
         compose.setContent {
             HostPathPicker(
                 model = model,
@@ -144,7 +144,7 @@ class HostPathPickerTest {
         val mkdir = synchronized(recorded) { recorded.first { it.target == "/api/fs/mkdir" } }
         assertEquals("POST", mkdir.method)
         assertEquals(
-            WireJson.parse("""{"path":"/home/me/new-dir"}"""),
+            WireJson.parse("""{"path":"/home/me/new-dir","gitInit":false}"""),
             WireJson.parse(mkdir.body!!.utf8()),
         )
 
@@ -161,6 +161,30 @@ class HostPathPickerTest {
         assertEquals(
             WireJson.parse("""{"path":"/home/me/sub"}"""),
             WireJson.parse(rmdir.body!!.utf8()),
+        )
+    }
+
+    @Test
+    fun `new folder in a project-folder picker asks the server for git init`() {
+        compose.setContent {
+            HostPathPicker(
+                model = model,
+                mode = HostPickerMode.FOLDER,
+                gitInitNewFolder = true,
+                onSelect = {},
+                onCancel = {},
+            )
+        }
+        waitFor("sub")
+        compose.onNodeWithContentDescription("New Folder").performClick()
+        waitFor("Folder name")
+        compose.onNodeWithText("Folder name").performTextInput("new-project")
+        compose.onNodeWithText("new-project").performKeyInput { pressKey(Key.Enter) }
+        compose.waitUntil(10_000) { synchronized(recorded) { recorded.any { it.target == "/api/fs/mkdir" } } }
+        val mkdir = synchronized(recorded) { recorded.first { it.target == "/api/fs/mkdir" } }
+        assertEquals(
+            WireJson.parse("""{"path":"/home/me/new-project","gitInit":true}"""),
+            WireJson.parse(mkdir.body!!.utf8()),
         )
     }
 }

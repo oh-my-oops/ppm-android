@@ -41,10 +41,13 @@ import com.hienlh.ppm.state.osexplorer.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-/** Server paths, distinct from Android SAF. Shared by project forms, Save As and DB forms. */
+/**
+ * Server paths, distinct from Android SAF. Shared by project forms, Save As and DB forms.
+ * [gitInitNewFolder]: New Folder makes a git repository, for a picker choosing a project folder (web `gitInitNewFolder`).
+ */
 @Composable
 fun HostPathPicker(model: AppModel, mode: HostPickerMode, root: String = "~", accept: List<String> = emptyList(),
-                   title: String? = null, onSelect: (String) -> Unit, onCancel: () -> Unit) {
+                   title: String? = null, gitInitNewFolder: Boolean = false, onSelect: (String) -> Unit, onCancel: () -> Unit) {
     val api = model.api ?: return
     val scope = rememberCoroutineScope()
     val session = remember(api, root) {
@@ -84,8 +87,7 @@ fun HostPathPicker(model: AppModel, mode: HostPickerMode, root: String = "~", ac
         busy = true
         scope.launch {
             try {
-                // Match web `file-browser-picker.tsx:179`: send `{path}` only so the server runs its default `git init`.
-                api.fsMkdir(destination, gitInit = null); creating = false; error = null; session.refresh(); selected = destination
+                api.fsMkdir(destination, gitInit = gitInitNewFolder); creating = false; error = null; session.refresh(); selected = destination
                 if (model.api === api) model.filesMutated(com.hienlh.ppm.state.files.FileMutationReport(affectedDirectories = setOf(dir)))
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { error = (failure as? PpmError.Server)?.hint ?: failure.message }
