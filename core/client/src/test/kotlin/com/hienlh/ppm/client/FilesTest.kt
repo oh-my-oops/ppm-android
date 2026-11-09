@@ -37,6 +37,23 @@ class FilesTest {
     }
 
     @Test
+    fun `a message attachment is read by name from the uploads, unless a native provider kept its own absolute path`() = withServer(
+        MockResponse.Builder().body(Buffer().write(png)).build(),
+        MockResponse.Builder().body(Buffer().write(png)).build(),
+        MockResponse.Builder().body(Buffer().write(png)).build(),
+        MockResponse.Builder().body(Buffer().write(png)).build(),
+    ) { server, api ->
+        api.uploadedFile("p", "/home/u/.ppm/uploads/a1.png")
+        assertEquals("/api/project/p/chat/uploads/a1.png", server.takeRequest().target)
+        api.uploadedFile("p", "a1.png")
+        assertEquals("/api/project/p/chat/uploads/a1.png", server.takeRequest().target)
+        api.uploadedFile("p", "/tmp/codex/shot.png")
+        assertEquals("/api/fs/raw?path=%2Ftmp%2Fcodex%2Fshot.png", server.takeRequest().target)
+        api.uploadedFile("p", "C:\\Users\\u\\shot.png")
+        assertEquals("/api/fs/raw?path=C%3A%5CUsers%5Cu%5Cshot.png", server.takeRequest().target)
+    }
+
+    @Test
     fun `a relative path is read from inside the project, and a Windows drive counts as absolute`() = withServer(
         MockResponse.Builder().body(Buffer().write(png)).build(),
         MockResponse.Builder().body(Buffer().write(png)).build(),

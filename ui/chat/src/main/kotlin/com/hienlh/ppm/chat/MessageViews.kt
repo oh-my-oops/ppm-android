@@ -298,13 +298,13 @@ fun pulse(): Float {
     return alpha
 }
 
-/** The pulsing "Thinking..." under text that is still streaming: inside the text's `select-text` div, so it has the I-beam too. */
+/** The pulsing "Responding..." under text that is still streaming: inside the text's `select-text` div, so it has the I-beam too. */
 @Composable
 internal fun StreamingMark() {
     val tokens = LocalPpmTokens.current
     val alpha = pulse()
     TextCursorRegion {
-        CursorText("Thinking...", Modifier.alpha(alpha).cssLines(20f), ppmText(14f, lineHeight = 20f).copy(color = tokens.text3.color))
+        CursorText("Responding...", Modifier.alpha(alpha).cssLines(20f), ppmText(14f, lineHeight = 20f).copy(color = tokens.text3.color))
     }
 }
 

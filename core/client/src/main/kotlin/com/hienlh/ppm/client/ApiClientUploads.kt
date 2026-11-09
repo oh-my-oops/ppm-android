@@ -46,9 +46,19 @@ suspend fun ApiClient.uploadFile(project: String, name: String, mimeType: String
 /**
  * The bytes of a file sent with a message (`GET /api/project/:p/chat/uploads/:filename`), named by
  * the path the message carries. The route is under a project, but every upload is reachable from any.
+ * A native provider's attachment (Codex) keeps an absolute path outside the uploads folder and is read
+ * from there (`/api/fs/raw`), as the web's `uploadPreviewUrl` does; an upload stays addressable by name,
+ * so a session moved between machines still finds it.
  */
 suspend fun ApiClient.uploadedFile(project: String, path: String): ByteArray =
-    bytes(request("GET", "${chatPath(project)}/uploads/${ApiClient.escape(path.split('/', '\\').last())}"))
+    if (ABSOLUTE_PATH.containsMatchIn(path) && !UPLOADS_FILE.containsMatchIn(path)) {
+        bytes(request("GET", "/api/fs/raw", listOf("path" to path)))
+    } else {
+        bytes(request("GET", "${chatPath(project)}/uploads/${ApiClient.escape(path.split('/', '\\').last())}"))
+    }
+
+private val ABSOLUTE_PATH = Regex("""^(/|[A-Za-z]:[/\\])""")
+private val UPLOADS_FILE = Regex("""[/\\]uploads[/\\][^/\\]+$""")
 
 /** Discards an upload that was never sent, as removing an attachment from the composer does. */
 suspend fun ApiClient.deleteUpload(project: String, path: String) {
