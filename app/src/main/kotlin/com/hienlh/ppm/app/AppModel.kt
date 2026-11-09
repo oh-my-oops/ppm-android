@@ -1313,6 +1313,14 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         val info = api.info()
         api.checkAuth()
         store.add(info.deviceName ?: url.host, url.toString(), password)
+        // Added from the sign-in screen: the new server has its password, so that screen goes.
+        showSignIn = false
+    }
+
+    /** Opens another saved server; the sign-in screen comes back only if that one has no password either. */
+    fun switchServer(server: ServerProfile) {
+        showSignIn = false
+        store.select(server)
     }
 
     suspend fun signInAgain(password: String) {

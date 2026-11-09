@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.app.AppModel
@@ -217,6 +219,7 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
                             lineHeight = 22.5f,
                             onClick = ::connect,
                         )
+                        if (signIn && model.debug == null) OtherServers(model)
                         if (onCancel != null) {
                             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 BasicText(
@@ -322,5 +325,45 @@ private fun LoginField(focused: Boolean, trailing: (@Composable () -> Unit)? = n
             contentAlignment = Alignment.CenterStart,
         ) { field() }
         if (trailing != null) Box(Modifier.padding(end = 8.dp)) { trailing() }
+    }
+}
+
+/**
+ * Under Unlock once the password is gone (a log out, or one changed on the server): the other
+ * saved servers, a tap opening one, and a new address. Settings is not reachable from here.
+ */
+@Composable
+private fun OtherServers(model: AppModel) {
+    val tokens = LocalPpmTokens.current
+    val servers by model.store.servers.collectAsState()
+    val selected by model.store.selectedId.collectAsState()
+    val others = servers.filter { it.id != selected }
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (server in others) {
+            val shape = RoundedCornerShape(12.dp)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.opacity(0.4).color, shape = shape, onClickLabel = "Open ${server.name}") { model.switchServer(server) }
+                    .cssBorder(tokens.border.color, shape)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PpmIcon(ProductIcon.Monitor, 16.dp, tokens.text3.color)
+                Column(Modifier.weight(1f)) {
+                    BasicText(server.name, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    BasicText(server.url, style = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text2.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            BasicText(
+                "Use another server",
+                Modifier.clip(RoundedCornerShape(6.dp)).ppmClickable(pressedColor = tokens.panel2.color) { model.addingServer = true }.padding(horizontal = 12.dp, vertical = 8.dp),
+                style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.accent.color),
+            )
+        }
     }
 }
