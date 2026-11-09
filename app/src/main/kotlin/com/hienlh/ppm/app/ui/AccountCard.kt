@@ -49,6 +49,7 @@ import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
@@ -91,6 +92,7 @@ import com.hienlh.ppm.state.formatLastUpdated
 import com.hienlh.ppm.state.formatResetTime
 import com.hienlh.ppm.state.isExpired
 import com.hienlh.ppm.state.isoMillis
+import com.hienlh.ppm.state.scopedBucketLabel
 import com.hienlh.ppm.state.tokenStatus
 import com.hienlh.ppm.state.usagePercent
 
@@ -141,9 +143,10 @@ fun AccountCard(
     dailyGuardToggling: Boolean = false,
     resetCredits: ResetCredits? = null,
     resetCreditAction: (@Composable () -> Unit)? = null,
+    staleUsageHint: String? = null,
+    now: Long = System.currentTimeMillis(),
 ) {
     val tokens = LocalPpmTokens.current
-    val now = System.currentTimeMillis()
     val usage = entry.usage
     val status = accountInfo?.status ?: entry.accountStatus
     val isExpired = accountInfo?.isExpired(now) == true
@@ -231,7 +234,7 @@ fun AccountCard(
                 AccountBucketRow("Weekly", usage.weekly, now)
                 AccountBucketRow("Weekly (Opus)", usage.weeklyOpus, now)
                 AccountBucketRow("Weekly (Sonnet)", usage.weeklySonnet, now)
-                for (scoped in usage.weeklyScoped) AccountBucketRow("Weekly (${scoped.label})", scoped, now)
+                for (scoped in usage.weeklyScoped) AccountBucketRow(scopedBucketLabel(scoped.label), scoped, now)
             }
         } else {
             BasicText(
@@ -252,7 +255,14 @@ fun AccountCard(
             resetCreditAction?.invoke()
             val fact = ppmText(10f, lineHeight = 15f)
             usage.lastFetchedAt?.let(::isoMillis)?.let { read ->
-                FooterFact(ProductIcon.RefreshCw, formatLastUpdated(read, now).orEmpty(), tokens.text3, fact)
+                val stale = staleUsageHint != null
+                FooterFact(
+                    ProductIcon.RefreshCw,
+                    formatLastUpdated(read, now).orEmpty(),
+                    if (stale) tokens.warning else tokens.text3,
+                    fact,
+                    Modifier.testTag("account-card-last-read-${entry.accountId}-${if (stale) "stale" else "fresh"}"),
+                )
             }
             if (grantExpiresAtMs != null && !needsReauth) {
                 FooterFact(ProductIcon.KeyRound, "sign-in ${formatExpiry(grantExpiresAtMs, now)}", if (grantEndingSoon) tokens.warning else tokens.text3, fact)
@@ -330,8 +340,8 @@ private fun ResetCreditsChip(credits: ResetCredits) {
 
 /** A footer fact: a 12 px icon and its words, `inline-flex items-center gap-1`. */
 @Composable
-private fun FooterFact(icon: ProductIcon, text: String, color: Rgba, style: TextStyle) {
-    Row(Modifier.pointerHoverIcon(WebCursor.Help), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+private fun FooterFact(icon: ProductIcon, text: String, color: Rgba, style: TextStyle, modifier: Modifier = Modifier) {
+    Row(modifier.pointerHoverIcon(WebCursor.Help), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         PpmIcon(icon, 12.dp, color.color)
         BasicText(text, style = style.copy(color = color.color), maxLines = 1, softWrap = false)
     }

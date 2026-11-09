@@ -284,10 +284,45 @@ fun UsagePanelShell(
     footer: (@Composable () -> Unit)?,
     cards: @Composable (AccountCardLayout) -> Unit,
 ) {
+    UsagePanelShell(
+        onManageAccounts = { model.openSettings() },
+        onSetOverlay = { model.screenOverlay = it },
+        onClearOverlay = { if (model.screenOverlay === it) model.screenOverlay = null },
+        title = title,
+        meta = meta,
+        onClose = onClose,
+        onReload = onReload,
+        reloading = reloading,
+        error = error,
+        onDismissError = onDismissError,
+        cardCount = cardCount,
+        fallback = fallback,
+        footer = footer,
+        cards = cards,
+    )
+}
+
+@Composable
+internal fun UsagePanelShell(
+    onManageAccounts: () -> Unit,
+    onSetOverlay: ((@Composable () -> Unit) -> Unit)? = null,
+    onClearOverlay: ((@Composable () -> Unit) -> Unit)? = null,
+    title: String,
+    meta: String?,
+    onClose: () -> Unit,
+    onReload: (() -> Unit)?,
+    reloading: Boolean,
+    error: String?,
+    onDismissError: (() -> Unit)?,
+    cardCount: Int,
+    fallback: @Composable () -> Unit,
+    footer: (@Composable () -> Unit)?,
+    cards: @Composable (AccountCardLayout) -> Unit,
+) {
     var fullscreen by remember { mutableStateOf(false) }
     val body: @Composable (Boolean) -> Unit = { full ->
         PanelBody(
-            model, full, title, meta,
+            onManageAccounts, full, title, meta,
             onToggleFullscreen = { fullscreen = !fullscreen },
             onClose = {
                 fullscreen = false
@@ -297,15 +332,15 @@ fun UsagePanelShell(
         )
     }
     val latest by rememberUpdatedState(body)
-    if (fullscreen) {
+    if (fullscreen && onSetOverlay != null) {
         // Out of the toolbar, where it leaves no room behind, and over the app.
         DisposableEffect(Unit) {
             val overlay: @Composable () -> Unit = { latest(true) }
-            model.screenOverlay = overlay
-            onDispose { if (model.screenOverlay === overlay) model.screenOverlay = null }
+            onSetOverlay(overlay)
+            onDispose { onClearOverlay?.invoke(overlay) }
         }
     } else {
-        body(false)
+        body(fullscreen)
     }
 }
 
@@ -316,7 +351,7 @@ fun UsagePanelShell(
  */
 @Composable
 private fun PanelBody(
-    model: AppModel,
+    onManageAccounts: () -> Unit,
     fullscreen: Boolean,
     title: String,
     meta: String?,
@@ -356,7 +391,7 @@ private fun PanelBody(
             }
             Spacer(Modifier.weight(1f))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                ManageAccountsButton { model.openSettings() }
+                ManageAccountsButton(onManageAccounts)
                 if (cardCount > 0) PanelIconButton(if (fullscreen) ProductIcon.Minimize2 else ProductIcon.Maximize2, onClick = onToggleFullscreen)
                 if (onReload != null) PanelIconButton(ProductIcon.RefreshCw, enabled = !reloading, spinning = reloading, onClick = onReload)
                 PanelIconButton(ProductIcon.X, onClick = onClose)

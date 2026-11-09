@@ -414,10 +414,11 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                     fun toggle(which: ToolbarPanel) {
                         panel = if (panel == which) null else which
                     }
+                    val hasUsage = hasUsagePanel(tab.providerId)
                     ChatToolbar(
                         model, tab, chat, state, panel, narrow,
                         toggle = ::toggle,
-                        usageChip = if (isClaude || tab.providerId == "codex") {
+                        usageChip = if (hasUsage) {
                             {
                                 UsageChip(usage?.usage ?: UsageInfo(), pickedLabel, pickedAccountId, panel == ToolbarPanel.Usage, narrow) {
                                     toggle(ToolbarPanel.Usage)
@@ -452,15 +453,15 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                             )
                         }
                     }
-                    if (panel == ToolbarPanel.Usage && (isClaude || tab.providerId == "codex")) {
+                    if (panel == ToolbarPanel.Usage && hasUsage) {
                         val shown = usage?.usage ?: UsageInfo()
                         val selectAccount: (suspend (String, String?) -> String?)? = if (!tab.providerPending && !tab.firstSendPending) {
                             { id, label -> model.selectAccount(tab, id, label) { usageReader.read(refresh = false) } }
                         } else {
                             null
                         }
-                        if (isClaude) {
-                            ClaudeUsagePanel(
+                        when {
+                            isClaude -> ClaudeUsagePanel(
                                 model,
                                 shown,
                                 usageLoading,
@@ -470,10 +471,19 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                                 onReload = { paneScope.launch { usageReader.read(refresh = true) } },
                                 onClose = { panel = null },
                             )
-                        } else {
-                            CodexUsagePanel(
+                            tab.providerId == "codex" -> CodexUsagePanel(
                                 model,
                                 shown,
+                                selectedAccountId = pickedAccountId ?: shown.activeAccountId,
+                                onSelectAccount = selectAccount,
+                                onReload = { usageReader.read(refresh = true) },
+                                onClose = { panel = null },
+                            )
+                            tab.providerId == "antigravity" -> AntigravityUsagePanel(
+                                model,
+                                shown,
+                                usageLoading,
+                                usage?.fetchedAt,
                                 selectedAccountId = pickedAccountId ?: shown.activeAccountId,
                                 onSelectAccount = selectAccount,
                                 onReload = { usageReader.read(refresh = true) },
@@ -681,6 +691,10 @@ private fun GateButton(label: String, style: TextStyle, onClick: () -> Unit) {
 
 /** The panel the toolbar has open under it; one at a time. */
 private enum class ToolbarPanel { History, Config, Usage, Team }
+
+/** Providers whose chat toolbar surfaces the usage chip and usage panel (`chat-history-bar.tsx`). */
+internal fun hasUsagePanel(providerId: String): Boolean =
+    providerId.isEmpty() || providerId == "claude" || providerId == "codex" || providerId == "antigravity"
 
 /** `border-t` or `border-b`. */
 fun Modifier.line(top: Boolean, color: Color): Modifier = cssBorder(color, sides = if (top) CssSides.Top else CssSides.Bottom)
