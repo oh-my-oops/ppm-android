@@ -1,5 +1,6 @@
 package com.hienlh.ppm.terminal
 
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -94,6 +95,8 @@ class NativeTerminal(
     private var theme: PpmTheme? = null
     private var generation = 0
     private var closed = false
+    private var replayingParked = false
+    private var replayedParkBytes = 0
     internal val history = NativeTerminalHistory()
     var pendingCommand by mutableStateOf<String?>(null)
     var emulator by mutableStateOf<TerminalEmulator?>(null)
@@ -115,7 +118,12 @@ class NativeTerminal(
         onReset = { replaceEmulator() },
         // The replay is shown but never answered: the engine drops what it asks (cursor position, device
         // attributes, window size), which would otherwise be typed at the prompt it comes back to.
-        onReplay = { bytes -> if (!closed) emulator?.writeReplay(bytes) },
+        onReplay = { bytes ->
+            if (!closed) {
+                if (replayingParked) replayedParkBytes += bytes.size
+                emulator?.writeReplay(bytes)
+            }
+        },
     )
 
     /**
@@ -127,6 +135,7 @@ class NativeTerminal(
         if (closed) return
         controller.setVisible(shown)
         parkGate.setShown(shown)
+        if (shown && emulator == null) unparkEmulator()
     }
 
     /**
@@ -153,6 +162,8 @@ class NativeTerminal(
         history.replaced(bufferOf(previous))
         generation++
         emulator = null
+        replayingParked = true
+        replayedParkBytes = 0
         controller.park()
         previous.close()
     }
@@ -168,6 +179,8 @@ class NativeTerminal(
      */
     internal fun replaceEmulator(bufferOf: (TerminalEmulator) -> TerminalBufferSnapshot = TerminalEmulator::getBufferSnapshot) {
         if (closed) return
+        replayingParked = false
+        replayedParkBytes = 0
         val previous = emulator
         if (previous == null) {
             generation++
@@ -183,6 +196,8 @@ class NativeTerminal(
 
     /** A fresh shell, which the old one's rows say nothing about: its command boundary goes too. */
     fun restart() {
+        replayingParked = false
+        replayedParkBytes = 0
         history.reset()
         controller.restart()
     }
@@ -199,12 +214,27 @@ class NativeTerminal(
             // The first report, made when the view is laid out, is what lets the controller write into this emulator: the server
             // replays the shell's buffer at once and an emulator wraps what it is written at the width it has then, so the
             // controller holds the output until it has the real one.
-            onResize = { if (!closed && ownGeneration == generation) controller.resize(it.columns, it.rows) },
+            onResize = { if (!closed && ownGeneration == generation) onEmulatorResized(it.columns, it.rows) },
             onClipboardCopy = { if (!closed && ownGeneration == generation) copyToClipboard(it) },
             // The engine's own scan underlined every URL and opened one on any tap. A link is found where the web finds one, for a mouse.
             autoDetectUrls = false,
             maxScrollbackLines = 50_000,
         )
+    }
+
+    internal fun onEmulatorResized(columns: Int, rows: Int) {
+        if (!replayingParked) {
+            controller.resize(columns, rows)
+            return
+        }
+        replayedParkBytes = 0
+        val startNs = System.nanoTime()
+        controller.resize(columns, rows)
+        val elapsedMs = (System.nanoTime() - startNs) / 1_000_000L
+        val bytes = replayedParkBytes
+        replayingParked = false
+        replayedParkBytes = 0
+        Log.d("NativeTerminal", "Replayed $bytes bytes in $elapsedMs ms")
     }
 
     /**

@@ -21,6 +21,7 @@ dependencies {
     api(project(":ui:terminal-engine"))
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
+    testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.robolectric)
 }
 
