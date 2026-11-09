@@ -21,7 +21,7 @@ PINS = {
     "aar": "fc8e3e1ccd69f351c23ad82974df938037a07096f14d1b53793c3dec494b54e5",
     "pom": "45d82483a6f78c6cd34411168ceee39c7041f5875469b43eee2d1f2b5d23cb88",
 }
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[1]
 IME_TARGETS = {"Terminal.kt", "ImeInputView.kt", "KeyboardHandler.kt", "TerminalDispatcher.kt"}
 
 
@@ -1484,7 +1484,7 @@ def build(sources, aar, pom, output):
                     if any(word in name.upper() for word in ("LICENSE", "NOTICE", "COPYING")):
                         write("assets/terminal-engine/licenses/aar/" + name, data)
         write("assets/terminal-engine/licenses/Apache-2.0.txt", (REPO / "licenses/Apache-2.0.txt").read_bytes())
-        for license in (REPO / "android/ui/terminal-engine/licenses").glob("*.txt"):
+        for license in (REPO / "ui/terminal-engine/licenses").glob("*.txt"):
             write("assets/terminal-engine/licenses/" + license.name, license.read_bytes())
         write("upstream/termlib-0.3.13.pom", pom.read_bytes())
         write("assets/terminal-engine/PROVENANCE.json", (json.dumps({"coordinate": "org.connectbot:termlib:0.3.13", "sha256": PINS, "patched": sorted(patched), "replaced": sorted(replaced), "native": "Unmodified JNI from original AAR"}, indent=2, sort_keys=True) + "\n").encode())

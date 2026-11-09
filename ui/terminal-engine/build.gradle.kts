@@ -73,7 +73,7 @@ val patchTerminalEngine = tasks.register<PatchTerminalEngine>("patchTerminalEngi
     pom.set(layout.file(upstreamPom.elements.map { it.single().asFile }))
     script.set(layout.projectDirectory.file("../../scripts/patch-terminal-engine.py"))
     imeHelper.set(layout.projectDirectory.file("../../scripts/terminal_ime_patch.py"))
-    licenses.from(layout.projectDirectory.file("../../../licenses/Apache-2.0.txt"), layout.projectDirectory.dir("licenses"))
+    licenses.from(layout.projectDirectory.file("../../licenses/Apache-2.0.txt"), layout.projectDirectory.dir("licenses"))
     outputDir.set(layout.buildDirectory.dir("generated/termlib"))
     kotlinDir.set(outputDir.dir("kotlin"))
     resDir.set(outputDir.dir("res"))
