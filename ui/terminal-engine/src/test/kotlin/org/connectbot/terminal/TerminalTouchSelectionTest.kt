@@ -138,8 +138,12 @@ class TerminalTouchSelectionTest {
         assertEquals(1, step3)
         assertEquals(0.2f, rem3, 1e-5f)
 
-        // Shift suppresses wheel consumption in MouseService._consumeWheelEvent; Alt/Ctrl multiply by fastScrollSensitivity (5).
-        assertEquals(0 to 0.2f, consumeWheelDelta(1f, 0.2f, shiftPressed = true))
+        // Shift+wheel still accumulates steps for primary-screen scrollback (3 rows per step), while Alt/Ctrl multiply by fastScrollSensitivity (5).
+        val (shiftUp, shiftRem) = consumeWheelDelta(-1f, 0f)
+        assertEquals(-1, shiftUp)
+        assertEquals(0f, shiftRem, 1e-5f)
+        assertEquals(3, wheelScrollbackLines(shiftUp))
+
         val (fastUp, fastRem) = consumeWheelDelta(-1f, 0f, fastScroll = true)
         assertEquals(-5, fastUp)
         assertEquals(0f, fastRem, 1e-5f)
@@ -147,5 +151,10 @@ class TerminalTouchSelectionTest {
         assertEquals(3, wheelScrollbackLines(-1))
         assertEquals(15, wheelScrollbackLines(fastUp))
         assertEquals(-3, wheelScrollbackLines(1))
+
+        // 1016 SGR-Pixels reports pointer coordinates in dp ((xPx / density).toInt()), matching CSS px on the web.
+        assertEquals(140, sgrPixelCoordinate(px = 420, density = 3.0f))
+        assertEquals(85, sgrPixelCoordinate(px = 256, density = 3.0f))
+        assertEquals(200, sgrPixelCoordinate(px = 400, density = 2.0f))
     }
 }

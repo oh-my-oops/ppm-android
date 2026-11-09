@@ -64,15 +64,14 @@ internal fun touchScrollLines(accumulatedPx: Float, cellHeight: Float): Pair<Int
  * xterm.js's `MouseService._consumeWheelEvent`: multiplies by `fastScrollSensitivity` (`5`) when [fastScroll] (`alt` or `ctrl`)
  * is held, adds to [partialScroll], and extracts whole steps via `floor(abs(total)) * sign` leaving `total % 1` for the next
  * event. When the returned step count is non-zero, `MouseService` emits a single wheel report (or a single Up/Down key on the
- * alternate screen) for that event.
+ * alternate screen) unless Shift is held, in which case the primary screen scrolls its scrollback buffer by [wheelScrollbackLines].
  */
 internal fun consumeWheelDelta(
     deltaY: Float,
     partialScroll: Float,
     fastScroll: Boolean = false,
-    shiftPressed: Boolean = false,
 ): Pair<Int, Float> {
-    if (deltaY == 0f || shiftPressed) return 0 to partialScroll
+    if (deltaY == 0f) return 0 to partialScroll
     val amount = deltaY * if (fastScroll) 5f else 1f
     val total = partialScroll + amount
     val lines = floor(abs(total)).toInt() * if (total > 0f) 1 else -1
@@ -84,3 +83,10 @@ internal fun consumeWheelDelta(
  * into history (`wheelLines < 0`), negative scrolls down towards the live prompt (`wheelLines > 0`), 3 rows per step.
  */
 internal fun wheelScrollbackLines(wheelLines: Int): Int = -wheelLines * 3
+
+/**
+ * Converts a physical-pixel pointer coordinate [px] to `dp` (`(px / density).toInt()`), the CSS-px equivalent
+ * reported by `1016` SGR-Pixels (`MouseCoordsService.getMouseReportCoords`).
+ */
+internal fun sgrPixelCoordinate(px: Int, density: Float): Int =
+    if (density <= 0f) px else (px / density).toInt()

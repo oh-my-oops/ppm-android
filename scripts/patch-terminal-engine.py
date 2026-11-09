@@ -1032,8 +1032,10 @@ def touch_select(text):
                                                         val yPx = change.position.y.toInt().coerceIn(0, maxPxY)
                                                         val row = (yPx / baseCharHeight).toInt().coerceIn(0, screenState.snapshot.rows - 1)
                                                         val col = (xPx / baseCharWidth).toInt().coerceIn(0, screenState.snapshot.cols - 1)
+                                                        val xDp = sgrPixelCoordinate(xPx, density.density)
+                                                        val yDp = sgrPixelCoordinate(yPx, density.density)
                                                         repeat(abs(lines)) {
-                                                            terminalEmulator.commands.execute { terminalEmulator.dispatchWheel(down, row, col, xPx = xPx, yPx = yPx) }
+                                                            terminalEmulator.commands.execute { terminalEmulator.dispatchWheel(down, row, col, xPx = xDp, yPx = yDp) }
                                                         }
                                                     } else {
                                                         val key = if (down) VTermKey.DOWN else VTermKey.UP
@@ -1173,7 +1175,7 @@ def web_links(text):
                                     val shift = event.keyboardModifiers.isShiftPressed
                                     val alt = event.keyboardModifiers.isAltPressed
                                     val ctrl = event.keyboardModifiers.isCtrlPressed
-                                    val (wheelLines, nextPartial) = consumeWheelDelta(deltaY, wheelPartialScroll, fastScroll = alt || ctrl, shiftPressed = shift)
+                                    val (wheelLines, nextPartial) = consumeWheelDelta(deltaY, wheelPartialScroll, fastScroll = alt || ctrl)
                                     wheelPartialScroll = nextPartial
                                     if (terminalEmulator.isMouseTracking && !shift) {
                                         if (wheelLines != 0) {
@@ -1185,7 +1187,9 @@ def web_links(text):
                                             val row = (yPx / baseCharHeight).toInt().coerceIn(0, screenState.snapshot.rows - 1)
                                             val col = (xPx / baseCharWidth).toInt().coerceIn(0, screenState.snapshot.cols - 1)
                                             val mods = (if (alt) ControlKeys.ALT else 0) or (if (ctrl) ControlKeys.CTRL else 0)
-                                            terminalEmulator.commands.execute { terminalEmulator.dispatchWheel(down, row, col, mods, xPx, yPx) }
+                                            val xDp = sgrPixelCoordinate(xPx, density.density)
+                                            val yDp = sgrPixelCoordinate(yPx, density.density)
+                                            terminalEmulator.commands.execute { terminalEmulator.dispatchWheel(down, row, col, mods, xDp, yDp) }
                                         }
                                     } else if ((terminalEmulator.isAlternateScreen || screenState.snapshot.alternateScreen) && !shift) {
                                         if (wheelLines != 0) {
