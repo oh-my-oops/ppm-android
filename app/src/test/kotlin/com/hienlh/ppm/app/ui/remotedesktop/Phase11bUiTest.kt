@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.view.KeyEvent
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
@@ -12,6 +13,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -670,5 +673,138 @@ class Phase11bUiTest {
         assertEquals(60.0, sent[1].jsonObject["dy"]!!.toString().toDouble(), 1e-3)
         assertEquals(-120.0, sent[2].jsonObject["dy"]!!.toString().toDouble(), 1e-3)
         assertEquals(-30.0, sent[3].jsonObject["dy"]!!.toString().toDouble(), 1e-3)
+    }
+
+    @Test
+    fun `StageInputController tracks multiple held mouse buttons as a set and stage or window blur sends releaseAll`() {
+        val sent = mutableListOf<JsonElement>()
+        val controller = StageInputController(
+            moveCoalescer = com.hienlh.ppm.state.remotedesktop.PointerMoveCoalescer(send = { sent += it }),
+        )
+
+        fun mouseEvent(action: Int, buttonState: Int): android.view.MotionEvent {
+            val props = arrayOf(
+                android.view.MotionEvent.PointerProperties().apply {
+                    id = 0
+                    toolType = android.view.MotionEvent.TOOL_TYPE_MOUSE
+                },
+            )
+            val coords = arrayOf(
+                android.view.MotionEvent.PointerCoords().apply {
+                    x = 400f
+                    y = 300f
+                },
+            )
+            return android.view.MotionEvent.obtain(
+                0L,
+                0L,
+                action,
+                1,
+                props,
+                coords,
+                0,
+                buttonState,
+                1f,
+                1f,
+                0,
+                0,
+                android.view.InputDevice.SOURCE_MOUSE,
+                0,
+            )
+        }
+
+        val stageSize = androidx.compose.ui.unit.IntSize(800, 600)
+
+        // 1. Press left mouse button
+        mouseEvent(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.BUTTON_PRIMARY).also {
+            controller.onMotionEvent(it, stageSize)
+            it.recycle()
+        }
+        assertEquals(setOf("left"), controller.heldMouseButtons)
+
+        // 2. Press right mouse button while left is still held
+        mouseEvent(
+            android.view.MotionEvent.ACTION_BUTTON_PRESS,
+            android.view.MotionEvent.BUTTON_PRIMARY or android.view.MotionEvent.BUTTON_SECONDARY,
+        ).also {
+            controller.onMotionEvent(it, stageSize)
+            it.recycle()
+        }
+        assertEquals(setOf("left", "right"), controller.heldMouseButtons)
+
+        // 3. Release right mouse button while left stays held
+        mouseEvent(android.view.MotionEvent.ACTION_BUTTON_RELEASE, android.view.MotionEvent.BUTTON_PRIMARY).also {
+            controller.onMotionEvent(it, stageSize)
+            it.recycle()
+        }
+        assertEquals(setOf("left"), controller.heldMouseButtons)
+
+        // 4. Release left mouse button
+        mouseEvent(android.view.MotionEvent.ACTION_UP, 0).also {
+            controller.onMotionEvent(it, stageSize)
+            it.recycle()
+        }
+        assertEquals(emptySet<String>(), controller.heldMouseButtons)
+
+        assertEquals(4, sent.size)
+        assertEquals("left", sent[0].jsonObject["button"].string)
+        assertEquals(true, sent[0].jsonObject["down"].bool)
+        assertEquals("right", sent[1].jsonObject["button"].string)
+        assertEquals(true, sent[1].jsonObject["down"].bool)
+        assertEquals("right", sent[2].jsonObject["button"].string)
+        assertEquals(false, sent[2].jsonObject["down"].bool)
+        assertEquals("left", sent[3].jsonObject["button"].string)
+        assertEquals(false, sent[3].jsonObject["down"].bool)
+
+        // 5. Window blur while both buttons are held releases both buttons and sends releaseAll
+        sent.clear()
+        mouseEvent(
+            android.view.MotionEvent.ACTION_DOWN,
+            android.view.MotionEvent.BUTTON_PRIMARY or android.view.MotionEvent.BUTTON_SECONDARY,
+        ).also {
+            controller.onMotionEvent(it, stageSize)
+            it.recycle()
+        }
+        assertEquals(setOf("left", "right"), controller.heldMouseButtons)
+        sent.clear()
+
+        controller.onWindowFocusChanged(false)
+        assertEquals(emptySet<String>(), controller.heldMouseButtons)
+        assertTrue(sent.any { it.jsonObject["type"].string == "pointer" && it.jsonObject["button"].string == "left" && it.jsonObject["down"].bool == false })
+        assertTrue(sent.any { it.jsonObject["type"].string == "pointer" && it.jsonObject["button"].string == "right" && it.jsonObject["down"].bool == false })
+        assertTrue(sent.any { it.jsonObject["type"].string == "releaseAll" })
+
+        // 6. Stage focus loss in RemoteDesktopViewer sends releaseAll
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val model = AppModel(context)
+        val viewerSent = mutableListOf<JsonElement>()
+        val outsideFocus = androidx.compose.ui.focus.FocusRequester()
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                Column {
+                    Box(
+                        Modifier
+                            .size(40.dp)
+                            .focusRequester(outsideFocus)
+                            .focusable()
+                            .testTag("outside-focus-target"),
+                    )
+                    Box(Modifier.size(width = 800.dp, height = 600.dp)) {
+                        RemoteDesktopViewer(
+                            model = model,
+                            onSendMessageOverride = { viewerSent += it },
+                        )
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        viewerSent.clear()
+
+        composeRule.runOnIdle {
+            outsideFocus.requestFocus()
+        }
+        composeRule.waitForIdle()
+        assertTrue(viewerSent.any { it.jsonObject["type"].string == "releaseAll" })
     }
 }

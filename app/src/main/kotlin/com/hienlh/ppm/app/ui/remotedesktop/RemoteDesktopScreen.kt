@@ -14,6 +14,7 @@ import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.ViewTreeObserver
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -62,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
@@ -79,6 +81,8 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
@@ -1006,12 +1010,39 @@ fun RemoteDesktopViewer(
         }
     }
 
-    // Re-ping on resume or reconnect once if died while backgrounded; release held keys on pause
-    DisposableEffect(lifecycleOwner) {
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    var softKeyboardFocused by remember { mutableStateOf(false) }
+    val stageInput = remember(moveCoalescer) {
+        StageInputController(
+            moveCoalescer = moveCoalescer,
+            onRequestStageFocus = {
+                if (!keyBarOpen) {
+                    runCatching { stageFocusRequester.requestFocus() }
+                }
+            },
+        )
+    }
+
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(windowFocused, stageInput) {
+        stageInput.onWindowFocusChanged(windowFocused)
+    }
+
+    val localView = LocalView.current
+    DisposableEffect(localView, stageInput) {
+        val listener = ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
+            stageInput.onWindowFocusChanged(hasFocus)
+        }
+        localView.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+        onDispose { localView.viewTreeObserver.removeOnWindowFocusChangeListener(listener) }
+    }
+
+    // Re-ping on resume or reconnect once if died while backgrounded; release held keys & buttons on pause
+    DisposableEffect(lifecycleOwner, stageInput) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> {
-                    sendJson(buildJsonObject { put("type", "releaseAll") })
+                    stageInput.releaseAll()
                 }
                 Lifecycle.Event.ON_RESUME -> {
                     val sock = activeSocket
@@ -1060,23 +1091,12 @@ fun RemoteDesktopViewer(
         else -> null
     }
 
-    var containerSize by remember { mutableStateOf(IntSize.Zero) }
-    val stageInput = remember(moveCoalescer) {
-        StageInputController(
-            moveCoalescer = moveCoalescer,
-            onRequestStageFocus = {
-                if (!keyBarOpen) {
-                    runCatching { stageFocusRequester.requestFocus() }
-                }
-            },
-        )
-    }
-
     Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
             .focusRequester(stageFocusRequester)
+            .onFocusChanged { stageInput.onStageFocusChanged(it.isFocused) }
             .focusable()
             .onPreviewKeyEvent { keyEvent ->
                 val nativeCode = keyEvent.nativeKeyEvent.keyCode
@@ -1247,6 +1267,12 @@ fun RemoteDesktopViewer(
                 modifier = Modifier
                     .size(1.dp)
                     .focusRequester(keyboardFocusRequester)
+                    .onFocusChanged { state ->
+                        if (softKeyboardFocused && !state.isFocused) {
+                            stageInput.releaseAll()
+                        }
+                        softKeyboardFocused = state.isFocused
+                    }
                     .testTag("remote-desktop-virtual-keyboard-input"),
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.None,
@@ -1538,7 +1564,69 @@ internal class StageInputController(
 ) {
     private var singleTrack: SingleTrack? = null
     private var twoTrack: TwoFingerTrack? = null
-    private var mouseHeldButton: String? = null
+    private val mouseHeldButtons = linkedSetOf<String>()
+    private var lastMouseFrac: RdFraction = RdFraction(0.5, 0.5)
+    private var lastTouchMode: String = "mouse"
+    private var lastTransform: ZoomPanTransform = IDENTITY_TRANSFORM
+    private var lastVirtualCursor: RdFraction = RdFraction(0.5, 0.5)
+    private var lastDensityScale: Double = 1.0
+    private var stageFocused: Boolean = false
+    private var windowFocused: Boolean = true
+
+    val heldMouseButtons: Set<String>
+        get() = mouseHeldButtons.toSet()
+
+    fun onStageFocusChanged(isFocused: Boolean) {
+        val wasFocused = stageFocused
+        stageFocused = isFocused
+        if (wasFocused && !isFocused) {
+            releaseAll()
+        }
+    }
+
+    fun onWindowFocusChanged(isFocused: Boolean) {
+        val wasFocused = windowFocused
+        windowFocused = isFocused
+        if (wasFocused && !isFocused) {
+            releaseAll()
+        }
+    }
+
+    fun releaseAll() {
+        val held = mouseHeldButtons.toList()
+        mouseHeldButtons.clear()
+        for (btn in held) {
+            moveCoalescer.sendImmediate(
+                pointerJsonMessage(lastMouseFrac.xFrac, lastMouseFrac.yFrac, btn, false),
+            )
+        }
+        val st = singleTrack
+        if (st != null) {
+            val msgs = resolveSingleTouchCancel(
+                track = st,
+                mode = lastTouchMode,
+                transform = lastTransform,
+                cursor = lastVirtualCursor,
+                densityScale = lastDensityScale,
+            )
+            moveCoalescer.sendImmediateAll(msgs)
+        }
+        singleTrack = null
+        twoTrack = null
+        moveCoalescer.sendImmediate(buildJsonObject { put("type", "releaseAll") })
+    }
+
+    private fun protocolButtonsFromBits(buttonBits: Int): List<String> {
+        val out = ArrayList<String>(2)
+        androidMouseButtonToProtocol(buttonBits and MotionEvent.BUTTON_PRIMARY)?.let { out += it }
+        androidMouseButtonToProtocol(buttonBits and MotionEvent.BUTTON_SECONDARY)?.let {
+            if (it !in out) out += it
+        }
+        if (out.isEmpty()) {
+            androidMouseButtonToProtocol(buttonBits)?.let { out += it }
+        }
+        return out
+    }
 
     fun onMotionEvent(
         motion: MotionEvent,
@@ -1555,6 +1643,10 @@ internal class StageInputController(
         onVirtualCursorChange: (RdFraction) -> Unit = {},
     ): Boolean {
         val curDensityScale = densityScale.coerceAtLeast(0.1)
+        lastTouchMode = if (mobile) inputMode else "touch"
+        lastTransform = transform
+        lastVirtualCursor = virtualCursor
+        lastDensityScale = curDensityScale
         val videoRect = computeStageVideoRect(
             containerWidthPx = containerSize.width.toDouble(),
             containerHeightPx = containerSize.height.toDouble(),
@@ -1567,7 +1659,7 @@ internal class StageInputController(
         val pointerCount = motion.pointerCount
         val isMouse = motion.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE ||
             motion.buttonState != 0 ||
-            mouseHeldButton != null ||
+            mouseHeldButtons.isNotEmpty() ||
             motion.actionMasked == MotionEvent.ACTION_HOVER_MOVE ||
             motion.actionMasked == MotionEvent.ACTION_SCROLL ||
             motion.actionMasked == MotionEvent.ACTION_BUTTON_PRESS ||
@@ -1582,6 +1674,7 @@ internal class StageInputController(
                         videoRect,
                         transform,
                     )
+                    lastMouseFrac = frac
                     moveCoalescer.enqueueMove(frac.xFrac, frac.yFrac)
                 }
                 MotionEvent.ACTION_SCROLL -> {
@@ -1598,53 +1691,61 @@ internal class StageInputController(
                 }
                 MotionEvent.ACTION_DOWN, MotionEvent.ACTION_BUTTON_PRESS -> {
                     onRequestStageFocus()
-                    val rawBits = if (motion.actionMasked == MotionEvent.ACTION_BUTTON_PRESS && motion.actionButton != 0) {
-                        motion.actionButton
-                    } else if (motion.buttonState != 0) {
-                        motion.buttonState
+                    val frac = fractionFromZoomedPoint(
+                        motion.x.toDouble(),
+                        motion.y.toDouble(),
+                        videoRect,
+                        transform,
+                    )
+                    lastMouseFrac = frac
+                    val candidates = if (motion.actionMasked == MotionEvent.ACTION_BUTTON_PRESS && motion.actionButton != 0) {
+                        listOfNotNull(androidMouseButtonToProtocol(motion.actionButton))
                     } else {
-                        MotionEvent.BUTTON_PRIMARY
+                        val bits = if (motion.buttonState != 0) motion.buttonState else MotionEvent.BUTTON_PRIMARY
+                        protocolButtonsFromBits(bits)
                     }
-                    val btn = androidMouseButtonToProtocol(rawBits)
-                    if (btn != null && mouseHeldButton == null) {
-                        mouseHeldButton = btn
-                        val frac = fractionFromZoomedPoint(
-                            motion.x.toDouble(),
-                            motion.y.toDouble(),
-                            videoRect,
-                            transform,
-                        )
-                        moveCoalescer.sendImmediate(pointerJsonMessage(frac.xFrac, frac.yFrac, btn, true))
+                    for (btn in candidates) {
+                        if (mouseHeldButtons.add(btn)) {
+                            moveCoalescer.sendImmediate(pointerJsonMessage(frac.xFrac, frac.yFrac, btn, true))
+                        }
                     }
                 }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_BUTTON_RELEASE -> {
-                    val rawBits = if (motion.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE && motion.actionButton != 0) {
-                        motion.actionButton
+                MotionEvent.ACTION_BUTTON_RELEASE -> {
+                    val frac = fractionFromZoomedPoint(
+                        motion.x.toDouble(),
+                        motion.y.toDouble(),
+                        videoRect,
+                        transform,
+                    )
+                    lastMouseFrac = frac
+                    val toRelease = if (motion.actionButton != 0) {
+                        listOfNotNull(androidMouseButtonToProtocol(motion.actionButton))
                     } else {
-                        motion.buttonState
+                        val stillHeld = protocolButtonsFromBits(motion.buttonState).toSet()
+                        val diff = mouseHeldButtons.filter { it !in stillHeld }
+                        diff.ifEmpty { protocolButtonsFromBits(motion.buttonState) }
                     }
-                    val btn = mouseHeldButton ?: androidMouseButtonToProtocol(rawBits)
-                    mouseHeldButton = null
-                    if (btn != null) {
-                        val frac = fractionFromZoomedPoint(
-                            motion.x.toDouble(),
-                            motion.y.toDouble(),
-                            videoRect,
-                            transform,
-                        )
-                        moveCoalescer.sendImmediate(pointerJsonMessage(frac.xFrac, frac.yFrac, btn, false))
+                    for (btn in toRelease) {
+                        if (mouseHeldButtons.remove(btn) || toRelease.size == 1) {
+                            moveCoalescer.sendImmediate(pointerJsonMessage(frac.xFrac, frac.yFrac, btn, false))
+                        }
                     }
                 }
-                MotionEvent.ACTION_CANCEL -> {
-                    val btn = mouseHeldButton
-                    mouseHeldButton = null
-                    if (btn != null) {
-                        val frac = fractionFromZoomedPoint(
-                            motion.x.toDouble(),
-                            motion.y.toDouble(),
-                            videoRect,
-                            transform,
-                        )
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val frac = fractionFromZoomedPoint(
+                        motion.x.toDouble(),
+                        motion.y.toDouble(),
+                        videoRect,
+                        transform,
+                    )
+                    lastMouseFrac = frac
+                    val toRelease = if (mouseHeldButtons.isNotEmpty()) {
+                        mouseHeldButtons.toList()
+                    } else {
+                        protocolButtonsFromBits(motion.buttonState)
+                    }
+                    mouseHeldButtons.clear()
+                    for (btn in toRelease) {
                         moveCoalescer.sendImmediate(pointerJsonMessage(frac.xFrac, frac.yFrac, btn, false))
                     }
                 }
