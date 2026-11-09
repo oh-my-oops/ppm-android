@@ -278,9 +278,30 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     internal fun terminalOf(tabId: String): com.hienlh.ppm.terminal.NativeTerminal? = terminals[tabId]
 
     /** A shell in the open project, or in none: the web opens it all the same, with no project on the tab. */
-    fun openTerminal(inDock: Boolean = wide) {
+    fun openTerminal(inDock: Boolean = wide, panelId: String? = null) {
         val tab = terminalTab(selectedProject)
-        withWorkspace { store -> if (inDock) store.openInDock(tab) else store.openTab(tab) }
+        withWorkspace { store -> if (inDock) store.openInDock(tab) else store.openTab(tab, panelId) }
+    }
+
+    /** An untitled editor tab (`useTabStore.openNewFile`), in [panelId] when given. */
+    fun openNewFile(panelId: String? = null, language: String? = null, title: String? = null) {
+        withWorkspace { store ->
+            val num = com.hienlh.ppm.state.workspace.nextUntitledNumber(store.state.value.panels)
+            store.openTab(
+                NewTab(
+                    type = "editor",
+                    title = title ?: "Untitled-$num",
+                    projectId = null,
+                    metadata = buildJsonObject {
+                        put("isUntitled", true)
+                        put("untitledNumber", num)
+                        language?.let { put("language", it) }
+                    },
+                    closable = true,
+                ),
+                panelId,
+            )
+        }
     }
 
     /**
