@@ -538,7 +538,7 @@ class OpusAudioPlayer(
  * Direct H.264 Annex-B stream muxer into MP4 using [MediaMuxer] without re-encoding.
  * Video-only (no audio track).
  */
-class H264Mp4Recorder(
+open class H264Mp4Recorder(
     private val outputFile: File,
     private val width: Int,
     private val height: Int,
@@ -551,19 +551,7 @@ class H264Mp4Recorder(
     private var startNs: Long = 0L
 
     @Volatile
-    var recordedWidth: Int = width.coerceAtLeast(1)
-        private set
-
-    @Volatile
-    var recordedHeight: Int = height.coerceAtLeast(1)
-        private set
-
-    @Volatile
     var isStopped: Boolean = false
-        private set
-
-    @Volatile
-    var stoppedOnThreadName: String? = null
         private set
 
     fun writeAccessUnit(data: ByteArray, offset: Int, length: Int, isKeyframe: Boolean) {
@@ -576,8 +564,6 @@ class H264Mp4Recorder(
                     val liveSize = sizeProvider()
                     val recW = (liveSize.width.takeIf { it > 0 } ?: width).coerceAtLeast(1)
                     val recH = (liveSize.height.takeIf { it > 0 } ?: height).coerceAtLeast(1)
-                    recordedWidth = recW
-                    recordedHeight = recH
                     val m = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
                     val format = MediaFormat.createVideoFormat(
                         MediaFormat.MIMETYPE_VIDEO_AVC,
@@ -607,10 +593,9 @@ class H264Mp4Recorder(
         }
     }
 
-    fun stop(): File? {
+    open fun stop(): File? {
         synchronized(lock) {
             isStopped = true
-            stoppedOnThreadName = Thread.currentThread().name
             val m = muxer
             muxer = null
             val wasStarted = started

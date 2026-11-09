@@ -620,14 +620,13 @@ fun wheelDeltaForTouchDrag(wheelDeltaPx: Double, densityScale: Double = 1.0): Do
 }
 
 /**
- * Maps Android `MotionEvent` button bitmasks (`BUTTON_PRIMARY` = 1, `BUTTON_SECONDARY` = 2,
- * `BUTTON_TERTIARY` = 4, `BUTTON_STYLUS_PRIMARY` = 32, `BUTTON_STYLUS_SECONDARY` = 64) to the
+ * Maps Android `MotionEvent` button bitmasks (`BUTTON_PRIMARY` = 1, `BUTTON_SECONDARY` = 2) to the
  * remote-desktop protocol button (`"left"`, `"right"`, or `null` for middle/other, matching
  * web `toButton` in `use-remote-input-capture.ts:42`).
  */
 fun androidMouseButtonToProtocol(buttonBits: Int): String? = when {
-    (buttonBits and (1 or 32)) != 0 -> "left"
-    (buttonBits and (2 or 64)) != 0 -> "right"
+    (buttonBits and 1) != 0 -> "left"
+    (buttonBits and 2) != 0 -> "right"
     else -> null
 }
 
@@ -642,9 +641,6 @@ class PointerMoveCoalescer(
 ) {
     private var pendingMove: JsonElement? = null
     private var frameScheduled: Boolean = false
-
-    val hasPendingMove: Boolean
-        get() = pendingMove != null
 
     fun enqueueMove(xFrac: Double, yFrac: Double) {
         pendingMove = pointerJsonMessage(xFrac, yFrac, null, null)
@@ -1048,31 +1044,6 @@ private fun keyTapMessages(code: String): List<JsonElement> = listOf(
     buildJsonObject { put("type", "key"); put("code", code); put("down", true) },
     buildJsonObject { put("type", "key"); put("code", code); put("down", false) },
 )
-
-/**
- * Port of `forwardBeforeInput` (`use-remote-desktop-virtual-keyboard.ts:31-51`) with chunking
- * for long `insertText` payloads. Returns `null` when the input type is an active composition
- * (`insertCompositionText` etc.) that must wait for `compositionend`.
- */
-fun forwardBeforeInput(
-    inputType: String,
-    data: String?,
-    chunkSize: Int = SOFT_KEYBOARD_TEXT_CHUNK_SIZE,
-): List<JsonElement>? {
-    val step = chunkSize.coerceAtLeast(1)
-    return when (inputType) {
-        "insertText" -> {
-            if (data.isNullOrEmpty()) emptyList()
-            else data.chunked(step).map { chunk ->
-                buildJsonObject { put("type", "text"); put("text", chunk) }
-            }
-        }
-        "insertLineBreak", "insertParagraph" -> keyTapMessages("Enter")
-        "deleteContentBackward" -> keyTapMessages("Backspace")
-        "deleteContentForward" -> keyTapMessages("Delete")
-        else -> null
-    }
-}
 
 internal fun chunkByCodePoints(text: String, maxCodePoints: Int = SOFT_KEYBOARD_TEXT_CHUNK_SIZE): List<String> {
     if (text.isEmpty()) return emptyList()

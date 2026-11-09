@@ -717,10 +717,6 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         putUiPref { put("remoteDesktopStatsVisible", visible) }
     }
 
-    fun toggleRemoteDesktopStatsVisiblePref() {
-        setRemoteDesktopStatsVisiblePref(!remoteDesktopStatsVisible)
-    }
-
     fun setRemoteDesktopQualityPref(choice: String) {
         val parsed = com.hienlh.ppm.state.remotedesktop.parseQualityChoice(choice)
         remoteDesktopQuality = parsed
@@ -752,14 +748,6 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         prefs.put("remoteDesktopCustomQualityMore.$serverKey", more.toString())
         prefs.put("remoteDesktopCustomQualityPercent.$serverKey", p.toString())
         prefs.put("remoteDesktopCustomFps.$serverKey", f.toString())
-    }
-
-    fun setRemoteDesktopCustomQualityMorePref(more: Boolean) {
-        val p = com.hienlh.ppm.state.remotedesktop.clampCustomQualityPercent(remoteDesktopCustomQualityPercent, more)
-        remoteDesktopCustomQualityMore = more
-        remoteDesktopCustomQualityPercent = p
-        prefs.put("remoteDesktopCustomQualityMore.$serverKey", more.toString())
-        prefs.put("remoteDesktopCustomQualityPercent.$serverKey", p.toString())
     }
 
     fun setRemoteDesktopShowCursorPref(show: Boolean) {
@@ -922,6 +910,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     private var logsBoundEvents: GlobalEvents? = null
     internal var logsTailSender: ((String) -> Unit)? = null
     internal var reportClipboardCopy: ((String) -> Boolean)? = null
+    internal var remoteDesktopSender: ((JsonElement) -> Unit)? = null
 
     private fun sendLogsTailFrame(frame: String) {
         val custom = logsTailSender

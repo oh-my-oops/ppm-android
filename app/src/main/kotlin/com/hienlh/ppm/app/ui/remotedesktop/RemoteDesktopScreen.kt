@@ -668,8 +668,6 @@ fun RemoteDesktopViewer(
     model: AppModel,
     initialCaps: RemoteDesktopCapabilities = RemoteDesktopCapabilities(),
     onClose: () -> Unit = {},
-    onSendMessageOverride: ((JsonElement) -> Unit)? = null,
-    initialRecorder: H264Mp4Recorder? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -735,7 +733,7 @@ fun RemoteDesktopViewer(
 
     // Recording & Screenshot
     var surfaceViewRef by remember { mutableStateOf<SurfaceView?>(null) }
-    var activeRecorder by remember { mutableStateOf<H264Mp4Recorder?>(initialRecorder) }
+    var activeRecorder by remember { mutableStateOf<H264Mp4Recorder?>(null) }
     var recordingElapsedSec by remember { mutableIntStateOf(0) }
 
     val totalBytesRef = remember { AtomicLong(0L) }
@@ -753,11 +751,11 @@ fun RemoteDesktopViewer(
     var clipboardReadJob by remember { mutableStateOf<Job?>(null) }
 
     fun sendJson(obj: JsonElement) {
-        onSendMessageOverride?.invoke(obj)
+        model.remoteDesktopSender?.invoke(obj)
         activeSocket?.send(obj.toString())
     }
 
-    val moveCoalescer = remember(onSendMessageOverride) {
+    val moveCoalescer = remember(model) {
         PointerMoveCoalescer(
             send = ::sendJson,
             scheduleFrame = { cb ->
@@ -775,21 +773,7 @@ fun RemoteDesktopViewer(
         if (activeRecorder === rec) {
             activeRecorder = null
         }
-        model.scope.launch(Dispatchers.IO) {
-            val saved = runCatching { rec.stop() }.getOrNull() ?: return@launch
-            val preQFile = copyMp4ToDownloads(context, saved)
-            if (preQFile != null) {
-                withContext(Dispatchers.Main) {
-                    runCatching {
-                        android.widget.Toast.makeText(
-                            context,
-                            "Recording saved to ${preQFile.absolutePath}",
-                            android.widget.Toast.LENGTH_SHORT,
-                        ).show()
-                    }
-                }
-            }
-        }
+        stopAndSaveRecordingAsync(model.scope, context, rec)
     }
 
     DisposableEffect(decoder, audioPlayer) {
@@ -1592,6 +1576,28 @@ fun RemoteDesktopViewer(
     }
 }
 
+internal fun stopAndSaveRecordingAsync(
+    scope: kotlinx.coroutines.CoroutineScope,
+    context: Context,
+    rec: H264Mp4Recorder,
+) {
+    scope.launch(Dispatchers.IO) {
+        val saved = runCatching { rec.stop() }.getOrNull() ?: return@launch
+        val preQFile = copyMp4ToDownloads(context, saved)
+        if (preQFile != null) {
+            withContext(Dispatchers.Main) {
+                runCatching {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Recording saved to ${preQFile.absolutePath}",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+    }
+}
+
 internal class StageInputController(
     private val moveCoalescer: PointerMoveCoalescer,
     private val onRequestStageFocus: () -> Unit = {},
@@ -2028,14 +2034,13 @@ internal fun RemoteDesktopTabletToolbar(
     onToggleRecording: () -> Unit,
     onScreenshot: () -> Unit,
     modifier: Modifier = Modifier,
-    localScreenOverride: RdSize? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val context = LocalContext.current
     var displayMenuOpen by remember { mutableStateOf(false) }
     var settingsMenuOpen by remember { mutableStateOf(false) }
 
-    val localScreen = localScreenOverride ?: deviceFullScreenSizeDp(context)
+    val localScreen = deviceFullScreenSizeDp(context)
     val resolutions = remember(caps.resolutions.modes) { resolutionChoices(caps.resolutions.modes) }
     val fitLocal = remember(caps.resolutions.modes, localScreen, hostModeId) {
         fitLocalMode(caps.resolutions.modes, localScreen, hostModeId)
@@ -2949,11 +2954,10 @@ internal fun RemoteDesktopMobileSettingsPanel(
     recording: Boolean,
     onToggleRecording: () -> Unit,
     onScreenshot: () -> Unit,
-    localScreenOverride: RdSize? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val context = LocalContext.current
-    val localScreen = localScreenOverride ?: deviceFullScreenSizeDp(context)
+    val localScreen = deviceFullScreenSizeDp(context)
     val resolutions = remember(caps.resolutions.modes) { resolutionChoices(caps.resolutions.modes) }
     val fitLocal = remember(caps.resolutions.modes, localScreen, hostModeId) {
         fitLocalMode(caps.resolutions.modes, localScreen, hostModeId)

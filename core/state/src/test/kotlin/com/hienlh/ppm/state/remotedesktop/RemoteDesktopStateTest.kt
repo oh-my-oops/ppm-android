@@ -462,6 +462,8 @@ class RemoteDesktopStateTest {
         assertEquals("left", androidMouseButtonToProtocol(1))
         assertEquals("right", androidMouseButtonToProtocol(2))
         assertNull(androidMouseButtonToProtocol(4))
+        assertNull(androidMouseButtonToProtocol(32))
+        assertNull(androidMouseButtonToProtocol(64))
         assertTrue(isPasteKeyCombo("KeyV", ctrl = true, meta = false))
         assertEquals("1:05", formatRemoteDesktopElapsed(65))
         assertEquals("1:01:01", formatRemoteDesktopElapsed(3661))

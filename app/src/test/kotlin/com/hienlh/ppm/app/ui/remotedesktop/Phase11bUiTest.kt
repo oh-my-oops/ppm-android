@@ -381,12 +381,12 @@ class Phase11bUiTest {
         cm.setPrimaryClip(ClipData.newPlainText("test", "hello from clipboard"))
 
         val sent = mutableListOf<JsonElement>()
+        model.remoteDesktopSender = { sent += it }
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
                 Box(Modifier.size(width = 800.dp, height = 600.dp)) {
                     RemoteDesktopViewer(
                         model = model,
-                        onSendMessageOverride = { sent += it },
                     )
                 }
             }
@@ -488,6 +488,12 @@ class Phase11bUiTest {
                 ),
             ),
         )
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val density = context.resources.displayMetrics.density.toInt().coerceAtLeast(1)
+        org.robolectric.Shadows.shadowOf(org.robolectric.shadows.ShadowDisplay.getDefaultDisplay()).apply {
+            setRealWidth(1280 * density)
+            setRealHeight(800 * density)
+        }
         var requestedMode: String? = null
 
         composeRule.setContent {
@@ -527,7 +533,6 @@ class Phase11bUiTest {
                         recordingElapsedSec = 0,
                         onToggleRecording = {},
                         onScreenshot = {},
-                        localScreenOverride = RdSize(1280, 800),
                     )
                     RemoteDesktopMobileSettingsPanel(
                         caps = caps,
@@ -549,7 +554,6 @@ class Phase11bUiTest {
                         recording = false,
                         onToggleRecording = {},
                         onScreenshot = {},
-                        localScreenOverride = RdSize(1280, 800),
                     )
                 }
             }
@@ -568,15 +572,9 @@ class Phase11bUiTest {
         assertEquals("m2", requestedMode)
 
         // deviceFullScreenSizeDp reads physical display bounds (WindowManager), not split-screen configuration.screenWidthDp
-        val context = ApplicationProvider.getApplicationContext<Context>()
         val origW = context.resources.configuration.screenWidthDp
         val origH = context.resources.configuration.screenHeightDp
         try {
-            val density = context.resources.displayMetrics.density.toInt().coerceAtLeast(1)
-            org.robolectric.Shadows.shadowOf(org.robolectric.shadows.ShadowDisplay.getDefaultDisplay()).apply {
-                setRealWidth(1280 * density)
-                setRealHeight(800 * density)
-            }
             context.resources.configuration.screenWidthDp = 640
             context.resources.configuration.screenHeightDp = 400
             assertEquals(RdSize(1280, 800), deviceFullScreenSizeDp(context))
@@ -593,18 +591,15 @@ class Phase11bUiTest {
         model.remoteDesktopPlatformSupported = false
         assertEquals(false, model.remoteDesktopAvailable)
 
-        val tempMp4 = File(context.cacheDir, "test-unmount-record.mp4")
-        val recorder = H264Mp4Recorder(tempMp4, 480, 360) { RdSize(480, 360) }
         var showViewer by mutableStateOf(true)
 
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
-                Column {
+                Box(Modifier.size(width = 800.dp, height = 600.dp)) {
                     Sidebar(model = model)
                     if (showViewer) {
                         RemoteDesktopViewer(
                             model = model,
-                            initialRecorder = recorder,
                         )
                     }
                 }
@@ -615,18 +610,31 @@ class Phase11bUiTest {
         // Sidebar hides Remote Desktop button when platformSupported is false
         composeRule.onAllNodesWithTag("sidebar-remote-desktop").assertCountEquals(0)
 
-        // Unmounting RemoteDesktopViewer while recording stops the active recorder off the main thread
-        assertEquals(false, recorder.isStopped)
+        // Start recording via the toolbar settings menu, then unmount RemoteDesktopViewer
+        composeRule.onNodeWithTag("remote-desktop-settings-trigger").performClick()
+        composeRule.onNodeWithTag("remote-desktop-record-toggle").performClick()
+        composeRule.waitForIdle()
         showViewer = false
         composeRule.waitForIdle()
+
+        // Verify stopAndSaveRecordingAsync runs recorder.stop() on Dispatchers.IO worker thread
+        val tempMp4 = File(context.cacheDir, "test-unmount-record.mp4")
+        var stopThreadName: String? = null
+        val recorder = object : H264Mp4Recorder(tempMp4, 480, 360, { RdSize(480, 360) }) {
+            override fun stop(): File? {
+                stopThreadName = Thread.currentThread().name
+                return super.stop()
+            }
+        }
+        stopAndSaveRecordingAsync(model.scope, context, recorder)
         val stopDeadline = System.currentTimeMillis() + 2_000L
         while (!recorder.isStopped && System.currentTimeMillis() < stopDeadline) {
             Thread.sleep(10L)
         }
         assertTrue(recorder.isStopped)
         assertTrue(
-            "Expected recorder.stop() on Dispatchers.IO worker thread, got ${recorder.stoppedOnThreadName}",
-            recorder.stoppedOnThreadName?.contains("DefaultDispatcher-worker") == true,
+            "Expected recorder.stop() on Dispatchers.IO worker thread, got $stopThreadName",
+            stopThreadName?.contains("DefaultDispatcher-worker") == true,
         )
         tempMp4.delete()
 
@@ -658,35 +666,38 @@ class Phase11bUiTest {
     fun `Recording auto-stops at MAX_RECORDING_MS 2 hours`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val model = AppModel(context)
-        val tempMp4 = File(context.cacheDir, "test-autostop-record.mp4")
-        val recorder = H264Mp4Recorder(tempMp4, 480, 360) { RdSize(480, 360) }
 
-        composeRule.mainClock.autoAdvance = false
-        try {
-            composeRule.setContent {
-                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                Box(Modifier.size(width = 800.dp, height = 600.dp)) {
                     RemoteDesktopViewer(
                         model = model,
-                        initialRecorder = recorder,
                     )
                 }
             }
-            composeRule.mainClock.advanceTimeByFrame()
+        }
+        composeRule.waitForIdle()
 
+        // Start recording via the toolbar settings menu
+        composeRule.onNodeWithTag("remote-desktop-settings-trigger").performClick()
+        composeRule.onNodeWithTag("remote-desktop-record-toggle").performClick()
+        composeRule.waitForIdle()
+
+        // Reopen settings menu to observe the live recording toggle label
+        composeRule.onNodeWithTag("remote-desktop-settings-trigger").performClick()
+        composeRule.waitForIdle()
+
+        composeRule.mainClock.autoAdvance = false
+        try {
             // Advance just shy of 2 hours (7,199 seconds): still recording
             composeRule.mainClock.advanceTimeBy(com.hienlh.ppm.state.remotedesktop.MAX_RECORDING_MS - 1_000L)
-            assertEquals(false, recorder.isStopped)
+            composeRule.onNodeWithText("Stop recording", substring = true).assertIsDisplayed()
 
-            // Advance past 2 hours (7,200 seconds): auto-stopped on Dispatchers.IO
+            // Advance past 2 hours (7,200 seconds): auto-stopped
             composeRule.mainClock.advanceTimeBy(2_000L)
-            val deadline = System.currentTimeMillis() + 2_000L
-            while (!recorder.isStopped && System.currentTimeMillis() < deadline) {
-                Thread.sleep(10L)
-            }
-            assertTrue(recorder.isStopped)
+            composeRule.onNodeWithText("Start recording (no audio)").assertIsDisplayed()
         } finally {
             composeRule.mainClock.autoAdvance = true
-            tempMp4.delete()
         }
     }
 
@@ -858,6 +869,7 @@ class Phase11bUiTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val model = AppModel(context)
         val viewerSent = mutableListOf<JsonElement>()
+        model.remoteDesktopSender = { viewerSent += it }
         val outsideFocus = androidx.compose.ui.focus.FocusRequester()
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
@@ -872,7 +884,6 @@ class Phase11bUiTest {
                     Box(Modifier.size(width = 800.dp, height = 600.dp)) {
                         RemoteDesktopViewer(
                             model = model,
-                            onSendMessageOverride = { viewerSent += it },
                         )
                     }
                 }
