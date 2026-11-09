@@ -60,6 +60,7 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.SettingsButton
 import com.hienlh.ppm.app.ui.SettingsTextInput
 import com.hienlh.ppm.client.DbLoginCoordinator
+import com.hienlh.ppm.client.DbLoginFailedException
 import com.hienlh.ppm.client.DbLoginPromptInfo
 import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.client.dbChangesetApply
@@ -126,7 +127,9 @@ import com.hienlh.ppm.state.database.StatementOutcome
 import com.hienlh.ppm.state.database.StructureChange
 import com.hienlh.ppm.state.database.StructureFailure
 import com.hienlh.ppm.state.database.StructurePreview
+import com.hienlh.ppm.state.database.TABLE_EDIT_FIELD
 import com.hienlh.ppm.state.database.TEMPLATE_SOURCE
+import com.hienlh.ppm.state.database.TableEdit
 import com.hienlh.ppm.state.database.TableModel
 import com.hienlh.ppm.state.database.TableModelColumn
 import com.hienlh.ppm.state.database.TableModelForeignKey
@@ -157,6 +160,7 @@ import com.hienlh.ppm.state.database.databaseExportForm
 import com.hienlh.ppm.state.database.declaredType
 import com.hienlh.ppm.state.database.defaultRowTarget
 import com.hienlh.ppm.state.database.editorColumnRows
+import com.hienlh.ppm.state.database.encodeTableEditJson
 import com.hienlh.ppm.state.database.enginesFor
 import com.hienlh.ppm.state.database.exportRequest
 import com.hienlh.ppm.state.database.failureOf
@@ -206,6 +210,7 @@ import com.hienlh.ppm.state.database.patchUpload
 import com.hienlh.ppm.state.database.primaryKeyHasName
 import com.hienlh.ppm.state.database.primaryKeyRow
 import com.hienlh.ppm.state.database.queryTabMetadata
+import com.hienlh.ppm.state.database.readTableEdit
 import com.hienlh.ppm.state.database.removeColumns
 import com.hienlh.ppm.state.database.removeItem
 import com.hienlh.ppm.state.database.removeRow
@@ -220,11 +225,15 @@ import com.hienlh.ppm.state.database.setTables
 import com.hienlh.ppm.state.database.setTargetType
 import com.hienlh.ppm.state.database.startingStatus
 import com.hienlh.ppm.state.database.statementReports
+import com.hienlh.ppm.state.database.structureApplyRequestJson
+import com.hienlh.ppm.state.database.structurePreviewRequestJson
 import com.hienlh.ppm.state.database.tableModelProblems
 import com.hienlh.ppm.state.database.tableReferences
+import com.hienlh.ppm.state.database.targetTypeOptions
 import com.hienlh.ppm.state.database.uid
 import com.hienlh.ppm.state.database.uniqueRows
 import com.hienlh.ppm.state.database.updateRow
+import com.hienlh.ppm.state.database.uploadPreviewRequest
 import com.hienlh.ppm.state.database.uploadProblem
 import com.hienlh.ppm.state.database.upsertColumn
 import com.hienlh.ppm.state.database.upsertForeignKey
@@ -274,7 +283,8 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
     val dialect = dbDialectForType(dbType)
     val initialTableName = meta["tableName"]?.string.orEmpty()
     val schemaName = meta["schema"]?.string?.takeIf { it.isNotBlank() }
-    val initialIsNewTable = meta["newTable"]?.bool == true || initialTableName.isBlank()
+    val initialTableEdit = remember(tab.id) { readTableEdit(meta, dialect) }
+    val initialIsNewTable = initialTableEdit?.isNew == true || meta["newTable"]?.bool == true || initialTableName.isBlank()
     val readonly = meta["readonly"]?.bool == true
 
     var structure by remember(connId, database, filePath, schemaName, initialTableName) {
@@ -289,23 +299,25 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
     var activeLoginPrompt by remember { mutableStateOf<DbLoginPromptInfo?>(null) }
     var activeLoginDeferred by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     var loginError by remember { mutableStateOf<String?>(null) }
+    var loginErrorDetails by remember { mutableStateOf<String?>(null) }
     val loginCoordinator = remember {
         DbLoginCoordinator { prompt ->
             val deferred = CompletableDeferred<Boolean>()
             loginError = null
+            loginErrorDetails = null
             activeLoginDeferred = deferred
             activeLoginPrompt = prompt
             deferred.await()
         }
     }
 
-    suspend fun loadStructure(targetTable: String = structure?.table ?: initialTableName) {
+    suspend fun loadStructure(targetTable: String = structure?.name ?: initialTableName) {
         val client = api ?: return
         if (targetTable.isBlank()) return
         loading = true
         errorMessage = null
         runCatching {
-            client.dbTableStructure(
+            val obj = client.dbTableStructure(
                 connectionId = connId,
                 table = targetTable,
                 schema = schemaName,
@@ -314,8 +326,9 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
                 project = project,
                 loginCoordinator = loginCoordinator,
             )
-        }.onSuccess { obj ->
-            structure = parseDbTableStructure(obj)
+            withContext(Dispatchers.Default) { parseDbTableStructure(obj) }
+        }.onSuccess { parsed ->
+            structure = parsed
             isNewTable = false
         }.onFailure { err ->
             errorMessage = err.message ?: "Failed to load table structure"
@@ -335,6 +348,7 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
             DbLoginDialogContent(
                 prompt = prompt,
                 errorMessage = loginError,
+                errorDetails = loginErrorDetails,
                 onSubmit = { user, pass ->
                     val client = api ?: return@DbLoginDialogContent
                     val cid = prompt.connectionId ?: return@DbLoginDialogContent
@@ -344,7 +358,10 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
                                 activeLoginPrompt = null
                                 activeLoginDeferred?.complete(true)
                             }
-                            .onFailure { err -> loginError = err.message ?: "Login failed" }
+                            .onFailure { err ->
+                                loginError = err.message ?: "Login failed"
+                                loginErrorDetails = (err as? DbLoginFailedException)?.details?.takeIf { it.isNotBlank() }
+                            }
                     }
                 },
                 onCancel = {
@@ -356,7 +373,7 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
 
         DatabaseStructureTabContent(
             structure = structure,
-            dialect = structure?.dialect ?: dialect,
+            dialect = dialect,
             dbType = dbType,
             schema = structure?.schema ?: schemaName,
             database = database,
@@ -365,7 +382,12 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
             readonly = readonly,
             loading = loading,
             errorMessage = errorMessage,
+            initialTableEdit = initialTableEdit,
+            onTableEditChanged = { edit ->
+                model.patchTabMetadata(tab.id, TABLE_EDIT_FIELD to edit?.let(::encodeTableEditJson))
+            },
             onRefresh = {
+                model.patchTabMetadata(tab.id, TABLE_EDIT_FIELD to null)
                 scope.launch { loadStructure() }
             },
             onStartNewTable = {
@@ -428,7 +450,7 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
                 val client = api ?: error("Not connected")
                 val obj = client.dbStructurePreview(
                     connectionId = connId,
-                    body = change.toJsonObject(),
+                    body = structurePreviewRequestJson(change),
                     database = database,
                     path = filePath,
                     project = project,
@@ -438,11 +460,7 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
             },
             onApplyChange = { change, sql, allowRecreate ->
                 val client = api ?: error("Not connected")
-                val body = buildJsonObject {
-                    for ((k, v) in change.toJsonObject()) put(k, v)
-                    put("sql", sql)
-                    if (allowRecreate) put("allowRecreate", true)
-                }
+                val body = structureApplyRequestJson(change, sql, allowRecreate)
                 client.dbStructureApply(
                     connectionId = connId,
                     body = body,
@@ -454,6 +472,12 @@ fun DatabaseStructureTabBody(model: AppModel, tab: WorkspaceTab) {
             },
             onAppliedModel = { savedModel ->
                 isNewTable = false
+                model.patchTabMetadata(
+                    tab.id,
+                    TABLE_EDIT_FIELD to null,
+                    "newTable" to null,
+                    "tableName" to JsonPrimitive(savedModel.name),
+                )
                 scope.launch { loadStructure(savedModel.name) }
             },
         )
@@ -473,6 +497,8 @@ internal fun DatabaseStructureTabContent(
     loading: Boolean = false,
     errorMessage: String? = null,
     availableObjects: List<DbObjectItem> = emptyList(),
+    initialTableEdit: TableEdit? = null,
+    onTableEditChanged: (TableEdit?) -> Unit = {},
     onRefresh: () -> Unit = {},
     onStartNewTable: () -> Unit = {},
     onOpenDataTab: (table: String, schema: String?) -> Unit = { _, _ -> },
@@ -480,11 +506,10 @@ internal fun DatabaseStructureTabContent(
     onOpenQueryTab: (sql: String, title: String) -> Unit = { _, _ -> },
     onPreviewChange: suspend (StructureChange) -> StructurePreview = {
         StructurePreview(
-            dialect = dialect,
-            transactionalDdl = dialect != "mysql",
-            recreate = false,
-            statements = emptyList(),
             sql = "-- DDL preview",
+            statements = emptyList(),
+            recreate = false,
+            transactional = dialect != "mysql",
         )
     },
     onApplyChange: suspend (change: StructureChange, sql: String, allowRecreate: Boolean) -> JsonObject = { _, _, _ ->
@@ -496,15 +521,27 @@ internal fun DatabaseStructureTabContent(
     val mobile = LocalPpmMobile.current
     val context = LocalContext.current
 
-    val baseModel = remember(structure, isNewTable, dialect, schema) {
+    var restoredEdit by remember { mutableStateOf(initialTableEdit) }
+    val baseModel = remember(structure, isNewTable, dialect, schema, restoredEdit?.base) {
         when {
+            restoredEdit != null -> restoredEdit!!.base
             isNewTable -> newTableModel(dialect, schema)
-            structure != null -> modelFromStructure(structure)
+            structure != null -> modelFromStructure(structure, dialect)
             else -> newTableModel(dialect, schema)
         }
     }
-    var draftModel by remember(baseModel) { mutableStateOf(baseModel) }
+    var draftModel by remember(baseModel) {
+        mutableStateOf(restoredEdit?.current ?: baseModel)
+    }
     val isDirty = remember(baseModel, draftModel) { !sameTableModel(baseModel, draftModel) }
+    LaunchedEffect(baseModel, draftModel, isNewTable) {
+        val nextEdit = if (!isNewTable && sameTableModel(baseModel, draftModel)) {
+            null
+        } else {
+            TableEdit(base = baseModel, current = draftModel, isNew = isNewTable)
+        }
+        onTableEditChanged(nextEdit)
+    }
     val problems = remember(draftModel) { tableModelProblems(draftModel) }
     val canEdit = !mobile && !readonly && (isNewTable || structure?.kind == "table" || structure == null)
 
@@ -550,7 +587,7 @@ internal fun DatabaseStructureTabContent(
         activeSaveChange = if (isNewTable) {
             StructureChange.Create(database = database, target = draftModel)
         } else {
-            StructureChange.Alter(database = database, target = draftModel)
+            StructureChange.Alter(database = database, base = baseModel, current = draftModel)
         }
     }
 
@@ -578,7 +615,7 @@ internal fun DatabaseStructureTabContent(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val titleLabel = if (isNewTable) "New table (${draftModel.name})" else (structure?.table ?: draftModel.name)
+            val titleLabel = if (isNewTable) "New table (${draftModel.name})" else (structure?.name ?: draftModel.name)
             BasicText(
                 "$titleLabel · Structure",
                 style = ppmText(12f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.text.color),
@@ -596,12 +633,12 @@ internal fun DatabaseStructureTabContent(
                 SettingsButton(
                     label = "Data ↗",
                     modifier = Modifier.testTag("db-structure-open-data-btn"),
-                    onClick = { onOpenDataTab(structure.table, structure.schema) },
+                    onClick = { onOpenDataTab(structure.name, structure.schema) },
                 )
                 SettingsButton(
                     label = "SQL ↗",
                     modifier = Modifier.testTag("db-structure-open-sql-btn"),
-                    onClick = { onOpenSqlTab(structure.table, structure.schema, structure.kind) },
+                    onClick = { onOpenSqlTab(structure.name, structure.schema, structure.kind) },
                 )
             }
             if (canEdit) {
@@ -615,6 +652,7 @@ internal fun DatabaseStructureTabContent(
                         label = "Reset",
                         modifier = Modifier.testTag("db-structure-reset-btn"),
                         onClick = {
+                            if (!isNewTable) restoredEdit = null
                             draftModel = baseModel
                             selectedColIds = emptySet()
                         },
@@ -758,10 +796,10 @@ internal fun DatabaseStructureTabContent(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             SettingsButton(
-                                label = "${if (draftModel.withoutRowId) "☑" else "☐"} WITHOUT ROWID",
-                                primary = draftModel.withoutRowId,
+                                label = "${if (draftModel.withoutRowid) "☑" else "☐"} WITHOUT ROWID",
+                                primary = draftModel.withoutRowid,
                                 modifier = Modifier.testTag("db-structure-without-rowid-checkbox"),
-                                onClick = { draftModel = draftModel.copy(withoutRowId = !draftModel.withoutRowId) },
+                                onClick = { draftModel = draftModel.copy(withoutRowid = !draftModel.withoutRowid) },
                             )
                             SettingsButton(
                                 label = "${if (draftModel.strict) "☑" else "☐"} STRICT",
@@ -1231,52 +1269,6 @@ internal fun DatabaseStructureTabContent(
                     }
                 }
             }
-
-            // 7. Dependencies Section
-            val deps = structure?.dependencies.orEmpty()
-            if (deps.isNotEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(tokens.panel.color)
-                        .cssBorder(tokens.border.color)
-                        .padding(10.dp)
-                        .testTag("db-structure-section-dependencies"),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    BasicText(
-                        "DEPENDENCIES (${deps.size})",
-                        style = ppmText(11f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tokens.text2.color),
-                    )
-                    for (dep in deps) {
-                        val obj = dep.`object`
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    if (obj.kind == "table" || obj.kind == "view" || obj.kind == "matview") {
-                                        onOpenDataTab(obj.name, obj.schema)
-                                    } else {
-                                        onOpenSqlTab(obj.name, obj.schema, obj.kind)
-                                    }
-                                }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                                .testTag("db-structure-dep-link-${obj.name}"),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            BasicText(
-                                if (dep.direction == "uses") "Uses →" else "Used by ←",
-                                style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text3.color),
-                            )
-                            BasicText(
-                                "${obj.name} (${obj.kind})",
-                                style = ppmText(12f, FontWeight.Medium, FontKind.MONO).copy(color = tokens.accent.color),
-                            )
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -1557,7 +1549,7 @@ internal fun DatabaseStructureTabContent(
             keyProblems(
                 "Index",
                 idxDraft.constraintName,
-                idxDraft.columns.map { it.columnId },
+                idxDraft.columns.mapNotNull { it.columnId },
                 requireName = true,
                 model = draftModel,
                 editingId = if (isAdding) null else initialIdx.id,
@@ -1882,6 +1874,8 @@ internal fun DatabaseStructureTabContent(
             onDismiss = { activeSaveChange = null },
             onApplied = {
                 activeSaveChange = null
+                restoredEdit = null
+                onTableEditChanged(null)
                 onAppliedModel(draftModel)
             },
         )
@@ -2031,7 +2025,7 @@ fun StructureSaveDialog(
                         BasicText("⚠ $w", style = ppmText(11f).copy(color = tokens.warning.color))
                     }
                 }
-                if (!curPreview.transactionalDdl) {
+                if (!curPreview.transactional) {
                     BasicText(
                         "Note: MySQL commits each DDL statement on its own; earlier statements cannot be rolled back if a later one fails.",
                         style = ppmText(11f).copy(color = tokens.warning.color),
@@ -2073,7 +2067,13 @@ fun StructureSaveDialog(
 
             val curFailure = failure
             if (curFailure != null) {
-                val reports = remember(curFailure) { statementReports(curFailure) }
+                val reports = remember(curPreview, curFailure) {
+                    if (curPreview != null) {
+                        statementReports(curPreview, curFailure)
+                    } else {
+                        emptyList()
+                    }
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -2084,7 +2084,7 @@ fun StructureSaveDialog(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     BasicText(
-                        curFailure.error,
+                        curFailure.error.ifBlank { applyError.orEmpty() },
                         style = ppmText(12f, FontWeight.SemiBold).copy(color = tokens.error.color),
                     )
                     for (rep in reports) {
@@ -2164,7 +2164,9 @@ fun StructureSaveDialog(
                                             conflictNotice = "The table structure changed on the server. Review the updated SQL script and click Execute again."
                                         }
                                         failReport != null -> {
-                                            failure = failReport
+                                            failure = failReport.copy(
+                                                error = failReport.error.ifBlank { err.message.orEmpty() },
+                                            )
                                         }
                                         else -> {
                                             applyError = err.message ?: "Failed to execute DDL"
@@ -2248,7 +2250,7 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
     LaunchedEffect(api, activeJob) {
         val job = activeJob ?: return@LaunchedEffect
         val client = api ?: return@LaunchedEffect
-        var since = 1
+        var since = 0
         while (true) {
             val res = runCatching { client.dbImpExpJobStatus(job.id, since = since) }
             val obj = res.getOrElse { err ->
@@ -2261,10 +2263,10 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
             }
             val next = parseImpExpJobStatus(obj)
             val prevMessages = jobStatus?.messages.orEmpty()
-            val mergedMessages = (prevMessages + next.messages).distinctBy { it.id }
-            since = next.nextMessageId
+            val mergedMessages = prevMessages + next.messages
+            since = next.messageCount
             jobStatus = next.copy(messages = mergedMessages)
-            if (next.state != "running") break
+            if (next.state != "running" && next.state != "queued") break
             delay(1_000L)
         }
     }
@@ -2351,17 +2353,13 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
                         openStream = { bytes.inputStream() },
                     )
                 }.onSuccess { resObj ->
-                    val uploadId = resObj["uploadId"]?.string ?: resObj["id"]?.string
-                    val sources = (resObj["sources"] as? kotlinx.serialization.json.JsonArray)
-                        ?.mapNotNull { (it as? JsonPrimitive)?.string }
-                        .orEmpty()
+                    val id = resObj["id"]?.string
                     form = patchUpload(
                         form,
                         localId = localId,
                         state = "ready",
                         progress = 1.0,
-                        uploadId = uploadId,
-                        sources = sources,
+                        id = id,
                     )
                 }.onFailure { err ->
                     form = patchUpload(
@@ -2389,14 +2387,10 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
             if (form.sourceType != "database" && form.sourceType != "query") {
                 val u = form.uploads.firstOrNull { it.localId == row.uploadLocalId }
                     ?: error("Upload missing")
-                val uidStr = u.uploadId ?: error("Upload not ready")
-                val body = buildJsonObject {
-                    put("format", form.sourceType)
-                    if (row.sheetName != null) put("source", row.sheetName)
-                    put("formatOptions", form.importOptions.toJsonObject())
-                }
+                val uidStr = u.id ?: error("Upload not ready")
+                val body = uploadPreviewRequest(form, row)
                 val obj = client.dbImpExpUploadPreview(uidStr, body)
-                parseImportPreview(obj)
+                withContext(Dispatchers.Default) { parseImportPreview(obj) }
             } else {
                 val cid = form.sourceDb.connectionId ?: error("No source connection")
                 val reqJson = buildGridRequestJson(
@@ -2413,13 +2407,13 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
                     body = reqJson,
                     database = form.sourceDb.database,
                 )
-                val page = parseGridResponse(gridObj, countKey = row.source)
-                ImportPreviewResult(
-                    sources = listOf(row.source),
-                    source = row.source,
-                    columns = page.columnKeys,
-                    rows = page.rows.indices.map { page.rowAsMap(it) },
-                )
+                withContext(Dispatchers.Default) {
+                    val page = parseGridResponse(gridObj, countKey = row.source)
+                    ImportPreviewResult(
+                        columns = page.columnKeys,
+                        rows = page.rows.indices.map { page.rowAsMap(it) },
+                    )
+                }
             }
         },
         onRunJob = { preservedLogs ->
@@ -2430,10 +2424,10 @@ fun DatabaseImpExpTabBody(model: AppModel, tab: WorkspaceTab) {
                 runCatching {
                     if (isImportForm(form) && form.sourceType != "database" && form.sourceType != "query") {
                         val cid = form.targetDb.connectionId ?: error("Choose a target connection")
-                        client.dbImpExpImport(cid.toString(), importRequest(form))
+                        client.dbImpExpImport(cid.toString(), importRequest(form), database = form.targetDb.database)
                     } else {
                         val cid = form.sourceDb.connectionId ?: error("Choose a source connection")
-                        client.dbImpExpExport(cid.toString(), exportRequest(form))
+                        client.dbImpExpExport(cid.toString(), exportRequest(form), database = form.sourceDb.database)
                     }
                 }.onSuccess { jobIdStr ->
                     val jid = jobIdStr.ifBlank { "job-1" }
@@ -2466,10 +2460,8 @@ internal fun DatabaseImpExpTabContent(
     jobError: String? = null,
     onFormChange: (ImpExpForm) -> Unit = {},
     onPickUploadFiles: () -> Unit = {},
-    onPreviewRow: suspend (ImpExpRow) -> ImportPreviewResult = { row ->
+    onPreviewRow: suspend (ImpExpRow) -> ImportPreviewResult = { _ ->
         ImportPreviewResult(
-            sources = listOf(row.source),
-            source = row.source,
             columns = listOf("id", "name"),
             rows = listOf(mapOf("id" to DbCellValue.Num("1", 1.0), "name" to DbCellValue.Text("Alice"))),
         )
@@ -2519,6 +2511,7 @@ internal fun DatabaseImpExpTabContent(
     var configuringRow by remember { mutableStateOf<ImpExpRow?>(null) }
     var configureSourceCols by remember { mutableStateOf<List<String>>(emptyList()) }
     var previewDialogResult by remember { mutableStateOf<ImportPreviewResult?>(null) }
+    var previewDialogTitle by remember { mutableStateOf("") }
     var shownLevels by remember { mutableStateOf(DEFAULT_SHOWN_LEVELS) }
     var msgFilterText by remember { mutableStateOf("") }
     var preserveLogs by remember { mutableStateOf(false) }
@@ -2853,18 +2846,12 @@ internal fun DatabaseImpExpTabContent(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        SettingsButton(
-                            label = "Database",
-                            primary = form.targetType == "database",
-                            modifier = Modifier.testTag("db-impexp-target-type-database"),
-                            onClick = { onFormChange(setTargetType(form, "database")) },
-                        )
-                        for (fmt in IMPEXP_FILE_FORMATS.filter { it.exportable }) {
+                        for (opt in targetTypeOptions(form.sourceType)) {
                             SettingsButton(
-                                label = fmt.id.uppercase(),
-                                primary = form.targetType == fmt.id,
-                                modifier = Modifier.testTag("db-impexp-target-type-${fmt.id}"),
-                                onClick = { onFormChange(setTargetType(form, fmt.id)) },
+                                label = if (opt.id == "database") "Database" else opt.id.uppercase(),
+                                primary = form.targetType == opt.id,
+                                modifier = Modifier.testTag("db-impexp-target-type-${opt.id}"),
+                                onClick = { onFormChange(setTargetType(form, opt.id)) },
                             )
                         }
                     }
@@ -2899,14 +2886,14 @@ internal fun DatabaseImpExpTabContent(
                         // Export format options + Archive as ZIP
                         if (form.targetType == "xlsx") {
                             SettingsButton(
-                                label = "${if (form.exportOptions.xlsxInSingleFile) "☑" else "☐"} All tables in one Excel file",
-                                primary = form.exportOptions.xlsxInSingleFile,
+                                label = "${if (form.exportOptions.xlsxSingleFile) "☑" else "☐"} All tables in one Excel file",
+                                primary = form.exportOptions.xlsxSingleFile,
                                 modifier = Modifier.testTag("db-impexp-xlsx-single-checkbox"),
                                 onClick = {
                                     onFormChange(
                                         form.copy(
                                             exportOptions = form.exportOptions.copy(
-                                                xlsxInSingleFile = !form.exportOptions.xlsxInSingleFile,
+                                                xlsxSingleFile = !form.exportOptions.xlsxSingleFile,
                                             ),
                                         ),
                                     )
@@ -2951,7 +2938,7 @@ internal fun DatabaseImpExpTabContent(
                                 SettingsTextInput(
                                     value = form.zipFileName,
                                     onValueChange = { onFormChange(form.copy(zipFileName = it)) },
-                                    placeholder = "export.zip",
+                                    placeholder = "zip-archive-yyyy-mm-dd-hh-mm-ss.zip",
                                     modifier = Modifier.weight(1f).testTag("db-impexp-zip-name-input"),
                                 )
                             }
@@ -3049,7 +3036,10 @@ internal fun DatabaseImpExpTabContent(
                                 modifier = Modifier.testTag("db-impexp-row-preview-btn-${row.source}"),
                                 onClick = {
                                     scope.launch {
-                                        runCatching { onPreviewRow(row) }.onSuccess { previewDialogResult = it }
+                                        runCatching { onPreviewRow(row) }.onSuccess {
+                                            previewDialogTitle = row.sourceLabel
+                                            previewDialogResult = it
+                                        }
                                     }
                                 },
                             )
@@ -3093,18 +3083,9 @@ internal fun DatabaseImpExpTabContent(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         BasicText(
-                            "JOB ${jobStatus.state.uppercase()} (${formatImpExpDuration(jobStatus.startedAt, jobStatus.finishedAt)})",
+                            "JOB ${jobStatus.state.uppercase()} (${formatImpExpDuration(jobStatus.startedAt, jobStatus.endedAt)})",
                             style = ppmText(11f, FontWeight.SemiBold, FontKind.MONO).copy(color = tokens.text.color),
                         )
-                        val zip = jobStatus.zipFile
-                        if (zip != null) {
-                            SettingsButton(
-                                label = "⬇ Download ${zip.name}",
-                                primary = true,
-                                modifier = Modifier.testTag("db-impexp-download-zip"),
-                                onClick = { onDownloadOutputFile(zip) },
-                            )
-                        }
                         for (f in jobStatus.files) {
                             SettingsButton(
                                 label = "⬇ ${f.name}",
@@ -3166,11 +3147,11 @@ internal fun DatabaseImpExpTabContent(
                     ) {
                         for (m in filteredMsgs) {
                             BasicText(
-                                "${messageClock(m.at)} [${m.level.uppercase()}]${if (!m.item.isNullOrEmpty()) " [${m.item}]" else ""} ${m.text}",
+                                "${messageClock(m.time)} [${m.level.uppercase()}] ${m.text}",
                                 style = ppmText(11f, kind = FontKind.MONO).copy(
                                     color = when (m.level) {
                                         "error" -> tokens.error.color
-                                        "warn" -> tokens.warning.color
+                                        "warning" -> tokens.warning.color
                                         else -> tokens.text2.color
                                     },
                                 ),
@@ -3218,12 +3199,12 @@ internal fun DatabaseImpExpTabContent(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         SettingsButton(
-                            label = if (!entry.ignore) "☑" else "☐",
-                            primary = !entry.ignore,
-                            modifier = Modifier.testTag("db-impexp-col-map-check-${entry.source}"),
+                            label = if (!entry.skip) "☑" else "☐",
+                            primary = !entry.skip,
+                            modifier = Modifier.testTag("db-impexp-col-map-check-${entry.src}"),
                             onClick = {
                                 entries = entries.mapIndexed { i, e ->
-                                    if (i == idx) e.copy(ignore = !e.ignore) else e
+                                    if (i == idx) e.copy(skip = !e.skip) else e
                                 }
                             },
                         )
@@ -3316,7 +3297,7 @@ internal fun DatabaseImpExpTabContent(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     BasicText(
-                        "Preview · ${prevRes.source} (${prevRes.rows.size} rows)",
+                        "Preview · $previewDialogTitle (${prevRes.rows.size} rows)",
                         style = ppmText(13f, FontWeight.SemiBold).copy(color = tokens.text.color),
                     )
                     SettingsButton(
@@ -3694,6 +3675,106 @@ internal fun SqliteViewerTabContent(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * DBGate's "Confirm close tabs" dialog (`src/web/components/layout/tab-close-confirm-dialog.tsx`),
+ * shown when closing one or more database tabs that hold unsaved changes.
+ */
+@Composable
+fun DbTabCloseConfirmHost(model: AppModel) {
+    val pending = model.pendingTabClose ?: return
+    DbTabCloseConfirmDialogContent(
+        losingTabs = pending.losingTabs,
+        onCancel = { model.cancelPendingTabClose() },
+        onConfirm = { model.confirmPendingTabClose() },
+    )
+}
+
+@Composable
+fun DbTabCloseConfirmDialogContent(
+    losingTabs: List<WorkspaceTab>,
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    if (losingTabs.isEmpty()) return
+    val tokens = LocalPpmTokens.current
+    val one = losingTabs.size == 1
+    val title = "Confirm close tabs"
+    val explanation = if (one) {
+        "This tab has changes that are not saved. Closing it discards them."
+    } else {
+        "These tabs have changes that are not saved. Closing them discards the changes."
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.55f))
+            .clickable(onClick = onCancel)
+            .padding(16.dp)
+            .testTag("db-tab-close-confirm-dialog"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 460.dp)
+                .fillMaxWidth()
+                .background(tokens.panel.color, RoundedCornerShape(8.dp))
+                .cssBorder(tokens.border.color)
+                .clickable(enabled = false) {}
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            BasicText(
+                title,
+                style = ppmText(15f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color),
+                modifier = Modifier.testTag("db-tab-close-confirm-title"),
+            )
+            BasicText(
+                explanation,
+                style = ppmText(12f, lineHeight = 17f).copy(color = tokens.text2.color),
+                modifier = Modifier.testTag("db-tab-close-confirm-explanation"),
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 192.dp)
+                    .background(tokens.panel2.color, RoundedCornerShape(6.dp))
+                    .cssBorder(tokens.border.color)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                for (t in losingTabs) {
+                    BasicText(
+                        t.title.ifBlank { t.id },
+                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text.color),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag("db-tab-close-confirm-item-${t.id}"),
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SettingsButton(
+                    label = "Cancel",
+                    modifier = Modifier.testTag("db-tab-close-confirm-cancel"),
+                    onClick = onCancel,
+                )
+                Spacer(Modifier.width(8.dp))
+                SettingsButton(
+                    label = if (one) "Close tab" else "Close tabs",
+                    danger = true,
+                    modifier = Modifier.testTag("db-tab-close-confirm-accept"),
+                    onClick = onConfirm,
+                )
             }
         }
     }

@@ -173,6 +173,9 @@ class DatabasePhase09eQueryStateTest {
         assertEquals("result-0-0", shownResultTab(MESSAGES_TAB, run).let { shownResultTab("auto", run) })
 
         val (_, rs) = resultOfTab(run, "result-0-0")!!
+        assertTrue("Result set rows must be parsed in a single pass (rows === cellRows)", rs.rows === rs.cellRows)
+        val pageData = rs.toGridPageData("SELECT id, id, name FROM users", listOf("id"))
+        assertTrue("toGridPageData must reuse cellRows without re-mapping", pageData.rows === rs.cellRows)
         val deduped = deduplicateResultColumns(rs.columns)
         assertEquals(listOf("id", "id (2)", "name"), deduped.map { it.name })
 
@@ -210,6 +213,69 @@ class DatabasePhase09eQueryStateTest {
             put("currentSql", "SELECT 2;")
         }
         assertTrue(isQueryTabDirty(dirtyMeta))
+        assertTrue(isDbTabDirty("db-query", dirtyMeta))
+
+        val cleanQueryTab = com.hienlh.ppm.state.workspace.WorkspaceTab(
+            id = "db-query:q1",
+            type = "db-query",
+            title = "Query 1",
+            metadata = meta,
+        )
+        val dirtyQueryTab = cleanQueryTab.copy(metadata = dirtyMeta)
+        assertFalse(losesDbWorkOnClose(cleanQueryTab))
+        assertTrue(losesDbWorkOnClose(dirtyQueryTab))
+
+        // Unsaved grid edits stay in memory only (UnsavedGridRowsStore); metadata holds only unsavedGridRows count
+        var cs = EMPTY_CHANGESET
+        cs = editCells(
+            cs,
+            listOf(
+                CellChange(
+                    rowId = "1",
+                    col = "name",
+                    value = DbCellValue.Text("Bob"),
+                    key = mapOf("id" to DbCellValue.Num("1", 1.0)),
+                    original = DbCellValue.Text("Alice"),
+                ),
+            ),
+        )
+        setUnsavedGridChangeset("database:1::public:users", cs)
+        val restoredCs = unsavedGridChangeset("database:1::public:users")
+        assertEquals(1, changedRowCount(restoredCs))
+
+        val tableTab = com.hienlh.ppm.state.workspace.WorkspaceTab(
+            id = "database:1::public:users",
+            type = "database",
+            title = "users",
+            metadata = buildJsonObject {
+                put("unsavedGridRows", 1)
+            },
+        )
+        assertFalse("pendingChangeset" in tableTab.metadata)
+        assertTrue(losesDbWorkOnClose(tableTab))
+        clearUnsavedGridRows("database:1::public:users")
+        assertEquals(0, changedRowCount(unsavedGridChangeset("database:1::public:users")))
+
+        // pendingChangeset is never read from tab.metadata (row data must not live in synced UI prefs)
+        val stalePendingTab = com.hienlh.ppm.state.workspace.WorkspaceTab(
+            id = "database:1::public:stale",
+            type = "database",
+            title = "stale",
+            metadata = buildJsonObject {
+                put("pendingChangeset", buildJsonObject { put("inserted", 1) })
+            },
+        )
+        assertFalse(losesDbWorkOnClose(stalePendingTab))
+
+        setUnsavedGridRows("database:1::public:orders", 2)
+        val ordersTab = com.hienlh.ppm.state.workspace.WorkspaceTab(
+            id = "database:1::public:orders",
+            type = "database",
+            title = "orders",
+        )
+        assertTrue(losesDbWorkOnClose(ordersTab))
+        clearUnsavedGridRows("database:1::public:orders")
+        assertFalse(losesDbWorkOnClose(ordersTab))
 
         var openedQueryJson: JsonObject? = null
         val req = TabOpenRequest.Query(

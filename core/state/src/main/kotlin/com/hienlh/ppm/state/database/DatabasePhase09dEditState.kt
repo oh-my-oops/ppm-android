@@ -104,7 +104,34 @@ data class GridChangeset(
     val cells: Map<String, Map<String, PendingEdit>> = emptyMap(),
     val inserted: List<String> = emptyList(),
     val deleted: Set<String> = emptySet(),
+    /** Saved rows marked for deletion, by row id, with the key that deletes each (`grid-changeset.ts:38`). */
+    val deletedKeys: Map<String, Map<String, DbCellValue>> = emptyMap(),
 )
+
+/**
+ * Stable row ID derived from a saved row's primary-key map (`glide-data-grid.tsx:224-226`).
+ * Using the row's key rather than its display index ensures pending edits and deletes follow
+ * the row across sort, filter, or refresh.
+ */
+fun rowIdForRowKey(
+    keyMap: Map<String, DbCellValue>,
+    keyCols: List<String>,
+    fallbackIndex: Int = 0,
+): String {
+    if (keyCols.isEmpty() || keyMap.isEmpty()) return "row_$fallbackIndex"
+    if (keyCols.size == 1) {
+        val v = keyMap[keyCols[0]] ?: return "row_$fallbackIndex"
+        return when (v) {
+            DbCellValue.Null, DbCellValue.NoField -> "null"
+            else -> formatCellEditText(v)
+        }
+    }
+    return buildJsonArray {
+        for (c in keyCols) {
+            add(dbCellValueToWireJson(keyMap[c] ?: DbCellValue.Null))
+        }
+    }.toString()
+}
 
 val EMPTY_CHANGESET = GridChangeset()
 
@@ -209,11 +236,18 @@ fun cloneValues(
 
 /**
  * Mark saved rows for deletion or remove unsaved new rows (`deleteRows` in `grid-changeset.ts`).
+ * Stores the row's primary key at the time it is marked (`rowKeys`) so subsequent sorting,
+ * filtering, or refreshing cannot cause Save to delete a different row.
  */
-fun deleteRows(cs: GridChangeset, rowIds: List<String>): GridChangeset {
+fun deleteRows(
+    cs: GridChangeset,
+    rowIds: List<String>,
+    rowKeys: Map<String, Map<String, DbCellValue>> = emptyMap(),
+): GridChangeset {
     if (rowIds.isEmpty()) return cs
     val cells = LinkedHashMap(cs.cells)
     val deleted = LinkedHashSet(cs.deleted)
+    val deletedKeys = LinkedHashMap(cs.deletedKeys)
     val dropInserted = HashSet<String>()
     for (id in rowIds) {
         cells.remove(id)
@@ -221,6 +255,10 @@ fun deleteRows(cs: GridChangeset, rowIds: List<String>): GridChangeset {
             dropInserted += id
         } else {
             deleted += id
+            val key = rowKeys[id]
+            if (!key.isNullOrEmpty()) {
+                deletedKeys[id] = key
+            }
         }
     }
     val inserted = if (dropInserted.isNotEmpty()) {
@@ -228,7 +266,7 @@ fun deleteRows(cs: GridChangeset, rowIds: List<String>): GridChangeset {
     } else {
         cs.inserted
     }
-    return GridChangeset(cells = cells, inserted = inserted, deleted = deleted)
+    return GridChangeset(cells = cells, inserted = inserted, deleted = deleted, deletedKeys = deletedKeys)
 }
 
 /**
@@ -238,10 +276,12 @@ fun revertRows(cs: GridChangeset, rowIds: List<String>): GridChangeset {
     if (rowIds.isEmpty()) return cs
     val cells = LinkedHashMap(cs.cells)
     val deleted = LinkedHashSet(cs.deleted)
+    val deletedKeys = LinkedHashMap(cs.deletedKeys)
     val dropInserted = HashSet<String>()
     for (id in rowIds) {
         cells.remove(id)
         deleted.remove(id)
+        deletedKeys.remove(id)
         if (isNewRowId(id)) dropInserted += id
     }
     val inserted = if (dropInserted.isNotEmpty()) {
@@ -249,7 +289,7 @@ fun revertRows(cs: GridChangeset, rowIds: List<String>): GridChangeset {
     } else {
         cs.inserted
     }
-    return GridChangeset(cells = cells, inserted = inserted, deleted = deleted)
+    return GridChangeset(cells = cells, inserted = inserted, deleted = deleted, deletedKeys = deletedKeys)
 }
 
 data class LockColumn(
@@ -281,9 +321,109 @@ fun changedRowCount(cs: GridChangeset): Int {
     return rows.size
 }
 
+/**
+ * Tracks unsaved grid row counts by tab ID (and optional secondary grid slot, e.g. reference detail grid),
+ * matching `src/web/stores/unsaved-grid-rows-store.ts`.
+ */
+object UnsavedGridRowsStore {
+    private val counts = LinkedHashMap<String, Int>()
+    private val changesets = LinkedHashMap<String, GridChangeset>()
+
+    private fun slotKey(tabId: String, slot: String? = null): String =
+        if (!slot.isNullOrEmpty()) "$tabId\u0000$slot" else tabId
+
+    @Synchronized
+    fun set(tabId: String, rows: Int, slot: String? = null) {
+        if (tabId.isEmpty()) return
+        val key = slotKey(tabId, slot)
+        if (rows > 0) {
+            counts[key] = rows
+        } else {
+            counts.remove(key)
+            changesets.remove(key)
+        }
+    }
+
+    @Synchronized
+    fun setChangeset(tabId: String, cs: GridChangeset, slot: String? = null) {
+        if (tabId.isEmpty()) return
+        val key = slotKey(tabId, slot)
+        val count = changedRowCount(cs)
+        if (count > 0 && !isEmptyChangeset(cs)) {
+            counts[key] = count
+            changesets[key] = cs
+        } else {
+            counts.remove(key)
+            changesets.remove(key)
+        }
+    }
+
+    @Synchronized
+    fun getChangeset(tabId: String, slot: String? = null): GridChangeset =
+        if (tabId.isEmpty()) EMPTY_CHANGESET else (changesets[slotKey(tabId, slot)] ?: EMPTY_CHANGESET)
+
+    @Synchronized
+    fun get(tabId: String): Int {
+        if (tabId.isEmpty()) return 0
+        val prefix = "$tabId\u0000"
+        var total = 0
+        for ((k, v) in counts) {
+            if (k == tabId || k.startsWith(prefix)) {
+                total += v
+            }
+        }
+        return total
+    }
+
+    @Synchronized
+    fun getSlot(tabId: String, slot: String? = null): Int =
+        counts[slotKey(tabId, slot)] ?: 0
+
+    @Synchronized
+    fun clearTab(tabId: String) {
+        if (tabId.isEmpty()) return
+        val prefix = "$tabId\u0000"
+        val iter = counts.keys.iterator()
+        while (iter.hasNext()) {
+            val k = iter.next()
+            if (k == tabId || k.startsWith(prefix)) iter.remove()
+        }
+        val csIter = changesets.keys.iterator()
+        while (csIter.hasNext()) {
+            val k = csIter.next()
+            if (k == tabId || k.startsWith(prefix)) csIter.remove()
+        }
+    }
+
+    @Synchronized
+    fun clearAll() {
+        counts.clear()
+        changesets.clear()
+    }
+}
+
+fun setUnsavedGridRows(tabId: String, rows: Int, slot: String? = null) =
+    UnsavedGridRowsStore.set(tabId, rows, slot)
+
+fun setUnsavedGridChangeset(tabId: String, cs: GridChangeset, slot: String? = null) =
+    UnsavedGridRowsStore.setChangeset(tabId, cs, slot)
+
+fun unsavedGridChangeset(tabId: String, slot: String? = null): GridChangeset =
+    UnsavedGridRowsStore.getChangeset(tabId, slot)
+
+fun unsavedGridRows(tabId: String): Int =
+    UnsavedGridRowsStore.get(tabId)
+
+fun slotUnsavedRows(tabId: String, slot: String? = null): Int =
+    UnsavedGridRowsStore.getSlot(tabId, slot)
+
+fun clearUnsavedGridRows(tabId: String) =
+    UnsavedGridRowsStore.clearTab(tabId)
+
 data class GridUpdateItem(
     val key: Map<String, DbCellValue>,
     val set: Map<String, DbCellValue>,
+    val original: Map<String, DbCellValue> = emptyMap(),
 )
 
 data class GridChangesPayload(
@@ -293,6 +433,9 @@ data class GridChangesPayload(
 ) {
     val totalOperations: Int
         get() = inserts.size + updates.size + deletes.size
+
+    val hasMissingRowKey: Boolean
+        get() = updates.any { it.key.isEmpty() } || deletes.any { it.isEmpty() }
 }
 
 /**
@@ -323,21 +466,25 @@ fun toGridChanges(
         val list = edits.values.toList()
         if (list.isEmpty()) continue
         val set = LinkedHashMap<String, DbCellValue>()
+        val original = LinkedHashMap<String, DbCellValue>()
         for (e in list) {
             if (e.newVal != DbCellValue.NoField) {
                 set[e.col] = e.newVal
+                if (e.original != DbCellValue.NoField) {
+                    original[e.col] = e.original
+                }
             }
         }
+        if (set.isEmpty()) continue
         val firstKey = list.first().key
         val key = if (firstKey.isNotEmpty()) firstKey else rowKeys[rowId].orEmpty()
-        if (key.isEmpty() || set.isEmpty()) continue
-        updates += GridUpdateItem(key = key, set = set)
+        updates += GridUpdateItem(key = key, set = set, original = original)
     }
 
     val deletes = mutableListOf<Map<String, DbCellValue>>()
     for (rowId in cs.deleted) {
-        val key = rowKeys[rowId]
-        if (!key.isNullOrEmpty()) deletes += key
+        val key = cs.deletedKeys[rowId]?.takeIf { it.isNotEmpty() } ?: rowKeys[rowId].orEmpty()
+        deletes += key
     }
 
     return GridChangesPayload(inserts = inserts, updates = updates, deletes = deletes)
@@ -395,6 +542,7 @@ fun buildChangesetRequestJson(
                     buildJsonObject {
                         put("key", rowMapToWireJson(u.key))
                         put("set", rowMapToWireJson(u.set))
+                        put("original", rowMapToWireJson(u.original))
                     },
                 )
             }
@@ -416,7 +564,7 @@ fun buildChangesetRequestJson(
                     add(
                         buildJsonObject {
                             if (!ref.schema.isNullOrBlank()) put("schema", ref.schema) else put("schema", JsonNull)
-                            put("name", ref.name)
+                            put("table", ref.table)
                         },
                     )
                 }
@@ -495,15 +643,22 @@ fun cellMark(cs: GridChangeset, rowId: String, col: String): CellMark {
 
 data class TableRef(
     val schema: String?,
-    val name: String,
-)
+    val table: String,
+) {
+    val name: String
+        get() = table
+}
 
 data class ChangesetReference(
-    val table: TableRef,
-    val count: Int,
-    val paths: List<String>,
+    val schema: String?,
+    val table: String,
+    val paths: List<List<String>>,
+    val cascadesInDb: Boolean = false,
     val script: String,
-)
+) {
+    val tableRef: TableRef
+        get() = TableRef(schema = schema, table = table)
+}
 
 data class ChangesetPreview(
     val statementCount: Int,
@@ -520,16 +675,15 @@ data class ChangesetApplyResult(
 )
 
 data class ChangesetFailure(
-    val statementIndex: Int,
-    val kind: String, // "insert" | "update" | "delete" | "cascade"
-    val sql: String,
-    val table: TableRef,
+    val statementIndex: Int? = null,
+    val statementCount: Int,
+    val sql: String? = null,
     val affected: Int? = null,
 )
 
 fun parseTableRef(obj: JsonObject?): TableRef = TableRef(
     schema = (obj?.get("schema") as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull,
-    name = (obj?.get("name") as? JsonPrimitive)?.contentOrNull.orEmpty(),
+    table = ((obj?.get("table") ?: obj?.get("name")) as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull.orEmpty(),
 )
 
 fun parseChangesetPreview(obj: JsonObject): ChangesetPreview {
@@ -537,12 +691,23 @@ fun parseChangesetPreview(obj: JsonObject): ChangesetPreview {
     val script = (obj["script"] as? JsonPrimitive)?.contentOrNull.orEmpty()
     val refs = ((obj["references"] as? JsonArray).orEmpty()).mapNotNull { el ->
         val r = el as? JsonObject ?: return@mapNotNull null
-        val tableObj = r["table"] as? JsonObject ?: return@mapNotNull null
-        val paths = ((r["paths"] as? JsonArray).orEmpty()).mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        val tableName = (r["table"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull
+            ?.takeIf { it.isNotEmpty() }
+            ?: return@mapNotNull null
+        val schema = (r["schema"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull
+        val paths = ((r["paths"] as? JsonArray).orEmpty()).mapNotNull { pathEl ->
+            when (pathEl) {
+                is JsonArray -> pathEl.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.takeIf { it.isNotEmpty() }
+                is JsonPrimitive -> pathEl.contentOrNull?.let { listOf(it) }
+                else -> null
+            }
+        }
+        val cascadesInDb = (r["cascadesInDb"] as? JsonPrimitive)?.booleanOrNull ?: false
         ChangesetReference(
-            table = parseTableRef(tableObj),
-            count = (r["count"] as? JsonPrimitive)?.intOrNull ?: 0,
+            schema = schema,
+            table = tableName,
             paths = paths,
+            cascadesInDb = cascadesInDb,
             script = (r["script"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
         )
     }
@@ -559,25 +724,26 @@ fun parseChangesetApplyResult(obj: JsonObject): ChangesetApplyResult = Changeset
 
 fun parseChangesetFailure(el: JsonElement?): ChangesetFailure? {
     val obj = el as? JsonObject ?: return null
-    val sql = (obj["sql"] as? JsonPrimitive)?.contentOrNull ?: return null
+    val statementCount = (obj["statementCount"] as? JsonPrimitive)?.intOrNull ?: return null
     return ChangesetFailure(
-        statementIndex = (obj["statementIndex"] as? JsonPrimitive)?.intOrNull ?: 0,
-        kind = (obj["kind"] as? JsonPrimitive)?.contentOrNull ?: "update",
-        sql = sql,
-        table = parseTableRef(obj["table"] as? JsonObject),
+        statementIndex = (obj["statementIndex"] as? JsonPrimitive)?.intOrNull,
+        statementCount = statementCount,
+        sql = (obj["sql"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull,
         affected = (obj["affected"] as? JsonPrimitive)?.intOrNull,
     )
 }
 
 /** Stable key for a referenced table in the Save dialog's checked set (`refKey` in `grid-save-model.ts`). */
-fun refKey(ref: TableRef): String = "${ref.schema.orEmpty()}.${ref.name}"
+fun refKey(ref: TableRef): String = "${ref.schema.orEmpty()}.${ref.table}"
+
+fun refKey(ref: ChangesetReference): String = "${ref.schema.orEmpty()}.${ref.table}"
 
 /**
  * Tables to pass as `cascade` in `ChangesetRequest`, in the server's deepest-first order
  * (`cascadeTables` in `grid-save-model.ts`).
  */
 fun cascadeTables(references: List<ChangesetReference>, checked: Set<String>): List<TableRef> =
-    references.filter { refKey(it.table) in checked }.map { it.table }
+    references.filter { refKey(it) in checked }.map { it.tableRef }
 
 /**
  * SQL shown in the Save dialog and opened by "Open script" (`saveScript` in `grid-save-model.ts`):
@@ -585,31 +751,26 @@ fun cascadeTables(references: List<ChangesetReference>, checked: Set<String>): L
  */
 fun saveScript(preview: ChangesetPreview, checked: Set<String>): String {
     val cascade = preview.references
-        .filter { refKey(it.table) in checked && it.script.isNotEmpty() }
+        .filter { refKey(it) in checked && it.script.isNotEmpty() }
         .map { it.script }
     return (cascade + preview.script).filter { it.isNotEmpty() }.joinToString("\n")
 }
 
-/** `"orders (3)"` or `"sales.orders (3)"` (`refLabel` in `grid-save-model.ts`). */
+/** A referencing table as the list names it: with its schema only when that is not the saved table's (`refLabel` in `grid-save-model.ts`). */
 fun refLabel(ref: ChangesetReference, defaultSchema: String? = "public"): String {
-    val showSchema = !ref.table.schema.isNullOrBlank() && ref.table.schema != defaultSchema
-    val name = if (showSchema) "${ref.table.schema}.${ref.table.name}" else ref.table.name
-    return "$name (${NumberFormat.getIntegerInstance(Locale.US).format(ref.count)})"
+    val showSchema = !ref.schema.isNullOrBlank() && ref.schema != defaultSchema
+    return if (showSchema) "${ref.schema}.${ref.table}" else ref.table
 }
 
-/** `"orders.user_id -> users.id"` (`refPaths` in `grid-save-model.ts`). */
-fun refPaths(ref: ChangesetReference): String = ref.paths.joinToString("\n")
+/** How the table reaches the rows deleted: `order_items → orders → users` (`refPaths` in `grid-save-model.ts`). */
+fun refPaths(ref: ChangesetReference): List<String> = ref.paths.map { it.joinToString(" → ") }
 
 /**
  * Toast text after a save finishes (`savedText` in `grid-save-model.ts`).
  */
 fun savedText(result: ChangesetApplyResult): String {
-    val parts = mutableListOf<String>()
-    if (result.inserted > 0) parts += "${result.inserted} inserted"
-    if (result.updated > 0) parts += "${result.updated} updated"
-    if (result.deleted > 0) parts += "${result.deleted} deleted"
-    if (result.cascaded > 0) parts += "${result.cascaded} cascaded"
-    return if (parts.isNotEmpty()) "Saved (${parts.joinToString(", ")})" else "Saved"
+    val n = result.inserted + result.updated + result.deleted + result.cascaded
+    return "$n change${if (n == 1) "" else "s"} saved in one transaction · ${result.executionTimeMs} ms"
 }
 
 /**
@@ -721,31 +882,51 @@ sealed interface FormParse {
     data object Invalid : FormParse
 }
 
-private val FORM_NUMBER_REGEX = Regex("""^-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$""", RegexOption.IGNORE_CASE)
-private val DIGITS_ONLY_REGEX = Regex("""\D""")
+private val FORM_NUMBER_REGEX = Regex("""^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$""", RegexOption.IGNORE_CASE)
+private val FORM_INTEGER_REGEX = Regex("""^[+-]?\d+$""")
+private val LEADING_SIGN_REGEX = Regex("""^[+-]""")
+private val EXPONENT_SUFFIX_REGEX = Regex("""e.*$""", RegexOption.IGNORE_CASE)
+private const val MAX_SAFE_JS_INTEGER = 9_007_199_254_740_991L
+private const val EXACT_SIGNIFICANT_DIGITS = 15
+
+private fun keepsEveryDigit(trimmed: String): Boolean {
+    if (FORM_INTEGER_REGEX.matches(trimmed)) {
+        val asLong = trimmed.toLongOrNull() ?: return false
+        return kotlin.math.abs(asLong) <= MAX_SAFE_JS_INTEGER
+    }
+    val mantissa = trimmed
+        .replace(LEADING_SIGN_REGEX, "")
+        .replace(EXPONENT_SUFFIX_REGEX, "")
+        .replace(".", "")
+        .trimStart('0')
+        .trimEnd('0')
+    return mantissa.length <= EXACT_SIGNIFICANT_DIGITS
+}
 
 /**
  * Parse text typed into a Form View or inline cell editor (`parseFormText` in `form-view-model.ts`).
- * Numbers with > 15 significant digits stay strings ([DbCellValue.Text]) so 64-bit bigints never lose precision.
+ * - Empty input (`""`) produces [DbCellValue.Null] for every kind (`form-view-model.ts:229`).
+ * - Booleans accept `true`/`t`/`1` and `false`/`f`/`0`.
+ * - Numbers with > 15 significant digits (or outside JS safe integer range) stay strings ([DbCellValue.Text]) so 64-bit bigints never lose precision.
  */
 fun parseFormText(text: String, kind: FormFieldKind): FormParse {
+    if (text.isEmpty()) return FormParse.Valid(DbCellValue.Null)
     if (kind == FormFieldKind.BINARY) return FormParse.Invalid
     if (kind == FormFieldKind.BOOLEAN) {
         return when (text.trim().lowercase(Locale.US)) {
-            "true", "1" -> FormParse.Valid(DbCellValue.Bool(true))
-            "false", "0" -> FormParse.Valid(DbCellValue.Bool(false))
+            "true", "t", "1" -> FormParse.Valid(DbCellValue.Bool(true))
+            "false", "f", "0" -> FormParse.Valid(DbCellValue.Bool(false))
             else -> FormParse.Invalid
         }
     }
     if (kind == FormFieldKind.NUMBER) {
         val trimmed = text.trim()
-        if (trimmed.isEmpty() || !FORM_NUMBER_REGEX.matches(trimmed)) return FormParse.Invalid
-        val digits = trimmed.replace(DIGITS_ONLY_REGEX, "").length
         val n = trimmed.toDoubleOrNull()
-        val value = if (digits > 15 || n == null || !n.isFinite()) {
-            DbCellValue.Text(trimmed)
-        } else {
+        if (!FORM_NUMBER_REGEX.matches(trimmed) || n == null || !n.isFinite()) return FormParse.Invalid
+        val value = if (keepsEveryDigit(trimmed)) {
             DbCellValue.Num(rawText = trimmed, asDouble = n)
+        } else {
+            DbCellValue.Text(trimmed)
         }
         return FormParse.Valid(value)
     }

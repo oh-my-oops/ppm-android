@@ -63,6 +63,7 @@ import com.hienlh.ppm.app.ui.SettingsButton
 import com.hienlh.ppm.app.ui.SettingsTextInput
 import com.hienlh.ppm.client.DbDriverMissingException
 import com.hienlh.ppm.client.DbLoginCoordinator
+import com.hienlh.ppm.client.DbLoginFailedException
 import com.hienlh.ppm.client.DbLoginPromptInfo
 import com.hienlh.ppm.client.dbChangesetApply
 import com.hienlh.ppm.client.dbChangesetPreview
@@ -145,6 +146,7 @@ import com.hienlh.ppm.state.database.savedFileOf
 import com.hienlh.ppm.state.database.savedQueryTab
 import com.hienlh.ppm.state.database.scriptRun
 import com.hienlh.ppm.state.database.selectionOrStatementRun
+import com.hienlh.ppm.state.database.setUnsavedGridRows
 import com.hienlh.ppm.state.database.shownResultTab
 import com.hienlh.ppm.state.database.splitSqlStatementsWithLines
 import com.hienlh.ppm.state.database.startQueryRun
@@ -157,9 +159,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -213,11 +217,13 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
     var activeLoginPrompt by remember { mutableStateOf<DbLoginPromptInfo?>(null) }
     var activeLoginDeferred by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     var loginError by remember { mutableStateOf<String?>(null) }
+    var loginErrorDetails by remember { mutableStateOf<String?>(null) }
 
     val loginCoordinator = remember {
         DbLoginCoordinator { prompt ->
             val def = CompletableDeferred<Boolean>()
             loginError = null
+            loginErrorDetails = null
             activeLoginPrompt = prompt
             activeLoginDeferred = def
             def.await()
@@ -268,7 +274,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                     loginCoordinator = loginCoordinator,
                 )
             }.getOrNull()?.let { objsJson ->
-                objectList = parseDbObjectList(objsJson)
+                objectList = withContext(Dispatchers.Default) { parseDbObjectList(objsJson) }
             }
         }
     }
@@ -279,6 +285,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
             DbLoginDialogContent(
                 prompt = prompt,
                 errorMessage = loginError,
+                errorDetails = loginErrorDetails,
                 onSubmit = { user, pass ->
                     val client = api ?: return@DbLoginDialogContent
                     val cid = prompt.connectionId ?: return@DbLoginDialogContent
@@ -290,6 +297,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                             activeLoginDeferred?.complete(true)
                         }.onFailure { err ->
                             loginError = err.message ?: "Login failed"
+                            loginErrorDetails = (err as? DbLoginFailedException)?.details?.takeIf { it.isNotBlank() }
                         }
                     }
                 },
@@ -363,7 +371,12 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                     loginCoordinator = loginCoordinator,
                     onCallCreated = onCall,
                     onEventLine = { line ->
-                        parseQueryScriptEventJson(line)?.let { ev -> onEvent(ev) }
+                        val ev = withContext(Dispatchers.Default) { parseQueryScriptEventJson(line) }
+                        if (ev != null) {
+                            withContext(Dispatchers.Main.immediate) {
+                                onEvent(ev)
+                            }
+                        }
                     },
                 )
             },
@@ -397,7 +410,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                         loginCoordinator = loginCoordinator,
                     )
                 }.getOrNull() ?: return@DatabaseQueryTabContent emptyList()
-                val parsed = parseGridColumnsSchema(arr)
+                val parsed = withContext(Dispatchers.Default) { parseGridColumnsSchema(arr) }
                 tableSchemasMap[key] = parsed
                 tableSchemasMap[table] = parsed
                 parsed
@@ -413,7 +426,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                     project = fileProject,
                     loginCoordinator = loginCoordinator,
                 )
-                parseChangesetPreview(obj)
+                withContext(Dispatchers.Default) { parseChangesetPreview(obj) }
             },
             onApplyResultChangeset = { table, schema, payload, cascade ->
                 val client = api ?: error("Not connected")
@@ -426,7 +439,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                     project = fileProject,
                     loginCoordinator = loginCoordinator,
                 )
-                parseChangesetApplyResult(obj)
+                withContext(Dispatchers.Default) { parseChangesetApplyResult(obj) }
             },
             onLoadHistory = { search, offset ->
                 val client = api ?: return@DatabaseQueryTabContent QueryHistoryResponse(emptyList())
@@ -440,7 +453,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                         loginCoordinator = loginCoordinator,
                     )
                 }.getOrNull() ?: return@DatabaseQueryTabContent QueryHistoryResponse(emptyList())
-                parseQueryHistoryResponse(json)
+                withContext(Dispatchers.Default) { parseQueryHistoryResponse(json) }
             },
             onListDirectoryEntries = { dirPath ->
                 val client = api ?: return@DatabaseQueryTabContent emptyList()
@@ -483,6 +496,10 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                 scope.launch {
                     runCatching { client.dbInstallMissingDriver(driverId) }
                 }
+            },
+            onUnsavedResultRowsChanged = { count ->
+                setUnsavedGridRows(tab.id, count, slot = "query-results")
+                model.patchTabMetadata(tab.id, "unsavedGridRows" to if (count > 0) JsonPrimitive(count) else null)
             },
         )
     }
@@ -543,6 +560,7 @@ internal fun DatabaseQueryTabContent(
     onSaveSqlFile: suspend (SavedQueryFile, String) -> Unit = { _, _ -> },
     onOpenNewQueryTab: (String) -> Unit = {},
     onInstallMissingDriver: (String) -> Unit = {},
+    onUnsavedResultRowsChanged: (Int) -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -636,7 +654,11 @@ internal fun DatabaseQueryTabContent(
     // Result editability & dirty tracking per result tab
     val resultTabSchemas = remember { mutableStateMapOf<String, List<GridColumnSchema>>() }
     val dirtyResultTabs = remember { mutableStateMapOf<String, Boolean>() }
-    val hasUnsavedResultEdits = dirtyResultTabs.values.any { it }
+    val unsavedResultTabCount = dirtyResultTabs.values.count { it }
+    val hasUnsavedResultEdits = unsavedResultTabCount > 0
+    LaunchedEffect(unsavedResultTabCount) {
+        onUnsavedResultRowsChanged(unsavedResultTabCount)
+    }
 
     var pendingRunConfirmationSpec by remember { mutableStateOf<QueryRunSpec?>(null) }
     var showWriteOnceDialog by remember { mutableStateOf(false) }

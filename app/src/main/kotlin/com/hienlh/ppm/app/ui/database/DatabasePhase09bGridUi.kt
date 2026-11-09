@@ -66,6 +66,7 @@ import com.hienlh.ppm.app.ui.SettingsButton
 import com.hienlh.ppm.app.ui.SettingsTextInput
 import com.hienlh.ppm.client.DbDriverMissingException
 import com.hienlh.ppm.client.DbLoginCoordinator
+import com.hienlh.ppm.client.DbLoginFailedException
 import com.hienlh.ppm.client.DbLoginPromptInfo
 import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.client.dbChangesetApply
@@ -156,6 +157,8 @@ import com.hienlh.ppm.state.database.changedRowCount
 import com.hienlh.ppm.state.database.classifyColumnType
 import com.hienlh.ppm.state.database.cloneValues
 import com.hienlh.ppm.state.database.collectCellData
+import com.hienlh.ppm.state.database.EMPTY_CHANGESET
+import com.hienlh.ppm.state.database.changedRowCount
 import com.hienlh.ppm.state.database.columnFilterState
 import com.hienlh.ppm.state.database.columnNameMatches
 import com.hienlh.ppm.state.database.computeRowCountView
@@ -198,14 +201,18 @@ import com.hienlh.ppm.state.database.refusedFilters
 import com.hienlh.ppm.state.database.reloadKeepLoadedLimit
 import com.hienlh.ppm.state.database.revertRows
 import com.hienlh.ppm.state.database.rowDocumentText
+import com.hienlh.ppm.state.database.rowIdForRowKey
 import com.hienlh.ppm.state.database.rowMarkerWidthPx
 import com.hienlh.ppm.state.database.savedText
 import com.hienlh.ppm.state.database.selectedBlock
 import com.hienlh.ppm.state.database.selectedRowIndices
 import com.hienlh.ppm.state.database.selectionHasCell
+import com.hienlh.ppm.state.database.setUnsavedGridChangeset
+import com.hienlh.ppm.state.database.setUnsavedGridRows
 import com.hienlh.ppm.state.database.shouldBypassSaveDialog
 import com.hienlh.ppm.state.database.sortInfoForColumn
 import com.hienlh.ppm.state.database.tableReferences
+import com.hienlh.ppm.state.database.unsavedGridChangeset
 import com.hienlh.ppm.state.database.titleIconFor
 import com.hienlh.ppm.state.database.toFunnelKind
 import com.hienlh.ppm.state.database.toGridChanges
@@ -216,6 +223,7 @@ import com.hienlh.ppm.state.database.withMultiFilter
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -984,6 +992,9 @@ fun DatabaseTableTabBody(
     var missingDriverId by remember { mutableStateOf<String?>(null) }
     var readonlyEnabled by remember { mutableStateOf(meta["readonly"]?.bool ?: true) }
     var autoRefreshSec by remember { mutableIntStateOf(0) }
+    val initialChangeset = remember(tab.id) {
+        unsavedGridChangeset(tab.id)
+    }
 
     val schemaMapForBody = remember(schemaList) { schemaList.associateBy { it.name } }
     val columnNames = pageData?.columnKeys.orEmpty()
@@ -1006,10 +1017,12 @@ fun DatabaseTableTabBody(
     var activeLoginPrompt by remember { mutableStateOf<DbLoginPromptInfo?>(null) }
     var activeLoginDeferred by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     var loginError by remember { mutableStateOf<String?>(null) }
+    var loginErrorDetails by remember { mutableStateOf<String?>(null) }
     val loginCoordinator = remember {
         DbLoginCoordinator { prompt ->
             val deferred = CompletableDeferred<Boolean>()
             loginError = null
+            loginErrorDetails = null
             activeLoginDeferred = deferred
             activeLoginPrompt = prompt
             deferred.await()
@@ -1072,16 +1085,19 @@ fun DatabaseTableTabBody(
             } else {
                 null
             }
-            Triple(gridObj, colsArr, structObj)
-        }.onSuccess { (gridObj, colsArr, structObj) ->
+            withContext(Dispatchers.Default) {
+                val parsed = parseGridResponse(gridObj, countKey = countKey)
+                val parsedCols = colsArr?.let(::parseGridColumnsSchema)
+                Triple(parsed, parsedCols, structObj)
+            }
+        }.onSuccess { (parsed, parsedCols, structObj) ->
             if (seq != fetchSeq) return
             missingDriverId = null
             errorMessage = null
             serverFilterErrors = emptyMap()
-            val parsed = parseGridResponse(gridObj, countKey = countKey)
             pageData = parsed
-            val nextCols = if (colsArr != null) parseGridColumnsSchema(colsArr) else schemaList
-            if (colsArr != null) schemaList = nextCols
+            val nextCols = parsedCols ?: schemaList
+            if (parsedCols != null) schemaList = nextCols
             if (structObj != null) structureJson = structObj
             if (sort.isEmpty() && !hasFilters(filters) && limit == GRID_PAGE_SIZE && nextCols.isNotEmpty()) {
                 TableFirstPageCache.write(cacheDbKey, schemaName, tableName, parsed, nextCols)
@@ -1271,6 +1287,7 @@ fun DatabaseTableTabBody(
             DbLoginDialogContent(
                 prompt = prompt,
                 errorMessage = loginError,
+                errorDetails = loginErrorDetails,
                 onSubmit = { user, pass ->
                     val client = api ?: return@DbLoginDialogContent
                     val cid = prompt.connectionId ?: return@DbLoginDialogContent
@@ -1282,6 +1299,7 @@ fun DatabaseTableTabBody(
                             activeLoginDeferred?.complete(true)
                         }.onFailure { err ->
                             loginError = err.message ?: "Login failed"
+                            loginErrorDetails = (err as? DbLoginFailedException)?.details?.takeIf { it.isNotBlank() }
                         }
                     }
                 },
@@ -1361,12 +1379,14 @@ fun DatabaseTableTabBody(
                         )
                     }.fold(
                         onSuccess = { obj ->
-                            val valsArr = obj["values"] as? JsonArray
-                            val list = valsArr?.map { el -> parseDbCellValue(el) }.orEmpty()
-                            LookupValueListResult(
-                                values = list,
-                                hasMore = obj["hasMore"].bool == true,
-                            )
+                            withContext(Dispatchers.Default) {
+                                val valsArr = obj["values"] as? JsonArray
+                                val list = valsArr?.map { el -> parseDbCellValue(el) }.orEmpty()
+                                LookupValueListResult(
+                                    values = list,
+                                    hasMore = obj["hasMore"].bool == true,
+                                )
+                            }
                         },
                         onFailure = { err ->
                             LookupValueListResult(error = err.message ?: "Failed to load values")
@@ -1389,7 +1409,7 @@ fun DatabaseTableTabBody(
                             project = project,
                             loginCoordinator = loginCoordinator,
                         )
-                        val fkSchemaCols = parseGridColumnsSchema(fkSchemaArr)
+                        val fkSchemaCols = withContext(Dispatchers.Default) { parseGridColumnsSchema(fkSchemaArr) }
                         val fkFilterableCols = filterableColumns(fkSchemaCols, dbType)
                         val descCol = descriptionColumn(fkFilterableCols, fkCol, chosenDesc)
                         val searchCols = fkFilterableCols.filter { it.name == fkCol || it.name == descCol }
@@ -1407,8 +1427,10 @@ fun DatabaseTableTabBody(
                             project = project,
                             loginCoordinator = loginCoordinator,
                         )
-                        val parsed = parseGridResponse(gridObj, countKey = "$fkTable:${fkSchema.orEmpty()}")
-                        val rowsList = parsed.rows.indices.map { idx -> parsed.rowAsMap(idx) }
+                        val (parsed, rowsList) = withContext(Dispatchers.Default) {
+                            val p = parseGridResponse(gridObj, countKey = "$fkTable:${fkSchema.orEmpty()}")
+                            p to p.rows.indices.map { idx -> p.rowAsMap(idx) }
+                        }
                         LookupTableRowsResult(
                             columns = fkFilterableCols,
                             rows = rowsList,
@@ -1436,7 +1458,7 @@ fun DatabaseTableTabBody(
                         limit = GRID_PAGE_SIZE,
                     )
                     runCatching {
-                        client.dbGridPage(
+                        val moreObj = client.dbGridPage(
                             connectionId = connId,
                             body = reqJson,
                             database = database,
@@ -1444,9 +1466,11 @@ fun DatabaseTableTabBody(
                             project = project,
                             loginCoordinator = loginCoordinator,
                         )
-                    }.onSuccess { moreObj ->
+                        withContext(Dispatchers.Default) {
+                            parseGridResponse(moreObj, countKey = cur.countKey)
+                        }
+                    }.onSuccess { nextPart ->
                         if (seq == fetchSeq) {
-                            val nextPart = parseGridResponse(moreObj, countKey = cur.countKey)
                             val merged = cur.copy(
                                 rows = cur.rows + nextPart.rows,
                                 hasMore = nextPart.hasMore,
@@ -1480,8 +1504,8 @@ fun DatabaseTableTabBody(
                             offset = cur.rows.size,
                             limit = FETCH_ALL_CHUNK,
                         )
-                        val chunkObj = runCatching {
-                            client.dbGridPage(
+                        val part = runCatching {
+                            val chunkObj = client.dbGridPage(
                                 connectionId = connId,
                                 body = reqJson,
                                 database = database,
@@ -1489,9 +1513,11 @@ fun DatabaseTableTabBody(
                                 project = project,
                                 loginCoordinator = loginCoordinator,
                             )
+                            withContext(Dispatchers.Default) {
+                                parseGridResponse(chunkObj, countKey = cur.countKey)
+                            }
                         }.getOrNull() ?: break
                         if (seq != fetchSeq) break
-                        val part = parseGridResponse(chunkObj, countKey = cur.countKey)
                         cur = cur.copy(
                             rows = cur.rows + part.rows,
                             hasMore = part.hasMore,
@@ -1623,7 +1649,18 @@ fun DatabaseTableTabBody(
                         if (!project.isNullOrBlank()) put("project", project)
                         put("dbType", dbType)
                         put("sql", sql)
+                        put("currentSql", sql)
+                        put("openedSql", sql)
                     },
+                )
+            },
+            initialChangeset = initialChangeset,
+            onChangesetChanged = { cs ->
+                val count = changedRowCount(cs)
+                setUnsavedGridChangeset(tab.id, cs)
+                model.patchTabMetadata(
+                    tab.id,
+                    "unsavedGridRows" to if (count > 0) JsonPrimitive(count) else null,
                 )
             },
             onOpenReferencedTableTab = { refTable, refSchema, refFilters ->
@@ -1726,7 +1763,9 @@ internal fun DatabaseTableTabContent(
     onCountExactly: () -> Unit = {},
     onStartQuickExport: (String, List<String>) -> Unit = { _, _ -> },
     onInstallMissingDriver: (String) -> Unit = {},
+    initialChangeset: GridChangeset = EMPTY_CHANGESET,
     onChangesetDirtyChanged: (Boolean) -> Unit = {},
+    onChangesetChanged: (GridChangeset) -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -1784,10 +1823,11 @@ internal fun DatabaseTableTabContent(
     var phoneSheetSubmenu by remember { mutableStateOf<String?>(null) }
 
     // Phase 09d Changeset & Editing State
-    var history by remember { mutableStateOf(ChangesetHistory()) }
+    var history by remember(initialChangeset) { mutableStateOf(ChangesetHistory(present = initialChangeset)) }
     val changeset = history.present
     LaunchedEffect(changeset) {
         onChangesetDirtyChanged(!isEmptyChangeset(changeset))
+        onChangesetChanged(changeset)
     }
     var newRowSeq by remember { mutableIntStateOf(0) }
     var inlineEditTarget by remember { mutableStateOf<Pair<Int, Int>?>(null) } // (visColIdx, rowIdx)
@@ -1824,16 +1864,35 @@ internal fun DatabaseTableTabContent(
             schemaList.filter { it.pk }.map { it.name }
         }
     }
-    val hasRowKey = keyCols.isNotEmpty()
+    val hasRowKey = keyCols.isNotEmpty() && keyCols.all { it in columns }
     val canEditTable = !readonlyEnabled && hasRowKey
 
-    // Combined rows: stored rows (with pending cell edits overlaid) + inserted new rows
-    val rowIds = remember(storedRows.size, changeset.inserted) {
-        List(storedRows.size) { "row_$it" } + changeset.inserted
+    fun rowKeyMapFor(rowIndex: Int): Map<String, DbCellValue> {
+        if (rowIndex !in storedRows.indices) return emptyMap()
+        val stored = storedRows[rowIndex]
+        val out = LinkedHashMap<String, DbCellValue>()
+        for (kCol in keyCols) {
+            val cIdx = columns.indexOf(kCol)
+            if (cIdx >= 0) {
+                out[kCol] = stored.getOrElse(cIdx) { DbCellValue.Null }
+            }
+        }
+        return out
     }
-    val rows = remember(storedRows, columns, changeset) {
+
+    val storedRowIds = remember(storedRows, columns, keyCols) {
+        List(storedRows.size) { rIdx ->
+            rowIdForRowKey(rowKeyMapFor(rIdx), keyCols, rIdx)
+        }
+    }
+
+    // Combined rows: stored rows (with pending cell edits overlaid) + inserted new rows
+    val rowIds = remember(storedRowIds, changeset.inserted) {
+        storedRowIds + changeset.inserted
+    }
+    val rows = remember(storedRows, storedRowIds, columns, changeset) {
         val modifiedStored = storedRows.mapIndexed { rIdx, baseRow ->
-            val rId = "row_$rIdx"
+            val rId = storedRowIds.getOrElse(rIdx) { "row_$rIdx" }
             val rowEdits = changeset.cells[rId]
             if (rowEdits.isNullOrEmpty()) baseRow
             else columns.mapIndexed { cIdx, colName ->
@@ -1876,23 +1935,13 @@ internal fun DatabaseTableTabContent(
         return columns.mapIndexed { idx, col -> col to (r.getOrElse(idx) { DbCellValue.Null }) }.toMap()
     }
 
-    fun rowKeyMapFor(rowIndex: Int): Map<String, DbCellValue> {
-        if (rowIndex !in storedRows.indices) return emptyMap()
-        val stored = storedRows[rowIndex]
-        val out = LinkedHashMap<String, DbCellValue>()
-        for (kCol in keyCols) {
-            val cIdx = columns.indexOf(kCol)
-            if (cIdx >= 0) {
-                out[kCol] = stored.getOrElse(cIdx) { DbCellValue.Null }
-            }
-        }
-        return out
-    }
-
-    val allRowKeysMap = remember(storedRows, columns, keyCols) {
+    val allRowKeysMap = remember(storedRows, storedRowIds, columns, keyCols) {
         val map = LinkedHashMap<String, Map<String, DbCellValue>>()
         for (rIdx in storedRows.indices) {
-            map["row_$rIdx"] = rowKeyMapFor(rIdx)
+            val keyMap = rowKeyMapFor(rIdx)
+            val rId = storedRowIds.getOrElse(rIdx) { "row_$rIdx" }
+            map[rId] = keyMap
+            map["row_$rIdx"] = keyMap
         }
         map
     }
@@ -1957,7 +2006,8 @@ internal fun DatabaseTableTabContent(
             listOfNotNull(selection.activeCell?.second)
         }
         if (targetRows.isEmpty()) return
-        pushChangeset(deleteRows(changeset, targetRows.map { rowIdAt(it) }))
+        val keysByRowId = targetRows.associate { rIdx -> rowIdAt(rIdx) to rowKeyMapFor(rIdx) }
+        pushChangeset(deleteRows(changeset, targetRows.map { rowIdAt(it) }, keysByRowId))
     }
 
     fun revertSelectedRows() {
@@ -1970,6 +2020,10 @@ internal fun DatabaseTableTabContent(
 
     fun triggerSaveFlow() {
         val payload = toGridChanges(changeset, allRowKeysMap)
+        if (payload.hasMissingRowKey) {
+            saveDialogError = "Cannot save: missing primary key for one or more rows"
+            return
+        }
         if (payload.totalOperations == 0) {
             saveToastMessage = "No changes to save"
             return
@@ -2521,7 +2575,7 @@ internal fun DatabaseTableTabContent(
                         onClick = { onInstallMissingDriver(missingDriverId) },
                     )
                 }
-            } else if (errorMessage != null) {
+            } else if (errorMessage != null || (saveDialogError != null && activeSavePreview == null)) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -2530,7 +2584,7 @@ internal fun DatabaseTableTabContent(
                         .testTag("db-grid-error-banner"),
                 ) {
                     BasicText(
-                        errorMessage,
+                        errorMessage ?: saveDialogError.orEmpty(),
                         style = ppmText(11f, lineHeight = 15f).copy(color = tokens.error.color),
                     )
                 }
@@ -2566,6 +2620,10 @@ internal fun DatabaseTableTabContent(
                         dontAskSave = nextDontAsk
                         prefs.edit().putBoolean(SAVE_DONT_ASK_KEY, nextDontAsk).apply()
                         val payload = toGridChanges(changeset, allRowKeysMap)
+                        if (payload.hasMissingRowKey) {
+                            saveDialogError = "Cannot save: missing primary key for one or more rows"
+                            return@GridSaveDialog
+                        }
                         savingChanges = true
                         saveDialogError = null
                         saveConflictFailure = null
@@ -3340,7 +3398,14 @@ internal fun DatabaseTableTabContent(
                                 phoneFormRowIndex = nextIdx.coerceIn(0, (rows.size - 1).coerceAtLeast(0))
                             },
                             onDeleteRow = {
-                                pushChangeset(deleteRows(changeset, listOf(rowIdAt(activePhoneRow))))
+                                val rId = rowIdAt(activePhoneRow)
+                                pushChangeset(
+                                    deleteRows(
+                                        changeset,
+                                        listOf(rId),
+                                        mapOf(rId to rowKeyMapFor(activePhoneRow)),
+                                    ),
+                                )
                                 phoneFormRowIndex = null
                             },
                             onRevertRow = {

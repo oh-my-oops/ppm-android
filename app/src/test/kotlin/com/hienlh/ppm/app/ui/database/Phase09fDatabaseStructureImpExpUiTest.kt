@@ -13,14 +13,12 @@ import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
-import com.hienlh.ppm.state.database.DbDependency
 import com.hienlh.ppm.state.database.DbForeignKey
 import com.hienlh.ppm.state.database.DbIndex
 import com.hienlh.ppm.state.database.DbIndexKey
 import com.hienlh.ppm.state.database.DbObjectItem
 import com.hienlh.ppm.state.database.DbPrimaryKey
 import com.hienlh.ppm.state.database.DbStructureColumn
-import com.hienlh.ppm.state.database.DbStructureObjectRef
 import com.hienlh.ppm.state.database.DbTableStructure
 import com.hienlh.ppm.state.database.DbUniqueConstraint
 import com.hienlh.ppm.state.database.ImpExpDatabase
@@ -53,16 +51,14 @@ class Phase09fDatabaseStructureImpExpUiTest {
     val rules: RuleChain = withComposeActivity(composeRule)
 
     private val sampleStructure = DbTableStructure(
-        dialect = "mysql",
-        database = "shop",
         schema = null,
-        table = "employees",
+        name = "employees",
         kind = "table",
         comment = "Staff directory",
         engine = "InnoDB",
         columns = listOf(
-            DbStructureColumn(ordinal = 1, name = "id", type = "int unsigned", nullable = false, autoIncrement = true),
-            DbStructureColumn(ordinal = 2, name = "email", type = "varchar(255)", nullable = false),
+            DbStructureColumn(name = "id", type = "int unsigned", nullable = false, autoIncrement = true),
+            DbStructureColumn(name = "email", type = "varchar(255)", nullable = false),
         ),
         primaryKey = DbPrimaryKey(name = "PRIMARY", columns = listOf("id")),
         indexes = listOf(
@@ -70,8 +66,8 @@ class Phase09fDatabaseStructureImpExpUiTest {
                 name = "idx_email",
                 unique = false,
                 primary = false,
-                type = "BTREE",
-                keys = listOf(DbIndexKey(column = "email", order = "ASC")),
+                method = "BTREE",
+                keys = listOf(DbIndexKey(column = "email", descending = false)),
             ),
         ),
         uniques = listOf(
@@ -83,17 +79,11 @@ class Phase09fDatabaseStructureImpExpUiTest {
                 schema = null,
                 table = "employees",
                 columns = listOf("id"),
-                referencedSchema = null,
-                referencedTable = "employees",
-                referencedColumns = listOf("id"),
+                refSchema = null,
+                refTable = "employees",
+                refColumns = listOf("id"),
                 onUpdate = "CASCADE",
                 onDelete = "RESTRICT",
-            ),
-        ),
-        dependencies = listOf(
-            DbDependency(
-                direction = "usedBy",
-                `object` = DbStructureObjectRef(schema = null, name = "active_employees_view", kind = "view"),
             ),
         ),
     )
@@ -118,14 +108,13 @@ class Phase09fDatabaseStructureImpExpUiTest {
                     onOpenDataTab = { tbl, _ -> openedDataTable = tbl },
                     onPreviewChange = {
                         StructurePreview(
-                            dialect = "mysql",
-                            transactionalDdl = false,
-                            recreate = true,
-                            statements = listOf(
-                                StructureStatement("ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2)", recreatesTable = true),
-                            ),
                             sql = "ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2);",
+                            statements = listOf(
+                                StructureStatement("ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2)"),
+                            ),
+                            recreate = true,
                             warnings = listOf("Recreates table employees"),
+                            transactional = false,
                         )
                     },
                     onApplyChange = { _, sql, _ ->
@@ -134,21 +123,19 @@ class Phase09fDatabaseStructureImpExpUiTest {
                         if (applyAttempt == 1) {
                             throw PpmError.Server(
                                 status = 409,
-                                serverMessage = "Conflict",
+                                serverMessage = "Structure changed since preview",
                                 data = Json.parseToJsonElement(
                                     """
                                     {
-                                      "error": "Structure changed since preview",
-                                      "preview": {
-                                        "dialect": "mysql",
-                                        "transactionalDdl": false,
-                                        "recreate": false,
-                                        "statements": [
-                                          { "sql": "ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2) NOT NULL", "recreatesTable": false }
-                                        ],
-                                        "sql": "ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2) NOT NULL;",
-                                        "warnings": []
-                                      }
+                                      "sql": "ALTER TABLE `employees` COMMENT = 'Staff';\nALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2) NOT NULL;\nCREATE INDEX `idx_sal` ON `employees`(`salary`);",
+                                      "statements": [
+                                        { "sql": "ALTER TABLE `employees` COMMENT = 'Staff'" },
+                                        { "sql": "ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2) NOT NULL" },
+                                        { "sql": "CREATE INDEX `idx_sal` ON `employees`(`salary`)" }
+                                      ],
+                                      "recreate": false,
+                                      "warnings": [],
+                                      "transactional": false
                                     }
                                     """.trimIndent(),
                                 ),
@@ -156,19 +143,14 @@ class Phase09fDatabaseStructureImpExpUiTest {
                         } else {
                             throw PpmError.Server(
                                 status = 400,
-                                serverMessage = "DDL failed",
+                                serverMessage = "Duplicate column name 'salary'",
                                 data = Json.parseToJsonElement(
                                     """
                                     {
-                                      "error": "Duplicate column name 'salary'",
-                                      "failedIndex": 1,
-                                      "ranCount": 1,
-                                      "rolledBack": false,
-                                      "statements": [
-                                        "ALTER TABLE `employees` COMMENT = 'Staff'",
-                                        "ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2)",
-                                        "CREATE INDEX `idx_sal` ON `employees`(`salary`)"
-                                      ]
+                                      "statement": "ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2) NOT NULL",
+                                      "index": 1,
+                                      "applied": 1,
+                                      "total": 3
                                     }
                                     """.trimIndent(),
                                 ),
@@ -210,7 +192,10 @@ class Phase09fDatabaseStructureImpExpUiTest {
         // 2nd attempt -> sends updated SQL -> 400 statement failure report
         composeRule.onNodeWithTag("db-structure-save-execute-btn").performClick()
         composeRule.waitForIdle()
-        assertEquals("ALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2) NOT NULL;", lastAppliedSql)
+        assertEquals(
+            "ALTER TABLE `employees` COMMENT = 'Staff';\nALTER TABLE `employees` ADD COLUMN `salary` decimal(10,2) NOT NULL;\nCREATE INDEX `idx_sal` ON `employees`(`salary`);",
+            lastAppliedSql,
+        )
         composeRule.onNodeWithTag("db-structure-failure-report").assertIsDisplayed()
         composeRule.onNodeWithTag("db-structure-stmt-outcome-0").assertIsDisplayed()
         composeRule.onNodeWithTag("db-structure-stmt-outcome-1").assertIsDisplayed()
@@ -285,20 +270,21 @@ class Phase09fDatabaseStructureImpExpUiTest {
                                 kind = "export",
                                 state = "done",
                                 startedAt = 1000L,
-                                finishedAt = 2200L,
+                                endedAt = 2200L,
                                 items = listOf(
                                     ImpExpJobItemStatus(
                                         source = "users",
                                         target = "users.csv",
                                         state = "done",
-                                        rowsProcessed = 120L,
+                                        rowsRead = 120L,
+                                        rowsWritten = 120L,
                                     ),
                                 ),
                                 messages = listOf(
-                                    ImpExpMessage(id = 1, at = 1500L, level = "info", item = "users", text = "Exported 120 rows"),
+                                    ImpExpMessage(time = 1500L, level = "info", text = "Exported 120 rows"),
                                 ),
                                 files = listOf(
-                                    ImpExpOutputFile(name = "users.csv", size = 4096L, mimeType = "text/csv"),
+                                    ImpExpOutputFile(name = "users.csv", size = 4096L),
                                 ),
                             )
                         },
@@ -358,5 +344,69 @@ class Phase09fDatabaseStructureImpExpUiTest {
         composeRule.onNodeWithTag("sqlite-phone-table-picker-btn").performClick()
         composeRule.onNodeWithTag("sqlite-table-item-users").performClick()
         assertEquals("users", selectedSqliteTable)
+    }
+
+    @Test
+    fun structureTabEditPersistenceAndTabCloseConfirmDialog_preserveTableEditAndConfirmClose() {
+        var persistedEdit by mutableStateOf<com.hienlh.ppm.state.database.TableEdit?>(null)
+        var remountGeneration by mutableStateOf(0)
+        var closeConfirmedCount = 0
+        var closeCancelledCount = 0
+        var losingTabs by mutableStateOf<List<com.hienlh.ppm.state.workspace.WorkspaceTab>>(emptyList())
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                androidx.compose.runtime.key(remountGeneration) {
+                    DatabaseStructureTabContent(
+                        structure = sampleStructure,
+                        dialect = "mysql",
+                        dbType = "mysql",
+                        schema = "shop",
+                        initialTableEdit = persistedEdit,
+                        onTableEditChanged = { persistedEdit = it },
+                    )
+                }
+                DbTabCloseConfirmDialogContent(
+                    losingTabs = losingTabs,
+                    onCancel = { closeCancelledCount++ },
+                    onConfirm = { closeConfirmedCount++ },
+                )
+            }
+        }
+
+        // 1. Add a column -> persistedEdit is updated with dirty TableEdit
+        composeRule.onNodeWithTag("db-structure-add-col-btn").performScrollTo().performClick()
+        composeRule.onNodeWithTag("db-col-dialog-name-input").performTextReplacement("bonus")
+        composeRule.onNodeWithTag("db-col-dialog-type-chip-decimal(10,2)").performScrollTo().performClick()
+        composeRule.onNodeWithTag("db-col-dialog-save-btn").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        assertTrue(persistedEdit != null)
+        assertTrue(persistedEdit!!.current.columns.any { it.name == "bonus" })
+
+        // 2. Simulate tab switch unmount/remount -> restored from initialTableEdit
+        remountGeneration = 1
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("db-structure-dirty-badge").assertIsDisplayed()
+
+        // 3. Verify Confirm close tabs dialog (single tab & multiple tabs)
+        losingTabs = listOf(
+            com.hienlh.ppm.state.workspace.WorkspaceTab(
+                id = "db-structure:1::public:employees",
+                type = "db-structure",
+                title = "employees · Structure",
+            ),
+        )
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("db-tab-close-confirm-dialog").assertIsDisplayed()
+        composeRule.onNodeWithTag("db-tab-close-confirm-accept").performClick()
+        assertEquals(1, closeConfirmedCount)
+
+        losingTabs = listOf(
+            com.hienlh.ppm.state.workspace.WorkspaceTab(id = "t1", type = "db-query", title = "Query 1"),
+            com.hienlh.ppm.state.workspace.WorkspaceTab(id = "t2", type = "database", title = "orders"),
+        )
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("db-tab-close-confirm-cancel").performClick()
+        assertEquals(1, closeCancelledCount)
     }
 }

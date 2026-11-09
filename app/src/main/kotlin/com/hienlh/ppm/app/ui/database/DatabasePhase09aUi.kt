@@ -53,6 +53,7 @@ import com.hienlh.ppm.app.ui.SettingsTextInput
 import com.hienlh.ppm.client.DbConnectionsEvents
 import com.hienlh.ppm.client.DbDriverMissingException
 import com.hienlh.ppm.client.DbLoginCoordinator
+import com.hienlh.ppm.client.DbLoginFailedException
 import com.hienlh.ppm.client.DbLoginPromptInfo
 import com.hienlh.ppm.client.dbConnectionConfig
 import com.hienlh.ppm.client.dbConnections
@@ -158,11 +159,13 @@ fun DatabaseSidebarPane(
     var activeLoginPrompt by remember { mutableStateOf<DbLoginPromptInfo?>(null) }
     var activeLoginDeferred by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     var loginError by remember { mutableStateOf<String?>(null) }
+    var loginErrorDetails by remember { mutableStateOf<String?>(null) }
 
     val loginCoordinator = remember {
         DbLoginCoordinator { prompt ->
             val def = CompletableDeferred<Boolean>()
             loginError = null
+            loginErrorDetails = null
             activeLoginPrompt = prompt
             activeLoginDeferred = def
             def.await()
@@ -231,6 +234,7 @@ fun DatabaseSidebarPane(
             DbLoginDialogContent(
                 prompt = prompt,
                 errorMessage = loginError,
+                errorDetails = loginErrorDetails,
                 onSubmit = { user, pass ->
                     val client = api ?: return@DbLoginDialogContent
                     val cid = prompt.connectionId ?: return@DbLoginDialogContent
@@ -242,6 +246,7 @@ fun DatabaseSidebarPane(
                             activeLoginDeferred?.complete(true)
                         }.onFailure { err ->
                             loginError = err.message ?: "Login failed"
+                            loginErrorDetails = (err as? DbLoginFailedException)?.details?.takeIf { it.isNotBlank() }
                         }
                     }
                 },
@@ -2002,6 +2007,8 @@ internal fun DbLoginDialogContent(
     var password by remember(prompt) { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
     var showDetails by remember { mutableStateOf(false) }
+    var localError by remember(prompt, errorMessage) { mutableStateOf<String?>(null) }
+    val displayedError = localError ?: errorMessage
 
     Column(
         modifier = Modifier
@@ -2050,20 +2057,22 @@ internal fun DbLoginDialogContent(
             )
         }
 
-        if (!errorMessage.isNullOrBlank()) {
+        if (!displayedError.isNullOrBlank()) {
             BasicText(
-                errorMessage,
+                displayedError,
                 modifier = Modifier.testTag("db-login-error"),
                 style = ppmText(11f, FontWeight.Medium, lineHeight = 15f).copy(color = tokens.error.color),
             )
-            if (!errorDetails.isNullOrBlank()) {
+            if (localError == null && !errorDetails.isNullOrBlank()) {
                 SettingsButton(
                     label = if (showDetails) "Hide Details" else "Details",
+                    modifier = Modifier.testTag("db-login-details-toggle"),
                     onClick = { showDetails = !showDetails },
                 )
                 if (showDetails) {
                     BasicText(
                         errorDetails,
+                        modifier = Modifier.testTag("db-login-error-details"),
                         style = ppmText(10f, kind = FontKind.MONO, lineHeight = 14f).copy(color = tokens.text3.color),
                     )
                 }
@@ -2075,7 +2084,14 @@ internal fun DbLoginDialogContent(
                 label = "Log In",
                 primary = true,
                 modifier = Modifier.testTag("db-login-submit-btn"),
-                onClick = { onSubmit(if (prompt.askUser) user.trim() else null, password) },
+                onClick = {
+                    if (prompt.askUser && user.trim().isEmpty()) {
+                        localError = "Enter the user name."
+                    } else {
+                        localError = null
+                        onSubmit(if (prompt.askUser) user.trim() else null, password)
+                    }
+                },
             )
             SettingsButton(
                 label = "Cancel",

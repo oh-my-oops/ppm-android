@@ -113,27 +113,39 @@ class DatabasePhase09dEditStateTest {
 
     @Test
     fun `saveScript prepends checked cascade scripts in server deepest-first order and bypass checks references`() {
-        val preview = ChangesetPreview(
-            statementCount = 1,
-            script = "DELETE FROM \"users\" WHERE \"id\" = 1;",
-            references = listOf(
-                ChangesetReference(
-                    table = TableRef("public", "order_items"),
-                    count = 5,
-                    paths = listOf("order_items.order_id -> orders.id -> users.id"),
-                    script = "DELETE FROM \"order_items\" WHERE \"order_id\" IN (10, 11);",
-                ),
-                ChangesetReference(
-                    table = TableRef("public", "orders"),
-                    count = 2,
-                    paths = listOf("orders.user_id -> users.id"),
-                    script = "DELETE FROM \"orders\" WHERE \"user_id\" = 1;",
-                ),
-            ),
-        )
+        val previewJson = Json.parseToJsonElement(
+            """
+            {
+              "statementCount": 1,
+              "script": "DELETE FROM \"users\" WHERE \"id\" = 1;",
+              "references": [
+                {
+                  "schema": "public",
+                  "table": "order_items",
+                  "paths": [["order_items", "orders", "users"]],
+                  "cascadesInDb": false,
+                  "script": "DELETE FROM \"order_items\" WHERE \"order_id\" IN (10, 11);"
+                },
+                {
+                  "schema": "public",
+                  "table": "orders",
+                  "paths": [["orders", "users"]],
+                  "cascadesInDb": true,
+                  "script": "DELETE FROM \"orders\" WHERE \"user_id\" = 1;"
+                }
+              ]
+            }
+            """.trimIndent(),
+        ) as JsonObject
+        val preview = parseChangesetPreview(previewJson)
+        assertEquals(2, preview.references.size)
+        assertEquals(listOf("order_items → orders → users"), refPaths(preview.references[0]))
+        assertTrue(preview.references[1].cascadesInDb)
+        assertEquals("order_items", refLabel(preview.references[0], "public"))
+
         val checked = setOf("public.orders", "public.order_items")
         val cascaded = cascadeTables(preview.references, checked)
-        assertEquals(listOf("order_items", "orders"), cascaded.map { it.name })
+        assertEquals(listOf("order_items", "orders"), cascaded.map { it.table })
         val fullScript = saveScript(preview, checked)
         assertEquals(
             """
@@ -150,6 +162,91 @@ class DatabasePhase09dEditStateTest {
                 preview = preview.copy(references = emptyList()),
             ),
         )
+    }
+
+    @Test
+    fun `C1 mark row for deletion then re-sort sends original row primary key`() {
+        // Initial sort: row index 3 holds id=40
+        val initialRowKeys = mapOf(
+            "row_0" to mapOf("id" to DbCellValue.Num("10", 10.0)),
+            "row_1" to mapOf("id" to DbCellValue.Num("20", 20.0)),
+            "row_2" to mapOf("id" to DbCellValue.Num("30", 30.0)),
+            "row_3" to mapOf("id" to DbCellValue.Num("40", 40.0)),
+        )
+        val cs = deleteRows(EMPTY_CHANGESET, listOf("row_3"), initialRowKeys)
+
+        // Re-sorted: row index 3 now holds id=10!
+        val resortedRowKeys = mapOf(
+            "row_0" to mapOf("id" to DbCellValue.Num("40", 40.0)),
+            "row_1" to mapOf("id" to DbCellValue.Num("30", 30.0)),
+            "row_2" to mapOf("id" to DbCellValue.Num("20", 20.0)),
+            "row_3" to mapOf("id" to DbCellValue.Num("10", 10.0)),
+        )
+        val payload = toGridChanges(cs, resortedRowKeys)
+        assertEquals(1, payload.deletes.size)
+        assertEquals(mapOf("id" to DbCellValue.Num("40", 40.0)), payload.deletes[0])
+    }
+
+    @Test
+    fun `C2 C3 buildChangesetRequestJson sends original on updates and table on cascade entries`() {
+        val key1 = mapOf("id" to DbCellValue.Num("1", 1.0))
+        val cs = editCells(
+            EMPTY_CHANGESET,
+            listOf(
+                CellChange(
+                    rowId = "1",
+                    col = "name",
+                    value = DbCellValue.Text("Alice2"),
+                    key = key1,
+                    original = DbCellValue.Text("Alice"),
+                ),
+            ),
+        )
+        val payload = toGridChanges(cs)
+        val req = buildChangesetRequestJson(
+            table = "users",
+            schema = "public",
+            payload = payload,
+            cascade = listOf(TableRef(schema = "public", table = "orders")),
+        )
+        val updateObj = (req["updates"] as kotlinx.serialization.json.JsonArray)[0] as JsonObject
+        val originalObj = updateObj["original"] as? JsonObject
+        assertNotNull(originalObj)
+        assertEquals("\"Alice\"", originalObj!!["name"].toString())
+
+        val cascadeObj = (req["cascade"] as kotlinx.serialization.json.JsonArray)[0] as JsonObject
+        assertEquals("\"orders\"", cascadeObj["table"].toString())
+        assertNull(cascadeObj["name"])
+    }
+
+    @Test
+    fun `C5 parseFormText converts empty input to Null for every kind and accepts t and f for boolean`() {
+        assertEquals(FormParse.Valid(DbCellValue.Null), parseFormText("", FormFieldKind.TEXT))
+        assertEquals(FormParse.Valid(DbCellValue.Null), parseFormText("", FormFieldKind.NUMBER))
+        assertEquals(FormParse.Valid(DbCellValue.Null), parseFormText("", FormFieldKind.BOOLEAN))
+        assertEquals(FormParse.Valid(DbCellValue.Null), parseFormText("", FormFieldKind.JSON))
+
+        assertEquals(FormParse.Valid(DbCellValue.Bool(true)), parseFormText("t", FormFieldKind.BOOLEAN))
+        assertEquals(FormParse.Valid(DbCellValue.Bool(true)), parseFormText("T", FormFieldKind.BOOLEAN))
+        assertEquals(FormParse.Valid(DbCellValue.Bool(false)), parseFormText("f", FormFieldKind.BOOLEAN))
+        assertEquals(FormParse.Valid(DbCellValue.Bool(false)), parseFormText("F", FormFieldKind.BOOLEAN))
+    }
+
+    @Test
+    fun `parseChangesetFailure parses server ChangesetFailure shape and empty row key is flagged`() {
+        val failureJson = Json.parseToJsonElement(
+            """{"statementIndex":1,"statementCount":3,"sql":"UPDATE \"users\" SET \"name\" = 'Bob' WHERE \"id\" = 2","affected":0}""",
+        )
+        val parsed = parseChangesetFailure(failureJson)
+        assertNotNull(parsed)
+        assertEquals(1, parsed!!.statementIndex)
+        assertEquals(3, parsed.statementCount)
+        assertEquals(0, parsed.affected)
+        assertEquals("UPDATE \"users\" SET \"name\" = 'Bob' WHERE \"id\" = 2", parsed.sql)
+
+        val missingKeyCs = deleteRows(EMPTY_CHANGESET, listOf("unkeyed_row"))
+        val missingKeyPayload = toGridChanges(missingKeyCs)
+        assertTrue(missingKeyPayload.hasMissingRowKey)
     }
 
     @Test

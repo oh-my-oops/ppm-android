@@ -1483,10 +1483,10 @@ data class QueryResultSet(
     fun toGridPageData(sql: String = "", primaryKeys: List<String> = emptyList()): DbGridPageData {
         val rawCols = columns.map { ResultColumnMeta(name = it.name, type = it.type) }
         val keys = uniqueColumnKeys(rawCols.map { it.name })
-        val resolvedRows = if (cellRows.isNotEmpty() && cellRows.size == rows.size) {
-            cellRows
-        } else {
-            rows.map { r ->
+        val resolvedRows = when {
+            rows.isEmpty() -> emptyList()
+            cellRows.size == rows.size -> cellRows
+            else -> rows.map { r ->
                 List(keys.size) { idx ->
                     when (val v = r.getOrNull(idx)) {
                         null -> DbCellValue.Null
@@ -1534,16 +1534,6 @@ sealed interface QueryScriptEvent {
     data class Done(val durationMs: Long, val error: String? = null) : QueryScriptEvent
 }
 
-private fun parseJsonCellValue(el: JsonElement?): Any? = when (el) {
-    null, is JsonNull -> null
-    is JsonPrimitive -> when {
-        el.isString -> el.content
-        el.booleanOrNull != null -> el.booleanOrNull
-        else -> el.content.toLongOrNull() ?: el.content.toDoubleOrNull() ?: el.content
-    }
-    else -> el.toString()
-}
-
 private fun parseQueryResultSet(obj: JsonObject): QueryResultSet {
     val colsArr = obj["columns"] as? JsonArray ?: JsonArray(emptyList())
     val columns = colsArr.mapNotNull { el ->
@@ -1562,17 +1552,14 @@ private fun parseQueryResultSet(obj: JsonObject): QueryResultSet {
         )
     }
     val rowsArr = obj["rows"] as? JsonArray ?: JsonArray(emptyList())
-    val rows = rowsArr.mapNotNull { rowEl ->
-        val rArr = rowEl as? JsonArray ?: return@mapNotNull null
-        rArr.map(::parseJsonCellValue)
-    }
     val cellRows = rowsArr.mapNotNull { rowEl ->
         val rArr = rowEl as? JsonArray ?: return@mapNotNull null
-        List(columns.size) { idx -> parseDbCellValue(rArr.getOrNull(idx)) }
+        val width = maxOf(columns.size, rArr.size)
+        List(width) { idx -> parseDbCellValue(rArr.getOrNull(idx)) }
     }
     return QueryResultSet(
         columns = columns,
-        rows = rows,
+        rows = cellRows,
         truncated = obj["truncated"]?.bool == true,
         cellRows = cellRows,
     )
@@ -2185,6 +2172,30 @@ fun isQueryTabDirty(metadata: JsonObject?): Boolean {
     val cur = metadata?.get("currentSql")?.string ?: return false
     val opened = metadata["openedSql"]?.string.orEmpty()
     return cur != opened
+}
+
+/**
+ * DBGate's unsaved indicator on whichever database tab holds work nothing else keeps
+ * (`isDbTabDirty` in `src/web/lib/db-tabs.ts`).
+ */
+fun isDbTabDirty(type: String, metadata: JsonObject?): Boolean = when (type) {
+    "db-query" -> isQueryTabDirty(metadata)
+    "db-structure" -> isStructureTabDirty(metadata)
+    else -> false
+}
+
+/**
+ * True when closing [tab] would discard unsaved database work (`losesWorkOnClose` in
+ * `src/web/stores/tab-close-confirm-store.ts`):
+ * - dirty `db-query` SQL (`currentSql != openedSql`)
+ * - dirty `db-structure` table model (`!sameTableModel(tableEdit.base, tableEdit.current)`)
+ * - unsaved grid row edits in `UnsavedGridRowsStore` or `tab.metadata["unsavedGridRows"]`
+ */
+fun losesDbWorkOnClose(tab: WorkspaceTab): Boolean {
+    if (isDbTabDirty(tab.type, tab.metadata)) return true
+    if (unsavedGridRows(tab.id) > 0) return true
+    val metaRows = tab.metadata["unsavedGridRows"]?.int ?: 0
+    return metaRows > 0
 }
 
 /** The next `"Query N"` number across open tabs (`nextQueryNumber` in `src/web/lib/db-tabs.ts`). */

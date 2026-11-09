@@ -192,4 +192,47 @@ class Phase09aDatabaseUiTest {
         assertTrue(d3.await())
         assertEquals(1, promptCount.get())
     }
+
+    @Test
+    fun dbLoginDialogContent_validatesAskUserAndShowsErrorWithDetails() {
+        var submittedUser: String? = null
+        var submittedPass: String? = null
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                DbLoginDialogContent(
+                    prompt = DbLoginPromptInfo(
+                        connectionId = 3,
+                        name = "Payroll Prod",
+                        type = "postgres",
+                        user = "",
+                        askUser = true,
+                    ),
+                    errorMessage = "Connect failed: password authentication failed for user \"postgres\"",
+                    errorDetails = "FATAL: password authentication failed (SQLSTATE 28P01)",
+                    onSubmit = { u, p ->
+                        submittedUser = u
+                        submittedPass = p
+                    },
+                )
+            }
+        }
+
+        // Server error message + toggleable details are shown
+        composeRule.onNodeWithTag("db-login-error").assertIsDisplayed()
+        composeRule.onNodeWithTag("db-login-details-toggle").performClick()
+        composeRule.onNodeWithTag("db-login-error-details").assertIsDisplayed()
+
+        // Submitting with blank user when askUser=true displays validation error and does not call onSubmit
+        composeRule.onNodeWithTag("db-login-submit-btn").performClick()
+        composeRule.onNodeWithText("Enter the user name.").assertIsDisplayed()
+        assertEquals(null, submittedUser)
+
+        // Entering user and password submits trimmed user
+        composeRule.onNodeWithTag("db-login-user-input").performTextReplacement("  postgres  ")
+        composeRule.onNodeWithTag("db-login-password-input").performTextReplacement("s3cret")
+        composeRule.onNodeWithTag("db-login-submit-btn").performClick()
+        assertEquals("postgres", submittedUser)
+        assertEquals("s3cret", submittedPass)
+    }
 }
