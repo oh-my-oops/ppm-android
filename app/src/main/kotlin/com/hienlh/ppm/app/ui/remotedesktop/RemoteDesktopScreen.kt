@@ -1958,6 +1958,40 @@ internal fun RemoteDesktopStatsOverlay(
 
 // ── 5. Tablet Floating Toolbar & Menus ────────────────────────────────
 
+@Suppress("DEPRECATION")
+internal fun deviceFullScreenSizeDp(context: Context): RdSize {
+    val wm = context.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+    val density = context.resources.displayMetrics.density.coerceAtLeast(0.1f)
+    if (wm != null) {
+        val realMetrics = android.util.DisplayMetrics()
+        val gotReal = runCatching {
+            wm.defaultDisplay?.getRealMetrics(realMetrics)
+            realMetrics.widthPixels > 0 && realMetrics.heightPixels > 0
+        }.getOrDefault(false)
+        if (gotReal) {
+            val d = realMetrics.density.takeIf { it > 0f } ?: density
+            return RdSize(
+                width = (realMetrics.widthPixels / d).roundToInt().coerceAtLeast(1),
+                height = (realMetrics.heightPixels / d).roundToInt().coerceAtLeast(1),
+            )
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val bounds = runCatching { wm.maximumWindowMetrics.bounds }.getOrNull()
+            if (bounds != null && bounds.width() > 0 && bounds.height() > 0) {
+                return RdSize(
+                    width = (bounds.width() / density).roundToInt().coerceAtLeast(1),
+                    height = (bounds.height() / density).roundToInt().coerceAtLeast(1),
+                )
+            }
+        }
+    }
+    val dm = context.resources.displayMetrics
+    return RdSize(
+        width = (dm.widthPixels / density).roundToInt().coerceAtLeast(1),
+        height = (dm.heightPixels / density).roundToInt().coerceAtLeast(1),
+    )
+}
+
 @Composable
 internal fun RemoteDesktopTabletToolbar(
     caps: RemoteDesktopCapabilities,
@@ -1997,14 +2031,11 @@ internal fun RemoteDesktopTabletToolbar(
     localScreenOverride: RdSize? = null,
 ) {
     val tokens = LocalPpmTokens.current
-    val configuration = LocalConfiguration.current
+    val context = LocalContext.current
     var displayMenuOpen by remember { mutableStateOf(false) }
     var settingsMenuOpen by remember { mutableStateOf(false) }
 
-    val localScreen = localScreenOverride ?: RdSize(
-        width = configuration.screenWidthDp.coerceAtLeast(1),
-        height = configuration.screenHeightDp.coerceAtLeast(1),
-    )
+    val localScreen = localScreenOverride ?: deviceFullScreenSizeDp(context)
     val resolutions = remember(caps.resolutions.modes) { resolutionChoices(caps.resolutions.modes) }
     val fitLocal = remember(caps.resolutions.modes, localScreen, hostModeId) {
         fitLocalMode(caps.resolutions.modes, localScreen, hostModeId)
@@ -2202,7 +2233,7 @@ internal fun RemoteDesktopTabletToolbar(
                             }
                             if (fitLocal != null) {
                                 MenuRadioRow(
-                                    label = "Fit local (${fitLocal.width} × ${fitLocal.height})",
+                                    label = "Fit local ${fitLocal.width}×${fitLocal.height}",
                                     selected = false,
                                     onClick = { onSetHostMode(fitLocal.id) },
                                     tag = "remote-desktop-resolution-fit-local",
@@ -2921,11 +2952,8 @@ internal fun RemoteDesktopMobileSettingsPanel(
     localScreenOverride: RdSize? = null,
 ) {
     val tokens = LocalPpmTokens.current
-    val configuration = LocalConfiguration.current
-    val localScreen = localScreenOverride ?: RdSize(
-        width = configuration.screenWidthDp.coerceAtLeast(1),
-        height = configuration.screenHeightDp.coerceAtLeast(1),
-    )
+    val context = LocalContext.current
+    val localScreen = localScreenOverride ?: deviceFullScreenSizeDp(context)
     val resolutions = remember(caps.resolutions.modes) { resolutionChoices(caps.resolutions.modes) }
     val fitLocal = remember(caps.resolutions.modes, localScreen, hostModeId) {
         fitLocalMode(caps.resolutions.modes, localScreen, hostModeId)

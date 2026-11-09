@@ -561,11 +561,29 @@ class Phase11bUiTest {
         composeRule.onNodeWithText("The host refused the mode.").assertIsDisplayed()
         composeRule.onNodeWithText("Start recording (no audio)").assertIsDisplayed()
 
-        // Tablet toolbar settings menu shows Fit local (1280 × 800) for a 1280x800 device screen
+        // Tablet toolbar settings menu shows Fit local 1280×800 (`remote-desktop-toolbar.tsx:285`: no spaces around ×, no parentheses)
         composeRule.onNodeWithTag("remote-desktop-settings-trigger").performClick()
         composeRule.onNodeWithTag("remote-desktop-resolution-fit-local").assertIsDisplayed()
-        composeRule.onNodeWithText("Fit local (1280 × 800)").performClick()
+        composeRule.onNodeWithText("Fit local 1280×800").performClick()
         assertEquals("m2", requestedMode)
+
+        // deviceFullScreenSizeDp reads physical display bounds (WindowManager), not split-screen configuration.screenWidthDp
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val origW = context.resources.configuration.screenWidthDp
+        val origH = context.resources.configuration.screenHeightDp
+        try {
+            val density = context.resources.displayMetrics.density.toInt().coerceAtLeast(1)
+            org.robolectric.Shadows.shadowOf(org.robolectric.shadows.ShadowDisplay.getDefaultDisplay()).apply {
+                setRealWidth(1280 * density)
+                setRealHeight(800 * density)
+            }
+            context.resources.configuration.screenWidthDp = 640
+            context.resources.configuration.screenHeightDp = 400
+            assertEquals(RdSize(1280, 800), deviceFullScreenSizeDp(context))
+        } finally {
+            context.resources.configuration.screenWidthDp = origW
+            context.resources.configuration.screenHeightDp = origH
+        }
     }
 
     @Test
