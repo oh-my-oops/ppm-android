@@ -2037,10 +2037,11 @@ internal fun RemoteDesktopTabletToolbar(
 ) {
     val tokens = LocalPpmTokens.current
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
     var displayMenuOpen by remember { mutableStateOf(false) }
     var settingsMenuOpen by remember { mutableStateOf(false) }
 
-    val localScreen = deviceFullScreenSizeDp(context)
+    val localScreen = remember(configuration) { deviceFullScreenSizeDp(context) }
     val resolutions = remember(caps.resolutions.modes) { resolutionChoices(caps.resolutions.modes) }
     val fitLocal = remember(caps.resolutions.modes, localScreen, hostModeId) {
         fitLocalMode(caps.resolutions.modes, localScreen, hostModeId)
@@ -2957,7 +2958,8 @@ internal fun RemoteDesktopMobileSettingsPanel(
 ) {
     val tokens = LocalPpmTokens.current
     val context = LocalContext.current
-    val localScreen = deviceFullScreenSizeDp(context)
+    val configuration = LocalConfiguration.current
+    val localScreen = remember(configuration) { deviceFullScreenSizeDp(context) }
     val resolutions = remember(caps.resolutions.modes) { resolutionChoices(caps.resolutions.modes) }
     val fitLocal = remember(caps.resolutions.modes, localScreen, hostModeId) {
         fitLocalMode(caps.resolutions.modes, localScreen, hostModeId)

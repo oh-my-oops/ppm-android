@@ -485,76 +485,86 @@ class Phase11bUiTest {
                 modes = listOf(
                     HostMode(id = "m1", width = 1920, height = 1080, refresh = 60, current = true, preferred = true),
                     HostMode(id = "m2", width = 1280, height = 800, refresh = 60, current = false, preferred = false),
+                    HostMode(id = "m3", width = 800, height = 1280, refresh = 60, current = false, preferred = false),
                 ),
             ),
         )
         val context = ApplicationProvider.getApplicationContext<Context>()
         val density = context.resources.displayMetrics.density.toInt().coerceAtLeast(1)
-        org.robolectric.Shadows.shadowOf(org.robolectric.shadows.ShadowDisplay.getDefaultDisplay()).apply {
+        val shadowDisplay = org.robolectric.Shadows.shadowOf(org.robolectric.shadows.ShadowDisplay.getDefaultDisplay()).apply {
             setRealWidth(1280 * density)
             setRealHeight(800 * density)
         }
+        var configuration by mutableStateOf(
+            android.content.res.Configuration(context.resources.configuration).apply {
+                orientation = android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            },
+        )
         var requestedMode: String? = null
 
         composeRule.setContent {
-            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
-                Column {
-                    RemoteDesktopTabletToolbar(
-                        caps = caps,
-                        currentDisplayId = "0",
-                        onSelectDisplay = {},
-                        qualityChoice = "balanced",
-                        serverPreset = "balanced",
-                        qualityHeld = 1.0,
-                        onSetQuality = {},
-                        onOpenCustomQuality = {},
-                        codec = null,
-                        onSetCodec = {},
-                        hostModeId = "m1",
-                        hostOriginalModeId = null,
-                        resolutionError = null,
-                        onSetHostMode = { requestedMode = it },
-                        viewStyle = "adaptive",
-                        customScale = 1.0,
-                        onSetViewStyle = {},
-                        onSetCustomScale = {},
-                        showCursor = true,
-                        onSetShowCursor = {},
-                        audioOn = false,
-                        onSetAudioOn = {},
-                        privacyOn = false,
-                        privacyError = null,
-                        onSetPrivacyOn = {},
-                        clipboardEnabled = true,
-                        onSetClipboardEnabled = {},
-                        statsVisible = false,
-                        onToggleStats = {},
-                        recording = false,
-                        recordingElapsedSec = 0,
-                        onToggleRecording = {},
-                        onScreenshot = {},
-                    )
-                    RemoteDesktopMobileSettingsPanel(
-                        caps = caps,
-                        statsVisible = false,
-                        onToggleStats = {},
-                        showCursor = true,
-                        onSetShowCursor = {},
-                        clipboardEnabled = true,
-                        onSetClipboardEnabled = {},
-                        audioOn = false,
-                        onSetAudioOn = {},
-                        privacyOn = false,
-                        privacyError = null,
-                        onSetPrivacyOn = {},
-                        hostModeId = "m1",
-                        hostOriginalModeId = null,
-                        resolutionError = "The host refused the mode.",
-                        onSetHostMode = { requestedMode = it },
-                        recording = false,
-                        onToggleRecording = {},
-                        onScreenshot = {},
-                    )
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalConfiguration provides configuration,
+            ) {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    Column {
+                        RemoteDesktopTabletToolbar(
+                            caps = caps,
+                            currentDisplayId = "0",
+                            onSelectDisplay = {},
+                            qualityChoice = "balanced",
+                            serverPreset = "balanced",
+                            qualityHeld = 1.0,
+                            onSetQuality = {},
+                            onOpenCustomQuality = {},
+                            codec = null,
+                            onSetCodec = {},
+                            hostModeId = "m1",
+                            hostOriginalModeId = null,
+                            resolutionError = null,
+                            onSetHostMode = { requestedMode = it },
+                            viewStyle = "adaptive",
+                            customScale = 1.0,
+                            onSetViewStyle = {},
+                            onSetCustomScale = {},
+                            showCursor = true,
+                            onSetShowCursor = {},
+                            audioOn = false,
+                            onSetAudioOn = {},
+                            privacyOn = false,
+                            privacyError = null,
+                            onSetPrivacyOn = {},
+                            clipboardEnabled = true,
+                            onSetClipboardEnabled = {},
+                            statsVisible = false,
+                            onToggleStats = {},
+                            recording = false,
+                            recordingElapsedSec = 0,
+                            onToggleRecording = {},
+                            onScreenshot = {},
+                        )
+                        RemoteDesktopMobileSettingsPanel(
+                            caps = caps,
+                            statsVisible = false,
+                            onToggleStats = {},
+                            showCursor = true,
+                            onSetShowCursor = {},
+                            clipboardEnabled = true,
+                            onSetClipboardEnabled = {},
+                            audioOn = false,
+                            onSetAudioOn = {},
+                            privacyOn = false,
+                            privacyError = null,
+                            onSetPrivacyOn = {},
+                            hostModeId = "m1",
+                            hostOriginalModeId = null,
+                            resolutionError = "The host refused the mode.",
+                            onSetHostMode = { requestedMode = it },
+                            recording = false,
+                            onToggleRecording = {},
+                            onScreenshot = {},
+                        )
+                    }
                 }
             }
         }
@@ -571,7 +581,29 @@ class Phase11bUiTest {
         composeRule.onNodeWithText("Fit local 1280×800").performClick()
         assertEquals("m2", requestedMode)
 
-        // deviceFullScreenSizeDp reads physical display bounds (WindowManager), not split-screen configuration.screenWidthDp
+        // Rotate to portrait (800×1280) without recreating the Activity/Context: LocalConfiguration change recomposes Fit local
+        requestedMode = null
+        composeRule.runOnIdle {
+            shadowDisplay.setRealWidth(800 * density)
+            shadowDisplay.setRealHeight(1280 * density)
+            configuration = android.content.res.Configuration(configuration).apply {
+                orientation = android.content.res.Configuration.ORIENTATION_PORTRAIT
+            }
+        }
+        composeRule.waitForIdle()
+
+        // Mobile Fit local button now selects the portrait mode (m3)
+        composeRule.onNodeWithTag("remote-desktop-mobile-resolution-fit-local").performClick()
+        assertEquals("m3", requestedMode)
+
+        // Tablet toolbar settings menu label follows the rotated display dimensions (Fit local 800×1280)
+        requestedMode = null
+        composeRule.onNodeWithText("Fit local 800×1280").performClick()
+        assertEquals("m3", requestedMode)
+
+        // Restore landscape display dimensions and verify deviceFullScreenSizeDp ignores split-screen configuration.screenWidthDp
+        shadowDisplay.setRealWidth(1280 * density)
+        shadowDisplay.setRealHeight(800 * density)
         val origW = context.resources.configuration.screenWidthDp
         val origH = context.resources.configuration.screenHeightDp
         try {
