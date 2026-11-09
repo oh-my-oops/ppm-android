@@ -11,6 +11,7 @@ import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -52,6 +53,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -177,32 +179,43 @@ fun clipboardImage(context: Context): Uri? {
 }
 
 /**
- * The paperclip (`aria-label="Attach file"`): `size-8` with a 16 px clip on a phone, `size-[34px]`
- * with 17 px and `hover:bg-surface-elevated` on a tablet; `rounded-[10px] text-text-3
- * hover:text-text-primary` on both.
+ * The paperclip (`SQUARE_BUTTON`, `aria-label="Attach file"`): `size-8` on a phone, `size-[34px]`
+ * on a tablet, `rounded-[10px] text-text-3 can-hover:hover:bg-surface-hover can-hover:hover:text-text`
+ * with a 16 px (`size-4`) icon and `motion-safe:active:scale-[0.97]`.
  */
 @Composable
 fun AttachButton(mobile: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
+    val reducedMotion = rememberPrefersReducedMotion()
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val hovered by source.collectIsHoveredAsState()
-    val lit = if (pressed) 1.0 else colorsFade(hovered).toDouble()
+    val lit = if (!mobile && hovered) colorsFade(true).toDouble() else 0.0
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed && enabled && !reducedMotion) 0.97f else 1f,
+        animationSpec = tween(if (reducedMotion) 0 else 150),
+        label = "attachButtonScale",
+    )
     val shape = RoundedCornerShape(10.dp)
     Box(
         Modifier
             .cssSize(if (mobile) 32.dp else 34.dp)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
             // `disabled:opacity-50`.
             .alpha(if (enabled) 1f else 0.5f)
             .clip(shape)
-            .background(if (mobile) Color.Transparent else tokens.panel2.color.copy(alpha = tokens.panel2.color.alpha * lit.toFloat()))
+            .background(if (!mobile && hovered) tokens.surfaceHover.color else Color.Transparent)
             .pointerHoverIcon(WebCursor.Default)
+            .webTitle("Attach file")
             .hoverable(source)
             .clickable(source, indication = null, enabled = enabled, onClickLabel = "Attach file", onClick = onClick)
             .semantics { contentDescription = "Attach file" },
         contentAlignment = Alignment.Center,
     ) {
-        PpmIcon(ProductIcon.Paperclip, if (mobile) 16.dp else 17.dp, tokens.text.mix(tokens.text3, lit).color)
+        PpmIcon(ProductIcon.Paperclip, 16.dp, tokens.text.mix(tokens.text3, lit).color)
     }
 }
 

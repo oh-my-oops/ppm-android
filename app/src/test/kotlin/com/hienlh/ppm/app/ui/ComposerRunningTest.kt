@@ -16,10 +16,10 @@ class ComposerRunningTest {
     }
 
     @Test
-    fun `the placeholder asks for a follow-up while a turn runs, a phone's without the Stop a tablet's names`() {
-        assertEquals("Ask anything...", composerPlaceholder(running = false, mobile = true))
-        assertEquals("Ask anything...", composerPlaceholder(running = false, mobile = false))
-        assertEquals("Follow-up...", composerPlaceholder(running = true, mobile = true))
-        assertEquals("Follow-up or Stop...", composerPlaceholder(running = true, mobile = false))
+    fun `the placeholder reflects offline first, then streaming follow-up, then idle`() {
+        assertEquals("Ask anything...", composerPlaceholder(running = false, offline = false))
+        assertEquals("Follow-up or Stop...", composerPlaceholder(running = true, offline = false))
+        assertEquals("Will send when reconnected...", composerPlaceholder(running = false, offline = true))
+        assertEquals("Will send when reconnected...", composerPlaceholder(running = true, offline = true))
     }
 }

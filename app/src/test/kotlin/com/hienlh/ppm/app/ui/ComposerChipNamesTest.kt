@@ -18,9 +18,10 @@ class ComposerChipNamesTest {
     }
 
     @Test
-    fun `the model chip's tooltip is its text, until a turn runs and it says why a press does nothing`() {
+    fun `the model chip's tooltip carries the provider and text, until a turn runs and it says why a press does nothing`() {
         assertEquals("Opus 4.7 · High", modelChipTitle(running = false, text = "Opus 4.7 · High"))
-        assertEquals("Can't change while running", modelChipTitle(running = true, text = "Opus 4.7 · High"))
+        assertEquals("Claude · Opus 4.7 · High", modelChipTitle(running = false, text = "Opus 4.7 · High", providerId = "claude"))
+        assertEquals("Can't change while running", modelChipTitle(running = true, text = "Opus 4.7 · High", providerId = "claude"))
     }
 
     @Test
@@ -28,11 +29,6 @@ class ComposerChipNamesTest {
         assertEquals("Model Opus 4.7, effort high", modelChipName("Opus 4.7", "high", thinking = false))
         // The chip's text says "Extra"; the name keeps the SDK's value.
         assertEquals("Model Sonnet, effort xhigh, thinking on", modelChipName("Sonnet", "xhigh", thinking = true))
-    }
-
-    @Test
-    fun `the provider chip names the provider as given, which its capitalize only draws differently`() {
-        assertEquals("AI Provider: claude", providerChipName("claude"))
     }
 
     @Test

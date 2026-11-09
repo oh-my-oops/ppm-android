@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
@@ -137,7 +138,11 @@ class PickerRowFocusTest {
 
     @Test
     fun `the provider row the focus is on is lit, and the one it leaves is not`() {
-        show { ProviderPanel("gemini", listOf(ProviderInfo("claude", "claude"), ProviderInfo("codex", "codex"), ProviderInfo("gemini", "gemini")), "", pick = {}) }
+        show {
+            Box(Modifier.background(popover)) {
+                ProviderChoiceBar("gemini", listOf(ProviderInfo("claude", "claude"), ProviderInfo("codex", "codex"), ProviderInfo("gemini", "gemini")), "", pick = {})
+            }
+        }
 
         assertTheFocusedRowIsLit("Claude", "Codex")
     }

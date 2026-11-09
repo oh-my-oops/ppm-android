@@ -4,15 +4,18 @@ import android.Manifest
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -20,10 +23,12 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -65,6 +70,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -88,8 +94,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
@@ -97,8 +106,11 @@ import androidx.compose.ui.semantics.editableText
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setSelection
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.textSelectionRange
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
@@ -129,10 +141,7 @@ import com.hienlh.ppm.chat.sky600
 import com.hienlh.ppm.chat.textareaBreakMark
 import com.hienlh.ppm.chat.textareaClipboard
 import com.hienlh.ppm.design.ChromeTextAreaBox
-import com.hienlh.ppm.design.CssAlign
 import com.hienlh.ppm.design.CssColumn
-import com.hienlh.ppm.design.CssExact
-import com.hienlh.ppm.design.CssRow
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
@@ -141,25 +150,17 @@ import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
-import com.hienlh.ppm.design.ThemeShadow
 import com.hienlh.ppm.design.WebCursor
-import com.hienlh.ppm.design.brightness
 import com.hienlh.ppm.design.chromeTextArea
 import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderPx
-import com.hienlh.ppm.design.cssExact
-import com.hienlh.ppm.design.cssFlex
-import com.hienlh.ppm.design.cssIcon
-import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.cssScrollY
-import com.hienlh.ppm.design.cssShrink
 import com.hienlh.ppm.design.cssSize
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberChromeTextArea
-import com.hienlh.ppm.design.rememberCssExact
 import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.ParsedUserMessage
@@ -175,9 +176,10 @@ import com.hienlh.ppm.state.ModelListStatus
 import com.hienlh.ppm.state.ModelNames
 import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.PromptCacheStatus
+import com.hienlh.ppm.state.ReconnectStage
+import com.hienlh.ppm.state.composerPlaceholder as stateComposerPlaceholder
 import com.hienlh.ppm.state.stepHistory
 import kotlin.math.floor
-import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -187,30 +189,47 @@ import kotlinx.coroutines.flow.filter
 /** Chips of the composer row: 11.5 px, with the body's 1.5 line height. */
 private val chipText = ppmText(11.5f, lineHeight = 17.25f)
 
+/** Custom semantics properties exposed on `clearAndSetSemantics` composer chips for layout/label tests without splitting the AccessibilityNodeInfo leaf. */
+internal val DisplayedChipTextKey = SemanticsPropertyKey<String>("DisplayedChipText")
+internal val ShowsChevronKey = SemanticsPropertyKey<Boolean>("ShowsChevron")
+
 /** `showCancel`: Stop takes Send's place while a turn runs and the box has nothing to send. */
 internal fun showsStop(running: Boolean, hasContent: Boolean) = running && !hasContent
 
-/** The box's placeholder: a turn running asks for a follow-up, and a tablet's adds that Stop is there. */
-internal fun composerPlaceholder(running: Boolean, mobile: Boolean) = when {
-    !running -> "Ask anything..."
-    mobile -> "Follow-up..."
-    else -> "Follow-up or Stop..."
-}
+/**
+ * The box's placeholder (`message-input.tsx`): `"Will send when reconnected..."` while offline,
+ * `"Follow-up or Stop..."` while a turn runs, `"Ask anything..."` otherwise.
+ */
+internal fun composerPlaceholder(running: Boolean, offline: Boolean = false): String =
+    stateComposerPlaceholder(if (offline) ReconnectStage.RECONNECTING else ReconnectStage.HIDDEN, running)
 
 /**
- * The message box (`message-input.tsx`): the chips that set how the next turn runs over the text
- * and Send, or Stop while the turn runs and nothing is typed. A phone draws the `md:hidden` rows,
- * a tablet the desktop ones. [narrow] is the chat's `@max-[420px]` — the mode and priority chips
- * keep only their icons, and on a tablet the chips stay on one line. [fileDrop] takes what is
- * dropped on the text, where its own field would; the [pickers] open over the box take its keys
- * first.
+ * The message box (`message-input.tsx`): a single `rounded-[18px]` container with optional
+ * reply/agent/attachment chips on top, the growing textarea in the middle, and ONE bottom action bar:
+ * `[AttachButton, ModeChip, ComposerModelChip (shrinkable), PriorityChip, Spacer, PromptCacheChip, MicButton, Send/Stop]`.
+ *
+ * [narrow] is the chat's `@max-[420px]/chat` — mode, priority, and cold prompt-cache chips drop their
+ * text labels, and the model chip drops its effort suffix and trailing chevron so the model name stays
+ * readable. [offline] switches the placeholder to `"Will send when reconnected..."`.
  */
 @Composable
-fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState, narrow: Boolean, fileDrop: ChatFileDrop, pickers: ComposerPickers) {
+fun ChatComposer(
+    model: AppModel,
+    tab: ChatTab,
+    chat: ChatController,
+    state: ChatState,
+    narrow: Boolean,
+    fileDrop: ChatFileDrop,
+    pickers: ComposerPickers,
+    offline: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
+    val reducedMotion = rememberPrefersReducedMotion()
     val running = state.isRunning
     val focus = remember { FocusRequester() }
+    var fieldFocused by remember { mutableStateOf(false) }
     var modeOpen by remember { mutableStateOf(false) }
     var modelOpen by remember { mutableStateOf(false) }
     // The model can't change mid-turn: its sheet closes as the turn starts.
@@ -342,22 +361,27 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
     // `disabled` while the first message goes: the text, the paperclip and the mic at half strength.
     val locked = tab.firstSendPending
 
-    val shape = RoundedCornerShape(tokens.rad.dp)
-    // `p-2 md:p-3` around the box, and its rows, at their exact heights: what is above the box
-    // starts where they put it.
-    val pad = if (mobile) 8.dp else 12.dp
-    CssColumn(Modifier.fillMaxWidth().padding(horizontal = pad), top = pad, bottom = pad) {
+    val shape = RoundedCornerShape(18.dp)
+    val borderColor by animateColorAsState(
+        targetValue = if (fieldFocused) tokens.accentWashBorder.color else tokens.border.color,
+        animationSpec = tween(if (reducedMotion) 0 else 150),
+        label = "composerBorderColor",
+    )
     CssColumn(
-        Modifier
+        modifier
             .fillMaxWidth()
+            .testTag("chat-composer")
             .ppmShadow(tokens.shadowFloat, shape)
             .clip(shape)
             .background(tokens.panel.color)
             // `cursor-text`: the I-beam over the whole box, its buttons back to the arrow.
             .pointerHoverIcon(WebCursor.Text)
-            // A tap on the box's padding goes to the text, as the web's container click does.
-            .clickable(remember { MutableInteractionSource() }, indication = null) { tab.requestFocus() }
-            .cssBorder(tokens.border.color, shape),
+            // A tap on the box's padding goes to the text, as the web's container `onClick` does,
+            // without turning the container into a `mergeDescendants` button in accessibility.
+            .pointerInput(tab, locked) {
+                detectTapGestures { if (!locked) tab.requestFocus() }
+            }
+            .cssBorder(borderColor, shape),
     ) {
         // `px-2 md:px-4 pt-2`, and the card's own `mb-2`.
         val inset = if (mobile) 8.dp else 16.dp
@@ -374,79 +398,98 @@ fun ChatComposer(model: AppModel, tab: ChatTab, chat: ChatController, state: Cha
             }
         }
         AttachmentChips(tab.attachments, inset, onRemove = { id -> model.removeAttachment(tab, id) }, onTextTap = { tab.requestFocus() })
-        val mode = tab.permissionMode ?: PermissionMode.FALLBACK
+
+        val placeholder = composerPlaceholder(running, offline)
         if (mobile) {
-            // `flex flex-wrap items-center gap-1 px-2 pt-2 relative`: the mode panel opens over this row.
-            val chips = rememberCssExact()
-            Box(Modifier.fillMaxWidth().cssExact(chips)) {
-                ChipsRow(model, tab, chat, state, narrow, chips, onMode = { modeOpen = !modeOpen }, onModel = { modelOpen = true })
-                if (modeOpen && !tab.providerPending) ModePopover(mode, onDismiss = { modeOpen = false }, pick = pickMode)
-            }
-            // `flex items-end gap-1 px-2 py-2`.
-            CssRow(Modifier.fillMaxWidth(), gap = 4.dp, start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp, align = CssAlign.End) {
-                AttachButton(mobile = true, enabled = !locked, onClick = attach)
-                // `text-sm py-1.5 max-h-20`, the `py-1.5` inside the 80 px; a phone's inputs are 16 px.
-                ComposerField(
-                    tab, focus, quietFocus, focusQuietly, onKey, ::keyboardSend, pasteImage, fileDrop,
-                    style = ppmText(16f, lineHeight = INPUT_LINE),
-                    padding = 6.dp,
-                    // `px-2`, the 32 px attach button and `gap-1`.
-                    cssStart = 44.dp,
-                    maxHeight = 80.dp,
-                    placeholder = composerPlaceholder(running, mobile = true),
-                    enabled = !locked,
-                    modifier = Modifier.cssFlex(),
-                )
-                if (micShown) MicButton(tab, mobile = true, enabled = !locked, onClick = toggleMic)
-                if (showsStop(running, hasContent)) {
-                    SquareButton(ProductIcon.Square, 14.dp, tokens.error, Color.White, hoverFill = tokens.error.opacity(0.8), label = "Stop") { chat.cancel() }
-                } else {
-                    SendButton(tab, 16.dp, label = "Send", enabled = canSend, onClick = ::send)
-                }
-            }
-        } else {
-            DesktopChipsRow(
-                model, tab, chat, state, narrow,
-                modeOpen = modeOpen,
-                onMode = { modeOpen = !modeOpen },
-                onModeDismiss = { modeOpen = false },
-                pickMode = pickMode,
-                modelOpen = modelOpen && !running,
-                onModel = { modelOpen = !modelOpen },
-                onModelDismiss = { modelOpen = false },
+            // `px-3 pb-0 pt-2 text-sm leading-relaxed max-h-20`: 16 px phone input, 80 dp total cap.
+            ComposerField(
+                tab, focus, quietFocus, focusQuietly, onKey, ::keyboardSend, pasteImage, fileDrop,
+                style = ppmText(16f, lineHeight = 16f * 1.625f),
+                padding = 0.dp,
+                cssStart = 12.dp,
+                maxHeight = 72.dp,
+                placeholder = placeholder,
+                enabled = !locked,
+                onFocusChange = { fieldFocused = it },
+                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp),
             )
-            // `flex items-end gap-2 px-2.5 py-2`.
-            CssRow(Modifier.fillMaxWidth(), gap = 8.dp, start = 10.dp, end = 10.dp, top = 8.dp, bottom = 8.dp, align = CssAlign.End) {
-                AttachButton(mobile = false, enabled = !locked, onClick = attach)
-                // `text-sm leading-relaxed py-2 max-h-[90px]`, the `py-2` inside the 90 px.
-                ComposerField(
-                    tab, focus, quietFocus, focusQuietly, onKey, ::keyboardSend, pasteImage, fileDrop,
-                    style = ppmText(14f, lineHeight = 14f * 1.625f),
-                    padding = 8.dp,
-                    // `px-2.5`, the 34 px attach button and `gap-2`.
-                    cssStart = 52.dp,
-                    maxHeight = 90.dp,
-                    placeholder = composerPlaceholder(running, mobile = false),
-                    enabled = !locked,
-                    modifier = Modifier.cssFlex(),
-                )
-                if (micShown) MicButton(tab, mobile = false, enabled = !locked, onClick = toggleMic)
-                if (showsStop(running, hasContent)) {
-                    SquareButton(ProductIcon.Square, 16.dp, tokens.error, Color.White, hoverFill = tokens.error.opacity(0.8), label = "Stop response") { chat.cancel() }
-                } else {
-                    SendButton(tab, 17.dp, label = "Send message", enabled = canSend, onClick = ::send)
+        } else {
+            // `px-3.5 pb-1 pt-3 text-sm leading-relaxed max-h-[160px] min-h-12`: 12 dp top (`8 + 4`), 4 dp bottom, 48 dp min, 160 dp max.
+            ComposerField(
+                tab, focus, quietFocus, focusQuietly, onKey, ::keyboardSend, pasteImage, fileDrop,
+                style = ppmText(14f, lineHeight = 14f * 1.625f),
+                padding = 4.dp,
+                cssStart = 14.dp,
+                maxHeight = 152.dp,
+                placeholder = placeholder,
+                enabled = !locked,
+                onFocusChange = { fieldFocused = it },
+                modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 8.dp).defaultMinSize(minHeight = 40.dp),
+            )
+        }
+
+        val mode = tab.permissionMode ?: PermissionMode.FALLBACK
+        val name = modelName(model, chat, state)
+        val compactBar = narrow || mobile
+        val barGap = if (compactBar) 2.dp else 4.dp
+        val barPx = if (compactBar) 6.dp else 8.dp
+        val barPt = if (mobile) 0.dp else 4.dp
+        val barPb = if (mobile) 4.dp else 8.dp
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .testTag("composer-action-bar")
+                .padding(start = barPx, end = barPx, top = barPt, bottom = barPb),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(barGap),
+        ) {
+            Row(
+                Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(barGap),
+            ) {
+                AttachButton(mobile = mobile, enabled = !locked, onClick = attach)
+                if (!tab.providerPending) {
+                    Box {
+                        ModeChip(mode, narrow) { modeOpen = !modeOpen }
+                        if (modeOpen) ModePopover(mode, onDismiss = { modeOpen = false }, pick = pickMode)
+                    }
                 }
+                if (!tab.providerPending && !tab.firstSendPending) {
+                    // `[data-model-slot]` (`shrink` while siblings stay `shrink-0`): the only chip that yields width.
+                    Box(Modifier.weight(1f, fill = false).testTag("composer-model-slot")) {
+                        ComposerModelChip(
+                            name = name,
+                            state = state,
+                            providerId = chat.providerId,
+                            narrow = narrow,
+                        ) {
+                            modelOpen = if (mobile) true else !modelOpen
+                        }
+                        if (!mobile && modelOpen && !running) {
+                            ModelPopover(model, tab, chat, state, onDismiss = { modelOpen = false })
+                        }
+                    }
+                }
+                if (running) {
+                    PriorityChip(tab, narrow)
+                }
+            }
+            PromptCacheChip(state.promptCache, narrow = narrow)
+            if (micShown) {
+                MicButton(tab, mobile = mobile, enabled = !locked, onClick = toggleMic)
+            }
+            if (showsStop(running, hasContent)) {
+                StopButton(mobile = mobile, onClick = chat::cancel)
+            } else {
+                SendButton(tab, mobile = mobile, enabled = canSend, onClick = ::send)
             }
         }
     }
-    }
     if (mobile && modelOpen && !running) {
-        ModelSheet(model, chat, state, onDismiss = { modelOpen = false })
+        ModelSheet(model, tab, chat, state, onDismiss = { modelOpen = false })
     }
 }
-
-/** `text-sm`'s 1.25 rem ratio, carried to the 16 px a phone's inputs are set at. */
-private const val INPUT_LINE = 16f * 1.25f / 0.875f
 
 /**
  * The textarea: `rows={1}` growing with its text (`field-sizing: content`) up to [maxHeight], its
@@ -474,6 +517,7 @@ internal fun ComposerField(
     placeholder: String,
     enabled: Boolean,
     modifier: Modifier = Modifier,
+    onFocusChange: (Boolean) -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     val inputStyle = style.copy(color = tokens.text.color)
@@ -504,6 +548,7 @@ internal fun ComposerField(
                 .tracksTextFocus(tab.draft)
                 .onFocusChanged {
                     focused = it.isFocused
+                    onFocusChange(it.isFocused)
                     if (!it.isFocused) quietFocus.value = false
                 }
                 .pointerInput(Unit) {
@@ -575,18 +620,7 @@ internal fun ComposerField(
 }
 
 /**
- * What an accessibility service reads of the field and does to its caret, in the text the user typed. The
- * field's own semantics describe its text as laid out, marks and all (`ChromeTextArea`'s): a service reads
- * "/<U+FEFF>skills" (what uiautomator dumps), is told the caret is where it is in that, and moving it a
- * character at a time stops it on 1, 3, 5, 7, 9. So the text, the caret and the action that sets it are stated
- * together, in the draft's own offsets: the text alone leaves ACTION_SET_SELECTION landing a character off for
- * every mark before it, because the field still reads its offsets in the laid-out text. The field's own check
- * stays: nothing moves while it is disabled, nor to an offset past the text.
- *
- * Line and paragraph traversal stay approximate: they read the line ends from the field's text layout, whose
- * offsets include the marks, and no semantics property can replace that layout. Measured in a 150 dp box over
- * a 53-character draft, three line steps from the start end at 25, 48, 48 and never reach the text's end
- * (25, 25, 25 without this: the caret stays where the first step put it).
+ * What an accessibility service reads of the field and does to its caret, in the text the user typed.
  */
 private fun Modifier.plainTextSemantics(state: TextFieldState, enabled: Boolean): Modifier = semantics {
     editableText = AnnotatedString(state.text.toString())
@@ -608,8 +642,6 @@ private fun Modifier.plainTextSemantics(state: TextFieldState, enabled: Boolean)
 private fun AgentChip(agent: String, modifier: Modifier = Modifier, onRemove: () -> Unit) {
     val shape = RoundedCornerShape(8.dp)
     val color = (if (isSystemInDarkTheme()) sky400 else sky600).color
-    // The chip stands on its icon's bottom edge, which is the border, `py-1` and half of what
-    // the 16 px row leaves around the 14 px icon above its own bottom.
     val room = strutRoomUnder(belowPx = with(LocalDensity.current) { cssBorderPx(1.dp) + 5.dp.toPx() })
     Row(Modifier.fillMaxWidth().then(modifier).padding(bottom = room)) {
         Row(
@@ -637,13 +669,6 @@ private fun AgentChip(agent: String, modifier: Modifier = Modifier, onRemove: ()
     }
 }
 
-/**
- * How far below an `inline-flex` chip the line it sits on reaches, in a block of the page's 16 px
- * text on 24 px lines: the chip stands on the baseline of its first item, [belowPx] above its
- * bottom, and the line's strut goes further down than that. Chrome rounds the strut in device
- * pixels ([PpmFonts.chromeAscentDescent], the top half-leading floored): 1.1 px under the agent
- * chip at 2.625x, 1 px at 2x.
- */
 @Composable
 private fun strutRoomUnder(belowPx: Float): Dp {
     val density = LocalDensity.current.density
@@ -651,90 +676,6 @@ private fun strutRoomUnder(belowPx: Float): Dp {
     val leading = 24f * density - up - down
     val strut = down + leading - floor(leading / 2)
     return ((strut - belowPx) / density).coerceAtLeast(0f).dp
-}
-
-@Composable
-private fun ChipsRow(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState, narrow: Boolean, exact: CssExact, onMode: () -> Unit, onModel: () -> Unit) {
-    val running = state.isRunning
-    val name = modelName(model, chat, state)
-    CssRow(Modifier.fillMaxWidth(), gap = 4.dp, start = 8.dp, end = 8.dp, top = 8.dp, wrap = true, exact = exact) {
-        val mode = tab.permissionMode ?: PermissionMode.FALLBACK
-        // While the provider resolves, nothing to pick a mode or a model for yet; while the first
-        // message goes, the model is fixed and a mode picked changes nothing.
-        if (!tab.providerPending) ModeChip(mode, narrow, onMode)
-        if (choosesProvider(tab)) ProviderChip(model, tab)
-        if (!tab.providerPending && !tab.firstSendPending) {
-            // `relative min-w-0`: a block around the chip, as tall as the line the chip stands on.
-            CssColumn(bottom = chipStrut(14.dp)) {
-                ComposerModelChip(name, state, chat.providerId, onModel)
-            }
-        }
-        if (running) {
-            PriorityChip(tab, narrow)
-        }
-        PromptCacheChip(state.promptCache)
-    }
-}
-
-/**
- * How far the line under a chip reaches below it, where the chip is an `inline-flex` button in a
- * block (the model's `relative min-w-0`, the desktop mode's `relative shrink-0`, the provider's
- * `relative`): it stands on its first item's bottom edge, its [icon]'s — the border, `py-1` and,
- * when it is [labelled], half of what its 17.25 px line leaves around the icon above its own
- * bottom. 0.75 px under the model chip at 2x, nothing under a labelled mode chip, 4 under a bare one.
- */
-@Composable
-private fun chipStrut(icon: Dp, labelled: Boolean = true): Dp {
-    val below = with(LocalDensity.current) {
-        cssBorderPx(1.dp) + 4.dp.toPx() + if (labelled) max(0f, 17.25f.sp.toPx() - icon.toPx()) / 2 else 0f
-    }
-    return strutRoomUnder(below)
-}
-
-/**
- * The desktop chips (`flex flex-wrap items-center gap-1.5 px-2.5 pt-2.5`): each panel opens over
- * its own chip, the mode's from `relative shrink-0`, the model's from `relative min-w-0`. On a
- * narrow chat (`@max-[420px]/chat:flex-nowrap`) they stay on one line and the model chip gives way.
- */
-@Composable
-private fun DesktopChipsRow(
-    model: AppModel,
-    tab: ChatTab,
-    chat: ChatController,
-    state: ChatState,
-    narrow: Boolean,
-    modeOpen: Boolean,
-    onMode: () -> Unit,
-    onModeDismiss: () -> Unit,
-    pickMode: (PermissionMode) -> Unit,
-    modelOpen: Boolean,
-    onModel: () -> Unit,
-    onModelDismiss: () -> Unit,
-) {
-    val running = state.isRunning
-    val name = modelName(model, chat, state)
-    val mode = tab.permissionMode ?: PermissionMode.FALLBACK
-    // As on the phone: no mode while the provider resolves, no model then or while the first message goes.
-    CssRow(Modifier.fillMaxWidth(), gap = 6.dp, start = 10.dp, end = 10.dp, top = 10.dp, wrap = !narrow) {
-        if (!tab.providerPending) {
-            CssColumn(bottom = chipStrut(12.dp, labelled = !narrow)) {
-                ModeChip(mode, narrow, onMode)
-                if (modeOpen) ModePopover(mode, onDismiss = onModeDismiss, pick = pickMode)
-            }
-        }
-        if (choosesProvider(tab)) ProviderChip(model, tab)
-        if (!tab.providerPending && !tab.firstSendPending) {
-            // On one line, the chip that gives way.
-            CssColumn(Modifier.cssShrink(), bottom = chipStrut(14.dp)) {
-                ComposerModelChip(name, state, chat.providerId, onModel)
-                if (modelOpen) ModelPopover(model, chat, state, onDismiss = onModelDismiss)
-            }
-        }
-        if (running) {
-            PriorityChip(tab, narrow)
-        }
-        PromptCacheChip(state.promptCache)
-    }
 }
 
 /** The model chip's name: the catalog's label, else one made from the id, else "Model". */
@@ -751,16 +692,20 @@ private fun modelName(model: AppModel, chat: ChatController, state: ChatState): 
 
 /**
  * A chip as the web's `<button aria-label=[name] disabled>` is to a screen reader: one node with the
- * name, a button's role, its press ([action]) and, while [enabled] is false, disabled. Left to
- * `clickable` and a `contentDescription`, Compose hands the services three nodes: the clickable,
- * which presses and can be disabled but has no name, the name as a child of it that does neither,
- * and the text as a second child. Clearing what lies below leaves the one node holding it all. Put it
- * ahead of the chip's own `clickable`, whose gestures it leaves alone and whose semantics it replaces.
+ * name, a button's role, its press ([action]) and, while [enabled] is false, disabled.
  */
-private fun Modifier.chipSemantics(name: String, enabled: Boolean = true, action: () -> Unit): Modifier =
+private fun Modifier.chipSemantics(
+    name: String,
+    enabled: Boolean = true,
+    tag: String? = null,
+    extra: SemanticsPropertyReceiver.() -> Unit = {},
+    action: () -> Unit,
+): Modifier =
     clearAndSetSemantics {
         contentDescription = name
         role = Role.Button
+        if (tag != null) testTag = tag
+        extra()
         onClick {
             if (enabled) action()
             enabled
@@ -769,69 +714,86 @@ private fun Modifier.chipSemantics(name: String, enabled: Boolean = true, action
     }
 
 /**
- * `px-[9px] py-1 rounded-full text-[11.5px] text-text-2 bg-panel-2 border border-border-soft`,
- * `hover:text-text-primary hover:border-border` faded in: the mode and the priority. [label] null
- * draws the icon alone, at `px-[7px]`; [name] is the chip's `aria-label`.
+ * `BAR_CHIP` (`message-input.tsx`): borderless ghost pill `h-[30px]` (`max-md:h-7` = 28 dp on phone),
+ * `rounded-full px-[9px] gap-1.5` (`@max-[420px]/chat` and `max-md`: `px-1.5` = 6 dp, `gap-1` = 4 dp),
+ * `text-[11.5px] text-text-2 can-hover:hover:bg-surface-hover can-hover:hover:text-text` and
+ * `motion-safe:active:scale-[0.97]`. On narrow or phone layouts (`narrow || mobile`) only the 16 px
+ * icon is drawn.
  */
 @Composable
-private fun NeutralChip(icon: ProductIcon, label: String?, name: String, narrow: Boolean, modifier: Modifier = Modifier, labelMax: Dp = Dp.Unspecified, onClick: () -> Unit) =
-    NeutralChip(label, name, narrow, labelMax, onClick, modifier) { color -> PpmIcon(icon, 12.dp, color, Modifier.cssIcon(12.dp)) }
-
-/** [NeutralChip] with its own [leading] mark, drawn in the chip's text colour. */
-@Composable
-private fun NeutralChip(label: String?, name: String, narrow: Boolean, labelMax: Dp, onClick: () -> Unit, modifier: Modifier = Modifier, leading: @Composable (Color) -> Unit) {
+private fun BarChip(
+    icon: ProductIcon,
+    label: String,
+    name: String,
+    narrow: Boolean,
+    modifier: Modifier = Modifier,
+    tag: String? = null,
+    onClick: () -> Unit,
+) {
     val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
+    val reducedMotion = rememberPrefersReducedMotion()
+    val compact = narrow || mobile
+    val showLabel = !compact
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val hovered by source.collectIsHoveredAsState()
-    val fade = colorsFade(hovered)
-    val lit = if (pressed) 1.0 else fade.toDouble()
-    val color = tokens.text.mix(tokens.text2, lit)
-    val side = if (narrow) 7.dp else 9.dp
-    CssRow(
+    val lit = if (!mobile && hovered) colorsFade(true).toDouble() else 0.0
+    val textColor = tokens.text.mix(tokens.text2, lit).color
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed && !reducedMotion) 0.97f else 1f,
+        animationSpec = tween(if (reducedMotion) 0 else 150),
+        label = "barChipScale",
+    )
+    Row(
         modifier
-            .chipSemantics(name, action = onClick)
+            .chipSemantics(
+                name = name,
+                tag = tag,
+                extra = { this[DisplayedChipTextKey] = if (showLabel) label else "" },
+                action = onClick,
+            )
+            .height(if (mobile) 28.dp else 30.dp)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
             .clip(CircleShape)
-            .background(tokens.panel2.color)
+            .background(if (!mobile && hovered) tokens.surfaceHover.color else Color.Transparent)
             .pointerHoverIcon(WebCursor.Default)
             .hoverable(source)
             .clickable(source, indication = null, onClick = onClick)
-            .cssBorder(tokens.border.mix(tokens.borderSoft, lit).color, CircleShape),
-        // `px-[9px] py-1` (`px-[7px]` narrow).
-        gap = 6.dp,
-        start = side,
-        end = side,
-        top = 4.dp,
-        bottom = 4.dp,
+            .padding(horizontal = if (compact) 6.dp else 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
     ) {
-        // An icon alone is the chip's whole height (21.5 px on the web): the hidden label leaves no line.
-        leading(color.color)
-        if (label != null) {
+        PpmIcon(icon, 16.dp, textColor)
+        if (showLabel) {
             BasicText(
                 label,
-                Modifier.cssShrink().widthIn(max = labelMax).cssLines(17.25f),
-                style = chipText.copy(color = color.color),
+                style = chipText.copy(color = textColor),
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                overflow = TextOverflow.Clip,
             )
         }
     }
 }
 
 /**
- * `ModeChip`, in both rows: the permission mode the next turn runs under. Its `title`, the mouse's
- * tooltip, and its `aria-label`, the name a screen reader gives it, are the same text.
+ * `ModeChip` (`message-input.tsx`): shows the one-word [PermissionMode.shortLabel] ("Ask",
+ * "Auto-edit", "Plan", "Bypass") on wide tablet, or icon-only when [narrow] or on phone.
+ * Its `title` and `aria-label` keep the full [PermissionMode.label].
  */
 @Composable
 internal fun ModeChip(mode: PermissionMode, narrow: Boolean, onClick: () -> Unit) {
     val name = modeChipName(mode)
-    NeutralChip(
-        mode.icon,
-        if (narrow) null else mode.label,
-        name,
-        narrow,
-        Modifier.webTitle(name),
-        labelMax = 100.dp,
+    BarChip(
+        icon = mode.icon,
+        label = mode.shortLabel,
+        name = name,
+        narrow = narrow,
+        modifier = Modifier.webTitle(name),
+        tag = "composer-mode-chip",
         onClick = onClick,
     )
 }
@@ -840,29 +802,46 @@ internal fun ModeChip(mode: PermissionMode, narrow: Boolean, onClick: () -> Unit
 internal fun modeChipName(mode: PermissionMode) = "Permission mode: ${mode.label}"
 
 /**
- * The chip of `ModelThinkingSelector`, in both rows: its `title` ([modelChipTitle]) and its
- * `aria-label` ([modelChipName]).
+ * The chip of `ModelThinkingSelector` (`model-thinking-selector.tsx`): borderless ghost pill carrying
+ * the provider's logo, the bounded model name (plus `" · <Effort>"` on wide tablet), optional `Brain`
+ * icon when thinking is on, and trailing `ChevronDown` on wide tablet.
  */
 @Composable
-internal fun ComposerModelChip(name: String, state: ChatState, providerId: String = "claude", onClick: () -> Unit) {
+internal fun ComposerModelChip(
+    name: String,
+    state: ChatState,
+    providerId: String = "claude",
+    narrow: Boolean = false,
+    onClick: () -> Unit,
+) {
     val isAntigravity = providerId == "antigravity"
     val effort = state.effort ?: ModelNames.suffixEffort(state.model, providerId) ?: Effort.DEFAULT.value
     val showThinking = !isAntigravity && state.thinking
     val text = ModelNames.chipLabel(name, effort)
     val running = state.isRunning
     ModelChip(
-        text,
-        modelChipName(name, effort, showThinking),
-        showThinking,
+        text = text,
+        name = modelChipName(name, effort, showThinking),
+        thinking = showThinking,
         disabled = running,
-        modifier = Modifier.webTitle(modelChipTitle(running, text)),
-        labelMax = if (isAntigravity) 180.dp else 140.dp,
+        modifier = Modifier.webTitle(modelChipTitle(running, text, providerId)),
+        providerId = providerId,
+        narrow = narrow,
+        modelDisplay = name,
+        tag = "composer-model-chip",
         onClick = onClick,
     )
 }
 
-/** The model chip's `title`: its own text, or while a turn runs why a press does nothing. */
-internal fun modelChipTitle(running: Boolean, text: String) = if (running) "Can't change while running" else text
+/**
+ * The model chip's `title` (`model-thinking-selector.tsx`): `"Can't change while running"` when
+ * [running], else `"<Provider> · <text>"` when [providerId] is given, else [text].
+ */
+internal fun modelChipTitle(running: Boolean, text: String, providerId: String? = null): String {
+    if (running) return "Can't change while running"
+    val provider = providerId?.takeIf { it.isNotEmpty() }?.replaceFirstChar { it.uppercase() }
+    return if (provider != null) "$provider · $text" else text
+}
 
 /**
  * The model chip's `aria-label`: the model, the effort by the value the server knows it by
@@ -872,73 +851,115 @@ internal fun modelChipName(model: String, effort: String, thinking: Boolean) =
     "Model $model, effort $effort${if (thinking) ", thinking on" else ""}"
 
 /**
- * `PriorityToggle`, in both rows: how a message sent during the turn is handled, one step on
- * (Queue, Later, Interrupt) with each press. Its `title` is the mouse's tooltip and its
- * `aria-label` the name a screen reader gives it, which a narrow chat's icon alone does not.
+ * `PriorityToggle` (`message-input.tsx`): visible only while streaming, stepping through
+ * Queue → Later → Interrupt on each tap.
  */
 @Composable
 private fun PriorityChip(tab: ChatTab, narrow: Boolean) {
     val priority = tab.priority
-    NeutralChip(
-        priority.icon,
-        if (narrow) null else priority.label,
-        "Message priority: ${priority.label}",
-        narrow,
-        Modifier.webTitle("Priority: ${priority.label} (click to cycle)"),
-    ) { tab.priority = priority.following }
-}
-
-/**
- * `text-primary bg-accent-wash border border-accent-wash-border`, sparkles, a brain while
- * thinking; `hover:brightness-110` faded in. 50% while the turn runs, when a mouse over it still
- * brightens it, as CSS `:hover` matches a disabled button. [labelMax] is the name's `max-w-[…]`,
- * [name] the chip's `aria-label`.
- */
-@Composable
-internal fun ModelChip(text: String, name: String, thinking: Boolean, disabled: Boolean, modifier: Modifier = Modifier, labelMax: Dp = 140.dp, onClick: () -> Unit) {
-    val tokens = LocalPpmTokens.current
-    val source = remember { MutableInteractionSource() }
-    val pressed by source.collectIsPressedAsState()
-    val hovered by source.collectIsHoveredAsState()
-    val fade = colorsFade(hovered)
-    val lit = if (pressed) 1f else fade
-    CssRow(
-        modifier
-            .chipSemantics(name, enabled = !disabled, action = onClick)
-            .alpha(if (disabled) 0.5f else 1f)
-            .brightness(1f + 0.1f * lit)
-            .clip(CircleShape)
-            .background(tokens.accentWash.color)
-            // `disabled:cursor-default`: the arrow either way.
-            .pointerHoverIcon(WebCursor.Default)
-            .hoverable(source)
-            .clickable(source, indication = null, enabled = !disabled, onClick = onClick)
-            .cssBorder(tokens.accentWashBorder.color, CircleShape),
-        gap = 6.dp,
-        start = 9.dp,
-        end = 9.dp,
-        top = 4.dp,
-        bottom = 4.dp,
+    BarChip(
+        icon = priority.icon,
+        label = priority.label,
+        name = "Message priority: ${priority.label}",
+        narrow = narrow,
+        modifier = Modifier.webTitle("Your next message: ${priority.label} (tap to cycle Queue → Later → Interrupt)"),
+        tag = "composer-priority-chip",
     ) {
-        PpmIcon(ProductIcon.Sparkles, 14.dp, tokens.accent.color, Modifier.cssIcon(14.dp))
-        BasicText(
-            text,
-            Modifier.cssShrink().widthIn(max = labelMax).cssLines(17.25f),
-            style = chipText.copy(color = tokens.accent.color),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        if (thinking) PpmIcon(ProductIcon.Brain, 12.dp, tokens.accent.color, Modifier.cssIcon(12.dp))
+        tab.priority = priority.following
     }
 }
 
 /**
- * How long the prompt cache has left (`PromptCacheChip`): a countdown while warm, red with the
- * time it has sat idle once gone; nothing until PPM has measured the session.
+ * `ModelThinkingSelector`'s trigger button (`data-model-chip`):
+ * `inline-flex h-[30px] min-w-0 max-w-full items-center gap-1.5 whitespace-nowrap rounded-full px-[9px]
+ * text-[11.5px] text-primary @max-[420px]/chat:gap-1 @max-[420px]/chat:px-1.5 max-md:gap-1 max-md:px-1.5
+ * can-hover:hover:bg-surface-hover motion-safe:active:scale-[0.97]`.
+ *
+ * On `narrow || mobile`, the effort suffix (`" · High"`) and trailing `ChevronDown` are hidden and
+ * the model name caps at `110.dp` (`180.dp` on wide tablet), matching `model-thinking-selector.tsx`
+ * lines 214–221.
  */
 @Composable
-private fun PromptCacheChip(cache: PromptCacheState?) {
+internal fun ModelChip(
+    text: String,
+    name: String,
+    thinking: Boolean,
+    disabled: Boolean,
+    modifier: Modifier = Modifier,
+    providerId: String = "claude",
+    narrow: Boolean = false,
+    modelDisplay: String = text.substringBefore(" · "),
+    labelMax: Dp = Dp.Unspecified,
+    tag: String? = null,
+    onClick: () -> Unit,
+) {
     val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
+    val reducedMotion = rememberPrefersReducedMotion()
+    val compact = narrow || mobile
+    val shownText = if (compact) modelDisplay else text
+    val effectiveMax = when {
+        labelMax != Dp.Unspecified -> labelMax
+        compact -> 110.dp
+        else -> 180.dp
+    }
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val hovered by source.collectIsHoveredAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed && !disabled && !reducedMotion) 0.97f else 1f,
+        animationSpec = tween(if (reducedMotion) 0 else 150),
+        label = "modelChipScale",
+    )
+    Row(
+        modifier
+            .chipSemantics(
+                name = name,
+                enabled = !disabled,
+                tag = tag,
+                extra = {
+                    this[DisplayedChipTextKey] = shownText
+                    this[ShowsChevronKey] = !compact
+                },
+                action = onClick,
+            )
+            .height(30.dp)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
+            .clip(CircleShape)
+            .background(if (!mobile && hovered && !disabled) tokens.surfaceHover.color else Color.Transparent)
+            // `disabled:cursor-default`: the arrow either way.
+            .pointerHoverIcon(WebCursor.Default)
+            .hoverable(source)
+            .clickable(source, indication = null, enabled = !disabled, onClick = onClick)
+            .padding(horizontal = if (compact) 6.dp else 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp),
+    ) {
+        ProviderBadge(providerId, 16.dp)
+        BasicText(
+            shownText,
+            Modifier.weight(1f, fill = false).widthIn(max = effectiveMax),
+            style = chipText.copy(color = tokens.accent.color),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (thinking) PpmIcon(ProductIcon.Brain, 12.dp, tokens.accent.color)
+        if (!compact) PpmIcon(ProductIcon.ChevronDown, 12.dp, tokens.text3.color)
+    }
+}
+
+/**
+ * Cold-only prompt cache indicator (`prompt-cache-chip.tsx`): a warm or unmeasured cache renders
+ * nothing; once cold, draws a borderless `h-[30px]` red clock + tabular idle duration (`"1h 51m"`),
+ * hiding the text on `narrow || mobile`.
+ */
+@Composable
+internal fun PromptCacheChip(cache: PromptCacheState?, narrow: Boolean = false) {
+    val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(cache) {
         while (true) {
@@ -946,45 +967,48 @@ private fun PromptCacheChip(cache: PromptCacheState?) {
             delay(30_000)
         }
     }
-    val status = PromptCacheStatus.of(cache, now.toDouble())
+    val status = PromptCacheStatus.of(cache, now.toDouble()) as? PromptCacheStatus.Cold ?: return
     val label = status.label ?: return
-    val cold = status is PromptCacheStatus.Cold
-    val color = if (cold) tokens.error else tokens.text2
-    CssRow(
+    val detail = status.detail ?: label
+    Row(
         Modifier
-            .clip(CircleShape)
-            .background((if (cold) tokens.error.opacity(0.1) else tokens.panel2).color)
-            .cssBorder((if (cold) tokens.error.opacity(0.4) else tokens.borderSoft).color, CircleShape),
-        gap = 6.dp,
-        start = 9.dp,
-        end = 9.dp,
-        top = 4.dp,
-        bottom = 4.dp,
+            .height(30.dp)
+            .testTag("prompt-cache-cold")
+            .webTitle(detail)
+            .semantics { contentDescription = detail }
+            .padding(horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        PpmIcon(ProductIcon.Clock, 12.dp, color.color, Modifier.cssIcon(12.dp))
-        BasicText(label, Modifier.cssLines(17.25f), style = chipText.copy(color = color.color, fontFeatureSettings = "tnum"), maxLines = 1)
+        PpmIcon(ProductIcon.Clock, 16.dp, tokens.error.color)
+        if (!narrow && !mobile) {
+            BasicText(
+                label,
+                style = ppmText(11f, lineHeight = 16.5f).copy(color = tokens.error.color, fontFeatureSettings = "tnum"),
+                maxLines = 1,
+            )
+        }
     }
 }
 
 /**
- * The mic, labelled "Start voice input", "Stop voice input" or "Transcribing": the paperclip's box
- * and colours while closed (`size-8` and a 16 px icon on a phone, `size-[34px]`, 17 px and
- * `hover:bg-surface-elevated` on a tablet); open, `bg-error text-white animate-pulse` and the mic
- * crossed out; while Whisper works on what it heard, a spinner at half strength taking no presses.
- * The change of look fades as `transition-colors` fades it.
+ * The mic (`SQUARE_BUTTON`, `message-input.tsx`), labelled `"Start voice input"`,
+ * `"Stop voice input"` or `"Transcribing"`: `size-[34px]` on tablet, `size-8` on phone, `rounded-[10px]`,
+ * `size-4` (16 dp) icon, `can-hover:hover:bg-surface-hover can-hover:hover:text-text` when idle,
+ * `!bg-error !text-white animate-pulse` when listening, and `motion-safe:active:scale-[0.97]`.
  */
 @Composable
 private fun MicButton(tab: ChatTab, mobile: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
+    val reducedMotion = rememberPrefersReducedMotion()
     val listening = tab.voiceListening
     val transcribing = tab.voiceTranscribing
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val hovered by source.collectIsHoveredAsState()
-    val lit = if (pressed && !transcribing) 1.0 else colorsFade(hovered).toDouble()
+    val lit = if (!mobile && hovered) colorsFade(true).toDouble() else 0.0
     val open = colorsFade(listening).toDouble()
-    // `animate-pulse`: down to half and back every 2 s, each way on cubic-bezier(0.4, 0, 0.6, 1).
-    val pulse = if (listening) {
+    val pulse = if (listening && !reducedMotion) {
         rememberInfiniteTransition(label = "pulse").animateFloat(
             initialValue = 1f,
             targetValue = 0.5f,
@@ -994,7 +1018,12 @@ private fun MicButton(tab: ChatTab, mobile: Boolean, enabled: Boolean, onClick: 
     } else {
         1f
     }
-    val idleFill = if (mobile) tokens.panel2.opacity(0.0) else tokens.panel2.opacity(lit)
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed && enabled && !transcribing && !reducedMotion) 0.97f else 1f,
+        animationSpec = tween(if (reducedMotion) 0 else 150),
+        label = "micButtonScale",
+    )
+    val idleFill = if (!mobile && hovered) tokens.surfaceHover else tokens.surfaceHover.opacity(0.0)
     val idleIcon = tokens.text.mix(tokens.text3, lit)
     val label = when {
         transcribing -> "Transcribing"
@@ -1006,9 +1035,14 @@ private fun MicButton(tab: ChatTab, mobile: Boolean, enabled: Boolean, onClick: 
         Modifier
             .alpha(if (transcribing || !enabled) 0.5f else pulse)
             .cssSize(if (mobile) 32.dp else 34.dp)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
             .clip(shape)
             .background(tokens.error.mix(idleFill, open).color)
             .pointerHoverIcon(WebCursor.Default)
+            .webTitle(label)
             .hoverable(source)
             .clickable(source, indication = null, enabled = enabled && !transcribing, onClickLabel = label, onClick = onClick)
             .semantics { contentDescription = label },
@@ -1019,7 +1053,7 @@ private fun MicButton(tab: ChatTab, mobile: Boolean, enabled: Boolean, onClick: 
             listening -> ProductIcon.MicOff
             else -> ProductIcon.Mic
         }
-        PpmIcon(icon, if (mobile) 16.dp else 17.dp, WHITE.mix(idleIcon, open).color, spinning = transcribing)
+        PpmIcon(icon, 16.dp, WHITE.mix(idleIcon, open).color, spinning = transcribing)
     }
 }
 
@@ -1030,80 +1064,99 @@ private val PULSE_EASING = CubicBezierEasing(0.4f, 0f, 0.6f, 1f)
 private val WHITE = Rgba(1.0, 1.0, 1.0, 1.0)
 
 /**
- * `size-9 rounded-[11px]` with the float shadow, [hoverFill] under a mouse (faded in) or a finger;
- * 30% and flat when disabled, when a mouse over it still lights it.
+ * Primary action button (`Send` / `Stop`, `message-input.tsx` lines 1179–1197):
+ * `size-9 rounded-[11px]` on tablet, `max-md:size-8 max-md:rounded-[10px]` on phone, `size-4` (16 dp)
+ * icon, `shadow-[var(--shadow-float)]`, `motion-safe:active:scale-[0.97]`; 30% flat when disabled.
  */
 @Composable
-private fun SquareButton(
+private fun ActionSquareButton(
     icon: ProductIcon,
-    iconSize: Dp,
+    mobile: Boolean,
     fill: Rgba,
     tint: Color,
     hoverFill: Rgba,
-    label: String,
+    ariaLabel: String,
+    title: String,
     enabled: Boolean = true,
     spinning: Boolean = false,
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(11.dp)
+    val reducedMotion = rememberPrefersReducedMotion()
+    val shape = RoundedCornerShape(if (mobile) 10.dp else 11.dp)
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val hovered by source.collectIsHoveredAsState()
     val fade = colorsFade(hovered)
     val lit = if (pressed && enabled) 1.0 else fade.toDouble()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed && enabled && !reducedMotion) 0.97f else 1f,
+        animationSpec = tween(if (reducedMotion) 0 else 150),
+        label = "actionSquareScale",
+    )
     Box(
         Modifier
             .alpha(if (enabled) 1f else 0.3f)
-            .cssSize(36.dp)
+            .cssSize(if (mobile) 32.dp else 36.dp)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
             .then(if (enabled) Modifier.ppmShadow(tokens.shadowFloat, shape) else Modifier)
             .clip(shape)
             .background(hoverFill.mix(fill, lit).color)
-            // Send's `disabled:cursor-not-allowed`.
             .pointerHoverIcon(if (enabled) WebCursor.Default else WebCursor.NotAllowed)
+            .webTitle(title)
             .hoverable(source)
-            .clickable(source, indication = null, enabled = enabled, onClickLabel = label, onClick = onClick)
-            // The `aria-label`: Stop and Send hold an icon only.
-            .semantics { contentDescription = label },
+            .clickable(source, indication = null, enabled = enabled, onClickLabel = ariaLabel, onClick = onClick)
+            .semantics { contentDescription = ariaLabel },
         contentAlignment = Alignment.Center,
     ) {
-        PpmIcon(icon, iconSize, tint, spinning = spinning)
+        PpmIcon(icon, 16.dp, tint, spinning = spinning)
     }
 }
 
-/**
- * Send, or while a file is still uploading the send waiting on it: a 16 px spinner labelled
- * "Cancel queued send", which a press takes back.
- */
 @Composable
-private fun SendButton(tab: ChatTab, arrowSize: Dp, label: String, enabled: Boolean, onClick: () -> Unit) {
+private fun StopButton(mobile: Boolean, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    ActionSquareButton(
+        icon = ProductIcon.Square,
+        mobile = mobile,
+        fill = tokens.error,
+        tint = Color.White,
+        hoverFill = tokens.error.opacity(0.8),
+        ariaLabel = "Stop response",
+        title = "Stop",
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun SendButton(tab: ChatTab, mobile: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val queued = tab.pendingSend
-    SquareButton(
-        if (queued) ProductIcon.Loader2 else ProductIcon.ArrowUp, if (queued) 16.dp else arrowSize,
-        tokens.accent, tokens.accentFg.color, hoverFill = tokens.accent.opacity(0.9),
-        label = if (queued) "Cancel queued send" else label, enabled = enabled, spinning = queued,
+    ActionSquareButton(
+        icon = if (queued) ProductIcon.Loader2 else ProductIcon.ArrowUp,
+        mobile = mobile,
+        fill = tokens.accent,
+        tint = tokens.accentFg.color,
+        hoverFill = tokens.accent.opacity(0.9),
+        ariaLabel = if (queued) "Cancel queued send" else "Send message",
+        title = "Send",
+        enabled = enabled,
+        spinning = queued,
         onClick = { if (queued) tab.pendingSend = false else onClick() },
     )
 }
 
 /**
- * The modes (`ModeSelector`, `w-72 md:w-80`): over what holds it — the chips row on a phone, the
- * chip on a tablet — with its left edge on that one's, 4 px clear of it. A press anywhere else
- * closes it and goes on to what it landed on, as the web's mousedown listener lets it. A row's
- * `hover:bg-surface-elevated` is the popover's own fill on the web, so this lights it in the
- * hover tint instead.
+ * The modes (`ModeSelector`, `w-72 md:w-80`): over the chip with its left edge on the chip's,
+ * 4 px clear (`absolute bottom-full left-0 mb-1`).
  */
 @Composable
 private fun ModePopover(current: PermissionMode, onDismiss: () -> Unit, pick: (PermissionMode) -> Unit) =
     ComposerPopover(onDismiss) { ModePanel(current, pick) }
 
-/**
- * The window the mode, provider and model panels open in, over the chip they came from with its left edge on the chip's,
- * 4 px clear (`absolute bottom-full left-0 mb-1`). One definition for the three: it is a focusable window of its own, so
- * the keyboard that moves over a panel's rows stays in it and no key reaches the window behind, and a panel opened
- * some other way would not have that. [PassThroughProperties] says what makes it so.
- */
 @Composable
 private fun ComposerPopover(onDismiss: () -> Unit, content: @Composable () -> Unit) {
     val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
@@ -1163,24 +1216,26 @@ internal fun ModePanel(current: PermissionMode, pick: (PermissionMode) -> Unit) 
     }
 }
 
-/** The provider chip is offered (`onProviderChange`): before the session, its provider resolved, no first message on its way. */
-private fun choosesProvider(tab: ChatTab) = tab.session == null && !tab.providerPending && !tab.firstSendPending
+/**
+ * Offered inside the model picker (`onProviderChange`, `chat-tab.tsx` line 1555): only before a
+ * session exists, outside design tabs, once preparation resolved, and before the first message sends.
+ */
+internal fun choosesProvider(tab: ChatTab) =
+    tab.session == null && !tab.tabId.startsWith("design:") && !tab.providerPending && !tab.firstSendPending
 
 /** What the provider list said when last read on opening (`result`): failed keeps the list in hand. */
 private class ProviderRead(val providers: List<ProviderInfo>, val failed: Boolean)
 
 /**
- * The provider of a chat with no session yet (`ProviderSelector`): its logo and name on a chip
- * drawn as the mode's (the name `max-w-[80px] truncate capitalize`), over which its providers
- * open. The list is the project's while fresh, read again each time it opens.
+ * `ProviderChoiceRow` (`provider-selector.tsx`): sits at the top of the model picker when starting
+ * a new chat. Picking a provider switches `tab.providerId` via `model.newChats.pickProvider` while
+ * keeping the model picker open so the user can immediately pick a model on that provider.
  */
 @Composable
-private fun ProviderChip(model: AppModel, tab: ChatTab) {
+internal fun ProviderChoiceRow(model: AppModel, tab: ChatTab) {
     val cache = model.newChats.preparationCache
-    var open by remember(tab) { mutableStateOf(false) }
-    var read by remember(tab) { mutableStateOf<ProviderRead?>(null) }
-    LaunchedEffect(tab, open) {
-        if (!open) return@LaunchedEffect
+    var read by remember(tab, tab.project) { mutableStateOf<ProviderRead?>(null) }
+    LaunchedEffect(tab, tab.project) {
         val api = model.api
         read = try {
             if (api == null) error("No server is open.")
@@ -1192,83 +1247,91 @@ private fun ProviderChip(model: AppModel, tab: ChatTab) {
         }
     }
     val providers = read?.providers ?: cache.peekProviders(tab.project) ?: emptyList()
-    val current = tab.providerId
-    val name = providers.firstOrNull { it.id == current }?.name ?: current
-    // `relative`: a block around the chip, as tall as the line the chip stands on.
-    CssColumn(bottom = chipStrut(14.dp)) {
-        NeutralChip(
-            cssCapitalized(name),
-            providerChipName(name),
-            narrow = false,
-            labelMax = 80.dp,
-            onClick = { open = !open },
-        ) { ProviderBadge(current, 14.dp) }
-        if (open) {
-            val status = when {
-                read?.failed == true -> "Unable to load providers"
-                read != null -> "No providers available"
-                else -> "Loading providers..."
-            }
-            ProviderPopover(current, providers, status, onDismiss = { open = false }) { id ->
-                model.newChats.pickProvider(tab, id)
-                open = false
-            }
-        }
+    val status = when {
+        read?.failed == true -> "Unable to load providers"
+        read != null -> "No providers available"
+        else -> "Loading providers..."
     }
+    ProviderChoiceBar(
+        current = tab.providerId,
+        providers = providers,
+        status = status,
+        pick = { id -> model.newChats.pickProvider(tab, id) },
+    )
 }
 
-/** The provider chip's `aria-label`: the name as the server gives it, not as the chip's `capitalize` draws it. */
-internal fun providerChipName(name: String) = "AI Provider: $name"
-
 /**
- * The providers (`w-56 rounded-lg border popover-solid shadow-panel`), over the chip with its left
- * edge on the chip's, 4 px clear: "Provider", then a row each (`px-3 py-2 gap-3`), the chosen one
- * lit and checked; [status] while there is none. A press anywhere else closes it and goes on.
+ * Pure UI for `ProviderChoiceRow` (`border-b border-border px-1 py-1`, `role="radiogroup"`):
+ * `"Provider"` label above wrapping rounded-full pills (`min-h-8 px-2.5 text-xs` on tablet,
+ * `max-md:min-h-11 max-md:px-3.5 max-md:text-sm` on phone).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ProviderPopover(current: String, providers: List<ProviderInfo>, status: String, onDismiss: () -> Unit, pick: (String) -> Unit) =
-    ComposerPopover(onDismiss) { ProviderPanel(current, providers, status, pick) }
-
-/** What [ProviderPopover] opens: "Provider" over a row for each provider, or the [status] while there is none. */
-@Composable
-internal fun ProviderPanel(current: String, providers: List<ProviderInfo>, status: String, pick: (String) -> Unit) {
+internal fun ProviderChoiceBar(
+    current: String,
+    providers: List<ProviderInfo>,
+    status: String,
+    pick: (String) -> Unit,
+) {
     val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(12.dp)
+    val mobile = LocalPpmMobile.current
     Column(
         Modifier
-            .width(224.dp)
-            .ppmShadow(tokens.shadowPanel, shape)
-            .clip(shape)
-            .background(tokens.panel2.over(tokens.bgSolid).color)
-            .cssBorder(tokens.border.color, shape),
+            .fillMaxWidth()
+            .testTag("provider-choice-row")
+            .semantics { contentDescription = "AI provider" }
+            .cssBorder(tokens.border.color, sides = CssSides.Bottom)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
     ) {
-        PopoverHeader("Provider")
-        Column(Modifier.padding(vertical = 4.dp)) {
-            if (providers.isEmpty()) {
-                BasicText(
-                    status,
-                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
-                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
-                )
-            }
-            for (provider in providers) {
-                val active = provider.id == current
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(if (active) tokens.panel2.color else Color.Transparent)
-                        .ppmClickable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color, litOnFocus = true) { pick(provider.id) }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    ProviderBadge(provider.id, 16.dp)
-                    BasicText(
-                        cssCapitalized(provider.name),
-                        Modifier.weight(1f),
-                        style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color),
-                    )
-                    if (active) PpmIcon(ProductIcon.Check, 16.dp, tokens.accent.color)
+        BasicText(
+            "Provider",
+            Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color),
+        )
+        if (providers.isEmpty()) {
+            BasicText(
+                status,
+                Modifier
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+                style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+            )
+        } else {
+            FlowRow(
+                Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                for (provider in providers) {
+                    val active = provider.id == current
+                    val textColor = if (active) tokens.text.color else tokens.text2.color
+                    Row(
+                        Modifier
+                            .defaultMinSize(minHeight = if (mobile) 44.dp else 32.dp)
+                            .clip(CircleShape)
+                            .background(if (active) tokens.accentWash.color else Color.Transparent)
+                            .ppmClickable(
+                                pressedColor = tokens.surfaceHover.color,
+                                hoverColor = tokens.surfaceHover.color,
+                                shape = CircleShape,
+                                litOnFocus = true,
+                            ) { pick(provider.id) }
+                            .cssBorder((if (active) tokens.accentWashBorder else tokens.borderSoft).color, CircleShape)
+                            .semantics {
+                                role = Role.RadioButton
+                                selected = active
+                            }
+                            .padding(horizontal = if (mobile) 14.dp else 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        ProviderBadge(provider.id, if (mobile) 16.dp else 14.dp)
+                        BasicText(
+                            cssCapitalized(provider.name),
+                            style = ppmText(if (mobile) 14f else 12f, lineHeight = if (mobile) 20f else 16f).copy(color = textColor),
+                        )
+                        if (active) PpmIcon(ProductIcon.Check, 14.dp, tokens.accent.color)
+                    }
                 }
             }
         }
@@ -1276,9 +1339,7 @@ internal fun ProviderPanel(current: String, providers: List<ProviderInfo>, statu
 }
 
 /**
- * A selector popover's [label], "Provider" or "Model" (`px-3 py-2 border-b`): a block, so its line
- * is the page's 16 px text on 24 px lines, the label on that line's baseline as Chrome rounds it in
- * device pixels.
+ * A selector popover's [label], "Model" (`px-3 py-2 border-b`), used by `ModelSelector.kt`.
  */
 @Composable
 internal fun PopoverHeader(label: String) {
@@ -1290,8 +1351,8 @@ internal fun PopoverHeader(label: String) {
         { BasicText(label, style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color)) },
         Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Bottom).padding(horizontal = 12.dp, vertical = 8.dp).height(24.dp),
     ) { measurables, constraints ->
-        val label = measurables.first().measure(constraints.copy(minWidth = 0, minHeight = 0))
-        layout(constraints.maxWidth, constraints.maxHeight) { label.place(0, (baseline - label[FirstBaseline]).roundToInt()) }
+        val labelPlaceable = measurables.first().measure(constraints.copy(minWidth = 0, minHeight = 0))
+        layout(constraints.maxWidth, constraints.maxHeight) { labelPlaceable.place(0, (baseline - labelPlaceable[FirstBaseline]).roundToInt()) }
     }
 }
 
@@ -1312,18 +1373,19 @@ internal fun aboveStart(gap: Int) = { anchor: IntRect, window: IntSize, box: Int
 }
 
 /**
- * Model, effort and thinking in one sheet (`ModelThinkingSelector` on a phone). A pick leaves the
- * sheet open, as on the web.
+ * Model, effort and thinking in one sheet (`ModelThinkingSelector` on a phone), with optional
+ * [ProviderChoiceRow] on top before a session exists. A pick leaves the sheet open, as on the web.
  */
 @Composable
-private fun ModelSheet(model: AppModel, chat: ChatController, state: ChatState, onDismiss: () -> Unit) {
+private fun ModelSheet(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState, onDismiss: () -> Unit) {
+    val showProvider = choosesProvider(tab)
     BottomSheet(onDismiss) {
-        // `px-1 pb-2`.
         ModelColumns(
             model.models, chat, state,
             Modifier.heightIn(max = LocalConfiguration.current.screenHeightDp.dp * 0.8f),
             Modifier.padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
             onPicked = {},
+            header = if (showProvider) ({ ProviderChoiceRow(model, tab) }) else null,
         )
     }
 }
@@ -1331,11 +1393,12 @@ private fun ModelSheet(model: AppModel, chat: ChatController, state: ChatState, 
 /**
  * The same on a tablet: a popover over the chip (`absolute bottom-full left-0 mb-1 w-80
  * rounded-lg border popover-solid shadow-panel max-h-[70vh] overflow-y-auto`). A model or effort
- * picked closes it, the thinking switch does not; a press anywhere else closes it and goes on.
+ * picked closes it; picking a provider or toggling Thinking leaves it open.
  */
 @Composable
-private fun ModelPopover(model: AppModel, chat: ChatController, state: ChatState, onDismiss: () -> Unit) {
+private fun ModelPopover(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState, onDismiss: () -> Unit) {
     val tokens = LocalPpmTokens.current
+    val showProvider = choosesProvider(tab)
     ComposerPopover(onDismiss) {
         val shape = RoundedCornerShape(12.dp)
         ModelColumns(
@@ -1349,17 +1412,25 @@ private fun ModelPopover(model: AppModel, chat: ChatController, state: ChatState
                 .heightIn(max = LocalConfiguration.current.screenHeightDp.dp * 0.7f),
             Modifier,
             onPicked = onDismiss,
+            header = if (showProvider) ({ ProviderChoiceRow(model, tab) }) else null,
         )
     }
 }
 
 /**
- * The picker's content (`flex divide-x divide-border`): the provider's models on the left, the
- * efforts and the thinking switch on the right, scrolling inside [box] past its height; [inner]
- * pads the columns inside the scroll. [onPicked] runs after a model or an effort is picked.
+ * The picker's content (`flex divide-x divide-border`): optional [header] (`ProviderChoiceRow`)
+ * above the provider's models on the left and efforts + thinking switch on the right.
  */
 @Composable
-internal fun ModelColumns(catalog: ModelCatalog?, chat: ChatController, state: ChatState, box: Modifier, inner: Modifier, onPicked: () -> Unit) {
+internal fun ModelColumns(
+    catalog: ModelCatalog?,
+    chat: ChatController,
+    state: ChatState,
+    box: Modifier,
+    inner: Modifier,
+    onPicked: () -> Unit,
+    header: (@Composable () -> Unit)? = null,
+) {
     val entries = catalog?.entries?.collectAsState()?.value
     LaunchedEffect(catalog, chat.providerId) { catalog?.load(chat.providerId) }
     val models: List<ModelOption> = remember(catalog, entries, chat.providerId) { catalog?.models(chat.providerId).orEmpty() }
@@ -1369,6 +1440,7 @@ internal fun ModelColumns(catalog: ModelCatalog?, chat: ChatController, state: C
     ModelPickerColumns(
         models, status, effectiveModel, effectiveEffort, state.thinking, box, inner,
         providerId = chat.providerId,
+        header = header,
         onModel = {
             chat.setModel(it)
             onPicked()
@@ -1382,67 +1454,70 @@ internal fun ModelColumns(catalog: ModelCatalog?, chat: ChatController, state: C
 }
 
 /**
- * What [ModelColumns] draws once it has what it shows, apart from where that comes from: [model] and [effort] are the ones
- * chosen, [thinking] whether the switch is on, and [onThinking] is told what it would turn it to.
+ * What [ModelColumns] draws once it has what it shows, apart from where that comes from: optional
+ * [header] above the two-column model + effort/thinking layout.
  */
 @Composable
 internal fun ModelPickerColumns(
     models: List<ModelOption>, status: ModelListStatus?, model: String?, effort: Effort, thinking: Boolean,
     box: Modifier, inner: Modifier,
     providerId: String = "claude",
+    header: (@Composable () -> Unit)? = null,
     onModel: (String) -> Unit, onEffort: (Effort) -> Unit, onThinking: (Boolean) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
     val isAntigravity = providerId == "antigravity"
     // The tablet's popover scrolls with the web's thumb; the phone's sheet does not scroll on the web.
     val scroll = rememberScrollState()
-    Row(
+    Column(
         box
             .then(if (LocalPpmMobile.current) Modifier.verticalScroll(scroll) else Modifier.cssScrollY(scroll))
-            .then(inner)
-            .height(IntrinsicSize.Min),
+            .then(inner),
     ) {
-        Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
-            SectionLabel("Model")
-            if (status != null) {
-                BasicText(
-                    status.text,
-                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
-                )
-            }
-            for (option in models) {
-                OptionRow(active = option.value == model, onClick = { onModel(option.value) }) {
+        header?.invoke()
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+                SectionLabel("Model")
+                if (status != null) {
                     BasicText(
-                        ModelNames.shortLabel(option.label, providerId),
-                        Modifier.weight(1f),
-                        style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        status.text,
+                        Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
                     )
                 }
-            }
-        }
-        Column(Modifier.weight(1f).fillMaxHeight().cssBorder(tokens.border.color, sides = CssSides.Start).padding(vertical = 4.dp)) {
-            SectionLabel("Effort")
-            for (option in Effort.optionsFor(providerId)) {
-                OptionRow(active = option == effort, onClick = { onEffort(option) }) {
-                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                        BasicText(option.label, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1)
-                        if (option == Effort.DEFAULT) {
-                            BasicText(
-                                "Default",
-                                Modifier.padding(start = 8.dp),
-                                style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
-                                maxLines = 1,
-                            )
-                        }
+                for (option in models) {
+                    OptionRow(active = option.value == model, onClick = { onModel(option.value) }) {
+                        BasicText(
+                            ModelNames.shortLabel(option.label, providerId),
+                            Modifier.weight(1f),
+                            style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
             }
-            if (!isAntigravity) {
-                Box(Modifier.padding(vertical = 4.dp).fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top))
-                ThinkingRow(thinking) { onThinking(!thinking) }
+            Column(Modifier.weight(1f).fillMaxHeight().cssBorder(tokens.border.color, sides = CssSides.Start).padding(vertical = 4.dp)) {
+                SectionLabel("Effort")
+                for (option in Effort.optionsFor(providerId)) {
+                    OptionRow(active = option == effort, onClick = { onEffort(option) }) {
+                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            BasicText(option.label, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1)
+                            if (option == Effort.DEFAULT) {
+                                BasicText(
+                                    "Default",
+                                    Modifier.padding(start = 8.dp),
+                                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+                }
+                if (!isAntigravity) {
+                    Box(Modifier.padding(vertical = 4.dp).fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Top))
+                    ThinkingRow(thinking) { onThinking(!thinking) }
+                }
             }
         }
     }

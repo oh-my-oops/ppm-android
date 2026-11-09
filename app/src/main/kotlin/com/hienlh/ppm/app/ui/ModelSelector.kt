@@ -1,6 +1,11 @@
 package com.hienlh.ppm.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,6 +13,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -25,16 +32,31 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.design.CssRow
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.WebCursor
+import com.hienlh.ppm.design.brightness
+import com.hienlh.ppm.design.colorsFade
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.cssIcon
+import com.hienlh.ppm.design.cssLines
+import com.hienlh.ppm.design.cssShrink
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
@@ -61,11 +83,9 @@ internal fun ModelSelector(model: AppModel, value: String?, providerId: String, 
     val current = models.firstOrNull { it.value == value }
     val title = current?.label
     Box {
-        ModelChip(
+        FormModelChip(
             current?.let { ModelNames.shortLabel(it.label) } ?: value ?: "Model",
             formModelChipName(title, value),
-            thinking = false,
-            disabled = false,
             // No `title` for a model the provider does not list, as `title={undefined}`.
             modifier = if (title != null) Modifier.webTitle(title) else Modifier,
             labelMax = 90.dp,
@@ -76,6 +96,53 @@ internal fun ModelSelector(model: AppModel, value: String?, providerId: String, 
                 open = false
             }
         }
+    }
+}
+
+@Composable
+private fun FormModelChip(
+    text: String,
+    name: String,
+    modifier: Modifier = Modifier,
+    labelMax: Dp = 90.dp,
+    onClick: () -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val hovered by source.collectIsHoveredAsState()
+    val lit = if (pressed) 1f else colorsFade(hovered)
+    CssRow(
+        modifier
+            .clearAndSetSemantics {
+                contentDescription = name
+                role = Role.Button
+                onClick {
+                    onClick()
+                    true
+                }
+            }
+            .brightness(1f + 0.1f * lit)
+            .clip(CircleShape)
+            .background(tokens.accentWash.color)
+            .pointerHoverIcon(WebCursor.Default)
+            .hoverable(source)
+            .clickable(source, indication = null, onClick = onClick)
+            .cssBorder(tokens.accentWashBorder.color, CircleShape),
+        gap = 6.dp,
+        start = 9.dp,
+        end = 9.dp,
+        top = 4.dp,
+        bottom = 4.dp,
+    ) {
+        PpmIcon(ProductIcon.Sparkles, 14.dp, tokens.accent.color, Modifier.cssIcon(14.dp))
+        BasicText(
+            text,
+            Modifier.cssShrink().widthIn(max = labelMax).cssLines(17.25f),
+            style = ppmText(11.5f, lineHeight = 17.25f).copy(color = tokens.accent.color),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

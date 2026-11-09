@@ -1,11 +1,11 @@
 package com.hienlh.ppm.state
 
 /** When Claude asks before acting (`mode-selector.tsx`), in the order Shift+Tab steps through. */
-enum class PermissionMode(val value: String, val label: String, val detail: String) {
-    DEFAULT("default", "Ask before edits", "Claude will ask for approval before making each edit"),
-    ACCEPT_EDITS("acceptEdits", "Edit automatically", "Claude will edit files without asking first"),
-    PLAN("plan", "Plan mode", "Claude will present a plan before editing"),
-    BYPASS_PERMISSIONS("bypassPermissions", "Bypass permissions", "Claude will not ask before running commands"),
+enum class PermissionMode(val value: String, val label: String, val shortLabel: String, val detail: String) {
+    DEFAULT("default", "Ask before edits", "Ask", "Claude will ask for approval before making each edit"),
+    ACCEPT_EDITS("acceptEdits", "Edit automatically", "Auto-edit", "Claude will edit files without asking first"),
+    PLAN("plan", "Plan mode", "Plan", "Claude will present a plan before editing"),
+    BYPASS_PERMISSIONS("bypassPermissions", "Bypass permissions", "Bypass", "Claude will not ask before running commands"),
     ;
 
     /** The next one, as Shift+Tab in the message box moves. */

@@ -495,7 +495,10 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                 val pickers = rememberComposerPickers(model, tab)
                 ComposerPickerList(model, tab, pickers)
                 if (tab.editFork != null) EditingLine(onCancel = tab::cancelEdit)
-                ChatComposer(model, tab, chat, state, narrow, fileDrop, pickers)
+                ChatComposer(
+                    model, tab, chat, state, narrow, fileDrop, pickers,
+                    modifier = Modifier.padding(if (LocalPpmMobile.current) 8.dp else 12.dp),
+                )
             }
         }
         // A pill, not an overlay: the chat stays readable and usable while it reconnects.
