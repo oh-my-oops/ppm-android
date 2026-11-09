@@ -156,6 +156,7 @@ import com.hienlh.ppm.state.remotedesktop.VIEW_STYLE_ORDER
 import com.hienlh.ppm.state.remotedesktop.WHEEL_DELTA
 import com.hienlh.ppm.state.remotedesktop.WHEEL_PIXELS_PER_NOTCH
 import com.hienlh.ppm.state.remotedesktop.ZoomPanTransform
+import com.hienlh.ppm.state.remotedesktop.MAX_RECORDING_MS
 import com.hienlh.ppm.state.remotedesktop.PointerMoveCoalescer
 import com.hienlh.ppm.state.remotedesktop.SOFT_KEYBOARD_SENTINEL
 import com.hienlh.ppm.state.remotedesktop.advanceSingleTouch
@@ -194,10 +195,12 @@ import com.hienlh.ppm.state.remotedesktop.shortQualityLabel
 import com.hienlh.ppm.state.remotedesktop.snapScalePos
 import com.hienlh.ppm.state.remotedesktop.stepCustomScale
 import com.hienlh.ppm.state.remotedesktop.wheelDeltaForTouchDrag
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -768,16 +771,33 @@ fun RemoteDesktopViewer(
         )
     }
 
+    fun stopActiveRecording(rec: H264Mp4Recorder) {
+        if (activeRecorder === rec) {
+            activeRecorder = null
+        }
+        model.scope.launch(Dispatchers.IO) {
+            val saved = runCatching { rec.stop() }.getOrNull() ?: return@launch
+            val preQFile = copyMp4ToDownloads(context, saved)
+            if (preQFile != null) {
+                withContext(Dispatchers.Main) {
+                    runCatching {
+                        android.widget.Toast.makeText(
+                            context,
+                            "Recording saved to ${preQFile.absolutePath}",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+            }
+        }
+    }
+
     DisposableEffect(decoder, audioPlayer) {
         onDispose {
             moveCoalescer.cancel()
             val rec = activeRecorder
             if (rec != null) {
-                activeRecorder = null
-                val saved = runCatching { rec.stop() }.getOrNull()
-                if (saved != null) {
-                    copyMp4ToDownloads(context, saved)
-                }
+                stopActiveRecording(rec)
             }
             runCatching { decoder.release() }
             runCatching { audioPlayer.release() }
@@ -852,15 +872,20 @@ fun RemoteDesktopViewer(
         }
     }
 
-    // Recording elapsed timer
+    // Recording elapsed timer (`use-remote-desktop-recorder.ts:17,87-96`: auto-stops at 2 hours)
     LaunchedEffect(activeRecorder) {
-        if (activeRecorder == null) {
+        val cur = activeRecorder
+        if (cur == null) {
             recordingElapsedSec = 0
             return@LaunchedEffect
         }
-        while (isActive && activeRecorder != null) {
+        while (isActive && activeRecorder === cur) {
             delay(1_000L)
             recordingElapsedSec++
+            if (recordingElapsedSec * 1_000L >= MAX_RECORDING_MS) {
+                stopActiveRecording(cur)
+                break
+            }
         }
     }
 
@@ -1063,7 +1088,20 @@ fun RemoteDesktopViewer(
         val sv = surfaceViewRef ?: return
         captureSurfaceViewBitmap(sv, targetSize = frameSize) { bmp ->
             if (bmp != null) {
-                saveBitmapToDownloads(context, bmp)
+                model.scope.launch(Dispatchers.IO) {
+                    val preQFile = saveBitmapToDownloads(context, bmp)
+                    if (preQFile != null) {
+                        withContext(Dispatchers.Main) {
+                            runCatching {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Screenshot saved to ${preQFile.absolutePath}",
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1071,11 +1109,7 @@ fun RemoteDesktopViewer(
     fun toggleRecording() {
         val cur = activeRecorder
         if (cur != null) {
-            activeRecorder = null
-            val saved = cur.stop()
-            if (saved != null) {
-                copyMp4ToDownloads(context, saved)
-            }
+            stopActiveRecording(cur)
         } else {
             val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss", Locale.US))
             val outFile = File(context.cacheDir, "ppm-remote-$stamp.mp4")
@@ -3103,42 +3137,88 @@ private fun MobileSettingSwitchRow(
 
 // ── 8. File Export Helpers ────────────────────────────────────────────
 
-private fun saveBitmapToDownloads(context: Context, bitmap: Bitmap) {
-    runCatching {
+@Suppress("DEPRECATION")
+private fun resolvePreQDownloadsDir(context: Context, downloadsDirOverride: File? = null): File {
+    val candidates = buildList {
+        if (downloadsDirOverride != null) add(downloadsDirOverride)
+        runCatching { Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) }
+            .getOrNull()?.let(::add)
+        runCatching { context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) }
+            .getOrNull()?.let(::add)
+        add(context.cacheDir)
+    }
+    for (dir in candidates) {
+        if ((dir.exists() || dir.mkdirs()) && dir.canWrite()) {
+            return dir
+        }
+    }
+    return context.cacheDir
+}
+
+internal fun saveBitmapToDownloads(
+    context: Context,
+    bitmap: Bitmap,
+    sdkInt: Int = Build.VERSION.SDK_INT,
+    downloadsDirOverride: File? = null,
+): File? {
+    return runCatching {
         val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss", Locale.US))
         val name = "ppm-remote-$stamp.png"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (sdkInt >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, name)
                 put(MediaStore.Downloads.MIME_TYPE, "image/png")
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
             }
-            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return
-            context.contentResolver.openOutputStream(uri)?.use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-            }
-        } else {
-            val file = File(context.cacheDir, name)
-            FileOutputStream(file).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                }
+                return null
             }
         }
-    }
+        val dir = resolvePreQDownloadsDir(context, downloadsDirOverride)
+        val file = File(dir, name)
+        FileOutputStream(file).use { out ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        }
+        file
+    }.getOrNull()
 }
 
-private fun copyMp4ToDownloads(context: Context, file: File) {
-    runCatching {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+internal fun copyMp4ToDownloads(
+    context: Context,
+    file: File,
+    sdkInt: Int = Build.VERSION.SDK_INT,
+    downloadsDirOverride: File? = null,
+): File? {
+    return runCatching {
+        if (sdkInt >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, file.name)
                 put(MediaStore.Downloads.MIME_TYPE, "video/mp4")
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
             }
-            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return
-            context.contentResolver.openOutputStream(uri)?.use { out ->
-                file.inputStream().use { inp -> inp.copyTo(out) }
+            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { inp -> inp.copyTo(out) }
+                }
+                file.delete()
+                return null
+            }
+        }
+        val dir = resolvePreQDownloadsDir(context, downloadsDirOverride)
+        val dest = File(dir, file.name)
+        if (dest.canonicalPath != file.canonicalPath) {
+            file.inputStream().use { inp ->
+                FileOutputStream(dest).use { out ->
+                    inp.copyTo(out)
+                }
             }
             file.delete()
         }
-    }
+        dest
+    }.getOrNull()
 }

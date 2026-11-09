@@ -562,6 +562,10 @@ class H264Mp4Recorder(
     var isStopped: Boolean = false
         private set
 
+    @Volatile
+    var stoppedOnThreadName: String? = null
+        private set
+
     fun writeAccessUnit(data: ByteArray, offset: Int, length: Int, isKeyframe: Boolean) {
         synchronized(lock) {
             if (isStopped) return
@@ -606,6 +610,7 @@ class H264Mp4Recorder(
     fun stop(): File? {
         synchronized(lock) {
             isStopped = true
+            stoppedOnThreadName = Thread.currentThread().name
             val m = muxer
             muxer = null
             val wasStarted = started

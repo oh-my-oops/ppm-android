@@ -1022,6 +1022,9 @@ fun isPasteKeyCombo(code: String, ctrl: Boolean, meta: Boolean, alt: Boolean = f
 fun isCopyKeyCombo(code: String, ctrl: Boolean, meta: Boolean, alt: Boolean = false): Boolean =
     !alt && (ctrl || meta) && (code == "KeyC" || code == "KeyX")
 
+/** Two hours (`use-remote-desktop-recorder.ts:17`). */
+const val MAX_RECORDING_MS: Long = 2L * 60L * 60L * 1000L
+
 /** `m:ss`, or `h:mm:ss` past an hour (`remote-desktop-toolbar.tsx:418-423`). */
 fun formatRemoteDesktopElapsed(totalSec: Int): String {
     val clamped = max(0, totalSec)

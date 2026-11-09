@@ -597,17 +597,79 @@ class Phase11bUiTest {
         // Sidebar hides Remote Desktop button when platformSupported is false
         composeRule.onAllNodesWithTag("sidebar-remote-desktop").assertCountEquals(0)
 
-        // Unmounting RemoteDesktopViewer while recording stops the active recorder
+        // Unmounting RemoteDesktopViewer while recording stops the active recorder off the main thread
         assertEquals(false, recorder.isStopped)
         showViewer = false
         composeRule.waitForIdle()
+        val stopDeadline = System.currentTimeMillis() + 2_000L
+        while (!recorder.isStopped && System.currentTimeMillis() < stopDeadline) {
+            Thread.sleep(10L)
+        }
         assertTrue(recorder.isStopped)
+        assertTrue(
+            "Expected recorder.stop() on Dispatchers.IO worker thread, got ${recorder.stoppedOnThreadName}",
+            recorder.stoppedOnThreadName?.contains("DefaultDispatcher-worker") == true,
+        )
         tempMp4.delete()
+
+        // Below API 29 (e.g. API 28), copyMp4ToDownloads saves the MP4 into the Downloads directory instead of losing it
+        val sourceMp4 = File(context.cacheDir, "ppm-remote-pre-q.mp4").apply {
+            writeBytes(byteArrayOf(0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70))
+        }
+        val fakeDownloadsDir = File(context.cacheDir, "fake-downloads").apply { mkdirs() }
+        val savedPreQ = copyMp4ToDownloads(
+            context = context,
+            file = sourceMp4,
+            sdkInt = android.os.Build.VERSION_CODES.P,
+            downloadsDirOverride = fakeDownloadsDir,
+        )
+        assertTrue(savedPreQ != null && savedPreQ.exists())
+        assertEquals(fakeDownloadsDir.canonicalPath, savedPreQ!!.parentFile!!.canonicalPath)
+        assertEquals(8L, savedPreQ.length())
+        assertEquals(false, sourceMp4.exists())
+        savedPreQ.delete()
+        fakeDownloadsDir.deleteRecursively()
 
         // Screenshot target bitmap is allocated at decoded frameSize (1920x1080), not surfaceView layout size (800x450)
         val bmp = createScreenshotTargetBitmap(surfaceWidth = 800, surfaceHeight = 450, frameSize = RdSize(1920, 1080))
         assertEquals(1920, bmp!!.width)
         assertEquals(1080, bmp.height)
+    }
+
+    @Test
+    fun `Recording auto-stops at MAX_RECORDING_MS 2 hours`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val model = AppModel(context)
+        val tempMp4 = File(context.cacheDir, "test-autostop-record.mp4")
+        val recorder = H264Mp4Recorder(tempMp4, 480, 360) { RdSize(480, 360) }
+
+        composeRule.mainClock.autoAdvance = false
+        try {
+            composeRule.setContent {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    RemoteDesktopViewer(
+                        model = model,
+                        initialRecorder = recorder,
+                    )
+                }
+            }
+            composeRule.mainClock.advanceTimeByFrame()
+
+            // Advance just shy of 2 hours (7,199 seconds): still recording
+            composeRule.mainClock.advanceTimeBy(com.hienlh.ppm.state.remotedesktop.MAX_RECORDING_MS - 1_000L)
+            assertEquals(false, recorder.isStopped)
+
+            // Advance past 2 hours (7,200 seconds): auto-stopped on Dispatchers.IO
+            composeRule.mainClock.advanceTimeBy(2_000L)
+            val deadline = System.currentTimeMillis() + 2_000L
+            while (!recorder.isStopped && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10L)
+            }
+            assertTrue(recorder.isStopped)
+        } finally {
+            composeRule.mainClock.autoAdvance = true
+            tempMp4.delete()
+        }
     }
 
     @Test
