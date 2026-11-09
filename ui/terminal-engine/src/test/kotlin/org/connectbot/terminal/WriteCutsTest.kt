@@ -820,12 +820,30 @@ class WriteCutsTest {
         assertEquals("$esc[<81;1;1M", String(sgr.wheelReport(down = true, row = 0, col = 0, modifiers = 4)!!, Charsets.US_ASCII))
         assertEquals("$esc[<72;10;20M", String(sgr.wheelReport(down = false, row = 19, col = 9, modifiers = 2)!!, Charsets.US_ASCII))
 
-        // urxvt (?1002;1015h) and default X10 (?1003h after ?1006l).
-        val rxvt = scanner(24, "$esc[?1002;1015h")
-        assertEquals("$esc[97;53;5M", String(rxvt.wheelReport(down = true, row = 4, col = 52)!!, Charsets.US_ASCII))
+        // SGR-Pixels (?1000;1016h): 0-based pixel coords (xPx, yPx), M terminator, reset on ?1016l.
+        val sgrPixels = scanner(24, "$esc[?1000;1016h")
+        assertTrue(sgrPixels.mouseTracking)
+        assertEquals(1016, sgrPixels.mouseProtocol)
+        assertEquals("$esc[<65;420;132M", String(sgrPixels.wheelReport(down = true, row = 4, col = 52, xPx = 420, yPx = 132)!!, Charsets.US_ASCII))
+        assertEquals("$esc[<64;420;132M", String(sgrPixels.wheelReport(down = false, row = 4, col = 52, xPx = 420, yPx = 132)!!, Charsets.US_ASCII))
+        val sgrPixelsReset = scanner(24, "$esc[?1000;1016h$esc[?1016l")
+        assertEquals(0, sgrPixelsReset.mouseProtocol)
+
+        // 1005 (UTF-8) and 1015 (urxvt) were removed in xterm.js #2507: treated as no encoding, leaving DEFAULT (0) or current SGR intact.
+        val utf8Ignored = scanner(24, "$esc[?1002;1005h")
+        assertEquals(0, utf8Ignored.mouseProtocol)
+        assertEquals("$esc[M" + (0x41 + 0x20).toChar() + (53 + 0x20).toChar() + (5 + 0x20).toChar(), String(utf8Ignored.wheelReport(down = true, row = 4, col = 52)!!, Charsets.ISO_8859_1))
+        val rxvtIgnored = scanner(24, "$esc[?1002;1015h")
+        assertEquals(0, rxvtIgnored.mouseProtocol)
+        assertEquals("$esc[M" + (0x41 + 0x20).toChar() + (53 + 0x20).toChar() + (5 + 0x20).toChar(), String(rxvtIgnored.wheelReport(down = true, row = 4, col = 52)!!, Charsets.ISO_8859_1))
+        val sgrKeptOver1015 = scanner(24, "$esc[?1002;1006h$esc[?1015h$esc[?1005l")
+        assertEquals(1006, sgrKeptOver1015.mouseProtocol)
+
+        // Default X10 (?1003h after ?1006l), suppressing reports beyond 1-based 223 (+ 32 > 255).
         val x10 = scanner(24, "$esc[?1003;1006h$esc[?1006l")
         assertEquals(0, x10.mouseProtocol)
         assertEquals("$esc[M" + (0x41 + 0x20).toChar() + (53 + 0x20).toChar() + (5 + 0x20).toChar(), String(x10.wheelReport(down = true, row = 4, col = 52)!!, Charsets.ISO_8859_1))
+        assertNull(x10.wheelReport(down = true, row = 4, col = 223))
 
         // DECSTR (!p), RIS (ESC c) and ?1000l turn mouse tracking off.
         assertFalse(scanner(24, "$esc[?1000;1006h$esc[?1000l").mouseTracking)

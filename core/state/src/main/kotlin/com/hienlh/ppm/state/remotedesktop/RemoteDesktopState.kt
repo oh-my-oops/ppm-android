@@ -275,6 +275,111 @@ fun letterboxedContentRect(box: RdRect, contentWidth: Int, contentHeight: Int): 
     }
 }
 
+/**
+ * On-screen video rectangle inside the stage container for both `SurfaceView` sizing and
+ * pointer coordinate mapping across `adaptive`, `original`, and `custom` scale modes.
+ */
+fun computeStageVideoRect(
+    containerWidthPx: Double,
+    containerHeightPx: Double,
+    frameSize: RdSize,
+    viewStyle: String = DEFAULT_VIEW_STYLE,
+    customScale: Double = DEFAULT_CUSTOM_SCALE,
+    mobile: Boolean = false,
+    densityScale: Double = 1.0,
+): RdRect {
+    val outer = RdRect(
+        left = 0.0,
+        top = 0.0,
+        width = containerWidthPx.coerceAtLeast(1.0),
+        height = containerHeightPx.coerceAtLeast(1.0),
+    )
+    val css = if (!mobile) canvasCssSize(viewStyle, customScale, frameSize) else null
+    if (css == null) {
+        return letterboxedContentRect(outer, frameSize.width, frameSize.height)
+    }
+    val wPx = (css.width * densityScale.coerceAtLeast(0.1)).coerceAtLeast(1.0)
+    val hPx = (css.height * densityScale.coerceAtLeast(0.1)).coerceAtLeast(1.0)
+    val left = (outer.width - wPx) / 2.0
+    val top = (outer.height - hPx) / 2.0
+    return RdRect(left = left, top = top, width = wPx, height = hPx)
+}
+
+/**
+ * Bounded access-unit queue for off-main H.264 decoding.
+ * Drops delta frames when waiting for a keyframe or when at capacity, and sets
+ * [waitingForKeyframe] = `true` whenever a delta frame is dropped so subsequent
+ * deltas in the same GOP are not fed to the decoder until the next keyframe arrives.
+ */
+class QueuedVideoFrame(
+    val bytes: ByteArray,
+    val offset: Int,
+    val length: Int,
+    val isKeyframe: Boolean,
+)
+
+class BoundedVideoFrameQueue(val capacity: Int = 8) {
+    private val lock = Any()
+    private val queue = ArrayDeque<QueuedVideoFrame>(capacity.coerceAtLeast(1))
+
+    @Volatile
+    var waitingForKeyframe: Boolean = true
+        private set
+
+    @Volatile
+    var droppedDeltas: Int = 0
+        private set
+
+    val size: Int
+        get() = synchronized(lock) { queue.size }
+
+    fun offer(bytes: ByteArray, offset: Int = 0, length: Int = bytes.size - offset, isKeyframe: Boolean): Boolean {
+        synchronized(lock) {
+            if (!isKeyframe) {
+                if (waitingForKeyframe) {
+                    droppedDeltas++
+                    return false
+                }
+                if (queue.size >= capacity) {
+                    waitingForKeyframe = true
+                    droppedDeltas++
+                    return false
+                }
+                queue.addLast(QueuedVideoFrame(bytes, offset, length, false))
+                return true
+            }
+            while (queue.isNotEmpty()) {
+                val removed = queue.removeFirst()
+                if (!removed.isKeyframe) droppedDeltas++
+            }
+            waitingForKeyframe = false
+            queue.addLast(QueuedVideoFrame(bytes, offset, length, true))
+            return true
+        }
+    }
+
+    fun poll(): QueuedVideoFrame? = synchronized(lock) {
+        if (queue.isEmpty()) null else queue.removeFirst()
+    }
+
+    fun markWaitingForKeyframe() {
+        synchronized(lock) {
+            while (queue.isNotEmpty() && !queue.first().isKeyframe) {
+                queue.removeFirst()
+                droppedDeltas++
+            }
+            waitingForKeyframe = queue.none { it.isKeyframe }
+        }
+    }
+
+    fun clear() {
+        synchronized(lock) {
+            queue.clear()
+            waitingForKeyframe = true
+        }
+    }
+}
+
 // ── 4. Touch Gesture Classifiers & Trackers ───────────────────────────
 
 data class PointerSample(
@@ -356,10 +461,12 @@ fun advanceSingleTouch(
     mode: String,
     transform: ZoomPanTransform,
     cursor: RdFraction,
+    densityScale: Double = 1.0,
 ): SingleMoveResult {
+    val tapThresholdPx = TAP_MOVE_THRESHOLD_PX * densityScale.coerceAtLeast(0.1)
     val dist = hypot(x - track.start.x, y - track.start.y)
     if (mode == "touch") {
-        if (!track.moved && dist > TAP_MOVE_THRESHOLD_PX) {
+        if (!track.moved && dist > tapThresholdPx) {
             track.moved = true
             val start = fractionFromZoomedPoint(track.start.x, track.start.y, track.rect, transform)
             track.last = RdPoint(x, y)
@@ -374,7 +481,7 @@ fun advanceSingleTouch(
     val scale = if (transform.scale > 0.0) transform.scale else 1.0
     val dx = (x - track.last.x) / scale
     val dy = (y - track.last.y) / scale
-    if (dist > TAP_MOVE_THRESHOLD_PX) track.moved = true
+    if (dist > tapThresholdPx) track.moved = true
     track.last = RdPoint(x, y)
     val next = RdFraction(
         xFrac = (cursor.xFrac + if (track.rect.width > 0.0) dx / track.rect.width else 0.0).coerceIn(0.0, 1.0),
@@ -391,9 +498,11 @@ fun resolveSingleTouchEnd(
     transform: ZoomPanTransform,
     cursor: RdFraction,
     nowMs: Long = System.currentTimeMillis(),
+    densityScale: Double = 1.0,
 ): List<JsonElement> {
+    val tapThresholdPx = TAP_MOVE_THRESHOLD_PX * densityScale.coerceAtLeast(0.1)
     val end = PointerSample(x, y, nowMs)
-    val tapped = isTapGesture(track.start, end, TAP_MOVE_THRESHOLD_PX, TAP_MAX_DURATION_MS)
+    val tapped = isTapGesture(track.start, end, tapThresholdPx, TAP_MAX_DURATION_MS)
     if (mode == "touch") {
         val frac = fractionFromZoomedPoint(x, y, track.rect, transform)
         if (!track.moved && tapped) return clickMessages(frac.xFrac, frac.yFrac, "left")
@@ -402,6 +511,29 @@ fun resolveSingleTouchEnd(
     }
     if (!track.moved && tapped) return clickMessages(cursor.xFrac, cursor.yFrac, "left")
     return emptyList()
+}
+
+/**
+ * Releases a held left button when a touch gesture is cancelled mid-drag in `"touch"` mode
+ * (`use-remote-desktop-touch.ts:197-207`).
+ */
+fun resolveSingleTouchCancel(
+    track: SingleTrack?,
+    mode: String,
+    transform: ZoomPanTransform,
+    cursor: RdFraction,
+    densityScale: Double = 1.0,
+): List<JsonElement> {
+    if (track == null || !track.moved || mode != "touch") return emptyList()
+    return resolveSingleTouchEnd(
+        track = track,
+        x = track.last.x,
+        y = track.last.y,
+        mode = "touch",
+        transform = transform,
+        cursor = cursor,
+        densityScale = densityScale,
+    )
 }
 
 class TwoFingerTrack(
@@ -440,16 +572,18 @@ fun advanceTwoFingerTouch(
     pa: RdPoint,
     pb: RdPoint,
     currentTransform: ZoomPanTransform,
+    densityScale: Double = 1.0,
 ): TwoFingerMoveResult {
+    val twoFingerThresholdPx = TWO_FINGER_THRESHOLD_PX * densityScale.coerceAtLeast(0.1)
     val currentDistance = touchDistance(pa, pb)
     val currentMid = touchMidpoint(pa, pb)
 
     if (track.gesture == null) {
         val distDiff = abs(currentDistance - track.startDistance)
         val midDist = touchDistance(track.startMid, currentMid)
-        if (distDiff > TWO_FINGER_THRESHOLD_PX) {
-            track.gesture = classifyTwoFingerGesture(track.startDistance, currentDistance, TWO_FINGER_THRESHOLD_PX)
-        } else if (midDist > TWO_FINGER_THRESHOLD_PX) {
+        if (distDiff > twoFingerThresholdPx) {
+            track.gesture = classifyTwoFingerGesture(track.startDistance, currentDistance, twoFingerThresholdPx)
+        } else if (midDist > twoFingerThresholdPx) {
             track.gesture = "scroll"
         } else {
             track.lastMid = currentMid
@@ -478,6 +612,65 @@ fun advanceTwoFingerTouch(
     }
     track.lastMid = currentMid
     return result
+}
+
+fun wheelDeltaForTouchDrag(wheelDeltaPx: Double, densityScale: Double = 1.0): Double {
+    val notchPx = WHEEL_PIXELS_PER_NOTCH * densityScale.coerceAtLeast(0.1)
+    return -(wheelDeltaPx / notchPx) * WHEEL_DELTA
+}
+
+/**
+ * Maps Android `MotionEvent` button bitmasks (`BUTTON_PRIMARY` = 1, `BUTTON_SECONDARY` = 2) to the
+ * remote-desktop protocol button (`"left"`, `"right"`, or `null` for middle/other, matching
+ * web `toButton` in `use-remote-input-capture.ts:42`).
+ */
+fun androidMouseButtonToProtocol(buttonBits: Int): String? = when {
+    (buttonBits and 1) != 0 -> "left"
+    (buttonBits and 2) != 0 -> "right"
+    else -> null
+}
+
+/**
+ * Coalesces pointer move messages to at most one per animation frame (`use-remote-input-capture.ts:51-79`),
+ * flushing any pending move immediately before a button down/up message so clicks land at the
+ * exact press/release coordinates.
+ */
+class PointerMoveCoalescer(
+    private val send: (JsonElement) -> Unit,
+    private val scheduleFrame: (() -> Unit) -> Unit = { it() },
+) {
+    private var pendingMove: JsonElement? = null
+    private var frameScheduled: Boolean = false
+
+    fun enqueueMove(xFrac: Double, yFrac: Double) {
+        pendingMove = pointerJsonMessage(xFrac, yFrac, null, null)
+        if (!frameScheduled) {
+            frameScheduled = true
+            scheduleFrame(::flush)
+        }
+    }
+
+    fun flush() {
+        frameScheduled = false
+        val msg = pendingMove ?: return
+        pendingMove = null
+        send(msg)
+    }
+
+    fun sendImmediate(msg: JsonElement) {
+        flush()
+        send(msg)
+    }
+
+    fun sendImmediateAll(msgs: Iterable<JsonElement>) {
+        flush()
+        for (m in msgs) send(m)
+    }
+
+    fun cancel() {
+        pendingMove = null
+        frameScheduled = false
+    }
 }
 
 fun resolveTwoFingerEnd(
@@ -817,6 +1010,102 @@ val RD_COMBOS: List<RdComboItem> = listOf(
 fun isCopyChord(codes: List<String>): Boolean {
     val mod = "ControlLeft" in codes || "MetaLeft" in codes || "ControlRight" in codes || "MetaRight" in codes
     return mod && ("KeyC" in codes || "KeyX" in codes)
+}
+
+fun isPasteKeyCombo(code: String, ctrl: Boolean, meta: Boolean, alt: Boolean = false): Boolean =
+    !alt && (ctrl || meta) && code == "KeyV"
+
+fun isCopyKeyCombo(code: String, ctrl: Boolean, meta: Boolean, alt: Boolean = false): Boolean =
+    !alt && (ctrl || meta) && (code == "KeyC" || code == "KeyX")
+
+/** Two hours (`use-remote-desktop-recorder.ts:17`). */
+const val MAX_RECORDING_MS: Long = 2L * 60L * 60L * 1000L
+
+/** `m:ss`, or `h:mm:ss` past an hour (`remote-desktop-toolbar.tsx:418-423`). */
+fun formatRemoteDesktopElapsed(totalSec: Int): String {
+    val clamped = max(0, totalSec)
+    val h = clamped / 3600
+    val m = (clamped % 3600) / 60
+    val sec = (clamped % 60).toString().padStart(2, '0')
+    return if (h > 0) "$h:${m.toString().padStart(2, '0')}:$sec" else "$m:$sec"
+}
+
+/**
+ * Two zero-width spaces (`\u200B\u200B`) with the cursor placed at index 1 so a soft keyboard's
+ * backward delete (`deleteSurroundingText(1, 0)`) removes index 0 and forward delete
+ * (`deleteSurroundingText(0, 1)`) removes index 1.
+ */
+const val SOFT_KEYBOARD_SENTINEL = "\u200B\u200B"
+
+/** Maximum Unicode characters per `{type:"text"}` message when chunking long soft-keyboard commits. */
+const val SOFT_KEYBOARD_TEXT_CHUNK_SIZE = 512
+
+private fun keyTapMessages(code: String): List<JsonElement> = listOf(
+    buildJsonObject { put("type", "key"); put("code", code); put("down", true) },
+    buildJsonObject { put("type", "key"); put("code", code); put("down", false) },
+)
+
+internal fun chunkByCodePoints(text: String, maxCodePoints: Int = SOFT_KEYBOARD_TEXT_CHUNK_SIZE): List<String> {
+    if (text.isEmpty()) return emptyList()
+    val step = maxCodePoints.coerceAtLeast(1)
+    val out = ArrayList<String>()
+    var index = 0
+    while (index < text.length) {
+        val remainingCodePoints = text.codePointCount(index, text.length)
+        val end = if (remainingCodePoints <= step) {
+            text.length
+        } else {
+            text.offsetByCodePoints(index, step)
+        }
+        out += text.substring(index, end)
+        index = end
+    }
+    return out
+}
+
+/**
+ * Resolves an Android soft-keyboard `TextFieldValue` update (`use-remote-desktop-virtual-keyboard.ts`):
+ * - While [hasActiveComposition] is `true` (Telex / CJK / predictive IME composition in flight),
+ *   returns `null` so the caller keeps the composing buffer untouched and sends nothing yet.
+ * - Once [hasActiveComposition] is `false` (`compositionend` or direct non-composing input),
+ *   returns the committed `{type:"text"}` chunks (split on Unicode code-point boundaries) and/or
+ *   `Enter` / `Backspace` / `Delete` key taps, after which the caller resets the field to
+ *   [SOFT_KEYBOARD_SENTINEL] with cursor at 1.
+ */
+fun resolveSoftKeyboardCommit(
+    text: String,
+    selectionStart: Int = 1,
+    hasActiveComposition: Boolean = false,
+    chunkSize: Int = SOFT_KEYBOARD_TEXT_CHUNK_SIZE,
+): List<JsonElement>? {
+    if (hasActiveComposition) return null
+    val committed = text.replace("\u200B", "")
+    if (committed.isNotEmpty()) {
+        val out = ArrayList<JsonElement>()
+        val normalized = committed.replace("\r\n", "\n").replace('\r', '\n')
+        val step = chunkSize.coerceAtLeast(1)
+        val parts = normalized.split('\n')
+        for ((idx, part) in parts.withIndex()) {
+            if (part.isNotEmpty()) {
+                for (chunk in chunkByCodePoints(part, step)) {
+                    out += buildJsonObject { put("type", "text"); put("text", chunk) }
+                }
+            }
+            if (idx < parts.lastIndex) {
+                out += keyTapMessages("Enter")
+            }
+        }
+        return out
+    }
+    val sentinelCount = text.count { it == '\u200B' }
+    if (sentinelCount < 2) {
+        return if (sentinelCount == 1 && selectionStart >= 1) {
+            keyTapMessages("Delete")
+        } else {
+            keyTapMessages("Backspace")
+        }
+    }
+    return emptyList()
 }
 
 /**

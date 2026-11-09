@@ -129,5 +129,90 @@ class NativeTerminalReattachTest {
 
         terminal.setShown(true)
         assertNotNull(terminal.emulator)
+
+        // Park, then show again and report layout size: logs one Log.d line with replayed bytes and ms.
+        terminal.parkEmulator { snapshot("$ ") }
+        assertNull(terminal.emulator)
+        terminal.setShown(true)
+        assertNotNull(terminal.emulator)
+        org.robolectric.shadows.ShadowLog.clear()
+        terminal.onEmulatorResized(80, 24)
+        val logs = org.robolectric.shadows.ShadowLog.getLogsForTag("NativeTerminal")
+        assertEquals(1, logs.size)
+        assertTrue(logs.single().msg, Regex("""^Replayed \d+ bytes in \d+ ms$""").matches(logs.single().msg))
+    }
+
+    @Test
+    fun `parking calls history replaced before closing the parked emulator so the last command survives unpark and reconnect`() {
+        val terminal = terminal()
+        terminal.history.send("\r", { snapshot("$ echo old", "old", "$ seq 1 3", cursor = 2) }) { true }
+        val old = terminal.emulator
+        var readBeforeClose: TerminalEmulator? = null
+
+        terminal.parkEmulator {
+            readBeforeClose = it
+            assertFalse("buffer snapshot must be read before closing the parked emulator", it.isClosed)
+            assertSame(old, terminal.emulator)
+            snapshot("$ echo old", "old", "$ seq 1 3", "1", "2", "3", "$ ")
+        }
+
+        assertSame(old, readBeforeClose)
+        assertNull(terminal.emulator)
+        assertTrue(old!!.isClosed)
+
+        // Even if a reconnect happens while parked, the carried command text is preserved until shown again.
+        terminal.replaceEmulator()
+        assertNull(terminal.emulator)
+
+        val replayed = snapshot("banner", "$ echo old", "old", "$ seq 1 3", "1", "2", "3", "$ ")
+        assertEquals("$ seq 1 3", terminal.history.lastCommand(replayed))
+        assertEquals("1\n2\n3\n$", terminal.history.lastOutput(replayed))
+    }
+
+    @Test
+    fun `canPark refuses when alternate screen or mouse tracking is active or when the ring trimmed`() = kotlinx.coroutines.runBlocking {
+        val peers = java.util.concurrent.LinkedBlockingQueue<okhttp3.WebSocket>()
+        val server = mockwebserver3.MockWebServer()
+        server.dispatcher = object : mockwebserver3.Dispatcher() {
+            override fun dispatch(request: mockwebserver3.RecordedRequest): mockwebserver3.MockResponse =
+                mockwebserver3.MockResponse.Builder().webSocketUpgrade(object : okhttp3.WebSocketListener() {
+                    override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
+                        peers.put(webSocket)
+                    }
+                }).build()
+        }
+        server.start()
+        try {
+            val terminal = NativeTerminal(
+                ApiClient(server.url("/"), "token"),
+                "project",
+                "tab-trim",
+                CoroutineScope(Dispatchers.Unconfined),
+                store,
+                "server:",
+                copyToClipboard = {},
+            ).also {
+                terminals += it
+                it.setShown(true)
+            }
+            assertTrue(terminal.canPark { false to false })
+            assertFalse("must not park on alternate screen", terminal.canPark { true to false })
+            assertFalse("must not park when mouse tracking is on", terminal.canPark { false to true })
+
+            // Feed > 1 MB of output so controller.ringTrimmed becomes true, and verify canPark refuses even on primary screen without mouse tracking.
+            terminal.controller.start()
+            val peer = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                checkNotNull(peers.poll(3, java.util.concurrent.TimeUnit.SECONDS)) { "Timed out waiting for terminal socket" }
+            }
+            val chunk = "x".repeat(64 * 1024)
+            repeat(17) { peer.send(chunk) }
+            kotlinx.coroutines.withTimeout(3_000) {
+                while (!terminal.controller.ringTrimmed) kotlinx.coroutines.delay(10)
+            }
+            assertTrue(terminal.controller.ringTrimmed)
+            assertFalse("must not park once the 1 MB ring has trimmed", terminal.canPark { false to false })
+        } finally {
+            server.close()
+        }
     }
 }

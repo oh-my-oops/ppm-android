@@ -11,12 +11,16 @@ import com.hienlh.ppm.protocol.string
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
+enum class FileGitScopeKind {
+    REPO,
+    NO_REPO,
+}
+
 /** Resolved git scope for a file path inside a project (`fileGitScope` in `git-repo-scope.ts`). */
 data class FileGitScope(
     val repo: GitRepo?,
     val filePath: String,
-    /** `"repo"`: file is inside a git repo; `"no-repo"`: file is outside all discovered repos. */
-    val kind: String,
+    val kind: FileGitScopeKind,
 )
 
 /**
@@ -67,10 +71,16 @@ object GitRepoScope {
     fun fileGitScope(discovery: GitRepos?, projectRelative: String): FileGitScope? {
         if (discovery == null) return null
         val repo = repoContainingFile(discovery, projectRelative)
-            ?: return FileGitScope(repo = null, filePath = projectRelative, kind = "no-repo")
-        val filePath = repoRelativePath(projectRelative, repo)
-            ?: return FileGitScope(repo = null, filePath = projectRelative, kind = "no-repo")
-        return FileGitScope(repo = repo, filePath = filePath, kind = "repo")
+        if (repo != null) {
+            val filePath = repoRelativePath(projectRelative, repo)
+                ?: return FileGitScope(repo = null, filePath = projectRelative, kind = FileGitScopeKind.NO_REPO)
+            return FileGitScope(repo = repo, filePath = filePath, kind = FileGitScopeKind.REPO)
+        }
+        if (hasNoRepo(discovery)) {
+            val filePath = repoRelativePath(projectRelative, null) ?: projectRelative
+            return FileGitScope(repo = null, filePath = filePath, kind = FileGitScopeKind.REPO)
+        }
+        return FileGitScope(repo = null, filePath = projectRelative, kind = FileGitScopeKind.NO_REPO)
     }
 
     /** True when the project is a folder containing multiple repos and none is chosen yet. */
@@ -120,6 +130,9 @@ object GitRepoScope {
             untracked = status.untracked.map { projectRelativePath(it, repo) },
         )
     }
+
+    /** `commandRunsGit` in `src/web/lib/git-repo-scope.ts:215-217`. */
+    fun commandRunsGit(command: String): Boolean = command.startsWith("git-graph.")
 }
 
 /**

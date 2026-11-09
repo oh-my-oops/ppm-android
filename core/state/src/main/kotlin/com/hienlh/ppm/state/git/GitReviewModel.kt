@@ -349,7 +349,7 @@ object GitReviewModel {
         val out = mutableListOf<GitFileReview>()
         val listed = HashSet<String>()
         for (file in files) {
-            if (file.conflict != null) continue
+            if (file.conflict) continue
             listed += file.path
             val blocks = fileBlocks(
                 path = file.path,

@@ -121,6 +121,10 @@ class TerminalController internal constructor(
     /** What [held] adds up to, for the cap. A test reads it to see that nothing is kept once the output is written or dropped. */
     internal var heldBytes = 0
         private set
+
+    /** True once [held] has trimmed bytes past [MAX_HELD_BYTES] in the current connection; replaying from it would lose earlier modes or scrollback. */
+    var ringTrimmed = false
+        private set
     private val active get() = started && !closed && controllerScope.isActive
 
     /** Idempotent. Construction alone never opens a socket. */
@@ -339,6 +343,7 @@ class TerminalController internal constructor(
         heldBytes += bytes.size
         // Keep the newest [MAX_HELD_BYTES]: whole pieces off the front, then the front of the oldest left, never inside a character.
         while (heldBytes > MAX_HELD_BYTES) {
+            ringTrimmed = true
             val oldest = held.first()
             val excess = heldBytes - MAX_HELD_BYTES
             if (oldest.size <= excess) {
@@ -374,6 +379,7 @@ class TerminalController internal constructor(
     private fun discardHeld() {
         held.clear()
         heldBytes = 0
+        ringTrimmed = false
     }
 
     private fun markReady() {

@@ -442,6 +442,7 @@ class TerminalFirstSizeTest {
             f.controller.resize(105, 30)
             f.text("live while shown\n")
             assertEquals(listOf("REPLAY:initial\n", "live while shown\n"), f.delivery)
+            assertFalse(f.controller.ringTrimmed)
 
             // Hidden and parked: no output reaches the torn-down emulator, even if a flood arrives.
             f.controller.setVisible(false)
@@ -455,6 +456,7 @@ class TerminalFirstSizeTest {
             }
             assertTrue("nothing is written while parked", f.delivery.isEmpty())
             assertEquals("capped at 1 MB through a 300,000-line flood", MAX_HELD_BYTES, f.controller.heldBytes)
+            assertTrue("ringTrimmed is set once the 1 MB ring drops earlier bytes", f.controller.ringTrimmed)
 
             // Shown again: the new emulator lays out and reports its size; the newest 1 MB is replayed at once.
             f.controller.setVisible(true)
@@ -463,6 +465,10 @@ class TerminalFirstSizeTest {
             assertEquals(MAX_HELD_BYTES, f.replays.sumOf { it.size })
             assertTrue(delivered(f).endsWith("299999\n300000\n"))
             assertEquals(listOf("\u0001RESIZE:105,30", "\u0001RESIZE:105,30"), f.socket.sent)
+
+            // A reconnect discards the held ring and resets ringTrimmed.
+            f.controller.restart()
+            assertFalse(f.controller.ringTrimmed)
         }
     }
 

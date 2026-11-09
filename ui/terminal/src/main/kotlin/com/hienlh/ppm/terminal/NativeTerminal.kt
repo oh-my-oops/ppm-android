@@ -1,5 +1,6 @@
 package com.hienlh.ppm.terminal
 
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -32,6 +33,7 @@ internal const val PARK_GRACE_MS = 150L
 internal class TerminalParkGate(
     private val scope: CoroutineScope,
     private val graceMs: Long = PARK_GRACE_MS,
+    private val canPark: () -> Boolean = { true },
     private val onShow: () -> Unit,
     private val onPark: () -> Unit,
     private val schedule: (Long, () -> Unit) -> Job = { ms, block ->
@@ -62,7 +64,7 @@ internal class TerminalParkGate(
             if (parked || parkJob != null) return
             parkJob = schedule(graceMs) {
                 parkJob = null
-                if (!shown && !parked) {
+                if (!shown && !parked && canPark()) {
                     parked = true
                     onPark()
                 }
@@ -93,6 +95,8 @@ class NativeTerminal(
     private var theme: PpmTheme? = null
     private var generation = 0
     private var closed = false
+    private var replayingParked = false
+    private var replayedParkBytes = 0
     internal val history = NativeTerminalHistory()
     var pendingCommand by mutableStateOf<String?>(null)
     var emulator by mutableStateOf<TerminalEmulator?>(null)
@@ -100,6 +104,7 @@ class NativeTerminal(
 
     private val parkGate = TerminalParkGate(
         scope = scope,
+        canPark = ::canPark,
         onShow = ::unparkEmulator,
         onPark = ::parkEmulator,
     )
@@ -113,17 +118,37 @@ class NativeTerminal(
         onReset = { replaceEmulator() },
         // The replay is shown but never answered: the engine drops what it asks (cursor position, device
         // attributes, window size), which would otherwise be typed at the prompt it comes back to.
-        onReplay = { bytes -> if (!closed) emulator?.writeReplay(bytes) },
+        onReplay = { bytes ->
+            if (!closed) {
+                if (replayingParked) replayedParkBytes += bytes.size
+                emulator?.writeReplay(bytes)
+            }
+        },
     )
 
     /**
      * Show or hide the terminal view. Showing builds [emulator] if parked (waiting for its first layout to
-     * release the controller's 1 MB ring); hiding parks it after [PARK_GRACE_MS] unless shown again first.
+     * release the controller's 1 MB ring); hiding parks it after [PARK_GRACE_MS] unless shown again first,
+     * provided the ring has not trimmed and neither the alternate screen nor mouse tracking is active.
      */
     fun setShown(shown: Boolean) {
         if (closed) return
         controller.setVisible(shown)
         parkGate.setShown(shown)
+        if (shown && emulator == null) unparkEmulator()
+    }
+
+    /**
+     * Whether tearing down [emulator] and replaying [controller]'s 1 MB raw ring can reconstruct the session
+     * without losing scrollback, the alternate screen, or an active mouse mode.
+     */
+    internal fun canPark(
+        emulatorModes: (TerminalEmulator) -> Pair<Boolean, Boolean> = { it.isAlternateScreen to it.isMouseTracking },
+    ): Boolean {
+        if (closed || controller.ringTrimmed) return false
+        val current = emulator ?: return false
+        val (alternateScreen, mouseTracking) = emulatorModes(current)
+        return !alternateScreen && !mouseTracking
     }
 
     private fun unparkEmulator() {
@@ -131,14 +156,16 @@ class NativeTerminal(
         emulator = newEmulator().also { applyTheme(it) }
     }
 
-    private fun parkEmulator() {
+    internal fun parkEmulator(bufferOf: (TerminalEmulator) -> TerminalBufferSnapshot = TerminalEmulator::getBufferSnapshot) {
         if (closed) return
+        val previous = emulator ?: return
+        history.replaced(bufferOf(previous))
         generation++
-        val previous = emulator
         emulator = null
-        history.reset()
+        replayingParked = true
+        replayedParkBytes = 0
         controller.park()
-        previous?.close()
+        previous.close()
     }
 
     /**
@@ -152,10 +179,11 @@ class NativeTerminal(
      */
     internal fun replaceEmulator(bufferOf: (TerminalEmulator) -> TerminalBufferSnapshot = TerminalEmulator::getBufferSnapshot) {
         if (closed) return
+        replayingParked = false
+        replayedParkBytes = 0
         val previous = emulator
         if (previous == null) {
             generation++
-            history.reset()
             return
         }
         val dimensions = previous.dimensions
@@ -168,6 +196,8 @@ class NativeTerminal(
 
     /** A fresh shell, which the old one's rows say nothing about: its command boundary goes too. */
     fun restart() {
+        replayingParked = false
+        replayedParkBytes = 0
         history.reset()
         controller.restart()
     }
@@ -184,12 +214,27 @@ class NativeTerminal(
             // The first report, made when the view is laid out, is what lets the controller write into this emulator: the server
             // replays the shell's buffer at once and an emulator wraps what it is written at the width it has then, so the
             // controller holds the output until it has the real one.
-            onResize = { if (!closed && ownGeneration == generation) controller.resize(it.columns, it.rows) },
+            onResize = { if (!closed && ownGeneration == generation) onEmulatorResized(it.columns, it.rows) },
             onClipboardCopy = { if (!closed && ownGeneration == generation) copyToClipboard(it) },
             // The engine's own scan underlined every URL and opened one on any tap. A link is found where the web finds one, for a mouse.
             autoDetectUrls = false,
             maxScrollbackLines = 50_000,
         )
+    }
+
+    internal fun onEmulatorResized(columns: Int, rows: Int) {
+        if (!replayingParked) {
+            controller.resize(columns, rows)
+            return
+        }
+        replayedParkBytes = 0
+        val startNs = System.nanoTime()
+        controller.resize(columns, rows)
+        val elapsedMs = (System.nanoTime() - startNs) / 1_000_000L
+        val bytes = replayedParkBytes
+        replayingParked = false
+        replayedParkBytes = 0
+        Log.d("NativeTerminal", "Replayed $bytes bytes in $elapsedMs ms")
     }
 
     /**

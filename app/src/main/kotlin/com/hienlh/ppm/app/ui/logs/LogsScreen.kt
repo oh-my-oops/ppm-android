@@ -45,10 +45,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.client.logsGithubDuplicates
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import com.hienlh.ppm.app.ui.PpmTextField
 import com.hienlh.ppm.app.ui.tablet.Edge
 import com.hienlh.ppm.app.ui.tablet.edge
@@ -61,6 +67,7 @@ import com.hienlh.ppm.client.logsSetIssuesAuto
 import com.hienlh.ppm.client.logsUndismissAllIssues
 import com.hienlh.ppm.client.queryLogs
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.LucideIcon
 import com.hienlh.ppm.design.PpmIcon
@@ -113,6 +120,7 @@ fun LogsAppBody(
     initialIssues: LogIssuesResult? = null,
 ) {
     val tokens = LocalPpmTokens.current
+    val phone = LocalPpmMobile.current
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -123,8 +131,10 @@ fun LogsAppBody(
     var loading by remember { mutableStateOf(initialResult == null) }
     var follow by remember { mutableStateOf(true) }
     var utc by remember { mutableStateOf(false) }
-    var pausedLines by remember { mutableStateOf<List<LogEntry>>(emptyList()) }
-    var pausedTitles by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var prefsOpen by remember { mutableStateOf(false) }
+    val liveBuffer = remember { LogsLiveFeedBuffer() }
+    var pausedCount by remember { mutableIntStateOf(0) }
+    var reloads by remember { mutableIntStateOf(0) }
 
     var issuesResult by remember { mutableStateOf(initialIssues ?: LogIssuesResult()) }
     var issuesLoading by remember { mutableStateOf(false) }
@@ -136,24 +146,22 @@ fun LogsAppBody(
     val stepsField = remember { TextFieldState("") }
     val expectedField = remember { TextFieldState("") }
     var labels by remember { mutableStateOf(listOf("bug")) }
+    var redactProjects by remember { mutableStateOf(false) }
     var redactOpts by remember {
         mutableStateOf(
             RedactOptions(
                 home = true,
                 email = true,
                 chats = true,
-                projects = model.projects.map { it.name },
+                projects = emptyList(),
             ),
         )
     }
-    var envPairs by remember {
-        mutableStateOf(
-            listOf(
-                "PPM" to "Android Client",
-                "OS" to "Android ${android.os.Build.VERSION.RELEASE}",
-            ),
-        )
-    }
+    val effectiveRedact = redactOpts.copy(
+        projects = if (redactProjects) model.projects.map { it.name } else emptyList(),
+    )
+    var envPairs by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var envLoaded by remember { mutableStateOf(false) }
     var draftingAi by remember { mutableStateOf(false) }
     var bannerError by remember { mutableStateOf<String?>(null) }
 
@@ -163,6 +171,10 @@ fun LogsAppBody(
     }
 
     suspend fun loadLogs(before: String? = null) {
+        if (before == null) {
+            liveBuffer.beginPageRead()
+            pausedCount = 0
+        }
         val api = model.api ?: run {
             loading = false
             return
@@ -174,12 +186,23 @@ fun LogsAppBody(
             val json = api.queryLogs(pairs)
             val parsed = LogQueryResult.from(json)
             result = if (before != null) {
-                parsed.copy(entries = parsed.entries + result.entries)
+                val have = result.entries.take(DEDUPE_TAIL).map { it.id }.toSet()
+                val older = parsed.entries.filterNot { it.id in have }
+                result.copy(
+                    entries = older + result.entries,
+                    hasMore = parsed.hasMore,
+                    titles = parsed.titles + result.titles,
+                    reachMissed = parsed.reachMissed,
+                )
             } else {
-                parsed
+                liveBuffer.finishPageRead(parsed, filter)
             }
             bannerError = null
+        } catch (e: CancellationException) {
+            liveBuffer.cancelPageRead()
+            throw e
         } catch (e: Exception) {
+            liveBuffer.cancelPageRead()
             bannerError = e.message ?: "Failed to query logs"
         } finally {
             loading = false
@@ -193,7 +216,11 @@ fun LogsAppBody(
             val json = api.logsIssues()
             val parsed = LogIssuesResult.from(json)
             issuesResult = parsed
-            model.logsLikelyBugs = parsed.issues.count { !it.dismissed && it.cls == "bug" }
+            if (model.logsBadge && model.info?.minimalMode == false) {
+                model.logsLikelyBugs = parsed.issues.count { !it.dismissed && it.cls == "bug" }
+            }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             bannerError = e.message ?: "Failed to load log issues"
         } finally {
@@ -201,78 +228,118 @@ fun LogsAppBody(
         }
     }
 
-    LaunchedEffect(model.api, filter, range) {
-        if (initialResult == null || filter != DEFAULT_LOG_FILTER || range != "1h") {
-            loadLogs()
-        }
-    }
-
-    LaunchedEffect(model.api) {
-        val api = model.api ?: return@LaunchedEffect
-        launch { loadIssues() }
-        launch {
-            runCatching { api.logsEnvironment() }.getOrNull()?.obj?.let { envObj ->
-                val list = mutableListOf<Pair<String, String>>()
-                envObj["ppm"]?.string?.let { list += "PPM" to it }
-                envObj["os"]?.string?.let { list += "Host OS" to it }
-                envObj["bun"]?.string?.let { list += "Bun" to it }
-                list += "Client" to "PPM Android (${android.os.Build.MODEL})"
-                if (list.isNotEmpty()) envPairs = list
-            }
-        }
-    }
-
-    // Live tail via GlobalEvents
-    DisposableEffect(model.events, follow, filter) {
+    // Live tail via GlobalEvents: subscribe BEFORE the page read, resubscribe and re-read on global_ready.
+    DisposableEffect(model, model.events) {
+        val releaseTail = model.retainLogsTail()
         val ev = model.events
         var unsubLines: (() -> Unit)? = null
         var unsubIssues: (() -> Unit)? = null
+        var unsubReady: (() -> Unit)? = null
         if (ev != null) {
-            ev.sendIfOpen("""{"type":"logs:subscribe"}""")
+            unsubReady = ev.onGlobalReady {
+                reloads += 1
+            }
             unsubLines = ev.onLogsLines { msg ->
                 val incoming = msg["entries"].array.orEmpty().mapNotNull(LogEntry::from)
                 val incomingTitles = msg["titles"].obj?.mapNotNull { (k, v) -> v.string?.let { k to it } }?.toMap().orEmpty()
-                if (follow) {
-                    result = applyLiveEntries(result, incoming, incomingTitles, filter)
-                } else {
-                    pausedLines = (pausedLines + incoming).takeLast(MAX_KEEP)
-                    pausedTitles = pausedTitles + incomingTitles
-                }
+                result = liveBuffer.onLiveBatch(result, incoming, incomingTitles, filter, follow)
+                pausedCount = liveBuffer.pausedMatchingCount(result, filter)
             }
             unsubIssues = ev.onLogsIssuesChanged {
                 scope.launch { loadIssues() }
             }
         }
         onDispose {
+            unsubReady?.invoke()
             unsubLines?.invoke()
             unsubIssues?.invoke()
-            ev?.sendIfOpen("""{"type":"logs:unsubscribe"}""")
+            releaseTail()
         }
+    }
+
+    var initialLoadSkipped by remember { mutableStateOf(false) }
+    LaunchedEffect(model.api, filter, range, reloads) {
+        if (!initialLoadSkipped && initialResult != null && reloads == 0 && filter == DEFAULT_LOG_FILTER && range == "1h") {
+            initialLoadSkipped = true
+            return@LaunchedEffect
+        }
+        initialLoadSkipped = true
+        liveBuffer.beginPageRead()
+        pausedCount = 0
+        loadLogs()
+    }
+
+    suspend fun loadEnvironment(): List<Pair<String, String>> {
+        val api = model.api ?: return envPairs
+        val envJson = try {
+            api.logsEnvironment()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        if (envJson != null) {
+            val rawAgent = System.getProperty("http.agent")?.takeIf { it.contains("Android", ignoreCase = true) }
+                ?: "Mozilla/5.0 (Linux; Android ${android.os.Build.VERSION.RELEASE ?: "14"})"
+            val list = parseLogsEnvironment(envJson) + ("Browser" to userAgentSummary(rawAgent))
+            envPairs = list
+            envLoaded = true
+            return list
+        }
+        return envPairs
+    }
+
+    LaunchedEffect(model.api) {
+        val api = model.api ?: return@LaunchedEffect
+        if (initialIssues == null) {
+            launch { loadIssues() }
+        }
+        launch { loadEnvironment() }
     }
 
     fun resumeFollow() {
         follow = true
-        if (pausedLines.isNotEmpty()) {
-            result = applyLiveEntries(result, pausedLines, pausedTitles, filter)
-            pausedLines = emptyList()
-            pausedTitles = emptyMap()
-        }
+        result = liveBuffer.resumeFollow(result, filter)
+        pausedCount = 0
     }
 
-    fun draftWithAi(rows: List<LogRow>, note: String = "") {
+    fun draftWithAi(targetSnippets: List<ReportSnippet>, note: String = "") {
         val api = model.api ?: return
+        if (targetSnippets.isEmpty() || draftingAi) return
         draftingAi = true
         scope.launch {
             try {
-                val rawLines = rows.take(120).map { rawLogLine(it.entry, it.count) }
+                val activeEnv = if (!envLoaded) loadEnvironment() else envPairs
+                val snippetsJson = kotlinx.serialization.json.JsonArray(
+                    targetSnippets.map { s ->
+                        buildJsonObject {
+                            put("label", JsonPrimitive(snippetHeading(s)))
+                            put(
+                                "lines",
+                                kotlinx.serialization.json.JsonArray(
+                                    s.rows.take(500).map { JsonPrimitive(rawLogLine(it.entry, it.count)) },
+                                ),
+                            )
+                        }
+                    },
+                )
+                val envJson = kotlinx.serialization.json.JsonArray(
+                    activeEnv.take(20).map { (k, v) ->
+                        kotlinx.serialization.json.JsonArray(listOf(JsonPrimitive(k), JsonPrimitive(v)))
+                    },
+                )
                 val res = api.logsDraftReport(
                     buildJsonObject {
-                        put("lines", kotlinx.serialization.json.JsonArray(rawLines.map(::JsonPrimitive)))
-                        put("note", JsonPrimitive(note))
+                        put("snippets", snippetsJson)
+                        put("environment", envJson)
+                        if (note.isNotBlank()) put("note", JsonPrimitive(note))
                     },
                 )
                 res?.get("title")?.string?.takeIf { it.isNotBlank() }?.let { t ->
                     titleField.edit { replace(0, length, t) }
+                }
+                res?.get("labels")?.array?.mapNotNull { it.string }?.takeIf { it.isNotEmpty() }?.let { l ->
+                    labels = l
                 }
                 res?.get("what")?.string?.takeIf { it.isNotBlank() }?.let { w ->
                     whatField.edit { replace(0, length, w) }
@@ -283,6 +350,8 @@ fun LogsAppBody(
                 res?.get("expected")?.string?.takeIf { it.isNotBlank() }?.let { ex ->
                     expectedField.edit { replace(0, length, ex) }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 bannerError = e.message ?: "AI draft failed"
             } finally {
@@ -343,11 +412,11 @@ fun LogsAppBody(
                 )
             }
 
-            if (activeView == "logs") {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (activeView == "logs") {
                     val followShape = RoundedCornerShape(6.dp)
                     Row(
                         Modifier
@@ -369,26 +438,137 @@ fun LogsAppBody(
                                 .background(if (follow) Color(0xFF22C55E) else tokens.text2.color),
                         )
                         BasicText(
-                            if (follow) "Live" else if (pausedLines.isNotEmpty()) "Paused (+${pausedLines.size})" else "Paused",
+                            if (follow) "Live" else if (pausedCount > 0) "Paused (+$pausedCount)" else "Paused",
                             style = ppmText(11f, FontWeight.Medium, lineHeight = 15f)
                                 .copy(color = if (follow) Color(0xFF22C55E) else tokens.text2.color),
                         )
                     }
+                }
+                if (!phone) {
                     Box(
                         Modifier
-                            .height(26.dp)
+                            .size(32.dp)
                             .clip(RoundedCornerShape(6.dp))
-                            .background(tokens.panel2.color)
-                            .ppmClickable { utc = !utc }
-                            .padding(horizontal = 7.dp),
+                            .background(if (prefsOpen) tokens.accent.opacity(0.12).color else Color.Transparent)
+                            .ppmClickable { prefsOpen = !prefsOpen }
+                            .semantics { contentDescription = "Logs preferences" }
+                            .testTag("logs-prefs-toggle"),
                         contentAlignment = Alignment.Center,
                     ) {
-                        BasicText(
-                            if (utc) "UTC" else localOffsetLabel(),
-                            style = ppmText(10f, kind = FontKind.MONO, lineHeight = 14f).copy(color = tokens.text2.color),
+                        PpmIcon(
+                            ProductIcon.Settings,
+                            16.dp,
+                            if (prefsOpen) tokens.accent.color else tokens.text2.color,
                         )
                     }
                 }
+            }
+        }
+
+        if (prefsOpen && !phone) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(tokens.panel2.opacity(0.45).color)
+                    .edge(Edge.Bottom, tokens.border.color)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .testTag("logs-prefs"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    BasicText(
+                        "Times",
+                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text2.color),
+                    )
+                    val localShape = RoundedCornerShape(4.dp)
+                    Box(
+                        Modifier
+                            .clip(localShape)
+                            .background(if (!utc) tokens.accent.opacity(0.14).color else tokens.panel2.color)
+                            .ppmClickable(shape = localShape) { utc = false }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        BasicText(
+                            "Local (${localOffsetLabel()})",
+                            style = ppmText(11f, lineHeight = 15f).copy(color = if (!utc) tokens.accent.color else tokens.text2.color),
+                        )
+                    }
+                    Box(
+                        Modifier
+                            .clip(localShape)
+                            .background(if (utc) tokens.accent.opacity(0.14).color else tokens.panel2.color)
+                            .ppmClickable(shape = localShape) { utc = true }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        BasicText(
+                            "UTC",
+                            style = ppmText(11f, lineHeight = 15f).copy(color = if (utc) tokens.accent.color else tokens.text2.color),
+                        )
+                    }
+                }
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .ppmClickable { model.updateLogsBadge(!model.logsBadge) }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .testTag("logs-prefs-badge-switch"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(width = 24.dp, height = 14.dp)
+                            .clip(CircleShape)
+                            .background(if (model.logsBadge) tokens.accent.color else tokens.border.color)
+                            .padding(2.dp),
+                        contentAlignment = if (model.logsBadge) Alignment.CenterEnd else Alignment.CenterStart,
+                    ) {
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(Color.White))
+                    }
+                    BasicText(
+                        "Red dot on the Logs button for a likely bug",
+                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text.color),
+                    )
+                }
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .ppmClickable {
+                            val nextAuto = !issuesResult.auto
+                            scope.launch {
+                                runCatching { model.api?.logsSetIssuesAuto(nextAuto) }
+                                loadIssues()
+                            }
+                        }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .testTag("logs-prefs-auto-switch"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(width = 24.dp, height = 14.dp)
+                            .clip(CircleShape)
+                            .background(if (issuesResult.auto) tokens.accent.color else tokens.border.color)
+                            .padding(2.dp),
+                        contentAlignment = if (issuesResult.auto) Alignment.CenterEnd else Alignment.CenterStart,
+                    ) {
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(Color.White))
+                    }
+                    BasicText(
+                        "Let AI sort new errors and warnings",
+                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text.color),
+                    )
+                }
+                BasicText(
+                    "Keeps ${result.files.generations} × ${byteSize(result.files.capBytes)} of ppm.log and ${plural(result.files.browserRetentionDays, "day")} of browser logs",
+                    style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+                )
             }
         }
 
@@ -421,6 +601,7 @@ fun LogsAppBody(
                     filter = filter,
                     range = range,
                     utc = utc,
+                    follow = follow,
                     onFilterChange = { filter = it },
                     onRangeChange = { range = it },
                     onLoadEarlier = {
@@ -483,10 +664,11 @@ fun LogsAppBody(
                         titleField.edit { replace(0, length, issue.title) }
                         whatField.edit { replace(0, length, issue.why) }
                         selectView("report")
-                        if (rows.isNotEmpty()) draftWithAi(rows, issue.title)
+                        if (rows.isNotEmpty()) draftWithAi(listOf(snip), issue.title)
                     },
                 )
                 "report" -> LogsReportPane(
+                    model = model,
                     titleField = titleField,
                     whatField = whatField,
                     stepsField = stepsField,
@@ -497,17 +679,30 @@ fun LogsAppBody(
                     },
                     snippets = snippets,
                     onRemoveSnippet = { id -> snippets = snippets.filterNot { it.id == id } },
-                    redact = redactOpts,
-                    onRedactChange = { redactOpts = it },
+                    redact = effectiveRedact,
+                    onRedactChange = { redactOpts = it.copy(projects = emptyList()) },
+                    redactProjects = redactProjects,
+                    onRedactProjectsChange = { redactProjects = it },
                     environment = envPairs,
                     draftingAi = draftingAi,
                     onDraftWithAi = {
-                        val rows = snippets.flatMap { it.rows }.ifEmpty { foldRepeats(result.entries.takeLast(80)) }
-                        draftWithAi(rows, titleField.text.toString())
+                        val targetSnips = snippets.ifEmpty {
+                            val rows = foldRepeats(result.entries.takeLast(80))
+                            if (rows.isEmpty()) emptyList() else listOf(ReportSnippet(id = "s-auto", src = filter.src, rows = rows))
+                        }
+                        draftWithAi(targetSnips, titleField.text.toString())
                     },
                     onCopyMarkdown = { md ->
-                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                        cm?.setPrimaryClip(ClipData.newPlainText("PPM Bug Report", md))
+                        val custom = model.reportClipboardCopy
+                        if (custom != null) {
+                            custom(md)
+                        } else {
+                            runCatching {
+                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return@runCatching false
+                                cm.setPrimaryClip(ClipData.newPlainText("PPM Bug Report", md))
+                                true
+                            }.getOrDefault(false)
+                        }
                     },
                     onOpenGithub = { url ->
                         runCatching {
@@ -576,6 +771,7 @@ private fun LogsStreamPane(
     filter: LogFilter,
     range: String,
     utc: Boolean,
+    follow: Boolean = true,
     onFilterChange: (LogFilter) -> Unit,
     onRangeChange: (String) -> Unit,
     onLoadEarlier: () -> Unit,
@@ -596,6 +792,18 @@ private fun LogsStreamPane(
     val searchCompiled = remember(filter) { compileLogSearch(filter) }
     val rows = remember(result.entries) { foldRepeats(result.entries) }
     val dividers = remember(rows, result.restarts) { restartDividers(rows, result.restarts) }
+    val lastEntryId = rows.lastOrNull()?.entry?.id
+    LaunchedEffect(follow, lastEntryId, rows.size) {
+        if (follow && rows.isNotEmpty()) {
+            val targetIdx = (rows.size - 1 + (if (result.hasMore) 1 else 0) + dividers.size).coerceAtLeast(0)
+            try {
+                listState.scrollToItem(targetIdx)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
+        }
+    }
 
     Box(Modifier.fillMaxSize().testTag("logs-stream-pane")) {
         Column(Modifier.fillMaxSize()) {
@@ -1241,6 +1449,7 @@ private fun LogsIssuesPane(
 
 @Composable
 private fun LogsReportPane(
+    model: AppModel,
     titleField: TextFieldState,
     whatField: TextFieldState,
     stepsField: TextFieldState,
@@ -1251,15 +1460,18 @@ private fun LogsReportPane(
     onRemoveSnippet: (String) -> Unit,
     redact: RedactOptions,
     onRedactChange: (RedactOptions) -> Unit,
+    redactProjects: Boolean,
+    onRedactProjectsChange: (Boolean) -> Unit,
     environment: List<Pair<String, String>>,
     draftingAi: Boolean,
     onDraftWithAi: () -> Unit,
-    onCopyMarkdown: (String) -> Unit,
+    onCopyMarkdown: (String) -> Boolean,
     onOpenGithub: (String) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
     var mode by remember { mutableStateOf("write") } // "write" | "preview"
     var copied by remember { mutableStateOf(false) }
+    var dupes by remember { mutableStateOf<DuplicateSearchResult?>(null) }
 
     val fields = ReportFields(
         title = titleField.text.toString(),
@@ -1268,13 +1480,24 @@ private fun LogsReportPane(
         steps = stepsField.text.toString(),
         expected = expectedField.text.toString(),
     )
-    val compiledBody = remember(fields, snippets, environment, redact) {
-        reportBody(fields, snippets, environment, redact, mark = false)
+    val prepared = remember(fields, snippets, environment, redact) {
+        prepareIssueReport(fields, snippets, environment, redact)
     }
-    val ghUrl = remember(fields.title, labels, compiledBody) {
-        val full = issueUrl(fields.title.ifBlank { "Bug report" }, labels, compiledBody)
-        if (full.length <= ISSUE_URL_LIMIT) full
-        else issueUrl(fields.title.ifBlank { "Bug report" }, labels, compiledBody.take(3500) + "\n\n_(Truncated to fit URL limit)_")
+    val compiledBody = prepared.body
+    val ghUrl = prepared.openUrl
+
+    LaunchedEffect(prepared.duplicateQuery, model.api) {
+        dupes = null
+        val dq = prepared.duplicateQuery ?: return@LaunchedEffect
+        val api = model.api ?: return@LaunchedEffect
+        delay(700L)
+        try {
+            val res = api.logsGithubDuplicates(dq)
+            dupes = DuplicateSearchResult.from(res, dq)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
     }
 
     Column(
@@ -1355,7 +1578,7 @@ private fun LogsReportPane(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 BasicText(
-                    "# ${fields.title.ifBlank { "Bug report" }}",
+                    "# ${prepared.redactedTitle.ifBlank { "Bug report" }}",
                     style = ppmText(15f, FontWeight.Bold, lineHeight = 20f).copy(color = tokens.text.color),
                 )
                 BasicText(
@@ -1448,9 +1671,10 @@ private fun LogsReportPane(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    PrivacyChip("Home paths (~)", redact.home) { onRedactChange(redact.copy(home = !redact.home)) }
-                    PrivacyChip("Emails", redact.email) { onRedactChange(redact.copy(email = !redact.email)) }
-                    PrivacyChip("Chat UUIDs", redact.chats) { onRedactChange(redact.copy(chats = !redact.chats)) }
+                    PrivacyChip("Home folder", redact.home, tag = "report-privacy-home") { onRedactChange(redact.copy(home = !redact.home)) }
+                    PrivacyChip("Email addresses", redact.email, tag = "report-privacy-email") { onRedactChange(redact.copy(email = !redact.email)) }
+                    PrivacyChip("Chat ids", redact.chats, tag = "report-privacy-chats") { onRedactChange(redact.copy(chats = !redact.chats)) }
+                    PrivacyChip("Project names", redactProjects, tag = "report-privacy-projects") { onRedactProjectsChange(!redactProjects) }
                 }
             }
         }
@@ -1468,7 +1692,19 @@ private fun LogsReportPane(
                     .height(38.dp)
                     .clip(btnShape)
                     .background(tokens.accent.color)
-                    .ppmClickable(shape = btnShape) { onOpenGithub(ghUrl) }
+                    .ppmClickable(shape = btnShape) {
+                        if (prepared.bodyOverLimit) {
+                            val ok = onCopyMarkdown(compiledBody)
+                            if (ok) {
+                                model.toast(ErrorToastMessage("Body copied. Paste it into the issue that just opened.", kind = ErrorToastMessage.Kind.SUCCESS))
+                            } else {
+                                model.toast(ErrorToastMessage("Could not copy the body. Use Copy as Markdown, then paste it into the issue.", kind = ErrorToastMessage.Kind.ERROR))
+                            }
+                        } else {
+                            model.toast(ErrorToastMessage("Opened the new issue on GitHub. Check it there, then press Submit.", kind = ErrorToastMessage.Kind.SUCCESS))
+                        }
+                        onOpenGithub(ghUrl)
+                    }
                     .testTag("report-open-github-btn"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
@@ -1476,7 +1712,7 @@ private fun LogsReportPane(
                 PpmIcon(ProductIcon.ExternalLink, 14.dp, tokens.accentFg.color)
                 Spacer(Modifier.width(6.dp))
                 BasicText(
-                    "Open GitHub issue",
+                    if (prepared.bodyOverLimit) "Copy body and open GitHub" else "Open GitHub issue",
                     style = ppmText(12f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.accentFg.color),
                 )
             }
@@ -1488,8 +1724,13 @@ private fun LogsReportPane(
                     .background(tokens.panel2.color)
                     .cssBorder(tokens.border.color, btnShape)
                     .ppmClickable(shape = btnShape) {
-                        onCopyMarkdown(reportMarkdown(fields.title, compiledBody))
-                        copied = true
+                        val ok = onCopyMarkdown(reportMarkdown(prepared.redactedTitle, compiledBody))
+                        if (ok) {
+                            copied = true
+                            model.toast(ErrorToastMessage("Copied the issue as Markdown", kind = ErrorToastMessage.Kind.SUCCESS))
+                        } else {
+                            model.toast(ErrorToastMessage("Could not copy the issue", kind = ErrorToastMessage.Kind.ERROR))
+                        }
                     }
                     .testTag("report-copy-md-btn"),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1501,6 +1742,53 @@ private fun LogsReportPane(
                     if (copied) "Copied Markdown" else "Copy as Markdown",
                     style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color),
                 )
+            }
+        }
+
+        val currentDupes = dupes
+        if (currentDupes != null) {
+            val hasIssues = currentDupes.issues.isNotEmpty()
+            val dupeShape = RoundedCornerShape(8.dp)
+            val warnColor = Color(0xFFEAB308)
+            val okColor = Color(0xFF22C55E)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(dupeShape)
+                    .background(if (hasIssues) warnColor.copy(alpha = 0.12f) else tokens.panel2.opacity(0.35).color)
+                    .cssBorder(if (hasIssues) warnColor.copy(alpha = 0.35f) else tokens.border.color, dupeShape)
+                    .padding(10.dp)
+                    .testTag("report-duplicates-box"),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PpmIcon(
+                    if (hasIssues) ProductIcon.TriangleAlert else ProductIcon.CheckCircle2,
+                    14.dp,
+                    if (hasIssues) warnColor else okColor,
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (hasIssues) {
+                        BasicText(
+                            "Open issues that look like this one:",
+                            style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text.color),
+                        )
+                        for (issue in currentDupes.issues.take(3)) {
+                            BasicText(
+                                "#${issue.number} ${issue.title}",
+                                modifier = Modifier
+                                    .ppmClickable { onOpenGithub(issue.url) }
+                                    .testTag("report-dupe-issue-${issue.number}"),
+                                style = ppmText(11f, FontWeight.Medium, lineHeight = 15f).copy(color = tokens.accent.color),
+                            )
+                        }
+                    } else {
+                        BasicText(
+                            "No open issue looks like this one. Searched $LOGS_ISSUE_REPO for \u201C${currentDupes.query}\u201D.",
+                            style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text2.color),
+                        )
+                    }
+                }
             }
         }
     }
@@ -1539,7 +1827,7 @@ private fun ReportFieldBox(
 }
 
 @Composable
-private fun PrivacyChip(label: String, checked: Boolean, onClick: () -> Unit) {
+private fun PrivacyChip(label: String, checked: Boolean, tag: String, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(6.dp)
     Row(
@@ -1548,7 +1836,8 @@ private fun PrivacyChip(label: String, checked: Boolean, onClick: () -> Unit) {
             .background(if (checked) tokens.accent.opacity(0.15).color else tokens.bgSolid.color)
             .cssBorder((if (checked) tokens.accent else tokens.border).color, shape)
             .ppmClickable(shape = shape, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .testTag(tag),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {

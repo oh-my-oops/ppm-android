@@ -10,10 +10,12 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -25,6 +27,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,6 +42,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -58,6 +62,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
@@ -68,15 +73,20 @@ import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -117,6 +127,7 @@ import com.hienlh.ppm.state.remotedesktop.CUSTOM_QUALITY_MAX_MORE_PERCENT
 import com.hienlh.ppm.state.remotedesktop.CUSTOM_QUALITY_MAX_PERCENT
 import com.hienlh.ppm.state.remotedesktop.CUSTOM_QUALITY_MIN_PERCENT
 import com.hienlh.ppm.state.remotedesktop.DEFAULT_CUSTOM_SCALE
+import com.hienlh.ppm.state.remotedesktop.computeStageVideoRect
 import com.hienlh.ppm.state.remotedesktop.DEFAULT_PRESET_ID
 import com.hienlh.ppm.state.remotedesktop.DEFAULT_VIEW_STYLE
 import com.hienlh.ppm.state.remotedesktop.IDENTITY_TRANSFORM
@@ -143,9 +154,13 @@ import com.hienlh.ppm.state.remotedesktop.VIEW_STYLE_ORDER
 import com.hienlh.ppm.state.remotedesktop.WHEEL_DELTA
 import com.hienlh.ppm.state.remotedesktop.WHEEL_PIXELS_PER_NOTCH
 import com.hienlh.ppm.state.remotedesktop.ZoomPanTransform
-import com.hienlh.ppm.state.remotedesktop. advanceSingleTouch
+import com.hienlh.ppm.state.remotedesktop.MAX_RECORDING_MS
+import com.hienlh.ppm.state.remotedesktop.PointerMoveCoalescer
+import com.hienlh.ppm.state.remotedesktop.SOFT_KEYBOARD_SENTINEL
+import com.hienlh.ppm.state.remotedesktop.advanceSingleTouch
 import com.hienlh.ppm.state.remotedesktop.advanceTwoFingerTouch
 import com.hienlh.ppm.state.remotedesktop.androidKeyCodeToW3cCode
+import com.hienlh.ppm.state.remotedesktop.androidMouseButtonToProtocol
 import com.hienlh.ppm.state.remotedesktop.beginSingleTouch
 import com.hienlh.ppm.state.remotedesktop.beginTwoFingerTouch
 import com.hienlh.ppm.state.remotedesktop.canvasCssSize
@@ -156,28 +171,38 @@ import com.hienlh.ppm.state.remotedesktop.codecLabel
 import com.hienlh.ppm.state.remotedesktop.computeRemoteDesktopStats
 import com.hienlh.ppm.state.remotedesktop.customBitrateKbps
 import com.hienlh.ppm.state.remotedesktop.fitLocalMode
+import com.hienlh.ppm.state.remotedesktop.formatRemoteDesktopElapsed
 import com.hienlh.ppm.state.remotedesktop.fractionFromPoint
+import com.hienlh.ppm.state.remotedesktop.fractionFromZoomedPoint
 import com.hienlh.ppm.state.remotedesktop.isCopyChord
+import com.hienlh.ppm.state.remotedesktop.isCopyKeyCombo
+import com.hienlh.ppm.state.remotedesktop.isPasteKeyCombo
 import com.hienlh.ppm.state.remotedesktop.letterboxedContentRect
 import com.hienlh.ppm.state.remotedesktop.nextQualityChoice
 import com.hienlh.ppm.state.remotedesktop.parsePresetId
 import com.hienlh.ppm.state.remotedesktop.pointerJsonMessage
 import com.hienlh.ppm.state.remotedesktop.resolutionChoices
 import com.hienlh.ppm.state.remotedesktop.resolutionLabel
+import com.hienlh.ppm.state.remotedesktop.resolveSingleTouchCancel
 import com.hienlh.ppm.state.remotedesktop.resolveSingleTouchEnd
+import com.hienlh.ppm.state.remotedesktop.resolveSoftKeyboardCommit
 import com.hienlh.ppm.state.remotedesktop.resolveTwoFingerEnd
 import com.hienlh.ppm.state.remotedesktop.scalePercentToPos
 import com.hienlh.ppm.state.remotedesktop.scalePosToPercent
 import com.hienlh.ppm.state.remotedesktop.shortQualityLabel
 import com.hienlh.ppm.state.remotedesktop.snapScalePos
 import com.hienlh.ppm.state.remotedesktop.stepCustomScale
+import com.hienlh.ppm.state.remotedesktop.wheelDeltaForTouchDrag
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.io.File
 import java.io.FileOutputStream
@@ -219,15 +244,18 @@ fun RemoteDesktopAppBody(
     initialWarningDismissed: Boolean = false,
     initialCaps: RemoteDesktopCapabilities? = null,
 ) {
-    var warningAccepted by remember { mutableStateOf(initialWarningDismissed) }
+    var warningAccepted by remember { mutableStateOf(initialWarningDismissed || model.remoteDesktopWarningDismissed) }
     var dontShowAgain by remember { mutableStateOf(false) }
 
-    if (!warningAccepted) {
+    if (!warningAccepted && !model.remoteDesktopWarningDismissed) {
         RemoteDesktopWarningGate(
             dontShowAgain = dontShowAgain,
             onToggleDontShowAgain = { dontShowAgain = it },
             onCancel = onClose,
             onContinue = {
+                if (dontShowAgain) {
+                    model.setRemoteDesktopWarningDismissedPref(true)
+                }
                 warningAccepted = true
             },
         )
@@ -661,36 +689,44 @@ fun RemoteDesktopViewer(
     var generation by remember { mutableIntStateOf(0) }
     var frameSize by remember { mutableStateOf(RdSize(1920, 1080)) }
 
-    // Quality, scale & feature toggles
-    var qualityChoice by remember { mutableStateOf(DEFAULT_PRESET_ID) }
+    // Quality, scale & feature toggles seeded from persisted AppModel preferences
+    var qualityChoice by remember { mutableStateOf(model.remoteDesktopQuality) }
     var serverPreset by remember { mutableStateOf(DEFAULT_PRESET_ID) }
     var qualityHeld by remember { mutableDoubleStateOf(1.0) }
-    var customPercent by remember { mutableIntStateOf(CUSTOM_QUALITY_DEFAULT_PERCENT) }
-    var customFps by remember { mutableIntStateOf(CUSTOM_FPS_DEFAULT) }
-    var customMore by remember { mutableStateOf(false) }
+    var customPercent by remember { mutableIntStateOf(model.remoteDesktopCustomQualityPercent) }
+    var customFps by remember { mutableIntStateOf(model.remoteDesktopCustomFps) }
+    var customMore by remember { mutableStateOf(model.remoteDesktopCustomQualityMore) }
     var customQualityDialogOpen by remember { mutableStateOf(false) }
 
-    var viewStyle by remember { mutableStateOf(DEFAULT_VIEW_STYLE) }
-    var customScale by remember { mutableDoubleStateOf(DEFAULT_CUSTOM_SCALE) }
-    var showCursor by remember { mutableStateOf(true) }
-    var codec by remember { mutableStateOf<String?>(null) }
+    var viewStyle by remember { mutableStateOf(model.remoteDesktopViewStyle) }
+    var customScale by remember { mutableDoubleStateOf(model.remoteDesktopCustomScale) }
+    var showCursor by remember { mutableStateOf(model.remoteDesktopShowCursor) }
+    var codec by remember { mutableStateOf<String?>(model.remoteDesktopCodec) }
     var audioOn by remember { mutableStateOf(false) }
     var privacyOn by remember { mutableStateOf(false) }
     var privacyError by remember { mutableStateOf<String?>(null) }
     var hostModeId by remember { mutableStateOf<String?>(null) }
     var hostOriginalModeId by remember { mutableStateOf<String?>(null) }
     var resolutionError by remember { mutableStateOf<String?>(null) }
-    var clipboardSync by remember { mutableStateOf(true) }
-    var statsVisible by remember { mutableStateOf(false) }
+    var clipboardSync by remember { mutableStateOf(model.remoteDesktopClipboardSync) }
+    var statsVisible by remember { mutableStateOf(model.remoteDesktopStatsVisible) }
     var pendingHostClipboard by remember { mutableStateOf<String?>(null) }
 
-    // Mobile controls
+    // Mobile & focus controls
     var inputMode by remember { mutableStateOf("mouse") }
     var transform by remember { mutableStateOf(IDENTITY_TRANSFORM) }
     var virtualCursor by remember { mutableStateOf(RdFraction(0.5, 0.5)) }
     var keyBarOpen by remember { mutableStateOf(false) }
     var mobileSettingsOpen by remember { mutableStateOf(false) }
-    var softInputText by remember { mutableStateOf("") }
+    var softInputValue by remember {
+        mutableStateOf(
+            TextFieldValue(
+                text = SOFT_KEYBOARD_SENTINEL,
+                selection = TextRange(1),
+            ),
+        )
+    }
+    val stageFocusRequester = remember { FocusRequester() }
     val keyboardFocusRequester = remember { FocusRequester() }
 
     // Recording & Screenshot
@@ -713,7 +749,45 @@ fun RemoteDesktopViewer(
     var clipboardReadJob by remember { mutableStateOf<Job?>(null) }
 
     fun sendJson(obj: JsonElement) {
+        model.remoteDesktopSender?.invoke(obj)
         activeSocket?.send(obj.toString())
+    }
+
+    val moveCoalescer = remember(model) {
+        PointerMoveCoalescer(
+            send = ::sendJson,
+            scheduleFrame = { cb ->
+                val choreographer = runCatching { Choreographer.getInstance() }.getOrNull()
+                if (choreographer != null) {
+                    choreographer.postFrameCallback { cb() }
+                } else {
+                    cb()
+                }
+            },
+        )
+    }
+
+    fun stopActiveRecording(rec: H264Mp4Recorder) {
+        if (activeRecorder === rec) {
+            activeRecorder = null
+        }
+        stopAndSaveRecordingAsync(model.scope, context, rec)
+    }
+
+    DisposableEffect(decoder, audioPlayer) {
+        onDispose {
+            moveCoalescer.cancel()
+            val rec = activeRecorder
+            if (rec != null) {
+                stopActiveRecording(rec)
+            }
+            runCatching { decoder.release() }
+            runCatching { audioPlayer.release() }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        runCatching { stageFocusRequester.requestFocus() }
     }
 
     fun buildQualityMessage(choice: String): JsonElement =
@@ -733,6 +807,7 @@ fun RemoteDesktopViewer(
 
     fun selectQuality(choice: String) {
         qualityChoice = choice
+        model.setRemoteDesktopQualityPref(choice)
         sendJson(buildQualityMessage(choice))
     }
 
@@ -740,6 +815,8 @@ fun RemoteDesktopViewer(
         customPercent = percent
         customFps = fps
         qualityChoice = "custom"
+        model.setRemoteDesktopCustomQualityPref(percent, fps, customMore)
+        model.setRemoteDesktopQualityPref("custom")
         sendJson(buildQualityMessage("custom"))
     }
 
@@ -777,15 +854,20 @@ fun RemoteDesktopViewer(
         }
     }
 
-    // Recording elapsed timer
+    // Recording elapsed timer (`use-remote-desktop-recorder.ts:17,87-96`: auto-stops at 2 hours)
     LaunchedEffect(activeRecorder) {
-        if (activeRecorder == null) {
+        val cur = activeRecorder
+        if (cur == null) {
             recordingElapsedSec = 0
             return@LaunchedEffect
         }
-        while (isActive && activeRecorder != null) {
+        while (isActive && activeRecorder === cur) {
             delay(1_000L)
             recordingElapsedSec++
+            if (recordingElapsedSec * 1_000L >= MAX_RECORDING_MS) {
+                stopActiveRecording(cur)
+                break
+            }
         }
     }
 
@@ -907,7 +989,7 @@ fun RemoteDesktopViewer(
                                         audioPlayer.decodePacket(bytes, 1, bytes.size - 1)
                                     } else {
                                         val isKey = kind == RD_FRAME_KEY
-                                        decoder.decodeAccessUnit(bytes, 1, bytes.size - 1, isKey)
+                                        decoder.enqueueAccessUnit(bytes, 1, bytes.size - 1, isKey)
                                         activeRecorder?.writeAccessUnit(bytes, 1, bytes.size - 1, isKey)
                                         if (connState == "connecting") connState = "streaming"
                                     }
@@ -935,12 +1017,30 @@ fun RemoteDesktopViewer(
         }
     }
 
-    // Re-ping on resume or reconnect once if died while backgrounded; release held keys on pause
-    DisposableEffect(lifecycleOwner) {
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    var softKeyboardFocused by remember { mutableStateOf(false) }
+    val stageInput = remember(moveCoalescer) {
+        StageInputController(
+            moveCoalescer = moveCoalescer,
+            onRequestStageFocus = {
+                if (!keyBarOpen) {
+                    runCatching { stageFocusRequester.requestFocus() }
+                }
+            },
+        )
+    }
+
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(windowFocused, stageInput) {
+        stageInput.onWindowFocusChanged(windowFocused)
+    }
+
+    // Re-ping on resume or reconnect once if died while backgrounded; release held keys & buttons on pause
+    DisposableEffect(lifecycleOwner, stageInput) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> {
-                    sendJson(buildJsonObject { put("type", "releaseAll") })
+                    stageInput.releaseAll()
                 }
                 Lifecycle.Event.ON_RESUME -> {
                     val sock = activeSocket
@@ -959,9 +1059,23 @@ fun RemoteDesktopViewer(
 
     fun takeScreenshot() {
         val sv = surfaceViewRef ?: return
-        captureSurfaceViewBitmap(sv) { bmp ->
+        val appContext = context.applicationContext ?: context
+        captureSurfaceViewBitmap(sv, targetSize = frameSize) { bmp ->
             if (bmp != null) {
-                saveBitmapToDownloads(context, bmp)
+                model.scope.launch(Dispatchers.IO) {
+                    val preQFile = saveBitmapToDownloads(appContext, bmp)
+                    if (preQFile != null) {
+                        withContext(Dispatchers.Main) {
+                            runCatching {
+                                android.widget.Toast.makeText(
+                                    appContext,
+                                    "Screenshot saved to ${preQFile.absolutePath}",
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -969,15 +1083,11 @@ fun RemoteDesktopViewer(
     fun toggleRecording() {
         val cur = activeRecorder
         if (cur != null) {
-            activeRecorder = null
-            val saved = cur.stop()
-            if (saved != null) {
-                copyMp4ToDownloads(context, saved)
-            }
+            stopActiveRecording(cur)
         } else {
             val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss", Locale.US))
             val outFile = File(context.cacheDir, "ppm-remote-$stamp.mp4")
-            activeRecorder = H264Mp4Recorder(outFile, frameSize.width, frameSize.height)
+            activeRecorder = H264Mp4Recorder(outFile, frameSize.width, frameSize.height) { frameSize }
         }
     }
 
@@ -989,29 +1099,34 @@ fun RemoteDesktopViewer(
         else -> null
     }
 
-    var containerSize by remember { mutableStateOf(IntSize.Zero) }
-    var singleTrack by remember { mutableStateOf<SingleTrack?>(null) }
-    var twoTrack by remember { mutableStateOf<TwoFingerTrack?>(null) }
-
     Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .focusRequester(stageFocusRequester)
+            .onFocusChanged { stageInput.onStageFocusChanged(it.isFocused) }
+            .focusable()
             .onPreviewKeyEvent { keyEvent ->
                 val nativeCode = keyEvent.nativeKeyEvent.keyCode
                 val w3c = androidKeyCodeToW3cCode(nativeCode) ?: return@onPreviewKeyEvent false
                 val isDown = keyEvent.type == KeyEventType.KeyDown
-                if (isDown && (keyEvent.isCtrlPressed || keyEvent.isMetaPressed)) {
-                    if (w3c == "KeyV" && clipboardSync) {
+                val ctrl = keyEvent.isCtrlPressed
+                val meta = keyEvent.isMetaPressed
+                val alt = keyEvent.isAltPressed
+                if (clipboardSync && isPasteKeyCombo(w3c, ctrl = ctrl, meta = meta, alt = alt)) {
+                    // Drop both KeyDown and KeyUp of Ctrl+V / Cmd+V when clipboard sync is active
+                    // so KeyV up is never forwarded without a matching KeyV down (`use-remote-input-capture.ts:116-126`).
+                    if (isDown) {
                         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                         val clipText = cm?.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
                         if (clipText.isNotEmpty()) {
                             sendClipboardText(clipText, paste = true, shift = keyEvent.isShiftPressed)
-                            return@onPreviewKeyEvent true
                         }
-                    } else if ((w3c == "KeyC" || w3c == "KeyX") && clipboardSync) {
-                        requestHostClipboard()
                     }
+                    return@onPreviewKeyEvent true
+                }
+                if (isDown && clipboardSync && isCopyKeyCombo(w3c, ctrl = ctrl, meta = meta, alt = alt)) {
+                    requestHostClipboard()
                 }
                 sendJson(
                     buildJsonObject {
@@ -1024,123 +1139,62 @@ fun RemoteDesktopViewer(
             }
             .testTag(if (mobile) "remote-desktop-mobile-view" else "remote-desktop-window"),
     ) {
+        val densityScale = density.density.toDouble().coerceAtLeast(0.1)
+        val stageVideoRect = computeStageVideoRect(
+            containerWidthPx = containerSize.width.toDouble(),
+            containerHeightPx = containerSize.height.toDouble(),
+            frameSize = frameSize,
+            viewStyle = viewStyle,
+            customScale = customScale,
+            mobile = mobile,
+            densityScale = densityScale,
+        )
+
         // Video Stage
         Box(
             Modifier
                 .fillMaxSize()
                 .onSizeChanged { containerSize = it }
                 .pointerInteropFilter { motion ->
-                    val outerRect = RdRect(
-                        left = 0.0,
-                        top = 0.0,
-                        width = containerSize.width.toDouble(),
-                        height = containerSize.height.toDouble(),
+                    stageInput.onMotionEvent(
+                        motion = motion,
+                        containerSize = containerSize,
+                        frameSize = frameSize,
+                        viewStyle = viewStyle,
+                        customScale = customScale,
+                        mobile = mobile,
+                        inputMode = inputMode,
+                        densityScale = density.density.toDouble().coerceAtLeast(0.1),
+                        transform = transform,
+                        onTransformChange = { transform = it },
+                        virtualCursor = virtualCursor,
+                        onVirtualCursorChange = { virtualCursor = it },
                     )
-                    val videoRect = letterboxedContentRect(outerRect, frameSize.width, frameSize.height)
-                    val pointerCount = motion.pointerCount
-
-                    when (motion.actionMasked) {
-                        MotionEvent.ACTION_DOWN -> {
-                            twoTrack = null
-                            singleTrack = beginSingleTouch(motion.x.toDouble(), motion.y.toDouble(), videoRect)
-                        }
-                        MotionEvent.ACTION_POINTER_DOWN -> {
-                            if (pointerCount == 2) {
-                                singleTrack = null
-                                twoTrack = beginTwoFingerTouch(
-                                    RdPoint(motion.getX(0).toDouble(), motion.getY(0).toDouble()),
-                                    RdPoint(motion.getX(1).toDouble(), motion.getY(1).toDouble()),
-                                    transform.scale,
-                                )
-                            } else {
-                                singleTrack = null
-                                twoTrack = null
-                            }
-                        }
-                        MotionEvent.ACTION_MOVE -> {
-                            val st = singleTrack
-                            val tt = twoTrack
-                            if (st != null && pointerCount == 1) {
-                                val effectiveMode = if (mobile) inputMode else "touch"
-                                val r = advanceSingleTouch(
-                                    track = st,
-                                    x = motion.x.toDouble(),
-                                    y = motion.y.toDouble(),
-                                    mode = effectiveMode,
-                                    transform = transform,
-                                    cursor = virtualCursor,
-                                )
-                                r.message?.let(::sendJson)
-                                r.cursor?.let { cur ->
-                                    virtualCursor = cur
-                                    if (r.sendCursorMove) {
-                                        sendJson(pointerJsonMessage(cur.xFrac, cur.yFrac, null, null))
-                                    }
-                                }
-                            } else if (tt != null && pointerCount == 2) {
-                                val r = advanceTwoFingerTouch(
-                                    track = tt,
-                                    pa = RdPoint(motion.getX(0).toDouble(), motion.getY(0).toDouble()),
-                                    pb = RdPoint(motion.getX(1).toDouble(), motion.getY(1).toDouble()),
-                                    currentTransform = transform,
-                                )
-                                r.transform?.let { nextTransform ->
-                                    transform = nextTransform
-                                }
-                                r.wheelDeltaPx?.let { wPx ->
-                                    if (wPx != 0.0) {
-                                        val dy = -(wPx / WHEEL_PIXELS_PER_NOTCH) * WHEEL_DELTA
-                                        sendJson(
-                                            buildJsonObject {
-                                                put("type", "wheel")
-                                                put("dy", dy)
-                                            },
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
-                            val st = singleTrack
-                            val tt = twoTrack
-                            if (st != null && pointerCount == 1) {
-                                val effectiveMode = if (mobile) inputMode else "touch"
-                                val msgs = resolveSingleTouchEnd(
-                                    track = st,
-                                    x = motion.x.toDouble(),
-                                    y = motion.y.toDouble(),
-                                    mode = effectiveMode,
-                                    transform = transform,
-                                    cursor = virtualCursor,
-                                )
-                                msgs.forEach(::sendJson)
-                                singleTrack = null
-                            } else if (tt != null) {
-                                val msgs = resolveTwoFingerEnd(tt, videoRect, transform)
-                                msgs.forEach(::sendJson)
-                                twoTrack = null
-                            }
-                        }
-                        MotionEvent.ACTION_CANCEL -> {
-                            singleTrack = null
-                            twoTrack = null
-                        }
-                    }
-                    true
                 }
                 .testTag("remote-desktop-stage"),
             contentAlignment = Alignment.Center,
         ) {
             val cssSize = if (!mobile) canvasCssSize(viewStyle, customScale, frameSize) else null
+            val surfaceSizeModifier = when {
+                containerSize.width > 0 && containerSize.height > 0 -> {
+                    with(density) {
+                        Modifier.size(
+                            stageVideoRect.width.toFloat().toDp(),
+                            stageVideoRect.height.toFloat().toDp(),
+                        )
+                    }
+                }
+                cssSize != null -> {
+                    with(density) { Modifier.size(cssSize.width.toDp(), cssSize.height.toDp()) }
+                }
+                else -> {
+                    val aspect = frameSize.width.coerceAtLeast(1).toFloat() / frameSize.height.coerceAtLeast(1).toFloat()
+                    Modifier.aspectRatio(aspect)
+                }
+            }
             Box(
                 Modifier
-                    .let { mod ->
-                        if (cssSize != null) {
-                            with(density) { mod.size(cssSize.width.toDp(), cssSize.height.toDp()) }
-                        } else {
-                            mod.fillMaxSize()
-                        }
-                    }
+                    .fillMaxSize()
                     .graphicsLayer {
                         scaleX = transform.scale.toFloat()
                         scaleY = transform.scale.toFloat()
@@ -1152,6 +1206,9 @@ fun RemoteDesktopViewer(
                 AndroidView(
                     factory = { ctx ->
                         SurfaceView(ctx).apply {
+                            if (frameSize.width > 0 && frameSize.height > 0) {
+                                runCatching { holder.setFixedSize(frameSize.width, frameSize.height) }
+                            }
                             holder.addCallback(
                                 object : SurfaceHolder.Callback {
                                     override fun surfaceCreated(holder: SurfaceHolder) {
@@ -1170,20 +1227,18 @@ fun RemoteDesktopViewer(
                             surfaceViewRef = this
                         }
                     },
-                    modifier = Modifier.fillMaxSize().testTag("remote-desktop-surface"),
+                    update = { sv ->
+                        if (frameSize.width > 0 && frameSize.height > 0) {
+                            runCatching { sv.holder.setFixedSize(frameSize.width, frameSize.height) }
+                        }
+                    },
+                    modifier = surfaceSizeModifier.testTag("remote-desktop-surface"),
                 )
 
                 // Virtual cursor marker in mobile mouse mode
                 if (mobile && inputMode == "mouse") {
-                    val outerRect = RdRect(
-                        left = 0.0,
-                        top = 0.0,
-                        width = containerSize.width.toDouble().coerceAtLeast(1.0),
-                        height = containerSize.height.toDouble().coerceAtLeast(1.0),
-                    )
-                    val videoRect = letterboxedContentRect(outerRect, frameSize.width, frameSize.height)
-                    val cursorX = (videoRect.left + virtualCursor.xFrac * videoRect.width).roundToInt()
-                    val cursorY = (videoRect.top + virtualCursor.yFrac * videoRect.height).roundToInt()
+                    val cursorX = (stageVideoRect.left + virtualCursor.xFrac * stageVideoRect.width).roundToInt()
+                    val cursorY = (stageVideoRect.top + virtualCursor.yFrac * stageVideoRect.height).roundToInt()
                     Box(
                         Modifier
                             .align(Alignment.TopStart)
@@ -1199,30 +1254,44 @@ fun RemoteDesktopViewer(
 
             // Hidden soft-keyboard input field for IME text entry (Telex / CJK / predictive)
             BasicTextField(
-                value = softInputText,
+                value = softInputValue,
                 onValueChange = { next ->
-                    if (next.length > softInputText.length) {
-                        val added = next.substring(softInputText.length)
-                        if (added == "\n") {
-                            sendJson(buildJsonObject { put("type", "key"); put("code", "Enter"); put("down", true) })
-                            sendJson(buildJsonObject { put("type", "key"); put("code", "Enter"); put("down", false) })
-                        } else {
-                            sendJson(buildJsonObject { put("type", "text"); put("text", added.take(1024)) })
-                        }
-                    } else if (next.length < softInputText.length) {
-                        sendJson(buildJsonObject { put("type", "key"); put("code", "Backspace"); put("down", true) })
-                        sendJson(buildJsonObject { put("type", "key"); put("code", "Backspace"); put("down", false) })
+                    val msgs = resolveSoftKeyboardCommit(
+                        text = next.text,
+                        selectionStart = next.selection.start,
+                        hasActiveComposition = next.composition != null,
+                    )
+                    if (msgs == null) {
+                        // IME composition still in flight (e.g. Telex / CJK); preserve composing buffer
+                        softInputValue = next
+                    } else {
+                        for (m in msgs) sendJson(m)
+                        softInputValue = TextFieldValue(
+                            text = SOFT_KEYBOARD_SENTINEL,
+                            selection = TextRange(1),
+                        )
                     }
-                    softInputText = ""
                 },
                 modifier = Modifier
                     .size(1.dp)
                     .focusRequester(keyboardFocusRequester)
+                    .onFocusChanged { state ->
+                        if (softKeyboardFocused && !state.isFocused) {
+                            stageInput.releaseAll()
+                        }
+                        softKeyboardFocused = state.isFocused
+                    }
                     .testTag("remote-desktop-virtual-keyboard-input"),
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.None,
                     autoCorrectEnabled = false,
                     imeAction = ImeAction.Send,
+                ),
+                keyboardActions = KeyboardActions(
+                    onSend = {
+                        sendJson(buildJsonObject { put("type", "key"); put("code", "Enter"); put("down", true) })
+                        sendJson(buildJsonObject { put("type", "key"); put("code", "Enter"); put("down", false) })
+                    },
                 ),
             )
         }
@@ -1292,6 +1361,7 @@ fun RemoteDesktopViewer(
                 codec = codec,
                 onSetCodec = { enc ->
                     codec = enc
+                    model.setRemoteDesktopCodecPref(enc)
                     if (enc != null) {
                         sendJson(buildJsonObject { put("type", "codec"); put("encoder", enc) })
                     }
@@ -1305,11 +1375,19 @@ fun RemoteDesktopViewer(
                 },
                 viewStyle = viewStyle,
                 customScale = customScale,
-                onSetViewStyle = { viewStyle = it },
-                onSetCustomScale = { customScale = clampCustomScale(it) },
+                onSetViewStyle = { nextStyle ->
+                    viewStyle = nextStyle
+                    model.setRemoteDesktopViewStylePref(nextStyle)
+                },
+                onSetCustomScale = { nextScale ->
+                    val clamped = clampCustomScale(nextScale)
+                    customScale = clamped
+                    model.setRemoteDesktopCustomScalePref(clamped)
+                },
                 showCursor = showCursor,
                 onSetShowCursor = { show ->
                     showCursor = show
+                    model.setRemoteDesktopShowCursorPref(show)
                     sendJson(buildJsonObject { put("type", "cursor"); put("show", show) })
                 },
                 audioOn = audioOn,
@@ -1325,9 +1403,16 @@ fun RemoteDesktopViewer(
                     sendJson(buildJsonObject { put("type", "privacy"); put("enabled", on) })
                 },
                 clipboardEnabled = clipboardSync,
-                onSetClipboardEnabled = { clipboardSync = it },
+                onSetClipboardEnabled = { enabled ->
+                    clipboardSync = enabled
+                    model.setRemoteDesktopClipboardSyncPref(enabled)
+                },
                 statsVisible = statsVisible,
-                onToggleStats = { statsVisible = !statsVisible },
+                onToggleStats = {
+                    val next = !statsVisible
+                    statsVisible = next
+                    model.setRemoteDesktopStatsVisiblePref(next)
+                },
                 recording = activeRecorder != null,
                 recordingElapsedSec = recordingElapsedSec,
                 onToggleRecording = ::toggleRecording,
@@ -1345,14 +1430,22 @@ fun RemoteDesktopViewer(
                     RemoteDesktopMobileSettingsPanel(
                         caps = caps,
                         statsVisible = statsVisible,
-                        onToggleStats = { statsVisible = !statsVisible },
+                        onToggleStats = {
+                            val next = !statsVisible
+                            statsVisible = next
+                            model.setRemoteDesktopStatsVisiblePref(next)
+                        },
                         showCursor = showCursor,
                         onSetShowCursor = { show ->
                             showCursor = show
+                            model.setRemoteDesktopShowCursorPref(show)
                             sendJson(buildJsonObject { put("type", "cursor"); put("show", show) })
                         },
                         clipboardEnabled = clipboardSync,
-                        onSetClipboardEnabled = { clipboardSync = it },
+                        onSetClipboardEnabled = { enabled ->
+                            clipboardSync = enabled
+                            model.setRemoteDesktopClipboardSyncPref(enabled)
+                        },
                         audioOn = audioOn,
                         onSetAudioOn = { on ->
                             audioOn = on
@@ -1402,7 +1495,11 @@ fun RemoteDesktopViewer(
                     onToggleMode = { inputMode = if (inputMode == "mouse") "touch" else "mouse" },
                     onOpenKeyboard = {
                         keyBarOpen = !keyBarOpen
-                        runCatching { keyboardFocusRequester.requestFocus() }
+                        if (keyBarOpen) {
+                            runCatching { keyboardFocusRequester.requestFocus() }
+                        } else {
+                            runCatching { stageFocusRequester.requestFocus() }
+                        }
                     },
                     onResetZoom = { transform = IDENTITY_TRANSFORM },
                     settingsOpen = mobileSettingsOpen,
@@ -1459,12 +1556,342 @@ fun RemoteDesktopViewer(
             frameSize = frameSize,
             onSetMore = { nextMore ->
                 customMore = nextMore
+                model.setRemoteDesktopCustomQualityPref(customPercent, customFps, nextMore)
                 val clamped = clampCustomQualityPercent(customPercent, nextMore)
                 if (clamped != customPercent) commitCustomQuality(clamped, customFps)
             },
             onCommit = ::commitCustomQuality,
             onDismiss = { customQualityDialogOpen = false },
         )
+    }
+}
+
+internal fun stopAndSaveRecordingAsync(
+    scope: kotlinx.coroutines.CoroutineScope,
+    context: Context,
+    rec: H264Mp4Recorder,
+) {
+    val appContext = context.applicationContext ?: context
+    scope.launch(Dispatchers.IO) {
+        val saved = runCatching { rec.stop() }.getOrNull() ?: return@launch
+        val preQFile = copyMp4ToDownloads(appContext, saved)
+        if (preQFile != null) {
+            withContext(Dispatchers.Main) {
+                runCatching {
+                    android.widget.Toast.makeText(
+                        appContext,
+                        "Recording saved to ${preQFile.absolutePath}",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+    }
+}
+
+internal class StageInputController(
+    private val moveCoalescer: PointerMoveCoalescer,
+    private val onRequestStageFocus: () -> Unit = {},
+) {
+    private var singleTrack: SingleTrack? = null
+    private var twoTrack: TwoFingerTrack? = null
+    private val mouseHeldButtons = linkedSetOf<String>()
+    private var lastMouseFrac: RdFraction = RdFraction(0.5, 0.5)
+    private var lastTouchMode: String = "mouse"
+    private var lastTransform: ZoomPanTransform = IDENTITY_TRANSFORM
+    private var lastVirtualCursor: RdFraction = RdFraction(0.5, 0.5)
+    private var lastDensityScale: Double = 1.0
+    private var stageFocused: Boolean = false
+    private var windowFocused: Boolean = true
+
+    fun onStageFocusChanged(isFocused: Boolean) {
+        val wasFocused = stageFocused
+        stageFocused = isFocused
+        if (wasFocused && !isFocused) {
+            releaseAll()
+        }
+    }
+
+    fun onWindowFocusChanged(isFocused: Boolean) {
+        val wasFocused = windowFocused
+        windowFocused = isFocused
+        if (wasFocused && !isFocused) {
+            releaseAll()
+        }
+    }
+
+    fun releaseAll() {
+        val held = mouseHeldButtons.toList()
+        mouseHeldButtons.clear()
+        for (btn in held) {
+            moveCoalescer.sendImmediate(
+                pointerJsonMessage(lastMouseFrac.xFrac, lastMouseFrac.yFrac, btn, false),
+            )
+        }
+        val st = singleTrack
+        if (st != null) {
+            val msgs = resolveSingleTouchCancel(
+                track = st,
+                mode = lastTouchMode,
+                transform = lastTransform,
+                cursor = lastVirtualCursor,
+                densityScale = lastDensityScale,
+            )
+            moveCoalescer.sendImmediateAll(msgs)
+        }
+        singleTrack = null
+        twoTrack = null
+        moveCoalescer.sendImmediate(buildJsonObject { put("type", "releaseAll") })
+    }
+
+    private fun protocolButtonsFromBits(buttonBits: Int): List<String> {
+        val out = ArrayList<String>(2)
+        androidMouseButtonToProtocol(buttonBits and MotionEvent.BUTTON_PRIMARY)?.let { out += it }
+        androidMouseButtonToProtocol(buttonBits and MotionEvent.BUTTON_SECONDARY)?.let {
+            if (it !in out) out += it
+        }
+        if (out.isEmpty()) {
+            androidMouseButtonToProtocol(buttonBits)?.let { out += it }
+        }
+        return out
+    }
+
+    fun onMotionEvent(
+        motion: MotionEvent,
+        containerSize: IntSize,
+        frameSize: RdSize = RdSize(1920, 1080),
+        viewStyle: String = DEFAULT_VIEW_STYLE,
+        customScale: Double = DEFAULT_CUSTOM_SCALE,
+        mobile: Boolean = false,
+        inputMode: String = "mouse",
+        densityScale: Double = 1.0,
+        transform: ZoomPanTransform = IDENTITY_TRANSFORM,
+        onTransformChange: (ZoomPanTransform) -> Unit = {},
+        virtualCursor: RdFraction = RdFraction(0.5, 0.5),
+        onVirtualCursorChange: (RdFraction) -> Unit = {},
+    ): Boolean {
+        val curDensityScale = densityScale.coerceAtLeast(0.1)
+        lastTouchMode = if (mobile) inputMode else "touch"
+        lastTransform = transform
+        lastVirtualCursor = virtualCursor
+        lastDensityScale = curDensityScale
+        val videoRect = computeStageVideoRect(
+            containerWidthPx = containerSize.width.toDouble(),
+            containerHeightPx = containerSize.height.toDouble(),
+            frameSize = frameSize,
+            viewStyle = viewStyle,
+            customScale = customScale,
+            mobile = mobile,
+            densityScale = curDensityScale,
+        )
+        val pointerCount = motion.pointerCount
+        val isMouse = motion.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE ||
+            motion.buttonState != 0 ||
+            mouseHeldButtons.isNotEmpty() ||
+            motion.actionMasked == MotionEvent.ACTION_HOVER_MOVE ||
+            motion.actionMasked == MotionEvent.ACTION_SCROLL ||
+            motion.actionMasked == MotionEvent.ACTION_BUTTON_PRESS ||
+            motion.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE
+
+        if (isMouse) {
+            when (motion.actionMasked) {
+                MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_MOVE -> {
+                    val frac = fractionFromZoomedPoint(
+                        motion.x.toDouble(),
+                        motion.y.toDouble(),
+                        videoRect,
+                        transform,
+                    )
+                    lastMouseFrac = frac
+                    moveCoalescer.enqueueMove(frac.xFrac, frac.yFrac)
+                }
+                MotionEvent.ACTION_SCROLL -> {
+                    val vScroll = motion.getAxisValue(MotionEvent.AXIS_VSCROLL).toDouble()
+                    if (vScroll != 0.0) {
+                        val dy = vScroll * WHEEL_DELTA
+                        moveCoalescer.sendImmediate(
+                            buildJsonObject {
+                                put("type", "wheel")
+                                put("dy", dy)
+                            },
+                        )
+                    }
+                }
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_BUTTON_PRESS -> {
+                    onRequestStageFocus()
+                    val frac = fractionFromZoomedPoint(
+                        motion.x.toDouble(),
+                        motion.y.toDouble(),
+                        videoRect,
+                        transform,
+                    )
+                    lastMouseFrac = frac
+                    val candidates = if (motion.actionMasked == MotionEvent.ACTION_BUTTON_PRESS && motion.actionButton != 0) {
+                        listOfNotNull(androidMouseButtonToProtocol(motion.actionButton))
+                    } else {
+                        val bits = if (motion.buttonState != 0) motion.buttonState else MotionEvent.BUTTON_PRIMARY
+                        protocolButtonsFromBits(bits)
+                    }
+                    for (btn in candidates) {
+                        if (mouseHeldButtons.add(btn)) {
+                            moveCoalescer.sendImmediate(pointerJsonMessage(frac.xFrac, frac.yFrac, btn, true))
+                        }
+                    }
+                }
+                MotionEvent.ACTION_BUTTON_RELEASE -> {
+                    val frac = fractionFromZoomedPoint(
+                        motion.x.toDouble(),
+                        motion.y.toDouble(),
+                        videoRect,
+                        transform,
+                    )
+                    lastMouseFrac = frac
+                    val toRelease = if (motion.actionButton != 0) {
+                        listOfNotNull(androidMouseButtonToProtocol(motion.actionButton))
+                    } else {
+                        val stillHeld = protocolButtonsFromBits(motion.buttonState).toSet()
+                        val diff = mouseHeldButtons.filter { it !in stillHeld }
+                        diff.ifEmpty { protocolButtonsFromBits(motion.buttonState) }
+                    }
+                    for (btn in toRelease) {
+                        if (mouseHeldButtons.remove(btn) || toRelease.size == 1) {
+                            moveCoalescer.sendImmediate(pointerJsonMessage(frac.xFrac, frac.yFrac, btn, false))
+                        }
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val frac = fractionFromZoomedPoint(
+                        motion.x.toDouble(),
+                        motion.y.toDouble(),
+                        videoRect,
+                        transform,
+                    )
+                    lastMouseFrac = frac
+                    val toRelease = if (mouseHeldButtons.isNotEmpty()) {
+                        mouseHeldButtons.toList()
+                    } else {
+                        protocolButtonsFromBits(motion.buttonState)
+                    }
+                    mouseHeldButtons.clear()
+                    for (btn in toRelease) {
+                        moveCoalescer.sendImmediate(pointerJsonMessage(frac.xFrac, frac.yFrac, btn, false))
+                    }
+                }
+            }
+            return true
+        }
+
+        when (motion.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                onRequestStageFocus()
+                twoTrack = null
+                singleTrack = beginSingleTouch(motion.x.toDouble(), motion.y.toDouble(), videoRect)
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (pointerCount == 2) {
+                    singleTrack = null
+                    twoTrack = beginTwoFingerTouch(
+                        RdPoint(motion.getX(0).toDouble(), motion.getY(0).toDouble()),
+                        RdPoint(motion.getX(1).toDouble(), motion.getY(1).toDouble()),
+                        transform.scale,
+                    )
+                } else {
+                    singleTrack = null
+                    twoTrack = null
+                }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val st = singleTrack
+                val tt = twoTrack
+                if (st != null && pointerCount == 1) {
+                    val effectiveMode = if (mobile) inputMode else "touch"
+                    val r = advanceSingleTouch(
+                        track = st,
+                        x = motion.x.toDouble(),
+                        y = motion.y.toDouble(),
+                        mode = effectiveMode,
+                        transform = transform,
+                        cursor = virtualCursor,
+                        densityScale = curDensityScale,
+                    )
+                    r.message?.let { msg ->
+                        val obj = msg.jsonObject
+                        if (obj.containsKey("button")) {
+                            moveCoalescer.sendImmediate(msg)
+                        } else {
+                            val xf = obj["xFrac"].double ?: 0.0
+                            val yf = obj["yFrac"].double ?: 0.0
+                            moveCoalescer.enqueueMove(xf, yf)
+                        }
+                    }
+                    r.cursor?.let { cur ->
+                        onVirtualCursorChange(cur)
+                        if (r.sendCursorMove) {
+                            moveCoalescer.enqueueMove(cur.xFrac, cur.yFrac)
+                        }
+                    }
+                } else if (tt != null && pointerCount == 2) {
+                    val r = advanceTwoFingerTouch(
+                        track = tt,
+                        pa = RdPoint(motion.getX(0).toDouble(), motion.getY(0).toDouble()),
+                        pb = RdPoint(motion.getX(1).toDouble(), motion.getY(1).toDouble()),
+                        currentTransform = transform,
+                        densityScale = curDensityScale,
+                    )
+                    r.transform?.let(onTransformChange)
+                    r.wheelDeltaPx?.let { wPx ->
+                        if (wPx != 0.0) {
+                            val dy = wheelDeltaForTouchDrag(wPx, curDensityScale)
+                            moveCoalescer.sendImmediate(
+                                buildJsonObject {
+                                    put("type", "wheel")
+                                    put("dy", dy)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
+                val st = singleTrack
+                val tt = twoTrack
+                if (st != null && pointerCount == 1) {
+                    val effectiveMode = if (mobile) inputMode else "touch"
+                    val msgs = resolveSingleTouchEnd(
+                        track = st,
+                        x = motion.x.toDouble(),
+                        y = motion.y.toDouble(),
+                        mode = effectiveMode,
+                        transform = transform,
+                        cursor = virtualCursor,
+                        densityScale = curDensityScale,
+                    )
+                    moveCoalescer.sendImmediateAll(msgs)
+                    singleTrack = null
+                } else if (tt != null) {
+                    val msgs = resolveTwoFingerEnd(tt, videoRect, transform)
+                    moveCoalescer.sendImmediateAll(msgs)
+                    twoTrack = null
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                val st = singleTrack
+                if (st != null) {
+                    val effectiveMode = if (mobile) inputMode else "touch"
+                    val msgs = resolveSingleTouchCancel(
+                        track = st,
+                        mode = effectiveMode,
+                        transform = transform,
+                        cursor = virtualCursor,
+                        densityScale = curDensityScale,
+                    )
+                    moveCoalescer.sendImmediateAll(msgs)
+                }
+                singleTrack = null
+                twoTrack = null
+            }
+        }
+        return true
     }
 }
 
@@ -1525,6 +1952,40 @@ internal fun RemoteDesktopStatsOverlay(
 
 // ── 5. Tablet Floating Toolbar & Menus ────────────────────────────────
 
+@Suppress("DEPRECATION")
+internal fun deviceFullScreenSizeDp(context: Context): RdSize {
+    val wm = context.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+    val density = context.resources.displayMetrics.density.coerceAtLeast(0.1f)
+    if (wm != null) {
+        val realMetrics = android.util.DisplayMetrics()
+        val gotReal = runCatching {
+            wm.defaultDisplay?.getRealMetrics(realMetrics)
+            realMetrics.widthPixels > 0 && realMetrics.heightPixels > 0
+        }.getOrDefault(false)
+        if (gotReal) {
+            val d = realMetrics.density.takeIf { it > 0f } ?: density
+            return RdSize(
+                width = (realMetrics.widthPixels / d).roundToInt().coerceAtLeast(1),
+                height = (realMetrics.heightPixels / d).roundToInt().coerceAtLeast(1),
+            )
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val bounds = runCatching { wm.maximumWindowMetrics.bounds }.getOrNull()
+            if (bounds != null && bounds.width() > 0 && bounds.height() > 0) {
+                return RdSize(
+                    width = (bounds.width() / density).roundToInt().coerceAtLeast(1),
+                    height = (bounds.height() / density).roundToInt().coerceAtLeast(1),
+                )
+            }
+        }
+    }
+    val dm = context.resources.displayMetrics
+    return RdSize(
+        width = (dm.widthPixels / density).roundToInt().coerceAtLeast(1),
+        height = (dm.heightPixels / density).roundToInt().coerceAtLeast(1),
+    )
+}
+
 @Composable
 internal fun RemoteDesktopTabletToolbar(
     caps: RemoteDesktopCapabilities,
@@ -1563,12 +2024,15 @@ internal fun RemoteDesktopTabletToolbar(
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
     var displayMenuOpen by remember { mutableStateOf(false) }
     var settingsMenuOpen by remember { mutableStateOf(false) }
 
+    val localScreen = remember(configuration) { deviceFullScreenSizeDp(context) }
     val resolutions = remember(caps.resolutions.modes) { resolutionChoices(caps.resolutions.modes) }
-    val fitLocal = remember(caps.resolutions.modes, hostModeId) {
-        fitLocalMode(caps.resolutions.modes, RdSize(1920, 1080), hostModeId)
+    val fitLocal = remember(caps.resolutions.modes, localScreen, hostModeId) {
+        fitLocalMode(caps.resolutions.modes, localScreen, hostModeId)
     }
 
     Row(
@@ -1763,7 +2227,7 @@ internal fun RemoteDesktopTabletToolbar(
                             }
                             if (fitLocal != null) {
                                 MenuRadioRow(
-                                    label = "Fit local (${fitLocal.width} × ${fitLocal.height})",
+                                    label = "Fit local ${fitLocal.width}×${fitLocal.height}",
                                     selected = false,
                                     onClick = { onSetHostMode(fitLocal.id) },
                                     tag = "remote-desktop-resolution-fit-local",
@@ -1827,7 +2291,7 @@ internal fun RemoteDesktopTabletToolbar(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             PpmIcon(ProductIcon.Image, 13.dp, tokens.text.color)
-                            BasicText("Take screenshot", style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text.color))
+                            BasicText("Save screenshot", style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text.color))
                         }
                         Row(
                             Modifier
@@ -1848,7 +2312,11 @@ internal fun RemoteDesktopTabletToolbar(
                                 tint = if (recording) tokens.error.color else tokens.text.color,
                             )
                             BasicText(
-                                if (recording) "Stop recording (${recordingElapsedSec}s)" else "Record session",
+                                if (recording) {
+                                    "Stop recording · ${formatRemoteDesktopElapsed(recordingElapsedSec)} (no audio)"
+                                } else {
+                                    "Start recording (no audio)"
+                                },
                                 style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text.color),
                             )
                         }
@@ -2455,7 +2923,7 @@ fun RemoteDesktopMobileKeyBarView(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun RemoteDesktopMobileSettingsPanel(
+internal fun RemoteDesktopMobileSettingsPanel(
     caps: RemoteDesktopCapabilities,
     statsVisible: Boolean,
     onToggleStats: () -> Unit,
@@ -2477,7 +2945,13 @@ private fun RemoteDesktopMobileSettingsPanel(
     onScreenshot: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val localScreen = remember(configuration) { deviceFullScreenSizeDp(context) }
     val resolutions = remember(caps.resolutions.modes) { resolutionChoices(caps.resolutions.modes) }
+    val fitLocal = remember(caps.resolutions.modes, localScreen, hostModeId) {
+        fitLocalMode(caps.resolutions.modes, localScreen, hostModeId)
+    }
     val shape = RoundedCornerShape(12.dp)
 
     Column(
@@ -2545,10 +3019,26 @@ private fun RemoteDesktopMobileSettingsPanel(
                                 .clip(chipShape)
                                 .background(Color.White.copy(alpha = 0.10f))
                                 .ppmClickable(shape = chipShape) { onSetHostMode(hostOriginalModeId) }
-                                .padding(horizontal = 10.dp),
+                                .padding(horizontal = 10.dp)
+                                .testTag("remote-desktop-mobile-resolution-original"),
                             contentAlignment = Alignment.Center,
                         ) {
                             BasicText("Original", style = ppmText(11f, lineHeight = 15f).copy(color = Color.White))
+                        }
+                    }
+                    if (fitLocal != null) {
+                        val chipShape = RoundedCornerShape(6.dp)
+                        Box(
+                            Modifier
+                                .heightIn(min = 36.dp)
+                                .clip(chipShape)
+                                .background(Color.White.copy(alpha = 0.10f))
+                                .ppmClickable(shape = chipShape) { onSetHostMode(fitLocal.id) }
+                                .padding(horizontal = 10.dp)
+                                .testTag("remote-desktop-mobile-resolution-fit-local"),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            BasicText("Fit local", style = ppmText(11f, lineHeight = 15f).copy(color = Color.White))
                         }
                     }
                     val activeMode = hostModeId ?: resolutions.firstOrNull { it.current }?.id
@@ -2572,6 +3062,14 @@ private fun RemoteDesktopMobileSettingsPanel(
                         }
                     }
                 }
+                if (resolutionError != null) {
+                    Spacer(Modifier.height(6.dp))
+                    BasicText(
+                        resolutionError,
+                        Modifier.testTag("remote-desktop-mobile-resolution-error"),
+                        style = ppmText(10f, lineHeight = 14f).copy(color = Color(0xFFF87171)),
+                    )
+                }
             }
         }
 
@@ -2590,7 +3088,7 @@ private fun RemoteDesktopMobileSettingsPanel(
                     .testTag("remote-desktop-mobile-screenshot"),
                 contentAlignment = Alignment.Center,
             ) {
-                BasicText("Screenshot", style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = Color.White))
+                BasicText("Save screenshot", style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = Color.White))
             }
             Box(
                 Modifier
@@ -2603,7 +3101,7 @@ private fun RemoteDesktopMobileSettingsPanel(
                 contentAlignment = Alignment.Center,
             ) {
                 BasicText(
-                    if (recording) "Stop Record" else "Record",
+                    if (recording) "Stop recording (no audio)" else "Start recording (no audio)",
                     style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = Color.White),
                 )
             }
@@ -2661,42 +3159,72 @@ private fun MobileSettingSwitchRow(
 
 // ── 8. File Export Helpers ────────────────────────────────────────────
 
-private fun saveBitmapToDownloads(context: Context, bitmap: Bitmap) {
-    runCatching {
+private fun resolvePreQDownloadsDir(context: Context): File {
+    val externalDownloads = runCatching { context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) }.getOrNull()
+    if (externalDownloads != null && (externalDownloads.exists() || externalDownloads.mkdirs()) && externalDownloads.canWrite()) {
+        return externalDownloads
+    }
+    return context.cacheDir
+}
+
+internal fun saveBitmapToDownloads(
+    context: Context,
+    bitmap: Bitmap,
+    sdkInt: Int = Build.VERSION.SDK_INT,
+): File? {
+    return runCatching {
         val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss", Locale.US))
         val name = "ppm-remote-$stamp.png"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (sdkInt >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, name)
                 put(MediaStore.Downloads.MIME_TYPE, "image/png")
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
             }
-            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return
-            context.contentResolver.openOutputStream(uri)?.use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-            }
-        } else {
-            val file = File(context.cacheDir, name)
-            FileOutputStream(file).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                }
+                return null
             }
         }
-    }
+        val dir = resolvePreQDownloadsDir(context)
+        val file = File(dir, name)
+        FileOutputStream(file).use { out ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        }
+        file
+    }.getOrNull()
 }
 
-private fun copyMp4ToDownloads(context: Context, file: File) {
-    runCatching {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+internal fun copyMp4ToDownloads(
+    context: Context,
+    file: File,
+    sdkInt: Int = Build.VERSION.SDK_INT,
+): File? {
+    return runCatching {
+        if (sdkInt >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, file.name)
                 put(MediaStore.Downloads.MIME_TYPE, "video/mp4")
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
             }
-            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return
-            context.contentResolver.openOutputStream(uri)?.use { out ->
-                file.inputStream().use { inp -> inp.copyTo(out) }
+            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            if (uri != null) {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { inp -> inp.copyTo(out) }
+                }
+                file.delete()
+                return null
             }
+        }
+        val dir = resolvePreQDownloadsDir(context)
+        val dest = File(dir, file.name)
+        if (dest.canonicalPath != file.canonicalPath) {
+            file.copyTo(dest, overwrite = true)
             file.delete()
         }
-    }
+        dest
+    }.getOrNull()
 }

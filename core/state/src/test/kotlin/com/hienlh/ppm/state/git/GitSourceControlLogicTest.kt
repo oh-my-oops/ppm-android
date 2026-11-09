@@ -1,9 +1,11 @@
 package com.hienlh.ppm.state.git
 
+import com.hienlh.ppm.client.ChangeBlock
 import com.hienlh.ppm.client.ChangeSide
 import com.hienlh.ppm.client.ChangedFile
 import com.hienlh.ppm.client.DiffHunk
 import com.hienlh.ppm.client.DiffLine
+import com.hienlh.ppm.client.DiscardRecord
 import com.hienlh.ppm.client.GitBranchState
 import com.hienlh.ppm.client.GitBranchStatus
 import com.hienlh.ppm.client.GitChanges
@@ -13,10 +15,15 @@ import com.hienlh.ppm.client.GitRef
 import com.hienlh.ppm.client.GitRepo
 import com.hienlh.ppm.client.GitRepos
 import com.hienlh.ppm.client.KeyValueStore
+import com.hienlh.ppm.client.StashEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -76,20 +83,73 @@ class GitSourceControlLogicTest {
         val stagedFile = ChangedFile(
             path = "src/A.kt",
             oldPath = "src/OldA.kt",
-            staged = ChangeSide("R", added = 5, removed = 2, blocks = listOf("add", "delete")),
+            conflict = false,
+            x = "R",
+            y = ".",
+            untracked = false,
+            staged = ChangeSide(
+                added = 5,
+                removed = 2,
+                blocks = listOf("add", "delete"),
+                changeBlocks = listOf(
+                    ChangeBlock("add", 0, 1, 0, 1, 5, 5, 0),
+                    ChangeBlock("delete", 1, 10, 2, 15, 0, 0, 2),
+                ),
+            ),
         )
         val partialFile = ChangedFile(
             path = "src/B.kt",
-            staged = ChangeSide("M", added = 1, removed = 0, blocks = listOf("add")),
-            unstaged = ChangeSide("M", added = 3, removed = 1, blocks = listOf("change")),
+            conflict = false,
+            x = "A",
+            y = "M",
+            untracked = false,
+            staged = ChangeSide(
+                added = 1,
+                removed = 0,
+                blocks = listOf("add"),
+                changeBlocks = listOf(ChangeBlock("add", 0, 1, 0, 1, 1, 1, 0)),
+            ),
+            unstaged = ChangeSide(
+                added = 3,
+                removed = 1,
+                blocks = listOf("change"),
+                changeBlocks = listOf(ChangeBlock("change", 0, 5, 1, 5, 3, 3, 1)),
+            ),
         )
         val untrackedFile = ChangedFile(
             path = "src/new/C.kt",
-            unstaged = ChangeSide("A", added = 10, removed = 0, blocks = listOf("add")),
+            conflict = false,
+            x = "?",
+            y = "?",
+            untracked = true,
+            unstaged = ChangeSide(
+                added = 10,
+                removed = 0,
+                blocks = listOf("add"),
+                changeBlocks = listOf(ChangeBlock("add", 0, 0, 0, 1, 10, 10, 0)),
+            ),
         )
         val conflictFile = ChangedFile(
             path = "src/Conflict.kt",
-            conflict = "UU",
+            conflict = true,
+            x = "U",
+            y = "U",
+            untracked = false,
+            staged = ChangeSide(
+                added = 2,
+                removed = 1,
+                blocks = listOf("c-staged"),
+                changeBlocks = listOf(ChangeBlock("c-staged", 0, 1, 1, 1, 2, 2, 1)),
+            ),
+            unstaged = ChangeSide(
+                added = 1,
+                removed = 1,
+                blocks = listOf("c-unstaged-1", "c-unstaged-2"),
+                changeBlocks = listOf(
+                    ChangeBlock("c-unstaged-1", 0, 10, 1, 10, 1, 1, 1),
+                    ChangeBlock("c-unstaged-2", 1, 20, 1, 20, 1, 1, 1),
+                ),
+            ),
         )
 
         assertEquals(CheckState.ALL, GitChangesView.fileCheckState(stagedFile))
@@ -103,28 +163,97 @@ class GitSourceControlLogicTest {
         assertEquals(4 to 1, GitChangesView.changeCounts(partialFile))
         assertEquals("U", GitChangesView.changeLetter(conflictFile))
         assertEquals("R", GitChangesView.changeLetter(stagedFile))
+        assertEquals("A", GitChangesView.changeLetter(partialFile))
+        assertEquals("A", GitChangesView.changeLetter(untrackedFile))
 
         assertTrue(GitChangesView.hasConflictMarkers("line 1\n<<<<<<< HEAD\nfoo\n=======\nbar\n>>>>>>> main"))
         assertFalse(GitChangesView.hasConflictMarkers("normal text"))
 
         val totalsWithConflict = GitChangesView.changeTotals(listOf(stagedFile, partialFile, untrackedFile, conflictFile))
-        assertEquals(4, totalsWithConflict.total)
-        assertEquals(2, totalsWithConflict.staged)
-        assertEquals(2, totalsWithConflict.unstaged)
+        assertEquals(4, totalsWithConflict.files)
+        assertEquals(3, totalsWithConflict.filesStaged)
+        assertEquals(4, totalsWithConflict.blocksStaged)
+        assertEquals(8, totalsWithConflict.blocks)
         assertEquals(1, totalsWithConflict.conflicts)
-        assertFalse(totalsWithConflict.implicitAll)
-        assertEquals(2, totalsWithConflict.commitCount)
-        assertEquals("Resolve 1 conflict before committing", GitChangesView.commitHint(totalsWithConflict, "msg"))
+        assertEquals("Resolve 1 conflict to commit", GitChangesView.commitHint(totalsWithConflict, "msg"))
         assertFalse(GitChangesView.canCommit(totalsWithConflict, "msg", null))
 
-        val cleanTotals = GitChangesView.changeTotals(listOf(untrackedFile))
-        assertTrue(cleanTotals.implicitAll)
-        assertEquals(1, cleanTotals.commitCount)
-        assertEquals("Commit 1 file", GitChangesView.commitLabel(cleanTotals))
-        assertTrue(GitChangesView.canCommit(cleanTotals, "feat: add C", null))
+        // Unstaged-only files: filesStaged == 0 -> cannot commit, label is "Commit", hint tells user to tick a file or stage a block
+        val unstagedOnlyTotals = GitChangesView.changeTotals(listOf(untrackedFile))
+        assertEquals(1, unstagedOnlyTotals.files)
+        assertEquals(0, unstagedOnlyTotals.filesStaged)
+        assertEquals("Commit", GitChangesView.commitLabel(unstagedOnlyTotals))
+        assertEquals("Tick a file or stage a block to commit", GitChangesView.commitHint(unstagedOnlyTotals, "feat: add C"))
+        assertFalse(GitChangesView.canCommit(unstagedOnlyTotals, "feat: add C", null))
 
-        assertEquals("delete 1 new file", GitChangesView.discardSummary(listOf(untrackedFile)))
-        assertEquals("revert 1 modified file and delete 1 new file", GitChangesView.discardSummary(listOf(partialFile, untrackedFile)))
+        // Staged files: filesStaged > 0 -> can commit when message is non-empty
+        val stagedTotals = GitChangesView.changeTotals(listOf(stagedFile, partialFile))
+        assertEquals(2, stagedTotals.filesStaged)
+        assertEquals("Commit 2 files", GitChangesView.commitLabel(stagedTotals))
+        assertEquals("Write a message to commit", GitChangesView.commitHint(stagedTotals, "   "))
+        assertEquals("3 of 4 blocks staged · ⌘↵ commits", GitChangesView.commitHint(stagedTotals, "feat: commit staged"))
+        assertTrue(GitChangesView.canCommit(stagedTotals, "feat: commit staged", null))
+
+        // Amend: allowed with empty message when filesStaged > 0 and !lastCommitPushed; blocked when lastCommitPushed
+        assertTrue(
+            GitChangesView.canCommit(
+                stagedTotals,
+                "",
+                operation = null,
+                amend = true,
+                hasLastCommit = true,
+                lastCommitPushed = false,
+            ),
+        )
+        assertFalse(
+            GitChangesView.canCommit(
+                stagedTotals,
+                "feat: amend pushed",
+                operation = null,
+                amend = true,
+                hasLastCommit = true,
+                lastCommitPushed = true,
+            ),
+        )
+        assertFalse(
+            GitChangesView.canCommit(
+                unstagedOnlyTotals,
+                "",
+                operation = null,
+                amend = true,
+                hasLastCommit = true,
+                lastCommitPushed = false,
+            ),
+        )
+
+        val untrackedSummary = GitChangesView.discardSummary(listOf(untrackedFile))
+        assertEquals("Delete C.kt?", untrackedSummary.title)
+        assertEquals("Delete file", untrackedSummary.confirm)
+        assertEquals("It is a new file git has never stored, so this deletes it. You can undo it right after.", untrackedSummary.body)
+
+        // Tracked file with x == "A" (staged addition + unstaged modification) is NOT treated as untracked
+        val partialSummary = GitChangesView.discardSummary(listOf(partialFile))
+        assertEquals("Discard changes to B.kt?", partialSummary.title)
+        assertEquals("This puts 1 unstaged block back to the staged version. The 1 staged block stays. You can undo it right after.", partialSummary.body)
+        assertEquals("Discard 1 block", partialSummary.confirm)
+
+        val modifiedOnlyFile = ChangedFile(
+            path = "src/Mod.kt",
+            conflict = false,
+            x = ".",
+            y = "M",
+            untracked = false,
+            unstaged = ChangeSide(added = 1, removed = 1, blocks = emptyList()),
+        )
+        val modSummary = GitChangesView.discardSummary(listOf(modifiedOnlyFile))
+        assertEquals("Discard changes to Mod.kt?", modSummary.title)
+        assertEquals("This puts 1 unstaged block back to the last commit's version. You can undo it right after.", modSummary.body)
+        assertEquals("Discard 1 block", modSummary.confirm)
+
+        val mixedSummary = GitChangesView.discardSummary(listOf(modifiedOnlyFile, untrackedFile))
+        assertEquals("Discard changes to 2 files?", mixedSummary.title)
+        assertEquals("Discard 2 files", mixedSummary.confirm)
+        assertEquals("This puts the unstaged changes back the way the index has them, and deletes 1 new file. Staged changes stay. You can undo it right after.", mixedSummary.body)
 
         val branch = GitBranchState(head = "main", oid = "1234567", upstream = "origin/main", upstreamGone = false, ahead = 2, behind = 1)
         assertEquals("sync", GitChangesView.syncMode(branch))
@@ -136,25 +265,124 @@ class GitSourceControlLogicTest {
             branch = branch,
             operation = null,
             lastCommit = null,
-            files = listOf(stagedFile, partialFile, untrackedFile),
+            files = listOf(stagedFile, partialFile, untrackedFile, conflictFile),
             truncated = false,
             stashes = 0,
         )
         val status = GitChangesView.changesToStatus(changes)
+        // Conflict file maps to unstaged with status "M"
+        assertTrue(status.unstaged.any { it.path == "src/Conflict.kt" && it.status == "M" })
         val fileMap = GitChangesView.buildFileStatusMap(status)
         assertEquals("R", fileMap["src/A.kt"])
-        assertEquals("M", fileMap["src/B.kt"])
+        // Staged ("A") overrides unstaged ("M") on partialFile
+        assertEquals("A", fileMap["src/B.kt"])
         assertEquals("U", fileMap["src/new/C.kt"])
+        assertEquals("M", fileMap["src/Conflict.kt"])
 
         val folderMap = GitChangesView.buildFolderStatusMap(fileMap)
-        assertEquals("M", folderMap["src"]) // M (4) > R (3) > U (1)
+        assertEquals("A", folderMap["src"]) // D (6) > A (5) > M (4) > R (3) > C (2) > U (1)
         assertEquals("U", folderMap["src/new"])
+
+        val copiedFile = ChangedFile(
+            path = "src/Copied.kt",
+            oldPath = "src/Orig.kt",
+            conflict = false,
+            x = "C",
+            y = ".",
+            untracked = false,
+            staged = ChangeSide(added = 4, removed = 0, blocks = listOf("add")),
+        )
+        val detachedChanges = GitChanges(
+            branch = GitBranchState(head = null, oid = "abcdef0", upstream = null, upstreamGone = false, ahead = 0, behind = 0),
+            operation = null,
+            lastCommit = null,
+            files = listOf(copiedFile),
+            truncated = false,
+            stashes = 0,
+        )
+        val detachedStatus = GitChangesView.changesToStatus(detachedChanges)
+        assertNull(detachedStatus.branch)
+        assertEquals(listOf(GitFileChange(path = "src/Copied.kt", status = "C", oldPath = "src/Orig.kt")), detachedStatus.staged)
+    }
+
+    @Test
+    fun `ChangeBlock and ChangedFile reject missing required fields and DiscardRecord and StashEntry handle null server payloads`() {
+        assertNull(ChangeBlock.from(JsonPrimitive("add")))
+        val sideWithStrings = ChangeSide.from(
+            Json.parseToJsonElement("""{"added":1,"removed":0,"blocks":["add"]}""").jsonObject,
+        )
+        assertTrue(sideWithStrings!!.changeBlocks.isEmpty())
+        assertNull(ChangeBlock.from(Json.parseToJsonElement("""{"id":"h0"}""").jsonObject))
+        val parsedZeroBlock = ChangeBlock.from(
+            Json.parseToJsonElement("""{"id":"h0","index":0,"oldStart":0,"oldLines":0,"newStart":1,"newLines":5,"added":5,"removed":0}""").jsonObject,
+        )!!
+        assertEquals(0, parsedZeroBlock.oldStart)
+        assertEquals(1, parsedZeroBlock.newStart)
+        assertNull(
+            ChangedFile.from(
+                Json.parseToJsonElement(
+                    """{"path":"src/Raw.kt","staged":{"added":3,"removed":0,"blocks":[]},"unstaged":{"added":1,"removed":0,"blocks":[]}}""",
+                ).jsonObject,
+            ),
+        )
+        val rawChangedFile = ChangedFile.from(
+            Json.parseToJsonElement(
+                """{"path":"src/Raw.kt","x":".","y":"M","untracked":false,"conflict":false,"staged":{"added":3,"removed":0,"blocks":[]},"unstaged":{"added":1,"removed":0,"blocks":[]}}""",
+            ).jsonObject,
+        )!!
+        assertEquals(".", rawChangedFile.x)
+        assertEquals("M", rawChangedFile.y)
+        assertFalse(rawChangedFile.untracked)
+        assertFalse(rawChangedFile.conflict)
+
+        // Server returns {"undo": null} when nothing could be backed up
+        val nullUndoJson = Json.parseToJsonElement("""{"undo":null}""").jsonObject
+        assertNull(DiscardRecord.from(nullUndoJson))
+
+        // Server returns {"undo":{"id":"u1","createdAt":100,"paths":["a.kt"],"skipped":["big.bin"]}}
+        val undoWithSkippedJson = Json.parseToJsonElement(
+            """{"undo":{"id":"u1","createdAt":100,"paths":["a.kt"],"skipped":["big.bin"]}}""",
+        ).jsonObject
+        val record = DiscardRecord.from(undoWithSkippedJson)
+        assertNotNull(record)
+        assertEquals("u1", record!!.id)
+        assertEquals(listOf("a.kt"), record.files)
+        assertEquals(listOf("big.bin"), record.skipped)
+
+        // Server returns {"stashed":false,"stash":null} when nothing was stashed
+        val nullStashJson = Json.parseToJsonElement("""{"stashed":false,"stash":null}""").jsonObject
+        assertNull(StashEntry.from(nullStashJson))
+
+        // blockDots returns all dots in file order without truncation
+        val manyBlocksFile = ChangedFile(
+            path = "src/Many.kt",
+            conflict = false,
+            x = "M",
+            y = "M",
+            untracked = false,
+            staged = ChangeSide(
+                added = 1,
+                removed = 0,
+                blocks = listOf("s0"),
+                changeBlocks = listOf(ChangeBlock("s0", 0, 15, 1, 15, 2, 1, 0)),
+            ),
+            unstaged = ChangeSide(
+                added = 7,
+                removed = 0,
+                blocks = emptyList(),
+                changeBlocks = (0 until 7).map { idx ->
+                    ChangeBlock("b$idx", idx, idx * 10, 1, idx * 10, 2, 1, 0)
+                },
+            ),
+        )
+        val dots = GitChangesView.blockDots(manyBlocksFile)
+        assertEquals(listOf(false, false, true, false, false, false, false, false), dots)
     }
 
     @Test
     fun `GitFileTree compacts single-child folders and collects leaf files`() {
-        val f1 = ChangedFile(path = "src/web/components/git/A.tsx", unstaged = ChangeSide("M", 1, 0, emptyList()))
-        val f2 = ChangedFile(path = "src/web/components/git/B.tsx", unstaged = ChangeSide("A", 2, 0, emptyList()))
+        val f1 = ChangedFile(path = "src/web/components/git/A.tsx", conflict = false, x = ".", y = "M", untracked = false, unstaged = ChangeSide(1, 0, emptyList()))
+        val f2 = ChangedFile(path = "src/web/components/git/B.tsx", conflict = false, x = ".", y = "A", untracked = false, unstaged = ChangeSide(2, 0, emptyList()))
         val tree = GitFileTree.buildTree(listOf(f2, f1))
         assertEquals(1, tree.size)
         val root = tree[0]
@@ -229,5 +457,43 @@ class GitSourceControlLogicTest {
         assertEquals("from web", sync.message("ppm", null))
         sync.consumed("ppm", null, "from web")
         assertEquals("", sync.message("ppm", null))
+    }
+
+    @Test
+    fun `OPERATION_NOUN and operationTitle match git-changes-view ts`() {
+        assertEquals("patch series", GitChangesView.OPERATION_NOUN["am"])
+        assertEquals("merge", GitChangesView.OPERATION_NOUN["merge"])
+        assertEquals("rebase", GitChangesView.OPERATION_NOUN["rebase"])
+        assertEquals("cherry-pick", GitChangesView.OPERATION_NOUN["cherry-pick"])
+        assertEquals("revert", GitChangesView.OPERATION_NOUN["revert"])
+
+        assertEquals(
+            "Merging feat/x into main",
+            GitChangesView.operationTitle(GitOperation(kind = "merge", name = "feat/x", head = "1234567"), "main"),
+        )
+        assertEquals(
+            "Merging a commit",
+            GitChangesView.operationTitle(GitOperation(kind = "merge"), null as String?),
+        )
+        assertEquals(
+            "Rebasing feat/x (2 of 5)",
+            GitChangesView.operationTitle(GitOperation(kind = "rebase", name = "feat/x", step = 2, total = 5), "main"),
+        )
+        assertEquals(
+            "Rebasing HEAD",
+            GitChangesView.operationTitle(GitOperation(kind = "rebase"), null as String?),
+        )
+        assertEquals(
+            "Cherry-picking abcdef1 into main",
+            GitChangesView.operationTitle(GitOperation(kind = "cherry-pick", head = "abcdef1"), "main"),
+        )
+        assertEquals(
+            "Reverting abcdef1",
+            GitChangesView.operationTitle(GitOperation(kind = "revert", head = "abcdef1"), "main"),
+        )
+        assertEquals(
+            "Applying patches (1 of 3)",
+            GitChangesView.operationTitle(GitOperation(kind = "am", step = 1, total = 3), "main"),
+        )
     }
 }

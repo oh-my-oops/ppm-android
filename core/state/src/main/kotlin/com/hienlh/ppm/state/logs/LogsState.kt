@@ -689,3 +689,188 @@ fun issueUrl(title: String, labels: List<String>, body: String?): String {
 
 fun reportMarkdown(title: String, body: String): String =
     "# ${title.trim().ifEmpty { "Bug report" }}\n\n$body"
+
+fun parseLogsEnvironment(json: JsonElement?): List<Pair<String, String>> =
+    json?.array.orEmpty().mapNotNull { item ->
+        val pair = item.array ?: return@mapNotNull null
+        val k = pair.getOrNull(0)?.string ?: return@mapNotNull null
+        val v = pair.getOrNull(1)?.string ?: return@mapNotNull null
+        k to v
+    }
+
+data class UserAgentInfo(val browser: String, val version: String?, val os: String)
+
+private val BROWSER_PATTERNS = listOf(
+    Regex("""\bEdg(?:e|A|iOS)?/(\d+)""") to "Edge",
+    Regex("""\bOPR/(\d+)""") to "Opera",
+    Regex("""\bSamsungBrowser/(\d+)""") to "Samsung Internet",
+    Regex("""\b(?:Firefox|FxiOS)/(\d+)""") to "Firefox",
+    Regex("""\bCriOS/(\d+)""") to "Chrome",
+    Regex("""\bChrome/(\d+)""") to "Chrome",
+    Regex("""\bVersion/(\d+)(?:\.\d+)*.*\bSafari/""") to "Safari",
+)
+
+private val SYSTEM_PATTERNS = listOf(
+    Regex("""\b(?:iPhone|iPad|iPod)\b""") to "iOS",
+    Regex("""\bAndroid\b""") to "Android",
+    Regex("""\bCrOS\b""") to "ChromeOS",
+    Regex("""\b(?:Macintosh|Mac OS X)\b""") to "macOS",
+    Regex("""\bWindows\b""") to "Windows",
+    Regex("""\bLinux\b""") to "Linux",
+)
+
+fun describeUserAgent(ua: String?): UserAgentInfo {
+    val text = ua.orEmpty()
+    var browser = "Browser"
+    var version: String? = null
+    for ((re, name) in BROWSER_PATTERNS) {
+        val m = re.find(text)
+        if (m != null) {
+            browser = name
+            version = m.groupValues.getOrNull(1)?.takeIf { it.isNotEmpty() }
+            break
+        }
+    }
+    val os = SYSTEM_PATTERNS.firstOrNull { (re, _) -> re.containsMatchIn(text) }?.second ?: "Unknown OS"
+    return UserAgentInfo(browser, version, os)
+}
+
+fun userAgentSummary(ua: String?): String {
+    val info = describeUserAgent(ua)
+    return "${info.browser}${info.version?.let { " $it" }.orEmpty()} on ${info.os}"
+}
+
+data class DuplicateIssue(
+    val number: Int,
+    val title: String,
+    val url: String,
+)
+
+data class DuplicateSearchResult(
+    val query: String,
+    val issues: List<DuplicateIssue>,
+) {
+    companion object {
+        fun from(json: JsonElement?, fallbackQuery: String = ""): DuplicateSearchResult {
+            val query = json["query"].string ?: fallbackQuery
+            val issues = json["issues"].array.orEmpty().mapNotNull { item ->
+                val num = item["number"].int ?: item["number"]?.toString()?.toIntOrNull() ?: return@mapNotNull null
+                val title = item["title"].string ?: return@mapNotNull null
+                val url = item["url"].string ?: return@mapNotNull null
+                DuplicateIssue(number = num, title = title, url = url)
+            }
+            return DuplicateSearchResult(query = query, issues = issues)
+        }
+    }
+}
+
+data class PreparedIssueReport(
+    val redactedTitle: String,
+    val body: String,
+    val fullUrl: String,
+    val openUrl: String,
+    val bodyOverLimit: Boolean,
+    val duplicateQuery: String?,
+)
+
+fun prepareIssueReport(
+    fields: ReportFields,
+    snippets: List<ReportSnippet>,
+    environment: List<Pair<String, String>>,
+    redact: RedactOptions,
+): PreparedIssueReport {
+    val trimmedTitle = fields.title.trim()
+    val redactedTitle = redactLogText(trimmedTitle, redact)
+    val body = reportBody(fields, snippets, environment, redact, mark = false)
+    val fullUrl = issueUrl(redactedTitle, fields.labels, body)
+    val over = fullUrl.length > ISSUE_URL_LIMIT
+    val openUrl = if (over) issueUrl(redactedTitle, fields.labels, null) else fullUrl
+    val duplicateQuery = if (trimmedTitle.length >= 8) redactLogText(trimmedTitle, redact) else null
+    return PreparedIssueReport(
+        redactedTitle = redactedTitle,
+        body = body,
+        fullUrl = fullUrl,
+        openUrl = openUrl,
+        bodyOverLimit = over,
+        duplicateQuery = duplicateQuery,
+    )
+}
+
+class LogsLiveFeedBuffer {
+    var inFlight: Boolean = false
+        private set
+    private val inFlightEntries = mutableListOf<LogEntry>()
+    private val inFlightTitles = mutableMapOf<String, String>()
+    private val pausedEntries = mutableListOf<LogEntry>()
+    private val pausedTitles = mutableMapOf<String, String>()
+
+    val pausedEntryCount: Int
+        get() = pausedEntries.size
+
+    val pausedTitleCount: Int
+        get() = pausedTitles.size
+
+    fun beginPageRead() {
+        inFlight = true
+        inFlightEntries.clear()
+        inFlightTitles.clear()
+        pausedEntries.clear()
+        pausedTitles.clear()
+    }
+
+    fun cancelPageRead() {
+        inFlight = false
+        inFlightEntries.clear()
+        inFlightTitles.clear()
+    }
+
+    fun finishPageRead(page: LogQueryResult, filter: LogFilter): LogQueryResult {
+        val pendingEntries = inFlightEntries.toList()
+        val pendingTitles = inFlightTitles.toMap()
+        inFlight = false
+        inFlightEntries.clear()
+        inFlightTitles.clear()
+        return if (pendingEntries.isEmpty()) page else applyLiveEntries(page, pendingEntries, pendingTitles, filter)
+    }
+
+    fun onLiveBatch(
+        current: LogQueryResult,
+        incoming: List<LogEntry>,
+        titles: Map<String, String>,
+        filter: LogFilter,
+        follow: Boolean,
+    ): LogQueryResult {
+        if (incoming.isEmpty()) return current
+        if (inFlight) {
+            inFlightEntries.addAll(incoming)
+            inFlightTitles.putAll(titles)
+            return current
+        }
+        if (!follow) {
+            pausedEntries.addAll(incoming)
+            if (pausedEntries.size > MAX_KEEP) {
+                val drop = pausedEntries.size - MAX_KEEP
+                repeat(drop) { pausedEntries.removeAt(0) }
+            }
+            pausedTitles.putAll(titles)
+            return current
+        }
+        return applyLiveEntries(current, incoming, titles, filter)
+    }
+
+    fun resumeFollow(current: LogQueryResult, filter: LogFilter): LogQueryResult {
+        if (pausedEntries.isEmpty()) return current
+        val entries = pausedEntries.toList()
+        val titles = pausedTitles.toMap()
+        pausedEntries.clear()
+        pausedTitles.clear()
+        return applyLiveEntries(current, entries, titles, filter)
+    }
+
+    fun pausedMatchingCount(current: LogQueryResult, filter: LogFilter): Int {
+        if (pausedEntries.isEmpty()) return 0
+        val search = compileLogSearch(filter)
+        val titles = current.titles + pausedTitles
+        return pausedEntries.count { matchesLogFilter(it, filter, search, titles) }
+    }
+}

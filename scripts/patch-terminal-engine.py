@@ -47,6 +47,10 @@ def emulator(text):
         /** Idempotent; releases JNI, images and retained history. Late queued writes are ignored. */
         override fun close()
         val isClosed: Boolean
+        /** Whether a mouse-tracking mode (`?1000`, `?1002` or `?1003`) is on. */
+        val isMouseTracking: Boolean
+        /** Whether the alternate screen (`?47`, `?1047` or `?1049`) is active. */
+        val isAlternateScreen: Boolean
         /** Fresh parser/screens/history, preserving dimensions, callbacks, palette and defaults. */
         fun reset()
         /**
@@ -561,16 +565,16 @@ def emulator(text):
         }
 
         /** Whether a mouse-tracking mode with wheel events (`?1000`, `?1002` or `?1003`) is on, or the alternate screen is active. */
-        internal val isMouseTracking: Boolean
+        override val isMouseTracking: Boolean
             get() = synchronized(damageLock) { writeCuts.mouseTracking }
 
-        internal val isAlternateScreen: Boolean
+        override val isAlternateScreen: Boolean
             get() = synchronized(damageLock) { isAltScreenActive || writeCuts.onAlternate }
 
-        /** Sends one wheel step at 0-based [row] and [col] when mouse tracking is on, in the protocol the stream asked for. */
-        internal fun dispatchWheel(down: Boolean, row: Int, col: Int, modifiers: Int = 0): Unit = commands.call {
+        /** Sends one wheel step at 0-based [row] and [col] (and 0-based pixel [xPx] and [yPx] for `1016` SGR-Pixels) when mouse tracking is on, in the protocol the stream asked for. */
+        internal fun dispatchWheel(down: Boolean, row: Int, col: Int, modifiers: Int = 0, xPx: Int = col, yPx: Int = row): Unit = commands.call {
             val report = synchronized(damageLock) {
-                if (isClosed) null else writeCuts.wheelReport(down, row.coerceIn(0, rows - 1), col.coerceIn(0, cols - 1), modifiers)
+                if (isClosed) null else writeCuts.wheelReport(down, row.coerceIn(0, rows - 1), col.coerceIn(0, cols - 1), modifiers, xPx, yPx)
             } ?: return@call
             onKeyboardInput(report)
         }
@@ -888,7 +892,7 @@ def tap_asks_for_focus(text):
                                     }
                                 }
                                 // Every tap asks for the focus: one that cleared a selection or opened a link too.
-                                if (currentKeyboardEnabled) {
+                                if (currentKeyboardEnabled && !currentTouchSelect) {
                                     focusRequester.requestFocus()
                                     if (currentShouldShowIme) imeInputView?.showIme()
                                 }
@@ -979,11 +983,6 @@ def touch_select(text):
 """ + marker)
     text = replace(text, "                        val isDoubleTap = (down.uptimeMillis", "                        val isDoubleTap = !currentTouchSelect && !terminalEmulator.isMouseTracking && (down.uptimeMillis")
     text = replace(text, "                        val longPressJob = if (gestureType == GestureType.Undetermined) {", "                        val longPressJob = if (gestureType == GestureType.Undetermined && !currentTouchSelect && !terminalEmulator.isMouseTracking) {")
-    text = replace(
-        text,
-        "                                    selectionManager.endSelection()\n                                }\n                            }\n",
-        "                                    selectionManager.endSelection()\n                                }\n                                if (currentKeyboardEnabled) focusRequester.requestFocus()\n                            }\n",
-    )
     text = replace(text, "                        var pendingPageDrag = 0f\n", "                        var pendingPageDrag = 0f\n                        var pendingTouchScroll = 0f\n")
     text = replace(text, """                                        if (gestureType == GestureType.Page) {
                                             // Include movement accumulated during touch slop and the zoom grace period.
@@ -1027,10 +1026,16 @@ def touch_select(text):
                                                 if (lines != 0) {
                                                     val down = lines > 0
                                                     if (mouseTracking) {
-                                                        val row = (change.position.y / baseCharHeight).toInt().coerceIn(0, screenState.snapshot.rows - 1)
-                                                        val col = (change.position.x / baseCharWidth).toInt().coerceIn(0, screenState.snapshot.cols - 1)
+                                                        val maxPxX = ((screenState.snapshot.cols * baseCharWidth).toInt() - 1).coerceAtLeast(0)
+                                                        val maxPxY = ((screenState.snapshot.rows * baseCharHeight).toInt() - 1).coerceAtLeast(0)
+                                                        val xPx = change.position.x.toInt().coerceIn(0, maxPxX)
+                                                        val yPx = change.position.y.toInt().coerceIn(0, maxPxY)
+                                                        val row = (yPx / baseCharHeight).toInt().coerceIn(0, screenState.snapshot.rows - 1)
+                                                        val col = (xPx / baseCharWidth).toInt().coerceIn(0, screenState.snapshot.cols - 1)
+                                                        val xDp = sgrPixelCoordinate(xPx, density.density)
+                                                        val yDp = sgrPixelCoordinate(yPx, density.density)
                                                         repeat(abs(lines)) {
-                                                            terminalEmulator.commands.execute { terminalEmulator.dispatchWheel(down, row, col) }
+                                                            terminalEmulator.commands.execute { terminalEmulator.dispatchWheel(down, row, col, xPx = xDp, yPx = yDp) }
                                                         }
                                                     } else {
                                                         val key = if (down) VTermKey.DOWN else VTermKey.UP
@@ -1159,6 +1164,7 @@ def web_links(text):
     text = replace(text, "                ).pointerInput(terminalEmulator, baseCharWidth, baseCharHeight) {\n                val touchSlopSquared =\n", """                ).pointerHoverIcon(if (hoverLink != null) PointerIcon.Hand else PointerIcon.Text)
                 .pointerInput(terminalEmulator, baseCharWidth, baseCharHeight) {
                     awaitPointerEventScope {
+                        var wheelPartialScroll = 0f
                         while (true) {
                             val event = awaitPointerEvent()
                             val change = event.changes.firstOrNull() ?: continue
@@ -1169,23 +1175,29 @@ def web_links(text):
                                     val shift = event.keyboardModifiers.isShiftPressed
                                     val alt = event.keyboardModifiers.isAltPressed
                                     val ctrl = event.keyboardModifiers.isCtrlPressed
+                                    val (wheelLines, nextPartial) = consumeWheelDelta(deltaY, wheelPartialScroll, fastScroll = alt || ctrl)
+                                    wheelPartialScroll = nextPartial
                                     if (terminalEmulator.isMouseTracking && !shift) {
-                                        val steps = wheelScrollSteps(deltaY)
-                                        val down = steps > 0
-                                        val row = (change.position.y / baseCharHeight).toInt().coerceIn(0, screenState.snapshot.rows - 1)
-                                        val col = (change.position.x / baseCharWidth).toInt().coerceIn(0, screenState.snapshot.cols - 1)
-                                        val mods = (if (alt) ControlKeys.ALT else 0) or (if (ctrl) ControlKeys.CTRL else 0)
-                                        repeat(abs(steps)) {
-                                            terminalEmulator.commands.execute { terminalEmulator.dispatchWheel(down, row, col, mods) }
+                                        if (wheelLines != 0) {
+                                            val down = deltaY > 0f
+                                            val maxPxX = ((screenState.snapshot.cols * baseCharWidth).toInt() - 1).coerceAtLeast(0)
+                                            val maxPxY = ((screenState.snapshot.rows * baseCharHeight).toInt() - 1).coerceAtLeast(0)
+                                            val xPx = change.position.x.toInt().coerceIn(0, maxPxX)
+                                            val yPx = change.position.y.toInt().coerceIn(0, maxPxY)
+                                            val row = (yPx / baseCharHeight).toInt().coerceIn(0, screenState.snapshot.rows - 1)
+                                            val col = (xPx / baseCharWidth).toInt().coerceIn(0, screenState.snapshot.cols - 1)
+                                            val mods = (if (alt) ControlKeys.ALT else 0) or (if (ctrl) ControlKeys.CTRL else 0)
+                                            val xDp = sgrPixelCoordinate(xPx, density.density)
+                                            val yDp = sgrPixelCoordinate(yPx, density.density)
+                                            terminalEmulator.commands.execute { terminalEmulator.dispatchWheel(down, row, col, mods, xDp, yDp) }
                                         }
                                     } else if ((terminalEmulator.isAlternateScreen || screenState.snapshot.alternateScreen) && !shift) {
-                                        val steps = wheelScrollSteps(deltaY)
-                                        val key = if (steps > 0) VTermKey.DOWN else VTermKey.UP
-                                        repeat(abs(steps)) {
+                                        if (wheelLines != 0) {
+                                            val key = if (deltaY > 0f) VTermKey.DOWN else VTermKey.UP
                                             terminalEmulator.commands.execute { terminalEmulator.dispatchKey(0, key) }
                                         }
                                     } else if (!terminalEmulator.isAlternateScreen && !screenState.snapshot.alternateScreen) {
-                                        val lines = wheelScrollbackLines(deltaY, alt)
+                                        val lines = wheelScrollbackLines(wheelLines)
                                         if (lines != 0) {
                                             screenState.scrollBy(lines)
                                             val syncedOffset = screenState.scrollbackPosition * baseCharHeight

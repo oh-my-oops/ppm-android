@@ -62,8 +62,8 @@ class GitTest {
               "operation": {"kind":"rebase","head":"abc1234","step":2,"total":5},
               "lastCommit": {"hash":"1234567890abcdef","shortHash":"1234567","subject":"feat: add sc","date":"2026-11-07T00:00:00Z","hasParent":true,"pushed":false},
               "files": [
-                {"path":"src/App.kt","staged":{"status":"M","added":4,"removed":1,"blocks":["add","change"]},"unstaged":{"status":"M","added":2,"removed":0,"blocks":["add"]}},
-                {"path":"CONFLICT.md","conflict":"UU"}
+                {"path":"src/App.kt","x":"M","y":"M","untracked":false,"conflict":false,"staged":{"added":4,"removed":1,"blocks":[{"id":"add","index":0,"oldStart":1,"oldLines":1,"newStart":1,"newLines":2,"added":2,"removed":0},{"id":"change","index":1,"oldStart":5,"oldLines":1,"newStart":6,"newLines":2,"added":2,"removed":1}]},"unstaged":{"added":2,"removed":0,"blocks":[{"id":"add","index":0,"oldStart":10,"oldLines":0,"newStart":11,"newLines":2,"added":2,"removed":0}]}},
+                {"path":"CONFLICT.md","x":"U","y":"U","untracked":false,"conflict":true,"staged":null,"unstaged":null}
               ],
               "truncated": false,
               "stashes": 2
@@ -126,7 +126,7 @@ class GitTest {
         assertEquals("1234567", changes.lastCommit?.shortHash)
         assertEquals(2, changes.files.size)
         assertEquals(4, changes.files[0].staged?.added)
-        assertEquals("UU", changes.files[1].conflict)
+        assertTrue(changes.files[1].conflict)
         assertEquals(2, changes.stashes)
 
         val hunks = api.gitHunks("ppm", "src/App.kt", "worktree", nestedRepo)
@@ -136,7 +136,7 @@ class GitTest {
 
         api.gitStageHunks("ppm", "src/App.kt", listOf(HunkSelectionItem(0, "hunk-0", listOf(1))), nestedRepo)
         val discard = api.gitDiscard("ppm", listOf("src/App.kt"), nestedRepo)
-        assertEquals("disc-1", discard.id)
+        assertEquals("disc-1", discard?.id)
 
         val commit = api.gitCommit("ppm", "feat: commit", amend = false, signoff = true, repo = nestedRepo)
         assertEquals("abcdef1234567", commit.hash)
@@ -259,10 +259,15 @@ class GitTest {
         val changes = api.gitChanges("s3-git")
         assertEquals(false, changes.branch.hasRemote)
         assertEquals(2, changes.files.size)
-        assertEquals("M", changes.files[0].unstaged?.status)
+        assertEquals(".", changes.files[0].x)
+        assertEquals("M", changes.files[0].y)
+        assertEquals(false, changes.files[0].untracked)
         assertEquals(listOf("1f2ca95832d8a1ee4d0cde66ca6e09e0"), changes.files[0].unstaged?.blocks)
-        assertEquals("A", changes.files[1].unstaged?.status)
-        assertEquals(null, changes.files[0].conflict)
+        assertEquals("?", changes.files[1].x)
+        assertEquals("?", changes.files[1].y)
+        assertEquals(true, changes.files[1].untracked)
+        assertEquals(0, changes.files[1].unstaged?.changeBlocks?.get(0)?.oldStart)
+        assertEquals(false, changes.files[0].conflict)
 
         val hunks = api.gitHunks("s3-git", "src/App.kt")
         assertEquals("src/App.kt", hunks.path)
@@ -275,11 +280,11 @@ class GitTest {
         assertEquals(2, hunks.hunks[0].lines[2].newNumber)
 
         val discard = api.gitDiscard("s3-git", listOf("src/App.kt"))
-        assertEquals("undo-99", discard.id)
-        assertEquals(listOf("src/App.kt"), discard.files)
+        assertEquals("undo-99", discard?.id)
+        assertEquals(listOf("src/App.kt"), discard?.files)
 
         val stash = api.gitStash("s3-git")
-        assertEquals("bbbb222", stash.hash)
+        assertEquals("bbbb222", stash?.hash)
 
         val refs = api.gitRefs("s3-git")
         assertEquals("branch", refs[0].kind)
@@ -385,5 +390,26 @@ class GitTest {
         assertEquals("/api/project/s4-git/git/branch-diff?base=main&head=feat%2Freview", server.takeRequest().target)
         assertEquals("/api/project/s4-git/git/graph?max=100&skip=0", server.takeRequest().target)
         assertEquals("/api/project/s4-git/git/file-full-diff?file=src%2FApp.kt&ref=abc1111&ref2=def2222", server.takeRequest().target)
+    }
+
+    @Test
+    fun `gitPublish and gitStashAction fail parse when required response fields are missing`() = withServer(
+        ok("""{"branch":"feat/demo"}"""),
+        ok("""{"remote":"origin"}"""),
+        ok("""{}"""),
+        ok("""{}"""),
+    ) { _, api ->
+        val missingRemote = runCatching { api.gitPublish("s4-git") }.exceptionOrNull()
+        assertTrue("Expected BadResponse on missing remote, got $missingRemote", missingRemote is PpmError.BadResponse)
+
+        val missingBranch = runCatching { api.gitPublish("s4-git") }.exceptionOrNull()
+        assertTrue("Expected BadResponse on missing branch, got $missingBranch", missingBranch is PpmError.BadResponse)
+
+        val missingIndexRestored = runCatching { api.gitStashAction("s4-git", "pop", 0, "abc1234") }.exceptionOrNull()
+        assertTrue("Expected BadResponse on missing indexRestored for pop, got $missingIndexRestored", missingIndexRestored is PpmError.BadResponse)
+
+        // drop returns {} on the server and succeeds
+        val dropRes = api.gitStashAction("s4-git", "drop", 0, "abc1234")
+        assertTrue(dropRes.indexRestored)
     }
 }

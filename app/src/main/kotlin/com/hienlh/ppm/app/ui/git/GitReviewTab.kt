@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -181,7 +182,7 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
 
     val held = !selectRepo.isNullOrEmpty() && selectRepo != repo?.path
 
-    var changes by remember(projectName, repo?.path) { mutableStateOf(model.gitChangesCache[projectName]) }
+    var changes by remember(projectName, repo?.path) { mutableStateOf(model.cachedGitChanges(projectName, repo?.path)) }
     var error by remember(projectName, repo?.path) { mutableStateOf<String?>(null) }
     val details = remember(projectName, repo?.path) { mutableStateMapOf<String, FileChangeDetail>() }
     val detailSigs = remember(projectName, repo?.path) { mutableMapOf<String, String>() }
@@ -193,6 +194,7 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
     var busy by remember { mutableStateOf<String?>(null) }
     var toast by remember(projectName, repo?.path) { mutableStateOf<ReviewToastData?>(null) }
     var toastSeq by remember { mutableLongStateOf(0L) }
+    var changesRequestId by remember(projectName, repo?.path) { mutableLongStateOf(0L) }
     val writeMutex = remember { Mutex() }
 
     val drafts by model.commitDrafts.drafts.collectAsState()
@@ -207,8 +209,10 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
     suspend fun refreshChanges(): GitChanges? {
         val client = api ?: return null
         if (repo == null || needsPick || noRepo) return null
+        val reqId = ++changesRequestId
         return try {
             val fresh = client.gitChanges(projectName, repo)
+            if (reqId != changesRequestId) return changes
             changes = fresh
             error = null
             model.applyGitChanges(projectName, repo, fresh)
@@ -216,7 +220,9 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            error = model.describe(e)
+            if (reqId == changesRequestId) {
+                error = model.describe(e)
+            }
             null
         }
     }
@@ -224,12 +230,19 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
     LaunchedEffect(projectName, repo?.path, needsPick, noRepo, api) {
         if (repo != null && !needsPick && !noRepo && api != null) {
             refreshChanges()
+            while (true) {
+                delay(5_000L)
+                if (model.windowVisible && !writeMutex.isLocked) {
+                    refreshChanges()
+                }
+            }
         }
     }
 
     LaunchedEffect(projectName, repo?.path, api) {
         if (repo == null) return@LaunchedEffect
         model.gitChangedEvents.filter { it == projectName }.collectLatest {
+            delay(300L)
             if (writeMutex.isLocked) return@collectLatest
             refreshChanges()
         }
@@ -264,9 +277,17 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
             pending = pending,
         )
     }
-    val conflicts = remember(files) { files.filter { it.conflict != null } }
+    val conflicts = remember(files) { files.filter { it.conflict } }
     val totals = remember(reviews) { GitReviewModel.reviewTotals(reviews) }
-    val commitTotals = remember(files) { GitChangesView.changeTotals(files) }
+    val commitTotals = remember(reviews, totals, conflicts) {
+        ChangeTotals(
+            files = totals.files,
+            filesStaged = reviews.count { it.staged > 0 },
+            blocks = totals.blocks,
+            blocksStaged = totals.staged,
+            conflicts = conflicts.size,
+        )
+    }
 
     val focus = remember(reviews, want) { GitReviewModel.resolveFocus(reviews, want) }
     val focusedTriple = remember(reviews, focus) {
@@ -326,7 +347,7 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
         }
         for (p in wantedPaths) {
             val f = byPath[p] ?: continue
-            if (f.conflict != null || p in writingPaths) continue
+            if (f.conflict || p in writingPaths) continue
             val sig = GitReviewModel.fileSignature(f)
             if (detailSigs[p] == sig && p in details) continue
             detailSigs[p] = sig
@@ -516,7 +537,7 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
                 val entry: DiscardedEntry? = if (hunk == null || file.untracked) {
                     val shown = shownHunks(path, listOf(block))
                     val res = client.gitDiscard(projectName, listOf(path), repo)
-                    if (res.files.isNotEmpty() && res.id.isNotEmpty()) {
+                    if (res != null && res.files.isNotEmpty() && res.id.isNotEmpty()) {
                         DiscardedEntry(
                             path = path,
                             recordId = res.id,
@@ -537,7 +558,7 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
                         listOf(HunkSelectionItem(hunk = idx, id = hunk.id)),
                         repo,
                     )
-                    if (res.id.isNotEmpty()) {
+                    if (res != null && res.id.isNotEmpty()) {
                         DiscardedEntry(
                             path = path,
                             recordId = res.id,
@@ -600,7 +621,7 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
                 val added = openBlocks.sumOf { it.added }
                 val removed = openBlocks.sumOf { it.removed }
                 val res = client.gitDiscard(projectName, listOf(path), repo)
-                val entry = if (res.files.isNotEmpty() && res.id.isNotEmpty()) {
+                val entry = if (res != null && res.files.isNotEmpty() && res.id.isNotEmpty()) {
                     DiscardedEntry(
                         path = path,
                         recordId = res.id,
@@ -715,9 +736,9 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
     fun runCommit(amend: Boolean, signoff: Boolean, andPush: Boolean, onSuccess: (() -> Unit)? = null) {
         val client = api ?: return
         val before = changes
-        val stagedFiles = commitTotals.commitCount
+        val stagedFiles = commitTotals.filesStaged
         val msg = commitMessage.trim()
-        if (msg.isEmpty()) return
+        if ((!amend && msg.isEmpty()) || (amend && msg.isEmpty() && stagedFiles == 0)) return
         enqueue("commit", emptyList(), if (amend) "Could not amend the commit" else "Could not commit") {
             val res = client.gitCommit(projectName, msg, amend = amend, signoff = signoff, repo = repo)
             model.commitDrafts.consumed(projectName, repo, msg)
@@ -731,11 +752,11 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
             if (andPush && before != null) {
                 val publish = GitChangesView.syncMode(before.branch) == "publish"
                 try {
-                    if (publish) client.gitPublish(projectName, repo = repo)
-                    else client.gitPush(projectName, repo = repo)
+                    val pub = if (publish) client.gitPublish(projectName, repo = repo) else null
+                    if (!publish) client.gitPush(projectName, repo = repo)
                     refreshChanges()
                     showToast(
-                        if (publish) "Published ${before.branch.head ?: "the branch"}"
+                        if (pub != null) "Published ${pub.branch} to ${pub.remote}"
                         else "Pushed $short to ${before.branch.upstream ?: "the remote"}",
                     )
                 } catch (e: CancellationException) {
@@ -996,6 +1017,7 @@ internal fun GitReviewDesktopLayout(
                     onCommit = onCommit,
                     onUndoLast = onUndoCommit,
                     isBottom = true,
+                    branch = changes.branch.head,
                     onInputFocusChanged = { commitInputFocused = it },
                 )
             }
@@ -1235,7 +1257,21 @@ internal fun GitReviewDesktopLayout(
                             Box(Modifier.weight(1f).fillMaxWidth()) {
                                 val (_, fileName) = remember(fileRev.path) { GitChangesView.splitPath(fileRev.path) }
                                 val lang = remember(fileRev.path) { gitDiffLanguage(fileRev.path) }
+                                val codeListState = rememberLazyListState()
+                                val loaded = focusedBlock.parts != null
+                                LaunchedEffect(fileRev.path, focusedBlock.key, loaded, items.size) {
+                                    val targetIdx = items.indexOfFirst {
+                                        it is GitPaneItem.Block && it.block.key == focusedBlock.key
+                                    }
+                                    if (targetIdx >= 0) {
+                                        val info = codeListState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == targetIdx }
+                                        if (info == null || info.offset < 0 || info.offset + info.size > codeListState.layoutInfo.viewportEndOffset) {
+                                            codeListState.scrollToItem(targetIdx)
+                                        }
+                                    }
+                                }
                                 LazyColumn(
+                                    state = codeListState,
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .padding(top = 8.dp, bottom = 20.dp)
@@ -1290,11 +1326,10 @@ internal fun GitReviewDesktopLayout(
                                 onDiscardFile = {
                                     val f = fileRev.file ?: return@DesktopBottomBar
                                     val sum = GitChangesView.discardSummary(listOf(f))
-                                    val what = f.path.substringAfterLast('/')
                                     confirm = ReviewConfirmState(
-                                        title = "Discard changes to $what?",
-                                        detail = "This will $sum. You can undo within a few minutes from the notification.",
-                                        confirmLabel = "Discard",
+                                        title = sum.title,
+                                        detail = sum.body,
+                                        confirmLabel = sum.confirm,
                                         onConfirm = { onDiscardFile(fileRev.path) },
                                     )
                                 },
@@ -1756,6 +1791,7 @@ private fun GitReviewPhoneLayout(
                         },
                         onUndoLast = onUndoCommit,
                         isBottom = true,
+                        branch = changes.branch.head,
                     )
                 }
             }
@@ -1840,11 +1876,10 @@ private fun GitReviewPhoneLayout(
                                 sheet = null
                                 val f = fileRev.file ?: return@clickable
                                 val sum = GitChangesView.discardSummary(listOf(f))
-                                val what = f.path.substringAfterLast('/')
                                 confirm = ReviewConfirmState(
-                                    title = "Discard changes to $what?",
-                                    detail = "This will $sum. You can undo within a few minutes from the notification.",
-                                    confirmLabel = "Discard",
+                                    title = sum.title,
+                                    detail = sum.body,
+                                    confirmLabel = sum.confirm,
                                     onConfirm = { onDiscardFile(fileRev.path) },
                                 )
                             }

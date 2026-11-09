@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -50,6 +51,8 @@ import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -57,6 +60,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.hienlh.ppm.client.ChangedFile
@@ -132,6 +136,54 @@ internal fun TruncatedText(
     )
 }
 
+/**
+ * Start-ellipsized single-line text (`StartTruncatedText` in `git-change-parts.tsx`), keeping
+ * the filename/folder tail visible when space is tight while exposing the full string to
+ * semantics/tests.
+ */
+@Composable
+internal fun StartTruncatedText(
+    text: String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+) {
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {
+        val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+        val maxPx = constraints.maxWidth
+        val display = remember(text, style, maxPx) {
+            if (text.isEmpty() || maxPx <= 0 || maxPx == Int.MAX_VALUE) {
+                text
+            } else {
+                val fullWidth = measurer.measure(AnnotatedString(text), style = style, maxLines = 1, softWrap = false).size.width
+                if (fullWidth <= maxPx) {
+                    text
+                } else {
+                    var lo = 1
+                    var hi = text.length
+                    var best = "…${text.takeLast(1)}"
+                    while (lo <= hi) {
+                        val mid = (lo + hi) ushr 1
+                        val cand = "…${text.takeLast(mid)}"
+                        val w = measurer.measure(AnnotatedString(cand), style = style, maxLines = 1, softWrap = false).size.width
+                        if (w <= maxPx) {
+                            best = cand
+                            lo = mid + 1
+                        } else {
+                            hi = mid - 1
+                        }
+                    }
+                    best
+                }
+            }
+        }
+        BasicText(
+            text = display,
+            style = style,
+            maxLines = 1,
+        )
+    }
+}
+
 internal fun Modifier.rightClick(onClick: () -> Unit): Modifier = pointerInput(onClick) {
     awaitEachGesture {
         val event = awaitPointerEvent(PointerEventPass.Main)
@@ -162,7 +214,7 @@ internal fun gitStatusRgba(status: String?, tokens: ThemeTokens): Color? =
 internal fun StatusTile(file: ChangedFile) {
     val tokens = LocalPpmTokens.current
     val letter = GitChangesView.changeLetter(file)
-    val conflict = file.conflict != null
+    val conflict = file.conflict
     val tone = when {
         conflict || letter == "D" -> tokens.error
         letter == "A" -> tokens.success
@@ -183,38 +235,41 @@ internal fun StatusTile(file: ChangedFile) {
     }
 }
 
+private const val MAX_DOTS = 6
+
 @Composable
 internal fun BlockDots(file: ChangedFile) {
     val tokens = LocalPpmTokens.current
-    val res = remember(file) { GitChangesView.blockDots(file) }
-    if (res.blocks.isEmpty()) return
+    val dots = remember(file) { GitChangesView.blockDots(file) }
+    if (dots.isEmpty()) return
+    val staged = dots.count { it }
+    val title = "$staged of ${dots.size} ${if (dots.size == 1) "block" else "blocks"} staged"
     Row(
+        modifier = Modifier
+            .semantics { contentDescription = title }
+            .testTag("git-block-dots-${file.path}"),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        for (block in res.blocks) {
-            val tone = when (block) {
-                "add" -> tokens.success
-                "delete" -> tokens.error
-                else -> tokens.warning
-            }
+        dots.take(MAX_DOTS).forEachIndexed { i, on ->
             Box(
                 modifier = Modifier
-                    .size(5.dp)
-                    .clip(RoundedCornerShape(1.dp))
+                    .size(7.dp)
+                    .clip(CircleShape)
                     .then(
-                        if (res.staged) {
-                            Modifier.background(tone.color)
+                        if (on) {
+                            Modifier.background(tokens.accent.color)
                         } else {
-                            Modifier.cssBorder(tone.opacity(0.8).color, RoundedCornerShape(1.dp))
+                            Modifier.cssBorder(tokens.text3.opacity(0.85).color, CircleShape)
                         },
-                    ),
+                    )
+                    .testTag("git-block-dot-${file.path}-$i-${if (on) "on" else "off"}"),
             )
         }
-        if (res.overflow > 0) {
+        if (dots.size > MAX_DOTS) {
             BasicText(
-                text = "+${res.overflow}",
-                style = PpmFont.mono(9, lineHeight = 10, color = tokens.text3.color),
+                text = "+${dots.size - MAX_DOTS}",
+                style = PpmFont.mono(10, lineHeight = 10, color = tokens.text3.color),
             )
         }
     }
@@ -260,20 +315,20 @@ internal fun CheckCell(
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
-    val hitSize = if (mobile) 28.dp else 20.dp
     Box(
         modifier = Modifier
-            .size(hitSize)
+            .width(if (mobile) 48.dp else 30.dp)
+            .fillMaxHeight()
             .then(if (tag != null) Modifier.testTag(tag) else Modifier)
             .alpha(if (disabled) 0.4f else 1f)
             .clickable(enabled = !disabled, role = Role.Checkbox, onClick = onToggle),
         contentAlignment = Alignment.Center,
     ) {
         val checked = state != CheckState.NONE
-        val shape = RoundedCornerShape(3.dp)
+        val shape = RoundedCornerShape(if (mobile) 5.dp else 3.dp)
         Box(
             modifier = Modifier
-                .size(14.dp)
+                .size(if (mobile) 20.dp else 14.dp)
                 .clip(shape)
                 .background(if (checked) tokens.accent.color else Color.Transparent)
                 .cssBorder(if (checked) tokens.accent.color else tokens.text3.opacity(0.6).color, shape),
@@ -313,59 +368,123 @@ internal fun GitConfirm(
     title: String,
     detail: String,
     confirmLabel: String,
+    confirmIcon: ProductIcon = ProductIcon.Trash2,
     destructive: Boolean = false,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(8.dp)
-    Dialog(onDismissRequest = onCancel) {
-        Column(
-            modifier = Modifier
-                .width(340.dp)
-                .clip(shape)
-                .background(tokens.bgSolid.color)
-                .cssBorder(tokens.border.color, shape)
-                .padding(14.dp)
-                .testTag("git-confirm-dialog"),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    val mobile = LocalPpmMobile.current
+    val btnHeight = if (mobile) 44.dp else 28.dp
+    val shape = if (mobile) {
+        RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+    } else {
+        RoundedCornerShape(8.dp)
+    }
+    val btnBg = if (destructive) tokens.error.color else tokens.accent.color
+    val btnFg = if (destructive) Color.White else tokens.accentFg.color
+
+    @Composable
+    fun CancelButton(modifier: Modifier = Modifier) {
+        Box(
+            modifier = modifier
+                .height(btnHeight)
+                .testTag("git-confirm-cancel")
+                .clip(RoundedCornerShape(6.dp))
+                .clickable(onClick = onCancel)
+                .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            BasicText(
-                text = title,
-                style = PpmFont.sans(13, FontWeight.SemiBold, lineHeight = 18, color = tokens.text.color),
-            )
-            BasicText(
-                text = detail,
-                style = PpmFont.sans(12, lineHeight = 16, color = tokens.text2.color),
-            )
+            BasicText("Cancel", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text.color))
+        }
+    }
+
+    @Composable
+    fun ConfirmButton(modifier: Modifier = Modifier) {
+        Box(
+            modifier = modifier
+                .height(btnHeight)
+                .testTag("git-confirm-ok")
+                .clip(RoundedCornerShape(6.dp))
+                .background(btnBg)
+                .clickable(onClick = onConfirm)
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Box(
-                    modifier = Modifier
-                        .height(28.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
-                        .clickable(onClick = onCancel)
-                        .padding(horizontal = 12.dp),
-                    contentAlignment = Alignment.Center,
+                PpmIcon(
+                    confirmIcon,
+                    size = 14.dp,
+                    tint = btnFg,
+                    modifier = Modifier.testTag("git-confirm-icon-${confirmIcon.name}"),
+                )
+                BasicText(confirmLabel, style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = btnFg))
+            }
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onCancel,
+        properties = DialogProperties(usePlatformDefaultWidth = !mobile),
+    ) {
+        Box(
+            modifier = if (mobile) {
+                Modifier.fillMaxSize().clickable(onClick = onCancel).testTag("git-confirm-bottom-sheet")
+            } else {
+                Modifier
+            },
+            contentAlignment = if (mobile) Alignment.BottomCenter else Alignment.Center,
+        ) {
+            Column(
+                modifier = Modifier
+                    .then(if (mobile) Modifier.fillMaxWidth() else Modifier.width(340.dp))
+                    .clip(shape)
+                    .background(tokens.bgSolid.color)
+                    .cssBorder(tokens.border.color, shape)
+                    .clickable(enabled = mobile) {}
+                    .padding(14.dp)
+                    .testTag("git-confirm-dialog"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    BasicText("Cancel", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text.color))
+                    PpmIcon(
+                        ProductIcon.AlertTriangle,
+                        size = 16.dp,
+                        tint = tokens.error.color,
+                        modifier = Modifier.testTag("git-confirm-alert-icon"),
+                    )
+                    BasicText(
+                        text = title,
+                        style = PpmFont.sans(13, FontWeight.SemiBold, lineHeight = 18, color = tokens.text.color),
+                    )
                 }
-                val btnBg = if (destructive) tokens.error.color else tokens.accent.color
-                val btnFg = if (destructive) Color.White else tokens.accentFg.color
-                Box(
-                    modifier = Modifier
-                        .height(28.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(btnBg)
-                        .clickable(onClick = onConfirm)
-                        .padding(horizontal = 12.dp)
-                        .testTag("git-confirm-ok"),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    BasicText(confirmLabel, style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = btnFg))
+                BasicText(
+                    text = detail,
+                    style = PpmFont.sans(12, lineHeight = 16, color = tokens.text2.color),
+                )
+                if (mobile) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ConfirmButton(Modifier.fillMaxWidth())
+                        CancelButton(Modifier.fillMaxWidth())
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+                    ) {
+                        CancelButton()
+                        ConfirmButton()
+                    }
                 }
             }
         }
@@ -375,37 +494,33 @@ internal fun GitConfirm(
 @Composable
 internal fun GitNoRepo(onRescan: () -> Unit) {
     val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 32.dp)
+            .padding(horizontal = 24.dp, vertical = 32.dp)
             .testTag("git-no-repo"),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        PpmIcon(LucideIcon.FolderGit2, size = 28.dp, tint = tokens.text3.opacity(0.6).color)
-        Spacer(Modifier.height(10.dp))
+        PpmIcon(LucideIcon.FolderGit2, size = 32.dp, tint = tokens.text3.opacity(0.6).color)
+        Spacer(Modifier.height(12.dp))
         BasicText(
-            text = "Not a Git repository",
-            style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text.color),
-        )
-        Spacer(Modifier.height(4.dp))
-        BasicText(
-            text = "This project folder has no .git directory at its root or one level down.",
-            style = PpmFont.sans(11, lineHeight = 16, color = tokens.text3.color).copy(textAlign = TextAlign.Center),
+            text = "No git repository in this project, or in any folder two levels below it.",
+            style = PpmFont.sans(13, lineHeight = 18, color = tokens.text2.color).copy(textAlign = TextAlign.Center),
         )
         Spacer(Modifier.height(12.dp))
         Row(
             modifier = Modifier
-                .height(28.dp)
+                .height(if (mobile) 44.dp else 36.dp)
                 .clip(RoundedCornerShape(6.dp))
                 .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
                 .clickable(onClick = onRescan)
-                .padding(horizontal = 10.dp),
+                .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            PpmIcon(ProductIcon.RefreshCw, size = 12.dp, tint = tokens.text2.color)
+            PpmIcon(ProductIcon.RefreshCw, size = 14.dp, tint = tokens.text2.color)
             BasicText("Scan again", style = PpmFont.sans(12, lineHeight = 16, color = tokens.text2.color))
         }
     }
@@ -421,30 +536,31 @@ internal fun GitRepoChoice(repos: List<GitRepo>, onSelect: (GitRepo) -> Unit) {
         if (q.isEmpty()) repos else repos.filter { it.name.lowercase().contains(q) || it.relative.lowercase().contains(q) }
     }
     Column(
-        modifier = Modifier.fillMaxSize().testTag("git-repo-choice"),
+        modifier = Modifier.fillMaxSize().padding(16.dp).testTag("git-repo-choice"),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .edge(Edge.Bottom, tokens.border.color)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            PpmIcon(LucideIcon.FolderGit2, size = 16.dp, tint = tokens.accent.color)
-            Column(Modifier.weight(1f)) {
-                BasicText("Select a repository", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text.color))
-                BasicText(
-                    "${repos.size} Git repositories found in this workspace",
-                    style = PpmFont.sans(11, lineHeight = 14, color = tokens.text3.color),
-                )
-            }
+            PpmIcon(LucideIcon.FolderGit2, size = 16.dp, tint = tokens.text3.color)
+            BasicText(
+                "${repos.size} repositories in this folder",
+                style = PpmFont.sans(14, FontWeight.Medium, lineHeight = 18, color = tokens.text.color),
+            )
         }
+        BasicText(
+            "This project folder is not a git repository itself. Pick the one to work with — you can switch later from the header.",
+            style = PpmFont.sans(12, lineHeight = 16, color = tokens.text2.color),
+            modifier = Modifier.padding(bottom = 12.dp),
+        )
         if (showSearch) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .edge(Edge.Bottom, tokens.border.color)
+                    .padding(bottom = 8.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
                     .padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -467,22 +583,28 @@ internal fun GitRepoChoice(repos: List<GitRepo>, onSelect: (GitRepo) -> Unit) {
             }
         }
         Column(
-            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(vertical = 4.dp),
+            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             for (repo in filtered) {
+                val candShape = RoundedCornerShape(6.dp)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 44.dp)
+                        .clip(candShape)
+                        .background(tokens.panel.color)
+                        .cssBorder(tokens.border.color, candShape)
                         .clickable { onSelect(repo) }
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    PpmIcon(ProductIcon.GitBranch, size = 14.dp, tint = tokens.text3.color)
+                    PpmIcon(ProductIcon.GitBranch, size = 16.dp, tint = tokens.text3.color)
                     Column(Modifier.weight(1f)) {
-                        TruncatedText(repo.name, style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text.color))
+                        TruncatedText(repo.name, style = PpmFont.sans(13, FontWeight.Medium, lineHeight = 18, color = tokens.text.color))
                         if (repo.relative != repo.name) {
-                            TruncatedText(repo.relative, style = PpmFont.mono(10, lineHeight = 14, color = tokens.text3.color))
+                            TruncatedText(repo.relative, style = PpmFont.mono(11, lineHeight = 14, color = tokens.text3.color))
                         }
                     }
                 }
@@ -748,10 +870,12 @@ internal fun GitOperationBanner(
     onAbort: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
     val noun = GitChangesView.OPERATION_NOUN[operation.kind] ?: operation.kind
-    val title = remember(operation, branch) { GitChangesView.operationTitle(operation, branch) }
-    val continuing = busyAction == "op:continue"
-    val aborting = busyAction == "op:abort"
+    val title = remember(operation, branch.head) { GitChangesView.operationTitle(operation, branch.head) }
+    val continuing = busyAction == "continue" || busyAction == "op:continue"
+    val aborting = busyAction == "abort" || busyAction == "op:abort"
+    val btnHeight = if (mobile) 44.dp else 26.dp
 
     Column(
         modifier = Modifier
@@ -786,7 +910,7 @@ internal fun GitOperationBanner(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(26.dp)
+                    .height(btnHeight)
                     .clip(RoundedCornerShape(6.dp))
                     .background(tokens.bgSolid.color)
                     .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
@@ -804,7 +928,7 @@ internal fun GitOperationBanner(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(26.dp)
+                    .height(btnHeight)
                     .clip(RoundedCornerShape(6.dp))
                     .background(tokens.accent.color)
                     .alpha(if (canCont) 1f else 0.4f)
@@ -833,20 +957,33 @@ internal fun GitCommitComposer(
     onCommit: (amend: Boolean, signoff: Boolean, andPush: Boolean) -> Unit,
     onUndoLast: () -> Unit,
     isBottom: Boolean = false,
+    branch: String? = null,
     onInputFocusChanged: ((Boolean) -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
     var menuOpen by remember { mutableStateOf(false) }
     DisposableEffect(onInputFocusChanged) {
         onDispose { onInputFocusChanged?.invoke(false) }
     }
 
-    val canSend = GitChangesView.canCommit(totals, message, operation, amend = false, hasLastCommit = lastCommit != null)
-    val canAmend = GitChangesView.canCommit(totals, message, operation, amend = true, hasLastCommit = lastCommit != null)
-    val canUndo = lastCommit != null && !lastCommit.pushed && lastCommit.hasParent && operation == null
-    val label = GitChangesView.commitLabel(totals, amend = false)
+    val rewritable = lastCommit != null && !lastCommit.pushed
+    val canSend = GitChangesView.canCommit(totals, message, operation, amend = false)
+    val canAmend = rewritable && (totals.filesStaged > 0 || message.trim().isNotEmpty()) && (operation == null || operation.kind == "merge")
+    val canUndo = rewritable && lastCommit.hasParent && operation == null
+    val ready = canSend && busyAction == null
+    val amendable = canAmend && busyAction == null
+    val undoable = canUndo && busyAction == null
+    val label = GitChangesView.commitLabel(totals)
     val hint = GitChangesView.commitHint(totals, message)
-    val committing = busyAction == "commit" || busyAction == "commit-push" || busyAction == "amend"
+    val committing = busyAction == "commit"
+    val barHeight = if (mobile) 44.dp else 32.dp
+    val triggerWidth = if (mobile) 44.dp else 32.dp
+    val placeholderText = if (!branch.isNullOrEmpty()) {
+        "Message (Ctrl+↵ to commit on $branch)"
+    } else {
+        "Message (Ctrl+↵ to commit)"
+    }
 
     Column(
         modifier = Modifier
@@ -883,7 +1020,7 @@ internal fun GitCommitComposer(
                     .onFocusChanged { onInputFocusChanged?.invoke(it.isFocused) }
                     .onPreviewKeyEvent { ev ->
                         if (ev.type == KeyEventType.KeyDown && ev.key == Key.Enter && (ev.isCtrlPressed || ev.isMetaPressed)) {
-                            if (canSend && busyAction == null) onCommit(false, false, false)
+                            if (ready) onCommit(false, false, false)
                             true
                         } else {
                             false
@@ -892,7 +1029,7 @@ internal fun GitCommitComposer(
                 decorationBox = { inner ->
                     if (message.isEmpty()) {
                         BasicText(
-                            text = if (operation?.kind == "merge") "Merge commit message" else "Commit message",
+                            text = placeholderText,
                             style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color),
                         )
                     }
@@ -906,16 +1043,16 @@ internal fun GitCommitComposer(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(30.dp)
+                    .height(barHeight)
                     .clip(btnShape)
                     .background(tokens.accent.color),
             ) {
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .height(30.dp)
-                        .alpha(if (canSend && busyAction == null) 1f else 0.4f)
-                        .clickable(enabled = canSend && busyAction == null) { onCommit(false, false, false) }
+                        .height(barHeight)
+                        .alpha(if (ready) 1f else 0.4f)
+                        .clickable(enabled = ready) { onCommit(false, false, false) }
                         .padding(horizontal = 12.dp)
                         .testTag("git-commit-button"),
                     verticalAlignment = Alignment.CenterVertically,
@@ -930,8 +1067,8 @@ internal fun GitCommitComposer(
                 }
                 Box(
                     modifier = Modifier
-                        .width(28.dp)
-                        .height(30.dp)
+                        .width(triggerWidth)
+                        .height(barHeight)
                         .cssBorder(tokens.accentFg.opacity(0.2).color, sides = CssSides.Start)
                         .alpha(if (busyAction == null) 1f else 0.4f)
                         .clickable(enabled = busyAction == null) { menuOpen = !menuOpen }
@@ -958,35 +1095,33 @@ internal fun GitCommitComposer(
                             .padding(vertical = 4.dp),
                     ) {
                         CommitMenuItem(
-                            label = if (syncMode == "publish") "Commit and publish" else "Commit and push",
-                            enabled = canSend,
+                            label = "Commit and push",
+                            enabled = ready,
                         ) {
                             menuOpen = false
                             onCommit(false, false, true)
                         }
                         CommitMenuItem(
                             label = "Amend last commit",
-                            enabled = canAmend,
+                            enabled = amendable,
                         ) {
                             menuOpen = false
                             onCommit(true, false, false)
                         }
                         CommitMenuItem(
                             label = "Commit with sign-off",
-                            enabled = canSend,
+                            enabled = ready,
                         ) {
                             menuOpen = false
                             onCommit(false, true, false)
                         }
-                        if (canUndo) {
-                            Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(tokens.border.color))
-                            CommitMenuItem(
-                                label = "Undo last commit",
-                                enabled = true,
-                            ) {
-                                menuOpen = false
-                                onUndoLast()
-                            }
+                        Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(tokens.border.color))
+                        CommitMenuItem(
+                            label = "Undo last commit",
+                            enabled = undoable,
+                        ) {
+                            menuOpen = false
+                            onUndoLast()
                         }
                     }
                 }
@@ -1009,9 +1144,11 @@ private fun CommitMenuItem(
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = if (mobile) 44.dp else 28.dp)
             .alpha(if (enabled) 1f else 0.4f)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp),

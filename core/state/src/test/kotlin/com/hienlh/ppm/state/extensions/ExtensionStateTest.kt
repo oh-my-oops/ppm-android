@@ -1,5 +1,7 @@
 package com.hienlh.ppm.state.extensions
 
+import okhttp3.HttpUrl.Companion.toHttpUrl
+
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -30,7 +32,7 @@ class ExtensionStateTest {
         assertNotNull(contribMsg)
         assertEquals(1, contribMsg!!.contributions.commands.size)
         assertEquals("git-graph.view", contribMsg.contributions.commands[0].command)
-        assertEquals("Timed out", contribMsg.activationErrors["bad.ext"])
+        assertEquals("Timed out", contribMsg.activationErrors?.get("bad.ext"))
 
         val createMsg = ExtServerMessage.parse(
             """
@@ -139,6 +141,22 @@ class ExtensionStateTest {
 
         val iconsMsg = Json.parseToJsonElement("""{"command":"__ppm.fileIcons","names":["App.tsx","README.md"]}""")
         assertEquals(listOf("App.tsx", "README.md"), ExtensionWebviewBridge.fileIconsRequest(iconsMsg))
+
+        val answer = ExtensionWebviewBridge.fileIconsAnswer(
+            icons = listOf("App.tsx" to "vsi-file-type-reactts", "__proto__" to "vsi-default-file"),
+            rules = listOf("vsi-file-type-reactts" to ".vsi-file-type-reactts { background-image: url(\"data:...\"); }\n"),
+        )
+        assertEquals("__ppm.fileIcons", (answer["command"] as JsonPrimitive).content)
+        val ansIcons = answer["icons"] as kotlinx.serialization.json.JsonArray
+        assertEquals(2, ansIcons.size)
+        val firstPair = ansIcons[0] as kotlinx.serialization.json.JsonArray
+        assertEquals("App.tsx", (firstPair[0] as JsonPrimitive).content)
+        assertEquals("vsi-file-type-reactts", (firstPair[1] as JsonPrimitive).content)
+        val ansRules = answer["rules"] as kotlinx.serialization.json.JsonArray
+        assertEquals(1, ansRules.size)
+        val firstRule = ansRules[0] as kotlinx.serialization.json.JsonArray
+        assertEquals("vsi-file-type-reactts", (firstRule[0] as JsonPrimitive).content)
+        assertTrue((firstRule[1] as JsonPrimitive).content.startsWith(".vsi-file-type-reactts"))
     }
 
     @Test
@@ -151,5 +169,188 @@ class ExtensionStateTest {
         assertEquals("expanded", merged[0].collapsibleState)
         assertEquals(1, merged[0].children?.size)
         assertEquals("child-1", merged[0].children!![0].id)
+    }
+
+    @Test
+    fun `QuickPickShow and InputBoxShow resolve superseded requests with null before replacing`() {
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob())
+        val api = com.hienlh.ppm.client.ApiClient("http://localhost:3210".toHttpUrl(), "tok")
+        val sentClientMessages = mutableListOf<String>()
+        val client = object : ExtensionClient(api, scope) {
+            override fun sendRaw(json: String) {
+                sentClientMessages += json
+            }
+        }
+        try {
+            val qp1 = ExtServerMessage.parse(
+                """{"type":"quickpick:show","requestId":"qp-1","items":[{"label":"one"}]}""",
+            )!!
+            val qp2 = ExtServerMessage.parse(
+                """{"type":"quickpick:show","requestId":"qp-2","items":[{"label":"two"}]}""",
+            )!!
+            client.handle(qp1)
+            assertEquals("qp-1", client.quickPick.value?.requestId)
+            assertTrue(sentClientMessages.isEmpty())
+
+            client.handle(qp2)
+            assertEquals("qp-2", client.quickPick.value?.requestId)
+            assertEquals(1, sentClientMessages.size)
+            assertTrue(sentClientMessages[0].contains("\"type\":\"quickpick:resolve\""))
+            assertTrue(sentClientMessages[0].contains("\"requestId\":\"qp-1\""))
+            assertTrue(sentClientMessages[0].contains("\"selected\":null"))
+
+            val ib1 = ExtServerMessage.parse(
+                """{"type":"inputbox:show","requestId":"ib-1","options":{"prompt":"First"}}""",
+            )!!
+            val ib2 = ExtServerMessage.parse(
+                """{"type":"inputbox:show","requestId":"ib-2","options":{"prompt":"Second"}}""",
+            )!!
+            client.handle(ib1)
+            assertEquals("ib-1", client.inputBox.value?.requestId)
+            client.handle(ib2)
+            assertEquals("ib-2", client.inputBox.value?.requestId)
+            assertEquals(2, sentClientMessages.size)
+            assertTrue(sentClientMessages[1].contains("\"type\":\"inputbox:resolve\""))
+            assertTrue(sentClientMessages[1].contains("\"requestId\":\"ib-1\""))
+            assertTrue(sentClientMessages[1].contains("\"value\":null"))
+        } finally {
+            client.stop()
+        }
+    }
+
+    @Test
+    fun `TreeRefresh removes view from treeViews and ContributionsUpdate emits only new activationErrors`() {
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob())
+        val api = com.hienlh.ppm.client.ApiClient("http://localhost:3210".toHttpUrl(), "tok")
+        val client = ExtensionClient(api, scope)
+        val newErrors = mutableListOf<Pair<String, String>>()
+        client.onActivationError = { id, err -> newErrors += id to err }
+        try {
+            client.handle(
+                ExtServerMessage.parse(
+                    """{"type":"tree:update","viewId":"ext.tree","items":[{"id":"n1","label":"Node 1"}]}""",
+                )!!,
+            )
+            assertEquals(1, client.treeViews.value["ext.tree"]?.size)
+
+            client.handle(
+                ExtServerMessage.parse(
+                    """{"type":"tree:refresh","viewId":"ext.tree"}""",
+                )!!,
+            )
+            assertNull(client.treeViews.value["ext.tree"])
+
+            client.handle(
+                ExtServerMessage.parse(
+                    """{"type":"contributions:update","contributions":{},"activationErrors":{"ext.a":"Boom"}}""",
+                )!!,
+            )
+            assertEquals(listOf("ext.a" to "Boom"), newErrors)
+
+            // Repeated update with same ext.a + new ext.b only notifies ext.b
+            client.handle(
+                ExtServerMessage.parse(
+                    """{"type":"contributions:update","contributions":{},"activationErrors":{"ext.a":"Boom","ext.b":"Crash"}}""",
+                )!!,
+            )
+            assertEquals(listOf("ext.a" to "Boom", "ext.b" to "Crash"), newErrors)
+            assertEquals(mapOf("ext.a" to "Boom", "ext.b" to "Crash"), client.activationErrors.value)
+
+            // Update without activationErrors key preserves existing activationErrors (use-extension-ws.ts:101)
+            client.handle(
+                ExtServerMessage.parse(
+                    """{"type":"contributions:update","contributions":{}}""",
+                )!!,
+            )
+            assertEquals(mapOf("ext.a" to "Boom", "ext.b" to "Crash"), client.activationErrors.value)
+        } finally {
+            client.stop()
+        }
+    }
+
+    @Test
+    fun `ExternalLinkGate requires recent user gesture and rate-limits openExternal`() {
+        val gate = ExternalLinkGate(gestureWindowMs = 2_000L, cooldownMs = 1_000L)
+        val linkMsg = Json.parseToJsonElement("""{"command":"__ppm.openExternal","url":"https://github.com/hienlh/ppm"}""")
+
+        // Without gesture -> rejected
+        val noGesture = gate.tryConsumeOpenExternal(linkMsg, nowMs = 1_000L)
+        assertNotNull(noGesture)
+        assertTrue(noGesture!!.isFailure)
+
+        // With recent gesture -> allowed once
+        gate.recordUserGesture(nowMs = 2_000L)
+        val firstAllowed = gate.tryConsumeOpenExternal(linkMsg, nowMs = 2_500L)
+        assertNotNull(firstAllowed)
+        assertTrue(firstAllowed!!.isSuccess)
+        assertEquals("https://github.com/hienlh/ppm", firstAllowed.getOrNull())
+
+        // Second within cooldownMs -> rate-limited
+        val rateLimited = gate.tryConsumeOpenExternal(linkMsg, nowMs = 3_000L)
+        assertNotNull(rateLimited)
+        assertTrue(rateLimited!!.isFailure)
+
+        // Expired gesture -> rejected
+        val expiredGesture = gate.tryConsumeOpenExternal(linkMsg, nowMs = 5_000L)
+        assertNotNull(expiredGesture)
+        assertTrue(expiredGesture!!.isFailure)
+    }
+
+    @Test
+    fun `setStateRequest and injectVscodeApiShim persist and seed webview state`() {
+        val msg = Json.parseToJsonElement("""{"command":"__ppm.setState","state":{"repo":"/work/app","scroll":42}}""")
+        val state = ExtensionWebviewBridge.setStateRequest(msg)
+        assertNotNull(state)
+        assertEquals("""{"repo":"/work/app","scroll":42}""", state.toString())
+
+        val html = ExtensionWebviewBridge.injectVscodeApiShim("<html><head></head><body></body></html>", state.toString())
+        assertTrue(html.contains("""var memState = {"repo":"/work/app","scroll":42};"""))
+        assertTrue(html.contains("__ppm.setState"))
+    }
+
+    @Test
+    fun `headerActionsForView filters view title menus by when clause and commandRunsGit matches only git-graph prefix`() {
+        val contrib = ExtensionContributes.from(
+            Json.parseToJsonElement(
+                """
+                {
+                  "commands": [
+                    {"command": "db.refresh", "title": "Refresh DB", "icon": "refresh"},
+                    {"command": "other.add", "title": "Add Other", "icon": "plus"}
+                  ],
+                  "menus": {
+                    "view/title": [
+                      {"command": "db.refresh", "when": "view == db.connections"},
+                      {"command": "other.add", "when": "view == other.tree"}
+                    ]
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+        val actions = contrib.headerActionsForView("db.connections")
+        assertEquals(1, actions.size)
+        assertEquals("db.refresh", actions[0].command)
+        assertEquals("Refresh DB", actions[0].title)
+
+        assertTrue(com.hienlh.ppm.state.git.GitRepoScope.commandRunsGit("git-graph.view"))
+        assertFalse(com.hienlh.ppm.state.git.GitRepoScope.commandRunsGit("git.other"))
+        assertFalse(com.hienlh.ppm.state.git.GitRepoScope.commandRunsGit("db.refresh"))
+
+        val explorerFallback = ExtensionContributes.from(
+            Json.parseToJsonElement(
+                """
+                {
+                  "views": {
+                    "explorer": [
+                      {"id": "ext.tree", "name": "Explorer Tree", "type": "tree"},
+                      {"id": "ext.web", "name": "Explorer Web", "type": "webview"}
+                    ]
+                  }
+                }
+                """.trimIndent(),
+            ),
+        )
+        assertEquals(listOf("ext.tree", "ext.web"), explorerFallback.sidebarViews().map { it.id })
     }
 }

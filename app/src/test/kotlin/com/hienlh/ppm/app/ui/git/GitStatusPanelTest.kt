@@ -1,18 +1,24 @@
 package com.hienlh.ppm.app.ui.git
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.files.ExplorerTreeRow
 import com.hienlh.ppm.app.ui.files.installBlankFileIcons
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.client.ApiClient
+import com.hienlh.ppm.client.ChangeBlock
 import com.hienlh.ppm.client.ChangeSide
 import com.hienlh.ppm.client.ChangedFile
 import com.hienlh.ppm.client.GitBranchState
@@ -27,6 +33,7 @@ import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -109,7 +116,11 @@ class GitStatusPanelTest {
         val files = listOf(
             ChangedFile(
                 path = "src/App.kt",
-                staged = ChangeSide(status = "M", added = 12, removed = 3, blocks = listOf("a")),
+                conflict = false,
+                x = "M",
+                y = ".",
+                untracked = false,
+                staged = ChangeSide(added = 12, removed = 3, blocks = listOf("a")),
             ),
         )
         val totals = GitChangesView.changeTotals(files)
@@ -142,6 +153,7 @@ class GitStatusPanelTest {
                     busyAction = null,
                     onCommit = { _, _, _ -> committed = true },
                     onUndoLast = {},
+                    branch = branch.head,
                 )
                 CleanState(
                     last = lastCommit,
@@ -183,11 +195,19 @@ class GitStatusPanelTest {
         val files = listOf(
             ChangedFile(
                 path = "src/ui/GitStatusPanel.kt",
-                staged = ChangeSide(status = "A", added = 50, removed = 0, blocks = listOf("a")),
+                conflict = false,
+                x = "A",
+                y = ".",
+                untracked = false,
+                staged = ChangeSide(added = 50, removed = 0, blocks = listOf("a")),
             ),
             ChangedFile(
                 path = "src/ui/GitChangeParts.kt",
-                unstaged = ChangeSide(status = "M", added = 10, removed = 2, blocks = listOf("m")),
+                conflict = false,
+                x = ".",
+                y = "M",
+                untracked = false,
+                unstaged = ChangeSide(added = 10, removed = 2, blocks = listOf("m")),
             ),
         )
         var toggledFile: String? = null
@@ -205,10 +225,12 @@ class GitStatusPanelTest {
                     viewMode = "flat",
                     onToggleFile = { toggledFile = it.path },
                     onToggleBatch = { toggledBatchCount = it.size },
+                    onStageFile = {},
+                    onUnstageFile = {},
                     onOpen = {},
                     onOpenDiff = {},
                     onOpenFile = {},
-                    onDiscard = { _, _ -> },
+                    onDiscard = {},
                     onStageLines = { _, _ -> },
                     onMarkResolved = {},
                     onReviewAll = { reviewedAll = true },
@@ -318,6 +340,639 @@ class GitStatusPanelTest {
             val targetsAfter = synchronized(recorded) { recorded.toList() }
             assertEquals(2, targetsAfter.count { it.endsWith("/git/repos") })
             assertTrue(targetsAfter.any { it.contains("/git/changes") })
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `git status panel unstages partly-staged file via Unstage file menu and handles null stash and mixed discard undo+skipped`() {
+        installBlankFileIcons()
+        val server = MockWebServer()
+        val recordedMethodsAndTargets = mutableListOf<Pair<String, String>>()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                synchronized(recordedMethodsAndTargets) {
+                    recordedMethodsAndTargets += (request.method ?: "GET") to target
+                }
+                return when {
+                    target.endsWith("/git/repos") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"projectPath":"/work/app","rootIsRepo":true,"repos":[{"path":"/work/app","name":"app","relative":"."}]}}""")
+                        .build()
+                    target.contains("/git/changes") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body(
+                            """{"ok":true,"data":{"branch":{"head":"main","oid":"1111111","upstream":"origin/main","upstreamGone":false,"ahead":0,"behind":0,"hasRemote":true},"operation":null,"files":[{"path":"src/Partial.kt","x":"M","y":"M","untracked":false,"conflict":false,"staged":{"added":2,"removed":0,"blocks":[{"id":"b1","index":0,"oldStart":1,"oldLines":0,"newStart":1,"newLines":2,"added":2,"removed":0}]},"unstaged":{"added":3,"removed":1,"blocks":[{"id":"b2","index":0,"oldStart":10,"oldLines":1,"newStart":12,"newLines":3,"added":3,"removed":1}]}}],"stashes":0,"lastCommit":null,"truncated":false}}""",
+                        )
+                        .build()
+                    target.contains("/git/commit-draft") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"message":"","updatedAt":0}}""")
+                        .build()
+                    target.endsWith("/git/unstage") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"unstaged":true}}""")
+                        .build()
+                    target.endsWith("/git/stash") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"stashed":false,"stash":null}}""")
+                        .build()
+                    target.endsWith("/git/discard") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"undo":{"id":"undo-99","createdAt":1700000000,"paths":["src/Partial.kt"],"skipped":["assets/huge.bin"]}}}""")
+                        .build()
+                    else -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{}}""")
+                        .build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val model = AppModel(ApplicationProvider.getApplicationContext())
+            model.api = ApiClient(server.url("/"), "tok")
+            model.selectedProject = "demo"
+
+            var isMobile by androidx.compose.runtime.mutableStateOf(true)
+            compose.setContent {
+                androidx.compose.runtime.CompositionLocalProvider(com.hienlh.ppm.design.LocalPpmMobile provides isMobile) {
+                    GitStatusPanel(model = model)
+                }
+            }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithTag("git-change-row-src/Partial.kt").fetchSemanticsNodes().isNotEmpty()
+            }
+
+            // Open row bottom-sheet menu on partly-staged file via long-click and click "Unstage file" -> must call /git/unstage, NOT /git/stage
+            compose.onNodeWithTag("git-change-row-src/Partial.kt").performTouchInput {
+                down(center)
+                advanceEventTime(1_000L)
+                up()
+            }
+            compose.waitForIdle()
+            compose.onNodeWithText("Unstage file").performClick()
+            compose.waitUntil(5_000) {
+                synchronized(recordedMethodsAndTargets) {
+                    recordedMethodsAndTargets.any { it.second.endsWith("/git/unstage") } &&
+                        recordedMethodsAndTargets.count { it.second.contains("/git/changes") } >= 2
+                }
+            }
+            compose.waitForIdle()
+            val afterUnstage = synchronized(recordedMethodsAndTargets) { recordedMethodsAndTargets.toList() }
+            assertFalse("Unstage file on partly-staged file must not call /git/stage", afterUnstage.any { it.second.endsWith("/git/stage") })
+
+            // Click More -> wait until busyAction clears so "Stash all changes" is enabled -> click -> shows "Nothing was stashed" toast
+            compose.onNodeWithTag("git-more-button").performClick()
+            compose.waitUntil(5_000) {
+                runCatching {
+                    compose.onNodeWithText("Stash all changes").assertIsEnabled()
+                    true
+                }.getOrDefault(false)
+            }
+            compose.onNodeWithText("Stash all changes").performClick()
+            compose.waitUntil(5_000) {
+                synchronized(recordedMethodsAndTargets) { recordedMethodsAndTargets.any { it.second.endsWith("/git/stash") } }
+            }
+            compose.waitUntil(5_000) {
+                model.toasts.any { it.message.title == "Nothing was stashed" }
+            }
+            val stashToast = model.toasts.firstOrNull { it.message.title == "Nothing was stashed" }
+            assertTrue("Expected 'Nothing was stashed' toast, got ${model.toasts.map { it.message }}", stashToast != null)
+
+            // Switch to tablet/desktop mode (`isMobile = false`) and click Discard row tool -> confirm dialog uses DiscardSummary
+            isMobile = false
+            compose.waitForIdle()
+            compose.onNodeWithTag("git-row-discard-src/Partial.kt").performClick()
+            compose.waitForIdle()
+            compose.onNodeWithText("Discard changes to Partial.kt?").assertIsDisplayed()
+            compose.onNodeWithText("This puts 1 unstaged block back to the staged version. The 1 staged block stays. You can undo it right after.").assertIsDisplayed()
+            compose.onNodeWithText("Discard 1 block").assertIsDisplayed()
+            compose.onNodeWithTag("git-confirm-ok").performClick()
+            compose.waitUntil(5_000) {
+                synchronized(recordedMethodsAndTargets) { recordedMethodsAndTargets.any { it.second.endsWith("/git/discard") } }
+            }
+            compose.waitUntil(5_000) {
+                model.toasts.any { it.message.title == "Discarded changes to Partial.kt" }
+            }
+            val toasts = model.toasts.map { it.message }
+            assertTrue("Expected Undo toast 'Discarded changes to Partial.kt', got $toasts", toasts.any { it.title == "Discarded changes to Partial.kt" && it.action?.label == "Undo" })
+            assertTrue("Expected warning toast for skipped file, got $toasts", toasts.any { it.title.contains("could not be kept") })
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `BlockDots draws first 6 dots and +N-6 overflow like git-change-parts tsx`() {
+        val fileWith8Blocks = ChangedFile(
+            path = "src/EightBlocks.kt",
+            conflict = false,
+            x = "M",
+            y = "M",
+            untracked = false,
+            staged = ChangeSide(
+                added = 2,
+                removed = 0,
+                blocks = listOf("s0", "s1"),
+                changeBlocks = listOf(
+                    ChangeBlock("s0", 0, 5, 1, 5, 2, 1, 0),
+                    ChangeBlock("s1", 1, 25, 1, 25, 2, 1, 0),
+                ),
+            ),
+            unstaged = ChangeSide(
+                added = 6,
+                removed = 0,
+                blocks = emptyList(),
+                changeBlocks = (0 until 6).map { idx ->
+                    ChangeBlock("u$idx", idx, idx * 10, 1, idx * 10, 2, 1, 0)
+                },
+            ),
+        )
+        compose.setContent {
+            BlockDots(fileWith8Blocks)
+        }
+        compose.waitForIdle()
+        // First 6 dots (0..5) are drawn; dot 6 is not; overflow text is +2
+        for (i in 0 until 6) {
+            val state = if (i == 1 || i == 4) "on" else "off"
+            compose.onNodeWithTag("git-block-dot-src/EightBlocks.kt-$i-$state", useUnmergedTree = true).assertIsDisplayed()
+        }
+        assertTrue(compose.onAllNodesWithTag("git-block-dot-src/EightBlocks.kt-6-off", useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        compose.onNodeWithText("+2", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun `gitChangesCache is keyed per repo and GitStatusPanel refreshes on failed write visibility and Fetch and shows poll-error banner`() {
+        installBlankFileIcons()
+        val server = MockWebServer()
+        val calls = mutableListOf<Pair<String, String>>()
+        var changesBehind = 0
+        var failChanges = false
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val method = request.method ?: "GET"
+                val target = request.target
+                synchronized(calls) { calls += method to target }
+                return when {
+                    target.endsWith("/git/repos") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"projectPath":"/work/app","rootIsRepo":false,"repos":[{"path":"/work/app/a","name":"a","relative":"a"},{"path":"/work/app/b","name":"b","relative":"b"}]}}""")
+                        .build()
+                    target.contains("/git/changes") -> {
+                        if (failChanges) {
+                            MockResponse.Builder()
+                                .code(500)
+                                .addHeader("Content-Type", "application/json")
+                                .body("""{"ok":false,"error":"git status poll failed"}""")
+                                .build()
+                        } else {
+                            val fileName = if (target.contains("repo=%2Fwork%2Fapp%2Fb")) "src/B.kt" else "src/A.kt"
+                            MockResponse.Builder()
+                                .addHeader("Content-Type", "application/json")
+                                .body(
+                                    """{"ok":true,"data":{"branch":{"head":"main","oid":"1111111","upstream":"origin/main","upstreamGone":false,"ahead":0,"behind":$changesBehind,"hasRemote":true},"operation":null,"files":[{"path":"$fileName","x":".","y":"M","untracked":false,"conflict":false,"staged":null,"unstaged":{"added":1,"removed":0,"blocks":[{"id":"b1","index":0,"oldStart":1,"oldLines":1,"newStart":1,"newLines":2,"added":1,"removed":0}]}}],"stashes":0,"lastCommit":null,"truncated":false}}""",
+                                )
+                                .build()
+                        }
+                    }
+                    target.contains("/git/commit-draft") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"message":"","updatedAt":0}}""")
+                        .build()
+                    target.contains("/git/stage") -> MockResponse.Builder()
+                        .code(500)
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":false,"error":"index.lock exists"}""")
+                        .build()
+                    target.contains("/git/fetch") -> {
+                        changesBehind = 2
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{}}""")
+                            .build()
+                    }
+                    else -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{}}""")
+                        .build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val model = AppModel(ApplicationProvider.getApplicationContext())
+            model.api = ApiClient(server.url("/"), "tok")
+            model.selectedProject = "demo"
+            model.chooseGitRepo("demo", "/work/app/a")
+
+            compose.setContent {
+                androidx.compose.runtime.CompositionLocalProvider(com.hienlh.ppm.design.LocalPpmMobile provides true) {
+                    GitStatusPanel(model = model)
+                }
+            }
+            compose.waitUntil(5_000) {
+                model.cachedGitChanges("demo", "/work/app/a") != null
+            }
+            compose.waitForIdle()
+            assertEquals("src/A.kt", model.cachedGitChanges("demo", "/work/app/a")?.files?.single()?.path)
+            assertNull(model.cachedGitChanges("demo", "/work/app/b"))
+
+            // Switch to repo B -> separate cache entry for repo B, repo A stays intact
+            model.chooseGitRepo("demo", "/work/app/b")
+            compose.waitUntil(5_000) {
+                model.cachedGitChanges("demo", "/work/app/b") != null
+            }
+            compose.waitForIdle()
+            assertEquals("src/A.kt", model.cachedGitChanges("demo", "/work/app/a")?.files?.single()?.path)
+            assertEquals("src/B.kt", model.cachedGitChanges("demo", "/work/app/b")?.files?.single()?.path)
+
+            // Failed write (stage returns 500) still refreshes in finally; make that refresh fail so poll-error banner shows
+            val changesReadsBeforeFail = synchronized(calls) { calls.count { it.second.contains("/git/changes") } }
+            failChanges = true
+            compose.onNodeWithTag("git-change-check-src/B.kt").performClick()
+            compose.waitUntil(5_000) {
+                synchronized(calls) { calls.any { it.second.contains("/git/stage") } } &&
+                    synchronized(calls) { calls.count { it.second.contains("/git/changes") } > changesReadsBeforeFail } &&
+                    compose.onAllNodesWithTag("git-poll-error-banner").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithTag("git-poll-error-banner").assertIsDisplayed()
+            compose.onNodeWithText("git status poll failed", substring = true, useUnmergedTree = true).assertIsDisplayed()
+            assertTrue(compose.onAllNodesWithTag("git-graph-button").fetchSemanticsNodes().isEmpty())
+            compose.onNodeWithTag("git-history-button").assertIsDisplayed()
+            assertTrue(
+                "Expected Could not stage toast on stage failure, got ${model.toasts.map { it.message }}",
+                model.toasts.any { it.message.title == "Could not stage" && it.message.description?.contains("index.lock exists") == true },
+            )
+
+            // Visibility transition false -> true triggers refresh and clears poll-error banner
+            failChanges = false
+            val readsBeforeVisible = synchronized(calls) { calls.count { it.second.contains("/git/changes") } }
+            model.windowVisible = false
+            compose.waitForIdle()
+            model.windowVisible = true
+            compose.waitUntil(5_000) {
+                synchronized(calls) { calls.count { it.second.contains("/git/changes") } > readsBeforeVisible } &&
+                    compose.onAllNodesWithTag("git-poll-error-banner").fetchSemanticsNodes().isEmpty()
+            }
+            assertTrue(compose.onAllNodesWithTag("git-poll-error-banner").fetchSemanticsNodes().isEmpty())
+
+            // More -> Fetch runs loadChanges() and shows Fetched — 2 new commits to pull
+            compose.onNodeWithTag("git-more-button").performClick()
+            compose.waitForIdle()
+            compose.onNodeWithText("Fetch").performClick()
+            compose.waitUntil(5_000) {
+                model.toasts.any { it.message.title == "Fetched — 2 new commits to pull" }
+            }
+            assertEquals(2, model.cachedGitChanges("demo", "/work/app/b")?.branch?.behind)
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `strings and controls match web git-status-panel git-commit-composer git-repo-picker and hunk-stage-dialog`() {
+        installBlankFileIcons()
+        val server = MockWebServer()
+        var hunkResponseMode = "binary"
+        val hunkGate = java.util.concurrent.CountDownLatch(1)
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                return when {
+                    target.contains("/git/hunks") -> {
+                        hunkGate.await(2, java.util.concurrent.TimeUnit.SECONDS)
+                        val body = when (hunkResponseMode) {
+                            "binary" -> """{"ok":true,"data":{"binary":true,"hunks":[]}}"""
+                            "with-hunk" -> """{"ok":true,"data":{"binary":false,"hunks":[{"id":"h0","index":0,"header":"@@ -1,2 +1,2 @@","oldStart":1,"oldLines":2,"newStart":1,"newLines":2,"lines":[{"type":"-","content":"old"},{"type":"+","content":"new"}]}]}}"""
+                            else -> """{"ok":true,"data":{"binary":false,"hunks":[]}}"""
+                        }
+                        MockResponse.Builder().addHeader("Content-Type", "application/json").body(body).build()
+                    }
+                    else -> MockResponse.Builder().addHeader("Content-Type", "application/json").body("""{"ok":true,"data":{}}""").build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val model = AppModel(ApplicationProvider.getApplicationContext())
+            model.api = ApiClient(server.url("/"), "tok")
+            val stagedOnly = ChangedFile(
+                path = "src/StagedOnly.kt",
+                x = "M",
+                y = ".",
+                untracked = false,
+                conflict = false,
+                staged = ChangeSide(
+                    added = 3,
+                    removed = 0,
+                    blocks = listOf("b0"),
+                    changeBlocks = listOf(ChangeBlock("b0", 0, 1, 0, 1, 3, 3, 0)),
+                ),
+                unstaged = null,
+            )
+            val conflictFile = ChangedFile(
+                path = "src/Conflict.kt",
+                x = "U",
+                y = "U",
+                untracked = false,
+                conflict = true,
+            )
+            val totals = GitChangesView.changeTotals(listOf(stagedOnly))
+            var scopeMode by androidx.compose.runtime.mutableStateOf("worktree")
+            var showHunkDialog by androidx.compose.runtime.mutableStateOf(true)
+            var viewStep by androidx.compose.runtime.mutableStateOf("no-repo")
+
+            compose.setContent {
+                when (viewStep) {
+                    "no-repo" -> GitNoRepo(onRescan = {})
+                    "repo-choice" -> GitRepoChoice(
+                        repos = listOf(
+                            com.hienlh.ppm.client.GitRepo("/w/a", "a", "a"),
+                            com.hienlh.ppm.client.GitRepo("/w/b", "b", "b"),
+                        ),
+                        onSelect = {},
+                    )
+                    else -> Column {
+                        GitCommitComposer(
+                            message = "",
+                            onMessageChange = {},
+                            totals = totals,
+                            operation = null,
+                            lastCommit = null,
+                            syncMode = "publish",
+                            busyAction = null,
+                            onCommit = { _, _, _ -> },
+                            onUndoLast = {},
+                            branch = "feat/demo",
+                        )
+                        ChangeGroupSection(
+                            model = model,
+                            label = "Conflicts",
+                            files = listOf(conflictFile),
+                            errorTone = true,
+                            showCheckAll = false,
+                            viewMode = "flat",
+                            onToggleFile = {},
+                            onToggleBatch = {},
+                            onOpen = {},
+                            onOpenDiff = {},
+                            onOpenFile = {},
+                            onDiscard = {},
+                            onStageLines = { _, _ -> },
+                            onMarkResolved = {},
+                            onReviewAll = null,
+                        )
+                        ChangeGroupSection(
+                            model = model,
+                            label = "Changes",
+                            files = listOf(stagedOnly),
+                            errorTone = false,
+                            showCheckAll = true,
+                            viewMode = "flat",
+                            onToggleFile = {},
+                            onToggleBatch = {},
+                            onOpen = {},
+                            onOpenDiff = {},
+                            onOpenFile = {},
+                            onDiscard = {},
+                            onStageLines = { _, _ -> },
+                            onMarkResolved = {},
+                            onReviewAll = {},
+                        )
+                        if (showHunkDialog) {
+                            GitHunkStageDialog(
+                                model = model,
+                                project = "demo",
+                                repo = com.hienlh.ppm.client.GitRepo("/w", "w", "."),
+                                filePath = "src/Bin.png",
+                                scope = scopeMode,
+                                onClose = { showHunkDialog = false },
+                                onApplied = {},
+                            )
+                        }
+                    }
+                }
+            }
+            compose.waitForIdle()
+
+            // GitNoRepo and GitRepoChoice strings
+            compose.onNodeWithText("No git repository in this project, or in any folder two levels below it.").assertIsDisplayed()
+            viewStep = "repo-choice"
+            compose.waitForIdle()
+            compose.onNodeWithText("2 repositories in this folder").assertIsDisplayed()
+            compose.onNodeWithText("This project folder is not a git repository itself. Pick the one to work with — you can switch later from the header.").assertIsDisplayed()
+            viewStep = "controls"
+            compose.waitForIdle()
+
+            // While hunkGate is held, loading state shows "Loading diff…" next to spinner
+            compose.onNodeWithText("Loading diff…", useUnmergedTree = true).assertIsDisplayed()
+            hunkGate.countDown()
+
+            // Composer placeholder uses Ctrl+↵ on Android (not ⌘↵)
+            compose.onNodeWithText("Message (Ctrl+↵ to commit on feat/demo)", useUnmergedTree = true).assertIsDisplayed()
+            // Conflicts group has no Review button; Changes group Review button has contentDescription "Review block by block"
+            assertTrue(compose.onAllNodesWithTag("git-group-review-Conflicts").fetchSemanticsNodes().isEmpty())
+            val reviewNode = compose.onNodeWithTag("git-group-review-Changes", useUnmergedTree = true).fetchSemanticsNode()
+            assertEquals(
+                listOf("Review block by block"),
+                reviewNode.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription],
+            )
+
+            // Tablet row tools on staged-only file: Open {name} and Discard changes to {name}
+            val openNode = compose.onNodeWithTag("git-row-open-file-src/StagedOnly.kt", useUnmergedTree = true).fetchSemanticsNode()
+            assertEquals(
+                listOf("Open StagedOnly.kt"),
+                openNode.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription],
+            )
+            val discardNode = compose.onNodeWithTag("git-row-discard-src/StagedOnly.kt", useUnmergedTree = true).fetchSemanticsNode()
+            assertEquals(
+                listOf("Discard changes to StagedOnly.kt"),
+                discardNode.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription],
+            )
+
+            // CheckCell is full row height
+            val rowBounds = compose.onNodeWithTag("git-change-row-src/StagedOnly.kt", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val checkBounds = compose.onNodeWithTag("git-change-check-src/StagedOnly.kt", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertEquals(rowBounds.height, checkBounds.height, 1f)
+
+            // Hunk dialog binary message and no "Tap a line or hunk header to toggle"
+            compose.waitUntil(5_000) {
+                runCatching {
+                    compose.onNodeWithText("This is a binary file — it can only be staged whole.").assertIsDisplayed()
+                    true
+                }.getOrDefault(false)
+            }
+            compose.onNodeWithText("This is a binary file — it can only be staged whole.").assertIsDisplayed()
+
+            // Switch hunk dialog to worktree with 2 changed lines: verify trash button description and destructive button text
+            hunkResponseMode = "with-hunk"
+            showHunkDialog = false
+            compose.waitForIdle()
+            showHunkDialog = true
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithTag("git-hunk-discard-toggle").fetchSemanticsNodes().isNotEmpty()
+            }
+            val trashToggle = compose.onNodeWithTag("git-hunk-discard-toggle", useUnmergedTree = true).fetchSemanticsNode()
+            assertEquals(
+                listOf("Discard selected lines"),
+                trashToggle.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription],
+            )
+            compose.onNodeWithTag("git-hunk-discard-toggle").performClick()
+            compose.waitForIdle()
+            compose.onNodeWithTag("git-hunk-discard-confirm").assertIsDisplayed()
+            compose.onNodeWithText("Discard 2 lines — cannot be undone", useUnmergedTree = true).assertIsDisplayed()
+
+            // Switch hunk dialog to empty non-binary staged
+            hunkResponseMode = "empty"
+            scopeMode = "index"
+            compose.waitUntil(5_000) {
+                runCatching {
+                    compose.onNodeWithText("No staged changes in this file.").assertIsDisplayed()
+                    true
+                }.getOrDefault(false)
+            }
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `GitStatusPanel toasts and confirm dialogs match web strings for publish operation abort-continue and stash pop Undo`() {
+        installBlankFileIcons()
+        val server = MockWebServer()
+        var currentOp = """{"kind":"am","step":1,"total":2}"""
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                return when {
+                    target.endsWith("/git/repos") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"projectPath":"/work/app","rootIsRepo":true,"repos":[{"path":"/work/app","name":"app","relative":"."}]}}""")
+                        .build()
+                    target.contains("/git/changes") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body(
+                            """{"ok":true,"data":{"branch":{"head":"feat/demo","oid":"1111111","upstream":null,"upstreamGone":false,"ahead":0,"behind":0,"hasRemote":true},"operation":$currentOp,"files":[{"path":"src/A.kt","oldPath":null,"x":".","y":"M","untracked":false,"conflict":false,"staged":null,"unstaged":{"added":1,"removed":0,"blocks":[{"id":"b1","index":0,"oldStart":1,"oldLines":1,"newStart":1,"newLines":2,"added":1,"removed":0}]}}],"stashes":1,"lastCommit":null,"truncated":false}}""",
+                        )
+                        .build()
+                    target.contains("/git/commit-draft") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"message":"","updatedAt":0}}""")
+                        .build()
+                    target.contains("/git/operation/continue") -> {
+                        currentOp = "null"
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{}}""")
+                        .build()
+                    }
+                    target.contains("/git/publish") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"remote":"origin","branch":"feat/demo"}}""")
+                        .build()
+                    target.endsWith("/git/stash") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"stashed":true,"stash":{"index":0,"hash":"abc1234","message":"WIP on feat/demo","date":"2026-11-08T00:00:00Z"}}}""")
+                        .build()
+                    target.contains("/git/stash/pop") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"indexRestored":false}}""")
+                        .build()
+                    else -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{}}""")
+                        .build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val model = AppModel(ApplicationProvider.getApplicationContext())
+            model.api = ApiClient(server.url("/"), "tok")
+            model.selectedProject = "demo"
+
+            compose.setContent {
+                androidx.compose.runtime.CompositionLocalProvider(com.hienlh.ppm.design.LocalPpmMobile provides true) {
+                    GitStatusPanel(model = model)
+                }
+            }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithTag("git-operation-banner").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText("Applying patches (1 of 2)").assertIsDisplayed()
+
+            // Verify header button descriptions on GitStatusPanel: list/tree toggle and History button
+            val viewToggleNode = compose.onNodeWithTag("git-view-mode-toggle", useUnmergedTree = true).fetchSemanticsNode()
+            assertEquals(
+                listOf("Group by folder"),
+                viewToggleNode.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription],
+            )
+            val historyNode = compose.onNodeWithTag("git-history-button", useUnmergedTree = true).fetchSemanticsNode()
+            assertEquals(
+                listOf("View Git Log"),
+                historyNode.config[androidx.compose.ui.semantics.SemanticsProperties.ContentDescription],
+            )
+
+            // Verify phone CheckCell is 48dp wide and full row height
+            val phoneRowBounds = compose.onNodeWithTag("git-change-row-src/A.kt", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val phoneCheckBounds = compose.onNodeWithTag("git-change-check-src/A.kt", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertEquals(phoneRowBounds.height, phoneCheckBounds.height, 1f)
+
+            // Click Abort patch series -> shows web abort confirm dialog on phone bottom sheet
+            // Confirm stacks above Cancel (flex-col-reverse), carries X icon, and title has TriangleAlert icon
+            compose.onNodeWithText("Abort patch series").performClick()
+            compose.waitForIdle()
+            compose.onNodeWithTag("git-confirm-bottom-sheet").assertIsDisplayed()
+            compose.onNodeWithTag("git-confirm-alert-icon", useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithTag("git-confirm-icon-X", useUnmergedTree = true).assertIsDisplayed()
+            val okBounds = compose.onNodeWithTag("git-confirm-ok", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val cancelBounds = compose.onNodeWithTag("git-confirm-cancel", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertTrue("Confirm button must be stacked above Cancel on phone, got ok=${okBounds.top} cancel=${cancelBounds.top}", okBounds.top < cancelBounds.top)
+            assertEquals(okBounds.width, cancelBounds.width, 6f)
+            assertEquals(okBounds.height, cancelBounds.height, 1f)
+            compose.onNodeWithText("Abort the patch series?").assertIsDisplayed()
+            compose.onNodeWithText("This puts the branch back where it was before the patch series started. Conflicts you resolved so far are lost.").assertIsDisplayed()
+            compose.onNodeWithText("Cancel").performClick()
+            compose.waitForIdle()
+
+            // Click Continue -> shows "The patch series is finished" toast
+            compose.onNodeWithText("Continue").performClick()
+            compose.waitUntil(5_000) {
+                model.toasts.any { it.message.title == "The patch series is finished" }
+            }
+
+            // Now operation is null -> Publish button is visible; click it -> "Published feat/demo to origin"
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithTag("git-sync-button").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithTag("git-sync-button").performClick()
+            compose.waitUntil(5_000) {
+                model.toasts.any { it.message.title == "Published feat/demo to origin" }
+            }
+
+            // More -> Stash all changes -> click Undo -> "Stash applied and dropped" with indexRestored=false warning
+            compose.onNodeWithTag("git-more-button").performClick()
+            compose.waitUntil(5_000) {
+                runCatching {
+                    compose.onNodeWithText("Stash all changes").assertIsEnabled()
+                    true
+                }.getOrDefault(false)
+            }
+            compose.onNodeWithText("Stash all changes").performClick()
+            compose.waitUntil(5_000) {
+                model.toasts.any { it.message.title == "Stashed 1 file" && it.message.action?.label == "Undo" }
+            }
+            val stashToast = model.toasts.first { it.message.title == "Stashed 1 file" }.message
+            stashToast.action!!.run()
+            compose.waitUntil(5_000) {
+                model.toasts.any { it.message.title == "Stash applied and dropped" }
+            }
+            val popToast = model.toasts.first { it.message.title == "Stash applied and dropped" }.message
+            assertEquals("Its staged changes no longer fit the index, so they came back unstaged.", popToast.description)
+            assertEquals(com.hienlh.ppm.app.ErrorToastMessage.Kind.WARNING, popToast.kind)
         } finally {
             server.close()
         }

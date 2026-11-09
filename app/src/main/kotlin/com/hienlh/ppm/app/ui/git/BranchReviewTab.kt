@@ -116,7 +116,7 @@ fun BranchReviewBody(model: AppModel, tab: WorkspaceTab) {
 
     LaunchedEffect(projectName, repo?.path, needsPick, noRepo, api) {
         val client = api ?: return@LaunchedEffect
-        if (needsPick || noRepo) return@LaunchedEffect
+        if (repo == null || needsPick || noRepo) return@LaunchedEffect
         try {
             val list = client.gitBranches(projectName, repo)
             branches = list
@@ -132,7 +132,7 @@ fun BranchReviewBody(model: AppModel, tab: WorkspaceTab) {
 
     fun triggerLoadDiff(targetBase: String = base, targetHead: String = head) {
         val client = api ?: return
-        if (needsPick || noRepo || targetBase.isEmpty() || targetHead.isEmpty()) return
+        if (repo == null || needsPick || noRepo || targetBase.isEmpty() || targetHead.isEmpty()) return
         diffJob?.cancel()
         diffJob = scope.launch {
             loading = true
@@ -227,7 +227,11 @@ fun BranchReviewBody(model: AppModel, tab: WorkspaceTab) {
                 ChangedFile(
                     path = f.path,
                     oldPath = f.oldPath,
-                    unstaged = ChangeSide(status = status, added = f.additions, removed = f.deletions, blocks = emptyList()),
+                    unstaged = ChangeSide(added = f.additions, removed = f.deletions, blocks = emptyList()),
+                    conflict = false,
+                    x = ".",
+                    y = status,
+                    untracked = false,
                 )
             },
         )

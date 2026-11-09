@@ -894,8 +894,10 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                     contentAlignment = Alignment.Center,
                 ) { PpmIcon(ProductIcon.X, 16.dp, tokens.text.color) }
             }
-            val sections = model.sidebarSections
-            val shown = section?.takeIf { it in sections || it.startsWith("ext:") } ?: sections.first()
+            val contribs = model.extensions?.contributions?.collectAsState()?.value
+            val extViews = (contribs?.views?.get("sidebar") ?: contribs?.views?.get("explorer")).orEmpty()
+            val sections = model.sidebarSections + extViews.map { "ext:${it.id}" }
+            val shown = section?.takeIf { it in sections } ?: sections.first()
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 val list = model.sidebarList
                 val search = model.sidebarSearch
@@ -935,25 +937,33 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                 Row(Modifier.fillMaxWidth()) {
                     for (id in sections) {
                         val teams = id == "teams"
+                        val extView = if (id.startsWith("ext:")) {
+                            val viewId = id.removePrefix("ext:")
+                            extViews.firstOrNull { it.id == viewId }
+                        } else {
+                            null
+                        }
                         DrawerTabSlot(
-                            when (id) {
-                                "explorer" -> ProductIcon.FolderOpen
-                                "search" -> ProductIcon.Search
-                                "git" -> ProductIcon.GitBranch
-                                "database" -> ProductIcon.Database
-                                "designs" -> ProductIcon.Palette
-                                "teams" -> ProductIcon.Users
-                                "tunnels" -> ProductIcon.Globe
+                            when {
+                                id == "explorer" -> ProductIcon.FolderOpen
+                                id == "search" -> ProductIcon.Search
+                                id == "git" -> ProductIcon.GitBranch
+                                id == "database" -> ProductIcon.Database
+                                id == "designs" -> ProductIcon.Palette
+                                id == "teams" -> ProductIcon.Users
+                                id == "tunnels" -> ProductIcon.Globe
+                                id.startsWith("ext:") -> ProductIcon.Puzzle
                                 else -> ProductIcon.BotMessageSquare
                             },
-                            when (id) {
-                                "explorer" -> "Explorer"
-                                "search" -> "Search"
-                                "git" -> "Git"
-                                "database" -> "DB"
-                                "designs" -> "Designs"
-                                "teams" -> "Teams"
-                                "tunnels" -> "Ports"
+                            when {
+                                id == "explorer" -> "Explorer"
+                                id == "search" -> "Search"
+                                id == "git" -> "Git"
+                                id == "database" -> "DB"
+                                id == "designs" -> "Designs"
+                                id == "teams" -> "Teams"
+                                id == "tunnels" -> "Ports"
+                                id.startsWith("ext:") -> extView?.name ?: id.removePrefix("ext:")
                                 else -> "History"
                             },
                             active = id == shown,
@@ -973,25 +983,29 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                             PpmIcon(ProductIcon.FolderTree, 16.dp, tokens.text3.color)
                             BasicText("Files", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
                         }
-                        Column(
-                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
-                                .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openAndroid() }
-                                .padding(vertical = 10.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            PpmIcon(ProductIcon.Smartphone, 16.dp, tokens.text3.color)
-                            BasicText("Android", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
+                        if (model.androidAvailable) {
+                            Column(
+                                Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                                    .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openAndroid() }
+                                    .padding(vertical = 10.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                PpmIcon(ProductIcon.Smartphone, 16.dp, tokens.text3.color)
+                                BasicText("Android", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
+                            }
                         }
-                        Column(
-                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
-                                .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openRemoteDesktop() }
-                                .padding(vertical = 10.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            PpmIcon(ProductIcon.Monitor, 16.dp, tokens.text3.color)
-                            BasicText("Desktop", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
+                        if (model.remoteDesktopAvailable) {
+                            Column(
+                                Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                                    .ppmClickable(pressedColor = tokens.panel2.color) { onClose(); model.openRemoteDesktop() }
+                                    .padding(vertical = 10.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                PpmIcon(ProductIcon.Monitor, 16.dp, tokens.text3.color)
+                                BasicText("Desktop", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
+                            }
                         }
                         Column(
                             Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
@@ -1010,7 +1024,7 @@ private fun MobileDrawer(model: AppModel, open: Boolean, section: String?, onSec
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            PpmIcon(ProductIcon.ScrollText, 16.dp, if (model.logsLikelyBugs > 0) tokens.error.color else tokens.text3.color)
+                            PpmIcon(ProductIcon.ScrollText, 16.dp, if (model.showLogsBadgeDot) tokens.error.color else tokens.text3.color)
                             BasicText("Logs", style = ppmText(10f, lineHeight = 10f).copy(color = tokens.text3.color))
                         }
                         Column(

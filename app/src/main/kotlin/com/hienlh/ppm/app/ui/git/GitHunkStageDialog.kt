@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -30,10 +32,13 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.client.FileHunks
 import com.hienlh.ppm.client.GitRepo
@@ -130,17 +135,28 @@ internal fun GitHunkStageDialog(
         }
     }
 
-    Dialog(onDismissRequest = onClose) {
-        val shape = RoundedCornerShape(if (mobile) 12.dp else 8.dp)
-        Column(
-            modifier = Modifier
-                .width(if (mobile) 360.dp else 640.dp)
-                .heightIn(max = if (mobile) 560.dp else 520.dp)
-                .clip(shape)
-                .background(tokens.bgSolid.color)
-                .cssBorder(tokens.border.color, shape)
-                .testTag("git-hunk-stage-dialog"),
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = !mobile),
+    ) {
+        val shape = if (mobile) {
+            RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+        } else {
+            RoundedCornerShape(8.dp)
+        }
+        Box(
+            modifier = if (mobile) Modifier.fillMaxSize() else Modifier,
+            contentAlignment = if (mobile) Alignment.BottomCenter else Alignment.Center,
         ) {
+            Column(
+                modifier = Modifier
+                    .then(if (mobile) Modifier.fillMaxWidth() else Modifier.width(640.dp))
+                    .heightIn(max = if (mobile) 560.dp else 520.dp)
+                    .clip(shape)
+                    .background(tokens.bgSolid.color)
+                    .cssBorder(tokens.border.color, shape)
+                    .testTag("git-hunk-stage-dialog"),
+            ) {
             // Header
             Column(
                 modifier = Modifier
@@ -169,9 +185,10 @@ internal fun GitHunkStageDialog(
                     if (scope == "worktree" && totalChanged > 0) {
                         Box(
                             modifier = Modifier
-                                .size(28.dp)
+                                .size(if (mobile) 44.dp else 32.dp)
                                 .clip(RoundedCornerShape(6.dp))
                                 .alpha(if (selectedCount == 0 || busy) 0.4f else 1f)
+                                .semantics { contentDescription = "Discard selected lines" }
                                 .clickable(enabled = selectedCount > 0 && !busy) { confirmDiscard = !confirmDiscard }
                                 .testTag("git-hunk-discard-toggle"),
                             contentAlignment = Alignment.Center,
@@ -181,7 +198,7 @@ internal fun GitHunkStageDialog(
                     }
                     Box(
                         modifier = Modifier
-                            .size(28.dp)
+                            .size(if (mobile) 44.dp else 32.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .clickable(onClick = onClose),
                         contentAlignment = Alignment.Center,
@@ -192,6 +209,7 @@ internal fun GitHunkStageDialog(
 
                 if (totalChanged > 0) {
                     Row(
+                        modifier = Modifier.height(if (mobile) 44.dp else 28.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -218,11 +236,16 @@ internal fun GitHunkStageDialog(
             ) {
                 when {
                     loading -> {
-                        Box(
+                        Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 36.dp),
-                            contentAlignment = Alignment.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                         ) {
                             PpmIcon(ProductIcon.Loader2, size = 18.dp, tint = tokens.text3.color)
+                            BasicText(
+                                "Loading diff…",
+                                style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color),
+                            )
                         }
                     }
                     data?.binary == true -> {
@@ -231,7 +254,7 @@ internal fun GitHunkStageDialog(
                             contentAlignment = Alignment.Center,
                         ) {
                             BasicText(
-                                "Binary file — cannot stage individual lines.",
+                                "This is a binary file — it can only be staged whole.",
                                 style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color),
                             )
                         }
@@ -242,7 +265,7 @@ internal fun GitHunkStageDialog(
                             contentAlignment = Alignment.Center,
                         ) {
                             BasicText(
-                                "No line-level changes.",
+                                "No ${if (scope == "index") "staged" else "unstaged"} changes in this file.",
                                 style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color),
                             )
                         }
@@ -257,13 +280,14 @@ internal fun GitHunkStageDialog(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .height(if (mobile) 44.dp else 28.dp)
                                         .background(tokens.panel2.color)
                                         .edge(Edge.Bottom, tokens.border.color)
                                         .clickable {
                                             confirmDiscard = false
                                             selected = HunkSelection.toggleHunk(hunk, selected)
                                         }
-                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                        .padding(horizontal = 10.dp)
                                         .testTag("git-hunk-header-${hunk.index}"),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -307,7 +331,7 @@ internal fun GitHunkStageDialog(
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .heightIn(min = if (mobile) 44.dp else 22.dp)
+                                                .height(if (mobile) 44.dp else 22.dp)
                                                 .background(rowBg)
                                                 .then(
                                                     if (isChanged) {
@@ -366,6 +390,7 @@ internal fun GitHunkStageDialog(
             }
 
             // Footer
+            val footerBtnHeight = if (mobile) 44.dp else 36.dp
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -375,14 +400,9 @@ internal fun GitHunkStageDialog(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (confirmDiscard) {
-                    BasicText(
-                        text = "Discard $selectedCount ${if (selectedCount == 1) "line" else "lines"} — cannot be undone",
-                        style = PpmFont.sans(11, FontWeight.Medium, lineHeight = 14, color = tokens.error.color),
-                        modifier = Modifier.weight(1f),
-                    )
                     Box(
                         modifier = Modifier
-                            .height(30.dp)
+                            .height(footerBtnHeight)
                             .clip(RoundedCornerShape(6.dp))
                             .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
                             .clickable(enabled = !busy) { confirmDiscard = false }
@@ -393,7 +413,8 @@ internal fun GitHunkStageDialog(
                     }
                     Box(
                         modifier = Modifier
-                            .height(30.dp)
+                            .weight(1f)
+                            .height(footerBtnHeight)
                             .clip(RoundedCornerShape(6.dp))
                             .background(tokens.error.color)
                             .alpha(if (busy) 0.4f else 1f)
@@ -402,20 +423,23 @@ internal fun GitHunkStageDialog(
                             .testTag("git-hunk-discard-confirm"),
                         contentAlignment = Alignment.Center,
                     ) {
-                        BasicText("Discard", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = Color.White))
+                        if (busy) {
+                            PpmIcon(ProductIcon.Loader2, size = 14.dp, tint = Color.White)
+                        } else {
+                            BasicText(
+                                "Discard $selectedCount ${if (selectedCount == 1) "line" else "lines"} — cannot be undone",
+                                style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = Color.White),
+                            )
+                        }
                     }
                 } else {
-                    BasicText(
-                        text = "Tap a line or hunk header to toggle",
-                        style = PpmFont.sans(11, lineHeight = 14, color = tokens.text3.color),
-                        modifier = Modifier.weight(1f),
-                    )
+                    Spacer(Modifier.weight(1f))
                     Box(
                         modifier = Modifier
-                            .height(30.dp)
+                            .height(footerBtnHeight)
                             .clip(RoundedCornerShape(6.dp))
                             .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
-                            .clickable(onClick = onClose)
+                            .clickable(enabled = !busy, onClick = onClose)
                             .padding(horizontal = 10.dp),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -424,7 +448,7 @@ internal fun GitHunkStageDialog(
                     val canApply = !busy && selectedCount > 0
                     Box(
                         modifier = Modifier
-                            .height(30.dp)
+                            .height(footerBtnHeight)
                             .clip(RoundedCornerShape(6.dp))
                             .background(tokens.accent.color)
                             .alpha(if (canApply) 1f else 0.4f)
@@ -439,6 +463,7 @@ internal fun GitHunkStageDialog(
                         )
                     }
                 }
+            }
             }
         }
     }

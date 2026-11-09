@@ -11,9 +11,12 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
@@ -22,6 +25,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.files.installBlankFileIcons
 import com.hienlh.ppm.app.withComposeActivity
+import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.BranchDiffFile
 import com.hienlh.ppm.client.ChangeBlock
 import com.hienlh.ppm.client.ChangeHunk
@@ -32,11 +36,25 @@ import com.hienlh.ppm.client.ChangedFile
 import com.hienlh.ppm.client.FileChangeDetail
 import com.hienlh.ppm.client.GitBranch
 import com.hienlh.ppm.client.GitCommit
+import com.hienlh.ppm.client.GitRepo
+import com.hienlh.ppm.client.GitRepos
 import com.hienlh.ppm.state.git.BranchReviewState
 import com.hienlh.ppm.state.git.DiscardedEntry
 import com.hienlh.ppm.state.git.GitFileTree
+import com.hienlh.ppm.state.git.FileGitScope
+import com.hienlh.ppm.state.git.FileGitScopeKind
+import com.hienlh.ppm.state.git.GitRepoScope
 import com.hienlh.ppm.state.git.GitReviewModel
+import com.hienlh.ppm.state.workspace.WorkspaceTab
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -149,7 +167,11 @@ class GitPhase08bUiTest {
             files.map { f ->
                 ChangedFile(
                     path = f.path,
-                    unstaged = ChangeSide(status = f.status, added = f.additions, removed = f.deletions, blocks = emptyList()),
+                    conflict = false,
+                    x = ".",
+                    y = f.status,
+                    untracked = false,
+                    unstaged = ChangeSide(added = f.additions, removed = f.deletions, blocks = emptyList()),
                 )
             },
         )
@@ -205,7 +227,11 @@ class GitPhase08bUiTest {
         val block0 = ChangeBlock("hunk-0", 0, 10, 2, 10, 3, added = 2, removed = 1)
         val file = ChangedFile(
             path = "src/App.kt",
-            unstaged = ChangeSide(status = "M", added = 2, removed = 1, blocks = listOf("hunk-0"), changeBlocks = listOf(block0)),
+            conflict = false,
+            x = ".",
+            y = "M",
+            untracked = false,
+            unstaged = ChangeSide(added = 2, removed = 1, blocks = listOf("hunk-0"), changeBlocks = listOf(block0)),
         )
         val detail = FileChangeDetail(
             path = "src/App.kt",
@@ -336,7 +362,11 @@ class GitPhase08bUiTest {
         val block0 = ChangeBlock("hunk-0", 0, 10, 2, 10, 3, added = 2, removed = 1)
         val file = ChangedFile(
             path = "src/App.kt",
-            unstaged = ChangeSide(status = "M", added = 2, removed = 1, blocks = listOf("hunk-0"), changeBlocks = listOf(block0)),
+            conflict = false,
+            x = ".",
+            y = "M",
+            untracked = false,
+            unstaged = ChangeSide(added = 2, removed = 1, blocks = listOf("hunk-0"), changeBlocks = listOf(block0)),
         )
         val detail = FileChangeDetail(
             path = "src/App.kt",
@@ -440,5 +470,286 @@ class GitPhase08bUiTest {
         assertTrue("typing 'j'/'k' in commit box must NOT step blocks", stepped.isEmpty())
         assertTrue("typing 'l' in commit box must NOT start line pick", !pickStarted)
         assertTrue(message.contains("no block discarded"))
+    }
+
+    @Test
+    fun `fileGitScope picks deepest nested repo, skips gitFileFullDiff outside all repos, and binary preview uses nested repo and repo-relative path`() {
+        val outer = GitRepo("/work/mono/apps", "apps", "apps")
+        val inner = GitRepo("/work/mono/apps/web", "web", "apps/web")
+        val discovery = GitRepos(rootIsRepo = false, repos = listOf(outer, inner), root = "/work/mono")
+
+        assertNull(GitRepoScope.fileGitScope(null, "apps/web/src/App.tsx"))
+
+        // Deepest prefix match wins regardless of discovery order
+        val scoped = GitRepoScope.fileGitScope(discovery, "apps/web/src/App.tsx")
+        assertEquals(FileGitScope(repo = inner, filePath = "src/App.tsx", kind = FileGitScopeKind.REPO), scoped)
+
+        // File outside all repos when rootIsRepo == false returns NO_REPO
+        val outside = GitRepoScope.fileGitScope(discovery, "README.md")
+        assertEquals(FileGitScope(repo = null, filePath = "README.md", kind = FileGitScopeKind.NO_REPO), outside)
+
+        val server = MockWebServer()
+        val recordedTargets = mutableListOf<String>()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                synchronized(recordedTargets) { recordedTargets += target }
+                return when {
+                    target.endsWith("/git/repos") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"projectPath":"/work/mono","rootIsRepo":false,"repos":[{"path":"/work/mono/apps","name":"apps","relative":"apps"},{"path":"/work/mono/apps/web","name":"web","relative":"apps/web"}]}}""")
+                        .build()
+                    target.contains("/git/file-full-diff") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"original":"","modified":"","binary":true,"originalSize":68,"modifiedSize":68}}""")
+                        .build()
+                    else -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{}}""")
+                        .build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val model = AppModel(ApplicationProvider.getApplicationContext())
+            model.api = ApiClient(server.url("/"), "tok")
+            model.selectedProject = "mono"
+            model.gitChosenRepoPath["mono"] = "/work/mono/apps"
+
+            compose.setContent {
+                Column {
+                    Box(Modifier.size(600.dp, 200.dp)) {
+                        GitDiffViewer(
+                            model = model,
+                            projectName = "mono",
+                            filePath = "outside/README.md",
+                            ref1 = "HEAD~1",
+                            ref2 = "HEAD",
+                        )
+                    }
+                    Box(Modifier.size(600.dp, 300.dp)) {
+                        GitDiffViewer(
+                            model = model,
+                            projectName = "mono",
+                            filePath = "apps/web/src/logo.png",
+                            ref1 = "HEAD~1",
+                            ref2 = "HEAD",
+                        )
+                    }
+                }
+            }
+            compose.waitUntil(5_000) {
+                synchronized(recordedTargets) { recordedTargets.count { it.contains("/git/file-blob") } >= 2 }
+            }
+            compose.waitForIdle()
+            val allTargets = synchronized(recordedTargets) { recordedTargets.toList() }
+            assertFalse("Expected no /git/file-full-diff for outside/README.md, got $allTargets",
+                allTargets.any { it.contains("README.md") })
+            val diffTargets = allTargets.filter { it.contains("/git/file-full-diff") }
+            assertEquals("Expected exactly one file-full-diff for logo.png, got $diffTargets", 1, diffTargets.size)
+            assertTrue("Expected file-full-diff to use repo-relative path and nested repo, got ${diffTargets.first()}",
+                diffTargets.first().contains("file=src%2Flogo.png") && diffTargets.first().contains("repo=%2Fwork%2Fmono%2Fapps%2Fweb"))
+            val blobTargets = allTargets.filter { it.contains("/git/file-blob") }
+            assertTrue("Expected file-blob requests to use repo-relative path src/logo.png and nested repo /work/mono/apps/web, got $blobTargets",
+                blobTargets.all { it.contains("file=src%2Flogo.png") && it.contains("repo=%2Fwork%2Fmono%2Fapps%2Fweb") })
+            assertEquals(1, compose.onAllNodesWithTag("git-diff-binary", useUnmergedTree = true).fetchSemanticsNodes().size)
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `GitReviewBody and BranchReviewBody end-to-end with MockWebServer stage hunk and load branch diff`() {
+        installBlankFileIcons()
+        val server = MockWebServer()
+        val stageBodies = mutableListOf<String>()
+        val recordedTargets = mutableListOf<String>()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                synchronized(recordedTargets) { recordedTargets += target }
+                return when {
+                    target.endsWith("/git/repos") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"projectPath":"/work/ppm","rootIsRepo":true,"repos":[{"path":"/work/ppm","name":"ppm","relative":"."}]}}""")
+                        .build()
+                    target.contains("/git/commit-draft") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"message":"","updatedAt":0}}""")
+                        .build()
+                    target.contains("/git/changes/file") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body(
+                            """{"ok":true,"data":{"path":"src/App.kt","staged":null,"unstaged":{"whole":null,"hunks":[{"id":"hunk-0","index":0,"oldStart":10,"oldLines":2,"newStart":10,"newLines":3,"added":2,"removed":1,"header":"@@ -10,2 +10,3 @@","lines":[{"kind":" ","text":"val x = 1"},{"kind":"-","text":"val y = 2"},{"kind":"+","text":"val y = 20"},{"kind":"+","text":"val z = 30"}]}]}}}""",
+                        )
+                        .build()
+                    target.contains("/git/changes") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body(
+                            """{"ok":true,"data":{"branch":{"head":"feat/review","oid":"abcdef1","upstream":"origin/feat/review","upstreamGone":false,"ahead":1,"behind":0,"hasRemote":true},"operation":null,"files":[{"path":"src/App.kt","x":".","y":"M","untracked":false,"conflict":false,"staged":null,"unstaged":{"added":2,"removed":1,"blocks":[{"id":"hunk-0","index":0,"oldStart":10,"oldLines":2,"newStart":10,"newLines":3,"added":2,"removed":1}]}}],"stashes":0,"lastCommit":null,"truncated":false}}""",
+                        )
+                        .build()
+                    target.endsWith("/git/stage-hunks") -> {
+                        val b = request.body?.utf8().orEmpty()
+                        synchronized(stageBodies) { stageBodies += b }
+                        MockResponse.Builder()
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{"staged":true}}""")
+                            .build()
+                    }
+                    target.contains("/git/branches") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":[{"name":"feat/review","current":true,"remote":false,"tracking":"origin/feat/review","ahead":1,"behind":0,"commit":"abcdef1"},{"name":"main","current":false,"remote":false,"tracking":"origin/main","ahead":0,"behind":0,"commit":"1111111"}]}""")
+                        .build()
+                    target.contains("/git/branch-diff") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"base":"main","head":"feat/review","mode":"three-dot","mergeBase":"1111111","headCommit":"abcdef1","omitted":0,"files":[{"path":"src/Feature.kt","status":"M","additions":12,"deletions":3,"binary":false,"blob":"blob-feat"}]}}""")
+                        .build()
+                    else -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{}}""")
+                        .build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val model = AppModel(ApplicationProvider.getApplicationContext())
+            model.api = ApiClient(server.url("/"), "tok")
+            model.selectedProject = "ppm"
+            val reviewTab = WorkspaceTab(
+                id = "tab-review",
+                type = "git-review",
+                title = "Review changes",
+                projectId = "ppm",
+                metadata = buildJsonObject { put("projectName", JsonPrimitive("ppm")) },
+            )
+            val branchTab = WorkspaceTab(
+                id = "tab-branch",
+                type = "branch-review",
+                title = "Branch Review",
+                projectId = "ppm",
+                metadata = buildJsonObject {
+                    put("projectName", JsonPrimitive("ppm"))
+                    put("base", JsonPrimitive("main"))
+                },
+            )
+
+            compose.setContent {
+                Column {
+                    Box(Modifier.size(900.dp, 500.dp)) {
+                        GitReviewBody(model = model, tab = reviewTab)
+                    }
+                    Box(Modifier.size(900.dp, 400.dp)) {
+                        BranchReviewBody(model = model, tab = branchTab)
+                    }
+                }
+            }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithTag("git-review-block-stage-u:hunk-0", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() &&
+                    compose.onAllNodesWithTag("branch-review-file-src/Feature.kt", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.waitForIdle()
+
+            // Stage the open block in GitReviewBody -> sends POST /git/stage-hunks with {"path":"src/App.kt","hunks":[{"hunk":0,"id":"hunk-0"}]}
+            compose.onNodeWithTag("git-review-block-stage-u:hunk-0", useUnmergedTree = true).performClick()
+            compose.waitUntil(5_000) {
+                synchronized(stageBodies) { stageBodies.isNotEmpty() }
+            }
+            val stageBody = synchronized(stageBodies) { stageBodies.first() }
+            assertTrue("Expected stage-hunks body to include path and hunk-0, got $stageBody", stageBody.contains("\"path\":\"src/App.kt\"") && stageBody.contains("\"id\":\"hunk-0\""))
+
+            // BranchReviewBody renders the diffed file row
+            compose.onNodeWithTag("branch-review-file-src/Feature.kt", useUnmergedTree = true).assertIsDisplayed()
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `GitLogBody retries failed pagination page when user scrolls again`() {
+        val server = MockWebServer()
+        val requestedSkips = mutableListOf<Int>()
+        var failSkip100Once = true
+        val page1Commits = (0 until 100).joinToString(",") { i ->
+            val h = "c%06d".format(i)
+            """{"hash":"$h","shortHash":"$h","subject":"Commit $i","author":"Dev","email":"d@e.com","date":"2026-11-08T00:00:00Z","parents":[]}"""
+        }
+        val page2Commits = """[{"hash":"c000100","shortHash":"c000100","subject":"Commit 100","author":"Dev","email":"d@e.com","date":"2026-11-08T00:00:00Z","parents":[]}]"""
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val target = request.target
+                return when {
+                    target.endsWith("/git/repos") -> MockResponse.Builder()
+                        .addHeader("Content-Type", "application/json")
+                        .body("""{"ok":true,"data":{"projectPath":"/work/ppm","rootIsRepo":true,"repos":[{"path":"/work/ppm","name":"ppm","relative":"."}]}}""")
+                        .build()
+                    target.contains("/git/graph") -> {
+                        val skip = Regex("skip=(\\d+)").find(target)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                        synchronized(requestedSkips) { requestedSkips += skip }
+                        if (skip == 100 && failSkip100Once) {
+                            failSkip100Once = false
+                            MockResponse.Builder()
+                                .code(500)
+                                .addHeader("Content-Type", "application/json")
+                                .body("""{"ok":false,"error":"transient graph error"}""")
+                                .build()
+                        } else if (skip == 0) {
+                            MockResponse.Builder()
+                                .addHeader("Content-Type", "application/json")
+                                .body("""{"ok":true,"data":{"commits":[$page1Commits],"branches":[],"head":"main"}}""")
+                                .build()
+                        } else {
+                            MockResponse.Builder()
+                                .addHeader("Content-Type", "application/json")
+                                .body("""{"ok":true,"data":{"commits":$page2Commits,"branches":[],"head":"main"}}""")
+                                .build()
+                        }
+                    }
+                    else -> MockResponse.Builder().code(404).build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val model = AppModel(ApplicationProvider.getApplicationContext())
+            model.api = ApiClient(server.url("/"), "tok")
+            model.selectedProject = "ppm"
+            val logTab = WorkspaceTab(
+                id = "tab-log",
+                type = "git-log",
+                title = "Git Log",
+                projectId = "ppm",
+                metadata = buildJsonObject { put("projectName", JsonPrimitive("ppm")) },
+            )
+            compose.setContent {
+                Box(Modifier.size(600.dp, 300.dp)) {
+                    GitLogBody(model = model, tab = logTab)
+                }
+            }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("100 commits").fetchSemanticsNodes().isNotEmpty()
+            }
+            // Scroll near the bottom -> triggers skip=100 which fails once
+            compose.onNodeWithTag("git-log-list").performScrollToIndex(95)
+            compose.waitUntil(5_000) {
+                synchronized(requestedSkips) { requestedSkips.count { it == 100 } == 1 }
+            }
+            compose.waitForIdle()
+            // Still 100 commits after first failure
+            compose.onNodeWithText("100 commits").assertIsDisplayed()
+
+            // Scroll again -> retries skip=100 and loads Commit 100 (101 commits total)
+            compose.onNodeWithTag("git-log-list").performScrollToIndex(50)
+            compose.waitForIdle()
+            compose.onNodeWithTag("git-log-list").performScrollToIndex(98)
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("101 commits").fetchSemanticsNodes().isNotEmpty()
+            }
+            assertEquals(2, synchronized(requestedSkips) { requestedSkips.count { it == 100 } })
+        } finally {
+            server.close()
+        }
     }
 }

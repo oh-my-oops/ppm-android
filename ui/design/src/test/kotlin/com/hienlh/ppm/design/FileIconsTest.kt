@@ -113,4 +113,28 @@ class FileIconsTest {
             assertEquals(text, null, IconFramework.of(text))
         }
     }
+
+    @Test
+    fun `resolveWebviewFileIcons emits vsi-prefixed icon pairs and deduplicated css rule pairs`() {
+        val (iconPairs, rulePairs) = FileIcons.resolveWebviewFileIcons(
+            names = listOf("src/index.ts", "other.ts", "__proto__"),
+            table = icons,
+            framework = null,
+            readSvg = { variant, glyph ->
+                val f = File(dir, "$variant/$glyph.svg")
+                if (f.isFile) f.readBytes() else null
+            },
+        )
+        assertEquals(3, iconPairs.size)
+        assertEquals("src/index.ts", iconPairs[0].first)
+        assertTrue(iconPairs[0].second.startsWith("vsi-"))
+        assertEquals(iconPairs[0].second, iconPairs[1].second)
+        assertEquals("__proto__", iconPairs[2].first)
+        assertEquals("vsi-$defaultFile", iconPairs[2].second)
+
+        // Two distinct classes (typescript + defaultFile), each with its CSS rule
+        assertEquals(2, rulePairs.size)
+        assertEquals(iconPairs[0].second, rulePairs[0].first)
+        assertTrue(rulePairs[0].second.contains(".${iconPairs[0].second} { background-image: url(\"data:image/svg+xml;base64,"))
+    }
 }

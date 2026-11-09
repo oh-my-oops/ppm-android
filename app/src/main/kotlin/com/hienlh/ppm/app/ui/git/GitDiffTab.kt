@@ -69,6 +69,7 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.state.ReviewBlocks
 import com.hienlh.ppm.state.SessionReviewModel
 import com.hienlh.ppm.state.git.GitLogRefBadges
+import com.hienlh.ppm.state.git.FileGitScopeKind
 import com.hienlh.ppm.state.git.GitRepoScope
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import kotlinx.coroutines.CancellationException
@@ -137,9 +138,9 @@ fun GitDiffViewer(
     val chosenPath = projectName?.let { model.gitChosenRepoPath[it] }
     val selectedRepo = remember(discovery, chosenPath) { GitRepoScope.resolveRepo(discovery, chosenPath) }
 
-    val fileScope = remember(filePath, discovery, selectedRepo) {
+    val fileScope = remember(filePath, discovery) {
         if (filePath == null) null
-        else resolveFileRepoScope(filePath, discovery, selectedRepo)
+        else GitRepoScope.fileGitScope(discovery, filePath)
     }
 
     LaunchedEffect(projectName, filePath, ref1, ref2, file1, file2, isInline, openAsText, discovery, selectedRepo?.path, api) {
@@ -161,26 +162,22 @@ fun GitDiffViewer(
                     diffText = null
                 }
                 filePath != null -> {
-                    if (discovery == null) {
-                        model.loadGitRepos(proj)
+                    val scope = GitRepoScope.fileGitScope(discovery, filePath)
+                    if (scope == null) {
+                        // Discovery has not finished yet
+                        return@LaunchedEffect
                     }
-                    val disc = model.gitDiscovery[proj]
-                    val chosen = model.gitChosenRepoPath[proj]
-                    val fallbackRepo = GitRepoScope.resolveRepo(disc, chosen)
-                    val scope = resolveFileRepoScope(filePath, disc, fallbackRepo)
-                    if (scope == null && disc != null && GitRepoScope.hasNoRepo(disc)) {
+                    if (scope.kind == FileGitScopeKind.NO_REPO) {
                         loading = false
                         return@LaunchedEffect
                     }
-                    val relPath = scope?.first ?: filePath
-                    val targetRepo = scope?.second ?: fallbackRepo
                     fullFileDiff = client.gitFileFullDiff(
                         project = proj,
-                        file = relPath,
+                        file = scope.filePath,
                         ref = ref1 ?: "HEAD",
                         ref2 = ref2,
                         text = openAsText,
-                        repo = targetRepo,
+                        repo = scope.repo,
                     )
                     fileContents = null
                     diffText = null
@@ -191,11 +188,11 @@ fun GitDiffViewer(
                     fileContents = null
                 }
             }
+            loading = false
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             error = model.describe(e)
-        } finally {
             loading = false
         }
     }
@@ -237,9 +234,13 @@ fun GitDiffViewer(
     }
 
     val full = fullFileDiff
-    if (full != null && full.binary && !openAsText && filePath != null && projectName != null) {
+    val scopePair = if (fileScope != null && fileScope.kind == FileGitScopeKind.REPO) {
+        fileScope.filePath to fileScope.repo
+    } else {
+        null
+    }
+    if (full != null && full.binary && !openAsText && filePath != null && projectName != null && scopePair != null) {
         val canPreview = remember(filePath) { GitLogRefBadges.canPreviewBinary(filePath) }
-        val scopePair = fileScope ?: (filePath to selectedRepo)
         Column(modifier = modifier.fillMaxSize().background(tokens.bgSolid.color).testTag("git-diff-binary")) {
             if (canPreview) {
                 Row(
@@ -568,28 +569,6 @@ internal fun stripDiffEol(line: String): String = when {
     else -> line
 }
 
-internal fun resolveFileRepoScope(
-    filePath: String,
-    discovery: com.hienlh.ppm.client.GitRepos?,
-    selectedRepo: GitRepo?,
-): Pair<String, GitRepo?>? {
-    if (discovery == null) return filePath to selectedRepo
-    if (!discovery.rootIsRepo && discovery.repos.isEmpty()) return null
-    for (repo in discovery.repos) {
-        if (repo.relative != ".") {
-            val rel = GitRepoScope.repoRelativePath(filePath, repo)
-            if (rel != null) return rel to repo
-        }
-    }
-    if (selectedRepo != null) {
-        val rel = GitRepoScope.repoRelativePath(filePath, selectedRepo)
-        if (rel != null) return rel to selectedRepo
-    }
-    val rootRepo = discovery.repos.firstOrNull { it.relative == "." }
-    if (discovery.rootIsRepo || rootRepo != null) return filePath to rootRepo
-    return null
-}
-
 @Composable
 private fun NoContentChanges(filePath: String?, modifier: Modifier = Modifier) {
     val tokens = LocalPpmTokens.current
@@ -714,10 +693,10 @@ private fun BinaryImagePreview(
 
     @Composable
     fun SidePane(label: String, size: Long?, isOriginal: Boolean, modifier: Modifier = Modifier) {
-        var bitmap by remember(projectName, repoFilePath, ref1, ref2, isOriginal) { mutableStateOf<ImageBitmap?>(null) }
-        var failed by remember(projectName, repoFilePath, ref1, ref2, isOriginal) { mutableStateOf(false) }
+        var bitmap by remember(projectName, repoFilePath, repo?.path, ref1, ref2, isOriginal) { mutableStateOf<ImageBitmap?>(null) }
+        var failed by remember(projectName, repoFilePath, repo?.path, ref1, ref2, isOriginal) { mutableStateOf(false) }
 
-        LaunchedEffect(projectName, repoFilePath, projectFilePath, ref1, ref2, isOriginal, api) {
+        LaunchedEffect(projectName, repoFilePath, projectFilePath, repo?.path, ref1, ref2, isOriginal, api) {
             val client = api ?: return@LaunchedEffect
             failed = false
             try {

@@ -540,11 +540,19 @@ class CommittedImeInstrumentation : Instrumentation() {
             "\u001b[14t" to listOf("\u001b[4;384;640t"),
             "\u001b[16t" to listOf("\u001b[6;16;8t"),
             "\u001b[?12\$p" to listOf("\u001b[?12;1\$y", "\u001b[?12;2\$y"),
+            "\u001b[?47\$p" to listOf("\u001b[?47;2\$y"),
+            "\u001b[?1047\$p" to listOf("\u001b[?1047;2\$y"),
+            "\u001b[?1049\$p" to listOf("\u001b[?1049;2\$y"),
+            "\u001b]10;?\u0007" to listOf("\u001b]10;rgb:ffff/ffff/ffff\u001b\\"),
+            "\u001b]11;?\u0007" to listOf("\u001b]11;rgb:0000/0000/0000\u001b\\"),
+            "\u001b]12;?\u0007" to listOf("\u001b]12;rgb:ffff/ffff/ffff\u001b\\"),
+            "\u001b]10;?\u001b\\" to listOf("\u001b]10;rgb:ffff/ffff/ffff\u001b\\"),
+            "\u001b]11;?\u001b\\" to listOf("\u001b]11;rgb:0000/0000/0000\u001b\\"),
+            "\u001b]12;?\u001b\\" to listOf("\u001b]12;rgb:ffff/ffff/ffff\u001b\\"),
         )
         val unverified = listOf(
             "\u001b[c", "\u001b[5n", "\u001b[?6n", "\u001b[18t", "\u001b[>q", "\u001b[?u", "\u001b[?1004h", "\u001b[?1004l",
-            "\u001b]10;?\u0007", "\u001b]11;?\u0007", "\u001b]10;?\u001b\\", "\u001b]11;?\u001b\\", "\u001b]4;1;?\u0007",
-            "\u001bP\$qm\u001b\\", "\u001b[4\$p",
+            "\u001b]4;1;?\u0007", "\u001bP\$qm\u001b\\", "\u001b[4\$p",
         )
         val queries = seen.map { it.first } + unverified
         // The queries as a vim session leaves them, one replay.

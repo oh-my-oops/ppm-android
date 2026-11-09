@@ -305,7 +305,7 @@ private fun ToastSlot(
                 interactive,
                 onAction = { action ->
                     action.run()
-                    toast.dismiss()
+                    toast.dismiss(byAction = true)
                 },
                 Modifier.graphicsLayer { this.alpha = children[0] },
             )
@@ -399,6 +399,28 @@ private fun ToastBody(message: ErrorToastMessage, dark: Boolean, interactive: Bo
             BasicText(message.title, Modifier.cssLines(19.5f), style = sonnerText(13f, FontWeight.Medium, lineHeight = 19.5f).copy(color = tokens.text.color))
             message.description?.let {
                 BasicText(it, Modifier.cssLines(18.2f), style = sonnerText(13f, FontWeight.Normal, lineHeight = 18.2f).copy(color = (if (dark) SONNER_DESCRIPTION_DARK else SONNER_DESCRIPTION).color))
+            }
+        }
+        // `[data-cancel]`: secondary action button (`toastOpts.cancel` in `use-extension-ws.ts`).
+        message.cancel?.let { cancel ->
+            CssRow(
+                Modifier
+                    .height(24.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(tokens.border.color)
+                    .then(
+                        if (interactive) {
+                            Modifier
+                                .pointerHoverIcon(WebCursor.Pointer)
+                                .clickable(remember { MutableInteractionSource() }, indication = null, role = Role.Button) { onAction(cancel) }
+                        } else {
+                            Modifier
+                        },
+                    ),
+                start = 8.dp,
+                end = 8.dp,
+            ) {
+                CssText(cancel.label, sonnerText(12f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.text.color))
             }
         }
         // `[data-button]`, `margin-left: auto`: 24 tall, the toast's colours swapped. It does what it

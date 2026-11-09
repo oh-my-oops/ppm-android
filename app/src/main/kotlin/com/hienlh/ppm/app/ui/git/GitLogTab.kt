@@ -22,7 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +52,7 @@ import com.hienlh.ppm.state.git.GitRepoScope
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
@@ -141,20 +142,23 @@ fun GitLogBody(model: AppModel, tab: WorkspaceTab) {
     }
 
     val listState = rememberLazyListState()
-    val shouldLoadMore by remember {
-        derivedStateOf {
+
+    LaunchedEffect(listState, projectName, repo?.path, api) {
+        snapshotFlow {
             val info = listState.layoutInfo
             val total = info.totalItemsCount
             val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-            total > 0 && lastVisible >= total - 10
+            val nearBottom = total > 0 && lastVisible >= total - 10
+            listOf(nearBottom, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset, data?.commits?.size ?: 0)
         }
-    }
-
-    LaunchedEffect(shouldLoadMore, loading, hasMore, data?.commits?.size) {
-        val current = data
-        if (shouldLoadMore && !loading && hasMore && current != null && current.commits.isNotEmpty()) {
-            fetchData(skip = current.commits.size, append = true)
-        }
+            .distinctUntilChanged()
+            .filter { it[0] == true }
+            .collect {
+                val current = data
+                if (!loading && hasMore && current != null && current.commits.isNotEmpty()) {
+                    fetchData(skip = current.commits.size, append = true)
+                }
+            }
     }
 
     Column(

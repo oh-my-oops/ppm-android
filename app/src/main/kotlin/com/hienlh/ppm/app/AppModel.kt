@@ -49,7 +49,10 @@ import com.hienlh.ppm.client.setTag
 import com.hienlh.ppm.client.uiPrefs
 import com.hienlh.ppm.client.updateTag
 import com.hienlh.ppm.client.webFile
+import com.hienlh.ppm.client.fullResourceSamples
 import com.hienlh.ppm.client.logsIssuesSummary
+import com.hienlh.ppm.client.androidCapabilities
+import com.hienlh.ppm.client.remoteDesktopCapabilities
 import com.hienlh.ppm.design.GalleryImage
 import com.hienlh.ppm.design.IconFramework
 import com.hienlh.ppm.design.PpmTheme
@@ -174,6 +177,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.withContext
@@ -434,9 +438,25 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** The versions Later was chosen for on each server while the app runs, as the web's `sessionStorage` keeps them. */
     private val upgradeDismissals = HashMap<String, MutableSet<String>>()
     var info by mutableStateOf<ServerInfo?>(null)
-        private set
+        internal set
+
+    /** Whether `/api/android/capabilities` reports `enabled: true` on the open server (`use-android-available.ts`). */
+    var androidEnabled by mutableStateOf(false)
+        internal set
+
+    /** The Android entry surfaces only when `enabled` is true and `minimalMode` is off (`use-android-available.ts`). */
+    val androidAvailable: Boolean
+        get() = info?.minimalMode != true && androidEnabled
+
+    /** Whether `/api/remote-desktop/capabilities` reports `platformSupported: true` (`use-remote-desktop-available.ts`). */
+    var remoteDesktopPlatformSupported by mutableStateOf(true)
+        internal set
+
+    /** The Remote Desktop entry surfaces only when `platformSupported` is true and `minimalMode` is off (`use-remote-desktop-available.ts`). */
+    val remoteDesktopAvailable: Boolean
+        get() = info?.minimalMode != true && remoteDesktopPlatformSupported
     var projects by mutableStateOf(emptyList<ProjectInfo>())
-        private set
+        internal set
     var projectsLoad by mutableStateOf<Load>(Load.Idle)
         private set
     var selectedProject by mutableStateOf<String?>(null)
@@ -573,6 +593,50 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     var jiraEnabled by mutableStateOf(false)
         private set
 
+    /** Remote Desktop stats overlay (`remoteDesktopStatsVisible`), shared through the server's UI prefs. */
+    var remoteDesktopStatsVisible by mutableStateOf(false)
+        internal set
+
+    /** Remote Desktop warning gate dismissed (`remoteDesktopWarningDismissed`), shared through the server's UI prefs. */
+    var remoteDesktopWarningDismissed by mutableStateOf(false)
+        internal set
+
+    /** Device-local Remote Desktop quality choice (`remoteDesktopQuality`). */
+    var remoteDesktopQuality by mutableStateOf(com.hienlh.ppm.state.remotedesktop.DEFAULT_PRESET_ID)
+        internal set
+
+    /** Device-local Remote Desktop view style (`remoteDesktopViewStyle`). */
+    var remoteDesktopViewStyle by mutableStateOf(com.hienlh.ppm.state.remotedesktop.DEFAULT_VIEW_STYLE)
+        internal set
+
+    /** Device-local Remote Desktop custom scale (`remoteDesktopCustomScale`). */
+    var remoteDesktopCustomScale by mutableStateOf(com.hienlh.ppm.state.remotedesktop.DEFAULT_CUSTOM_SCALE)
+        internal set
+
+    /** Device-local Remote Desktop custom quality "More" toggle (`remoteDesktopCustomQualityMore`). */
+    var remoteDesktopCustomQualityMore by mutableStateOf(false)
+        internal set
+
+    /** Device-local Remote Desktop custom bitrate percent (`remoteDesktopCustomQualityPercent`). */
+    var remoteDesktopCustomQualityPercent by mutableIntStateOf(com.hienlh.ppm.state.remotedesktop.CUSTOM_QUALITY_DEFAULT_PERCENT)
+        internal set
+
+    /** Device-local Remote Desktop custom FPS (`remoteDesktopCustomFps`). */
+    var remoteDesktopCustomFps by mutableIntStateOf(com.hienlh.ppm.state.remotedesktop.CUSTOM_FPS_DEFAULT)
+        internal set
+
+    /** Device-local Remote Desktop cursor visibility (`remoteDesktopShowCursor`). */
+    var remoteDesktopShowCursor by mutableStateOf(true)
+        internal set
+
+    /** Device-local Remote Desktop clipboard sync (`remoteDesktopClipboardSync`). */
+    var remoteDesktopClipboardSync by mutableStateOf(true)
+        internal set
+
+    /** Device-local Remote Desktop preferred H.264 encoder (`remoteDesktopCodec`). */
+    var remoteDesktopCodec by mutableStateOf<String?>(null)
+        internal set
+
     /** Requested Settings category when opened via deep link or `openSettings(category)`. */
     var requestedSettingsCategory by mutableStateOf<String?>(null)
         internal set
@@ -639,6 +703,67 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         jiraEnabled = enabled
         saveUiPrefs()
         putUiPref { put("jiraEnabled", enabled) }
+    }
+
+    fun setRemoteDesktopWarningDismissedPref(dismissed: Boolean) {
+        remoteDesktopWarningDismissed = dismissed
+        saveUiPrefs()
+        putUiPref { put("remoteDesktopWarningDismissed", dismissed) }
+    }
+
+    fun setRemoteDesktopStatsVisiblePref(visible: Boolean) {
+        remoteDesktopStatsVisible = visible
+        saveUiPrefs()
+        putUiPref { put("remoteDesktopStatsVisible", visible) }
+    }
+
+    fun setRemoteDesktopQualityPref(choice: String) {
+        val parsed = com.hienlh.ppm.state.remotedesktop.parseQualityChoice(choice)
+        remoteDesktopQuality = parsed
+        prefs.put("remoteDesktopQuality.$serverKey", parsed)
+    }
+
+    fun setRemoteDesktopViewStylePref(style: String) {
+        val parsed = com.hienlh.ppm.state.remotedesktop.parseViewStyle(style)
+        remoteDesktopViewStyle = parsed
+        prefs.put("remoteDesktopViewStyle.$serverKey", parsed)
+    }
+
+    fun setRemoteDesktopCustomScalePref(scale: Double) {
+        val clamped = com.hienlh.ppm.state.remotedesktop.clampCustomScale(scale)
+        remoteDesktopCustomScale = clamped
+        prefs.put("remoteDesktopCustomScale.$serverKey", clamped.toString())
+    }
+
+    fun setRemoteDesktopCustomQualityPref(
+        percent: Int,
+        fps: Int,
+        more: Boolean = remoteDesktopCustomQualityMore,
+    ) {
+        val p = com.hienlh.ppm.state.remotedesktop.clampCustomQualityPercent(percent, more)
+        val f = com.hienlh.ppm.state.remotedesktop.clampCustomFps(fps)
+        remoteDesktopCustomQualityMore = more
+        remoteDesktopCustomQualityPercent = p
+        remoteDesktopCustomFps = f
+        prefs.put("remoteDesktopCustomQualityMore.$serverKey", more.toString())
+        prefs.put("remoteDesktopCustomQualityPercent.$serverKey", p.toString())
+        prefs.put("remoteDesktopCustomFps.$serverKey", f.toString())
+    }
+
+    fun setRemoteDesktopShowCursorPref(show: Boolean) {
+        remoteDesktopShowCursor = show
+        prefs.put("remoteDesktopShowCursor.$serverKey", show.toString())
+    }
+
+    fun setRemoteDesktopClipboardSyncPref(enabled: Boolean) {
+        remoteDesktopClipboardSync = enabled
+        prefs.put("remoteDesktopClipboardSync.$serverKey", enabled.toString())
+    }
+
+    fun setRemoteDesktopCodecPref(encoder: String?) {
+        val clean = encoder?.takeIf { it.isNotEmpty() }
+        remoteDesktopCodec = clean
+        prefs.put("remoteDesktopCodec.$serverKey", clean)
     }
 
     fun updateDeviceNameLocal(name: String) {
@@ -752,6 +877,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     var projectOpenedAt by mutableStateOf(emptyMap<String, Long>())
         private set
 
+    /** Device-local `logsBadge` preference (`use-logs-badge.ts`): when false, `/api/logs/issues/summary` is never called. */
+    var logsBadge by mutableStateOf(true)
+
     init {
         restoreUiPrefs()
     }
@@ -772,6 +900,159 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     /** Likely PPM bug count from `/api/logs/issues/summary` for the Logs footer badge. */
     var logsLikelyBugs by mutableIntStateOf(0)
+
+    val showLogsBadgeDot: Boolean
+        get() = logsBadge && info?.minimalMode == false && logsLikelyBugs > 0
+
+    private var logsBadgePollJob: Job? = null
+    internal var openLogsWindowCount = 0
+    private var logsReadyOff: (() -> Unit)? = null
+    private var logsBoundEvents: GlobalEvents? = null
+    internal var logsTailSender: ((String) -> Unit)? = null
+    internal var reportClipboardCopy: ((String) -> Boolean)? = null
+    internal var remoteDesktopSender: ((JsonElement) -> Unit)? = null
+
+    private fun sendLogsTailFrame(frame: String) {
+        val custom = logsTailSender
+        if (custom != null) {
+            custom(frame)
+        } else {
+            events?.sendIfOpen(frame)
+        }
+    }
+
+    /** Keeps the server pushing new lines while any Logs view is mounted (`retainLogsTail`, `use-logs-feed.ts:35-46`). */
+    fun retainLogsTail(): () -> Unit {
+        val ev = events
+        if (logsBoundEvents !== ev) {
+            logsReadyOff?.invoke()
+            logsReadyOff = null
+            logsBoundEvents = ev
+            if (openLogsWindowCount > 0) {
+                val subscribe = { sendLogsTailFrame("""{"type":"logs:subscribe"}""") }
+                subscribe()
+                logsReadyOff = ev?.onGlobalReady(subscribe)
+            }
+        }
+        if (openLogsWindowCount++ == 0) {
+            val subscribe = { sendLogsTailFrame("""{"type":"logs:subscribe"}""") }
+            subscribe()
+            logsReadyOff = ev?.onGlobalReady(subscribe)
+        }
+        var released = false
+        return {
+            if (!released) {
+                released = true
+                openLogsWindowCount = (openLogsWindowCount - 1).coerceAtLeast(0)
+                if (openLogsWindowCount == 0) {
+                    logsReadyOff?.invoke()
+                    logsReadyOff = null
+                    sendLogsTailFrame("""{"type":"logs:unsubscribe"}""")
+                }
+            }
+        }
+    }
+
+    var sharedMetricsSnapshot by mutableStateOf<com.hienlh.ppm.state.sysmon.MetricsSnapshot?>(null)
+    var sharedMetricsHistory by mutableStateOf<List<com.hienlh.ppm.state.sysmon.MetricsHistoryPoint>>(emptyList())
+    var sharedMetricsTickCount by mutableIntStateOf(0)
+    var sharedMetricsConnected by mutableStateOf(false)
+    internal val resourceTierTracker = com.hienlh.ppm.state.sysmon.ResourceStreamTierTracker()
+    private var resourceStreamJob: Job? = null
+
+    fun retainResourceMonitor(wantProcesses: Boolean, reconnectDelayMs: Long = 5_000L): () -> Unit {
+        applyResourceReconcile(resourceTierTracker.retain(wantProcesses), reconnectDelayMs)
+        var released = false
+        return {
+            if (!released) {
+                released = true
+                applyResourceReconcile(resourceTierTracker.release(wantProcesses), reconnectDelayMs)
+            }
+        }
+    }
+
+    internal fun applyResourceReconcile(
+        action: com.hienlh.ppm.state.sysmon.StreamReconcileAction,
+        reconnectDelayMs: Long = 5_000L,
+    ) {
+        when (action) {
+            com.hienlh.ppm.state.sysmon.StreamReconcileAction.NoOp -> {}
+            com.hienlh.ppm.state.sysmon.StreamReconcileAction.Disconnect -> {
+                resourceStreamJob?.cancel()
+                resourceStreamJob = null
+                sharedMetricsConnected = false
+            }
+            is com.hienlh.ppm.state.sysmon.StreamReconcileAction.Connect -> {
+                resourceStreamJob?.cancel()
+                val currentApi = api ?: return
+                val wantProc = action.wantProcesses
+                sharedMetricsTickCount = 0
+                resourceStreamJob = scope.launch {
+                    while (isActive) {
+                        sharedMetricsTickCount = 0
+                        try {
+                            currentApi.fullResourceSamples(processes = wantProc).collect { sampleJson ->
+                                val parsed = com.hienlh.ppm.state.sysmon.MetricsSnapshot.from(sampleJson) ?: return@collect
+                                sharedMetricsSnapshot = parsed
+                                sharedMetricsHistory = com.hienlh.ppm.state.sysmon.SysMonRingBuffer.appendSnapshot(sharedMetricsHistory, parsed)
+                                sharedMetricsTickCount += 1
+                                sharedMetricsConnected = true
+                            }
+                            sharedMetricsConnected = false
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (_: PpmError.Unauthorized) {
+                            sharedMetricsConnected = false
+                            return@launch
+                        } catch (_: Exception) {
+                            sharedMetricsConnected = false
+                        }
+                        delay(reconnectDelayMs)
+                    }
+                }
+            }
+        }
+    }
+
+    fun updateLogsBadge(enabled: Boolean, pollIntervalMs: Long = 10 * 60_000L) {
+        logsBadge = enabled
+        prefs.put("logsBadge.$serverKey", enabled.toString())
+        reconcileLogsBadge(pollIntervalMs)
+    }
+
+    internal fun reconcileLogsBadge(pollIntervalMs: Long = 10 * 60_000L) {
+        val currentApi = api
+        if (currentApi == null || !logsBadge || info?.minimalMode != false) {
+            logsBadgePollJob?.cancel()
+            logsBadgePollJob = null
+            logsLikelyBugs = 0
+            return
+        }
+        refreshLogsIssuesSummary()
+        if (logsBadgePollJob?.isActive != true) {
+            logsBadgePollJob = scope.launch {
+                while (isActive) {
+                    delay(pollIntervalMs)
+                    if (windowVisible && logsBadge && info?.minimalMode == false) {
+                        refreshLogsIssuesSummary()
+                    }
+                }
+            }
+        }
+    }
+
+    fun refreshLogsIssuesSummary() {
+        if (!logsBadge || info?.minimalMode != false) {
+            logsLikelyBugs = 0
+            return
+        }
+        val currentApi = api ?: return
+        scope.launch {
+            val summaryJson = quietly { currentApi.logsIssuesSummary() } ?: return@launch
+            if (this@AppModel.api !== currentApi || !logsBadge || info?.minimalMode != false) return@launch
+            logsLikelyBugs = com.hienlh.ppm.state.logs.LogIssuesSummary.from(summaryJson).likelyBugs
+        }
+    }
 
     /** Each project's branch and how far it is from its upstream, for the tablet's status bar (the web's git `meta`). */
     val gitBranches = mutableStateMapOf<String, GitBranchStatus>()
@@ -802,6 +1083,18 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     var branchPickerProject by mutableStateOf<String?>(null)
         private set
 
+    /** Mounted `GitStatusPanel` count per project so `watchGit` stands down while Source Control is open. */
+    val gitStatusPanelOpenCount = mutableStateMapOf<String, Int>()
+
+    fun onGitStatusPanelMounted(project: String) {
+        gitStatusPanelOpenCount[project] = (gitStatusPanelOpenCount[project] ?: 0) + 1
+    }
+
+    fun onGitStatusPanelUnmounted(project: String) {
+        val next = (gitStatusPanelOpenCount[project] ?: 0) - 1
+        if (next <= 0) gitStatusPanelOpenCount.remove(project) else gitStatusPanelOpenCount[project] = next
+    }
+
     fun openBranchPicker(project: String) {
         branchPickerProject = project
     }
@@ -815,9 +1108,11 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     val gitChangedEvents: kotlinx.coroutines.flow.SharedFlow<String> get() = gitChanged
 
     /** Whether the app is in front (the web's `document.hidden`, inverted). */
-    var windowVisible = true
+    private var _windowVisible by mutableStateOf(true)
+    var windowVisible: Boolean
+        get() = _windowVisible
         set(value) {
-            field = value
+            _windowVisible = value
             // In the background Android may end the process at any time: the layout goes out now,
             // and so does each draft still waiting out its second.
             if (value) {
@@ -1034,6 +1329,16 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             canGoBack = false
         }
         closeWorkspace()
+        logsBadgePollJob?.cancel()
+        logsBadgePollJob = null
+        logsLikelyBugs = 0
+        resourceStreamJob?.cancel()
+        resourceStreamJob = null
+        resourceTierTracker.reset()
+        sharedMetricsSnapshot = null
+        sharedMetricsHistory = emptyList()
+        sharedMetricsTickCount = 0
+        sharedMetricsConnected = false
         events?.stop()
         events = null
         extensions?.stop()
@@ -1052,6 +1357,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         upgrade?.close()
         upgrade = null
         info = null
+        androidEnabled = false
+        remoteDesktopPlatformSupported = true
         projects = emptyList()
         projectsLoad = Load.Idle
         selectedProject = null
@@ -1128,9 +1435,18 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 prefs.put("localUrl.$serverKey", url)
             }
             launch {
-                val summaryJson = quietly { api.logsIssuesSummary() } ?: return@launch
+                val capsJson = quietly { api.androidCapabilities() } ?: return@launch
                 if (this@AppModel.api !== api) return@launch
-                logsLikelyBugs = com.hienlh.ppm.state.logs.LogIssuesSummary.from(summaryJson).likelyBugs
+                androidEnabled = com.hienlh.ppm.state.androiddevice.parseAndroidCapabilities(capsJson).enabled
+            }
+            launch {
+                val capsJson = quietly { api.remoteDesktopCapabilities() }
+                if (this@AppModel.api !== api) return@launch
+                remoteDesktopPlatformSupported = if (capsJson != null) {
+                    com.hienlh.ppm.state.remotedesktop.RemoteDesktopCapabilities.from(capsJson).platformSupported
+                } else {
+                    false
+                }
             }
         }
     }
@@ -1272,6 +1588,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 val keys = async { quietly { api.keybindings() } }
                 val projects = api.projects()
                 this@AppModel.info = info.await()
+                reconcileLogsBadge()
                 keys.await()?.let { keyBindings = KeyBindings(it) }
                 uiPrefs.await()?.let { prefs ->
                     prefs.projectSortMode?.takeIf { it in PROJECT_SORT_MODES }?.let { projectSortMode = it }
@@ -1289,6 +1606,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                     prefs.editorTabStyle?.let { editorTabStyle = it }
                     prefs.inlineBlame?.let { inlineBlame = it }
                     prefs.designWindows?.let { designWindows = it }
+                    prefs.remoteDesktopStatsVisible?.let { remoteDesktopStatsVisible = it }
+                    prefs.remoteDesktopWarningDismissed?.let { remoteDesktopWarningDismissed = it }
                     prefs.jiraEnabled?.let { jiraEnabled = it }
                     saveUiPrefs()
                 }
@@ -1343,7 +1662,27 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         editorTabStyle = saved.editorTabStyle ?: "default"
         inlineBlame = saved.inlineBlame ?: true
         designWindows = saved.designWindows ?: false
+        remoteDesktopStatsVisible = saved.remoteDesktopStatsVisible ?: false
+        remoteDesktopWarningDismissed = saved.remoteDesktopWarningDismissed ?: false
         jiraEnabled = saved.jiraEnabled ?: false
+        logsBadge = prefs.get("logsBadge.$serverKey")?.toBooleanStrictOrNull() ?: true
+        remoteDesktopQuality = com.hienlh.ppm.state.remotedesktop.parseQualityChoice(prefs.get("remoteDesktopQuality.$serverKey"))
+        remoteDesktopViewStyle = com.hienlh.ppm.state.remotedesktop.parseViewStyle(prefs.get("remoteDesktopViewStyle.$serverKey"))
+        remoteDesktopCustomScale = com.hienlh.ppm.state.remotedesktop.clampCustomScale(
+            prefs.get("remoteDesktopCustomScale.$serverKey")?.toDoubleOrNull(),
+        )
+        val rdMore = prefs.get("remoteDesktopCustomQualityMore.$serverKey")?.toBooleanStrictOrNull() ?: false
+        remoteDesktopCustomQualityMore = rdMore
+        remoteDesktopCustomQualityPercent = com.hienlh.ppm.state.remotedesktop.clampCustomQualityPercent(
+            prefs.get("remoteDesktopCustomQualityPercent.$serverKey")?.toIntOrNull(),
+            rdMore,
+        )
+        remoteDesktopCustomFps = com.hienlh.ppm.state.remotedesktop.clampCustomFps(
+            prefs.get("remoteDesktopCustomFps.$serverKey")?.toIntOrNull(),
+        )
+        remoteDesktopShowCursor = prefs.get("remoteDesktopShowCursor.$serverKey")?.toBooleanStrictOrNull() ?: true
+        remoteDesktopClipboardSync = prefs.get("remoteDesktopClipboardSync.$serverKey")?.toBooleanStrictOrNull() ?: true
+        remoteDesktopCodec = prefs.get("remoteDesktopCodec.$serverKey")?.takeIf { it.isNotEmpty() }
     }
 
     private fun saveUiPrefs() {
@@ -1363,6 +1702,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             editorTabStyle = editorTabStyle,
             inlineBlame = inlineBlame,
             designWindows = designWindows,
+            remoteDesktopStatsVisible = remoteDesktopStatsVisible,
+            remoteDesktopWarningDismissed = remoteDesktopWarningDismissed,
             jiraEnabled = jiraEnabled,
         )
         prefs.put("uiPrefs.$serverKey", saved.toJson().toString())
@@ -1399,70 +1740,91 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 if (chat.project == push.projectName && chat.session?.id == push.sessionId) chat.sessionChanges?.push(push.files, push.gone)
             }
         }
+        events.onLogsIssuesChanged {
+            if (openLogsWindowCount == 0) {
+                refreshLogsIssuesSummary()
+            }
+        }
         this.events = events
         events.start()
     }
 
     private fun startExtensions(api: ApiClient) {
         val ext = com.hienlh.ppm.state.extensions.ExtensionClient(api, scope)
+        wireExtensionClient(ext)
+        this.extensions = ext
+        ext.start()
+    }
+
+    internal fun wireExtensionClient(ext: com.hienlh.ppm.state.extensions.ExtensionClient) {
+        ext.onActivationError = { extId, error ->
+            toast(ErrorToastMessage("Extension \"$extId\" failed to activate: $error"))
+        }
+        ext.onPersistWebviewState = { key, stateJson ->
+            prefs.put("extWebviewState.$serverKey.$key", stateJson)
+        }
+        ext.onLoadWebviewState = { key ->
+            prefs.get("extWebviewState.$serverKey.$key")
+        }
         ext.onWebviewCreated = { msg ->
             val slug = ext.coordinator.viewSlug(msg.viewType)
+            val locallyRequested = ext.coordinator.takeLocalDispatch(slug, msg.projectPath)
             val projName = msg.projectName ?: projects.firstOrNull { it.path == msg.projectPath }?.name
-            val existingTab = openTabs.map { it.first }.firstOrNull { t ->
+            val candidates = openTabs.map { it.first }.filter { t ->
                 t.type == "extension" &&
-                    ext.coordinator.viewSlug(t.metaString("viewType").orEmpty()) == slug &&
-                    (projName == null || t.projectId == projName || t.metaString("projectName") == projName)
+                    ext.coordinator.viewSlug(t.metaString("viewType").orEmpty()) == slug
+            }
+            val existingTab = if (projName != null) {
+                candidates.firstOrNull { t -> (t.metaString("projectName") ?: t.projectId) == projName }
+                    ?: candidates.firstOrNull { t -> (t.metaString("projectName") ?: t.projectId).isNullOrEmpty() }
+            } else {
+                candidates.firstOrNull()
             }
             if (existingTab != null) {
                 patchTabMetadata(
                     existingTab.id,
                     "panelId" to JsonPrimitive(msg.panelId),
-                    "viewType" to JsonPrimitive(msg.viewType),
+                    "viewType" to JsonPrimitive(slug),
                     "extensionId" to JsonPrimitive(msg.extensionId),
                     *(if (projName != null) arrayOf("projectName" to JsonPrimitive(projName)) else emptyArray()),
                 )
-                if (!ext.coordinator.consumeRecovery(slug)) {
+                val wasRecovery = ext.coordinator.consumeRecovery(slug)
+                if (locallyRequested && !wasRecovery) {
                     activate(existingTab.id)
                 }
-            } else if (!ext.coordinator.isRecentlyClosed(slug, projName)) {
-                val isLocal = ext.coordinator.takeLocalDispatch(slug, msg.projectPath)
-                if (isLocal) {
-                    withWorkspace { store ->
-                        store.openTab(
-                            NewTab(
-                                type = "extension",
-                                title = msg.title,
-                                projectId = projName ?: selectedProject,
-                                closable = true,
-                                metadata = buildJsonObject {
-                                    put("panelId", msg.panelId)
-                                    put("viewType", msg.viewType)
-                                    put("extensionId", msg.extensionId)
-                                    if (projName != null) put("projectName", projName)
-                                },
-                            ),
-                        )
-                    }
+            } else if (locallyRequested && !ext.coordinator.isRecentlyClosed(slug, projName)) {
+                val targetProject = projName ?: selectedProject
+                withWorkspace { store ->
+                    store.openTab(
+                        NewTab(
+                            type = "extension",
+                            title = msg.title,
+                            projectId = targetProject,
+                            closable = true,
+                            metadata = buildJsonObject {
+                                put("panelId", msg.panelId)
+                                put("viewType", slug)
+                                put("extensionId", msg.extensionId)
+                                if (targetProject != null) put("projectName", targetProject)
+                            },
+                        ),
+                    )
                 }
             }
         }
         ext.onTabOpen = { msg ->
-            val targetProject = msg.projectId
-                ?: (msg.metadata["projectName"] as? JsonPrimitive)?.contentOrNull
-                ?: selectedProject
-            if (msg.tabType == "git-review" && targetProject != null) {
-                val selObj = msg.metadata["select"] as? JsonObject
-                val path = (selObj?.get("path") as? JsonPrimitive)?.contentOrNull
-                    ?: (msg.metadata["filePath"] as? JsonPrimitive)?.contentOrNull
-                val repo = (selObj?.get("repo") as? JsonPrimitive)?.contentOrNull
-                openGitReview(targetProject, path, repo)
+            val metaProjectName = (msg.metadata["projectName"] as? JsonPrimitive)?.contentOrNull
+            if (msg.tabType == "git-review" && !metaProjectName.isNullOrEmpty()) {
+                val path = (msg.metadata["path"] as? JsonPrimitive)?.contentOrNull
+                val repo = (msg.metadata["repo"] as? JsonPrimitive)?.contentOrNull
+                openGitReview(metaProjectName, path, repo)
             } else {
                 withWorkspace { store ->
                     store.openTab(
                         NewTab(
                             type = msg.tabType,
                             title = msg.title,
-                            projectId = targetProject,
+                            projectId = msg.projectId,
                             closable = msg.closable,
                             metadata = JsonObject(msg.metadata),
                         ),
@@ -1482,6 +1844,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 else -> ErrorToastMessage.Kind.INFO
             }
             val firstAction = msg.actions.firstOrNull()
+            val secondAction = msg.actions.getOrNull(1)
             toast(
                 ErrorToastMessage(
                     title = msg.message,
@@ -1490,41 +1853,81 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                             ext.sendNotificationAction(msg.id, label)
                         }
                     },
+                    cancel = secondAction?.let { label ->
+                        ErrorToastMessage.Action(label) {
+                            ext.sendNotificationAction(msg.id, label)
+                        }
+                    },
+                    onDismiss = if (msg.actions.isNotEmpty()) {
+                        { ext.sendNotificationAction(msg.id, null) }
+                    } else {
+                        null
+                    },
                     kind = kind,
                 ),
             )
         }
-        this.extensions = ext
-        ext.start()
     }
 
     /**
      * Dispatches an extension command (`ext-command-dispatch.ts`), automatically passing the active
-     * project's path (or chosen git repository path for git commands) when [args] is null.
+     * project's path (or chosen git repository path for `git-graph.*` commands) when [args] is null.
      */
     fun dispatchExtCommand(
         command: String,
         args: List<JsonElement>? = null,
         recovery: Boolean = false,
+        projectName: String? = null,
     ) {
         val ext = extensions ?: return
-        val proj = currentProject
-        val runsGit = command == "git-graph.view" || command.startsWith("git-graph.") || command.startsWith("git.")
-        val projectPath = if (proj != null) {
-            if (runsGit) {
-                com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(
-                    gitDiscovery[proj.name],
-                    gitChosenRepoPath[proj.name],
-                )?.path ?: proj.path
-            } else {
-                proj.path
-            }
-        } else {
-            null
+        if (args != null) {
+            val argPath = (args.firstOrNull() as? JsonPrimitive)?.contentOrNull
+            ext.coordinator.recordCommandDispatch(command, argPath, recovery)
+            ext.sendCommand(command, args)
+            return
         }
-        ext.coordinator.recordCommandDispatch(command, projectPath, recovery)
-        val effectiveArgs = args ?: if (projectPath != null) listOf(JsonPrimitive(projectPath)) else emptyList()
-        ext.sendCommand(command, effectiveArgs)
+        val targetProjectName = if (recovery) projectName else (projectName ?: selectedProject)
+        if (targetProjectName.isNullOrEmpty()) {
+            ext.coordinator.recordCommandDispatch(command, null, recovery)
+            ext.sendCommand(command, emptyList())
+            return
+        }
+        val runsGit = com.hienlh.ppm.state.git.GitRepoScope.commandRunsGit(command)
+        val cachedProj = projects.firstOrNull { it.name == targetProjectName }
+        if (cachedProj != null && (!runsGit || cachedProj.name in gitDiscovery)) {
+            val projectPath = if (runsGit) {
+                com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(
+                    gitDiscovery[cachedProj.name],
+                    gitChosenRepoPath[cachedProj.name],
+                )?.path ?: cachedProj.path
+            } else {
+                cachedProj.path
+            }
+            ext.coordinator.recordCommandDispatch(command, projectPath, recovery)
+            ext.sendCommand(command, listOf(JsonPrimitive(projectPath)))
+            return
+        }
+        scope.launch {
+            val proj = cachedProj ?: api?.let { client ->
+                quietly { client.projects() }?.firstOrNull { it.name == targetProjectName }
+            }
+            val projectPath = if (proj != null) {
+                if (runsGit) {
+                    loadGitRepos(proj.name)
+                    com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(
+                        gitDiscovery[proj.name],
+                        gitChosenRepoPath[proj.name],
+                    )?.path ?: proj.path
+                } else {
+                    proj.path
+                }
+            } else {
+                null
+            }
+            ext.coordinator.recordCommandDispatch(command, projectPath, recovery)
+            val effectiveArgs = if (projectPath != null) listOf(JsonPrimitive(projectPath)) else emptyList()
+            ext.sendCommand(command, effectiveArgs)
+        }
     }
 
     /** How many times the app has come to the front: each restarts the reconnect pill's clocks. */
@@ -2134,13 +2537,26 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         }
     }
 
+    fun gitChangesKey(project: String, repoPath: String?): String =
+        com.hienlh.ppm.state.git.CommitDraftSync.draftKey(project, repoPath)
+
+    fun cachedGitChanges(project: String, repoPath: String? = null): com.hienlh.ppm.client.GitChanges? {
+        val resolvedPath = repoPath ?: com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(
+            gitDiscovery[project],
+            gitChosenRepoPath[project],
+        )?.path
+        return gitChangesCache[gitChangesKey(project, resolvedPath)]
+    }
+
     /** Sidebar badge count for Source Control (`selectChangeCount`). */
     fun gitChangeCount(project: String?): Int {
         if (project == null) return 0
-        gitChangesCache[project]?.let { return it.files.size }
+        cachedGitChanges(project)?.let { return it.files.size }
         val status = gitBranches[project] ?: return 0
         return status.staged.size + status.unstaged.size + status.untracked.size
     }
+
+    private val gitReposInflight = mutableMapOf<String, CompletableDeferred<Unit>>()
 
     suspend fun loadGitRepos(project: String, force: Boolean = false) {
         val client = api ?: return
@@ -2148,18 +2564,31 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             gitRepoChoices.chosen(project)?.let { gitChosenRepoPath[project] = it }
             return
         }
-        val repos = quietly { client.gitRepos(project) } ?: return
-        if (this.api === client) {
-            gitDiscovery[project] = repos
-            val saved = gitRepoChoices.chosen(project)
-            if (saved != null) gitChosenRepoPath[project] = saved
+        val existing = gitReposInflight[project]
+        if (existing != null && !force) {
+            existing.await()
+            return
+        }
+        val request = CompletableDeferred<Unit>()
+        gitReposInflight[project] = request
+        try {
+            val repos = quietly { client.gitRepos(project) }
+            if (repos != null && this.api === client) {
+                gitDiscovery[project] = repos
+                val saved = gitRepoChoices.chosen(project)
+                if (saved != null) gitChosenRepoPath[project] = saved
+            }
+        } finally {
+            if (gitReposInflight[project] === request) {
+                gitReposInflight.remove(project)
+            }
+            request.complete(Unit)
         }
     }
 
     fun chooseGitRepo(project: String, repoPath: String) {
         gitRepoChoices.choose(project, repoPath)
         gitChosenRepoPath[project] = repoPath
-        gitChangesCache.remove(project)
         gitChanged.tryEmit(project)
     }
 
@@ -2172,7 +2601,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     }
 
     fun applyGitChanges(project: String, repo: com.hienlh.ppm.client.GitRepo?, changes: com.hienlh.ppm.client.GitChanges) {
-        gitChangesCache[project] = changes
+        gitChangesCache[gitChangesKey(project, repo?.path)] = changes
         applyGitStatus(project, repo, com.hienlh.ppm.state.git.GitChangesView.changesToStatus(changes))
     }
 
@@ -2316,6 +2745,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         val api = api ?: return
         loadGitRepos(project)
         suspend fun read() {
+            if ((gitStatusPanelOpenCount[project] ?: 0) > 0) return
             val discovery = gitDiscovery[project] ?: quietly { api.gitRepos(project) } ?: return
             val repo = com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(discovery, gitChosenRepoPath[project]) ?: return
             // A failed read keeps the branch last shown.
@@ -4780,6 +5210,8 @@ class ErrorToastMessage(
     val persistent: Boolean = false,
     /** `duration: n`: how long it stays, in milliseconds; sonner's four seconds when none is given. */
     val durationMillis: Long? = null,
+    val cancel: Action? = null,
+    val onDismiss: (() -> Unit)? = null,
 ) {
     class Action(val label: String, val run: () -> Unit)
 
@@ -4800,8 +5232,15 @@ class AppToast internal constructor(val id: Long, message: ErrorToastMessage) {
     var dismissed by mutableStateOf(false)
         private set
 
-    fun dismiss() {
+    private var dismissNotified = false
+
+    fun dismiss(byAction: Boolean = false) {
+        if (dismissed) return
         dismissed = true
+        if (!byAction && !dismissNotified) {
+            dismissNotified = true
+            message.onDismiss?.invoke()
+        }
     }
 }
 

@@ -52,30 +52,34 @@ data class GitBranchStatus(
 /** One hunk summary (`ChangeBlock`) in `GET /git/changes`. */
 data class ChangeBlock(
     val id: String,
-    val index: Int = 0,
-    val oldStart: Int = 1,
-    val oldLines: Int = 1,
-    val newStart: Int = 1,
-    val newLines: Int = 1,
-    val added: Int = 0,
-    val removed: Int = 0,
+    val index: Int,
+    val oldStart: Int,
+    val oldLines: Int,
+    val newStart: Int,
+    val newLines: Int,
+    val added: Int,
+    val removed: Int,
 ) {
     companion object {
-        fun from(json: JsonElement?, fallbackIndex: Int = 0): ChangeBlock? {
-            json?.string?.let { id ->
-                return ChangeBlock(id = id, index = fallbackIndex)
-            }
+        fun from(json: JsonElement?): ChangeBlock? {
             val obj = json.obj ?: return null
             val id = obj["id"].string ?: return null
+            val index = obj["index"].int ?: return null
+            val oldStart = obj["oldStart"].int ?: return null
+            val oldLines = obj["oldLines"].int ?: return null
+            val newStart = obj["newStart"].int ?: return null
+            val newLines = obj["newLines"].int ?: return null
+            val added = obj["added"].int ?: return null
+            val removed = obj["removed"].int ?: return null
             return ChangeBlock(
                 id = id,
-                index = obj["index"].int ?: fallbackIndex,
-                oldStart = obj["oldStart"].int ?: 1,
-                oldLines = obj["oldLines"].int ?: 0,
-                newStart = obj["newStart"].int ?: 1,
-                newLines = obj["newLines"].int ?: 0,
-                added = obj["added"].int ?: 0,
-                removed = obj["removed"].int ?: 0,
+                index = index,
+                oldStart = oldStart,
+                oldLines = oldLines,
+                newStart = newStart,
+                newLines = newLines,
+                added = added,
+                removed = removed,
             )
         }
     }
@@ -83,35 +87,21 @@ data class ChangeBlock(
 
 /** One side of a changed file (`staged` or `unstaged`) in `GET /git/changes`. */
 data class ChangeSide(
-    val status: String,
     val added: Int,
     val removed: Int,
     val blocks: List<String>,
     val whole: String? = null,
-    val changeBlocks: List<ChangeBlock> = blocks.mapIndexed { idx, id ->
-        ChangeBlock(
-            id = id,
-            index = idx,
-            oldStart = idx * 10 + 1,
-            oldLines = 1,
-            newStart = idx * 10 + 1,
-            newLines = 1,
-            added = if (idx == 0) added else 0,
-            removed = if (idx == 0) removed else 0,
-        )
-    },
+    val changeBlocks: List<ChangeBlock> = emptyList(),
 ) {
     companion object {
-        fun from(json: JsonElement?, fallbackStatus: String = "M"): ChangeSide? {
+        fun from(json: JsonElement?): ChangeSide? {
             val obj = json.obj ?: return null
-            val status = obj["status"].string ?: fallbackStatus
-            val parsedBlocks = obj["blocks"].array.orEmpty().mapIndexedNotNull { idx, el ->
-                ChangeBlock.from(el, idx)
-            }
+            val added = obj["added"].int ?: return null
+            val removed = obj["removed"].int ?: return null
+            val parsedBlocks = obj["blocks"].array.orEmpty().mapNotNull(ChangeBlock::from)
             return ChangeSide(
-                status = status,
-                added = obj["added"].int ?: 0,
-                removed = obj["removed"].int ?: 0,
+                added = added,
+                removed = removed,
                 blocks = parsedBlocks.map { it.id },
                 whole = obj["whole"].string,
                 changeBlocks = parsedBlocks,
@@ -126,51 +116,28 @@ data class ChangedFile(
     val oldPath: String? = null,
     val staged: ChangeSide? = null,
     val unstaged: ChangeSide? = null,
-    val conflict: String? = null,
-    val x: String = when {
-        conflict != null -> "U"
-        staged != null -> staged.status
-        else -> "."
-    },
-    val y: String = when {
-        conflict != null -> "U"
-        unstaged != null -> unstaged.status
-        else -> "."
-    },
-    val untracked: Boolean = staged == null && unstaged?.status == "A",
+    val conflict: Boolean,
+    val x: String,
+    val y: String,
+    val untracked: Boolean,
 ) {
     companion object {
         fun from(json: JsonElement?): ChangedFile? {
             val obj = json.obj ?: return null
             val path = obj["path"].string ?: return null
-            val x = obj["x"].string ?: "."
-            val y = obj["y"].string ?: "."
-            val untracked = obj["untracked"].bool ?: false
-            val stagedFallback = when (x) {
-                ".", "?" -> "A"
-                else -> x
-            }
-            val unstagedFallback = when {
-                untracked || y == "?" -> "A"
-                y == "." -> "M"
-                else -> y
-            }
-            val conflictEl = obj["conflict"]
-            val conflict = when {
-                conflictEl == null -> null
-                conflictEl.bool == true -> "U"
-                conflictEl.bool == false -> null
-                else -> conflictEl.string
-            }
+            val conflict = obj["conflict"].bool ?: return null
+            val x = obj["x"].string ?: return null
+            val y = obj["y"].string ?: return null
+            val untracked = obj["untracked"].bool ?: return null
             return ChangedFile(
                 path = path,
                 oldPath = obj["oldPath"].string,
-                staged = ChangeSide.from(obj["staged"], stagedFallback),
-                unstaged = ChangeSide.from(obj["unstaged"], unstagedFallback),
+                staged = ChangeSide.from(obj["staged"]),
+                unstaged = ChangeSide.from(obj["unstaged"]),
                 conflict = conflict,
-                x = if (obj["x"] != null) x else if (conflict != null) "U" else stagedFallback.takeIf { obj["staged"] != null } ?: ".",
-                y = if (obj["y"] != null) y else if (conflict != null) "U" else unstagedFallback.takeIf { obj["unstaged"] != null } ?: ".",
-                untracked = if (obj["untracked"] != null) untracked else (obj["staged"] == null && unstagedFallback == "A" && obj["unstaged"] != null),
+                x = x,
+                y = y,
+                untracked = untracked,
             )
         }
     }
@@ -311,6 +278,7 @@ data class GitBranchState(
 data class GitOperation(
     val kind: String,
     val head: String? = null,
+    val name: String? = null,
     val step: Int? = null,
     val total: Int? = null,
 ) {
@@ -321,6 +289,7 @@ data class GitOperation(
             return GitOperation(
                 kind = kind,
                 head = obj["head"].string,
+                name = obj["name"].string,
                 step = obj["step"].int,
                 total = obj["total"].int,
             )
@@ -382,13 +351,15 @@ data class DiscardRecord(
     val skipped: List<String>,
 ) {
     companion object {
-        fun from(json: JsonElement?): DiscardRecord {
-            val target = json?.obj?.get("undo")?.takeIf { it.obj != null } ?: json
+        fun from(json: JsonElement?): DiscardRecord? {
+            val root = json?.obj ?: return null
+            val target = if ("undo" in root) root["undo"].obj ?: return null else root
+            val id = target["id"].string?.takeIf { it.isNotEmpty() } ?: return null
             return DiscardRecord(
-                id = target["id"].string ?: "",
+                id = id,
                 createdAt = target["createdAt"].long ?: 0L,
-                files = (target["files"].array ?: target["paths"].array).orEmpty().mapNotNull { it.string },
-                skipped = target["skipped"].array.orEmpty().mapNotNull { it.string },
+                files = (target["paths"].array ?: target["files"].array).orEmpty().mapNotNull { it.string },
+                skipped = (target["skipped"].array ?: root["skipped"].array).orEmpty().mapNotNull { it.string },
             )
         }
     }
@@ -714,7 +685,8 @@ data class StashEntry(
 ) {
     companion object {
         fun from(json: JsonElement?): StashEntry? {
-            val obj = json?.obj?.get("stash")?.obj ?: json.obj ?: return null
+            val root = json?.obj ?: return null
+            val obj = if ("stash" in root) root["stash"].obj ?: return null else root
             val index = obj["index"].int ?: return null
             val hash = obj["hash"].string ?: return null
             return StashEntry(
@@ -821,7 +793,7 @@ suspend fun ApiClient.gitUnstage(project: String, files: List<String>, repo: Git
     call("POST", "/api/project/${ApiClient.escape(project)}/git/unstage", gitRepoScope(repo), body)
 }
 
-suspend fun ApiClient.gitDiscard(project: String, files: List<String>, repo: GitRepo? = null): DiscardRecord {
+suspend fun ApiClient.gitDiscard(project: String, files: List<String>, repo: GitRepo? = null): DiscardRecord? {
     val body = buildJsonObject { put("files", JsonArray(files.map(::JsonPrimitive))) }
     return DiscardRecord.from(call("POST", "/api/project/${ApiClient.escape(project)}/git/discard", gitRepoScope(repo), body))
 }
@@ -872,7 +844,7 @@ suspend fun ApiClient.gitDiscardHunks(
     path: String,
     hunks: List<HunkSelectionItem>,
     repo: GitRepo? = null,
-): DiscardRecord {
+): DiscardRecord? {
     val body = buildJsonObject {
         put("path", path)
         put("hunks", JsonArray(hunks.map { it.toJson() }))
@@ -1022,8 +994,16 @@ suspend fun ApiClient.gitPush(
     call("POST", "/api/project/${ApiClient.escape(project)}/git/push", gitRepoScope(repo), body)
 }
 
-suspend fun ApiClient.gitPublish(project: String, repo: GitRepo? = null) {
-    call("POST", "/api/project/${ApiClient.escape(project)}/git/publish", gitRepoScope(repo), buildJsonObject {})
+data class GitPublishResult(
+    val remote: String,
+    val branch: String,
+)
+
+suspend fun ApiClient.gitPublish(project: String, repo: GitRepo? = null): GitPublishResult {
+    val data = call("POST", "/api/project/${ApiClient.escape(project)}/git/publish", gitRepoScope(repo), buildJsonObject {})
+    val remote = data["remote"].string ?: throw PpmError.BadResponse("Missing remote in gitPublish response")
+    val branch = data["branch"].string ?: throw PpmError.BadResponse("Missing branch in gitPublish response")
+    return GitPublishResult(remote = remote, branch = branch)
 }
 
 suspend fun ApiClient.gitPull(
@@ -1097,13 +1077,14 @@ suspend fun ApiClient.gitStash(
     message: String? = null,
     includeUntracked: Boolean = true,
     repo: GitRepo? = null,
-): StashEntry {
+): StashEntry? {
     val body = buildJsonObject {
         if (!message.isNullOrEmpty()) put("message", message)
         put("includeUntracked", includeUntracked)
     }
     val data = call("POST", "/api/project/${ApiClient.escape(project)}/git/stash", gitRepoScope(repo), body)
-    return StashEntry.from(data) ?: StashEntry(0, "", message ?: "stash@{0}", "")
+    if (data["stashed"].bool == false) return null
+    return StashEntry.from(data)
 }
 
 suspend fun ApiClient.gitStashAction(
@@ -1118,7 +1099,12 @@ suspend fun ApiClient.gitStashAction(
         put("hash", hash)
     }
     val data = call("POST", "/api/project/${ApiClient.escape(project)}/git/stash/${ApiClient.escape(action)}", gitRepoScope(repo), body)
-    return StashApplyResult(indexRestored = data["indexRestored"].bool ?: true)
+    val indexRestored = if (action == "drop") {
+        true
+    } else {
+        data["indexRestored"].bool ?: throw PpmError.BadResponse("Missing indexRestored in gitStashAction response")
+    }
+    return StashApplyResult(indexRestored = indexRestored)
 }
 
 suspend fun ApiClient.gitWorktrees(project: String, repo: GitRepo? = null): List<GitWorktree> =

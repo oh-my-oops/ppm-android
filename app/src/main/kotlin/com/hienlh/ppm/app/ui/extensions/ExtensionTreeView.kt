@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -27,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,8 +43,10 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.vector
+import com.hienlh.ppm.state.extensions.TreeHeaderAction
 import com.hienlh.ppm.state.extensions.TreeItemAction
 import com.hienlh.ppm.state.extensions.TreeItemUI
+import com.hienlh.ppm.state.extensions.inferTreeActionIcon
 import kotlinx.serialization.json.JsonElement
 
 @Composable
@@ -53,7 +58,11 @@ fun ExtensionTreeViewPanel(
 ) {
     val ext = model.extensions
     val treeViews by (ext?.treeViews?.collectAsState() ?: remember { mutableStateOf(emptyMap()) })
+    val contributions by (ext?.contributions?.collectAsState() ?: remember { mutableStateOf(null) })
     val items = treeViews[viewId].orEmpty()
+    val headerActions = remember(contributions, viewId) {
+        contributions?.headerActionsForView(viewId).orEmpty()
+    }
 
     ExtensionTreeViewList(
         viewId = viewId,
@@ -61,9 +70,16 @@ fun ExtensionTreeViewPanel(
         items = items,
         onExpand = { itemId -> ext?.expandTree(viewId, itemId) },
         onCommand = { cmd, args -> model.dispatchExtCommand(cmd, args) },
+        headerActions = headerActions,
         modifier = modifier,
     )
 }
+
+internal data class TreeFlatRow(
+    val item: TreeItemUI,
+    val depth: Int,
+    val keyPath: String,
+)
 
 @Composable
 fun ExtensionTreeViewList(
@@ -72,10 +88,50 @@ fun ExtensionTreeViewList(
     items: List<TreeItemUI>,
     onExpand: (String) -> Unit,
     onCommand: (String, List<JsonElement>) -> Unit,
+    headerActions: List<TreeHeaderAction> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
     val expandedOverrides = remember(viewId) { mutableStateMapOf<String, Boolean>() }
+    val childrenLoaded = remember(viewId) { HashSet<String>() }
+
+    // Prune stale expanded state after a root update or refresh, and auto-expand once when children arrive.
+    LaunchedEffect(items) {
+        if (items.isEmpty()) {
+            expandedOverrides.clear()
+            childrenLoaded.clear()
+            return@LaunchedEffect
+        }
+        val validIds = HashSet<String>()
+        val resetToCollapsed = HashSet<String>()
+        val newlyLoaded = HashSet<String>()
+        fun inspect(nodes: List<TreeItemUI>) {
+            for (node in nodes) {
+                validIds += node.id
+                val kids = node.children
+                if (kids.isNullOrEmpty()) {
+                    if (node.id in childrenLoaded) {
+                        resetToCollapsed += node.id
+                    }
+                } else {
+                    if (node.id !in childrenLoaded) {
+                        newlyLoaded += node.id
+                    }
+                    inspect(kids)
+                }
+            }
+        }
+        inspect(items)
+        val staleKeys = expandedOverrides.keys.filter { it !in validIds || it in resetToCollapsed }
+        for (k in staleKeys) expandedOverrides.remove(k)
+        childrenLoaded.removeAll { it !in validIds || it in resetToCollapsed }
+        for (id in newlyLoaded) {
+            childrenLoaded += id
+            if (expandedOverrides[id] != true) {
+                expandedOverrides[id] = true
+            }
+        }
+    }
 
     Column(
         modifier
@@ -83,18 +139,41 @@ fun ExtensionTreeViewList(
             .background(tokens.panel.color)
             .testTag("ext-treeview-$viewId"),
     ) {
-        if (viewName.isNotEmpty()) {
+        if (viewName.isNotEmpty() || headerActions.isNotEmpty()) {
             Row(
                 Modifier
                     .fillMaxWidth()
                     .edge(Edge.Bottom, tokens.borderSoft.color)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 BasicText(
                     viewName.uppercase(),
                     style = ppmText(11f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tokens.text3.color),
                 )
+                if (headerActions.isNotEmpty()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        for (action in headerActions) {
+                            val iconName = action.icon ?: inferTreeActionIcon(action.command)
+                            val iconVec = ExtensionIcons.icon(iconName) ?: ProductIcon.RefreshCw.vector
+                            Box(
+                                Modifier
+                                    .size(20.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .clickable { onCommand(action.command, emptyList()) }
+                                    .semantics { contentDescription = action.title }
+                                    .testTag("ext-tree-header-action-${action.command}"),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                PpmIcon(iconVec, 14.dp, tokens.text3.color)
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -109,29 +188,38 @@ fun ExtensionTreeViewList(
                 )
             }
         } else {
+            fun isNodeOpen(node: TreeItemUI): Boolean {
+                return expandedOverrides[node.id] ?: (!node.children.isNullOrEmpty() && node.id !in childrenLoaded)
+            }
+
             val flatRows = remember(items, expandedOverrides.toMap()) {
-                val out = mutableListOf<Pair<TreeItemUI, Int>>()
-                fun walk(nodes: List<TreeItemUI>, depth: Int) {
-                    for (node in nodes) {
-                        out += node to depth
+                val out = mutableListOf<TreeFlatRow>()
+                val usedKeys = HashSet<String>()
+                fun walk(nodes: List<TreeItemUI>, depth: Int, parentKey: String) {
+                    for ((idx, node) in nodes.withIndex()) {
+                        val baseKey = if (parentKey.isEmpty()) node.id else "$parentKey/${node.id}"
+                        val keyPath = if (usedKeys.add(baseKey)) baseKey else "$baseKey#$idx"
+                        out += TreeFlatRow(item = node, depth = depth, keyPath = keyPath)
                         val isCollapsible = node.collapsibleState != "none"
-                        val isOpen = expandedOverrides[node.id] ?: (node.collapsibleState == "expanded")
+                        val isOpen = isNodeOpen(node)
                         val kids = node.children
                         if (isCollapsible && isOpen && !kids.isNullOrEmpty()) {
-                            walk(kids, depth + 1)
+                            walk(kids, depth + 1, keyPath)
                         }
                     }
                 }
-                walk(items, 0)
+                walk(items, 0, "")
                 out
             }
 
             LazyColumn(
                 Modifier.fillMaxSize().padding(vertical = 4.dp),
             ) {
-                items(flatRows, key = { (item, depth) -> "$depth:${item.id}" }) { (item, depth) ->
+                items(flatRows, key = { row -> row.keyPath }) { row ->
+                    val item = row.item
+                    val depth = row.depth
                     val isCollapsible = item.collapsibleState != "none"
-                    val isOpen = expandedOverrides[item.id] ?: (item.collapsibleState == "expanded")
+                    val isOpen = isNodeOpen(item)
                     ExtensionTreeRow(
                         item = item,
                         depth = depth,
@@ -142,10 +230,11 @@ fun ExtensionTreeViewList(
                             if (isCollapsible) {
                                 val nextOpen = !isOpen
                                 expandedOverrides[item.id] = nextOpen
-                                if (nextOpen && item.children == null) {
+                                if (nextOpen && item.children.isNullOrEmpty()) {
                                     onExpand(item.id)
                                 }
-                            } else if (!cmd.isNullOrEmpty()) {
+                            }
+                            if (!cmd.isNullOrEmpty()) {
                                 onCommand(cmd, item.commandArgs)
                             }
                         },
@@ -245,6 +334,9 @@ private fun ExtensionTreeRow(
                     .size(22.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .clickable { onAction(action) }
+                    .let { m ->
+                        if (action.tooltip.isNotEmpty()) m.semantics { contentDescription = action.tooltip } else m
+                    }
                     .testTag("ext-tree-action-${item.id}-${action.command}"),
                 contentAlignment = Alignment.Center,
             ) {

@@ -173,4 +173,299 @@ class RemoteDesktopStateTest {
         assertEquals(19, opusCsd.size)
         assertEquals("OpusHead", String(opusCsd, 0, 8, Charsets.US_ASCII))
     }
+
+    @Test
+    fun `computeStageVideoRect and BoundedVideoFrameQueue enforce letterbox sizing and keyframe resync on dropped delta`() {
+        // B7: computeStageVideoRect in adaptive vs original vs custom scale modes
+        val adaptiveRect = computeStageVideoRect(
+            containerWidthPx = 1000.0,
+            containerHeightPx = 1000.0,
+            frameSize = RdSize(1920, 1080),
+            viewStyle = "adaptive",
+        )
+        assertEquals(0.0, adaptiveRect.left, 1e-3)
+        assertEquals(218.75, adaptiveRect.top, 1e-3)
+        assertEquals(1000.0, adaptiveRect.width, 1e-3)
+        assertEquals(562.5, adaptiveRect.height, 1e-3)
+
+        val customRect = computeStageVideoRect(
+            containerWidthPx = 1000.0,
+            containerHeightPx = 1000.0,
+            frameSize = RdSize(1920, 1080),
+            viewStyle = "custom",
+            customScale = 0.5,
+            densityScale = 1.0,
+        )
+        assertEquals(20.0, customRect.left, 1e-3)
+        assertEquals(230.0, customRect.top, 1e-3)
+        assertEquals(960.0, customRect.width, 1e-3)
+        assertEquals(540.0, customRect.height, 1e-3)
+
+        // B8: BoundedVideoFrameQueue drops deltas before keyframe, and dropping a delta on overflow sets waitingForKeyframe = true
+        val queue = BoundedVideoFrameQueue(capacity = 2)
+        assertTrue(queue.waitingForKeyframe)
+        assertEquals(false, queue.offer(byteArrayOf(1), isKeyframe = false))
+        assertEquals(1, queue.droppedDeltas)
+
+        // First keyframe + 1 delta fills capacity = 2
+        assertTrue(queue.offer(byteArrayOf(10), isKeyframe = true))
+        assertEquals(false, queue.waitingForKeyframe)
+        assertTrue(queue.offer(byteArrayOf(11), isKeyframe = false))
+        assertEquals(2, queue.size)
+
+        // Offering another delta overflows capacity -> dropped AND waitingForKeyframe becomes true
+        assertEquals(false, queue.offer(byteArrayOf(12), isKeyframe = false))
+        assertTrue(queue.waitingForKeyframe)
+        assertEquals(2, queue.droppedDeltas)
+
+        // Even after polling 1 frame so queue has space, subsequent deltas are still rejected until next keyframe
+        assertNotNull(queue.poll())
+        assertEquals(1, queue.size)
+        assertEquals(false, queue.offer(byteArrayOf(13), isKeyframe = false))
+        assertTrue(queue.waitingForKeyframe)
+
+        // Next keyframe resets waitingForKeyframe and is accepted
+        assertTrue(queue.offer(byteArrayOf(20), isKeyframe = true))
+        assertEquals(false, queue.waitingForKeyframe)
+    }
+
+    @Test
+    fun `BoundedVideoFrameQueue offer keyframe clears everything queued before it`() {
+        val queue = BoundedVideoFrameQueue(capacity = 8)
+        // [K1, d x 7] fills capacity = 8
+        assertTrue(queue.offer(byteArrayOf(0x01), isKeyframe = true))
+        for (i in 1..7) {
+            assertTrue(queue.offer(byteArrayOf((0x10 + i).toByte()), isKeyframe = false))
+        }
+        assertEquals(8, queue.size)
+
+        // Offering K2 must clear [K1, d x 7] so only [K2] remains
+        assertTrue(queue.offer(byteArrayOf(0x02), isKeyframe = true))
+        assertEquals(1, queue.size)
+        assertEquals(7, queue.droppedDeltas)
+        val polled = queue.poll()
+        assertNotNull(polled)
+        assertTrue(polled!!.isKeyframe)
+        assertEquals(0x02.toByte(), polled.bytes[0])
+        assertNull(queue.poll())
+    }
+
+    @Test
+    fun `BoundedVideoFrameQueue markWaitingForKeyframe only waits when no keyframe remains queued`() {
+        val queue = BoundedVideoFrameQueue(capacity = 8)
+
+        // Case 1: K1 polled by worker, only deltas [d1, d2] remain queued -> markWaitingForKeyframe drops them and waits
+        assertTrue(queue.offer(byteArrayOf(0x01), isKeyframe = true))
+        assertTrue(queue.offer(byteArrayOf(0x11), isKeyframe = false))
+        assertTrue(queue.offer(byteArrayOf(0x12), isKeyframe = false))
+        assertNotNull(queue.poll()) // K1 polled by worker
+        queue.markWaitingForKeyframe()
+        assertTrue(queue.waitingForKeyframe)
+        assertEquals(0, queue.size)
+        assertEquals(2, queue.droppedDeltas)
+        assertEquals(false, queue.offer(byteArrayOf(0x13), isKeyframe = false))
+
+        // Case 2: K2 and d1 are queued while worker fails on previous frame -> markWaitingForKeyframe keeps [K2, d1] and accepts d2
+        assertTrue(queue.offer(byteArrayOf(0x02), isKeyframe = true))
+        assertTrue(queue.offer(byteArrayOf(0x21), isKeyframe = false))
+        queue.markWaitingForKeyframe()
+        assertEquals(false, queue.waitingForKeyframe)
+        assertEquals(2, queue.size)
+        assertTrue(queue.offer(byteArrayOf(0x22), isKeyframe = false))
+        assertEquals(3, queue.size)
+        assertEquals(0x02.toByte(), queue.poll()!!.bytes[0])
+        assertEquals(0x21.toByte(), queue.poll()!!.bytes[0])
+        assertEquals(0x22.toByte(), queue.poll()!!.bytes[0])
+    }
+
+    @Test
+    fun `Touch thresholds scale by densityScale and resolveSingleTouchCancel releases held drag`() {
+        val rect = RdRect(0.0, 0.0, 1000.0, 500.0)
+
+        // At 3x density, 20px movement is < 30px (10dp * 3), so it remains a tap, not a drag
+        val track3x = beginSingleTouch(100.0, 100.0, rect, nowMs = 1000L)
+        val move3x = advanceSingleTouch(
+            track = track3x,
+            x = 120.0,
+            y = 100.0,
+            mode = "touch",
+            transform = IDENTITY_TRANSFORM,
+            cursor = RdFraction(0.5, 0.5),
+            densityScale = 3.0,
+        )
+        assertEquals(false, track3x.moved)
+        assertNull(move3x.message)
+        val end3x = resolveSingleTouchEnd(
+            track = track3x,
+            x = 120.0,
+            y = 100.0,
+            mode = "touch",
+            transform = IDENTITY_TRANSFORM,
+            cursor = RdFraction(0.5, 0.5),
+            nowMs = 1100L,
+            densityScale = 3.0,
+        )
+        assertEquals(2, end3x.size)
+        assertEquals(true, end3x[0]["down"].bool)
+        assertEquals(false, end3x[1]["down"].bool)
+
+        // Once movement exceeds 30px at 3x density (e.g. 40px), drag starts (down:true), and cancel releases (down:false)
+        val dragTrack = beginSingleTouch(100.0, 100.0, rect, nowMs = 2000L)
+        val dragStart = advanceSingleTouch(
+            track = dragTrack,
+            x = 140.0,
+            y = 100.0,
+            mode = "touch",
+            transform = IDENTITY_TRANSFORM,
+            cursor = RdFraction(0.5, 0.5),
+            densityScale = 3.0,
+        )
+        assertTrue(dragTrack.moved)
+        assertNotNull(dragStart.message)
+        assertEquals("left", dragStart.message!!["button"].string)
+        assertEquals(true, dragStart.message!!["down"].bool)
+
+        val cancelMsgs = resolveSingleTouchCancel(
+            track = dragTrack,
+            mode = "touch",
+            transform = IDENTITY_TRANSFORM,
+            cursor = RdFraction(0.5, 0.5),
+            densityScale = 3.0,
+        )
+        assertEquals(1, cancelMsgs.size)
+        assertEquals("left", cancelMsgs[0]["button"].string)
+        assertEquals(false, cancelMsgs[0]["down"].bool)
+        assertEquals(0.14, cancelMsgs[0]["xFrac"].double!!, 1e-3)
+
+        // Two-finger threshold at 3x density is 45px (15dp * 3); 30px spread does not classify as pinch yet
+        val two3x = beginTwoFingerTouch(RdPoint(400.0, 250.0), RdPoint(600.0, 250.0), 1.0, nowMs = 3000L)
+        val twoRes3x = advanceTwoFingerTouch(
+            track = two3x,
+            pa = RdPoint(385.0, 250.0),
+            pb = RdPoint(615.0, 250.0),
+            currentTransform = IDENTITY_TRANSFORM,
+            densityScale = 3.0,
+        )
+        assertNull(two3x.gesture)
+        assertNull(twoRes3x.transform)
+
+        // Wheel notch scales by densityScale (120px at 3x = 1 notch = -120.0)
+        assertEquals(-120.0, wheelDeltaForTouchDrag(120.0, densityScale = 3.0), 1e-3)
+        assertEquals(-360.0, wheelDeltaForTouchDrag(120.0, densityScale = 1.0), 1e-3)
+    }
+
+    @Test
+    fun `Soft keyboard resolveSoftKeyboardCommit preserves active IME composition and chunks long text without truncation`() {
+        // Active Telex / CJK composition returns null so the composing buffer is not cleared mid-word
+        assertNull(
+            resolveSoftKeyboardCommit(
+                text = "${SOFT_KEYBOARD_SENTINEL}tiế",
+                selectionStart = 5,
+                hasActiveComposition = true,
+            ),
+        )
+
+        // Committed Telex word sends full text
+        val committed = resolveSoftKeyboardCommit(
+            text = "${SOFT_KEYBOARD_SENTINEL}tiếng Việt",
+            selectionStart = 12,
+            hasActiveComposition = false,
+        )
+        assertNotNull(committed)
+        assertEquals(1, committed!!.size)
+        assertEquals("text", committed[0]["type"].string)
+        assertEquals("tiếng Việt", committed[0]["text"].string)
+
+        // Long paste/commit (> 1024 chars) is chunked into 512-char messages without truncation
+        val longText = "a".repeat(1500)
+        val chunked = resolveSoftKeyboardCommit(
+            text = SOFT_KEYBOARD_SENTINEL + longText,
+            selectionStart = 1502,
+            hasActiveComposition = false,
+        )
+        assertNotNull(chunked)
+        assertEquals(3, chunked!!.size)
+        val reconstructed = chunked.joinToString("") { it["text"].string.orEmpty() }
+        assertEquals(1500, reconstructed.length)
+        assertEquals(longText, reconstructed)
+
+        // Backspace vs Delete on sentinel
+        val backspaceMsgs = resolveSoftKeyboardCommit(
+            text = "\u200B",
+            selectionStart = 0,
+            hasActiveComposition = false,
+        )
+        assertNotNull(backspaceMsgs)
+        assertEquals(2, backspaceMsgs!!.size)
+        assertEquals("Backspace", backspaceMsgs[0]["code"].string)
+        assertEquals(true, backspaceMsgs[0]["down"].bool)
+        assertEquals(false, backspaceMsgs[1]["down"].bool)
+
+        val deleteMsgs = resolveSoftKeyboardCommit(
+            text = "\u200B",
+            selectionStart = 1,
+            hasActiveComposition = false,
+        )
+        assertNotNull(deleteMsgs)
+        assertEquals(2, deleteMsgs!!.size)
+        assertEquals("Delete", deleteMsgs[0]["code"].string)
+
+        // Emoji (surrogate pair \uD83D\uDE00) at UTF-16 index 511 must not be split into two broken halves
+        val emojiAt511 = "a".repeat(511) + "\uD83D\uDE00" + "b"
+        assertEquals('\uD83D', emojiAt511[511])
+        assertEquals('\uDE00', emojiAt511[512])
+        val emojiChunks = resolveSoftKeyboardCommit(
+            text = SOFT_KEYBOARD_SENTINEL + emojiAt511,
+            selectionStart = emojiAt511.length + 2,
+            hasActiveComposition = false,
+        )
+        assertNotNull(emojiChunks)
+        assertEquals(2, emojiChunks!!.size)
+        val firstChunk = emojiChunks[0]["text"].string!!
+        val secondChunk = emojiChunks[1]["text"].string!!
+        assertEquals("a".repeat(511) + "\uD83D\uDE00", firstChunk)
+        assertEquals("b", secondChunk)
+        assertEquals(false, firstChunk.last().isHighSurrogate())
+        assertEquals(false, secondChunk.first().isLowSurrogate())
+    }
+
+    @Test
+    fun `PointerMoveCoalescer coalesces moves per frame and flushes pending move before immediate button event`() {
+        val sent = mutableListOf<String>()
+        var scheduledCallback: (() -> Unit)? = null
+        val coalescer = PointerMoveCoalescer(
+            send = { sent += it.toString() },
+            scheduleFrame = { cb -> scheduledCallback = cb },
+        )
+
+        coalescer.enqueueMove(0.1, 0.2)
+        coalescer.enqueueMove(0.3, 0.4)
+        coalescer.enqueueMove(0.5, 0.6)
+        assertEquals(0, sent.size)
+        assertNotNull(scheduledCallback)
+
+        scheduledCallback!!.invoke()
+        assertEquals(1, sent.size)
+        val moveJson = WireJson.parseOrNull(sent[0])!!
+        assertEquals(0.5, moveJson["xFrac"].double!!, 1e-3)
+        assertEquals(0.6, moveJson["yFrac"].double!!, 1e-3)
+
+        // Enqueue a move, then immediately send a button click: move is flushed before the button event
+        sent.clear()
+        coalescer.enqueueMove(0.75, 0.25)
+        coalescer.sendImmediate(pointerJsonMessage(0.75, 0.25, "right", true))
+        assertEquals(2, sent.size)
+        assertNull(WireJson.parseOrNull(sent[0])!!["button"].string)
+        assertEquals("right", WireJson.parseOrNull(sent[1])!!["button"].string)
+        assertEquals(true, WireJson.parseOrNull(sent[1])!!["down"].bool)
+
+        assertEquals("left", androidMouseButtonToProtocol(1))
+        assertEquals("right", androidMouseButtonToProtocol(2))
+        assertNull(androidMouseButtonToProtocol(4))
+        assertNull(androidMouseButtonToProtocol(32))
+        assertNull(androidMouseButtonToProtocol(64))
+        assertTrue(isPasteKeyCombo("KeyV", ctrl = true, meta = false))
+        assertEquals("1:05", formatRemoteDesktopElapsed(65))
+        assertEquals("1:01:01", formatRemoteDesktopElapsed(3661))
+    }
 }

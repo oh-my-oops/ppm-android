@@ -1,7 +1,9 @@
 package com.hienlh.ppm.app.ui.sysmon
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,16 +44,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ErrorToastMessage
+import kotlinx.coroutines.awaitCancellation
 import com.hienlh.ppm.app.ui.PpmTextField
 import com.hienlh.ppm.app.ui.SecondaryButton
 import com.hienlh.ppm.app.ui.pressable
 import com.hienlh.ppm.app.ui.tablet.Edge
 import com.hienlh.ppm.app.ui.tablet.edge
+import com.hienlh.ppm.client.PpmError
 import com.hienlh.ppm.client.fullResourceSamples
 import com.hienlh.ppm.client.hardwareInventory
 import com.hienlh.ppm.client.killProcess
@@ -68,11 +78,15 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.webTitle
+import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.sysmon.*
 import com.hienlh.ppm.state.windows.WindowRuntimeState
 import com.hienlh.ppm.state.workspace.WorkspaceTab
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -130,14 +144,14 @@ fun SystemMonitorBody(
     var activeTab by remember(initialTab) { mutableStateOf(initialTab) }
     var selectedPerfDevice by remember { mutableStateOf("cpu") }
 
-    var snapshot by remember { mutableStateOf(initialSnapshot) }
-    var history by remember {
-        mutableStateOf(
-            if (initialSnapshot != null) SysMonRingBuffer.appendSnapshot(emptyList(), initialSnapshot)
-            else emptyList(),
-        )
+    val initialHistory = remember(initialSnapshot) {
+        if (initialSnapshot != null) SysMonRingBuffer.appendSnapshot(emptyList(), initialSnapshot)
+        else emptyList()
     }
-    var tickCount by remember { mutableIntStateOf(if (initialSnapshot != null) 2 else 0) }
+    val initialTickCount = if (initialSnapshot != null) 2 else 0
+    val snapshot = model.sharedMetricsSnapshot ?: initialSnapshot
+    val history = model.sharedMetricsHistory.ifEmpty { initialHistory }
+    val tickCount = if (model.sharedMetricsSnapshot != null) model.sharedMetricsTickCount else initialTickCount
     var inventory by remember { mutableStateOf(initialInventory) }
     var actionBanner by remember { mutableStateOf<String?>(null) }
 
@@ -146,18 +160,26 @@ fun SystemMonitorBody(
         onTabChange(tab)
     }
 
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(model.api) {
         val api = model.api ?: return@LaunchedEffect
-        launch {
-            runCatching { api.hardwareInventory() }.getOrNull()?.let { json ->
-                HardwareInventory.from(json)?.let { inventory = it }
-            }
+        try {
+            val json = api.hardwareInventory()
+            HardwareInventory.from(json)?.let { inventory = it }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
         }
-        api.fullResourceSamples(processes = true).collect { sampleJson ->
-            val parsed = MetricsSnapshot.from(sampleJson) ?: return@collect
-            snapshot = parsed
-            history = SysMonRingBuffer.appendSnapshot(history, parsed)
-            tickCount += 1
+    }
+    LaunchedEffect(model.api, lifecycle) {
+        if (model.api == null) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            val release = model.retainResourceMonitor(wantProcesses = true)
+            try {
+                awaitCancellation()
+            } finally {
+                release()
+            }
         }
     }
 
@@ -997,10 +1019,12 @@ private fun AppsPanel(
     onError: (String) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
+    val scope = rememberCoroutineScope()
     val searchState = remember { TextFieldState("") }
     var sortKey by remember { mutableStateOf("cpu") }
     var sortDir by remember { mutableStateOf("desc") }
     var killTarget by remember { mutableStateOf<KillTarget?>(null) }
+    var menuApp by remember { mutableStateOf<AppRowData?>(null) }
 
     val apps = snapshot.apps
     if (apps == null) {
@@ -1085,10 +1109,15 @@ private fun AppsPanel(
         } else {
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                 items(filtered, key = { it.id }) { app ->
+                    val byPid = snapshot.processes.associateBy { it.pid }
+                    val members = app.memberPids.mapNotNull { byPid[it] }
+                    val isProtected = ProcessTableModel.isGroupProtected(members)
+                    val canEnd = !isProtected && members.isNotEmpty()
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .edge(Edge.Bottom, tokens.border.opacity(0.4).color)
+                            .ppmClickable { menuApp = app }
                             .padding(horizontal = 12.dp, vertical = 10.dp)
                             .testTag("app-row-${app.id}"),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1137,32 +1166,82 @@ private fun AppsPanel(
                         Box(
                             Modifier
                                 .height(26.dp)
+                                .alpha(if (canEnd) 1f else 0.4f)
                                 .clip(btnShape)
                                 .background(tokens.error.opacity(0.12).color)
-                                .ppmClickable(shape = btnShape) {
-                                    val byPid = snapshot.processes.associateBy { it.pid }
-                                    val members = app.memberPids.mapNotNull { byPid[it] }
-                                    if (members.isNotEmpty()) {
-                                        killTarget = KillTarget.GroupTarget(
-                                            group = ProcessGroup(
-                                                key = app.id,
-                                                label = app.name,
-                                                rootPid = app.pids.firstOrNull(),
-                                                cpu = app.cpu,
-                                                ramMB = app.ramMB,
-                                                count = app.processCount,
-                                                pids = app.memberPids,
-                                            ),
-                                            members = members,
-                                        )
-                                    }
+                                .ppmClickable(enabled = canEnd, shape = btnShape) {
+                                    killTarget = KillTarget.GroupTarget(
+                                        group = AppRowsModel.groupForApp(app),
+                                        members = members,
+                                    )
                                 }
-                                .padding(horizontal = 10.dp),
+                                .padding(horizontal = 10.dp)
+                                .testTag("app-end-task-${app.id}"),
                             contentAlignment = Alignment.Center,
                         ) {
                             BasicText("End task", style = ppmText(11f, FontWeight.Medium, lineHeight = 15f).copy(color = tokens.error.color))
                         }
+                        Box(
+                            Modifier
+                                .size(24.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .ppmClickable { menuApp = app }
+                                .testTag("app-menu-${app.id}"),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            PpmIcon(ProductIcon.MoreVertical, 14.dp, tokens.text2.color)
+                        }
                     }
+                }
+            }
+        }
+    }
+
+    val targetApp = menuApp
+    if (targetApp != null) {
+        val byPid = snapshot.processes.associateBy { it.pid }
+        val members = targetApp.memberPids.mapNotNull { byPid[it] }
+        val endProtected = ProcessTableModel.isGroupProtected(members)
+        Dialog(onDismissRequest = { menuApp = null }) {
+            val shape = RoundedCornerShape(tokens.rad.dp)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .ppmShadow(tokens.shadowPanel, shape)
+                    .clip(shape)
+                    .background(tokens.panel2.over(tokens.bgSolid).color)
+                    .cssBorder(tokens.border.color, shape)
+                    .padding(12.dp)
+                    .testTag("app-row-menu"),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .alpha(if (endProtected) 0.5f else 1f)
+                        .clip(RoundedCornerShape(6.dp))
+                        .ppmClickable(enabled = !endProtected && members.isNotEmpty()) {
+                            menuApp = null
+                            killTarget = KillTarget.GroupTarget(
+                                group = AppRowsModel.groupForApp(targetApp),
+                                members = members,
+                            )
+                        }
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                        .testTag("app-menu-end-application"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BasicText(
+                        "End application",
+                        style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.error.color),
+                    )
+                }
+                if (endProtected) {
+                    BasicText(
+                        "One of this app's processes is protected, so PPM will not end it.",
+                        Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text2.color),
+                    )
                 }
             }
         }
@@ -1172,10 +1251,9 @@ private fun AppsPanel(
     if (pendingKill != null) {
         KillConfirmDialog(
             model = model,
+            parentScope = scope,
             target = pendingKill,
-            availableSignals = snapshot.signals.ifEmpty { listOf("SIGTERM", "SIGKILL", "SIGINT", "SIGHUP") },
             onDismiss = { killTarget = null },
-            onError = onError,
         )
     }
 }
@@ -1190,6 +1268,7 @@ private fun ProcessesPanel(
     onError: (String) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
+    val scope = rememberCoroutineScope()
     var mode by remember { mutableStateOf("grouped") }
     var ppmOnly by remember { mutableStateOf(false) }
     val searchState = remember { TextFieldState("") }
@@ -1198,6 +1277,8 @@ private fun ProcessesPanel(
     var expandedGroups by remember { mutableStateOf(emptySet<String>()) }
     var killTarget by remember { mutableStateOf<KillTarget?>(null) }
     var detailsPid by remember { mutableStateOf<Int?>(null) }
+    var menuProc by remember { mutableStateOf<ProcessInfo?>(null) }
+    var signalSubmenuOpen by remember { mutableStateOf(false) }
 
     val built = remember(
         snapshot.processes,
@@ -1414,19 +1495,31 @@ private fun ProcessesPanel(
                                 PerformanceDevices.formatRam(g.ramMB),
                                 style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color),
                             )
-                            if (!isProtected && members.isNotEmpty()) {
-                                Box(
-                                    Modifier
-                                        .size(22.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .ppmClickable { killTarget = KillTarget.GroupTarget(g, members) }
-                                        .testTag("proc-group-kill-${g.key}"),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    PpmIcon(ProductIcon.X, 13.dp, tokens.error.color)
-                                }
+                            val groupKillTooltip = if (isProtected) {
+                                "Protected: this app contains a PPM or OS-critical process — cannot be ended as a whole."
                             } else {
-                                Spacer(Modifier.width(22.dp))
+                                "End ${g.label} (${g.count} processes)"
+                            }
+                            Box(
+                                Modifier
+                                    .size(22.dp)
+                                    .alpha(if (isProtected || members.isEmpty()) 0.4f else 1f)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .webTitle(groupKillTooltip)
+                                    .ppmClickable(enabled = !isProtected && members.isNotEmpty()) {
+                                        killTarget = KillTarget.GroupTarget(g, members)
+                                    }
+                                    .semantics {
+                                        contentDescription = "End ${g.label} and its ${g.count} processes"
+                                    }
+                                    .testTag("proc-group-kill-${g.key}"),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                PpmIcon(
+                                    ProductIcon.X,
+                                    13.dp,
+                                    if (isProtected || members.isEmpty()) tokens.text2.color else tokens.error.color,
+                                )
                             }
                         }
                     }
@@ -1504,8 +1597,153 @@ private fun ProcessesPanel(
                                     PpmIcon(ProductIcon.Lock, 11.dp, tokens.text2.opacity(0.6).color)
                                 }
                             }
+                            Box(
+                                Modifier
+                                    .size(22.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .ppmClickable {
+                                        menuProc = p
+                                        signalSubmenuOpen = false
+                                    }
+                                    .testTag("proc-menu-${p.pid}"),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                PpmIcon(ProductIcon.MoreVertical, 13.dp, tokens.text2.color)
+                            }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    val targetProc = menuProc
+    if (targetProc != null) {
+        val availableSignals = snapshot.signals.map(::normalizeProcessSignal).ifEmpty { DEFAULT_PROCESS_SIGNALS }
+        Dialog(onDismissRequest = { menuProc = null }) {
+            val shape = RoundedCornerShape(tokens.rad.dp)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .ppmShadow(tokens.shadowPanel, shape)
+                    .clip(shape)
+                    .background(tokens.panel2.over(tokens.bgSolid).color)
+                    .cssBorder(tokens.border.color, shape)
+                    .padding(12.dp)
+                    .testTag("proc-row-menu"),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .ppmClickable {
+                            menuProc = null
+                            detailsPid = targetProc.pid
+                        }
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                        .testTag("proc-menu-details"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BasicText(
+                        "Details…",
+                        style = ppmText(13f, lineHeight = 18f).copy(color = tokens.text.color),
+                    )
+                }
+                if (availableSignals.isNotEmpty()) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .ppmClickable { signalSubmenuOpen = !signalSubmenuOpen }
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                            .testTag("proc-menu-send-signal"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        BasicText(
+                            "Send signal",
+                            style = ppmText(13f, lineHeight = 18f).copy(color = tokens.text.color),
+                        )
+                        PpmIcon(
+                            if (signalSubmenuOpen) ProductIcon.ChevronDown else ProductIcon.ChevronRight,
+                            14.dp,
+                            tokens.text2.color,
+                        )
+                    }
+                    if (signalSubmenuOpen) {
+                        Column(
+                            Modifier.fillMaxWidth().padding(start = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            for (sig in availableSignals) {
+                                val destructive = sig == "KILL" || sig == "STOP"
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .alpha(if (targetProc.protected) 0.5f else 1f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .ppmClickable(enabled = !targetProc.protected) {
+                                            val api = model.api
+                                            menuProc = null
+                                            if (api != null) {
+                                                scope.launch {
+                                                    try {
+                                                        val res = api.signalProcess(targetProc.pid, targetProc.startedAt, sig, false)
+                                                        val count = (res["signalled"].array ?: res["signaled"].array)?.size ?: 1
+                                                        val msg = if (count > 1) {
+                                                            "Sent SIG$sig to ${targetProc.name} and ${count - 1} child processes"
+                                                        } else {
+                                                            "Sent SIG$sig to ${targetProc.name} (${targetProc.pid})"
+                                                        }
+                                                        model.toast(ErrorToastMessage(msg, kind = ErrorToastMessage.Kind.SUCCESS))
+                                                    } catch (e: CancellationException) {
+                                                        throw e
+                                                    } catch (e: Exception) {
+                                                        val msg = e.message?.takeIf { it.isNotBlank() } ?: "Could not signal ${targetProc.name}"
+                                                        model.toast(ErrorToastMessage(msg, kind = ErrorToastMessage.Kind.ERROR))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                        .testTag("proc-menu-signal-$sig"),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    BasicText(
+                                        SIGNAL_LABELS[sig] ?: sig,
+                                        style = ppmText(12f, lineHeight = 16f)
+                                            .copy(color = if (destructive) tokens.error.color else tokens.text.color),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .alpha(if (targetProc.protected) 0.5f else 1f)
+                        .clip(RoundedCornerShape(6.dp))
+                        .ppmClickable(enabled = !targetProc.protected) {
+                            menuProc = null
+                            killTarget = KillTarget.SingleProcess(targetProc)
+                        }
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                        .testTag("proc-menu-end"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BasicText(
+                        "End process",
+                        style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.error.color),
+                    )
+                }
+                if (targetProc.protected) {
+                    BasicText(
+                        "PPM or OS-critical process — it cannot be ended or signalled.",
+                        Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text2.color),
+                    )
                 }
             }
         }
@@ -1515,10 +1753,9 @@ private fun ProcessesPanel(
     if (pendingKill != null) {
         KillConfirmDialog(
             model = model,
+            parentScope = scope,
             target = pendingKill,
-            availableSignals = snapshot.signals.ifEmpty { listOf("SIGTERM", "SIGKILL", "SIGINT", "SIGHUP") },
             onDismiss = { killTarget = null },
-            onError = onError,
         )
     }
 
@@ -1535,48 +1772,64 @@ private fun ProcessesPanel(
 @Composable
 private fun KillConfirmDialog(
     model: AppModel,
+    parentScope: CoroutineScope,
     target: KillTarget,
-    availableSignals: List<String>,
     onDismiss: () -> Unit,
-    onError: (String) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
-    val scope = rememberCoroutineScope()
-    var includeTree by remember { mutableStateOf(true) }
-    var selectedSignal by remember { mutableStateOf("SIGTERM") }
-    var busy by remember { mutableStateOf(false) }
+    var includeTree by remember(target) { mutableStateOf(false) }
 
-    val title = when (target) {
-        is KillTarget.SingleProcess -> "End process ${target.proc.name} (#${target.proc.pid})?"
-        is KillTarget.GroupTarget -> "End ${target.group.label} (${target.members.size} processes)?"
+    val isGroup = target is KillTarget.GroupTarget
+    val title = if (isGroup) "End app" else "End process"
+    val prompt = when (target) {
+        is KillTarget.SingleProcess -> "End ${target.proc.name} (pid ${target.proc.pid})?"
+        is KillTarget.GroupTarget -> "End ${target.group.label} and all its ${target.members.size} processes?"
     }
-    val isPpm = when (target) {
-        is KillTarget.SingleProcess -> target.proc.ppm
-        is KillTarget.GroupTarget -> target.group.ppm || target.members.any { it.ppm }
+    val cpu = when (target) {
+        is KillTarget.SingleProcess -> target.proc.cpu
+        is KillTarget.GroupTarget -> target.group.cpu
+    }
+    val ramMB = when (target) {
+        is KillTarget.SingleProcess -> target.proc.ramMB
+        is KillTarget.GroupTarget -> target.group.ramMB
     }
 
-    fun execute(forceKill: Boolean) {
+    fun executeKill() {
+        val tree = includeTree
+        onDismiss()
         val api = model.api ?: return
-        busy = true
-        scope.launch {
-            try {
-                val requests = when (target) {
-                    is KillTarget.SingleProcess -> listOf(ProcessTableModel.buildKillRequest(target.proc, includeTree))
-                    is KillTarget.GroupTarget -> ProcessTableModel.buildGroupKillRequests(target.group, target.members)
-                }
-                for (req in requests) {
-                    if (forceKill) {
+        parentScope.launch {
+            when (target) {
+                is KillTarget.SingleProcess -> {
+                    val req = ProcessTableModel.buildKillRequest(target.proc, tree)
+                    try {
                         api.killProcess(req.pid, req.startedAt, req.tree)
-                    } else {
-                        api.signalProcess(req.pid, req.startedAt, selectedSignal, req.tree)
+                        model.toast(ErrorToastMessage("Ended ${target.proc.name} (${target.proc.pid})", kind = ErrorToastMessage.Kind.SUCCESS))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        val msg = e.message ?: "Failed to end ${target.proc.name}"
+                        model.toast(ErrorToastMessage(msg, kind = ErrorToastMessage.Kind.ERROR))
                     }
                 }
-                onDismiss()
-            } catch (e: Exception) {
-                onError(e.message ?: "Failed to signal process")
-                onDismiss()
-            } finally {
-                busy = false
+                is KillTarget.GroupTarget -> {
+                    val failures = mutableListOf<String>()
+                    for (req in ProcessTableModel.buildGroupKillRequests(target.group, target.members)) {
+                        try {
+                            api.killProcess(req.pid, req.startedAt, req.tree)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            failures += e.message ?: "pid ${req.pid}"
+                        }
+                    }
+                    if (failures.isEmpty()) {
+                        model.toast(ErrorToastMessage("Ended ${target.group.label} (${target.members.size} processes)", kind = ErrorToastMessage.Kind.SUCCESS))
+                    } else {
+                        val msg = "${target.group.label}: ${failures.size} of ${target.members.size} could not be ended — ${failures.first()}"
+                        model.toast(ErrorToastMessage(msg, kind = ErrorToastMessage.Kind.ERROR))
+                    }
+                }
             }
         }
     }
@@ -1595,32 +1848,20 @@ private fun KillConfirmDialog(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             BasicText(title, style = ppmText(16f, FontWeight.SemiBold, lineHeight = 22f).copy(color = tokens.text.color))
-
-            if (isPpm) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFFEAB308).copy(alpha = 0.14f))
-                        .padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    PpmIcon(ProductIcon.AlertTriangle, 16.dp, Color(0xFFEAB308))
-                    BasicText(
-                        "This process belongs to a PPM workspace or terminal.",
-                        Modifier.weight(1f),
-                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text.color),
-                    )
-                }
-            }
+            BasicText(prompt, style = ppmText(13f, lineHeight = 18f).copy(color = tokens.text.color))
+            BasicText(
+                String.format(Locale.US, "CPU %.1f%% · RAM %s", cpu, PerformanceDevices.formatRam(ramMB)),
+                Modifier.testTag("sysmon-kill-stats"),
+                style = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text2.color),
+            )
 
             if (target is KillTarget.SingleProcess) {
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .ppmClickable { includeTree = !includeTree }
-                        .padding(vertical = 4.dp),
+                        .padding(vertical = 4.dp)
+                        .testTag("sysmon-kill-tree"),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -1641,31 +1882,6 @@ private fun KillConfirmDialog(
                 }
             }
 
-            // Signal selector chips
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                for (sig in availableSignals.take(6)) {
-                    val active = selectedSignal == sig
-                    val chipShape = RoundedCornerShape(6.dp)
-                    Box(
-                        Modifier
-                            .clip(chipShape)
-                            .background(if (active) tokens.accent.opacity(0.18).color else tokens.bgSolid.color)
-                            .cssBorder((if (active) tokens.accent else tokens.border).color, chipShape)
-                            .ppmClickable(shape = chipShape) { selectedSignal = sig }
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                    ) {
-                        BasicText(
-                            sig,
-                            style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f)
-                                .copy(color = if (active) tokens.accent.color else tokens.text2.color),
-                        )
-                    }
-                }
-            }
-
             Row(
                 Modifier.fillMaxWidth().padding(top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1677,28 +1893,13 @@ private fun KillConfirmDialog(
                         .weight(1f)
                         .height(44.dp)
                         .clip(btnShape)
-                        .background(tokens.accent.color)
-                        .ppmClickable(enabled = !busy, shape = btnShape) { execute(forceKill = false) }
-                        .testTag("kill-confirm-signal-btn"),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    BasicText(
-                        if (selectedSignal == "SIGTERM") "Stop" else selectedSignal,
-                        style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.accentFg.color),
-                    )
-                }
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                        .clip(btnShape)
                         .background(tokens.error.color)
-                        .ppmClickable(enabled = !busy, shape = btnShape) { execute(forceKill = true) }
-                        .testTag("kill-confirm-force-btn"),
+                        .ppmClickable(shape = btnShape) { executeKill() }
+                        .testTag("sysmon-kill-confirm-ok"),
                     contentAlignment = Alignment.Center,
                 ) {
                     BasicText(
-                        "Force Stop",
+                        if (isGroup) "End ${(target as KillTarget.GroupTarget).members.size} processes" else "End process",
                         style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = Color.White),
                     )
                 }
@@ -1785,6 +1986,7 @@ private fun ProcessDetailsDialog(
 
 // ── 5. Services Panel ──────────────────────────────────────────────────
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ServicesPanel(
     model: AppModel,
@@ -1802,42 +2004,71 @@ private fun ServicesPanel(
     val searchState = remember { TextFieldState("") }
     var busyUnit by remember { mutableStateOf<String?>(null) }
     var detailsTarget by remember { mutableStateOf<ServiceInfo?>(null) }
+    var menuService by remember { mutableStateOf<ServiceInfo?>(null) }
+    var pendingConfirm by remember { mutableStateOf<Pair<ServiceInfo, String>?>(null) }
+    var inFlight by remember { mutableStateOf(false) }
 
     suspend fun fetchServices() {
+        if (inFlight) return
         val api = model.api ?: run {
             loading = false
             return
         }
+        inFlight = true
         try {
             val res = api.systemServices()
             snapshot = ServicesSnapshot.from(res)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            onError(e.message ?: "Failed to load services")
+            onError(e.message ?: "Could not list services")
         } finally {
+            inFlight = false
             loading = false
         }
     }
 
-    LaunchedEffect(model.api) {
-        if (initialServices == null) fetchServices()
-        while (isActive) {
-            delay(3_000L)
-            if (model.api != null) fetchServices()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(model.api, lifecycle) {
+        if (model.api == null) {
+            loading = false
+            return@LaunchedEffect
+        }
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            if (initialServices == null) fetchServices()
+            while (isActive) {
+                delay(3_000L)
+                if (model.api != null) fetchServices()
+            }
         }
     }
 
-    fun triggerAction(service: ServiceInfo, action: String) {
+    fun executeAction(service: ServiceInfo, action: String) {
         val api = model.api ?: return
         busyUnit = "${service.scope}:${service.unit}"
         scope.launch {
             try {
-                api.systemServiceAction(service.scope, service.unit, action)
+                val res = api.systemServiceAction(service.scope, service.unit, action)
+                val note = res["note"].string?.takeIf { it.isNotBlank() }
+                model.toast(ErrorToastMessage("${service.unit}: $action done", description = note, kind = ErrorToastMessage.Kind.SUCCESS))
                 fetchServices()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                onError(e.message ?: "Service action '$action' failed")
+                val msg = e.message?.takeIf { it.isNotBlank() && !it.startsWith("The server answered HTTP ") }
+                    ?: "Could not $action ${service.unit}"
+                model.toast(ErrorToastMessage(msg, kind = ErrorToastMessage.Kind.ERROR))
             } finally {
                 busyUnit = null
             }
+        }
+    }
+
+    fun triggerAction(service: ServiceInfo, action: String) {
+        if (ServicesModel.needsConfirm(action)) {
+            pendingConfirm = service to action
+        } else {
+            executeAction(service, action)
         }
     }
 
@@ -1956,7 +2187,10 @@ private fun ServicesPanel(
                         Modifier
                             .fillMaxWidth()
                             .edge(Edge.Bottom, tokens.border.opacity(0.4).color)
-                            .ppmClickable { detailsTarget = svc }
+                            .combinedClickable(
+                                onClick = { detailsTarget = svc },
+                                onLongClick = { menuService = svc },
+                            )
                             .padding(horizontal = 12.dp, vertical = 9.dp)
                             .testTag("service-row-${svc.unit}"),
                         verticalAlignment = Alignment.CenterVertically,
@@ -2036,6 +2270,154 @@ private fun ServicesPanel(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    val ctxService = menuService
+    if (ctxService != null) {
+        val manager = snapshot?.manager ?: "systemd"
+        val allActions = listOf("start", "stop", "restart", "enable", "disable")
+        val allowed = allActions.filter { !ctxService.refused.containsKey(it) }
+        val reason = allActions.firstNotNullOfOrNull { ctxService.refused[it]?.takeIf { r -> r.isNotBlank() } }
+        fun actionLabel(action: String): String {
+            val base = when (action) {
+                "start" -> "Start"
+                "stop" -> "Stop"
+                "restart" -> "Restart"
+                "enable" -> "Enable at boot"
+                "disable" -> "Disable at boot"
+                else -> action
+            }
+            return if (manager == "launchd" && ctxService.scope == "user") {
+                base.replace(" at boot", " at login")
+            } else {
+                base
+            }
+        }
+        Dialog(onDismissRequest = { menuService = null }) {
+            val shape = RoundedCornerShape(tokens.rad.dp)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .ppmShadow(tokens.shadowPanel, shape)
+                    .clip(shape)
+                    .background(tokens.panel2.over(tokens.bgSolid).color)
+                    .cssBorder(tokens.border.color, shape)
+                    .padding(16.dp)
+                    .testTag("service-menu-dialog"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                for (action in allowed) {
+                    val destructive = action == "stop" || action == "disable"
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (destructive) tokens.error.opacity(0.12).color else tokens.panel.color)
+                            .ppmClickable(shape = RoundedCornerShape(8.dp)) {
+                                menuService = null
+                                triggerAction(ctxService, action)
+                            }
+                            .padding(horizontal = 12.dp)
+                            .testTag("service-menu-action-$action"),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        BasicText(
+                            actionLabel(action),
+                            style = ppmText(13f, FontWeight.Medium, lineHeight = 18f)
+                                .copy(color = if (destructive) tokens.error.color else tokens.text.color),
+                        )
+                    }
+                }
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(tokens.panel.color)
+                        .ppmClickable(shape = RoundedCornerShape(8.dp)) {
+                            menuService = null
+                            detailsTarget = ctxService
+                        }
+                        .padding(horizontal = 12.dp)
+                        .testTag("service-menu-details"),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    BasicText(
+                        "Details and log",
+                        style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.text.color),
+                    )
+                }
+                if (reason != null) {
+                    BasicText(
+                        reason,
+                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text2.color),
+                    )
+                }
+            }
+        }
+    }
+
+    val confirmPair = pendingConfirm
+    if (confirmPair != null) {
+        val (svc, act) = confirmPair
+        val manager = snapshot?.manager ?: "systemd"
+        val wording = ServicesModel.confirmWordingFor(manager, svc, act)
+        if (wording != null) {
+            val scopeLabel = when {
+                manager == "scm" -> "Windows"
+                svc.scope == "system" -> "System"
+                else -> "User"
+            }
+            val kindLabel = if (manager == "launchd") "job" else "service"
+            val pidSuffix = if (svc.mainPid != null) " · pid ${svc.mainPid}" else ""
+            Dialog(onDismissRequest = { pendingConfirm = null }) {
+                val shape = RoundedCornerShape(tokens.rad.dp)
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .ppmShadow(tokens.shadowPanel, shape)
+                        .clip(shape)
+                        .background(tokens.panel2.over(tokens.bgSolid).color)
+                        .cssBorder(tokens.border.color, shape)
+                        .padding(20.dp)
+                        .testTag("sysmon-service-confirm"),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    BasicText(wording.title, style = ppmText(16f, FontWeight.SemiBold, lineHeight = 22f).copy(color = tokens.text.color))
+                    BasicText(wording.body, style = ppmText(13f, lineHeight = 18f).copy(color = tokens.text.color))
+                    BasicText(
+                        "$scopeLabel $kindLabel$pidSuffix",
+                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        SecondaryButton("Cancel", Modifier.weight(1f), onClick = { pendingConfirm = null })
+                        val btnShape = RoundedCornerShape(12.dp)
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .height(44.dp)
+                                .clip(btnShape)
+                                .background(tokens.error.color)
+                                .ppmClickable(shape = btnShape) {
+                                    pendingConfirm = null
+                                    executeAction(svc, act)
+                                }
+                                .testTag("sysmon-service-confirm-ok"),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            BasicText(
+                                wording.cta,
+                                style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = Color.White),
+                            )
                         }
                     }
                 }

@@ -177,17 +177,33 @@ class Phase08cGitGraphNativeUiTest {
               "files": [
                 {
                   "path": "src/App.tsx",
-                  "staged": "M",
+                  "x": "M",
+                  "y": ".",
+                  "staged": {
+                    "blocks": [
+                      {"id": "h0", "index": 0, "oldStart": 1, "oldLines": 1, "newStart": 1, "newLines": 2, "added": 1, "removed": 0}
+                    ],
+                    "added": 1,
+                    "removed": 0
+                  },
                   "unstaged": null,
                   "untracked": false,
-                  "conflicted": true
+                  "conflict": false
                 },
                 {
                   "path": "src/Login.tsx",
+                  "x": ".",
+                  "y": "M",
                   "staged": null,
-                  "unstaged": "M",
+                  "unstaged": {
+                    "blocks": [
+                      {"id": "h1", "index": 0, "oldStart": 5, "oldLines": 2, "newStart": 5, "newLines": 3, "added": 2, "removed": 1}
+                    ],
+                    "added": 2,
+                    "removed": 1
+                  },
                   "untracked": false,
-                  "conflicted": false
+                  "conflict": false
                 }
               ],
               "truncated": false,

@@ -137,26 +137,36 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
     var activeGroups by remember { mutableStateOf(emptySet<PaletteGroup>()) }
     val bindings = model.keyBindings
     val extContribs = model.extensions?.contributions?.collectAsState()?.value
-    val actions = remember(model, bindings, extContribs) {
+    val androidAvailable = model.androidAvailable
+    val remoteDesktopAvailable = model.remoteDesktopAvailable
+    val actions = remember(model, bindings, extContribs, androidAvailable, remoteDesktopAvailable) {
         fun run(action: () -> Unit): () -> Unit = {
             onDismiss()
             action()
         }
-        val builtIn = listOf(
-            action("New AI Chat", ProductIcon.MessageSquare, "ai assistant claude", formatShortcut(bindings.binding("open-chat")), run { model.newChat() }),
+        val builtIn = buildList {
+            add(action("New AI Chat", ProductIcon.MessageSquare, "ai assistant claude", formatShortcut(bindings.binding("open-chat")), run { model.newChat() }))
             // A terminal tab in the focused panel (the first on a phone), as the web opens it; the terminal panel is the nav bar's and Ctrl+`'s.
-            action("New Terminal", ProductIcon.Terminal, "bash shell console", formatShortcut(bindings.binding("open-terminal")), run { model.openTerminal(inDock = false) }),
-            action("Voice Input", ProductIcon.Mic, "speech microphone dictate voice", formatShortcut(bindings.binding("voice-input")), run { model.toggleVoiceInput() }),
-            action("Settings", ProductIcon.Settings, "config preferences theme", formatShortcut(bindings.binding("open-settings")), run { model.openSettings() }),
-            action("Open File Explorer", ProductIcon.AppWindow, "open file explorer finder browse files folders disk drive window", null, run { model.openExplorer() }),
-            action("Android Devices", ProductIcon.Smartphone, "android emulator avd device virtual phone tablet", null, run { model.openAndroid() }),
-            action("Remote Desktop", ProductIcon.Monitor, "remote desktop screen share vnc viewer display", null, run { model.openRemoteDesktop() }),
-            action("System Monitor", ProductIcon.Activity, "cpu memory ram disk network gpu processes services monitor", null, run { model.openSystemMonitor() }),
-            action("Logs", ProductIcon.ScrollText, "logs output console errors warnings tail", null, run { model.openLogs() }),
-            action("Report Bug", ProductIcon.Bug, "bug report github issue crash", null, run { model.openLogs("report") }),
-            action("Forward a Port", ProductIcon.Globe, "port forward tunnel tailscale cloudflare preview", null, run { model.openPortForwarding() }),
-        )
+            add(action("New Terminal", ProductIcon.Terminal, "bash shell console", formatShortcut(bindings.binding("open-terminal")), run { model.openTerminal(inDock = false) }))
+            add(action("Voice Input", ProductIcon.Mic, "speech microphone dictate voice", formatShortcut(bindings.binding("voice-input")), run { model.toggleVoiceInput() }))
+            add(action("Settings", ProductIcon.Settings, "config preferences theme", formatShortcut(bindings.binding("open-settings")), run { model.openSettings() }))
+            add(action("Open File Explorer", ProductIcon.AppWindow, "open file explorer finder browse files folders disk drive window", null, run { model.openExplorer() }))
+            if (androidAvailable) {
+                add(action("Android Devices", ProductIcon.Smartphone, "android emulator avd device virtual phone tablet", null, run { model.openAndroid() }))
+            }
+            if (remoteDesktopAvailable) {
+                add(action("Remote Desktop", ProductIcon.Monitor, "remote desktop screen share vnc viewer display", null, run { model.openRemoteDesktop() }))
+            }
+            add(action("System Monitor", ProductIcon.Activity, "cpu memory ram disk network gpu processes services monitor", null, run { model.openSystemMonitor() }))
+            add(action("Logs", ProductIcon.ScrollText, "logs output console errors warnings tail", null, run { model.openLogs() }))
+            add(action("Report Bug", ProductIcon.Bug, "bug report github issue crash", null, run { model.openLogs("report") }))
+            add(action("Forward a Port", ProductIcon.Globe, "port forward tunnel tailscale cloudflare preview", null, run { model.openPortForwarding() }))
+        }
+        val extKbs = extContribs?.keybindings.orEmpty()
         val extItems = extContribs?.commands.orEmpty().map { cmd ->
+            val kb = extKbs.firstOrNull { it.command == cmd.command }
+            val overrideCombo = if (kb != null) bindings.binding("ext:${kb.command}") else ""
+            val shortcutCombo = overrideCombo.ifEmpty { kb?.key.orEmpty() }
             val label = if (!cmd.category.isNullOrEmpty()) "${cmd.category}: ${cmd.title}" else cmd.title
             val icon = when (cmd.icon) {
                 "git-branch", "git-compare" -> ProductIcon.GitBranch
@@ -178,8 +188,8 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
             action(
                 label = label,
                 icon = icon,
-                words = "${cmd.command} ${cmd.title} ${cmd.category.orEmpty()}",
-                shortcut = null,
+                words = "extension ${cmd.command} ${cmd.title} ${cmd.category.orEmpty()}",
+                shortcut = formatShortcut(shortcutCombo),
                 run = run { model.dispatchExtCommand(cmd.command) },
             )
         }

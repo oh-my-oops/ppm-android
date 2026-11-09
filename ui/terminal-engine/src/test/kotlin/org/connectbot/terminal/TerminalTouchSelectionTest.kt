@@ -122,20 +122,39 @@ class TerminalTouchSelectionTest {
     }
 
     @Test
-    fun `touch scroll and wheel steps match xterm row steps and scrollback sensitivity`() {
+    fun `touch scroll and wheel accumulation match xterm MouseService`() {
         assertEquals(0 to 12f, touchScrollLines(12f, 25f))
         assertEquals(2 to 5f, touchScrollLines(55f, 25f))
         assertEquals(-2 to -5f, touchScrollLines(-55f, 25f))
 
-        assertEquals(0, wheelScrollSteps(0f))
-        assertEquals(1, wheelScrollSteps(1f))
-        assertEquals(-1, wheelScrollSteps(-1f))
-        assertEquals(1, wheelScrollSteps(0.2f))
-        assertEquals(-3, wheelScrollSteps(-2.8f))
+        // Fractional trackpad deltas accumulate in partialScroll until |total| >= 1, emitting one step and keeping total % 1.
+        val (step1, rem1) = consumeWheelDelta(0.4f, 0f)
+        assertEquals(0, step1)
+        assertEquals(0.4f, rem1, 1e-5f)
+        val (step2, rem2) = consumeWheelDelta(0.4f, rem1)
+        assertEquals(0, step2)
+        assertEquals(0.8f, rem2, 1e-5f)
+        val (step3, rem3) = consumeWheelDelta(0.4f, rem2)
+        assertEquals(1, step3)
+        assertEquals(0.2f, rem3, 1e-5f)
 
-        assertEquals(3, wheelScrollbackLines(-1f, altPressed = false))
-        assertEquals(15, wheelScrollbackLines(-1f, altPressed = true))
-        assertEquals(-3, wheelScrollbackLines(1f, altPressed = false))
-        assertEquals(-15, wheelScrollbackLines(1f, altPressed = true))
+        // Shift+wheel still accumulates steps for primary-screen scrollback (3 rows per step), while Alt/Ctrl multiply by fastScrollSensitivity (5).
+        val (shiftUp, shiftRem) = consumeWheelDelta(-1f, 0f)
+        assertEquals(-1, shiftUp)
+        assertEquals(0f, shiftRem, 1e-5f)
+        assertEquals(3, wheelScrollbackLines(shiftUp))
+
+        val (fastUp, fastRem) = consumeWheelDelta(-1f, 0f, fastScroll = true)
+        assertEquals(-5, fastUp)
+        assertEquals(0f, fastRem, 1e-5f)
+
+        assertEquals(3, wheelScrollbackLines(-1))
+        assertEquals(15, wheelScrollbackLines(fastUp))
+        assertEquals(-3, wheelScrollbackLines(1))
+
+        // 1016 SGR-Pixels reports pointer coordinates in dp ((xPx / density).toInt()), matching CSS px on the web.
+        assertEquals(140, sgrPixelCoordinate(px = 420, density = 3.0f))
+        assertEquals(85, sgrPixelCoordinate(px = 256, density = 3.0f))
+        assertEquals(200, sgrPixelCoordinate(px = 400, density = 2.0f))
     }
 }

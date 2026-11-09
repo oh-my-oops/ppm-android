@@ -76,11 +76,18 @@ class KeyboardShortcuts(private val model: AppModel) {
 
     /** What this app runs, for the system's list of shortcuts (Meta + /), with the keys set in Settings. */
     fun groups(): List<KeyboardShortcutGroup> {
-        val items = shortcutActionIds(model.wide, model.projects.size).mapNotNull { id ->
+        val builtInItems = shortcutActionIds(model.wide, model.projects.size).mapNotNull { id ->
             val label = KEY_ACTIONS.first { it.id == id }.label
             model.keyBindings.binding(id).takeIf { it.isNotEmpty() }?.let { shortcutInfo(label, KeyCombo.parse(it)) }
         }
-        return listOf(KeyboardShortcutGroup("PPM", items))
+        val contribs = model.extensions?.contributions?.value
+        val extItems = contribs?.keybindings.orEmpty().mapNotNull { kb ->
+            val raw = model.keyBindings.binding("ext:${kb.command}").ifEmpty { kb.key }.trim()
+            if (raw.isEmpty()) return@mapNotNull null
+            val label = contribs?.commands?.firstOrNull { it.command == kb.command }?.title ?: kb.command
+            shortcutInfo(label, KeyCombo.parse(raw))
+        }
+        return listOf(KeyboardShortcutGroup("PPM", builtInItems + extItems))
     }
 
     private fun matches(press: KeyPress, actionId: String) = model.keyBindings.matches(press, actionId)
@@ -106,9 +113,30 @@ class KeyboardShortcuts(private val model: AppModel) {
             matches(press, "open-settings") -> model.openSettings()
             matches(press, "voice-input") -> model.toggleVoiceInput()
             jumpInChat(press) -> Unit
-            else -> model.openProjectAt((1..9).firstOrNull { matches(press, "switch-project-$it") } ?: return false)
+            else -> {
+                val projIdx = (1..9).firstOrNull { matches(press, "switch-project-$it") }
+                if (projIdx != null) {
+                    model.openProjectAt(projIdx)
+                } else if (!dispatchExtensionKeybinding(press)) {
+                    return false
+                }
+            }
         }
         return true
+    }
+
+    /** Extension-contributed keybindings (`use-global-keybindings.ts:301-319`). */
+    private fun dispatchExtensionKeybinding(press: KeyPress): Boolean {
+        val extKbs = model.extensions?.contributions?.value?.keybindings.orEmpty()
+        for (kb in extKbs) {
+            val raw = model.keyBindings.binding("ext:${kb.command}").ifEmpty { kb.key }.trim()
+            if (raw.isEmpty()) continue
+            if (KeyCombo.parse(raw).matches(press)) {
+                model.dispatchExtCommand(kb.command)
+                return true
+            }
+        }
+        return false
     }
 
     /** Mod+', and Ctrl+` on the desktop layout: shows or hides the terminal panel. */

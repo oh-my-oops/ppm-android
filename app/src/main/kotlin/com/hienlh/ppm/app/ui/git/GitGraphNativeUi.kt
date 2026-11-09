@@ -902,7 +902,7 @@ internal fun GitGraphNativeContent(
             // ── 1. Operation Banner (`git-graph-op-banner`) ──
             val op = changes?.operation
             if (op != null) {
-                val conflictCount = changedFiles.count { it.conflict != null }
+                val conflictCount = changedFiles.count { it.conflict }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -929,7 +929,7 @@ internal fun GitGraphNativeContent(
                                 label = "Resolve",
                                 modifier = Modifier.testTag("git-graph-op-resolve-btn"),
                                 onClick = {
-                                    val firstConflict = changedFiles.firstOrNull { it.conflict != null }
+                                    val firstConflict = changedFiles.firstOrNull { it.conflict }
                                     if (conflictCount == 1 && firstConflict != null) {
                                         onSendMessage(GitGraphWebviewMessages.openConflictFile(firstConflict.path))
                                     } else {
@@ -946,7 +946,9 @@ internal fun GitGraphNativeContent(
                                     "operation:abort",
                                     { reqId -> GitGraphWebviewMessages.operation("abort", reqId) },
                                     { res ->
-                                        onShowToast(if (res.ok) "Aborted ${op.kind}" else (res.error ?: "Abort failed"), null)
+                                        if (!res.ok) {
+                                            onShowToast(res.error ?: "Abort failed", null)
+                                        }
                                     },
                                 )
                             },
@@ -3039,7 +3041,7 @@ private fun GitGraphInspectorPane(
                     label = "${if (allState == CheckState.ALL) "☑ Unstage all" else "☐ Stage all"}",
                     modifier = Modifier.testTag("git-graph-wip-toggle-all-btn"),
                     onClick = {
-                        val paths = files.filter { it.conflict == null }.map { it.path }
+                        val paths = files.filter { !it.conflict }.map { it.path }
                         if (paths.isNotEmpty()) {
                             val act = if (allState == CheckState.ALL) "unstageFiles" else "stageFiles"
                             onSendTrackedAction(
@@ -3141,7 +3143,7 @@ private fun GitGraphInspectorPane(
                         modifier = Modifier
                             .weight(1f)
                             .clickable {
-                                if (file.conflict != null) {
+                                if (file.conflict) {
                                     onSendMessage(GitGraphWebviewMessages.openConflictFile(file.path))
                                 } else {
                                     onSendMessage(GitGraphWebviewMessages.openReview(file.path))
@@ -3150,7 +3152,7 @@ private fun GitGraphInspectorPane(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    if (file.unstaged != null && file.conflict == null) {
+                    if (file.unstaged != null && !file.conflict) {
                         SettingsButton(
                             label = "Discard",
                             modifier = Modifier.testTag("git-graph-wip-discard-${file.path}"),
