@@ -90,11 +90,19 @@ import kotlinx.serialization.json.put
 @Composable
 fun LogsWindowContent(model: AppModel, win: WindowRuntimeState) {
     val initialView = win.payload["logsView"].string ?: "logs"
+    val initialChat = win.payload["logsChat"].string
     LogsAppBody(
         model = model,
         initialView = initialView,
+        initialChat = initialChat,
         onViewChange = { next ->
-            model.windows?.setPayload(win.id, buildJsonObject { put("logsView", next) })
+            model.windows?.setPayload(
+                win.id,
+                buildJsonObject {
+                    put("logsView", next)
+                    if (!initialChat.isNullOrEmpty()) put("logsChat", initialChat)
+                },
+            )
         },
     )
 }
@@ -102,9 +110,11 @@ fun LogsWindowContent(model: AppModel, win: WindowRuntimeState) {
 @Composable
 fun LogsTabBody(model: AppModel, tab: WorkspaceTab) {
     val initialView = tab.metaString("logsView") ?: "logs"
+    val initialChat = tab.metaString("logsChat")
     LogsAppBody(
         model = model,
         initialView = initialView,
+        initialChat = initialChat,
         onViewChange = { next ->
             model.patchTabMetadata(tab.id, "logsView" to JsonPrimitive(next))
         },
@@ -115,6 +125,7 @@ fun LogsTabBody(model: AppModel, tab: WorkspaceTab) {
 fun LogsAppBody(
     model: AppModel,
     initialView: String = "logs",
+    initialChat: String? = null,
     onViewChange: (String) -> Unit = {},
     initialResult: LogQueryResult? = null,
     initialIssues: LogIssuesResult? = null,
@@ -125,7 +136,13 @@ fun LogsAppBody(
     val context = LocalContext.current
 
     var activeView by remember(initialView) { mutableStateOf(initialView) }
-    var filter by remember { mutableStateOf(DEFAULT_LOG_FILTER) }
+    var filter by remember { mutableStateOf(DEFAULT_LOG_FILTER.copy(chat = initialChat)) }
+    LaunchedEffect(initialChat) {
+        if (!initialChat.isNullOrEmpty() && filter.chat != initialChat) {
+            filter = filter.copy(chat = initialChat)
+            activeView = "logs"
+        }
+    }
     var range by remember { mutableStateOf("1h") }
     var result by remember { mutableStateOf(initialResult ?: LogQueryResult()) }
     var loading by remember { mutableStateOf(initialResult == null) }

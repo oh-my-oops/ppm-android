@@ -3794,12 +3794,23 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         }
     }
 
-    /** Opens Logs in a floating window on tablet or as a tab on phone. */
-    fun openLogs(view: String = "logs") {
+    /** Opens Logs in a floating window on tablet or as a tab on phone (`open-logs.ts`). */
+    fun openLogs(view: String = "logs", chat: String? = null) {
         val windows = windows
-        val payload = buildJsonObject { put("logsView", view) }
+        val payload = buildJsonObject {
+            put("logsView", view)
+            if (!chat.isNullOrEmpty()) put("logsChat", chat)
+        }
         if (!wide || windows == null) {
-            withWorkspace { it.openTab(NewTab("logs", "Logs", metadata = payload)) }
+            withWorkspace {
+                it.openTab(NewTab("logs", "Logs", metadata = payload))
+            }
+            if (!chat.isNullOrEmpty()) {
+                val logsTab = workspace?.state?.value?.panels?.values?.asSequence()?.flatMap { p -> p.tabs }?.firstOrNull { t -> t.type == "logs" }
+                if (logsTab != null) {
+                    patchTabMetadata(logsTab.id, "logsView" to JsonPrimitive(view), "logsChat" to JsonPrimitive(chat))
+                }
+            }
             return
         }
         val existing = windows.state.value.windows.values.firstOrNull { it.kind == WindowKind.Logs }
