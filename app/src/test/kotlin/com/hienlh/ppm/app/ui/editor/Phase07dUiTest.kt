@@ -2,6 +2,7 @@ package com.hienlh.ppm.app.ui.editor
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -177,5 +178,226 @@ class Phase07dUiTest {
         assertTrue(pickedPair != null)
         assertEquals("src/A.kt", pickedPair!!.first.filePath)
         assertEquals("src/B.kt", pickedPair!!.second.path)
+    }
+
+    @Test
+    fun editableFileCodeView_blameCommitLineUsesCommitFilenameBeforeCurrentPath() {
+        val server = mockwebserver3.MockWebServer()
+        server.start()
+        try {
+            DeviceLspPreference.setEnabled(false)
+            SharedBlamePreference.setEnabled(true)
+            // 1. /git/blame response where commit renamed file from src/OldName.ts -> src/NewName.ts
+            server.enqueue(
+                mockwebserver3.MockResponse.Builder()
+                    .code(200)
+                    .addHeader("Content-Type", "application/json")
+                    .body(
+                        """
+                        {
+                          "ok": true,
+                          "data": {
+                            "commits": {
+                              "1111111122222222333333334444444455555555": {
+                                "hash": "1111111122222222333333334444444455555555",
+                                "author": "Thang Ho",
+                                "authorMail": "<thang@example.com>",
+                                "authorTime": 1700000000,
+                                "summary": "refactor: rename file",
+                                "filename": "src/OldName.ts"
+                              }
+                            },
+                            "lines": [
+                              {
+                                "hash": "1111111122222222333333334444444455555555",
+                                "origLine": 7,
+                                "finalLine": 1
+                              }
+                            ]
+                          }
+                        }
+                        """.trimIndent(),
+                    )
+                    .build(),
+            )
+            // 2. /git/commit-line response
+            server.enqueue(
+                mockwebserver3.MockResponse.Builder()
+                    .code(200)
+                    .addHeader("Content-Type", "application/json")
+                    .body(
+                        """
+                        {
+                          "ok": true,
+                          "data": {
+                            "hash": "1111111122222222333333334444444455555555",
+                            "author": "Thang Ho",
+                            "authorMail": "<thang@example.com>",
+                            "authorTime": 1700000000,
+                            "message": "refactor: rename file",
+                            "removed": ["const oldVal = 1;"],
+                            "added": ["const newVal = 2;"]
+                          }
+                        }
+                        """.trimIndent(),
+                    )
+                    .build(),
+            )
+
+            val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()
+            val model = com.hienlh.ppm.app.AppModel(app).apply {
+                api = com.hienlh.ppm.client.ApiClient(server.url("/"), "secret")
+            }
+
+            composeRule.setContent {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    EditableFileCodeView(
+                        model = model,
+                        project = "ppm",
+                        path = "src/NewName.ts",
+                        initialContent = "const newVal = 2;",
+                        initialLanguage = "typescript",
+                        wrap = true,
+                        onToggleWrap = {},
+                    )
+                }
+            }
+
+            composeRule.mainClock.advanceTimeBy(400)
+            composeRule.waitForIdle()
+            composeRule.waitUntil(5_000) {
+                composeRule.mainClock.advanceTimeBy(50)
+                server.requestCount >= 1
+            }
+
+            val blameReq = server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)
+            org.junit.Assert.assertNotNull(blameReq)
+            assertTrue(blameReq!!.url.encodedPath.endsWith("/git/blame"))
+
+            composeRule.waitUntil(5_000) {
+                composeRule.mainClock.advanceTimeBy(50)
+                composeRule.waitForIdle()
+                server.requestCount >= 2
+            }
+
+            val commitLineReq = server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)
+            org.junit.Assert.assertNotNull(commitLineReq)
+            assertTrue(commitLineReq!!.url.encodedPath.endsWith("/git/commit-line"))
+            assertEquals("src/OldName.ts", commitLineReq.url.queryParameter("path"))
+            assertEquals("7", commitLineReq.url.queryParameter("line"))
+        } finally {
+            SharedBlamePreference.setEnabled(false)
+            DeviceLspPreference.setEnabled(false)
+            server.close()
+        }
+    }
+
+    @Test
+    fun conflictEditorContent_flushesUnsavedManualEditsOnDisposePreservingCrlf() {
+        var savedContent = ""
+        val mounted = androidx.compose.runtime.mutableStateOf(true)
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
+                if (mounted.value) {
+                    ConflictEditorContent(
+                        fileName = "Conflict.ts",
+                        initialContent = "a\r\nb",
+                        onSaveContent = { savedContent = it },
+                    )
+                }
+            }
+        }
+
+        // Type '#' via the mobile symbol bar and immediately unmount before the 1000ms debounce fires
+        composeRule.onNodeWithTag("mobile-key-sym-#").performClick()
+        mounted.value = false
+        composeRule.waitForIdle()
+
+        assertEquals("#a\r\nb", savedContent)
+    }
+
+    @Test
+    fun conflictEditorTabBody_showsSaveErrorAndHaltsWhenWriteAnswers403() {
+        val server = mockwebserver3.MockWebServer()
+        server.start()
+        try {
+            val conflicted = listOf(
+                "<<<<<<< HEAD",
+                "const v = 1;",
+                "=======",
+                "const v = 2;",
+                ">>>>>>> branch",
+            ).joinToString("\n")
+            val escaped = conflicted.replace("\n", "\\n")
+            // 1. GET /files/read succeeds
+            server.enqueue(
+                mockwebserver3.MockResponse.Builder()
+                    .code(200)
+                    .addHeader("Content-Type", "application/json")
+                    .body("""{"ok":true,"data":{"content":"$escaped","path":"src/Conflict.ts"}}""")
+                    .build(),
+            )
+            // 2. PUT /files/write answers 403 Forbidden
+            server.enqueue(
+                mockwebserver3.MockResponse.Builder()
+                    .code(403)
+                    .addHeader("Content-Type", "application/json")
+                    .body("""{"ok":false,"error":"Read-only conflict file"}""")
+                    .build(),
+            )
+
+            val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.app.Application>()
+            val model = com.hienlh.ppm.app.AppModel(app).apply {
+                api = com.hienlh.ppm.client.ApiClient(server.url("/"), "secret")
+            }
+            val tab = com.hienlh.ppm.state.workspace.WorkspaceTab(
+                id = "tab-conflict-1",
+                type = "conflict-editor",
+                title = "Conflict.ts",
+                projectId = "ppm",
+                closable = true,
+                metadata = kotlinx.serialization.json.buildJsonObject {
+                    put("projectName", kotlinx.serialization.json.JsonPrimitive("ppm"))
+                    put("filePath", kotlinx.serialization.json.JsonPrimitive("src/Conflict.ts"))
+                },
+            )
+
+            composeRule.setContent {
+                PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                    ConflictEditorTabBody(model = model, tab = tab)
+                }
+            }
+
+            composeRule.waitUntil(5_000) {
+                composeRule.onAllNodesWithTag("conflict-accept-current-0").fetchSemanticsNodes().isNotEmpty()
+            }
+            val readReq = server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)
+            org.junit.Assert.assertNotNull(readReq)
+            assertEquals("GET", readReq!!.method)
+            assertEquals("/api/project/ppm/files/read", readReq.url.encodedPath)
+            assertEquals("src/Conflict.ts", readReq.url.queryParameter("path"))
+
+            composeRule.onNodeWithTag("conflict-accept-current-0").assertIsDisplayed()
+            composeRule.onNodeWithTag("conflict-accept-current-0").performClick()
+
+            composeRule.waitUntil(5_000) {
+                composeRule.onAllNodesWithTag("editor-save-error-banner").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithTag("editor-save-error-banner").assertIsDisplayed()
+
+            val writeReq = server.takeRequest(5, java.util.concurrent.TimeUnit.SECONDS)
+            org.junit.Assert.assertNotNull(writeReq)
+            assertEquals("PUT", writeReq!!.method)
+            assertEquals("/api/project/ppm/files/write", writeReq.url.encodedPath)
+
+            // Save error banner and toast must be shown, and 403 must not loop retries
+            assertTrue(model.toasts.isNotEmpty())
+            composeRule.mainClock.advanceTimeBy(2_500)
+            composeRule.waitForIdle()
+            assertEquals(2, server.requestCount)
+        } finally {
+            server.close()
+        }
     }
 }

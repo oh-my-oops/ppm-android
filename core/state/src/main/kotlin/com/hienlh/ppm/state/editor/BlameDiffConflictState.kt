@@ -435,6 +435,9 @@ data class ConflictRegion(
     val currentLabel: String,
     val baseLabel: String? = null,
     val incomingLabel: String,
+    val currentLines: List<String> = emptyList(),
+    val baseLines: List<String>? = null,
+    val incomingLines: List<String> = emptyList(),
 )
 
 /**
@@ -443,7 +446,7 @@ data class ConflictRegion(
  * this cleanly separates [ConflictRegion.baseContent] so `Accept Current` never keeps the base marker!
  */
 fun parseConflicts(content: String): List<ConflictRegion> {
-    val lines = content.split("\n")
+    val lines = content.replace("\r\n", "\n").replace('\r', '\n').split("\n")
     val regions = mutableListOf<ConflictRegion>()
     var i = 0
     var id = 0
@@ -499,6 +502,9 @@ fun parseConflicts(content: String): List<ConflictRegion> {
                     currentLabel = currentLabel,
                     baseLabel = baseLabel,
                     incomingLabel = incomingLabel,
+                    currentLines = currentLines.toList(),
+                    baseLines = if (baseMarkerIdx != null) baseLines.toList() else null,
+                    incomingLines = incomingLines.toList(),
                 ),
             )
         }
@@ -519,34 +525,18 @@ fun resolveConflictRegion(
     val regions = parseConflicts(content)
     val region = regions.firstOrNull { it.id == regionId } ?: return content
     val replacementLines = when (action) {
-        ConflictResolutionAction.CURRENT ->
-            if (region.currentContent.isEmpty() && region.separatorLine - (region.baseMarkerLine ?: region.separatorLine) <= 1 && region.separatorLine - region.startLine == 1) {
-                emptyList()
-            } else {
-                region.currentContent.split("\n")
-            }
-        ConflictResolutionAction.INCOMING ->
-            if (region.incomingContent.isEmpty() && region.endLine - region.separatorLine == 1) {
-                emptyList()
-            } else {
-                region.incomingContent.split("\n")
-            }
-        ConflictResolutionAction.BOTH -> buildList {
-            if (!(region.currentContent.isEmpty() && region.separatorLine - region.startLine == 1)) {
-                addAll(region.currentContent.split("\n"))
-            }
-            if (!(region.incomingContent.isEmpty() && region.endLine - region.separatorLine == 1)) {
-                addAll(region.incomingContent.split("\n"))
-            }
-        }
+        ConflictResolutionAction.CURRENT -> region.currentLines
+        ConflictResolutionAction.INCOMING -> region.incomingLines
+        ConflictResolutionAction.BOTH -> region.currentLines + region.incomingLines
     }
 
-    val allLines = content.split("\n").toMutableList()
+    val eol = detectEol(content)
+    val allLines = content.replace("\r\n", "\n").replace('\r', '\n').split("\n").toMutableList()
     val startIdx = (region.startLine - 1).coerceIn(0, allLines.size)
     val endIdxExclusive = region.endLine.coerceIn(startIdx, allLines.size)
     allLines.subList(startIdx, endIdxExclusive).clear()
     allLines.addAll(startIdx, replacementLines)
-    return allLines.joinToString("\n")
+    return allLines.joinToString(eol)
 }
 
 private val CONFLICT_EXT_TO_LANG = mapOf(

@@ -191,4 +191,35 @@ class LspProtocolStateTest {
         assertEquals(2, tokens[1].line)
         assertEquals("function", tokens[1].tokenType)
     }
+
+    @Test
+    fun `offsetToLspPosition and lspPositionToOffset use 0-based UTF-16 with non-ASCII before cursor`() {
+        // Line 1 has both multi-byte UTF-8 ('é') and a 2-code-unit UTF-16 surrogate pair ('🚀') before `targetSymbol`
+        val text = "// header\nconst msg = \"café 🚀\"; targetSymbol.call()"
+        val buffer = EditorBuffer(text)
+        val cursorOffset = text.indexOf("targetSymbol") + "target".length
+
+        val lspPos = offsetToLspPosition(buffer, cursorOffset)
+        assertEquals(1, lspPos.line)
+        // On line 1: `const msg = "café 🚀"; target` -> '🚀' is 2 UTF-16 code units, so UTF-16 column is 29 (code point count would be 28)
+        assertEquals("const msg = \"café 🚀\"; target".length, lspPos.character)
+        assertEquals(29, lspPos.character)
+
+        // Round-trip back from 0-based UTF-16 LspPosition to EditorBuffer offset
+        assertEquals(cursorOffset, lspPositionToOffset(buffer, lspPos))
+
+        // Default completion word range (`getWordUntilPosition`) ends at the cursor: on `my|Helper` it covers `my` only
+        val midWordText = "const x = myHelper;"
+        val midWordBuf = EditorBuffer(midWordText)
+        val afterMyOffset = midWordText.indexOf("myHelper") + "my".length
+        val midWordRange = defaultCompletionReplaceOffsets(midWordBuf, afterMyOffset)
+        assertEquals("my", midWordBuf.substring(midWordRange.first, midWordRange.last))
+
+        // Word with non-ASCII letters (`chào|`) covers the whole `chào` up to the cursor
+        val vnText = "const chào = 1;"
+        val vnBuf = EditorBuffer(vnText)
+        val afterChaoOffset = vnText.indexOf("chào") + "chào".length
+        val vnRange = defaultCompletionReplaceOffsets(vnBuf, afterChaoOffset)
+        assertEquals("chào", vnBuf.substring(vnRange.first, vnRange.last))
+    }
 }

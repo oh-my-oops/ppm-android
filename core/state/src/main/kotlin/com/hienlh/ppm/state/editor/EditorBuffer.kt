@@ -17,6 +17,34 @@ data class IndentStyle(
     val unit: String get() = if (useTabs) "\t" else " ".repeat(size)
 }
 
+/** Detects the dominant line-ending sequence (`"\r\n"`, `"\r"`, or `"\n"`) in [text]. */
+fun detectEol(text: String, fallback: String = "\n"): String {
+    var crlf = 0
+    var lf = 0
+    var cr = 0
+    var i = 0
+    val len = text.length
+    while (i < len) {
+        val c = text[i]
+        if (c == '\r') {
+            if (i + 1 < len && text[i + 1] == '\n') {
+                crlf++
+                i += 2
+                continue
+            } else {
+                cr++
+            }
+        } else if (c == '\n') {
+            lf++
+        }
+        i++
+    }
+    if (crlf == 0 && lf == 0 && cr == 0) return fallback
+    if (crlf >= lf && crlf >= cr && crlf > 0) return "\r\n"
+    if (cr > lf && cr > crlf) return "\r"
+    return "\n"
+}
+
 /**
  * Piece-table text buffer with a lazily maintained line-start index (`O(log N)` line/offset lookup
  * and bounded `subSequence` slices that never copy the entire document on keystrokes or IME IPC).
@@ -28,6 +56,10 @@ class EditorBuffer(initialText: String = "") : CharSequence {
         val start: Int,
         val length: Int,
     )
+
+    /** Dominant line-ending sequence detected on load (`"\n"`, `"\r\n"`, or `"\r"`), restored on save. */
+    var eol: String = detectEol(initialText)
+        internal set
 
     private val original: String = initialText.replace("\r\n", "\n").replace('\r', '\n')
     private val addBuffer = StringBuilder()
@@ -149,7 +181,61 @@ class EditorBuffer(initialText: String = "") : CharSequence {
         pieces.addAll(nextPieces)
         totalLength += norm.length - (e - s)
         version++
-        cachedLineStarts = null
+        cachedLineStarts = cachedLineStarts?.let { updateLineStartsIncremental(it, s, e, norm) }
+    }
+
+    private fun updateLineStartsIncremental(
+        oldStarts: IntArray,
+        s: Int,
+        e: Int,
+        norm: String,
+    ): IntArray {
+        val delta = norm.length - (e - s)
+        val bsLeft = oldStarts.binarySearch(s)
+        val keepLeftCount = if (bsLeft >= 0) bsLeft + 1 else -bsLeft - 1
+        val bsRight = oldStarts.binarySearch(e)
+        val firstRightIdx = if (bsRight >= 0) bsRight + 1 else -bsRight - 1
+
+        var newNewlines = 0
+        for (i in 0 until norm.length) {
+            if (norm[i] == '\n') newNewlines++
+        }
+        val removedCount = firstRightIdx - keepLeftCount
+        if (removedCount == 0 && newNewlines == 0) {
+            if (delta != 0) {
+                for (i in firstRightIdx until oldStarts.size) {
+                    oldStarts[i] += delta
+                }
+            }
+            return oldStarts
+        }
+
+        val nextStarts = IntArray(oldStarts.size - removedCount + newNewlines)
+        System.arraycopy(oldStarts, 0, nextStarts, 0, keepLeftCount)
+        var outIdx = keepLeftCount
+        for (i in 0 until norm.length) {
+            if (norm[i] == '\n') {
+                nextStarts[outIdx++] = s + i + 1
+            }
+        }
+        for (i in firstRightIdx until oldStarts.size) {
+            nextStarts[outIdx++] = oldStarts[i] + delta
+        }
+        return nextStarts
+    }
+
+    /** Compares buffer contents against [other] in-place without allocating a full-buffer String copy. */
+    fun contentEquals(other: CharSequence): Boolean {
+        if (other.length != totalLength) return false
+        var pos = 0
+        for (i in 0 until pieces.size) {
+            val p = pieces[i]
+            val src = pieceCharSequence(p)
+            for (j in 0 until p.length) {
+                if (src[p.start + j] != other[pos++]) return false
+            }
+        }
+        return true
     }
 
     private fun appendNewPiece(target: MutableList<Piece>, text: String) {
@@ -164,8 +250,13 @@ class EditorBuffer(initialText: String = "") : CharSequence {
         }
     }
 
+    /** Number of full-buffer line-start scans performed (1 on initial index build, 0 on incremental edits). */
+    var fullLineStartScanCount: Int = 0
+        private set
+
     private fun ensureLineStarts(): IntArray {
         cachedLineStarts?.let { return it }
+        fullLineStartScanCount++
         var newlineCount = 0
         for (i in 0 until pieces.size) {
             val p = pieces[i]
@@ -248,4 +339,10 @@ class EditorBuffer(initialText: String = "") : CharSequence {
     }
 
     override fun toString(): String = subSequence(0, totalLength).toString()
+
+    /** Returns the document text with the file's original [eol] (`"\n"`, `"\r\n"`, or `"\r"`) restored. */
+    fun toDiskString(): String {
+        val lfText = toString()
+        return if (eol == "\n") lfText else lfText.replace("\n", eol)
+    }
 }

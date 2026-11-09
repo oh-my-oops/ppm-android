@@ -75,6 +75,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.int
 import com.hienlh.ppm.protocol.obj
@@ -92,6 +93,7 @@ import com.hienlh.ppm.state.git.GitGraphCommitDetail
 import com.hienlh.ppm.state.git.GitGraphCommitDraft
 import com.hienlh.ppm.state.git.GitGraphCommitStat
 import com.hienlh.ppm.state.git.GitGraphCommitsPageState
+import com.hienlh.ppm.state.git.GitGraphDiscardSummary
 import com.hienlh.ppm.state.git.GitGraphExtMessage
 import com.hienlh.ppm.state.git.GitGraphFileChange
 import com.hienlh.ppm.state.git.GitGraphIssueRule
@@ -121,10 +123,12 @@ import com.hienlh.ppm.state.git.formatGitGraphDate
 import com.hienlh.ppm.state.git.formatGitGraphLongAgo
 import com.hienlh.ppm.state.git.gitGraphAuthorInitials
 import com.hienlh.ppm.state.git.gitGraphAvatarGradientIndex
+import com.hienlh.ppm.state.git.gitGraphDiscardSummary
 import com.hienlh.ppm.state.git.gitGraphPrTemplate
 import com.hienlh.ppm.state.git.parseGitGraphExtMessage
 import com.hienlh.ppm.state.git.parseGitGraphStashMessage
 import com.hienlh.ppm.state.git.searchLoadedGitGraphCommits
+import com.hienlh.ppm.state.git.setGitGraphScope
 import com.hienlh.ppm.state.git.splitGitGraphCommitBody
 import com.hienlh.ppm.state.git.tokenizeGitGraphCommitMessage
 import com.hienlh.ppm.state.workspace.WorkspaceTab
@@ -205,6 +209,7 @@ fun GitGraphNativePanelBody(
     var draft by remember(panel.id) { mutableStateOf(GitGraphCommitDraft()) }
     var toastMessage by remember(panel.id) { mutableStateOf<String?>(null) }
     var toastUndo by remember(panel.id) { mutableStateOf<Pair<String, () -> Unit>?>(null) }
+    var toastIsError by remember(panel.id) { mutableStateOf(false) }
 
     val tracker = remember(panel.id) { GitGraphRequestTracker() }
 
@@ -282,6 +287,8 @@ fun GitGraphNativePanelBody(
                         GitGraphRequestTracker.Outcome.Unknown -> {
                             if (!msg.result.ok) {
                                 toastMessage = msg.result.error ?: "Git action failed"
+                                toastUndo = null
+                                toastIsError = true
                             }
                         }
                     }
@@ -299,6 +306,8 @@ fun GitGraphNativePanelBody(
                     }
                     pageState = pageState.copy(loading = false)
                     toastMessage = msg.message
+                    toastUndo = null
+                    toastIsError = true
                 }
                 null -> Unit
             }
@@ -319,13 +328,16 @@ fun GitGraphNativePanelBody(
         draft = draft,
         toastMessage = toastMessage,
         toastUndo = toastUndo,
+        toastIsError = toastIsError,
         onDismissToast = {
             toastMessage = null
             toastUndo = null
+            toastIsError = false
         },
         onShowToast = { msg, undo ->
             toastMessage = msg
             toastUndo = undo
+            toastIsError = false
         },
         onSendMessage = { msg -> sendToExt(msg) },
         onSendTrackedAction = { action, buildMsg, onDone ->
@@ -334,6 +346,15 @@ fun GitGraphNativePanelBody(
                 model.refreshGitStatus()
             }
             sendToExt(buildMsg(reqId))
+        },
+        onChangeScope = { newScope ->
+            pageState = setGitGraphScope(pageState, newScope)
+            sendToExt(
+                GitGraphWebviewMessages.requestCommits(
+                    branch = newScope.takeIf { it != "all" },
+                    maxCommits = settings.maxCommits,
+                ),
+            )
         },
         onClearSearchResults = { searchResults = null },
         modifier = modifier,
@@ -356,6 +377,7 @@ internal fun GitGraphNativeContent(
     draft: GitGraphCommitDraft = GitGraphCommitDraft(),
     toastMessage: String? = null,
     toastUndo: Pair<String, () -> Unit>? = null,
+    toastIsError: Boolean = false,
     onDismissToast: () -> Unit = {},
     onShowToast: (String, Pair<String, () -> Unit>?) -> Unit = { _, _ -> },
     onSendMessage: (JsonObject) -> Unit = {},
@@ -364,12 +386,32 @@ internal fun GitGraphNativeContent(
         buildMsg: (reqId: Int) -> JsonObject,
         onDone: (GitGraphActionResult) -> Unit,
     ) -> Unit = { _, buildMsg, _ -> onSendMessage(buildMsg(1)) },
+    onChangeScope: (String) -> Unit = { newScope ->
+        onSendMessage(
+            GitGraphWebviewMessages.requestCommits(
+                branch = newScope.takeIf { it != "all" },
+                maxCommits = settings.maxCommits,
+            ),
+        )
+    },
     onClearSearchResults: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
     val context = LocalContext.current
+
+    // Auto-dismiss toasts matching web durations (`webview-script-core.ts:580` & `webview-script-actions.ts:1101`)
+    LaunchedEffect(toastMessage, toastUndo, toastIsError) {
+        val msg = toastMessage ?: return@LaunchedEffect
+        val durationMs = com.hienlh.ppm.state.git.gitGraphToastDurationMs(
+            message = msg,
+            hasUndo = toastUndo != null,
+            isError = toastIsError,
+        )
+        delay(durationMs)
+        onDismissToast()
+    }
 
     val changedFiles = changes?.files.orEmpty()
     val displayCommits = remember(
@@ -494,6 +536,355 @@ internal fun GitGraphNativeContent(
                 } else {
                     onShowToast("$action failed: ${res.error.orEmpty()}", null)
                 }
+            },
+        )
+    }
+
+    fun runDiscardFiles(files: List<ChangedFile>) {
+        if (files.isEmpty()) return
+        val what = if (files.size == 1) files[0].path.substringAfterLast('/') else "${files.size} files"
+        onSendTrackedAction(
+            "discardFiles",
+            { reqId -> GitGraphWebviewMessages.discardFiles(files.map { it.path }, reqId) },
+            { res ->
+                if (!res.ok) {
+                    onShowToast("Could not discard: ${res.error.orEmpty()}", null)
+                    return@onSendTrackedAction
+                }
+                val record = res.data?.get("undo")?.obj
+                val undoId = record?.get("id").string.orEmpty()
+                val kept = record?.get("paths")?.array?.mapNotNull { it.string }.orEmpty()
+                val skipped = record?.get("skipped")?.array?.mapNotNull { it.string }.orEmpty()
+                if (kept.isNotEmpty() && undoId.isNotEmpty()) {
+                    val keptWhat = if (kept.size == 1) kept[0].substringAfterLast('/') else "${kept.size} files"
+                    val skippedNote = if (skipped.isNotEmpty()) {
+                        " (${skipped.joinToString(", ")} could not be kept, so it cannot be restored)"
+                    } else {
+                        ""
+                    }
+                    onShowToast(
+                        "Discarded changes to $what$skippedNote",
+                        "Undo" to {
+                            onSendTrackedAction(
+                                "undoDiscard",
+                                { rId -> GitGraphWebviewMessages.undoDiscard(undoId, rId) },
+                                { uRes ->
+                                    if (uRes.ok) {
+                                        onShowToast("Restored $keptWhat", null)
+                                    } else {
+                                        onShowToast("Could not undo the discard: ${uRes.error.orEmpty()}", null)
+                                    }
+                                },
+                            )
+                        },
+                    )
+                } else if (skipped.isNotEmpty()) {
+                    onShowToast("${skipped.joinToString(", ")} could not be kept, so it cannot be restored", null)
+                } else if (record == null) {
+                    onShowToast("Discarded changes to $what", null)
+                }
+            },
+        )
+    }
+
+    fun askDiscard(files: List<ChangedFile>, customSummary: GitGraphDiscardSummary? = null) {
+        val list = files.filter { GitChangesView.hasUnstaged(it) }
+        if (list.isEmpty()) return
+        val s = customSummary ?: gitGraphDiscardSummary(list)
+        activeDialog = GitGraphDialogSpec(
+            title = s.title,
+            message = s.body,
+            confirmLabel = s.confirm,
+            onConfirm = { _, _ -> runDiscardFiles(list) },
+        )
+    }
+
+    fun askResetWorkingTree() {
+        activeDialog = GitGraphDialogSpec(
+            title = "Reset the uncommitted changes?",
+            message = "mixed unstages everything and leaves your files as they are. hard puts every tracked file back to the last commit, and PPM keeps no copy.",
+            selectOptions = listOf("mixed", "hard"),
+            selectDefault = "mixed",
+            confirmLabel = "Reset",
+            onConfirm = { mode, _ ->
+                if (mode != "hard") {
+                    runGitAction(
+                        "reset",
+                        buildJsonObject {
+                            put("mode", "mixed")
+                            put("hash", "HEAD")
+                        },
+                        "Unstaged everything",
+                        "Could not reset",
+                    )
+                } else {
+                    activeDialog = GitGraphDialogSpec(
+                        title = "Throw away every uncommitted change?",
+                        message = "Tracked files go back to the last commit. Discard does the same with an undo; this does not have one.",
+                        confirmLabel = "Reset hard",
+                        onConfirm = { _, _ ->
+                            runGitAction(
+                                "reset",
+                                buildJsonObject {
+                                    put("mode", "hard")
+                                    put("hash", "HEAD")
+                                },
+                                "Reset to the last commit",
+                                "Could not reset",
+                            )
+                        },
+                    )
+                }
+            },
+        )
+    }
+
+    fun askDeleteBranch(name: String) {
+        activeDialog = GitGraphDialogSpec(
+            title = "Delete the branch $name?",
+            message = "Only the name goes: its commits stay wherever another branch contains them.",
+            confirmLabel = "Delete branch",
+            onConfirm = { _, _ ->
+                onSendTrackedAction(
+                    "deleteBranch",
+                    { reqId ->
+                        GitGraphWebviewMessages.gitAction(
+                            "deleteBranch",
+                            buildJsonObject {
+                                put("name", name)
+                                put("force", false)
+                            },
+                            reqId,
+                        )
+                    },
+                    { res ->
+                        if (res.ok) {
+                            onShowToast("Deleted $name", null)
+                        } else if (res.error?.contains("not fully merged", ignoreCase = true) == true) {
+                            activeDialog = GitGraphDialogSpec(
+                                title = "$name is not merged",
+                                message = "It has commits no other branch contains. Deleting it anyway leaves them reachable only through the reflog.",
+                                confirmLabel = "Delete anyway",
+                                onConfirm = { _, _ ->
+                                    runGitAction(
+                                        "deleteBranch",
+                                        buildJsonObject {
+                                            put("name", name)
+                                            put("force", true)
+                                        },
+                                        "Deleted $name",
+                                        "Could not delete $name",
+                                    )
+                                },
+                            )
+                        } else {
+                            onShowToast("Could not delete $name: ${res.error.orEmpty()}", null)
+                        }
+                    },
+                )
+            },
+        )
+    }
+
+    fun askDeleteRemoteBranch(remote: String, branch: String) {
+        activeDialog = GitGraphDialogSpec(
+            title = "Delete $branch from $remote?",
+            message = "The branch goes from the remote for everyone who uses it. Your local branch, if you have one, stays.",
+            confirmLabel = "Delete from $remote",
+            onConfirm = { _, _ ->
+                runGitAction(
+                    "push",
+                    buildJsonObject {
+                        put("remote", remote)
+                        put("branch", branch)
+                        put("delete", true)
+                    },
+                    "Deleted $branch from $remote",
+                    "Could not delete $branch",
+                )
+            },
+        )
+    }
+
+    fun askDeleteTag(name: String) {
+        activeDialog = GitGraphDialogSpec(
+            title = "Delete the tag $name?",
+            message = "Only the local tag goes. If it was pushed, the remote keeps its copy.",
+            confirmLabel = "Delete tag",
+            onConfirm = { _, _ ->
+                runGitAction("deleteTag", buildJsonObject { put("name", name) }, "Deleted tag $name", "Could not delete $name")
+            },
+        )
+    }
+
+    fun askRebase(target: String, label: String = target) {
+        val branch = repoInfo.currentBranch.ifEmpty { "HEAD" }
+        activeDialog = GitGraphDialogSpec(
+            title = "Rebase $branch onto $label?",
+            message = "The commits on $branch are replayed on top of $label, which rewrites them. If they are already pushed, the next push has to be forced.",
+            confirmLabel = "Rebase",
+            onConfirm = { _, _ ->
+                runGitAction("rebase", buildJsonObject { put("branch", target) }, "Rebased $branch onto $label", "Could not rebase")
+            },
+        )
+    }
+
+    fun askMerge(name: String) {
+        val into = repoInfo.currentBranch.ifEmpty { "HEAD" }
+        activeDialog = GitGraphDialogSpec(
+            title = "Merge $name into $into?",
+            message = "git makes a merge commit, unless $into can simply move forward to $name.",
+            confirmLabel = "Merge",
+            onConfirm = { _, _ ->
+                runGitAction("merge", buildJsonObject { put("branch", name) }, "Merged $name into $into", "Could not merge $name")
+            },
+        )
+    }
+
+    fun cherryPickCommit(hash: String, parentsCount: Int) {
+        val short = hash.take(7)
+        val branch = repoInfo.currentBranch.ifEmpty { "HEAD" }
+        if (parentsCount > 1) {
+            onShowToast("A merge cannot be cherry-picked from here", null)
+            return
+        }
+        runGitAction(
+            "cherryPick",
+            buildJsonObject { put("hash", hash) },
+            "Cherry-picked $short onto $branch",
+            "Could not cherry-pick $short",
+        )
+    }
+
+    fun promptResetMode(hash: String) {
+        val branch = repoInfo.currentBranch.ifEmpty { "HEAD" }
+        val short = hash.take(7)
+        val done = "Reset $branch to $short"
+        activeDialog = GitGraphDialogSpec(
+            title = "Reset $branch to $short?",
+            message = "soft keeps what the later commits changed, staged. mixed keeps it unstaged. hard throws it away, and every uncommitted change with it.",
+            selectOptions = listOf("soft", "mixed", "hard"),
+            selectDefault = "mixed",
+            confirmLabel = "Reset",
+            onConfirm = { mode, _ ->
+                if (mode != "hard") {
+                    runGitAction(
+                        "reset",
+                        buildJsonObject {
+                            put("mode", mode)
+                            put("hash", hash)
+                        },
+                        done,
+                        "Could not reset",
+                    )
+                } else {
+                    activeDialog = GitGraphDialogSpec(
+                        title = "Throw away every change since $short?",
+                        message = "A hard reset deletes uncommitted work in every tracked file, and PPM keeps no copy of it. The commits after $short can still be found in the reflog.",
+                        confirmLabel = "Reset hard",
+                        onConfirm = { _, _ ->
+                            runGitAction(
+                                "reset",
+                                buildJsonObject {
+                                    put("mode", "hard")
+                                    put("hash", hash)
+                                },
+                                done,
+                                "Could not reset",
+                            )
+                        },
+                    )
+                }
+            },
+        )
+    }
+
+    fun askRemoveWorktree(wt: GitGraphWorktree, force: Boolean = false) {
+        activeDialog = GitGraphDialogSpec(
+            title = if (force) "Remove it with its changes?" else "Remove the worktree at ${wt.path}?",
+            message = if (force) {
+                "It has changes that are not committed. Removing it anyway deletes them, and PPM keeps no copy."
+            } else {
+                "Its folder is deleted. The branch it has checked out stays."
+            },
+            confirmLabel = if (force) "Remove with changes" else "Remove worktree",
+            onConfirm = { _, _ ->
+                onSendTrackedAction(
+                    "removeWorktree",
+                    { reqId -> GitGraphWebviewMessages.removeWorktree(wt.path, force = force, reqId) },
+                    { res ->
+                        if (res.ok) {
+                            onShowToast("Removed the worktree at ${wt.path}", null)
+                        } else if (!force && Regex("--force|modified or untracked", RegexOption.IGNORE_CASE).containsMatchIn(res.error.orEmpty())) {
+                            askRemoveWorktree(wt, force = true)
+                        } else {
+                            onShowToast("Could not remove the worktree: ${res.error.orEmpty()}", null)
+                        }
+                    },
+                )
+            },
+        )
+    }
+
+    fun askPruneWorktrees() {
+        activeDialog = GitGraphDialogSpec(
+            title = "Prune stale worktrees?",
+            message = "Removes the entries of worktrees whose folders no longer exist. Nothing on disk is touched.",
+            confirmLabel = "Prune",
+            onConfirm = { _, _ ->
+                onSendTrackedAction(
+                    "pruneWorktrees",
+                    { reqId -> GitGraphWebviewMessages.pruneWorktrees(reqId) },
+                    { res ->
+                        if (res.ok) {
+                            onShowToast("Pruned stale worktree entries", null)
+                        } else {
+                            onShowToast("Could not prune: ${res.error.orEmpty()}", null)
+                        }
+                    },
+                )
+            },
+        )
+    }
+
+    fun askStashBranch(index: Int, hash: String) {
+        val ref = "stash@{$index}"
+        activeDialog = GitGraphDialogSpec(
+            title = "Create a branch from $ref",
+            message = "The branch starts at the commit the stash was made on, with the stash applied to it. The stash is dropped once it applies cleanly.",
+            inputPlaceholder = "Branch name",
+            confirmLabel = "Create branch",
+            onConfirm = { value, _ ->
+                val name = value.trim()
+                if (name.isNotEmpty()) {
+                    runGitAction(
+                        "stashBranch",
+                        buildJsonObject {
+                            put("name", name)
+                            put("index", index)
+                            put("hash", hash)
+                        },
+                        "Created $name from the stash",
+                        "Could not create $name",
+                    )
+                }
+            },
+        )
+    }
+
+    fun askDropStash(index: Int, hash: String, rawMessage: String = "") {
+        val (_, msgText) = parseGitGraphStashMessage(rawMessage)
+        val label = msgText.ifBlank { "stash@{$index}" }
+        activeDialog = GitGraphDialogSpec(
+            title = "Drop “$label”?",
+            message = "The stash is deleted for good: nothing in PPM can bring it back.",
+            confirmLabel = "Drop stash",
+            onConfirm = { _, _ ->
+                onSendTrackedAction(
+                    "stashAction",
+                    { reqId -> GitGraphWebviewMessages.stashAction("drop", index, hash, reqId) },
+                    { res -> onShowToast(if (res.ok) "Stash dropped" else (res.error ?: "Drop failed"), null) },
+                )
             },
         )
     }
@@ -967,7 +1358,14 @@ internal fun GitGraphNativeContent(
                     ) {
                         itemsIndexed(
                             items = displayCommits,
-                            key = { _, item -> item.hash },
+                            key = { index, item ->
+                                val kind = when {
+                                    item.isWip -> "wip"
+                                    item.isStash -> "stash:${item.stashIndex ?: index}"
+                                    else -> "commit"
+                                }
+                                "$kind:${item.hash}:$index"
+                            },
                         ) { rowIndex, commit ->
                             val isSelected = selectedCommitHash == commit.hash
                             val isDimmed = findMode == "loaded" && findQuery.isNotBlank() && !commit.isWip && commit.hash !in loadedMatchSet
@@ -1278,6 +1676,9 @@ internal fun GitGraphNativeContent(
                             onSendMessage = onSendMessage,
                             onSendTrackedAction = onSendTrackedAction,
                             onRunGitAction = ::runGitAction,
+                            onAskDiscard = { askDiscard(it) },
+                            onAskStashBranch = ::askStashBranch,
+                            onCherryPickCommit = ::cherryPickCommit,
                             onShowToast = onShowToast,
                             onOpenDialog = { activeDialog = it },
                         )
@@ -1326,6 +1727,9 @@ internal fun GitGraphNativeContent(
                         onSendMessage = onSendMessage,
                         onSendTrackedAction = onSendTrackedAction,
                         onRunGitAction = ::runGitAction,
+                        onAskDiscard = { askDiscard(it) },
+                        onAskStashBranch = ::askStashBranch,
+                        onCherryPickCommit = ::cherryPickCommit,
                         onShowToast = onShowToast,
                         onOpenDialog = { activeDialog = it },
                     )
@@ -1349,7 +1753,7 @@ internal fun GitGraphNativeContent(
                     modifier = Modifier.fillMaxWidth().testTag("git-graph-scope-option-all"),
                     onClick = {
                         showScopeMenu = false
-                        onSendMessage(GitGraphWebviewMessages.requestCommits(branch = null, maxCommits = settings.maxCommits))
+                        onChangeScope("all")
                     },
                 )
                 val q = scopeFilterText.trim().lowercase()
@@ -1360,7 +1764,7 @@ internal fun GitGraphNativeContent(
                         modifier = Modifier.fillMaxWidth().testTag("git-graph-scope-option-${b.name}"),
                         onClick = {
                             showScopeMenu = false
-                            onSendMessage(GitGraphWebviewMessages.requestCommits(branch = b.name, maxCommits = settings.maxCommits))
+                            onChangeScope(b.name)
                         },
                     )
                 }
@@ -1437,22 +1841,19 @@ internal fun GitGraphNativeContent(
                                 },
                             )
                             SettingsButton(
+                                label = "Create branch from stash…",
+                                modifier = Modifier.testTag("git-graph-stash-branch-${s.index}"),
+                                onClick = {
+                                    showStashesMenu = false
+                                    askStashBranch(s.index, s.hash)
+                                },
+                            )
+                            SettingsButton(
                                 label = "Drop",
                                 modifier = Modifier.testTag("git-graph-stash-drop-${s.index}"),
                                 onClick = {
                                     showStashesMenu = false
-                                    activeDialog = GitGraphDialogSpec(
-                                        title = "Drop stash@{${s.index}}?",
-                                        message = "The stash is deleted for good.",
-                                        confirmLabel = "Drop stash",
-                                        onConfirm = { _, _ ->
-                                            onSendTrackedAction(
-                                                "stashAction",
-                                                { reqId -> GitGraphWebviewMessages.stashAction("drop", s.index, s.hash, reqId) },
-                                                { res -> onShowToast(if (res.ok) "Stash dropped" else (res.error ?: "Drop failed"), null) },
-                                            )
-                                        },
-                                    )
+                                    askDropStash(s.index, s.hash, s.message)
                                 },
                             )
                         }
@@ -1466,7 +1867,7 @@ internal fun GitGraphNativeContent(
                         showStashesMenu = false
                         activeDialog = GitGraphDialogSpec(
                             title = "Stash changes",
-                            message = "Puts every change aside in a new stash.",
+                            message = "Puts every change, staged or not, aside in a new stash and takes the working tree back to the last commit.",
                             inputPlaceholder = "Message (optional)",
                             checkboxLabel = "Include untracked files",
                             checkboxDefault = true,
@@ -1526,11 +1927,7 @@ internal fun GitGraphNativeContent(
                                     modifier = Modifier.testTag("git-graph-wt-remove-${wt.branch}"),
                                     onClick = {
                                         showWorktreesMenu = false
-                                        onSendTrackedAction(
-                                            "removeWorktree",
-                                            { reqId -> GitGraphWebviewMessages.removeWorktree(wt.path, force = false, reqId) },
-                                            { res -> onShowToast(if (res.ok) "Removed worktree" else (res.error ?: "Remove failed"), null) },
-                                        )
+                                        askRemoveWorktree(wt, force = false)
                                     },
                                 )
                             }
@@ -1548,15 +1945,11 @@ internal fun GitGraphNativeContent(
                         },
                     )
                     SettingsButton(
-                        label = "Prune stale",
+                        label = "Prune stale entries…",
                         modifier = Modifier.testTag("git-graph-wt-prune-btn"),
                         onClick = {
                             showWorktreesMenu = false
-                            onSendTrackedAction(
-                                "pruneWorktrees",
-                                { reqId -> GitGraphWebviewMessages.pruneWorktrees(reqId) },
-                                { res -> onShowToast(if (res.ok) "Pruned stale worktrees" else (res.error ?: "Prune failed"), null) },
-                            )
+                            askPruneWorktrees()
                         },
                     )
                 }
@@ -1724,8 +2117,11 @@ internal fun GitGraphNativeContent(
                     style = ppmText(13f, FontWeight.SemiBold).copy(color = tokens.text.color),
                 )
                 if (menuCommit.isWip) {
+                    val discardable = changedFiles.filter { GitChangesView.hasUnstaged(it) }
+                    val untracked = changedFiles.filter { it.untracked && !it.conflict }
                     SettingsButton(
                         label = "Stash all changes",
+                        enabled = changedFiles.isNotEmpty(),
                         modifier = Modifier.fillMaxWidth().testTag("git-graph-wip-menu-stash"),
                         onClick = {
                             activeCommitMenu = null
@@ -1738,6 +2134,7 @@ internal fun GitGraphNativeContent(
                     )
                     SettingsButton(
                         label = "Review changes",
+                        enabled = changedFiles.isNotEmpty(),
                         modifier = Modifier.fillMaxWidth().testTag("git-graph-wip-menu-review"),
                         onClick = {
                             activeCommitMenu = null
@@ -1746,21 +2143,43 @@ internal fun GitGraphNativeContent(
                     )
                     SettingsButton(
                         label = "Discard all changes…",
+                        enabled = discardable.isNotEmpty(),
                         modifier = Modifier.fillMaxWidth().testTag("git-graph-wip-menu-discard-all"),
                         onClick = {
                             activeCommitMenu = null
-                            val paths = changedFiles.map { it.path }
-                            if (paths.isNotEmpty()) {
-                                onSendTrackedAction(
-                                    "discardFiles",
-                                    { reqId -> GitGraphWebviewMessages.discardFiles(paths, reqId) },
-                                    { res -> onShowToast(if (res.ok) "Discarded changes" else (res.error ?: "Discard failed"), null) },
+                            askDiscard(discardable)
+                        },
+                    )
+                    SettingsButton(
+                        label = "Delete untracked files…",
+                        enabled = untracked.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth().testTag("git-graph-wip-menu-delete-untracked"),
+                        onClick = {
+                            activeCommitMenu = null
+                            val customSummary = if (untracked.size == 1) {
+                                null
+                            } else {
+                                GitGraphDiscardSummary(
+                                    title = "Delete ${untracked.size} untracked files?",
+                                    body = "They are files git has never stored. You can undo it right after.",
+                                    confirm = "Delete ${untracked.size} files",
                                 )
                             }
+                            askDiscard(untracked, customSummary)
+                        },
+                    )
+                    SettingsButton(
+                        label = "Reset…",
+                        enabled = changedFiles.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth().testTag("git-graph-wip-menu-reset"),
+                        onClick = {
+                            activeCommitMenu = null
+                            askResetWorkingTree()
                         },
                     )
                 } else if (menuCommit.isStash) {
                     val stashIdx = menuCommit.stashIndex ?: 0
+                    val stashRef = "stash@{$stashIdx}"
                     SettingsButton(
                         label = "Apply",
                         modifier = Modifier.fillMaxWidth().testTag("git-graph-stash-menu-apply"),
@@ -1783,6 +2202,31 @@ internal fun GitGraphNativeContent(
                                 { reqId -> GitGraphWebviewMessages.stashAction("pop", stashIdx, menuCommit.hash, reqId) },
                                 { res -> onShowToast(if (res.ok) "Stash popped" else (res.error ?: "Pop failed"), null) },
                             )
+                        },
+                    )
+                    SettingsButton(
+                        label = "Create branch from stash…",
+                        modifier = Modifier.fillMaxWidth().testTag("git-graph-stash-menu-branch"),
+                        onClick = {
+                            activeCommitMenu = null
+                            askStashBranch(stashIdx, menuCommit.hash)
+                        },
+                    )
+                    SettingsButton(
+                        label = "Copy name",
+                        modifier = Modifier.fillMaxWidth().testTag("git-graph-stash-menu-copy"),
+                        onClick = {
+                            activeCommitMenu = null
+                            copyGraphText(context, "Stash ref", stashRef)
+                            onShowToast("Copied $stashRef", null)
+                        },
+                    )
+                    SettingsButton(
+                        label = "Drop…",
+                        modifier = Modifier.fillMaxWidth().testTag("git-graph-stash-menu-drop"),
+                        onClick = {
+                            activeCommitMenu = null
+                            askDropStash(stashIdx, menuCommit.hash, menuCommit.message)
                         },
                     )
                 } else {
@@ -1832,7 +2276,7 @@ internal fun GitGraphNativeContent(
                         onClick = {
                             activeCommitMenu = null
                             if (!isHead) {
-                                runGitAction("cherryPick", buildJsonObject { put("hash", menuCommit.hash) }, "Cherry-picked $shortHash")
+                                cherryPickCommit(menuCommit.hash, menuCommit.parents.size)
                             }
                         },
                     )
@@ -1843,7 +2287,7 @@ internal fun GitGraphNativeContent(
                             activeCommitMenu = null
                             activeDialog = GitGraphDialogSpec(
                                 title = "Revert $shortHash?",
-                                message = "Makes a new commit that undoes this commit.",
+                                message = "This makes a new commit on ${repoInfo.currentBranch.ifEmpty { "HEAD" }} that undoes “${menuCommit.message.lineSequence().firstOrNull().orEmpty()}”. The original commit stays in the history.",
                                 confirmLabel = "Revert",
                                 onConfirm = { _, _ ->
                                     runGitAction("revert", buildJsonObject { put("hash", menuCommit.hash) }, "Reverted $shortHash")
@@ -1928,27 +2372,7 @@ internal fun GitGraphNativeContent(
                         modifier = Modifier.fillMaxWidth().testTag("git-graph-menu-reset"),
                         onClick = {
                             activeCommitMenu = null
-                            activeDialog = GitGraphDialogSpec(
-                                title = "Reset ${repoInfo.currentBranch.ifEmpty { "HEAD" }} to $shortHash?",
-                                message = "soft keeps changes staged. mixed keeps them unstaged. hard deletes uncommitted changes.",
-                                selectOptions = listOf("soft", "mixed", "hard"),
-                                selectDefault = "mixed",
-                                confirmLabel = "Reset",
-                                onConfirm = { mode, _ ->
-                                    if (mode == "hard" && changedFiles.isNotEmpty()) {
-                                        onShowToast("Hard reset refused while working tree has uncommitted changes", null)
-                                    } else {
-                                        runGitAction(
-                                            "reset",
-                                            buildJsonObject {
-                                                put("mode", mode)
-                                                put("hash", menuCommit.hash)
-                                            },
-                                            "Reset to $shortHash ($mode)",
-                                        )
-                                    }
-                                },
-                            )
+                            promptResetMode(menuCommit.hash)
                         },
                     )
                 }
@@ -1974,19 +2398,19 @@ internal fun GitGraphNativeContent(
                             },
                         )
                         SettingsButton(
-                            label = "Merge into $currentBranch",
+                            label = "Merge into $currentBranch…",
                             modifier = Modifier.fillMaxWidth().testTag("git-graph-ref-merge"),
                             onClick = {
                                 activeRefMenu = null
-                                runGitAction("merge", buildJsonObject { put("branch", ref.name) }, "Merged ${ref.name}")
+                                askMerge(ref.name)
                             },
                         )
                         SettingsButton(
-                            label = "Rebase $currentBranch onto this",
+                            label = "Rebase $currentBranch onto this…",
                             modifier = Modifier.fillMaxWidth().testTag("git-graph-ref-rebase"),
                             onClick = {
                                 activeRefMenu = null
-                                runGitAction("rebase", buildJsonObject { put("branch", ref.name) }, "Rebased onto ${ref.name}")
+                                askRebase(ref.name, ref.name)
                             },
                         )
                     }
@@ -2029,14 +2453,7 @@ internal fun GitGraphNativeContent(
                             modifier = Modifier.fillMaxWidth().testTag("git-graph-ref-delete"),
                             onClick = {
                                 activeRefMenu = null
-                                runGitAction(
-                                    "deleteBranch",
-                                    buildJsonObject {
-                                        put("name", ref.name)
-                                        put("force", false)
-                                    },
-                                    "Deleted ${ref.name}",
-                                )
+                                askDeleteBranch(ref.name)
                             },
                         )
                     }
@@ -2053,11 +2470,19 @@ internal fun GitGraphNativeContent(
                         },
                     )
                     SettingsButton(
-                        label = "Merge into $currentBranch",
-                        modifier = Modifier.fillMaxWidth(),
+                        label = "Merge into $currentBranch…",
+                        modifier = Modifier.fillMaxWidth().testTag("git-graph-ref-merge-remote"),
                         onClick = {
                             activeRefMenu = null
-                            runGitAction("merge", buildJsonObject { put("branch", ref.name) }, "Merged ${ref.name}")
+                            askMerge(ref.name)
+                        },
+                    )
+                    SettingsButton(
+                        label = "Rebase $currentBranch onto this…",
+                        modifier = Modifier.fillMaxWidth().testTag("git-graph-ref-rebase-remote"),
+                        onClick = {
+                            activeRefMenu = null
+                            askRebase(ref.name, ref.name)
                         },
                     )
                     if (remoteName.isNotEmpty()) {
@@ -2066,15 +2491,7 @@ internal fun GitGraphNativeContent(
                             modifier = Modifier.fillMaxWidth().testTag("git-graph-ref-delete-remote"),
                             onClick = {
                                 activeRefMenu = null
-                                runGitAction(
-                                    "push",
-                                    buildJsonObject {
-                                        put("remote", remoteName)
-                                        put("branch", localName)
-                                        put("delete", true)
-                                    },
-                                    "Deleted $localName from $remoteName",
-                                )
+                                askDeleteRemoteBranch(remoteName, localName)
                             },
                         )
                     }
@@ -2092,7 +2509,7 @@ internal fun GitGraphNativeContent(
                         modifier = Modifier.fillMaxWidth().testTag("git-graph-ref-delete-tag"),
                         onClick = {
                             activeRefMenu = null
-                            runGitAction("deleteTag", buildJsonObject { put("name", ref.name) }, "Deleted tag ${ref.name}")
+                            askDeleteTag(ref.name)
                         },
                     )
                 }
@@ -2126,28 +2543,28 @@ internal fun GitGraphNativeContent(
                 BasicText("Drop '${ref.name}' onto $short", style = ppmText(13f, FontWeight.SemiBold).copy(color = tokens.text.color))
                 if (ref.name == repoInfo.currentBranch) {
                     SettingsButton(
-                        label = "Rebase ${ref.name} onto $short",
+                        label = "Rebase ${ref.name} onto $short…",
                         modifier = Modifier.fillMaxWidth().testTag("git-graph-drop-rebase"),
                         onClick = {
                             activeDropMenu = null
-                            runGitAction("rebase", buildJsonObject { put("branch", commit.hash) }, "Rebased ${ref.name} onto $short")
+                            askRebase(commit.hash, short)
                         },
                     )
                 } else {
                     SettingsButton(
-                        label = "Merge ${ref.name} into $currentBranch",
+                        label = "Merge ${ref.name} into $currentBranch…",
                         modifier = Modifier.fillMaxWidth().testTag("git-graph-drop-merge"),
                         onClick = {
                             activeDropMenu = null
-                            runGitAction("merge", buildJsonObject { put("branch", ref.name) }, "Merged ${ref.name} into $currentBranch")
+                            askMerge(ref.name)
                         },
                     )
                     SettingsButton(
-                        label = "Rebase $currentBranch onto ${ref.name}",
+                        label = "Rebase $currentBranch onto ${ref.name}…",
                         modifier = Modifier.fillMaxWidth().testTag("git-graph-drop-rebase"),
                         onClick = {
                             activeDropMenu = null
-                            runGitAction("rebase", buildJsonObject { put("branch", ref.name) }, "Rebased $currentBranch onto ${ref.name}")
+                            askRebase(ref.name, ref.name)
                         },
                     )
                 }
@@ -2530,6 +2947,9 @@ private fun GitGraphInspectorPane(
     onRunGitAction: (String, JsonObject, String, String) -> Unit,
     onShowToast: (String, Pair<String, () -> Unit>?) -> Unit,
     onOpenDialog: (GitGraphDialogSpec) -> Unit,
+    onAskDiscard: (List<ChangedFile>) -> Unit,
+    onAskStashBranch: (Int, String) -> Unit,
+    onCherryPickCommit: (String, Int) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
     val context = LocalContext.current
@@ -2736,27 +3156,7 @@ private fun GitGraphInspectorPane(
                         SettingsButton(
                             label = "Discard",
                             modifier = Modifier.testTag("git-graph-wip-discard-${file.path}"),
-                            onClick = {
-                                onSendTrackedAction(
-                                    "discardFiles",
-                                    { reqId -> GitGraphWebviewMessages.discardFiles(listOf(file.path), reqId) },
-                                    { res ->
-                                        val undoId = res.data?.get("undo")?.obj?.get("id").string
-                                        onShowToast(
-                                            if (res.ok) "Discarded ${file.path}" else (res.error ?: "Discard failed"),
-                                            if (res.ok && !undoId.isNullOrEmpty()) {
-                                                "Undo" to {
-                                                    onSendTrackedAction(
-                                                        "undoDiscard",
-                                                        { rId -> GitGraphWebviewMessages.undoDiscard(undoId, rId) },
-                                                        { _ -> onShowToast("Restored ${file.path}", null) },
-                                                    )
-                                                }
-                                            } else null,
-                                        )
-                                    },
-                                )
-                            },
+                            onClick = { onAskDiscard(listOf(file)) },
                         )
                     }
                 }
@@ -2937,6 +3337,11 @@ private fun GitGraphInspectorPane(
                         )
                     },
                 )
+                SettingsButton(
+                    label = "Create branch from stash…",
+                    modifier = Modifier.testTag("git-graph-insp-stash-branch"),
+                    onClick = { onAskStashBranch(stash.index, stash.hash) },
+                )
             }
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2966,13 +3371,14 @@ private fun GitGraphInspectorPane(
                                 checkboxLabel = "Check it out",
                                 checkboxDefault = true,
                                 confirmLabel = "Create branch",
-                                onConfirm = { name, _ ->
+                                onConfirm = { name, checked ->
                                     if (name.isNotBlank()) {
                                         onRunGitAction(
                                             "createBranch",
                                             buildJsonObject {
                                                 put("name", name.trim())
                                                 put("startPoint", detail.hash)
+                                                put("checkout", checked)
                                                 put("force", false)
                                             },
                                             "Created ${name.trim()}",
@@ -2989,12 +3395,7 @@ private fun GitGraphInspectorPane(
                     modifier = Modifier.testTag("git-graph-insp-cherry-pick-btn"),
                     onClick = {
                         if (!isHead) {
-                            onRunGitAction(
-                                "cherryPick",
-                                buildJsonObject { put("hash", detail.hash) },
-                                "Cherry-picked ${detail.hash.take(7)}",
-                                "Cherry-pick failed",
-                            )
+                            onCherryPickCommit(detail.hash, detail.parents.size)
                         }
                     },
                 )

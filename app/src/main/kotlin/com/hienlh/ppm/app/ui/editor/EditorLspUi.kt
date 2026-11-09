@@ -144,7 +144,44 @@ object DeviceLspPreference {
 
     fun setEnabled(value: Boolean) {
         _enabled.value = value
+        if (!value) {
+            SharedProjectLspRegistry.disconnectAll()
+        }
     }
+}
+
+// ── Shared Per-Project LSP WebSocket Registry ──────────────────────────────
+
+object SharedProjectLspRegistry {
+    private val bridges = ConcurrentHashMap<Pair<Int, String>, ProjectLspBridge>()
+
+    @Synchronized
+    fun getOrCreate(
+        api: ApiClient,
+        projectName: String,
+        scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    ): ProjectLspBridge {
+        val key = System.identityHashCode(api) to projectName
+        return bridges.getOrPut(key) { ProjectLspBridge(api, projectName, scope) }
+    }
+
+    @Synchronized
+    fun disconnectProject(api: ApiClient, projectName: String) {
+        val key = System.identityHashCode(api) to projectName
+        bridges.remove(key)?.disconnect()
+    }
+
+    @Synchronized
+    fun disconnectAll() {
+        val all = bridges.values.toList()
+        bridges.clear()
+        for (bridge in all) {
+            bridge.disconnect()
+        }
+    }
+
+    @Synchronized
+    fun activeBridgeCount(): Int = bridges.size
 }
 
 // ── Project LSP WebSocket Bridge ───────────────────────────────────────────
@@ -165,7 +202,21 @@ class ProjectLspBridge(
 
     @Volatile
     private var outboundSender: ((String) -> Boolean)? = null
+
+    internal fun setTestOutboundSender(sender: ((String) -> Boolean)?) {
+        outboundSender = sender
+    }
+
+    internal fun dispatchTestServerFrame(rawJson: String) {
+        handleIncomingFrame(rawJson)
+    }
+
+    @Volatile
+    private var activeSocket: SocketConnection? = null
     private var connectionJob: Job? = null
+
+    val isConnectedOrConnecting: Boolean
+        get() = connectionJob?.isActive == true
 
     fun statusFlow(path: String): StateFlow<LspDocumentStatus?> =
         statusFlows.getOrPut(path) { MutableStateFlow(session.statusOf(path)) }.asStateFlow()
@@ -174,15 +225,18 @@ class ProjectLspBridge(
         diagFlows.getOrPut(path) { MutableStateFlow(session.diagnosticsOf(path)) }.asStateFlow()
 
     fun ensureConnected() {
+        if (!DeviceLspPreference.enabled.value) return
         if (connectionJob?.isActive == true) return
         connectionJob = scope.launch {
             var backoffMs = 1000L
-            while (isActive) {
+            while (isActive && DeviceLspPreference.enabled.value) {
                 var socket: SocketConnection? = null
                 try {
                     socket = api.openLspConnection(projectName)
+                    activeSocket = socket
                     outboundSender = { frame -> socket.send(frame) }
                     for (event in socket.events) {
+                        if (!DeviceLspPreference.enabled.value) break
                         when (event) {
                             is SocketConnection.Event.Opened -> {
                                 backoffMs = 1000L
@@ -200,11 +254,26 @@ class ProjectLspBridge(
                     // Reconnect after backoff
                 } finally {
                     outboundSender = null
+                    activeSocket = null
                     socket?.close()
                 }
+                if (!DeviceLspPreference.enabled.value) break
                 delay(backoffMs)
                 backoffMs = (backoffMs * 2).coerceAtMost(30_000L)
             }
+        }
+    }
+
+    fun disconnect() {
+        connectionJob?.cancel()
+        connectionJob = null
+        outboundSender = null
+        val sock = activeSocket
+        activeSocket = null
+        sock?.close()
+        val ids = pendingRequests.keys.toList()
+        for (id in ids) {
+            pendingRequests.remove(id)?.complete(null)
         }
     }
 
@@ -350,6 +419,7 @@ fun LspStatusChip(
     status: LspDocumentStatus?,
     diagnostics: List<LspDiagnostic>,
     onInstall: (suspend (String) -> Unit)? = null,
+    onOpenProblems: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -443,6 +513,12 @@ fun LspStatusChip(
                     if (!next) dialogOpen = false
                 },
                 onInstall = onInstall,
+                onOpenProblems = if (onOpenProblems != null) {
+                    {
+                        dialogOpen = false
+                        onOpenProblems()
+                    }
+                } else null,
                 onClose = { dialogOpen = false },
             )
         }
@@ -456,6 +532,7 @@ internal fun LspStatusDetailsContent(
     warnings: Int,
     onToggle: (Boolean) -> Unit,
     onInstall: (suspend (String) -> Unit)? = null,
+    onOpenProblems: (() -> Unit)? = null,
     onClose: () -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
@@ -501,10 +578,40 @@ internal fun LspStatusDetailsContent(
                 LspDetailRow("Server", status.server.displayName)
                 LspDetailRow("Language", status.languageId)
                 LspDetailRow("Project root", status.server.rootPath, mono = true)
-                LspDetailRow(
-                    "Problems",
-                    "$errors error${if (errors == 1) "" else "s"}, $warnings warning${if (warnings == 1) "" else "s"}",
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .let { mod ->
+                            if (onOpenProblems != null) {
+                                mod
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .clickable { onOpenProblems() }
+                                    .testTag("lsp-open-problems-btn")
+                            } else {
+                                mod
+                            }
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BasicText(
+                        "Problems",
+                        modifier = Modifier.width(92.dp),
+                        style = ppmText(11f, lineHeight = 16f).copy(color = tokens.text3.color),
+                    )
+                    BasicText(
+                        "$errors error${if (errors == 1) "" else "s"}, $warnings warning${if (warnings == 1) "" else "s"}",
+                        modifier = Modifier.weight(1f),
+                        style = ppmText(12f, lineHeight = 16f).copy(
+                            color = if (onOpenProblems != null) tokens.accent.color else tokens.text.color,
+                        ),
+                    )
+                    if (onOpenProblems != null) {
+                        BasicText(
+                            "Open Problems",
+                            style = ppmText(11f, FontWeight.Medium, lineHeight = 14f).copy(color = tokens.accent.color),
+                        )
+                    }
+                }
                 BasicText(
                     "Completions, hover, go to definition (F12), find references (Shift+F12), rename (F2), quick fix (Ctrl+.) and format (Shift+Alt+F) all come from this server.",
                     style = ppmText(11f, lineHeight = 16f).copy(color = tokens.text3.color),
@@ -752,6 +859,48 @@ fun LspCompletionPopup(
 }
 
 // ── Dock `Problems` Panel (Port of `src/web/components/problems/problems-panel.tsx`) ──
+
+@Composable
+fun LspHoverPopup(
+    markdown: String?,
+    onDismiss: () -> Unit,
+) {
+    if (markdown.isNullOrBlank()) return
+    val tokens = LocalPpmTokens.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 160.dp)
+            .background(tokens.panel.color)
+            .cssBorder(tokens.border.color, sides = CssSides.Bottom)
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .testTag("lsp-hover-popup"),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BasicText(
+                "Hover Info",
+                style = ppmText(11f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tokens.text3.color),
+            )
+            Box(
+                modifier = Modifier
+                    .clickable { onDismiss() }
+                    .padding(2.dp)
+                    .testTag("lsp-hover-dismiss"),
+            ) {
+                PpmIcon(ProductIcon.X.vector, 12.dp, tokens.text3.color)
+            }
+        }
+        BasicText(
+            markdown,
+            style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text.color),
+        )
+    }
+}
 
 @Composable
 fun ProblemsTabBody(model: AppModel, tab: WorkspaceTab) {

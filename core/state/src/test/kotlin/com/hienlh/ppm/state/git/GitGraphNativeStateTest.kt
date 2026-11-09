@@ -1,5 +1,7 @@
 package com.hienlh.ppm.state.git
 
+import com.hienlh.ppm.client.ChangeBlock
+import com.hienlh.ppm.client.ChangeSide
 import com.hienlh.ppm.client.ChangedFile
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -159,6 +161,44 @@ class GitGraphNativeStateTest {
         assertEquals("all", pageState.scope)
         assertEquals(listOf("c3"), pageState.commits.map { it.hash })
 
+        // Scope switch and mismatched replace guard: switching to "feature" ignores late "main" replace response
+        var reqState = GitGraphCommitRequestState()
+        val (_, req1Gen) = beginGitGraphCommitRequest(reqState, skip = 0).also { reqState = it.first }
+        val (_, req2Gen) = beginGitGraphCommitRequest(reqState, skip = 0).also { reqState = it.first }
+        assertTrue(isStaleGitGraphCommitRequest(reqState, req1Gen))
+        assertFalse(isStaleGitGraphCommitRequest(reqState, req2Gen))
+
+        pageState = setGitGraphScope(pageState, "feature")
+        assertEquals("feature", pageState.scope)
+        assertTrue(pageState.commits.isEmpty())
+
+        // Mismatched scope on replace (append = false, msg.scope = "main" != current.scope = "feature") is ignored!
+        val afterMismatchedScope = applyGitGraphCommitsPage(
+            current = pageState,
+            msg = GitGraphExtMessage.LoadCommits(data = listOf(vertex("c9")), append = false, skip = 0, scope = "main"),
+            maxCommits = 2,
+        )
+        assertEquals("feature", afterMismatchedScope.scope)
+        assertTrue(afterMismatchedScope.commits.isEmpty())
+
+        // Stale generation on replace is ignored even if scope matches
+        val afterStaleReq = applyGitGraphCommitsPage(
+            current = pageState,
+            msg = GitGraphExtMessage.LoadCommits(data = listOf(vertex("c9")), append = false, skip = 0, scope = "feature"),
+            maxCommits = 2,
+            generation = pageState.requestState.lastReset - 1,
+        )
+        assertTrue(afterStaleReq.commits.isEmpty())
+
+        // Current generation + matching scope succeeds
+        pageState = applyGitGraphCommitsPage(
+            current = pageState,
+            msg = GitGraphExtMessage.LoadCommits(data = listOf(vertex("c3")), append = false, skip = 0, scope = "feature"),
+            maxCommits = 2,
+            generation = pageState.requestState.lastReset,
+        )
+        assertEquals(listOf("c3"), pageState.commits.map { it.hash })
+
         // Request tracker handles out-of-order responses and silent (null) callbacks
         val tracker = GitGraphRequestTracker()
         val order = mutableListOf<String>()
@@ -259,5 +299,60 @@ class GitGraphNativeStateTest {
         assertEquals(3, msg.data.filesOmitted)
         assertEquals(1, msg.data.fileChanges?.size)
         assertEquals("A", msg.data.fileChanges?.first()?.status)
+    }
+
+    @Test
+    fun gitGraphDiscardSummary_matchesWipModelTitlesMessagesAndButtonLabels() {
+        val block0 = ChangeBlock("h0", 0, 1, 1, 1, 3, added = 3, removed = 1)
+        val tracked = ChangedFile(
+            path = "src/App.kt",
+            staged = null,
+            unstaged = ChangeSide(added = 3, removed = 1, blocks = listOf("h0"), changeBlocks = listOf(block0)),
+            conflict = false,
+            x = ".",
+            y = "M",
+            untracked = false,
+        )
+        val untracked = ChangedFile(
+            path = "src/New.kt",
+            staged = null,
+            unstaged = ChangeSide(added = 5, removed = 0, blocks = emptyList(), whole = "new"),
+            conflict = false,
+            x = "?",
+            y = "?",
+            untracked = true,
+        )
+
+        val singleTracked = gitGraphDiscardSummary(listOf(tracked))
+        assertEquals("Discard changes to App.kt?", singleTracked.title)
+        assertEquals(
+            "This puts 1 unstaged block back to the last commit's version. You can undo it right after.",
+            singleTracked.body,
+        )
+        assertEquals("Discard 1 block", singleTracked.confirm)
+
+        val singleUntracked = gitGraphDiscardSummary(listOf(untracked))
+        assertEquals("Delete New.kt?", singleUntracked.title)
+        assertEquals(
+            "It is a new file git has never stored, so this deletes it. You can undo it right after.",
+            singleUntracked.body,
+        )
+        assertEquals("Delete file", singleUntracked.confirm)
+
+        val both = gitGraphDiscardSummary(listOf(tracked, untracked))
+        assertEquals("Discard changes to 2 files?", both.title)
+        assertEquals(
+            "This puts the unstaged changes back the way the index has them, and deletes 1 new file. Staged changes stay. You can undo it right after.",
+            both.body,
+        )
+        assertEquals("Discard 2 files", both.confirm)
+    }
+
+    @Test
+    fun `gitGraphToastDurationMs matches web durations for discard undo, error, and default toasts`() {
+        assertEquals(8_000L, gitGraphToastDurationMs("Discarded changes to 2 files", hasUndo = true, isError = false))
+        assertEquals(7_000L, gitGraphToastDurationMs("Discarded changes to 2 files", hasUndo = false, isError = false))
+        assertEquals(7_000L, gitGraphToastDurationMs("Copied the hash", hasUndo = false, isError = false))
+        assertEquals(12_000L, gitGraphToastDurationMs("Push failed", hasUndo = false, isError = true))
     }
 }

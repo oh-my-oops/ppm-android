@@ -871,7 +871,26 @@ object GitGraphWebviewMessages {
     }
 }
 
-// ── Paging & Scope State Update (`loadCommits` in `webview-script-main.ts`) ──
+// ── Paging, Request Generation & Scope State Update (`extension.ts` & `webview-script-main.ts`) ──
+
+data class GitGraphCommitRequestState(
+    val latest: Int = 0,
+    val lastReset: Int = 0,
+)
+
+fun beginGitGraphCommitRequest(
+    state: GitGraphCommitRequestState,
+    skip: Int,
+): Pair<GitGraphCommitRequestState, Int> {
+    val next = state.latest + 1
+    val reset = if (skip == 0) next else state.lastReset
+    return state.copy(latest = next, lastReset = reset) to next
+}
+
+fun isStaleGitGraphCommitRequest(
+    state: GitGraphCommitRequestState,
+    generation: Int,
+): Boolean = generation < state.lastReset
 
 data class GitGraphCommitsPageState(
     val commits: List<GitGraphVertex> = emptyList(),
@@ -880,20 +899,51 @@ data class GitGraphCommitsPageState(
     val hasMore: Boolean = false,
     val commitsLoaded: Boolean = false,
     val loading: Boolean = false,
+    val requestState: GitGraphCommitRequestState = GitGraphCommitRequestState(),
 )
 
 /**
- * Applies a `loadCommits` message (`webview-script-main.ts` lines 106-128):
- * - When `append == true`, only appends if `msg.skip == current.commits.size` (drops stale page).
- * - When `append == false`, replaces `commits`, resets `stats`, and updates `scope` (handling gone-branch fallback to `"all"`).
+ * Switches the active branch filter (`setScope` in `webview-script-actions.ts` lines 240-253)
+ * and advances the commit-window reset generation so in-flight responses for the old scope are ignored.
+ */
+fun setGitGraphScope(
+    current: GitGraphCommitsPageState,
+    name: String,
+): GitGraphCommitsPageState {
+    if (name == current.scope) return current
+    val (nextReq, _) = beginGitGraphCommitRequest(current.requestState, skip = 0)
+    return current.copy(
+        scope = name,
+        commits = emptyList(),
+        stats = emptyMap(),
+        commitsLoaded = false,
+        hasMore = false,
+        loading = true,
+        requestState = nextReq,
+    )
+}
+
+/**
+ * Applies a `loadCommits` message (`webview-script-main.ts` lines 106-128 & `extension.ts` lines 710-772):
+ * - Drops stale responses when [generation] is older than `current.requestState.lastReset`.
+ * - When `append == true`, only appends if `msg.skip == current.commits.size` and `msg.scope` matches `current.scope`.
+ * - When `append == false`, ignores responses for a mismatched branch scope (unless `msg.scope == "all"` for gone-branch fallback),
+ *   replaces `commits`, resets `stats`, and updates `scope`.
  */
 fun applyGitGraphCommitsPage(
     current: GitGraphCommitsPageState,
     msg: GitGraphExtMessage.LoadCommits,
     maxCommits: Int,
+    generation: Int? = null,
 ): GitGraphCommitsPageState {
+    if (generation != null && isStaleGitGraphCommitRequest(current.requestState, generation)) {
+        return current
+    }
     if (msg.append) {
         if (msg.skip != current.commits.size) {
+            return current
+        }
+        if (msg.scope.isNotEmpty() && msg.scope != current.scope) {
             return current
         }
         return current.copy(
@@ -903,6 +953,9 @@ fun applyGitGraphCommitsPage(
             loading = false,
         )
     }
+    if (msg.scope.isNotEmpty() && msg.scope != current.scope && msg.scope != "all") {
+        return current
+    }
     return current.copy(
         commits = msg.data,
         stats = emptyMap(),
@@ -910,6 +963,57 @@ fun applyGitGraphCommitsPage(
         hasMore = msg.data.size >= maxCommits,
         commitsLoaded = true,
         loading = false,
+    )
+}
+
+data class GitGraphDiscardSummary(
+    val title: String,
+    val body: String,
+    val confirm: String,
+)
+
+private fun gitGraphPlural(n: Int, word: String): String =
+    "$n ${if (n == 1) word else "${word}s"}"
+
+/**
+ * Exact 1:1 port of `discardSummary` in `packages/ext-git-graph/src/wip-model.ts` lines 213-242
+ * (`src/web/lib/git-changes-view.ts` lines 193-222).
+ */
+fun gitGraphDiscardSummary(files: List<ChangedFile>): GitGraphDiscardSummary {
+    if (files.size == 1) {
+        val file = files[0]
+        val name = file.path.substringAfterLast('/')
+        if (file.untracked) {
+            return GitGraphDiscardSummary(
+                title = "Delete $name?",
+                body = "It is a new file git has never stored, so this deletes it. You can undo it right after.",
+                confirm = "Delete file",
+            )
+        }
+        val staged = file.staged?.let { side ->
+            if (side.whole != null || side.changeBlocks.isEmpty()) 1 else side.changeBlocks.size
+        } ?: 0
+        val open = file.unstaged?.let { side ->
+            if (side.whole != null || side.changeBlocks.isEmpty()) 1 else side.changeBlocks.size
+        } ?: 0
+        val back = if (staged > 0) "the staged version" else "the last commit's version"
+        val stays = if (staged > 0) {
+            " The ${gitGraphPlural(staged, "staged block")} ${if (staged == 1) "stays" else "stay"}."
+        } else {
+            ""
+        }
+        return GitGraphDiscardSummary(
+            title = "Discard changes to $name?",
+            body = "This puts ${gitGraphPlural(open, "unstaged block")} back to $back.$stays You can undo it right after.",
+            confirm = "Discard ${gitGraphPlural(open, "block")}",
+        )
+    }
+    val created = files.count { it.untracked }
+    val deletes = if (created > 0) ", and deletes ${gitGraphPlural(created, "new file")}" else ""
+    return GitGraphDiscardSummary(
+        title = "Discard changes to ${gitGraphPlural(files.size, "file")}?",
+        body = "This puts the unstaged changes back the way the index has them$deletes. Staged changes stay. You can undo it right after.",
+        confirm = "Discard ${gitGraphPlural(files.size, "file")}",
     )
 }
 
@@ -1734,3 +1838,22 @@ fun buildGitGraphPrUrl(config: GitGraphPrCreationConfig?, sourceBranch: String):
         .replace("\${sourceBranch}", encode(sourceBranch))
         .replace("\${targetBranch}", encode(config.defaultTargetBranch.ifBlank { "main" }))
 }
+
+// ── Toast Auto-Dismiss Durations (`showToast` in `webview-script-core.ts:580` & `webview-script-actions.ts:1101`) ──
+
+const val GIT_GRAPH_TOAST_DEFAULT_DURATION_MS = 7_000L
+const val GIT_GRAPH_TOAST_DISCARD_UNDO_DURATION_MS = 8_000L
+const val GIT_GRAPH_TOAST_ERROR_DURATION_MS = 12_000L
+
+fun gitGraphToastDurationMs(
+    message: String,
+    hasUndo: Boolean = false,
+    isError: Boolean = false,
+    explicitDurationMs: Long? = null,
+): Long = when {
+    explicitDurationMs != null && explicitDurationMs > 0L -> explicitDurationMs
+    isError -> GIT_GRAPH_TOAST_ERROR_DURATION_MS
+    hasUndo && message.startsWith("Discarded changes to ") -> GIT_GRAPH_TOAST_DISCARD_UNDO_DURATION_MS
+    else -> GIT_GRAPH_TOAST_DEFAULT_DURATION_MS
+}
+

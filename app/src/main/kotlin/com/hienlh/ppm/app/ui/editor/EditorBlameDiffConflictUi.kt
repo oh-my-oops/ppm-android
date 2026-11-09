@@ -384,6 +384,51 @@ private fun BlameActionChip(
 fun GitSideBySideDiffRows(
     rows: List<SideBySideDiffRow>,
     wordWrap: Boolean,
+    language: String? = null,
+    oldTokens: List<androidx.compose.ui.text.AnnotatedString>? = null,
+    newTokens: List<androidx.compose.ui.text.AnnotatedString>? = null,
+    modifier: Modifier = Modifier,
+) {
+    val computedOldTokens = oldTokens ?: if (language != null) {
+        val leftDoc = remember(rows) { rows.mapNotNull { it.leftText }.joinToString("\n") }
+        com.hienlh.ppm.app.ui.git.rememberShikiTokenLines(leftDoc, language)
+    } else null
+    val computedNewTokens = newTokens ?: if (language != null) {
+        val rightDoc = remember(rows) { rows.mapNotNull { it.rightText }.joinToString("\n") }
+        com.hienlh.ppm.app.ui.git.rememberShikiTokenLines(rightDoc, language)
+    } else null
+
+    Column(modifier = modifier.fillMaxWidth().testTag("git-diff-side-by-side-block")) {
+        var leftNonNullIdx = 0
+        var rightNonNullIdx = 0
+        for (row in rows) {
+            val leftTok = if (oldTokens != null) {
+                row.leftLineNumber?.let { oldTokens.getOrNull(it - 1) }
+            } else if (row.leftText != null) {
+                computedOldTokens?.getOrNull(leftNonNullIdx++)
+            } else null
+            val rightTok = if (newTokens != null) {
+                row.rightLineNumber?.let { newTokens.getOrNull(it - 1) }
+            } else if (row.rightText != null) {
+                computedNewTokens?.getOrNull(rightNonNullIdx++)
+            } else null
+
+            GitSideBySideDiffRowItem(
+                row = row,
+                wordWrap = wordWrap,
+                leftTokens = leftTok,
+                rightTokens = rightTok,
+            )
+        }
+    }
+}
+
+@Composable
+fun GitSideBySideDiffRowItem(
+    row: SideBySideDiffRow,
+    wordWrap: Boolean,
+    leftTokens: androidx.compose.ui.text.AnnotatedString? = null,
+    rightTokens: androidx.compose.ui.text.AnnotatedString? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
@@ -391,42 +436,40 @@ fun GitSideBySideDiffRows(
     val delBg = tokens.error.opacity(0.14).color
     val emptyBg = tokens.panel.opacity(0.45).color
 
-    Column(modifier = modifier.fillMaxWidth().testTag("git-diff-side-by-side-block")) {
-        for (row in rows) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Top,
-            ) {
-                // Left column (Original)
-                SideDiffCell(
-                    lineNumber = row.leftLineNumber,
-                    text = row.leftText,
-                    kind = row.leftKind,
-                    addBg = addBg,
-                    delBg = delBg,
-                    emptyBg = emptyBg,
-                    wordWrap = wordWrap,
-                    modifier = Modifier.weight(1f),
-                )
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .heightIn(min = 20.dp)
-                        .background(tokens.border.color),
-                )
-                // Right column (Modified)
-                SideDiffCell(
-                    lineNumber = row.rightLineNumber,
-                    text = row.rightText,
-                    kind = row.rightKind,
-                    addBg = addBg,
-                    delBg = delBg,
-                    emptyBg = emptyBg,
-                    wordWrap = wordWrap,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top,
+    ) {
+        // Left column (Original)
+        SideDiffCell(
+            lineNumber = row.leftLineNumber,
+            text = row.leftText,
+            tokenLine = leftTokens,
+            kind = row.leftKind,
+            addBg = addBg,
+            delBg = delBg,
+            emptyBg = emptyBg,
+            wordWrap = wordWrap,
+            modifier = Modifier.weight(1f),
+        )
+        Box(
+            modifier = Modifier
+                .width(1.dp)
+                .heightIn(min = 20.dp)
+                .background(tokens.border.color),
+        )
+        // Right column (Modified)
+        SideDiffCell(
+            lineNumber = row.rightLineNumber,
+            text = row.rightText,
+            tokenLine = rightTokens,
+            kind = row.rightKind,
+            addBg = addBg,
+            delBg = delBg,
+            emptyBg = emptyBg,
+            wordWrap = wordWrap,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
@@ -434,6 +477,7 @@ fun GitSideBySideDiffRows(
 private fun SideDiffCell(
     lineNumber: Int?,
     text: String?,
+    tokenLine: androidx.compose.ui.text.AnnotatedString?,
     kind: ReviewBlocks.Kind?,
     addBg: Color,
     delBg: Color,
@@ -454,6 +498,14 @@ private fun SideDiffCell(
         else -> " "
     }
     val scrollMod = if (wordWrap) Modifier else Modifier.horizontalScroll(rememberScrollState())
+    val annotated = remember(text, tokenLine) {
+        com.hienlh.ppm.app.ui.git.buildDiffLineAnnotated(
+            text = text ?: "",
+            tokens = tokenLine,
+            changedRange = null,
+            wordHighlight = Color.Transparent,
+        )
+    }
 
     Row(
         modifier = modifier
@@ -484,7 +536,7 @@ private fun SideDiffCell(
         )
         Box(modifier = Modifier.weight(1f).then(scrollMod)) {
             BasicText(
-                text = text ?: "",
+                text = annotated,
                 style = ppmText(12f, kind = FontKind.MONO, lineHeight = 18f).copy(color = tokens.text.color),
                 softWrap = wordWrap,
             )
@@ -504,6 +556,8 @@ fun ConflictEditorTabBody(model: AppModel, tab: WorkspaceTab) {
     var content by remember(projectName, filePath) { mutableStateOf<String?>(null) }
     var loading by remember(projectName, filePath) { mutableStateOf(true) }
     var error by remember(projectName, filePath) { mutableStateOf<String?>(null) }
+    var saveError by remember(projectName, filePath) { mutableStateOf<String?>(null) }
+    var haltedOn4xx by remember(projectName, filePath) { mutableStateOf(false) }
 
     LaunchedEffect(api, projectName, filePath) {
         if (api == null || projectName.isNullOrBlank() || filePath.isBlank()) {
@@ -513,14 +567,45 @@ fun ConflictEditorTabBody(model: AppModel, tab: WorkspaceTab) {
         }
         loading = true
         error = null
-        runCatching {
-            api.readProjectFile(projectName, filePath)
-        }.onSuccess { loaded ->
+        try {
+            val loaded = api.readProjectFile(projectName, filePath)
             content = loaded
             loading = false
-        }.onFailure { err ->
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
+        } catch (err: Throwable) {
             error = err.message ?: "Failed to load file"
             loading = false
+        }
+    }
+
+    suspend fun saveConflictToServer(newText: String) {
+        content = newText
+        val client = api ?: return
+        val proj = projectName?.takeIf { it.isNotBlank() } ?: return
+        if (filePath.isBlank()) return
+        try {
+            client.writeFile(proj, filePath, newText)
+            saveError = null
+            haltedOn4xx = false
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
+        } catch (err: Throwable) {
+            val msg = err.message ?: "Failed to save $filePath"
+            saveError = msg
+            val is4xx = (err is com.hienlh.ppm.client.PpmError.Server && err.status in 400..499) ||
+                err is com.hienlh.ppm.client.PpmError.Unauthorized ||
+                err is IllegalArgumentException
+            if (is4xx) {
+                haltedOn4xx = true
+            }
+            model.toast(
+                com.hienlh.ppm.app.ErrorToastMessage(
+                    title = "Failed to save $filePath",
+                    description = msg,
+                ),
+            )
+            throw err
         }
     }
 
@@ -541,11 +626,17 @@ fun ConflictEditorTabBody(model: AppModel, tab: WorkspaceTab) {
     ConflictEditorContent(
         fileName = filePath.substringAfterLast('/').substringAfterLast('\\').ifBlank { "unknown" },
         initialContent = content!!,
+        saveError = saveError,
+        haltedOn4xx = haltedOn4xx,
+        onSaveSuspend = { newText -> saveConflictToServer(newText) },
         onSaveContent = { newText ->
-            content = newText
-            if (api != null && !projectName.isNullOrBlank() && filePath.isNotBlank()) {
-                scope.launch {
-                    runCatching { api.writeFile(projectName, filePath, newText) }
+            model.scope.launch {
+                try {
+                    saveConflictToServer(newText)
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    throw ce
+                } catch (_: Throwable) {
+                    // Error state and toast already recorded by saveConflictToServer
                 }
             }
         },
@@ -556,10 +647,14 @@ fun ConflictEditorTabBody(model: AppModel, tab: WorkspaceTab) {
 internal fun ConflictEditorContent(
     fileName: String,
     initialContent: String,
-    onSaveContent: (String) -> Unit,
+    saveError: String? = null,
+    haltedOn4xx: Boolean = false,
+    onSaveSuspend: (suspend (String) -> Unit)? = null,
+    onSaveContent: (String) -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
+    val scope = rememberCoroutineScope()
     val language = remember(fileName) { conflictEditorLanguage(fileName) }
     val session = remember(fileName) {
         EditorSessionState(initialText = initialContent, language = language)
@@ -569,19 +664,65 @@ internal fun ConflictEditorContent(
 
     val currentText = remember(editTick) { session.buffer.toString() }
     val regions = remember(currentText) { parseConflicts(currentText) }
+    var lastSavedDiskText by remember(fileName) { mutableStateOf(session.buffer.toDiskString()) }
+    var localSaveError by remember(fileName) { mutableStateOf<String?>(null) }
+    var localHaltedOn4xx by remember(fileName) { mutableStateOf(false) }
+
+    suspend fun performSave(diskText: String) {
+        try {
+            if (onSaveSuspend != null) {
+                onSaveSuspend(diskText)
+            } else {
+                onSaveContent(diskText)
+            }
+            lastSavedDiskText = diskText
+            localSaveError = null
+            localHaltedOn4xx = false
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
+        } catch (err: Throwable) {
+            localSaveError = err.message ?: "Failed to save file"
+            val is4xx = (err is com.hienlh.ppm.client.PpmError.Server && err.status in 400..499) ||
+                err is com.hienlh.ppm.client.PpmError.Unauthorized ||
+                err is IllegalArgumentException
+            if (is4xx) {
+                localHaltedOn4xx = true
+            }
+        }
+    }
 
     // Autosave manual edits after 1000 ms (fixes web bug where manual typing in ConflictEditor is lost)
-    LaunchedEffect(editTick) {
-        if (editTick <= 0L) return@LaunchedEffect
+    LaunchedEffect(editTick, haltedOn4xx, localHaltedOn4xx) {
+        if (editTick <= 0L || haltedOn4xx || localHaltedOn4xx) return@LaunchedEffect
         delay(1000L)
-        onSaveContent(session.buffer.toString())
+        if (haltedOn4xx || localHaltedOn4xx) return@LaunchedEffect
+        val diskText = session.buffer.toDiskString()
+        if (diskText != lastSavedDiskText) {
+            performSave(diskText)
+        }
+    }
+
+    // Flush unsaved manual edits when the conflict editor is disposed before the 1000 ms debounce completes
+    androidx.compose.runtime.DisposableEffect(session) {
+        onDispose {
+            val diskText = session.buffer.toDiskString()
+            if (diskText != lastSavedDiskText && !haltedOn4xx && !localHaltedOn4xx) {
+                lastSavedDiskText = diskText
+                onSaveContent(diskText)
+            }
+        }
     }
 
     fun applyResolution(region: ConflictRegion, action: ConflictResolutionAction) {
-        val updated = resolveConflictRegion(session.buffer.toString(), region.id, action)
+        val updated = resolveConflictRegion(session.buffer.toDiskString(), region.id, action)
         session.reloadExternalContent(updated)
         editTick++
-        onSaveContent(updated)
+        if (onSaveSuspend != null) {
+            scope.launch { performSave(updated) }
+        } else {
+            lastSavedDiskText = updated
+            onSaveContent(updated)
+        }
     }
 
     Column(
@@ -590,6 +731,37 @@ internal fun ConflictEditorContent(
             .background(tokens.bgSolid.color)
             .testTag("conflict-editor"),
     ) {
+        val currentSaveError = saveError ?: localSaveError
+        if (!currentSaveError.isNullOrBlank()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(tokens.error.opacity(0.14).color)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .testTag("editor-save-error-banner"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BasicText(
+                    currentSaveError,
+                    style = ppmText(11f).copy(color = tokens.error.color),
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(tokens.accent.color)
+                        .ppmClickable { scope.launch { performSave(session.buffer.toDiskString()) } }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .testTag("conflict-editor-retry-save-btn"),
+                ) {
+                    BasicText(
+                        "Retry Save",
+                        style = ppmText(11f, FontWeight.Medium, lineHeight = 14f).copy(color = Color.White),
+                    )
+                }
+            }
+        }
         // Status header
         Row(
             modifier = Modifier
@@ -688,7 +860,11 @@ internal fun ConflictEditorContent(
             isDirty = false,
             wrap = wrap,
             onToggleWrap = { wrap = !wrap },
-            onSaveNow = { onSaveContent(session.buffer.toString()) },
+            onSaveNow = {
+                val diskText = session.buffer.toDiskString()
+                lastSavedDiskText = diskText
+                onSaveContent(diskText)
+            },
             modifier = Modifier.weight(1f).fillMaxWidth(),
         )
     }
