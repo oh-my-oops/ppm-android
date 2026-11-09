@@ -382,13 +382,17 @@ internal fun PickerPanel(
         }
     }
 
+    val taggedModifier = modifier
+        .fillMaxWidth()
+        .testTag("composer-picker")
+        .semantics { stateDescription = variant.id }
+
     val panelModifier = if (variant == PickerVariant.FLOATING) {
         val screenHeight = LocalConfiguration.current.screenHeightDp.dp
         val maxHeight = minOf(320.dp, screenHeight * 0.55f)
         val shape = RoundedCornerShape(12.dp)
         val p = popProgress.value
-        modifier
-            .fillMaxWidth()
+        taggedModifier
             .heightIn(max = maxHeight)
             .graphicsLayer {
                 alpha = p
@@ -403,8 +407,7 @@ internal fun PickerPanel(
             .background(tokens.panel2.over(tokens.bgSolid).color)
             .cssBorder(tokens.border.color, shape)
     } else {
-        modifier
-            .fillMaxWidth()
+        taggedModifier
             .heightIn(max = 340.dp)
             .background(tokens.panel.color)
             .cssBorder(tokens.border.color, sides = CssSides.Bottom)
@@ -413,9 +416,7 @@ internal fun PickerPanel(
     Column(
         panelModifier
             .focusProperties { canFocus = false }
-            .pointerInput(Unit) { detectTapGestures { } }
-            .testTag("composer-picker")
-            .semantics { stateDescription = variant.id },
+            .pointerInput(Unit) { detectTapGestures { } },
     ) {
         header()
         Box(

@@ -161,6 +161,7 @@ fun FooterPopoverScrim(state: FooterPopoverHostState, modifier: Modifier = Modif
     Box(
         modifier
             .fillMaxSize()
+            .testTag("footer-popover-scrim")
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -211,29 +212,26 @@ fun FooterPopover(
         return
     }
 
-    var rendered by remember { mutableStateOf(open) }
-    var closing by remember { mutableStateOf(false) }
+    var keepDuringExit by remember { mutableStateOf(false) }
+    val show = open || keepDuringExit
+    val closing = !open && keepDuringExit
 
     LaunchedEffect(open, reducedMotion) {
         if (open) {
-            rendered = true
-            closing = false
-        } else if (rendered) {
+            keepDuringExit = !reducedMotion
+        } else if (keepDuringExit) {
             if (reducedMotion) {
-                rendered = false
-                closing = false
+                keepDuringExit = false
             } else {
-                closing = true
                 delay(POPOVER_EXIT_MS)
-                rendered = false
-                closing = false
+                keepDuringExit = false
             }
         }
     }
 
     if (host != null) {
         SideEffect {
-            if (rendered) {
+            if (show) {
                 host.entries[key] = FooterPopoverEntry(
                     align = align,
                     label = label,
@@ -245,11 +243,15 @@ fun FooterPopover(
             } else {
                 host.entries.remove(key)
             }
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         }
         DisposableEffect(host, key) {
-            onDispose { host.entries.remove(key) }
+            onDispose {
+                host.entries.remove(key)
+                androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+            }
         }
-    } else if (rendered) {
+    } else if (show) {
         FooterPopoverSurface(
             label = label,
             align = align,
@@ -292,6 +294,8 @@ private fun FooterPopoverSurface(
             .widthIn(max = maxWidth)
             .fillMaxWidth()
             .heightIn(max = maxHeight)
+            .testTag("footer-popover:$label")
+            .semantics { paneTitle = label }
             .graphicsLayer {
                 this.alpha = alpha
                 this.scaleX = scale
@@ -309,9 +313,7 @@ private fun FooterPopoverSurface(
                 } else {
                     false
                 }
-            }
-            .testTag("footer-popover:$label")
-            .semantics { paneTitle = label },
+            },
         content = content,
     )
 }

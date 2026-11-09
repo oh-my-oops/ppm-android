@@ -192,6 +192,7 @@ private val chipText = ppmText(11.5f, lineHeight = 17.25f)
 /** Custom semantics properties exposed on `clearAndSetSemantics` composer chips for layout/label tests without splitting the AccessibilityNodeInfo leaf. */
 internal val DisplayedChipTextKey = SemanticsPropertyKey<String>("DisplayedChipText")
 internal val ShowsChevronKey = SemanticsPropertyKey<Boolean>("ShowsChevron")
+internal val ComposerPlaceholderKey = SemanticsPropertyKey<String>("ComposerPlaceholder")
 
 /** `showCancel`: Stop takes Send's place while a turn runs and the box has nothing to send. */
 internal fun showsStop(running: Boolean, hasContent: Boolean) = running && !hasContent
@@ -539,8 +540,9 @@ internal fun ComposerField(
         BasicTextField(
             state = tab.draft,
             modifier = modifier
+                .testTag("composer-field")
                 .chromeTextArea(area, maxHeight)
-                .plainTextSemantics(tab.draft, enabled)
+                .plainTextSemantics(tab.draft, placeholder, enabled)
                 // `disabled:opacity-50`.
                 .alpha(if (enabled) 1f else 0.5f)
                 .heightIn(max = maxHeight)
@@ -622,7 +624,11 @@ internal fun ComposerField(
 /**
  * What an accessibility service reads of the field and does to its caret, in the text the user typed.
  */
-private fun Modifier.plainTextSemantics(state: TextFieldState, enabled: Boolean): Modifier = semantics {
+private fun Modifier.plainTextSemantics(state: TextFieldState, placeholder: String, enabled: Boolean): Modifier = semantics {
+    this[ComposerPlaceholderKey] = placeholder
+    if (state.text.isEmpty() && placeholder.isNotEmpty()) {
+        contentDescription = placeholder
+    }
     editableText = AnnotatedString(state.text.toString())
     textSelectionRange = state.selection
     setSelection { start, end, _ ->

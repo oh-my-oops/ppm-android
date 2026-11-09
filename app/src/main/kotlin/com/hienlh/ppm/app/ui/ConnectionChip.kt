@@ -47,7 +47,12 @@ fun rememberReconnectIndicator(
 ): ReconnectIndicatorState {
     var stage by remember { mutableStateOf(ReconnectStage.HIDDEN) }
     var epoch by remember { mutableIntStateOf(0) }
-    val restart: () -> Unit = remember { { epoch += 1 } }
+    val restart: () -> Unit = remember {
+        {
+            stage = ReconnectStage.HIDDEN
+            epoch += 1
+        }
+    }
 
     var wasVisible by remember { mutableStateOf(windowVisible) }
     LaunchedEffect(windowVisible) {

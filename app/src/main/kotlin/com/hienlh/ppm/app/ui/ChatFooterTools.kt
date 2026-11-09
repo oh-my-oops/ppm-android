@@ -516,7 +516,11 @@ fun ChatPaneFooterTools(
 
     val selectAccount: (suspend (String, String) -> String?)? =
         if (!tab.providerPending && !tab.firstSendPending) {
-            { id, label -> model.selectAccount(tab, id, label) { onReadUsageQuietly() } }
+            { id, label ->
+                model.selectAccount(tab, id, label) { onReadUsageQuietly() }.also { err ->
+                    if (err == null) switcher.reload()
+                }
+            }
         } else {
             null
         }

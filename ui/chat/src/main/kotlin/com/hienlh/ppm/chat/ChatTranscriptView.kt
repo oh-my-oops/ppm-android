@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -55,10 +56,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -66,6 +72,7 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -133,6 +140,9 @@ class ChatEdits(
     val versionsDisabled: Boolean,
 )
 
+/** Semantics property exposing the bottom scroll fade height (`12.dp` for `.chat-scroll-fade`). */
+val ChatScrollFadeKey = SemanticsPropertyKey<Dp>("ChatScrollFade")
+
 /**
  * A chat's messages, the turn streaming in, and what it waits on (`MessageList` in
  * message-list.tsx): kept on the newest while it is at the end, and left where the user put it
@@ -162,6 +172,10 @@ fun ChatTranscriptView(
     jumpRequest: ChatJumpRequest? = null,
     /** [jumpRequest] was shown, or given up on. */
     onJumpTaken: (ChatJumpRequest) -> Unit = {},
+    /** `.chat-scroll-fade`: masks the bottom `12.dp` of the scroll viewport so messages fade out over any theme background. */
+    bottomFade: Boolean = true,
+    /** `[data-chat-list]:has(+ [data-chat-footer])`: lifts the scroll navigator `24.dp` when the footer overlaps the `12.dp` fade band. */
+    overlappedByFooter: Boolean = bottomFade,
 ) {
     Box(modifier.fillMaxSize()) {
         when {
@@ -170,7 +184,11 @@ fun ChatTranscriptView(
                 CenteredNotice("Loading messages...", pulsing = true)
             state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null ->
                 Welcome(welcome)
-            else -> TranscriptList(state, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply, edits, jumpRequest, onJumpTaken)
+            else -> TranscriptList(
+                state, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply, edits, jumpRequest, onJumpTaken,
+                bottomFade = bottomFade,
+                overlappedByFooter = overlappedByFooter,
+            )
         }
         state.historyError?.let { error ->
             HistoryErrorBanner(error, onReload, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
@@ -190,6 +208,8 @@ private fun TranscriptList(
     edits: ChatEdits?,
     jumpRequest: ChatJumpRequest?,
     onJumpTaken: (ChatJumpRequest) -> Unit,
+    bottomFade: Boolean,
+    overlappedByFooter: Boolean,
 ) {
     val rollups = remember { TurnRollups() }
     val rows = remember(state.items, state.isRunning) { TranscriptRows.of(state.items, state.isRunning, rollups) }
@@ -367,7 +387,42 @@ private fun TranscriptList(
             Column(Modifier.fillMaxSize()) {
                 TaskTracker(state.tasks)
                 // The tag is how the Baseline Profile's journeys find the transcript (baselineprofile/).
-                LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(scroll.connection).onGloballyPositioned { anchors.list = it }.testTag("chat-transcript").cssScrollbar(list), state = list) {
+                val fadeModifier = if (bottomFade) {
+                    Modifier
+                        .semantics { this[ChatScrollFadeKey] = 12.dp }
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .drawWithContent {
+                            drawContent()
+                            val fadePx = 12.dp.toPx()
+                            if (size.height > fadePx) {
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0f to Color.Black,
+                                        1f to Color.Transparent,
+                                        startY = size.height - fadePx,
+                                        endY = size.height,
+                                    ),
+                                    topLeft = Offset(0f, size.height - fadePx),
+                                    size = Size(size.width, fadePx),
+                                    blendMode = BlendMode.DstIn,
+                                )
+                            }
+                        }
+                } else {
+                    Modifier
+                }
+                LazyColumn(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .nestedScroll(scroll.connection)
+                        .onGloballyPositioned { anchors.list = it }
+                        .testTag("chat-transcript")
+                        .then(fadeModifier)
+                        .cssScrollbar(list),
+                    state = list,
+                    contentPadding = PaddingValues(bottom = if (trailing || !bottomFade) 0.dp else 12.dp),
+                ) {
                     // `h-px`: 2.625 px at 2.625x, which pushes every message under it a fraction down.
                     if (state.hasEarlier) item(key = SENTINEL) { Spacer(stacked(0).fillMaxWidth().cssHeight(1.dp)) }
                     if (state.loadingEarlier) item(key = SKELETON) { Box(stacked(head - 1)) { PreCompactSkeleton() } }
@@ -416,7 +471,7 @@ private fun TranscriptList(
                         item(key = IDLE_CACHE) { Box(stacked(keys.indexOf(IDLE_CACHE))) { IdleCacheNotice(cold) } }
                     }
                     if (trailing) {
-                        item(key = TRAILING) { Box(stacked(keys.lastIndex)) { Trailing(state, onRespond) } }
+                        item(key = TRAILING) { Box(stacked(keys.lastIndex)) { Trailing(state, onRespond, bottomFade = bottomFade) } }
                     }
                 }
             }
@@ -426,7 +481,7 @@ private fun TranscriptList(
                 goDown = { scope.launch { list.toNextMessage(userItems, density, scroll::toEnd) } },
                 goBottom = { scope.launch { scroll.toEnd() } },
                 jumps = jumps,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 12.dp),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = if (overlappedByFooter) 24.dp else 12.dp),
             )
             // Both over the top of the chat, the tracker too; the errors button above the other.
             val earlierError = state.earlierError
@@ -674,10 +729,13 @@ private suspend fun LazyListState.toNextMessage(items: List<Int>, density: Densi
 
 /** The approval or question the AI waits on, and the thinking line: there while either is, or a turn runs (`hasTrailing`). */
 @Composable
-private fun Trailing(state: ChatState, onRespond: (ApprovalRequest, Boolean, JsonElement?) -> Unit) {
+private fun Trailing(state: ChatState, onRespond: (ApprovalRequest, Boolean, JsonElement?) -> Unit, bottomFade: Boolean = true) {
     val indicator = indicatorLabel(state)
     val request = state.pendingApproval
-    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(
+        Modifier.fillMaxWidth().padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = if (bottomFade) 12.dp else 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
         if (request != null) {
             key(request.requestId) {
                 PendingApprovalCard(request, { approved, data -> onRespond(request, approved, data) })

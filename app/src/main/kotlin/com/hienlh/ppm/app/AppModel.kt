@@ -474,7 +474,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     private var iconFrameworkFor: String? = null
 
     var sessions by mutableStateOf(emptyList<SessionInfo>())
-        private set
+        internal set
     var sessionsLoad by mutableStateOf<Load>(Load.Idle)
         private set
     var hasMoreSessions by mutableStateOf(false)
@@ -4656,7 +4656,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         private set
 
     var controller by mutableStateOf<ChatController?>(null)
-        private set
+        internal set
 
     /** Its tab's metadata and title as the layout last had them (the web's `metadata` prop), kept by the model. */
     internal var metadata by mutableStateOf(JsonObject(emptyMap()))

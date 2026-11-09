@@ -23,12 +23,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,15 +37,10 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
-import com.hienlh.ppm.client.accountUsages
-import com.hienlh.ppm.client.accounts
-import com.hienlh.ppm.client.activeAccount
-import com.hienlh.ppm.client.setAccountStatus
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -58,210 +50,13 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
-import com.hienlh.ppm.protocol.UsageInfo
-import com.hienlh.ppm.state.AccountsData
-import com.hienlh.ppm.state.UsageTone
-import com.hienlh.ppm.state.claudeUnselectableReason
-import com.hienlh.ppm.state.formatLastUpdated
-import com.hienlh.ppm.state.isoMillis
-import com.hienlh.ppm.state.switchRefusal
-import com.hienlh.ppm.state.usagePercent
-import java.math.BigDecimal
-import java.math.RoundingMode
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
-import kotlinx.coroutines.launch
 
 /**
- * The toolbar's usage chip (chat-history-bar.tsx): `[account] 5h:NN% · Wk:NN%` in the colour of
- * the fuller window. The figures show only while the reading is of the account named — an
- * account event can land before the new account's figures — and the name drops on a narrow chat,
- * leaving the figures, the one thing here that changes. Accent-tinted while its panel is open.
- */
-@Composable
-fun UsageChip(usage: UsageInfo, pickedLabel: String?, pickedAccountId: String?, active: Boolean, narrow: Boolean, onClick: () -> Unit) {
-    val tokens = LocalPpmTokens.current
-    val matches = pickedAccountId == null || pickedAccountId == usage.activeAccountId
-    val fiveHour = usage.fiveHour?.takeIf { matches }?.let(::usagePercent)
-    val sevenDay = usage.sevenDay?.takeIf { matches }?.let(::usagePercent)
-    val color = if (fiveHour != null || sevenDay != null) tokens.tone(UsageTone.of(maxOf(fiveHour ?: 0, sevenDay ?: 0))) else tokens.text3
-    // The claim, or the account the stream named, is this chat's; the reading's own name is
-    // whichever account ran last when there is no session to scope it to.
-    val label = pickedLabel ?: usage.activeAccountLabel?.takeIf { matches }
-    val shape = RoundedCornerShape(4.dp)
-    Row(
-        Modifier
-            .clip(shape)
-            .background(if (active) tokens.accent.opacity(0.1).color else Color.Transparent)
-            // `hover:bg-surface-elevated` comes after `bg-primary/10`, so it covers it.
-            .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, shape = shape, onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Box(Modifier.size(12.dp, 16.5.dp), contentAlignment = Alignment.Center) { PpmIcon(ProductIcon.Activity, 12.dp, color.color) }
-        val style = ppmText(11f, FontWeight.Medium, lineHeight = 16.5f).copy(color = color.color, fontFeatureSettings = "tnum")
-        if (label != null && !narrow) {
-            BasicText(
-                "[$label]",
-                Modifier.widthIn(max = 110.dp),
-                style = style.copy(color = tokens.text2.color, fontWeight = FontWeight.Normal),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                softWrap = false,
-            )
-        }
-        BasicText("5h:${fiveHour?.let { "$it%" } ?: "--%"}", style = style, maxLines = 1, softWrap = false)
-        BasicText("·", style = style.copy(color = tokens.text3.color))
-        BasicText("Wk:${sevenDay?.let { "$it%" } ?: "--%"}", style = style, maxLines = 1, softWrap = false)
-    }
-}
-
-/** The Claude accounts as the panel reads and switches them: the server's account routes. */
-private class ApiAccounts(private val model: AppModel) : AccountsData.Source {
-    private val api get() = model.api ?: throw IllegalStateException("Not connected")
-
-    override suspend fun usages() = api.accountUsages()
-
-    override suspend fun accounts() = api.accounts()
-
-    override suspend fun active() = api.activeAccount()
-
-    override suspend fun setStatus(id: String, status: String) = api.setAccountStatus(id, status)
-}
-
-/**
- * The Claude usage panel (usage-badge.tsx's `UsageDetailPanel`): every account as a card, the one
- * serving this chat marked, each with Use and its on/off switch; anything refused in one strip
- * above them. With no account to show, this chat's own reading. Read afresh each time it opens.
- * [onSelectAccount] moves this chat onto an account and answers why not, or null; absent while
- * the chat cannot be moved.
- */
-@Composable
-fun ClaudeUsagePanel(
-    model: AppModel,
-    usage: UsageInfo,
-    loading: Boolean,
-    lastFetchedAt: String?,
-    selectedAccountId: String?,
-    onSelectAccount: (suspend (id: String, label: String?) -> String?)?,
-    onReload: () -> Unit,
-    onClose: () -> Unit,
-) {
-    val tokens = LocalPpmTokens.current
-    val scope = rememberCoroutineScope()
-    val data = remember { AccountsData(scope, ApiAccounts(model)) }
-    LaunchedEffect(data) { data.reload() }
-    val state by data.state.collectAsState()
-    var selectingId by remember { mutableStateOf<String?>(null) }
-    var panelError by remember { mutableStateOf<String?>(null) }
-    val accounts = state.accounts.associateBy { it.id }
-    val now = System.currentTimeMillis()
-
-    fun select(id: String) {
-        val pick = onSelectAccount ?: return
-        val entry = state.usages.firstOrNull { it.accountId == id }
-        // Refused here rather than left inert, so the press is answered; the server checks again.
-        claudeUnselectableReason(accounts[id], entry, System.currentTimeMillis())?.let {
-            panelError = switchRefusal(it)
-            return
-        }
-        selectingId = id
-        panelError = null
-        scope.launch {
-            try {
-                panelError = pick(id, entry?.accountLabel)
-            } finally {
-                selectingId = null
-            }
-        }
-    }
-
-    val hasCost = usage.queryCostUsd != null || usage.totalCostUsd != null
-    UsagePanelShell(
-        model,
-        title = "Usage",
-        meta = lastFetchedAt?.let(::isoMillis)?.let { formatLastUpdated(it, now) },
-        onClose = onClose,
-        onReload = {
-            onReload()
-            scope.launch { data.reload() }
-        },
-        reloading = loading || state.refreshing,
-        error = panelError,
-        onDismissError = { panelError = null },
-        cardCount = state.usages.size,
-        fallback = {
-            val subtle = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color)
-            when {
-                state.initialLoading -> BasicText("Loading...", style = ppmText(10f, lineHeight = 15f).copy(color = tokens.text3.color))
-                usage.session != null || usage.weekly != null || usage.weeklyOpus != null || usage.weeklySonnet != null || usage.weeklyScoped.isNotEmpty() ->
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        AccountBucketRow("5-Hour Session", usage.session, now)
-                        AccountBucketRow("Weekly", usage.weekly, now)
-                        AccountBucketRow("Weekly (Opus)", usage.weeklyOpus, now)
-                        AccountBucketRow("Weekly (Sonnet)", usage.weeklySonnet, now)
-                        for (scoped in usage.weeklyScoped) AccountBucketRow("Weekly (${scoped.label})", scoped, now)
-                    }
-                else -> BasicText("No usage data available", style = subtle)
-            }
-        },
-        footer = if (hasCost) {
-            { CostFooter(usage) }
-        } else {
-            null
-        },
-    ) { layout ->
-        for (entry in state.usages) {
-            key(entry.accountId) {
-                val info = accounts[entry.accountId]
-                AccountCard(
-                    entry,
-                    // What serves this chat, not what the rotation would pick next.
-                    isActive = entry.accountId == (selectedAccountId ?: usage.activeAccountId ?: state.activeAccountId),
-                    accountInfo = info,
-                    layout = layout,
-                    flash = entry.accountId in state.flashIds,
-                    onToggle = { id, status -> scope.launch { panelError = data.toggle(id, status) } },
-                    toggling = state.togglingId == entry.accountId,
-                    onSelect = if (onSelectAccount != null) ::select else null,
-                    unselectableReason = claudeUnselectableReason(info, entry, now),
-                    selecting = selectingId == entry.accountId,
-                    onReauth = { model.openSettings("accounts") },
-                )
-            }
-        }
-    }
-}
-
-/** `border-t border-border pt-2 space-y-1`: the last query's cost and the session's. */
-@Composable
-private fun CostFooter(usage: UsageInfo) {
-    val tokens = LocalPpmTokens.current
-    Column(Modifier.fillMaxWidth().line(top = true, tokens.border.color).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        usage.queryCostUsd?.let { CostRow("Last query", it) }
-        usage.totalCostUsd?.let { CostRow("Session total", it) }
-    }
-}
-
-@Composable
-private fun CostRow(label: String, usd: Double) {
-    val tokens = LocalPpmTokens.current
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        BasicText(label, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color))
-        Spacer(Modifier.weight(1f))
-        // `toFixed(4)`: the double's exact value, a half rounded up.
-        BasicText(
-            "$" + BigDecimal(usd).setScale(4, RoundingMode.HALF_UP).toPlainString(),
-            style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color, fontFeatureSettings = "tnum"),
-        )
-    }
-}
-
-/**
- * The frame both usage panels share (usage-panel-shell.tsx): the title and when the figures were
+ * The frame usage panels share (usage-panel-shell.tsx): the title and when the figures were
  * read; Manage accounts, fullscreen, refresh and close; one strip for whatever was refused; then
  * the cards in a sideways strip — or [fallback] when there are none — and [footer] under them.
  * Fullscreen lays the cards out as a grid over the whole app, footer hidden, as the web's `fixed

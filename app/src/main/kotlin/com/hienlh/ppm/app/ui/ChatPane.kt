@@ -4,16 +4,9 @@ import android.content.ContentResolver
 import android.net.Uri
 import android.view.DragEvent
 import androidx.activity.compose.LocalActivity
-import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +20,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -34,15 +28,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.input.TextFieldLineLimits
-import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.selectAll
+import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -50,21 +42,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -77,11 +67,12 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.layoutId
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
@@ -89,13 +80,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
 import com.hienlh.ppm.app.ErrorToastMessage
@@ -113,7 +102,6 @@ import com.hienlh.ppm.chat.BackgroundCommandBar
 import com.hienlh.ppm.chat.CONTINUE_AFTER_STOP
 import com.hienlh.ppm.chat.ChatEdits
 import com.hienlh.ppm.chat.ChatImages
-import com.hienlh.ppm.chat.ChatReconnectBanner
 import com.hienlh.ppm.chat.ChatTabs
 import com.hienlh.ppm.chat.ChatTranscriptView
 import com.hienlh.ppm.chat.FirstSendView
@@ -127,19 +115,15 @@ import com.hienlh.ppm.chat.LocalToolImages
 import com.hienlh.ppm.chat.LocalTurnChanges
 import com.hienlh.ppm.chat.MarkdownImages
 import com.hienlh.ppm.chat.McpSignInBar
-import com.hienlh.ppm.chat.RelativeTime
-import com.hienlh.ppm.chat.RunningAgentsBar
-import com.hienlh.ppm.chat.SessionChangesBar
-import com.hienlh.ppm.chat.TeamActivityPanel
 import com.hienlh.ppm.chat.ToolImages
 import com.hienlh.ppm.chat.TurnChangesHost
 import com.hienlh.ppm.chat.TurnStopBar
+import com.hienlh.ppm.client.chatUsage
 import com.hienlh.ppm.client.teamActivity
 import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
-import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
@@ -147,15 +131,11 @@ import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.chromeCaret
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssFlex
-import com.hienlh.ppm.design.cssHeight
-import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberChromeCaret
 import com.hienlh.ppm.design.rememberHover
-import com.hienlh.ppm.client.chatUsage
 import com.hienlh.ppm.design.webTitle
-import com.hienlh.ppm.protocol.AgentSource
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.TeamMemberActivity
 import com.hienlh.ppm.protocol.TurnOptions
@@ -163,12 +143,10 @@ import com.hienlh.ppm.protocol.UsageInfo
 import com.hienlh.ppm.protocol.agentTranscriptProvider
 import com.hienlh.ppm.state.AgentActivityWatch
 import com.hienlh.ppm.state.AgentSessionIdentity
-import com.hienlh.ppm.state.AgentSessionPayload
 import com.hienlh.ppm.state.ChatController
-import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.ChatState
-import com.hienlh.ppm.state.SessionChanges
-import com.hienlh.ppm.state.HistoryList
+import com.hienlh.ppm.state.ReconnectStage
+import com.hienlh.ppm.state.SessionCollabState
 import com.hienlh.ppm.state.UsageCache
 import com.hienlh.ppm.state.UsageReader
 import com.hienlh.ppm.state.UsageScope
@@ -182,16 +160,18 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * One chat tab (`chat-tab.tsx`): the conversation, what the server said about the last message,
- * why the last turn stopped, and the bottom toolbar — History and the connection — over the
- * message box.
+ * One chat tab (`chat-tab.tsx`): the conversation (fading out over its bottom 12dp), optional
+ * stopped-turn and MCP sign-in bars, and the unified chat footer — one context row of chips
+ * (activity, session changes, connection on the left; usage rings, History, and ··· on the right)
+ * directly over the single-bar composer, with floating `/` and `@` pickers and footer popovers.
  */
 @Composable
 fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
     val chat = tab.controller ?: return
     val state by chat.state.collectAsState()
-    val tokens = LocalPpmTokens.current
-    var panel by remember(tab.tabId) { mutableStateOf<ToolbarPanel?>(null) }
+    val mobile = LocalPpmMobile.current
+    val density = LocalDensity.current
+
     // The title the server gives a new chat goes into every list and onto its tab, as the web's tab carries it.
     LaunchedEffect(state.title) {
         state.title?.takeIf { it.isNotEmpty() }?.let {
@@ -265,7 +245,8 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         }
     }
     // The session this chat's Agent cards and running agents belong to (`AgentSessionContext`).
-    val agentIdentity = AgentSessionIdentity(tab.project, agentTranscriptProvider(tab.providerId), tab.session?.id ?: state.sessionId.orEmpty())
+    val currentSessionId = tab.session?.id ?: state.sessionId
+    val agentIdentity = AgentSessionIdentity(tab.project, agentTranscriptProvider(tab.providerId), currentSessionId.orEmpty())
     val agentOpener = remember(agentIdentity) { AgentSessionOpener(agentIdentity, model::openAgentSession) }
     // Who is running (`useAgentActivity`), and the team's members (`useTeamActivityFeed`) for their type and start.
     val channel = model.events
@@ -288,9 +269,38 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         if (primaryTeam == null || api == null) return@LaunchedEffect
         pollTeamActivity({ api.teamActivity(primaryTeam) }) { teamMembers = it.members }
     }
+    // Seed `/ws/global`'s link map for this chat (`useLinkedSessions`).
+    LaunchedEffect(api, tab.project, currentSessionId) {
+        if (api != null && tab.project.isNotEmpty() && !currentSessionId.isNullOrEmpty()) {
+            model.seedSessionLinks(tab.project, currentSessionId)
+        }
+    }
+    val collabState = channel?.collab?.collectAsState()?.value ?: SessionCollabState()
+    val streamingSessions = channel?.running?.collectAsState()?.value.orEmpty()
+    val unreads = channel?.unread?.collectAsState()?.value.orEmpty()
+    val unlinkedForChat = if (!currentSessionId.isNullOrEmpty()) model.unlinkedSessions[currentSessionId].orEmpty() else emptyMap()
+
+    // Connection indicator (`useReconnectIndicator`): 800ms grace, 8s lost, restarted on foreground resume.
+    val reconnect = rememberReconnectIndicator(
+        isReconnecting = state.connection is ChatController.Connection.Reconnecting,
+        windowVisible = model.windowVisible,
+    )
+    LaunchedEffect(model.resumes) {
+        if (model.resumes > 0) reconnect.restart()
+    }
+
+    val itemsWithLive = remember(state.items, state.live, state.liveStartedAt) { state.itemsWithLive() }
+    val sessionChanges = tab.sessionChanges
+    val isRunning = state.isRunning
+    LaunchedEffect(sessionChanges, itemsWithLive, isRunning) {
+        if (sessionChanges != null) {
+            val (paths) = tab.sessionWrites.of(itemsWithLive)
+            sessionChanges.update(paths, isRunning)
+        }
+    }
+
     val pickedLabel = tab.servingAccount?.label ?: tab.claimedAccountLabel
     val pickedAccountId = tab.servingAccount?.id ?: tab.claimedAccountId
-    val isClaude = tab.providerId.isEmpty() || tab.providerId == "claude"
     val activity = LocalActivity.current
     val context = LocalContext.current
     val fileDrop = remember(tab) {
@@ -299,210 +309,348 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
             model.attach(context, tab, uris)
         }
     }
-    BoxWithConstraints(modifier.fillMaxSize().dropZone(shouldStartDragAndDrop = { true }, target = fileDrop)) {
-        // The chat's own `@container`: under 420 px the chips drop their words.
+    val popoverHost = remember(tab.tabId) { FooterPopoverHostState() }
+    val pickers = rememberComposerPickers(model, tab)
+
+    var contextRowLeftPx by remember { mutableIntStateOf(0) }
+    var contextRowTopPx by remember { mutableIntStateOf(0) }
+    var contextRowWidthPx by remember { mutableIntStateOf(0) }
+    var composerLeftPx by remember { mutableIntStateOf(0) }
+    var composerTopPx by remember { mutableIntStateOf(0) }
+    var composerWidthPx by remember { mutableIntStateOf(0) }
+    val coordsHolder = remember {
+        object {
+            var root: LayoutCoordinates? = null
+            var row: LayoutCoordinates? = null
+            var composer: LayoutCoordinates? = null
+        }
+    }
+    fun syncOverlayBounds() {
+        val root = coordsHolder.root
+        if (root == null || !root.isAttached) return
+        val row = coordsHolder.row
+        if (row != null && row.isAttached) {
+            val pos = root.localPositionOf(row, Offset.Zero)
+            contextRowLeftPx = pos.x.roundToInt()
+            contextRowTopPx = pos.y.roundToInt()
+            contextRowWidthPx = row.size.width
+        }
+        val comp = coordsHolder.composer
+        if (comp != null && comp.isAttached) {
+            val pos = root.localPositionOf(comp, Offset.Zero)
+            composerLeftPx = pos.x.roundToInt()
+            composerTopPx = pos.y.roundToInt()
+            composerWidthPx = comp.size.width
+        }
+    }
+
+    BoxWithConstraints(
+        modifier
+            .fillMaxSize()
+            .onGloballyPositioned {
+                coordsHolder.root = it
+                syncOverlayBounds()
+            }
+            .dropZone(shouldStartDragAndDrop = { true }, target = fileDrop),
+    ) {
+        // The chat's own `@container`: under 420 px the chips drop their words, under 600 px changes drop line totals.
         val narrow = maxWidth <= 420.dp
+        val hideChangeTotals = maxWidth <= 600.dp
         // `backdrop-blur-sm` under the drop overlay and the edit's: CSS's blur(8px) is Android's at a radius of 13.
-        // Stacked as Chrome stacks the chat's flex column: what is under the transcript ends on its last
-        // pixel and starts where its exact height puts it, so the bars' rows round where the web's do.
-        CssColumn(Modifier.fillMaxSize().then(if (fileDrop.showing || tab.editForking) Modifier.blur(13.dp) else Modifier)) {
-            if (tab.providerPending) NewChatGateLine(model, tab)
-            BackgroundCommandBar(state.backgroundShells, onViewOutput = { model.openBackgroundOutput(tab.tabId, it.shellId) }, onStop = { chat.killBackgroundShell(it.shellId) })
-            val images = remember(tab.project) {
-                object : ChatImages {
-                    override suspend fun load(path: String) = model.chatImage(tab.project, path)
+        val blurred = if (fileDrop.showing || tab.editForking) Modifier.blur(13.dp) else Modifier
 
-                    override suspend fun read(path: String) = model.chatImageFile(tab.project, path)
-                }
-            }
-            val toolImages = remember(tab.project) { ToolImages { model.toolImage(tab.project, it) } }
-            val markdownImages = remember(tab.project) {
-                object : MarkdownImages {
-                    override suspend fun local(path: String) = model.toolImage(tab.project, path)
+        CompositionLocalProvider(LocalFooterPopoverHost provides popoverHost) {
+            Box(Modifier.fillMaxSize().then(blurred)) {
+                CssColumn(Modifier.fillMaxSize()) {
+                    if (tab.providerPending) NewChatGateLine(model, tab)
+                    BackgroundCommandBar(
+                        state.backgroundShells,
+                        onViewOutput = { model.openBackgroundOutput(tab.tabId, it.shellId) },
+                        onStop = { chat.killBackgroundShell(it.shellId) },
+                    )
+                    val stop = state.turnStop
+                    val showStopBar = stop != null && !state.isRunning
+                    val showMcpBar = state.mcpNeedsAuth.any { it !in model.mcpSignInDismissed }
+                    val footerDirectlyAfterList = !showStopBar && !showMcpBar
 
-                    override suspend fun web(url: String) = model.webImage(url)
-                }
-            }
-            val tabs = remember(tab.project, tab.session?.id) {
-                object : ChatTabs {
-                    override fun openFile(path: String) = model.openFileTab(tab.project, path)
-
-                    override fun openDiff(path: String, original: String, modified: String) = model.openDiffTab(tab.project, path, original, modified)
-
-                    override fun openToolFile(tool: String, path: String, line: Int?) {
-                        tab.session?.let { model.openToolFileTab(tab.project, it.id, tool, path, line) }
-                    }
-
-                    override fun openFileOrSearch(path: String, line: SourceLine?) = model.openFileOrSearch(tab.project, path, line)
-
-                    override fun openFilePath(path: String) = model.openFilePath(path, tab.project)
-                }
-            }
-            CompositionLocalProvider(
-                LocalChatImages provides images,
-                LocalToolImages provides toolImages,
-                LocalMarkdownImages provides markdownImages,
-                LocalChatTabs provides tabs,
-                LocalRunInTerminal provides { command -> model.runInTerminal(command, tab.project) },
-                LocalAgentSessionOpener provides agentOpener,
-                // A Codex question's answer goes out as the composer would send it, in its permission mode.
-                LocalAsyncQuestions provides AsyncQuestions(
-                    state.items,
-                    if (state.connected) { content -> chat.send(content, TurnOptions(permissionMode = tab.permissionMode?.value)) } else null,
-                ),
-            ) {
-                val preview = tab.firstSendPreview
-                if (preview != null) {
-                    FirstSendView(preview.content, preview.timestamp, Modifier.cssFlex(grow = true))
-                } else {
-                    val turnChanges = rememberTurnChangesHost(model, tab, state)
-                    // Fork and Edit are left out while a turn runs, and the switchers greyed out.
-                    val running = state.isRunning
-                    val editingId = tab.editFork?.messageId
-                    val edits = remember(tab, running, editingId) {
-                        ChatEdits(
-                            onFork = if (running) null else { item, anchor -> model.edits.fork(tab, item, anchor) },
-                            onEdit = if (running) null else tab::armEdit,
-                            editingId = editingId,
-                            onSwitchVersion = { model.edits.switchVersion(tab, it) },
-                            versionsDisabled = running,
-                        )
-                    }
-                    CompositionLocalProvider(LocalTurnChanges provides turnChanges) {
-                        ChatTranscriptView(
-                            state,
-                            onRespond = { request, approved, data -> chat.respond(request, approved, data) },
-                            onLoadEarlier = chat::loadEarlier,
-                            onReload = { chat.reload() },
-                            modifier = Modifier.cssFlex(grow = true),
-                            jumps = remember(tab.tabId) { model.chatJumps.filter { it.first == tab.tabId }.map { it.second } },
-                            welcome = {
-                                // `w-full px-4`; picking a chat shows it in this tab.
-                                tab.welcomeList?.let { list ->
-                                    SessionListPanel(model, list, onOpen = { model.replaceTab(tab.tabId, it) }, Modifier.padding(horizontal = 16.dp))
+                    // `[data-chat-list] + [data-chat-footer]`: when nothing sits between the message list and
+                    // the footer, the footer pulls up 12dp over the list's 12dp bottom fade band.
+                    CssColumn(
+                        Modifier.cssFlex(grow = true).fillMaxWidth(),
+                        gaps = if (footerDirectlyAfterList) listOf(0.dp, (-12).dp) else null,
+                    ) {
+                        val images = remember(tab.project) {
+                            object : ChatImages {
+                                override suspend fun load(path: String) = model.chatImage(tab.project, path)
+                                override suspend fun read(path: String) = model.chatImageFile(tab.project, path)
+                            }
+                        }
+                        val toolImages = remember(tab.project) { ToolImages { model.toolImage(tab.project, it) } }
+                        val markdownImages = remember(tab.project) {
+                            object : MarkdownImages {
+                                override suspend fun local(path: String) = model.toolImage(tab.project, path)
+                                override suspend fun web(url: String) = model.webImage(url)
+                            }
+                        }
+                        val tabs = remember(tab.project, tab.session?.id) {
+                            object : ChatTabs {
+                                override fun openFile(path: String) = model.openFileTab(tab.project, path)
+                                override fun openDiff(path: String, original: String, modified: String) = model.openDiffTab(tab.project, path, original, modified)
+                                override fun openToolFile(tool: String, path: String, line: Int?) {
+                                    tab.session?.let { model.openToolFileTab(tab.project, it.id, tool, path, line) }
                                 }
-                            },
-                            onDismiss = chat::dismissMessage,
-                            onClearErrors = chat::clearErrors,
-                            jumpRequest = model.chatJump?.takeIf { it.sessionId == state.sessionId },
-                            onJumpTaken = model::chatJumpDone,
-                            // Not while the draft, which may carry a reply of its own, is on its way, nor
-                            // while an edit's version is made.
-                            onReply = if (tab.draftLoading || tab.editForking) null else tab::selectReply,
-                            edits = edits,
-                        )
-                    }
-                }
-            }
-            val itemsWithLive = remember(state.items, state.live, state.liveStartedAt) { state.itemsWithLive() }
-            // Agents still working: the last thing under the conversation.
-            RunningAgentsBar(
-                runningAgents,
-                teamMembers,
-                itemsWithLive,
-                onOpen = { model.openAgentSession(it.payload(agentIdentity, primaryTeam.orEmpty()), null) },
-            )
-            val stop = state.turnStop
-            if (stop != null && !state.isRunning) TurnStopBar(stop, onContinue = { chat.send(CONTINUE_AFTER_STOP) })
-            // MCP servers this session cannot use until someone signs in.
-            McpSignInBar(state.mcpNeedsAuth, model.mcpSignInDismissed, onSignIn = { model.openMcpSignIn(tab.project.ifEmpty { null }, it) }, onHide = model::dismissMcpSignIn)
-            // Every file this session has changed, across all its turns.
-            tab.sessionChanges?.let { changes -> SessionChangesSection(model, tab, state, changes, itemsWithLive, narrow) }
-            // `border-t border-border bg-panel`, around the toolbar and the message box.
-            CssColumn(Modifier.fillMaxWidth().background(tokens.panel.color).line(top = true, tokens.border.color)) {
-                CssColumn(Modifier.fillMaxWidth().line(top = false, tokens.border.opacity(0.5).color)) {
-                    fun toggle(which: ToolbarPanel) {
-                        panel = if (panel == which) null else which
-                    }
-                    val hasUsage = hasUsagePanel(tab.providerId)
-                    ChatToolbar(
-                        model, tab, chat, state, panel, narrow,
-                        toggle = ::toggle,
-                        usageChip = if (hasUsage) {
-                            {
-                                UsageChip(usage?.usage ?: UsageInfo(), pickedLabel, pickedAccountId, panel == ToolbarPanel.Usage, narrow) {
-                                    toggle(ToolbarPanel.Usage)
+                                override fun openFileOrSearch(path: String, line: SourceLine?) = model.openFileOrSearch(tab.project, path, line)
+                                override fun openFilePath(path: String) = model.openFilePath(path, tab.project)
+                            }
+                        }
+                        CompositionLocalProvider(
+                            LocalChatImages provides images,
+                            LocalToolImages provides toolImages,
+                            LocalMarkdownImages provides markdownImages,
+                            LocalChatTabs provides tabs,
+                            LocalRunInTerminal provides { command -> model.runInTerminal(command, tab.project) },
+                            LocalAgentSessionOpener provides agentOpener,
+                            // A Codex question's answer goes out as the composer would send it, in its permission mode.
+                            LocalAsyncQuestions provides AsyncQuestions(
+                                state.items,
+                                if (state.connected) { content -> chat.send(content, TurnOptions(permissionMode = tab.permissionMode?.value)) } else null,
+                            ),
+                        ) {
+                            val preview = tab.firstSendPreview
+                            if (preview != null) {
+                                FirstSendView(preview.content, preview.timestamp, Modifier.cssFlex(grow = true))
+                            } else {
+                                val turnChanges = rememberTurnChangesHost(model, tab, state)
+                                // Fork and Edit are left out while a turn runs, and the switchers greyed out.
+                                val running = state.isRunning
+                                val editingId = tab.editFork?.messageId
+                                val edits = remember(tab, running, editingId) {
+                                    ChatEdits(
+                                        onFork = if (running) null else { item, anchor -> model.edits.fork(tab, item, anchor) },
+                                        onEdit = if (running) null else tab::armEdit,
+                                        editingId = editingId,
+                                        onSwitchVersion = { model.edits.switchVersion(tab, it) },
+                                        versionsDisabled = running,
+                                    )
+                                }
+                                CompositionLocalProvider(LocalTurnChanges provides turnChanges) {
+                                    ChatTranscriptView(
+                                        state,
+                                        onRespond = { request, approved, data -> chat.respond(request, approved, data) },
+                                        onLoadEarlier = chat::loadEarlier,
+                                        onReload = { chat.reload() },
+                                        modifier = Modifier.cssFlex(grow = true),
+                                        jumps = remember(tab.tabId) { model.chatJumps.filter { it.first == tab.tabId }.map { it.second } },
+                                        welcome = {
+                                            // `w-full px-4`; picking a chat shows it in this tab.
+                                            tab.welcomeList?.let { list ->
+                                                SessionListPanel(model, list, onOpen = { model.replaceTab(tab.tabId, it) }, Modifier.padding(horizontal = 16.dp))
+                                            }
+                                        },
+                                        onDismiss = chat::dismissMessage,
+                                        onClearErrors = chat::clearErrors,
+                                        jumpRequest = model.chatJump?.takeIf { it.sessionId == state.sessionId },
+                                        onJumpTaken = model::chatJumpDone,
+                                        // Not while the draft, which may carry a reply of its own, is on its way, nor
+                                        // while an edit's version is made.
+                                        onReply = if (tab.draftLoading || tab.editForking) null else tab::selectReply,
+                                        edits = edits,
+                                        bottomFade = true,
+                                        overlappedByFooter = footerDirectlyAfterList,
+                                    )
                                 }
                             }
-                        } else {
-                            null
-                        },
-                    )
-                    val list = tab.historyList
-                    if (panel == ToolbarPanel.History && list != null) ChatHistoryDropdown(model, tab, list) { panel = null }
-                    if (panel == ToolbarPanel.Config) AiSettingsPanel(model)
-                    if (panel == ToolbarPanel.Team && state.team.hasTeams) {
-                        // `border-t border-border/30 bg-surface px-3 py-2`, with no scroll of its own: each tab has one.
-                        CssColumn(
-                            Modifier.fillMaxWidth().background(tokens.panel.color).line(top = true, tokens.border.opacity(0.3).color).padding(horizontal = 12.dp),
-                            top = 8.dp,
-                            bottom = 8.dp,
+                        }
+
+                        if (showStopBar && stop != null) {
+                            TurnStopBar(stop, onContinue = { chat.send(CONTINUE_AFTER_STOP, TurnOptions(permissionMode = tab.permissionMode?.value)) })
+                        }
+                        if (showMcpBar) {
+                            McpSignInBar(
+                                state.mcpNeedsAuth,
+                                model.mcpSignInDismissed,
+                                onSignIn = { model.openMcpSignIn(tab.project.ifEmpty { null }, it) },
+                                onHide = model::dismissMcpSignIn,
+                            )
+                        }
+
+                        // Unified footer (`data-chat-footer`): `shrink-0 px-2 pb-1.5 md:px-3 md:pb-3`, no border/divider.
+                        val footerPadX = if (mobile) 8.dp else 12.dp
+                        val footerPadBottom = if (mobile) 6.dp else 12.dp
+                        val contextRowTopPad = if (footerDirectlyAfterList) 12.dp else if (mobile) 6.dp else 8.dp
+                        val contextRowBottomPad = if (mobile) 6.dp else 8.dp
+
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .zIndex(20f)
+                                .testTag("chat-footer")
+                                .padding(start = footerPadX, end = footerPadX, bottom = footerPadBottom),
                         ) {
-                            TeamActivityPanel(
-                                state.team.names,
-                                state.team.messages,
-                                agentIdentity.sessionId.ifEmpty { null },
-                                fetch = { team -> api?.teamActivity(team) ?: error("Not connected") },
-                                onOpenMember = { team, member ->
-                                    val source = AgentSource.Member(team, member)
-                                    model.openAgentSession(
-                                        AgentSessionPayload(agentIdentity.projectName, agentIdentity.providerId, agentIdentity.sessionId, source, title = "Session — $member"),
-                                        null,
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .onGloballyPositioned { coords ->
+                                        coordsHolder.row = coords
+                                        syncOverlayBounds()
+                                    }
+                                    .testTag("chat-context-row")
+                                    .padding(
+                                        start = 2.dp,
+                                        end = 2.dp,
+                                        top = contextRowTopPad,
+                                        bottom = contextRowBottomPad,
+                                    ),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Row(
+                                    Modifier
+                                        .weight(1f)
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(if (narrow || mobile) 4.dp else 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    ActivityChip(
+                                        sessionId = currentSessionId,
+                                        running = runningAgents,
+                                        teamMembers = teamMembers,
+                                        items = itemsWithLive,
+                                        sessions = model.sessions,
+                                        collab = collabState,
+                                        streamingSessions = streamingSessions,
+                                        unreads = unreads,
+                                        unlinkedForChat = unlinkedForChat,
+                                        narrow = narrow,
+                                        onOpenAgent = { model.openAgentSession(it.payload(agentIdentity, primaryTeam.orEmpty()), null) },
+                                        onOpenLinkedSession = { view ->
+                                            model.openLinkedSession(tab.project, view.sessionId, view.providerId, view.title)
+                                        },
+                                        onSetSessionsUnlinked = { ids, unlink, atProvider ->
+                                            currentSessionId?.let { cid -> model.setSessionsUnlinked(cid, ids, unlink, atProvider) }
+                                        },
+                                        onStopChildSessions = {
+                                            if (!currentSessionId.isNullOrEmpty() && tab.project.isNotEmpty()) {
+                                                model.stopChildSessions(tab.project, currentSessionId)
+                                            }
+                                        },
+                                        onError = { title, detail -> model.toast(ErrorToastMessage(title, detail)) },
                                     )
-                                },
-                            )
-                        }
-                    }
-                    if (panel == ToolbarPanel.Usage && hasUsage) {
-                        val shown = usage?.usage ?: UsageInfo()
-                        val selectAccount: (suspend (String, String?) -> String?)? = if (!tab.providerPending && !tab.firstSendPending) {
-                            { id, label -> model.selectAccount(tab, id, label) { usageReader.read(refresh = false) } }
-                        } else {
-                            null
-                        }
-                        when {
-                            isClaude -> ClaudeUsagePanel(
-                                model,
-                                shown,
-                                usageLoading,
-                                usage?.fetchedAt,
-                                selectedAccountId = pickedAccountId ?: shown.activeAccountId,
-                                onSelectAccount = selectAccount,
-                                onReload = { paneScope.launch { usageReader.read(refresh = true) } },
-                                onClose = { panel = null },
-                            )
-                            tab.providerId == "codex" -> CodexUsagePanel(
-                                model,
-                                shown,
-                                selectedAccountId = pickedAccountId ?: shown.activeAccountId,
-                                onSelectAccount = selectAccount,
-                                onReload = { usageReader.read(refresh = true) },
-                                onClose = { panel = null },
-                            )
-                            tab.providerId == "antigravity" -> AntigravityUsagePanel(
-                                model,
-                                shown,
-                                usageLoading,
-                                usage?.fetchedAt,
-                                selectedAccountId = pickedAccountId ?: shown.activeAccountId,
-                                onSelectAccount = selectAccount,
-                                onReload = { usageReader.read(refresh = true) },
-                                onClose = { panel = null },
-                            )
+                                    if (model.info?.minimalMode != true && sessionChanges != null) {
+                                        val changeFiles by sessionChanges.files.collectAsState()
+                                        val changesLoaded by sessionChanges.loaded.collectAsState()
+                                        val changesLoading by sessionChanges.loading.collectAsState()
+                                        val changesUnloadedCount by sessionChanges.unloadedCount.collectAsState()
+                                        SessionChangesChip(
+                                            files = changeFiles,
+                                            loaded = changesLoaded,
+                                            loading = changesLoading,
+                                            unloadedCount = changesUnloadedCount,
+                                            projectPath = model.projects.firstOrNull { it.name == tab.project }?.path,
+                                            providerId = tab.providerId,
+                                            narrow = narrow,
+                                            hideTotals = hideChangeTotals,
+                                            onReview = { path ->
+                                                tab.session?.let {
+                                                    model.openSessionReview(tab.project, it.id, state.title, tab.providerId, sessionChanges.paths, path)
+                                                }
+                                            },
+                                            onOpen = sessionChanges::refresh,
+                                            onRefresh = sessionChanges::refresh,
+                                            onSetReviewed = sessionChanges::setReviewed,
+                                        )
+                                    }
+                                    ConnectionChip(
+                                        stage = reconnect.stage,
+                                        narrow = narrow,
+                                        onRetry = {
+                                            reconnect.restart()
+                                            chat.reloadChat()
+                                        },
+                                    )
+                                }
+                                ChatPaneFooterTools(
+                                    model = model,
+                                    tab = tab,
+                                    chat = chat,
+                                    state = state,
+                                    agentIdentity = agentIdentity,
+                                    usageInfo = usage?.usage ?: UsageInfo(),
+                                    usageLoading = usageLoading,
+                                    lastFetchedAt = usage?.fetchedAt,
+                                    onRefreshUsage = { usageReader.read(refresh = true) },
+                                    onReadUsageQuietly = { usageReader.read(refresh = false) },
+                                    pickedAccountId = pickedAccountId,
+                                    pickedAccountLabel = pickedLabel,
+                                    narrow = narrow,
+                                    connectionTrouble = reconnect.stage != ReconnectStage.HIDDEN,
+                                )
+                            }
+
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .onGloballyPositioned { coords ->
+                                        coordsHolder.composer = coords
+                                        syncOverlayBounds()
+                                    },
+                            ) {
+                                if (tab.editFork != null) EditingLine(onCancel = tab::cancelEdit)
+                                ChatComposer(
+                                    model = model,
+                                    tab = tab,
+                                    chat = chat,
+                                    state = state,
+                                    narrow = narrow,
+                                    fileDrop = fileDrop,
+                                    pickers = pickers,
+                                    offline = reconnect.stage != ReconnectStage.HIDDEN,
+                                )
+                            }
                         }
                     }
                 }
-                val pickers = rememberComposerPickers(model, tab)
-                ComposerPickerList(model, tab, pickers)
-                if (tab.editFork != null) EditingLine(onCancel = tab::cancelEdit)
-                ChatComposer(
-                    model, tab, chat, state, narrow, fileDrop, pickers,
-                    modifier = Modifier.padding(if (LocalPpmMobile.current) 8.dp else 12.dp),
-                )
+
+                // Tablet footer popovers (`FooterPopover`): anchored 4dp (`mb-1`) above `chat-context-row`.
+                FooterPopoverScrim(popoverHost)
+                if (popoverHost.entries.isNotEmpty() && contextRowWidthPx > 0) {
+                    val rowTopDp = with(density) { contextRowTopPx.coerceAtLeast(0).toDp() }
+                    val rowWidthDp = with(density) { contextRowWidthPx.toDp() }
+                    Box(
+                        Modifier
+                            .offset { IntOffset(contextRowLeftPx, 0) }
+                            .width(rowWidthDp)
+                            .height(rowTopDp),
+                        contentAlignment = Alignment.BottomStart,
+                    ) {
+                        FooterPopoverHostSlot(popoverHost)
+                    }
+                }
+
+                // Floating `/` and `@` pickers (`data-composer-picker="floating"`): composer-wide, 6dp (`mb-1.5`)
+                // above the composer anchor, overlapping `chat-context-row` without moving it.
+                if (pickers.isShowing && composerWidthPx > 0) {
+                    val pickerBottomPx = (composerTopPx - with(density) { 6.dp.roundToPx() }).coerceAtLeast(0)
+                    val pickerHeightDp = with(density) { pickerBottomPx.toDp() }
+                    val composerWidthDp = with(density) { composerWidthPx.toDp() }
+                    Box(
+                        Modifier
+                            .offset { IntOffset(composerLeftPx, 0) }
+                            .width(composerWidthDp)
+                            .height(pickerHeightDp),
+                        contentAlignment = Alignment.BottomStart,
+                    ) {
+                        ComposerPickerList(
+                            model = model,
+                            tab = tab,
+                            pickers = pickers,
+                            narrow = narrow,
+                            variant = PickerVariant.FLOATING,
+                        )
+                    }
+                }
             }
         }
-        // A pill, not an overlay: the chat stays readable and usable while it reconnects.
-        ChatReconnectBanner(state.connection is ChatController.Connection.Reconnecting, model.resumes, onRetry = chat::reloadChat)
         if (fileDrop.showing) DropFilesOverlay()
         if (tab.editForking) EditForkingOverlay()
     }
@@ -593,7 +741,7 @@ private fun BoxScope.DropFilesOverlay() {
 /**
  * Over the whole chat while an edit's version is made and connects (`editForking`): `absolute
  * inset-0 z-50 bg-background/70 backdrop-blur-sm`, "Creating edited version…" at its centre, and
- * every touch on the chat stopped there. Over the reconnect pill, which is `z-40`.
+ * every touch on the chat stopped there.
  */
 @Composable
 private fun BoxScope.EditForkingOverlay() {
@@ -627,7 +775,7 @@ private fun EditingLine(onCancel: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        BasicText("Editing message — your next send replaces it", Modifier.weight(1f), style = style.copy(color = tokens.text2.color))
+        BasicText("Editing message — your next send replaces it", Modifier.weight(1f), style.copy(color = tokens.text2.color))
         val hover = rememberHover()
         val pressed by hover.source.collectIsPressedAsState()
         val lit = if (pressed) 1.0 else hover.lit.toDouble()
@@ -692,465 +840,8 @@ private fun GateButton(label: String, style: TextStyle, onClick: () -> Unit) {
     )
 }
 
-/** The panel the toolbar has open under it; one at a time. */
-private enum class ToolbarPanel { History, Config, Usage, Team }
-
-/** Providers whose chat toolbar surfaces the usage chip and usage panel (`chat-history-bar.tsx`). */
-internal fun hasUsagePanel(providerId: String): Boolean =
-    providerId.isEmpty() || providerId == "claude" || providerId == "codex" || providerId == "antigravity"
-
 /** `border-t` or `border-b`. */
 fun Modifier.line(top: Boolean, color: Color): Modifier = cssBorder(color, sides = if (top) CssSides.Top else CssSides.Bottom)
-
-/**
- * The row over the message box (`chat-history-bar.tsx`): History, AI settings and the usage chip
- * on the left, scrolling sideways when they run out of room; on the right the reload button with
- * the connection dot, then the overflow menu. AI settings show the chat's provider once it has a
- * session, else a gear.
- */
-@Composable
-private fun ChatToolbar(
-    model: AppModel,
-    tab: ChatTab,
-    chat: ChatController,
-    state: ChatState,
-    panel: ToolbarPanel?,
-    narrow: Boolean,
-    toggle: (ToolbarPanel) -> Unit,
-    usageChip: (@Composable () -> Unit)?,
-) {
-    // `py-1` around the tallest control, kept to the fraction: the gear and the menu are 20 px, a
-    // chip that shows words 20.5, so the bar is 73.5 px or 74.8 as the web's, where whole pixels made it 75.
-    CssColumn(Modifier.fillMaxWidth(), top = 4.dp, bottom = 4.dp) {
-        Row(
-            Modifier.cssHeight(if (narrow && usageChip == null) 20.dp else 20.5.dp).fillMaxWidth().padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            // `overflow-x-auto` clips up and down too; the Team chip's dot just fits, its top on the row's.
-            ToolbarChips(Modifier.weight(1f).clipToBounds().horizontalScroll(rememberScrollState())) {
-                ToolbarChip(ProductIcon.History, if (narrow) null else "History", active = panel == ToolbarPanel.History) { toggle(ToolbarPanel.History) }
-                val provider = tab.providerId
-                if (tab.session != null && provider.isNotEmpty() && provider != "mock") {
-                    ToolbarChip(if (narrow) null else capitalized(provider), active = panel == ToolbarPanel.Config, onClick = { toggle(ToolbarPanel.Config) }, lead = 16f) { color ->
-                        ProviderBadge(provider, foreground = color)
-                    }
-                } else {
-                    SettingsGearButton(active = panel == ToolbarPanel.Config) { toggle(ToolbarPanel.Config) }
-                }
-                usageChip?.invoke()
-                if (state.team.hasTeams) {
-                    TeamChip(narrow, active = panel == ToolbarPanel.Team, unread = state.team.unread > 0) {
-                        toggle(ToolbarPanel.Team)
-                        chat.markTeamRead()
-                    }
-                }
-            }
-            Row(Modifier.padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                ReloadButton(state.connected) { chat.reloadChat() }
-                // Its actions are a session's.
-                tab.session?.let { OverflowButton(model, tab, it, state) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ToolbarChip(icon: ProductIcon, title: String?, active: Boolean, onClick: () -> Unit) =
-    ToolbarChip(title, active, onClick) { color -> PpmIcon(icon, 12.dp, color) }
-
-/** What [ToolbarChips] spaces a chip by: its width in CSS px, exactly, where it measures whole pixels. */
-private data class ChipWidth(val css: Float)
-
-/** A [ToolbarChip]'s exact width: `px-1.5` around its [lead] icon, then `gap-1` and its words if it shows them. */
-@Composable
-private fun chipWidth(title: String?, lead: Float = 12f): ChipWidth {
-    if (title == null) return ChipWidth(6f + lead + 6f)
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    val words = remember(title, density) {
-        val line = measurer.measure(title, ppmText(11f, lineHeight = 16.5f), softWrap = false, maxLines = 1)
-        (line.getLineRight(0) - line.getLineLeft(0)) / density.density
-    }
-    return ChipWidth(6f + lead + 4f + words + 6f)
-}
-
-/**
- * The chips of a `flex items-center gap-1` row where Chrome puts them: each [ChipWidth] and gap
- * after the last, kept in fractions of a pixel, on the pixel that rounds to. At 2.625x a 24 px chip
- * measures 64 px for its 63 and a 4 px gap spaces 11 for 10.5, which put the Team chip 4 px right
- * of the web's. A chip without a [ChipWidth] counts as wide as it measures.
- */
-@Composable
-private fun ToolbarChips(modifier: Modifier, content: @Composable () -> Unit) {
-    Layout(content, modifier) { measurables, constraints ->
-        val gap = 4.dp.toPx()
-        val lefts = IntArray(measurables.size)
-        var at = 0f
-        val placeables = measurables.mapIndexed { index, measurable ->
-            if (index > 0) at += gap
-            lefts[index] = at.roundToInt()
-            val placeable = measurable.measure(Constraints(maxHeight = constraints.maxHeight))
-            at += (measurable.layoutId as? ChipWidth)?.let { it.css * density } ?: placeable.width.toFloat()
-            placeable
-        }
-        val width = placeables.indices.maxOfOrNull { lefts[it] + placeables[it].width } ?: 0
-        val height = placeables.maxOfOrNull { it.height } ?: 0
-        layout(width.coerceIn(constraints.minWidth, constraints.maxWidth), height.coerceIn(constraints.minHeight, constraints.maxHeight)) {
-            placeables.forEachIndexed { index, placeable -> placeable.place(lefts[index], ((height - placeable.height) / 2f).roundToInt()) }
-        }
-    }
-}
-
-/**
- * `px-1.5 py-0.5 rounded text-[11px]`, accent-tinted while its panel is open, and otherwise
- * `hover:text-foreground hover:bg-surface-elevated`; [leading] is drawn in the chip's colour.
- */
-@Composable
-private fun ToolbarChip(title: String?, active: Boolean, onClick: () -> Unit, lead: Float = 12f, leading: @Composable (Color) -> Unit) {
-    val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(4.dp)
-    val hover = rememberHover(enabled = !active)
-    val color = if (active) tokens.accent else tokens.text.mix(tokens.text2, hover.lit.toDouble())
-    Row(
-        Modifier
-            .layoutId(chipWidth(title, lead))
-            .clip(shape)
-            .background(if (active) tokens.accent.opacity(0.1).color else Color.Transparent)
-            .ppmClickable(
-                pressedColor = tokens.panel2.color,
-                hoverColor = if (active) Color.Transparent else tokens.panel2.color,
-                shape = shape,
-                source = hover.source,
-                onClick = onClick,
-            )
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        leading(color.color)
-        if (title != null) BasicText(title, style = ppmText(11f, lineHeight = 16.5f).copy(color = color.color))
-    }
-}
-
-/**
- * The Team chip (`relative`, as the History chip otherwise), with a pulsing accent dot over its
- * top right corner while messages came in since the panel was last opened.
- */
-@Composable
-private fun TeamChip(narrow: Boolean, active: Boolean, unread: Boolean, onClick: () -> Unit) {
-    val tokens = LocalPpmTokens.current
-    val title = if (narrow) null else "Team"
-    Box(Modifier.layoutId(chipWidth(title))) {
-        ToolbarChip(ProductIcon.Users, title, active, onClick)
-        if (unread) {
-            // `animate-pulse`: down to half and back every 2 s.
-            val dim by rememberInfiniteTransition(label = "pulse").animateFloat(
-                1f, 0.5f,
-                infiniteRepeatable(tween(1_000, easing = CubicBezierEasing(0.4f, 0f, 0.6f, 1f)), RepeatMode.Reverse),
-                label = "dot",
-            )
-            Box(Modifier.align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp).size(8.dp).alpha(dim).clip(CircleShape).background(tokens.accent.color))
-        }
-    }
-}
-
-/**
- * AI settings before a chat has a provider of its own (`p-1 rounded`, a 12 px gear): accent-tinted
- * while open, else `text-text-subtle hover:text-text-secondary hover:bg-surface-elevated`.
- */
-@Composable
-private fun SettingsGearButton(active: Boolean, onClick: () -> Unit) {
-    val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(4.dp)
-    val hover = rememberHover(enabled = !active)
-    val color = if (active) tokens.accent else tokens.text2.mix(tokens.text3, hover.lit.toDouble())
-    Box(
-        Modifier
-            .layoutId(ChipWidth(20f))
-            .clip(shape)
-            .background(if (active) tokens.accent.opacity(0.1).color else Color.Transparent)
-            .ppmClickable(
-                pressedColor = tokens.panel2.color,
-                hoverColor = if (active) Color.Transparent else tokens.panel2.color,
-                shape = shape,
-                source = hover.source,
-                onClick = onClick,
-            )
-            .size(20.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        PpmIcon(ProductIcon.Settings2, 12.dp, color.color)
-    }
-}
-
-/**
- * Reads the messages again; its dot is the connection — green, or a pulsing red while the
- * socket is down.
- */
-@Composable
-private fun ReloadButton(connected: Boolean, reload: () -> Unit) {
-    val tokens = LocalPpmTokens.current
-    val scope = rememberCoroutineScope()
-    var spinning by remember { mutableStateOf(false) }
-    val pulse = rememberInfiniteTransition(label = "pulse")
-    // `animate-pulse`: down to half and back every 2 s.
-    val dim by pulse.animateFloat(
-        1f, 0.5f,
-        infiniteRepeatable(tween(1_000, easing = CubicBezierEasing(0.4f, 0f, 0.6f, 1f)), RepeatMode.Reverse),
-        label = "dot",
-    )
-    Box(
-        Modifier.size(16.dp).ppmClickable(pressedColor = Color.Transparent) {
-            reload()
-            spinning = true
-            scope.launch {
-                delay(600)
-                spinning = false
-            }
-        },
-        contentAlignment = Alignment.Center,
-    ) {
-        PpmIcon(ProductIcon.RefreshCw, 12.dp, if (connected) tokens.text2.opacity(0.6).color else tokens.error.color, spinning = spinning)
-        Box(
-            Modifier
-                .align(Alignment.TopEnd)
-                .offset(x = 2.dp, y = (-2).dp)
-                .size(6.dp)
-                .alpha(if (connected) 1f else dim)
-                .clip(CircleShape)
-                .background((if (connected) tokens.success else tokens.error).color),
-        )
-    }
-}
-
-/**
- * Session actions that do not earn a place of their own (`chat-toolbar-overflow-menu.tsx`),
- * `hover:text-text-secondary hover:bg-surface-elevated`. Its rows are `max-md:py-3`. Logs are not
- * in the app yet, so "Show logs for this chat" says so.
- */
-@Composable
-private fun OverflowButton(model: AppModel, tab: ChatTab, session: SessionInfo, state: ChatState) {
-    val tokens = LocalPpmTokens.current
-    val unread = model.unreadSessions()[session.id] != null
-    var open by remember { mutableStateOf(false) }
-    // Held here rather than by the menu, which goes as soon as an item is picked.
-    var debugOpen by remember { mutableStateOf(false) }
-    // `max-md:py-3`; the icons are `size-3.5` with no `mr-2` of their own.
-    val rows = if (LocalPpmMobile.current) 12.dp else 6.dp
-    val hover = rememberHover()
-    Box(
-        Modifier
-            .size(20.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, source = hover.source) { open = true },
-        contentAlignment = Alignment.Center,
-    ) {
-        PpmIcon(ProductIcon.MoreHorizontal, 14.dp, tokens.text2.mix(tokens.text3, hover.lit.toDouble()).color)
-        if (open) {
-            DropdownAboveEnd(onDismiss = { open = false }, minWidth = 190.dp) {
-                if (unread) {
-                    MenuItem("Mark as read", onClick = {
-                        open = false
-                        model.markRead(session.id)
-                    }, icon = { MenuIcon(ProductIcon.BellOff, tokens.warning) }, vertical = rows, iconEnd = 0.dp)
-                } else {
-                    MenuItem("Mark as unread", onClick = {
-                        open = false
-                        model.markUnread(model.sessions.firstOrNull { it.id == session.id } ?: session)
-                    }, icon = { MenuIcon(ProductIcon.Circle, tokens.accent) }, vertical = rows, iconEnd = 0.dp)
-                }
-                MenuItem("Session debug info", onClick = {
-                    open = false
-                    debugOpen = true
-                }, icon = { MenuIcon(ProductIcon.Bug) }, vertical = rows, iconEnd = 0.dp)
-                MenuItem("Show logs for this chat", onClick = {
-                    open = false
-                    model.toast(ErrorToastMessage("Logs are not in the Android app yet.", kind = ErrorToastMessage.Kind.PLAIN))
-                }, icon = { MenuIcon(ProductIcon.ScrollText) }, vertical = rows, iconEnd = 0.dp)
-            }
-        }
-    }
-    if (debugOpen) {
-        val items by rememberUpdatedState(state.items.size + if (state.live != null) 1 else 0)
-        SessionDebugDialog(model, tab.project, session.id, messageCount = { items }) { debugOpen = false }
-    }
-}
-
-/**
- * The chat's own History panel (`border-t border-border/30 bg-surface`): a title search, the tag
- * chips, then the sessions in the dense list the web shows here; picking one shows it in this
- * tab. Tag management is left out until this app has it.
- */
-@Composable
-private fun ChatHistoryDropdown(model: AppModel, tab: ChatTab, list: HistoryList, close: () -> Unit) {
-    val tokens = LocalPpmTokens.current
-    val state by list.state.collectAsState()
-    val scope = rememberCoroutineScope()
-    val line = tokens.border.opacity(0.3).color
-    val query = remember(list) { TextFieldState(list.query) }
-    LaunchedEffect(query, list) { snapshotFlow { query.text.toString() }.collect { list.query = it } }
-    var refreshing by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().background(tokens.panel.color).line(top = true, line)) {
-        // `flex items-center gap-1.5 px-2 py-1 border-b border-border/30`.
-        Row(
-            Modifier.fillMaxWidth().line(top = false, line).padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            PpmIcon(ProductIcon.Search, 12.dp, tokens.text3.color)
-            // A phone's inputs are 16 px whatever the class says.
-            PpmTextField(query, "Search sessions...", Modifier.weight(1f), desktopStyle = ppmText(11f, lineHeight = 16.5f))
-            SmallIconButton(ProductIcon.CalendarX2, tokens.error, enabled = !model.deletingOld) { model.askDeleteOld = true }
-            SmallIconButton(ProductIcon.RefreshCw, tokens.text2, spinning = refreshing || state.loading || model.deletingOld, enabled = !refreshing) {
-                scope.launch {
-                    refreshing = true
-                    model.refresh(list)
-                    refreshing = false
-                }
-            }
-        }
-        val all = state.sessions(model.sessions)
-        if (model.tags.tags.isNotEmpty()) {
-            Box(Modifier.fillMaxWidth().line(top = false, line)) {
-                // These chips, unlike the session list's, have no `hover:`.
-                TagChipBar(model.tags, all.size, state.tag, vertical = 4.dp, hover = false) { list.tag = it }
-            }
-        }
-        val sessions = state.shown(all)
-        val unread = model.unreadSessions()
-        Column(Modifier.fillMaxWidth().heightIn(max = 200.dp).cssScrollY()) {
-            when {
-                (state.loading || (state.searchPage == null && model.sessionsLoad == AppModel.Load.Loading)) && all.isEmpty() ->
-                    Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
-                        PpmIcon(ProductIcon.Loader2, 14.dp, tokens.text3.color, spinning = true)
-                    }
-                sessions.isEmpty() -> BasicText(
-                    if (query.text.isEmpty()) "No sessions yet" else "No matching sessions",
-                    Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                    style = ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
-                )
-                else -> {
-                    for (session in sessions) {
-                        HistoryBarRow(model, session, unread[session.id]?.type, unread.containsKey(session.id)) {
-                            model.replaceTab(tab.tabId, session)
-                            close()
-                        }
-                    }
-                    if (state.hasMore(model.hasMoreSessions)) {
-                        // `hover:text-text-secondary hover:bg-surface-elevated`.
-                        // Lit while loading too: CSS `:hover` matches a disabled button.
-                        val hover = rememberHover()
-                        val text = tokens.text2.mix(tokens.text3, hover.lit.toDouble()).color
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .ppmClickable(
-                                    enabled = !state.loadingMore,
-                                    pressedColor = tokens.panel2.color,
-                                    hoverColor = tokens.panel2.color,
-                                    source = hover.source,
-                                    hoverWhileDisabled = true,
-                                ) {
-                                    scope.launch { list.loadMore(model.sessions, model.hasMoreSessions) }
-                                }
-                                .padding(vertical = 6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (state.loadingMore) PpmIcon(ProductIcon.Loader2, 12.dp, text, spinning = true)
-                            BasicText(if (state.loadingMore) "Loading..." else "Load more", style = ppmText(11f, lineHeight = 16.5f).copy(color = text))
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** `p-0.5 rounded` around a 12 px icon in the subtle colour, [hoverTint] under a mouse. */
-@Composable
-private fun SmallIconButton(icon: ProductIcon, hoverTint: Rgba, spinning: Boolean = false, enabled: Boolean = true, size: Dp = 12.dp, onClick: () -> Unit) {
-    val tokens = LocalPpmTokens.current
-    // Lit while disabled too: CSS `:hover` matches a disabled button.
-    val hover = rememberHover()
-    Box(
-        Modifier
-            .alpha(if (enabled) 1f else 0.5f)
-            .clip(RoundedCornerShape(4.dp))
-            .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, source = hover.source, hoverWhileDisabled = true, onClick = onClick)
-            .padding(2.dp),
-    ) {
-        PpmIcon(icon, size, hoverTint.mix(tokens.text3, hover.lit.toDouble()).color, spinning = spinning)
-    }
-}
-
-/**
- * `px-3 py-1.5 gap-2`, 11 px: provider, tag dot, title, then pin, rename and delete — always
- * shown on a touch screen, where nothing hovers — and the age. Unread: tinted by what happened
- * last, in the text colour at medium weight. A long press opens the chat's menu.
- */
-@Composable
-private fun HistoryBarRow(model: AppModel, session: SessionInfo, unreadType: String?, isUnread: Boolean, open: () -> Unit) {
-    val tokens = LocalPpmTokens.current
-    var renaming by remember { mutableStateOf(false) }
-    var menuAt by remember { mutableStateOf<Offset?>(null) }
-    val color = if (isUnread) tokens.text else tokens.text2
-    val bot = session.title.startsWith("[PPM]")
-    val title = if (bot) session.title.drop(7) else session.title
-    // `hover:bg-surface-elevated`, on the row itself, so it lights while renaming too.
-    val hover = rememberHover()
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .background(if (isUnread) tokens.notification(unreadType).opacity(0.1).color else Color.Transparent)
-            .background(tokens.panel2.opacity(hover.lit.toDouble()).color)
-            .hoverable(hover.source),
-    ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .pressable(pressedColor = tokens.panel2.color, enabled = !renaming, onLongClick = { menuAt = it }, onClick = open)
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            ProviderBadge(session.providerId)
-            session.tag?.let { TagDot(it.color) }
-            if (renaming) {
-                InlineRename(model, session, RenameField.HistoryBar, Modifier.weight(1f)) { renaming = false }
-            } else {
-                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (bot) PpmIcon(ProductIcon.Bot, 12.dp, tokens.text2.color)
-                    BasicText(
-                        PpmFormat.collapsedWhitespace(title).ifEmpty { "Untitled" },
-                        style = ppmText(11f, if (isUnread) FontWeight.Medium else FontWeight.Normal, lineHeight = 16.5f).copy(color = color.color),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                RowIcon(
-                    if (session.pinned) ProductIcon.PinOff else ProductIcon.Pin,
-                    if (session.pinned) tokens.accent else tokens.text3,
-                    if (session.pinned) tokens.accent.opacity(0.7) else tokens.text2,
-                    fade = true,
-                ) {
-                    model.scope.launch { model.togglePin(session) }
-                }
-                RowIcon(ProductIcon.Pencil, tokens.text3, tokens.text2) { renaming = true }
-                RowIcon(ProductIcon.Trash2, tokens.text3, tokens.error, hoverFill = tokens.error.opacity(0.2)) { model.confirmDeleteSession = session }
-                session.updatedAt?.let {
-                    Box(Modifier.width(64.dp), contentAlignment = Alignment.CenterEnd) {
-                        RelativeTime(it, ppmText(10f, lineHeight = 15f).copy(color = tokens.text3.color))
-                    }
-                }
-            }
-        }
-        menuAt?.let { at ->
-            SessionContextMenu(model, session, at, onDismiss = { menuAt = null }, onRename = { renaming = true }, onDelete = { model.confirmDeleteSession = session })
-        }
-    }
-}
 
 /**
  * `p-0.5 rounded` with a 12 px icon in [tint], and [hoverTint] (on [hoverFill]) under a mouse: at
@@ -1269,48 +960,4 @@ private fun rememberTurnChangesHost(model: AppModel, tab: ChatTab, state: ChatSt
             ownsKeys = { model.activeTabId == tab.tabId },
         )
     }
-}
-
-/**
- * The changes bar wired to [tab]'s session (`useSessionFileChanges` + `SessionChangesBar`): a
- * count from the transcript and the server until the list is opened, its rows opening the
- * session's Review tab, and on a phone its sheet up to 85% of the page.
- */
-@Composable
-private fun SessionChangesSection(model: AppModel, tab: ChatTab, state: ChatState, changes: SessionChanges, items: List<ChatItem>, narrow: Boolean) {
-    val running = state.isRunning
-    LaunchedEffect(changes, items, running) {
-        val (paths) = tab.sessionWrites.of(items)
-        changes.update(paths, running)
-    }
-    val files by changes.files.collectAsState()
-    val loaded by changes.loaded.collectAsState()
-    val loading by changes.loading.collectAsState()
-    val unloadedCount by changes.unloadedCount.collectAsState()
-    // `max-h-[85%]` of the sheet's frame (`fixed inset-0`), which is the app's area: the sheet's
-    // window under the status bar.
-    val statusBar = WindowInsets.statusBars.getTop(LocalDensity.current)
-    val sheetMax = Modifier.layout { measurable, constraints ->
-        val max = ((constraints.maxHeight - statusBar) * 0.85f).toInt().coerceIn(constraints.minHeight, constraints.maxHeight)
-        val placeable = measurable.measure(constraints.copy(maxHeight = max))
-        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
-    }
-    SessionChangesBar(
-        files,
-        loaded,
-        loading,
-        unloadedCount,
-        projectPath = model.projects.firstOrNull { it.name == tab.project }?.path,
-        providerId = tab.providerId,
-        narrow = narrow,
-        onReview = { path ->
-            tab.session?.let { model.openSessionReview(tab.project, it.id, state.title, tab.providerId, changes.paths, path) }
-        },
-        onOpen = changes::refresh,
-        onRefresh = changes::refresh,
-        onSetReviewed = changes::setReviewed,
-        sheet = { dismiss, content ->
-            BottomSheet(dismiss, sheetMax) { content(LocalSheetContentTop.current) }
-        },
-    )
 }

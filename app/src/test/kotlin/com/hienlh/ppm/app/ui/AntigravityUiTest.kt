@@ -51,42 +51,70 @@ class AntigravityUiTest {
         LimitBucket(utilization, resetsAt, resetsInMinutes = null, resetsInHours = null, windowHours = 5.0, label = label)
 
     @Test
-    fun hasUsagePanel_includesClaudeCodexAndAntigravityOnly() {
-        assertTrue(hasUsagePanel(""))
-        assertTrue(hasUsagePanel("claude"))
-        assertTrue(hasUsagePanel("codex"))
-        assertTrue(hasUsagePanel("antigravity"))
-        assertFalse(hasUsagePanel("cursor"))
-        assertFalse(hasUsagePanel("gemini"))
-        assertFalse(hasUsagePanel("mock"))
-    }
-
-    @Test
-    fun usageChip_showsAntigravityAccountLabelAndPercentages() {
-        var clicked = 0
+    fun footerUsageCluster_includesClaudeCodexAndAntigravityOnly() {
+        var provider by mutableStateOf("antigravity")
+        val sample = UsageInfo(
+            fiveHour = 0.42,
+            sevenDay = 0.15,
+            activeAccountId = "acc-1",
+            activeAccountLabel = "work@example.com · Pro",
+        )
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
-                UsageChip(
-                    usage = UsageInfo(
-                        fiveHour = 0.42,
-                        sevenDay = 0.15,
-                        activeAccountId = "acc-1",
-                        activeAccountLabel = "work@example.com · Pro",
-                    ),
-                    pickedLabel = null,
-                    pickedAccountId = null,
-                    active = false,
+                ChatFooterTools(
+                    usageInfo = sample,
+                    providerId = provider,
                     narrow = false,
-                    onClick = { clicked++ },
                 )
             }
         }
 
-        composeRule.onNodeWithText("[work@example.com · Pro]").assertIsDisplayed()
-        composeRule.onNodeWithText("5h:42%").assertIsDisplayed()
-        composeRule.onNodeWithText("Wk:15%").assertIsDisplayed()
-        composeRule.onNodeWithText("5h:42%").performClick()
-        assertEquals(1, clicked)
+        for (supported in listOf("", "claude", "codex", "antigravity")) {
+            provider = supported
+            composeRule.waitForIdle()
+            composeRule.onNodeWithTag("usage-ring").assertIsDisplayed()
+        }
+        for (unsupported in listOf("cursor", "gemini", "mock")) {
+            provider = unsupported
+            composeRule.waitForIdle()
+            composeRule.onNodeWithTag("usage-ring").assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun antigravityUsageRing_showsLabelledWindowsAndOpensAntigravityUsagePopover() {
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                val host = androidx.compose.runtime.remember { FooterPopoverHostState() }
+                androidx.compose.runtime.CompositionLocalProvider(LocalFooterPopoverHost provides host) {
+                    androidx.compose.foundation.layout.Column {
+                        FooterPopoverHostSlot(host)
+                        ChatFooterTools(
+                            usageInfo = UsageInfo(
+                                fiveHour = 0.42,
+                                sevenDay = 0.15,
+                                activeAccountId = "acc-1",
+                                activeAccountLabel = "work@example.com · Pro",
+                            ),
+                            providerId = "antigravity",
+                            narrow = false,
+                            antigravityUsageContent = {
+                                androidx.compose.foundation.text.BasicText("Antigravity Usage Panel Body")
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        composeRule.onNodeWithContentDescription("Usage: work@example.com · Pro · 5h 42% · Week 15%").assertIsDisplayed()
+        composeRule.onNodeWithText("5h", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("42%", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Wk", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("15%", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("usage-ring").performClick()
+        composeRule.onNodeWithText("Antigravity Usage Panel Body").assertIsDisplayed()
+        composeRule.onNodeWithTag("chat-more-menu").assertDoesNotExist()
     }
 
     @Test
