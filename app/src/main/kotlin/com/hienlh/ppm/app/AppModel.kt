@@ -41,7 +41,9 @@ import com.hienlh.ppm.client.readProjectFile
 import com.hienlh.ppm.client.uploadedFile
 import com.hienlh.ppm.client.putUiPrefs
 import com.hienlh.ppm.client.renameSession
+import com.hienlh.ppm.client.sessionLinks
 import com.hienlh.ppm.client.setSessionAccount
+import com.hienlh.ppm.client.stopChildSessions
 import com.hienlh.ppm.client.settingsListThemes
 import com.hienlh.ppm.client.reorderProjects
 import com.hienlh.ppm.client.resetTags
@@ -67,6 +69,7 @@ import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.DraftAttachment
 import com.hienlh.ppm.protocol.FileMention
 import com.hienlh.ppm.protocol.Group
+import com.hienlh.ppm.protocol.LinkedSessionUnlinks
 import com.hienlh.ppm.protocol.McpServerName
 import com.hienlh.ppm.protocol.McpSignInDismissals
 import com.hienlh.ppm.protocol.PickedAccount
@@ -113,6 +116,7 @@ import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.NewChatCache
 import com.hienlh.ppm.state.NotificationTones
+import com.hienlh.ppm.state.updateUnlinks
 import com.hienlh.ppm.state.agentSessionKeysOnScreen
 import com.hienlh.ppm.state.agentSessionOpening
 import com.hienlh.ppm.state.workspace.NewChatDefaults
@@ -593,6 +597,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** Jira integration toggle (`jiraEnabled`), shared through the server's UI prefs. */
     var jiraEnabled by mutableStateOf(false)
         private set
+
+    /** Per-chat unlinked linked-session map (`unlinkedSessions`), shared through the server's UI prefs. */
+    var unlinkedSessions by mutableStateOf<Map<String, Map<String, Long>>>(emptyMap())
+        internal set
 
     /** Remote Desktop stats overlay (`remoteDesktopStatsVisible`), shared through the server's UI prefs. */
     var remoteDesktopStatsVisible by mutableStateOf(false)
@@ -1652,6 +1660,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                     prefs.remoteDesktopStatsVisible?.let { remoteDesktopStatsVisible = it }
                     prefs.remoteDesktopWarningDismissed?.let { remoteDesktopWarningDismissed = it }
                     prefs.jiraEnabled?.let { jiraEnabled = it }
+                    unlinkedSessions = prefs.unlinkedSessions
                     saveUiPrefs()
                 }
                 projects
@@ -1708,6 +1717,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         remoteDesktopStatsVisible = saved.remoteDesktopStatsVisible ?: false
         remoteDesktopWarningDismissed = saved.remoteDesktopWarningDismissed ?: false
         jiraEnabled = saved.jiraEnabled ?: false
+        unlinkedSessions = saved.unlinkedSessions
         logsBadge = prefs.get("logsBadge.$serverKey")?.toBooleanStrictOrNull() ?: true
         remoteDesktopQuality = com.hienlh.ppm.state.remotedesktop.parseQualityChoice(prefs.get("remoteDesktopQuality.$serverKey"))
         remoteDesktopViewStyle = com.hienlh.ppm.state.remotedesktop.parseViewStyle(prefs.get("remoteDesktopViewStyle.$serverKey"))
@@ -1748,6 +1758,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             remoteDesktopStatsVisible = remoteDesktopStatsVisible,
             remoteDesktopWarningDismissed = remoteDesktopWarningDismissed,
             jiraEnabled = jiraEnabled,
+            unlinkedSessions = unlinkedSessions,
         )
         prefs.put("uiPrefs.$serverKey", saved.toJson().toString())
     }
@@ -1781,6 +1792,22 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         events.onSessionFileChanges = { push ->
             for (chat in chats.values) {
                 if (chat.project == push.projectName && chat.session?.id == push.sessionId) chat.sessionChanges?.push(push.files, push.gone)
+            }
+        }
+        events.onSessionCreated = { created ->
+            if (created.projectName == selectedProject && sessions.none { it.id == created.sessionId }) {
+                sessions = (
+                    listOf(
+                        SessionInfo(
+                            id = created.sessionId,
+                            providerId = created.providerId,
+                            title = created.title,
+                            createdAt = runCatching { java.time.Instant.parse(created.createdAt) }.getOrNull(),
+                            spawnedBy = created.spawnedBy,
+                            parentTitle = created.parentTitle,
+                        ),
+                    ) + sessions
+                ).sortedForList()
             }
         }
         events.onLogsIssuesChanged {
@@ -3445,6 +3472,84 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         mcpSignInDismissed = names
         saveUiPrefs()
         putUiPref { put("mcpSignInDismissed", JsonArray(names.map(::JsonPrimitive))) }
+    }
+
+    /**
+     * Hides or shows linked sessions in [chatId]'s list (`setSessionsUnlinked`), synced across
+     * devices via `/api/settings/ui-prefs`.
+     */
+    fun setSessionsUnlinked(
+        chatId: String,
+        ids: Collection<String>,
+        unlink: Boolean,
+        atProvider: (String) -> Long = { 0L },
+    ) {
+        val next = updateUnlinks(unlinkedSessions, chatId, ids, unlink, atProvider)
+        if (next == unlinkedSessions) return
+        unlinkedSessions = next
+        saveUiPrefs()
+        putUiPref { put("unlinkedSessions", LinkedSessionUnlinks.encode(next)) }
+    }
+
+    /** Seeds `/ws/global`'s link map for [sessionId] from `/chat/sessions/:id/links`. */
+    suspend fun seedSessionLinks(projectName: String, sessionId: String) {
+        val client = api ?: return
+        val links = quietly { client.sessionLinks(projectName, sessionId) } ?: return
+        if (links.isNotEmpty()) events?.seedSessionLinks(sessionId, links)
+    }
+
+    /** Stops every running direct child session created by [sessionId]. */
+    suspend fun stopChildSessions(projectName: String, sessionId: String) {
+        val client = api ?: throw IllegalStateException("Not connected")
+        client.stopChildSessions(projectName, sessionId)
+    }
+
+    /**
+     * Opens a linked session (`openLinkedSession`): switches to [projectName] first if needed,
+     * otherwise opens or focuses its chat tab in the current workspace.
+     */
+    fun openLinkedSession(projectName: String, sessionId: String, providerId: String, title: String) {
+        val canonical = if (sessionId.startsWith("chat:")) sessionId.substringAfter('/') else sessionId
+        val resolvedProvider = providerId.ifEmpty {
+            sessions.firstOrNull { it.id == canonical }?.providerId ?: "claude"
+        }
+        val resolvedTitle = title.ifEmpty { "Chat" }
+        if (projectName != selectedProject) {
+            if (projects.none { it.name == projectName }) return
+            scope.launch {
+                openProject(projectName) { store ->
+                    store.openTab(
+                        NewTab(
+                            type = "chat",
+                            title = resolvedTitle,
+                            projectId = projectName,
+                            metadata = buildJsonObject {
+                                put("projectName", projectName)
+                                put("sessionId", canonical)
+                                put("providerId", resolvedProvider)
+                            },
+                        ),
+                    )
+                    events?.markRead(canonical)
+                }
+            }
+            return
+        }
+        withWorkspace { store ->
+            store.openTab(
+                NewTab(
+                    type = "chat",
+                    title = resolvedTitle,
+                    projectId = projectName,
+                    metadata = buildJsonObject {
+                        put("projectName", projectName)
+                        put("sessionId", canonical)
+                        put("providerId", resolvedProvider)
+                    },
+                ),
+            )
+            events?.markRead(canonical)
+        }
     }
 
     /** `findByOutput`: the open chat tab and command a `.output` file name belongs to, across every chat. */
