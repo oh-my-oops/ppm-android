@@ -216,21 +216,21 @@ internal fun StatusTile(file: ChangedFile) {
     val letter = GitChangesView.changeLetter(file)
     val conflict = file.conflict
     val tone = when {
-        conflict || letter == "D" -> tokens.error
+        conflict || letter == "D" || letter == "U" -> tokens.error
         letter == "A" -> tokens.success
-        letter == "R" -> tokens.info
+        letter == "R" -> tokens.accent
         else -> tokens.warning
     }
     Box(
         modifier = Modifier
-            .size(14.dp)
-            .clip(RoundedCornerShape(3.dp))
-            .background(tone.opacity(0.15).color),
+            .size(18.dp)
+            .clip(RoundedCornerShape(5.dp))
+            .background(tone.opacity(0.14).color),
         contentAlignment = Alignment.Center,
     ) {
         BasicText(
             text = letter,
-            style = PpmFont.mono(10, FontWeight.Bold, lineHeight = 10, color = tone.color),
+            style = PpmFont.mono(11, FontWeight.SemiBold, lineHeight = 11, color = tone.color),
         )
     }
 }
@@ -346,19 +346,19 @@ internal fun CheckCell(
 @Composable
 internal fun CountChip(count: Int, errorTone: Boolean = false) {
     val tokens = LocalPpmTokens.current
-    val bg = if (errorTone) tokens.error.opacity(0.15).color else tokens.panel2.color
+    val bg = if (errorTone) tokens.error.opacity(0.15).color else tokens.text.opacity(0.08).color
     val fg = if (errorTone) tokens.error.color else tokens.text2.color
     Box(
         modifier = Modifier
-            .height(16.dp)
+            .height(15.dp)
             .clip(CircleShape)
             .background(bg)
-            .padding(horizontal = 5.dp),
+            .padding(horizontal = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         BasicText(
             text = "$count",
-            style = PpmFont.mono(10, FontWeight.Medium, lineHeight = 12, color = fg),
+            style = PpmFont.mono(11, FontWeight.Medium, lineHeight = 14, color = fg),
         )
     }
 }
@@ -985,6 +985,8 @@ internal fun GitCommitComposer(
         "Message (Ctrl+↵ to commit)"
     }
 
+    var inputFocused by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -995,29 +997,32 @@ internal fun GitCommitComposer(
                     Modifier.edge(Edge.Bottom, tokens.border.color)
                 },
             )
-            .padding(8.dp)
+            .padding(10.dp)
             .testTag("git-commit-composer"),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        val inputShape = RoundedCornerShape(6.dp)
+        val inputShape = RoundedCornerShape(10.dp)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 56.dp, max = 140.dp)
+                .heightIn(min = if (mobile) 52.dp else 58.dp, max = 140.dp)
                 .clip(inputShape)
-                .background(tokens.panel2.color)
-                .cssBorder(tokens.border.color, inputShape)
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .background(tokens.bgSolid.color)
+                .cssBorder(if (inputFocused) tokens.accent.color else tokens.border.color, inputShape)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
             BasicTextField(
                 value = message,
                 onValueChange = onMessageChange,
-                textStyle = PpmFont.sans(12, lineHeight = 16, color = tokens.text.color),
+                textStyle = PpmFont.sans(13, lineHeight = 19, color = tokens.text.color),
                 cursorBrush = SolidColor(tokens.accent.color),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("git-commit-input")
-                    .onFocusChanged { onInputFocusChanged?.invoke(it.isFocused) }
+                    .onFocusChanged {
+                        inputFocused = it.isFocused
+                        onInputFocusChanged?.invoke(it.isFocused)
+                    }
                     .onPreviewKeyEvent { ev ->
                         if (ev.type == KeyEventType.KeyDown && ev.key == Key.Enter && (ev.isCtrlPressed || ev.isMetaPressed)) {
                             if (ready) onCommit(false, false, false)
@@ -1030,7 +1035,7 @@ internal fun GitCommitComposer(
                     if (message.isEmpty()) {
                         BasicText(
                             text = placeholderText,
-                            style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color),
+                            style = PpmFont.sans(13, lineHeight = 19, color = tokens.text3.color),
                         )
                     }
                     inner()
@@ -1039,19 +1044,21 @@ internal fun GitCommitComposer(
         }
 
         Box(Modifier.fillMaxWidth()) {
-            val btnShape = RoundedCornerShape(6.dp)
+            val radius = if (mobile) 10.dp else 6.dp
+            val leftShape = RoundedCornerShape(topStart = radius, bottomStart = radius)
+            val rightShape = RoundedCornerShape(topEnd = radius, bottomEnd = radius)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(barHeight)
-                    .clip(btnShape)
-                    .background(tokens.accent.color),
+                    .height(barHeight),
             ) {
                 Row(
                     modifier = Modifier
                         .weight(1f)
                         .height(barHeight)
-                        .alpha(if (ready) 1f else 0.4f)
+                        .alpha(if (ready) 1f else 0.5f)
+                        .clip(leftShape)
+                        .background(tokens.accent.color)
                         .clickable(enabled = ready) { onCommit(false, false, false) }
                         .padding(horizontal = 12.dp)
                         .testTag("git-commit-button"),
@@ -1063,14 +1070,16 @@ internal fun GitCommitComposer(
                     } else {
                         PpmIcon(ProductIcon.Check, size = 14.dp, tint = tokens.accentFg.color)
                     }
-                    BasicText(label, style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.accentFg.color))
+                    BasicText(label, style = PpmFont.sans(13, FontWeight.Medium, lineHeight = 16, color = tokens.accentFg.color))
                 }
                 Box(
                     modifier = Modifier
                         .width(triggerWidth)
                         .height(barHeight)
+                        .alpha(if (busyAction == null) 1f else 0.5f)
+                        .clip(rightShape)
+                        .background(tokens.accent.color)
                         .cssBorder(tokens.accentFg.opacity(0.2).color, sides = CssSides.Start)
-                        .alpha(if (busyAction == null) 1f else 0.4f)
                         .clickable(enabled = busyAction == null) { menuOpen = !menuOpen }
                         .testTag("git-commit-more-button"),
                     contentAlignment = Alignment.Center,
