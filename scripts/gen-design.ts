@@ -246,9 +246,11 @@ ${lucideIcons.map(({ name, paths }) => `            ${name} -> listOf(${paths.ma
 
 const logoSource = await Bun.file(resolve(repo, "src/web/lib/provider-logos.tsx")).text();
 const logoPaths: Record<string, string> = {};
-for (const name of ["Claude", "Codex", "Cursor", "Gemini"]) {
+for (const name of ["Claude", "Codex", "Cursor", "Gemini", "Antigravity"]) {
   const body = new RegExp(`export function ${name}Logo[\\s\\S]*?\\n}\\n`).exec(logoSource)?.[0];
-  const d = body && /\bd="([^"]+)"/.exec(body)?.[1];
+  const inline = body && /\bd="([^"]+)"/.exec(body)?.[1];
+  const ref = !inline && body ? /\bd=\{([A-Z0-9_]+)\}/.exec(body)?.[1] : undefined;
+  const d = inline ?? (ref ? new RegExp(`const ${ref}\\s*=\\s*"([^"]+)"`, "s").exec(logoSource)?.[1] : undefined);
   if (!d) throw new Error(`No path for ${name}Logo`);
   logoPaths[name.toLowerCase()] = d;
 }

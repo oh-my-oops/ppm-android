@@ -149,18 +149,21 @@ private fun svgNumberEnd(d: String, start: Int): Int {
 /** The AI providers' own logos, as the web draws them (src/web/lib/provider-logos.tsx). */
 object ProviderLogos {
     /** Providers with artwork; others get the lettered tile. */
-    fun has(providerId: String) = providerId in setOf("claude", "codex", "cursor", "gemini")
+    fun has(providerId: String) = providerId in setOf("claude", "codex", "cursor", "gemini", "antigravity")
 
     private val paths = ConcurrentHashMap<String, Path>()
 
+    internal fun pathData(providerId: String): String? = when (providerId) {
+        "claude" -> ProviderLogoPaths.CLAUDE
+        "codex" -> ProviderLogoPaths.CODEX
+        "cursor" -> ProviderLogoPaths.CURSOR
+        "gemini" -> ProviderLogoPaths.GEMINI
+        "antigravity" -> ProviderLogoPaths.ANTIGRAVITY
+        else -> null
+    }
+
     internal fun path(providerId: String): Path? {
-        val d = when (providerId) {
-            "claude" -> ProviderLogoPaths.CLAUDE
-            "codex" -> ProviderLogoPaths.CODEX
-            "cursor" -> ProviderLogoPaths.CURSOR
-            "gemini" -> ProviderLogoPaths.GEMINI
-            else -> return null
-        }
+        val d = pathData(providerId) ?: return null
         return paths.getOrPut(providerId) {
             PathParser().parsePathString(separateArcFlags(d)).toPath().apply {
                 if (providerId == "codex" || providerId == "cursor") fillType = PathFillType.EvenOdd
@@ -193,6 +196,43 @@ fun ProviderLogo(providerId: String, size: Dp, foreground: Color, modifier: Modi
                     drawPath(path, linear("#08B962", Offset(7f, 15.5f), Offset(11f, 12f), 1f))
                     drawPath(path, linear("#F94543", Offset(8f, 5.5f), Offset(11.5f, 11f), 1f))
                     drawPath(path, linear("#FABC12", Offset(3.5f, 13.5f), Offset(17.5f, 12f), 0.46f))
+                }
+                "antigravity" -> {
+                    // Google Antigravity "A" arch mark: a blue base with green-yellow (top-left),
+                    // red-orange (top-right), and peach-gold (apex) radial washes.
+                    drawPath(
+                        path,
+                        Brush.linearGradient(0f to hex("#3186FF"), 1f to hex("#4D9AF9"), start = Offset(12f, 9f), end = Offset(12f, 21.2f)),
+                    )
+                    drawPath(
+                        path,
+                        Brush.radialGradient(
+                            0f to hex("#FABC12"),
+                            0.45f to hex("#4BC76E"),
+                            1f to hex("#3FA3BD", 0.0),
+                            center = Offset(8.6f, 5.0f),
+                            radius = 7.5f,
+                        ),
+                    )
+                    drawPath(
+                        path,
+                        Brush.radialGradient(
+                            0f to hex("#F9543F"),
+                            0.5f to hex("#EB6E55", 0.75),
+                            1f to hex("#808ADB", 0.0),
+                            center = Offset(15.2f, 4.8f),
+                            radius = 7.5f,
+                        ),
+                    )
+                    drawPath(
+                        path,
+                        Brush.radialGradient(
+                            0f to hex("#FBBE94"),
+                            1f to hex("#FBBE94", 0.0),
+                            center = Offset(12f, 3.0f),
+                            radius = 3.2f,
+                        ),
+                    )
                 }
             }
         }

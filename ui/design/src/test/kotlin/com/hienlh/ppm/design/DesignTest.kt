@@ -77,7 +77,13 @@ class DesignTest {
     @Test
     fun `every provider logo arc is read as the circle its artwork draws`() {
         // A flag read as a number shifts every argument after it: radii, rotation and count go wrong.
-        val logos = mapOf("claude" to ProviderLogoPaths.CLAUDE, "codex" to ProviderLogoPaths.CODEX, "cursor" to ProviderLogoPaths.CURSOR, "gemini" to ProviderLogoPaths.GEMINI)
+        val logos = mapOf(
+            "claude" to ProviderLogoPaths.CLAUDE,
+            "codex" to ProviderLogoPaths.CODEX,
+            "cursor" to ProviderLogoPaths.CURSOR,
+            "gemini" to ProviderLogoPaths.GEMINI,
+            "antigravity" to ProviderLogoPaths.ANTIGRAVITY,
+        )
         val counts = logos.mapValues { (id, d) ->
             val arcs = addPathNodes(separateArcFlags(d)).mapNotNull {
                 when (it) {
@@ -89,23 +95,22 @@ class DesignTest {
             for ((rx, ry, theta) in arcs) assertTrue("$id: $rx $ry $theta", rx > 0f && rx == ry && theta == 0f)
             arcs.size
         }
-        assertEquals(mapOf("claude" to 1, "codex" to 24, "cursor" to 6, "gemini" to 13), counts)
+        assertEquals(mapOf("claude" to 1, "codex" to 24, "cursor" to 6, "gemini" to 13, "antigravity" to 0), counts)
     }
 
     @Test
     fun `provider logos are there`() {
-        for (id in listOf("claude", "codex", "cursor", "gemini")) {
+        for (id in listOf("claude", "codex", "cursor", "gemini", "antigravity")) {
             assertTrue(id, ProviderLogos.has(id))
-            assertTrue(id, addPathNodes(
-                when (id) {
-                    "claude" -> ProviderLogoPaths.CLAUDE
-                    "codex" -> ProviderLogoPaths.CODEX
-                    "cursor" -> ProviderLogoPaths.CURSOR
-                    else -> ProviderLogoPaths.GEMINI
-                },
-            ).size > 1)
+            val d = ProviderLogos.pathData(id)
+            assertTrue(id, d != null && addPathNodes(separateArcFlags(d)).size > 1)
         }
+        val agyNodes = addPathNodes(separateArcFlags(ProviderLogos.pathData("antigravity")!!))
+        assertEquals(PathNode.MoveTo(12f, 2.8f), agyNodes.first())
+        assertEquals(PathNode.Close, agyNodes.last())
+        assertEquals(14, agyNodes.count { it is PathNode.CurveTo })
         assertFalse(ProviderLogos.has("mock"))
+        assertNull(ProviderLogos.pathData("mock"))
     }
 
     @Test
