@@ -107,11 +107,10 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     LaunchedEffect(windowFocused) {
         kb.onWindowFocusChanged(windowFocused)
     }
-    LaunchedEffect(visible, state.exited, state.error) {
+    LaunchedEffect(visible, state.exited) {
         kb.onTerminalLivenessChanged(
             visible = visible,
             exited = state.exited,
-            hasError = state.error != null,
             hideKeyboard = { imeController?.hideKeyboard() },
             releaseFocus = { TextInputFocus.releaseNative(session) },
         )
@@ -354,18 +353,17 @@ internal class TerminalKeyboardState {
     }
 
     /**
-     * A transient socket reconnect drops `connected` or `shellReady` (`inputReady == false`) while the tab stays
-     * visible and alive; keep `keyboardRequested` and `terminalFocused` across the reconnect so the soft keyboard
-     * returns when `inputReady` comes back. Only hide and clear when the tab is hidden, exited, or in error.
+     * A transient socket reconnect drops `connected` or `shellReady` and sets `state.error` (`inputReady == false`)
+     * while the tab stays visible and alive; keep `keyboardRequested` and `terminalFocused` across the reconnect so
+     * the soft keyboard returns when `inputReady` comes back. Only hide and clear when the tab is hidden or exited.
      */
     fun onTerminalLivenessChanged(
         visible: Boolean,
         exited: Boolean,
-        hasError: Boolean,
         hideKeyboard: () -> Unit,
         releaseFocus: () -> Unit,
     ) {
-        if (!visible || exited || hasError) {
+        if (!visible || exited) {
             keyboardRequested = false
             hideKeyboard()
         }
