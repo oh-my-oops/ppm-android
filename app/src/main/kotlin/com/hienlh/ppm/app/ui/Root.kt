@@ -50,9 +50,12 @@ import com.hienlh.ppm.app.LightboxRequest
 import com.hienlh.ppm.app.leavesTextOnTap
 import com.hienlh.ppm.app.ui.extensions.ExtensionOverlays
 import com.hienlh.ppm.app.ui.tablet.TabletShell
+import com.hienlh.ppm.client.designListSystems
 import com.hienlh.ppm.design.ImageViewer
 import com.hienlh.ppm.design.LocalIconFramework
 import com.hienlh.ppm.design.LocalImageViewer
+import com.hienlh.ppm.protocol.array
+import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmThemeProvider
 import kotlinx.coroutines.launch
@@ -209,5 +212,75 @@ private fun Dialogs(model: AppModel) {
             onConfirm = { model.scope.launch { model.deleteSessions(days) } },
             onDismiss = { deleteOlderThan = null },
         )
+    }
+    val designProj = model.newDesignProject
+    val api = model.api
+    if (designProj != null && api != null) {
+        var systems by remember(designProj, api) { mutableStateOf(emptyList<com.hienlh.ppm.state.design.DesignSystemSummary>()) }
+        LaunchedEffect(designProj, api) {
+            val rawSys = runCatching { api.designListSystems(designProj) }.getOrNull()
+            val sysArr = rawSys?.get("systems")?.array ?: rawSys?.array.orEmpty()
+            systems = sysArr.mapNotNull { com.hienlh.ppm.state.design.DesignSystemSummary.fromJson(it) }
+        }
+        com.hienlh.ppm.app.ui.design.NewDesignDialog(
+            api = api,
+            projectName = designProj,
+            systems = systems,
+            onDismiss = { model.newDesignProject = null },
+            onCreated = { created, chosenProvider ->
+                model.newDesignProject = null
+                model.openDesignTab(
+                    slug = created.slug,
+                    title = created.title,
+                    projectName = designProj,
+                    sessionId = created.sessionId,
+                    providerId = chosenProvider ?: created.providerId,
+                    fresh = true,
+                )
+            },
+        )
+    }
+    if (model.comparePickerOpen) {
+        val project = model.selectedProject
+        val allTabs = model.layout?.panels?.values?.flatMap { it.tabs }.orEmpty()
+        val openTabs = remember(allTabs) {
+            allTabs.mapNotNull { t ->
+                val p = t.metaString("filePath") ?: t.metaString("path") ?: return@mapNotNull null
+                com.hienlh.ppm.state.editor.CompareCandidate(
+                    id = "tab:${t.id}",
+                    path = p,
+                    label = p.substringAfterLast('/').substringAfterLast('\\'),
+                    source = "tab",
+                )
+            }
+        }
+        val indexState = model.fileIndex?.state?.collectAsState()?.value
+        val indexedPaths = remember(indexState?.entries) {
+            indexState?.entries.orEmpty().filter { !it.isDirectory }.map { it.path }
+        }
+        androidx.compose.ui.window.Dialog(onDismissRequest = { model.comparePickerOpen = false }) {
+            com.hienlh.ppm.app.ui.editor.CompareFilesDialogContent(
+                initialSelectionA = com.hienlh.ppm.app.ui.editor.SharedCompareStore.store.selection,
+                candidates = com.hienlh.ppm.state.editor.buildCompareCandidates(openTabs, indexedPaths),
+                onPickPair = { selA, candB ->
+                    model.comparePickerOpen = false
+                    com.hienlh.ppm.app.ui.editor.SharedCompareStore.store.clearSelection()
+                    val proj = selA.projectName.ifEmpty { project.orEmpty() }
+                    model.openWorkspaceTab(
+                        type = "git-diff",
+                        title = com.hienlh.ppm.state.editor.formatCompareTabTitle(selA.filePath, candB.path),
+                        projectId = proj.ifEmpty { null },
+                        metadata = kotlinx.serialization.json.JsonObject(
+                            buildMap {
+                                if (proj.isNotEmpty()) put("projectName", kotlinx.serialization.json.JsonPrimitive(proj))
+                                put("file1", kotlinx.serialization.json.JsonPrimitive(selA.filePath))
+                                put("file2", kotlinx.serialization.json.JsonPrimitive(candB.path))
+                            },
+                        ),
+                    )
+                },
+                onClose = { model.comparePickerOpen = false },
+            )
+        }
     }
 }

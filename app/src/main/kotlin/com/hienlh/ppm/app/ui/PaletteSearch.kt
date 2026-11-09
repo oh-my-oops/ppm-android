@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui
 
+import androidx.compose.ui.graphics.vector.ImageVector
 import com.hienlh.ppm.chat.FileTargets
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.protocol.FileEntry
@@ -43,6 +44,7 @@ internal class PaletteItem(
     val shortcut: String? = null,
     /** An action's icon; a file is drawn with its own. */
     val icon: ProductIcon? = null,
+    val iconVector: ImageVector? = null,
     /** Excluded by `.gitignore`: drawn at 60% with a tooltip. */
     val ignored: Boolean = false,
     val action: (() -> Unit)? = null,

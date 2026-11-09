@@ -1291,6 +1291,15 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** Whether the Cloud & Share popover (tablet rail) or bottom sheet (phone) is open. */
     var cloudShareOpen by mutableStateOf(false)
 
+    /** Project name when the New Design dialog is requested from the command palette; null while closed. */
+    var newDesignProject by mutableStateOf<String?>(null)
+
+    /** Whether the global Compare Files picker dialog is open. */
+    var comparePickerOpen by mutableStateOf(false)
+
+    /** One-shot request to open the phone navigation drawer on a given section id. */
+    var mobileDrawerOpenRequest by mutableStateOf<String?>(null)
+
     /** The keyboard shortcuts in force: the server's overrides over the web's defaults. */
     var keyBindings by mutableStateOf(KeyBindings())
         private set
@@ -4123,6 +4132,16 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         sidebarTab = id
         saveUiPrefs()
         putUiPref { put("sidebarActiveTab", id) }
+    }
+
+    /** Shows [id] in the sidebar without folding an already-open panel (`setSidebarActiveTab` / `showSection`). */
+    fun showSidebarSection(id: String) {
+        openSidebarSection(id)
+        if (wide) {
+            if (sidebarCollapsed) toggleSidebar()
+        } else {
+            mobileDrawerOpenRequest = id
+        }
     }
 
     /** The tab bar's "Wrap Tabs" / "Scroll Tabs". */

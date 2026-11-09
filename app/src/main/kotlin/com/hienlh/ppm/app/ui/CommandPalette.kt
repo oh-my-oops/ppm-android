@@ -1,7 +1,10 @@
 package com.hienlh.ppm.app.ui
 
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.horizontalScroll
@@ -39,6 +42,7 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -53,16 +57,20 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
@@ -79,13 +87,19 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.liftsAsTap
+import com.hienlh.ppm.app.ui.editor.DeviceLspPreference
+import com.hienlh.ppm.app.ui.editor.SharedCompareStore
+import com.hienlh.ppm.app.ui.extensions.ExtensionIcons
 import com.hienlh.ppm.app.ui.tablet.Edge
 import com.hienlh.ppm.app.ui.tablet.edge
+import com.hienlh.ppm.client.designList
 import com.hienlh.ppm.client.fsList
 import com.hienlh.ppm.design.FileIcon
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.LucideIcon
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
@@ -98,21 +112,38 @@ import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
+import com.hienlh.ppm.design.vector
 import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.FileEntry
+import com.hienlh.ppm.protocol.array
+import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.state.FileIndexStore
+import com.hienlh.ppm.state.database.nextQueryNumber
+import com.hienlh.ppm.state.database.queryTabMetadata
+import com.hienlh.ppm.state.design.DesignSummary
+import com.hienlh.ppm.state.editor.CompareSelection
 import com.hienlh.ppm.state.formatShortcut
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /** Tailwind's `shadow-2xl`. */
 internal val SHADOW_2XL = ThemeShadow(0.0, 25.0, 50.0, -12.0, Rgba(0.0, 0.0, 0.0, 0.25))
 
 /** One action (`CommandItem`): what it is called, the words that also find it, its shortcut, what it does. */
-private fun action(label: String, icon: ProductIcon, words: String, shortcut: String?, run: () -> Unit) =
+private fun action(
+    label: String,
+    icon: ProductIcon? = null,
+    iconVector: ImageVector? = null,
+    words: String,
+    hint: String? = null,
+    shortcut: String? = null,
+    run: () -> Unit,
+) =
     // The web searches the words alone, so typing "settings" never finds Settings; the label is searched here too.
-    PaletteItem(PaletteGroup.ACTION, label, "$label $words", shortcut = shortcut, icon = icon, action = run)
+    PaletteItem(PaletteGroup.ACTION, label, "$label $words", hint = hint, shortcut = shortcut, icon = icon, iconVector = iconVector, action = run)
 
 /**
  * The command palette (command-palette.tsx): a search over the app's actions, the open project's
@@ -132,74 +163,162 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
     val mobile = LocalPpmMobile.current
     val query = rememberTextFieldState(initialQuery)
     val focus = remember { FocusRequester() }
+    var quietFocus by remember { mutableStateOf(true) }
+    val softwareKeyboard = LocalSoftwareKeyboardController.current
     val list = rememberLazyListState()
     var selected by remember { mutableIntStateOf(0) }
     var activeGroups by remember { mutableStateOf(emptySet<PaletteGroup>()) }
     val bindings = model.keyBindings
     val extContribs = model.extensions?.contributions?.collectAsState()?.value
-    val androidAvailable = model.androidAvailable
-    val remoteDesktopAvailable = model.remoteDesktopAvailable
-    val actions = remember(model, bindings, extContribs, androidAvailable, remoteDesktopAvailable) {
+    val lspEnabled by DeviceLspPreference.enabled.collectAsState()
+    val project = model.selectedProject
+    val api = model.api
+    var designs by remember(project) { mutableStateOf(emptyList<DesignSummary>()) }
+    LaunchedEffect(project, api) {
+        if (project == null || api == null) {
+            designs = emptyList()
+            return@LaunchedEffect
+        }
+        val raw = runCatching { api.designList(project) }.getOrNull()
+        val arr = raw?.get("designs")?.array ?: raw?.array.orEmpty()
+        designs = arr.mapNotNull { DesignSummary.fromJson(it) }
+    }
+    val actions = remember(model, bindings, extContribs, mobile, lspEnabled, project, designs) {
         fun run(action: () -> Unit): () -> Unit = {
             onDismiss()
             action()
         }
         val builtIn = buildList {
-            add(action("New AI Chat", ProductIcon.MessageSquare, "ai assistant claude", formatShortcut(bindings.binding("open-chat")), run { model.newChat() }))
+            add(action("New AI Chat", ProductIcon.MessageSquare, words = "ai assistant claude", shortcut = formatShortcut(bindings.binding("open-chat")), run = run { model.newChat() }))
+            add(action("New File", ProductIcon.FilePlus, words = "create untitled blank empty", shortcut = formatShortcut(bindings.binding("new-file")), run = run { model.openNewFile() }))
+            add(action("New DB Query", ProductIcon.Database, words = "sql database query scratchpad new", run = run {
+                val existingTabs = model.layout?.panels?.values?.flatMap { it.tabs }.orEmpty()
+                val qNum = nextQueryNumber(existingTabs)
+                model.openWorkspaceTab(type = "db-query", title = "Query $qNum", metadata = queryTabMetadata(sql = "", queryNumber = qNum))
+            }))
             // A terminal tab in the focused panel (the first on a phone), as the web opens it; the terminal panel is the nav bar's and Ctrl+`'s.
-            add(action("New Terminal", ProductIcon.Terminal, "bash shell console", formatShortcut(bindings.binding("open-terminal")), run { model.openTerminal(inDock = false) }))
-            add(action("Voice Input", ProductIcon.Mic, "speech microphone dictate voice", formatShortcut(bindings.binding("voice-input")), run { model.toggleVoiceInput() }))
-            add(action("Settings", ProductIcon.Settings, "config preferences theme", formatShortcut(bindings.binding("open-settings")), run { model.openSettings() }))
-            add(action("Open File Explorer", ProductIcon.AppWindow, "open file explorer finder browse files folders disk drive window", null, run { model.openExplorer() }))
-            if (androidAvailable) {
-                add(action("Android Devices", ProductIcon.Smartphone, "android emulator avd device virtual phone tablet", null, run { model.openAndroid() }))
+            add(action("New Terminal", ProductIcon.Terminal, words = "bash shell console", shortcut = formatShortcut(bindings.binding("open-terminal")), run = run { model.openTerminal(inDock = false) }))
+            add(action("Remote Access", ProductIcon.MonitorSmartphone, words = "remote access tunnel cloudflare tailscale public link share url phone domain", run = run { model.openSettings("remote-access") }))
+            add(action("Open Web Preview / Forward a Port", ProductIcon.Globe, words = "forward port forwarding localhost web preview browser tab open website tunnel cloudflare tailscale dev server url", run = run { model.openPortForwarding() }))
+            add(action("PPM Cloud & Share", ProductIcon.Cloud, words = "cloud permanent link alias share phone remote device qr sign in login", run = run { model.cloudShareOpen = true }))
+            add(action("New connection…", ProductIcon.Database, words = "database connection postgres pg mysql mariadb sqlite add", run = run {
+                model.openWorkspaceTab(type = "db-connection", title = "New Connection", metadata = buildJsonObject {})
+            }))
+            add(action("Voice Input", ProductIcon.Mic, words = "speech microphone dictate voice", shortcut = formatShortcut(bindings.binding("voice-input")), run = run { model.toggleVoiceInput() }))
+            add(action("Git Status", iconVector = LucideIcon.GitCommitHorizontal.vector, words = "changes diff staged", shortcut = formatShortcut(bindings.binding("open-git-status")), run = run { model.showSidebarSection("git") }))
+            add(action("Problems", ProductIcon.CircleX, words = "errors warnings diagnostics lint typescript", shortcut = formatShortcut(bindings.binding("open-problems")), run = run { model.openProblems() }))
+            add(action(
+                label = "Toggle Word Wrap",
+                icon = ProductIcon.WrapText,
+                words = "wrap unwrap word lines editor soft",
+                shortcut = if (mobile) null else "Alt+Z",
+                run = run { model.setWordWrapPref(!(if (model.wide) model.wordWrap else model.mobileWordWrap)) },
+            ))
+            add(action(
+                label = "Compare Files...",
+                icon = ProductIcon.Columns2,
+                words = "diff compare two files select",
+                shortcut = formatShortcut(bindings.binding("compare-files")),
+                run = run {
+                    val focusedPanel = model.layout?.let { it.panels[it.focusedPanelId] }
+                    val activeTab = focusedPanel?.tabs?.firstOrNull { it.id == focusedPanel.activeTabId }
+                    val fp = activeTab?.takeIf { it.type == "editor" }?.let { it.metaString("filePath") ?: it.metaString("path") }
+                    val proj = activeTab?.metaString("projectName") ?: project
+                    if (!fp.isNullOrBlank() && !proj.isNullOrBlank()) {
+                        SharedCompareStore.store.selectForCompare(
+                            CompareSelection(
+                                filePath = fp,
+                                projectName = proj,
+                                dirtyContent = activeTab.metaString("unsavedContent"),
+                            ),
+                        )
+                    }
+                    model.comparePickerOpen = true
+                },
+            ))
+            if (!mobile) {
+                add(action(
+                    label = if (lspEnabled) "Turn Off Language Server" else "Turn On Language Server",
+                    icon = ProductIcon.Zap,
+                    words = "lsp language server completions intellisense hover definition typescript pyright gopls",
+                    hint = "This device",
+                    run = run {
+                        val next = !DeviceLspPreference.enabled.value
+                        DeviceLspPreference.setEnabled(next)
+                        model.setLspEnabledPref(next)
+                    },
+                ))
             }
-            if (remoteDesktopAvailable) {
-                add(action("Remote Desktop", ProductIcon.Monitor, "remote desktop screen share vnc viewer display", null, run { model.openRemoteDesktop() }))
-            }
-            add(action("System Monitor", ProductIcon.Activity, "cpu memory ram disk network gpu processes services monitor", null, run { model.openSystemMonitor() }))
-            add(action("Logs", ProductIcon.ScrollText, "logs output console errors warnings tail", null, run { model.openLogs() }))
-            add(action("Report Bug", ProductIcon.Bug, "bug report github issue crash", null, run { model.openLogs("report") }))
-            add(action("Forward a Port", ProductIcon.Globe, "port forward tunnel tailscale cloudflare preview", null, run { model.openPortForwarding() }))
+            add(action("Settings", ProductIcon.Settings, words = "config preferences theme", shortcut = formatShortcut(bindings.binding("open-settings")), run = run { model.openSettings() }))
+            add(action("Open File Explorer", ProductIcon.AppWindow, words = "open file explorer finder browse files folders disk drive window", run = run { model.openExplorer() }))
+            add(action("System Monitor", ProductIcon.Cpu, words = "task manager activity monitor cpu memory ram disk network gpu processes services apps performance resources", run = run { model.openSystemMonitor() }))
+            add(action("Logs", ProductIcon.ScrollText, words = "logs server errors warnings debug tail ppm.log browser console cloudflared", run = run { model.openLogs() }))
+            add(action("Report a Bug", ProductIcon.Bug, words = "report bug issue github feedback problem crash", run = run { model.openLogs("report") }))
         }
+        val designItems = if (project == null) emptyList() else buildList {
+            add(action("New Design…", ProductIcon.Plus, words = "design mockup prototype page slides deck presentation canvas create", run = run { model.newDesignProject = project }))
+            add(action("Designs", ProductIcon.Palette, words = "design list canvas", run = run { model.showSidebarSection("designs") }))
+            for (d in designs) {
+                add(action(
+                    label = "Open Design: ${d.title}",
+                    icon = ProductIcon.Palette,
+                    words = "design ${d.slug} ${d.kind.wire}",
+                    hint = "designs/${d.slug}",
+                    run = run { model.openDesignTab(slug = d.slug, title = d.title, projectName = project) },
+                ))
+            }
+        }
+        val dbItems = if (mobile) emptyList() else listOf(
+            action(
+                label = "Export database",
+                icon = ProductIcon.ArrowRightFromLine,
+                words = "database export tables csv json excel xlsx xml sql ndjson zip file",
+                run = run {
+                    model.openWorkspaceTab(
+                        type = "db-impexp",
+                        title = "Export",
+                        metadata = buildJsonObject {
+                            put("impexpId", "default")
+                            put("mode", "export")
+                        },
+                    )
+                },
+            ),
+            action(
+                label = "Import data",
+                icon = ProductIcon.Upload,
+                words = "database import upload csv json ndjson file table",
+                run = run {
+                    model.openWorkspaceTab(
+                        type = "db-impexp",
+                        title = "Import",
+                        metadata = buildJsonObject {
+                            put("impexpId", "default")
+                            put("mode", "import")
+                        },
+                    )
+                },
+            ),
+        )
         val extKbs = extContribs?.keybindings.orEmpty()
         val extItems = extContribs?.commands.orEmpty().map { cmd ->
             val kb = extKbs.firstOrNull { it.command == cmd.command }
             val overrideCombo = if (kb != null) bindings.binding("ext:${kb.command}") else ""
             val shortcutCombo = overrideCombo.ifEmpty { kb?.key.orEmpty() }
-            val label = if (!cmd.category.isNullOrEmpty()) "${cmd.category}: ${cmd.title}" else cmd.title
-            val icon = when (cmd.icon) {
-                "git-branch", "git-compare" -> ProductIcon.GitBranch
-                "history" -> ProductIcon.History
-                "users" -> ProductIcon.Users
-                "list-ordered" -> ProductIcon.ListOrdered
-                "refresh" -> ProductIcon.RefreshCw
-                "edit" -> ProductIcon.Pencil
-                "trash" -> ProductIcon.Trash2
-                "plus" -> ProductIcon.Plus
-                "search" -> ProductIcon.Search
-                "database" -> ProductIcon.Database
-                "terminal" -> ProductIcon.Terminal
-                "settings" -> ProductIcon.Settings
-                "file-code" -> ProductIcon.FileCode
-                "globe" -> ProductIcon.Globe
-                else -> ProductIcon.Puzzle
-            }
             action(
-                label = label,
-                icon = icon,
-                words = "extension ${cmd.command} ${cmd.title} ${cmd.category.orEmpty()}",
+                label = cmd.title,
+                iconVector = ExtensionIcons.icon(cmd.icon) ?: ProductIcon.Puzzle.vector,
+                words = "extension ${cmd.command} ${cmd.category.orEmpty()}",
+                hint = cmd.category,
                 shortcut = formatShortcut(shortcutCombo),
                 run = run { model.dispatchExtCommand(cmd.command) },
             )
         }
-        builtIn + extItems
+        builtIn + designItems + dbItems + extItems
     }
     val text = query.text.toString()
     val typed = remember(text) { PaletteQuery(text) }
     val pathMode = isPathQuery(typed.path)
-    val project = model.selectedProject
-    val api = model.api
 
     // The project's files: read as the palette opens, or again if files changed since, and kept
     // current while it stays open. Until they land, whatever the explorer's tree has read.
@@ -275,7 +394,6 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
     val counts = remember(filtered) { groupCounts(filtered) }
     val shown = remember(filtered, activeGroups) { visibleResults(filtered, activeGroups) }
     LaunchedEffect(shown.size) { selected = selected.coerceAtMost(maxOf(shown.size - 1, 0)) }
-    LaunchedEffect(Unit) { focus.requestFocus() }
     // `scrollIntoView({ block: "nearest" })`.
     LaunchedEffect(selected) {
         val info = list.layoutInfo
@@ -325,7 +443,19 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
     if (closedByConnectionLost(onDismiss)) return
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
-        LaunchedEffect(window) { window?.setDimAmount(0f) }
+        SideEffect {
+            window?.setDimAmount(0f)
+            window?.setSoftInputMode(
+                if (quietFocus) WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
+                else WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED,
+            )
+        }
+        val windowFocused = LocalWindowInfo.current.isWindowFocused
+        LaunchedEffect(windowFocused) {
+            if (windowFocused && quietFocus) {
+                focus.requestFocus()
+            }
+        }
         Box(Modifier.fillMaxSize()) {
             Box(
                 Modifier
@@ -336,7 +466,19 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
             val card: @Composable (Modifier, Boolean) -> Unit = { modifier, showEsc ->
                 Column(modifier) {
                     Row(
-                        Modifier.fillMaxWidth().edge(Edge.Bottom, tokens.border.color).padding(horizontal = 12.dp, vertical = 10.dp),
+                        Modifier
+                            .fillMaxWidth()
+                            .edge(Edge.Bottom, tokens.border.color)
+                            .pointerInput(Unit) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                    quietFocus = false
+                                    if (liftsAsTap(down, PointerEventPass.Final)) {
+                                        softwareKeyboard?.show()
+                                    }
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
@@ -357,9 +499,10 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
                                 true
                             },
                             desktopStyle = ppmText(14f, lineHeight = 20f),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go, showKeyboardOnFocus = !quietFocus),
                             onKeyboardAction = { enter() },
                             focusRequester = focus,
+                            onFocusChanged = { if (!it) quietFocus = false },
                         )
                         if (listing) PpmIcon(ProductIcon.Loader2, 14.dp, tokens.text3.color, spinning = true)
                         if (showEsc) Kbd("ESC", horizontal = 6)
@@ -468,8 +611,9 @@ private fun PaletteRow(item: PaletteItem, selected: Boolean, onPick: () -> Unit)
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        when (item.group) {
-            PaletteGroup.FILE -> FileIcon(item.label)
+        when {
+            item.group == PaletteGroup.FILE -> FileIcon(item.label)
+            item.iconVector != null -> PpmIcon(item.iconVector, 16.dp, color)
             else -> PpmIcon(item.icon ?: item.group.icon, 16.dp, color)
         }
         BasicText(

@@ -116,6 +116,12 @@ fun PhoneShell(model: AppModel) {
     var drawerOpen by rememberSaveable { mutableStateOf(false) }
     // The drawer's own section (`activeTab`), kept while it is closed as the web's mounted drawer keeps it.
     var drawerSection by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(model.mobileDrawerOpenRequest) {
+        val req = model.mobileDrawerOpenRequest ?: return@LaunchedEffect
+        drawerSection = req
+        drawerOpen = true
+        model.mobileDrawerOpenRequest = null
+    }
     var projectsOpen by remember { mutableStateOf(false) }
     var tabsOpen by remember { mutableStateOf(false) }
     var tabMenu by remember { mutableStateOf<String?>(null) }
