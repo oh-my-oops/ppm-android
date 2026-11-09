@@ -1606,7 +1606,8 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         projectsLoad = Load.Loading
         try {
             val projects = coroutineScope {
-                val info = async { runCatching { api.info() }.getOrNull() }
+                // A server too old for this app fails the open; any other failure leaves the info out.
+                val info = async { runCatching { api.info() }.getOrElse { if (it is PpmError.OutdatedServer) throw it else null } }
                 val uiPrefs = async { quietly { api.uiPrefs() } }
                 val keys = async { quietly { api.keybindings() } }
                 val projects = api.projects()

@@ -54,7 +54,9 @@ class ApiClient(val baseUrl: HttpUrl, val token: String) {
         } catch (_: PpmError.OutdatedServer) {
             throw PpmError.BadResponse(NOT_PPM)
         }
-        return ServerInfo.from(json) ?: throw PpmError.BadResponse(NOT_PPM)
+        val info = ServerInfo.from(json) ?: throw PpmError.BadResponse(NOT_PPM)
+        if (!info.isSupported) throw PpmError.OutdatedServer()
+        return info
     }
 
     /** Throws [PpmError.Unauthorized] when the password is wrong. */

@@ -155,4 +155,16 @@ class ProtocolTest {
         assertEquals(java.time.Instant.parse("2026-10-19T08:00:00Z"), WireDate.parse(json("\"2026-10-19T08:00:00.000Z\"")))
         assertEquals(java.time.Instant.parse("2026-10-19T08:00:00Z"), WireDate.parse(json("\"2026-10-19T15:00:00+07:00\"")))
     }
+
+    @Test
+    fun `api info carries the protocol and capabilities, and an older server is protocol 0`() {
+        val now = ServerInfo.from(json("""{"version":"0.23.33","protocol":1,"capabilities":["chat","push.webpush"]}"""))!!
+        assertEquals(1, now.protocol)
+        assertTrue(now.has("push.webpush"))
+        assertTrue(!now.has("terminal"))
+        val older = ServerInfo.from(json("""{"version":"0.23.10","minimal_mode":false}"""))!!
+        assertEquals(0, older.protocol)
+        assertTrue(!older.has("chat"))
+        assertTrue("every server so far is readable", older.isSupported)
+    }
 }

@@ -14,8 +14,25 @@ data class ServerInfo(
     val deviceName: String?,
     val tunnelActive: Boolean,
     val minimalMode: Boolean = false,
+    /** Raised by the server on a breaking change; a server older than the field is 0. */
+    val protocol: Int = 0,
+    /** Features the server says it has (`chat`, `push.webpush`); none from a server older than the field. */
+    val capabilities: Set<String> = emptySet(),
 ) {
+    /** Below [MIN_PROTOCOL] the server sends what this app can no longer read: update PPM there. */
+    val isSupported: Boolean get() = protocol >= MIN_PROTOCOL
+
+    /** A feature whose capability the server does not list is hidden, never drawn broken. */
+    fun has(capability: String): Boolean = capability in capabilities
+
     companion object {
+        /**
+         * The oldest server protocol this app reads (docs/architecture/native-protocol.md). Every
+         * server so far works, including those older than the field; raise it only when the app
+         * drops what an older server sends.
+         */
+        const val MIN_PROTOCOL = 0
+
         fun from(json: JsonElement): ServerInfo? {
             val version = json["version"].string ?: return null
             return ServerInfo(
@@ -23,6 +40,8 @@ data class ServerInfo(
                 deviceName = json["device_name"].string,
                 tunnelActive = json["tunnel_active"].bool ?: false,
                 minimalMode = json["minimal_mode"].bool ?: json["minimalMode"].bool ?: false,
+                protocol = json["protocol"].int ?: 0,
+                capabilities = json["capabilities"].array.orEmpty().mapNotNull { it.string }.toSet(),
             )
         }
     }

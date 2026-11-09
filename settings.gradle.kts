@@ -26,5 +26,8 @@ include(":ui:media")
 // with and without it.
 include(":baselineprofile")
 
+// Jetpack Microbenchmark on a device: how long a chat frame takes to decode.
+include(":microbenchmark")
+
 // Opt-in, separately installed editor evaluation; never a production app dependency.
 if (providers.gradleProperty("editorSpike").orNull == "true") include(":editor-spike")
