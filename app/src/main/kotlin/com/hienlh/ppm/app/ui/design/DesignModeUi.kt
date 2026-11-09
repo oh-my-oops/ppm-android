@@ -1,8 +1,15 @@
 package com.hienlh.ppm.app.ui.design
 
+import android.content.ContentResolver
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Environment
+import android.print.PrintAttributes
+import android.print.PrintManager
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
@@ -67,6 +74,7 @@ import com.hienlh.ppm.app.ui.ChatPane
 import com.hienlh.ppm.app.ui.PpmTextField
 import com.hienlh.ppm.app.ui.PrimaryButton
 import com.hienlh.ppm.app.ui.SecondaryButton
+import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.DesignProviderOption
 import com.hienlh.ppm.client.DesignStyleEditResult
 import com.hienlh.ppm.client.DesignTweaksApplyResult
@@ -79,7 +87,6 @@ import com.hienlh.ppm.client.designCreateSystem
 import com.hienlh.ppm.client.designDelete
 import com.hienlh.ppm.client.designDeleteComment
 import com.hienlh.ppm.client.designDeleteSystem
-import com.hienlh.ppm.client.designDownloadExport
 import com.hienlh.ppm.client.designGet
 import com.hienlh.ppm.client.designGetSystemStale
 import com.hienlh.ppm.client.designHeadPreviewGen
@@ -94,10 +101,12 @@ import com.hienlh.ppm.client.designReadTweaks
 import com.hienlh.ppm.client.designRename
 import com.hienlh.ppm.client.designReplyComment
 import com.hienlh.ppm.client.designRestoreHistory
+import com.hienlh.ppm.client.designStreamExport
 import com.hienlh.ppm.client.designSubmitCheckResult
 import com.hienlh.ppm.client.designUndoEdit
 import com.hienlh.ppm.client.designUpdateComment
 import com.hienlh.ppm.client.designUpdateSystem
+import com.hienlh.ppm.client.filenameFromContentDisposition
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -108,21 +117,35 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.client.origin
+import com.hienlh.ppm.protocol.BridgeChildMessage
 import com.hienlh.ppm.protocol.CanvasCheckReport
 import com.hienlh.ppm.protocol.CheckSize
 import com.hienlh.ppm.protocol.LayoutCheckReport
+import com.hienlh.ppm.protocol.MAX_BRIDGE_ISSUES
 import com.hienlh.ppm.protocol.RuntimeIssue
 import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.bool
+import com.hienlh.ppm.protocol.checkRunEnvelope
+import com.hienlh.ppm.protocol.clearSelectionEnvelope
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.newBridgeNonce
 import com.hienlh.ppm.protocol.obj
+import com.hienlh.ppm.protocol.pickerEnvelope
+import com.hienlh.ppm.protocol.pinsSetEnvelope
+import com.hienlh.ppm.protocol.restoreScrollEnvelope
+import com.hienlh.ppm.protocol.selectParentEnvelope
+import com.hienlh.ppm.protocol.slidesExtractEnvelope
 import com.hienlh.ppm.protocol.string
+import com.hienlh.ppm.protocol.transformCancelEnvelope
+import com.hienlh.ppm.protocol.transformModeEnvelope
+import com.hienlh.ppm.protocol.transformNudgeEnvelope
+import com.hienlh.ppm.protocol.transformTargetEnvelope
+import com.hienlh.ppm.protocol.tweakReadEnvelope
+import com.hienlh.ppm.protocol.tweakResetEnvelope
+import com.hienlh.ppm.protocol.tweakSetEnvelope
 import com.hienlh.ppm.protocol.withRuntimeIssues
 import com.hienlh.ppm.state.design.CommentAnchor
-import com.hienlh.ppm.state.design.DesignBridgeChildMsg
-import com.hienlh.ppm.state.design.DesignBridgeParentEnvelopes
 import com.hienlh.ppm.state.design.DesignComment
 import com.hienlh.ppm.state.design.DesignDetail
 import com.hienlh.ppm.state.design.DesignDeviceFrame
@@ -147,6 +170,7 @@ import com.hienlh.ppm.state.design.buildAddTweaksPrompt
 import com.hienlh.ppm.state.design.buildCommentsPrompt
 import com.hienlh.ppm.state.design.buildFixTweaksPrompt
 import com.hienlh.ppm.state.design.buildHandoffPrompt
+import com.hienlh.ppm.state.design.buildPptxArchive
 import com.hienlh.ppm.state.design.canRespondToCanvasCheck
 import com.hienlh.ppm.state.design.commentAnchorToJson
 import com.hienlh.ppm.state.design.computeDeviceFrameScale
@@ -155,15 +179,16 @@ import com.hienlh.ppm.state.design.fitCheckReportUnderLimit
 import com.hienlh.ppm.state.design.hexForColorInput
 import com.hienlh.ppm.state.design.initialDesignPane
 import com.hienlh.ppm.state.design.nextAutoSplit
-import com.hienlh.ppm.state.design.onPreviewExpiredOrTimeout
 import com.hienlh.ppm.state.design.parseDesignComment
 import com.hienlh.ppm.state.design.parseTweaks
 import com.hienlh.ppm.state.design.pendingChanges
 import com.hienlh.ppm.state.design.rangeNumberOf
+import com.hienlh.ppm.state.design.recoverPreviewOnFailure
 import com.hienlh.ppm.state.design.resolveDesignLayout
 import com.hienlh.ppm.state.design.sanitizeTweakValue
 import com.hienlh.ppm.state.design.shownValue
-import com.hienlh.ppm.state.design.validateDesignBridgeChildEnvelope
+import com.hienlh.ppm.state.design.toPickedElement
+import com.hienlh.ppm.state.design.toPinRect
 import com.hienlh.ppm.state.design.variantDisplayName
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.web.FrameChannel
@@ -180,8 +205,10 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.io.ByteArrayInputStream
 import java.io.File
-import java.util.UUID
+import java.io.IOException
+import java.io.InputStream
 import kotlin.math.roundToInt
 
 // ===========================================================================
@@ -1144,7 +1171,7 @@ fun DesignTabBody(
 
     // Transform (Move / Resize) & Undo state
     var transformModeOn by remember(projectName, slug) { mutableStateOf(false) }
-    var armedPpmId by remember(projectName, slug) { mutableStateOf<String?>(null) }
+    var armedPpmId by remember(projectName, slug) { mutableStateOf<Int?>(null) }
     var armedTag by remember(projectName, slug) { mutableStateOf<String?>(null) }
     var lastParentGestureAt by remember(projectName, slug) { mutableStateOf(0L) }
     var styleEditInFlight by remember(projectName, slug) { mutableStateOf(false) }
@@ -1186,7 +1213,7 @@ fun DesignTabBody(
             }
             runCatching { api.designListComments(projectName, slug) }.getOrNull()?.let { json ->
                 val arr = json["comments"]?.array ?: json.array.orEmpty()
-                comments = arr.mapNotNull { parseDesignComment(it) }
+                comments = arr.mapIndexedNotNull { idx, item -> parseDesignComment(item, fallbackNumber = idx + 1) }
             }
             runCatching { api.designReadTweaks(projectName, slug) }.getOrNull()?.let { json ->
                 val parsed = parseTweaks(json["tweaks"])
@@ -1207,35 +1234,31 @@ fun DesignTabBody(
         if (api == null || projectName.isBlank()) return
         if (resetRecovery) {
             hasRecoveredOnce = false
+            previewToken = null
         }
         previewPhase = PreviewPhase.LOADING
         bridgeNonce = newBridgeNonce()
         runtimeIssues.clear()
         blockedNavHref = null
         scope.launch {
-            try {
-                val cap = api.designMintPreview(
-                    projectName = projectName,
-                    slug = slug,
-                    purpose = "canvas",
-                    token = previewToken,
-                    entry = activeVariant,
-                )
-                previewToken = cap.token
-                previewUrl = cap.url
+            val outcome = loadPreviewWithSelfHeal(
+                api = api,
+                projectName = projectName,
+                slug = slug,
+                entry = activeVariant,
+                initialToken = previewToken,
+                initialRecoveredOnce = hasRecoveredOnce,
+                retryDelayMs = 400L,
+            )
+            previewToken = outcome.token
+            hasRecoveredOnce = outcome.hasRecoveredOnce
+            if (outcome.phase == PreviewPhase.DEAD) {
+                previewPhase = PreviewPhase.DEAD
+            } else {
+                previewUrl = outcome.url
                 reloadNonce++
-                val gen = api.designHeadPreviewGen(cap.url)
-                if (!gen.isNullOrBlank()) {
-                    fileGens[activeVariant] = gen
-                }
-            } catch (_: Exception) {
-                val next = onPreviewExpiredOrTimeout(hasRecoveredOnce)
-                if (next == PreviewPhase.RECOVERING) {
-                    hasRecoveredOnce = true
-                    delay(400)
-                    mintAndLoadPreview(resetRecovery = false)
-                } else {
-                    previewPhase = PreviewPhase.DEAD
+                if (!outcome.gen.isNullOrBlank()) {
+                    fileGens[activeVariant] = outcome.gen
                 }
             }
         }
@@ -1270,8 +1293,8 @@ fun DesignTabBody(
             mintAndLoadPreview(resetRecovery = true)
             delay(600)
             if (previewPhase == PreviewPhase.READY) {
-                val reqId = "post-turn-${UUID.randomUUID()}"
-                frameChannel?.post(DesignBridgeParentEnvelopes.checkRun(bridgeNonce, reqId, screenshot = false))
+                val reqId = "post-turn-${newBridgeNonce()}"
+                checkRunEnvelope(reqId, screenshot = false)?.let { frameChannel?.post(it) }
             }
         }
         prevStreaming = isStreaming
@@ -1308,7 +1331,7 @@ fun DesignTabBody(
                 scope.launch {
                     runCatching { api?.designListComments(projectName, slug) }.getOrNull()?.let { json ->
                         val arr = json["comments"]?.array ?: json.array.orEmpty()
-                        comments = arr.mapNotNull { parseDesignComment(it) }
+                        comments = arr.mapIndexedNotNull { idx, item -> parseDesignComment(item, fallbackNumber = idx + 1) }
                     }
                 }
             }
@@ -1319,10 +1342,8 @@ fun DesignTabBody(
                 val isCanvasShown = resolution.mode == "split" || resolution.activePane == DesignPane.CANVAS
                 // Guard: parked/hidden tab or 0x0 canvas NEVER responds to check request!
                 if (canRespondToCanvasCheck(isCanvasShown, canvasWidthPx, canvasHeightPx, previewPhase)) {
-                    val effectiveId = reqId ?: "check-${UUID.randomUUID()}"
-                    frameChannel?.post(
-                        DesignBridgeParentEnvelopes.checkRun(bridgeNonce, effectiveId, wantScreenshot),
-                    )
+                    val effectiveId = reqId ?: newBridgeNonce()
+                    checkRunEnvelope(effectiveId, wantScreenshot)?.let { frameChannel?.post(it) }
                 }
             }
         }
@@ -1339,49 +1360,66 @@ fun DesignTabBody(
     LaunchedEffect(comments, activeVariant, previewPhase) {
         if (previewPhase == PreviewPhase.READY) {
             val forFile = comments.filter { it.file == activeVariant }
-            frameChannel?.post(DesignBridgeParentEnvelopes.pinsSet(bridgeNonce, forFile))
+            pinsSetEnvelope(forFile.map { it.toBridgePinTarget() })?.let { frameChannel?.post(it) }
+        }
+    }
+
+    var pendingSafExport by remember { mutableStateOf<PendingDesignExport?>(null) }
+    val createDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("*/*"),
+    ) { uri: Uri? ->
+        val pending = pendingSafExport
+        pendingSafExport = null
+        if (uri == null || pending == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            completeDesignSafExport(
+                resolver = context.contentResolver,
+                uri = uri,
+                export = pending,
+                api = api,
+                onToast = model::toast,
+            )
         }
     }
 
     // Handle incoming bridge child messages
     fun handleBridgeMessage(raw: kotlinx.serialization.json.JsonElement) {
-        val msg = validateDesignBridgeChildEnvelope(raw, bridgeNonce) ?: return
+        val msg = BridgeChildMessage.parseForNonce(raw, bridgeNonce) ?: return
         when (msg) {
-            is DesignBridgeChildMsg.Ready -> {
+            is BridgeChildMessage.Ready -> {
                 previewPhase = PreviewPhase.READY
                 hasRecoveredOnce = false
+                fileGens[msg.file] = msg.gen
+                fileGens.putAll(msg.cssGens)
                 if (savedScrollX != 0.0 || savedScrollY != 0.0) {
-                    frameChannel?.post(
-                        DesignBridgeParentEnvelopes.restoreScroll(bridgeNonce, savedScrollX, savedScrollY),
-                    )
+                    restoreScrollEnvelope(savedScrollX, savedScrollY)?.let { frameChannel?.post(it) }
                 }
                 val forFile = comments.filter { it.file == activeVariant }
                 if (forFile.isNotEmpty()) {
-                    frameChannel?.post(DesignBridgeParentEnvelopes.pinsSet(bridgeNonce, forFile))
+                    pinsSetEnvelope(forFile.map { it.toBridgePinTarget() })?.let { frameChannel?.post(it) }
                 }
                 if (tweakDefs.isNotEmpty()) {
-                    frameChannel?.post(
-                        DesignBridgeParentEnvelopes.tweakRead(bridgeNonce, tweakDefs.map { it.variable }),
-                    )
+                    tweakReadEnvelope(tweakDefs.map { it.variable })?.let { frameChannel?.post(it) }
                     // Replay unapplied pending tweak edits after reload
-                    for ((k, v) in pendingChanges(tweakDefs, savedTweakValues, currentTweakValues)) {
-                        frameChannel?.post(DesignBridgeParentEnvelopes.tweakSet(bridgeNonce, k, v))
+                    val pending = pendingChanges(tweakDefs, savedTweakValues, currentTweakValues)
+                    if (pending.isNotEmpty()) {
+                        tweakSetEnvelope(pending)?.let { frameChannel?.post(it) }
                     }
                 }
             }
-            is DesignBridgeChildMsg.Scroll -> {
+            is BridgeChildMessage.Scroll -> {
                 savedScrollX = msg.x
                 savedScrollY = msg.y
             }
-            is DesignBridgeChildMsg.Issue -> {
-                if (runtimeIssues.size < 50) {
-                    runtimeIssues.add(RuntimeIssue(msg.kind, msg.message, msg.detail))
+            is BridgeChildMessage.Issue -> {
+                if (runtimeIssues.size < MAX_BRIDGE_ISSUES) {
+                    runtimeIssues.add(RuntimeIssue(msg.kind, msg.message, msg.source, msg.line))
                 }
             }
-            is DesignBridgeChildMsg.NavigateBlocked -> {
+            is BridgeChildMessage.NavigateBlocked -> {
                 blockedNavHref = msg.href
             }
-            is DesignBridgeChildMsg.OpenLink -> {
+            is BridgeChildMessage.OpenLink -> {
                 runCatching {
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(msg.href)).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -1389,47 +1427,49 @@ fun DesignTabBody(
                     context.startActivity(intent)
                 }
             }
-            DesignBridgeChildMsg.Expired -> {
-                val next = onPreviewExpiredOrTimeout(hasRecoveredOnce)
-                if (next == PreviewPhase.RECOVERING) {
-                    hasRecoveredOnce = true
+            is BridgeChildMessage.Expired -> {
+                val recovery = recoverPreviewOnFailure(previewToken, hasRecoveredOnce)
+                hasRecoveredOnce = recovery.hasRecoveredOnce
+                previewToken = recovery.nextToken
+                if (recovery.phase == PreviewPhase.RECOVERING) {
                     mintAndLoadPreview(resetRecovery = false)
                 } else {
                     previewPhase = PreviewPhase.DEAD
                 }
             }
-            is DesignBridgeChildMsg.Hover -> Unit
-            is DesignBridgeChildMsg.Select -> {
-                pickedElement = msg.element
-                if (transformModeOn && msg.element.ppmId != null) {
-                    armedPpmId = msg.element.ppmId
-                    armedTag = msg.element.tag
+            is BridgeChildMessage.Hover -> Unit
+            is BridgeChildMessage.Select -> {
+                val picked = msg.el.toPickedElement()
+                pickedElement = picked
+                if (transformModeOn && picked.ppmId != null) {
+                    armedPpmId = picked.ppmId
+                    armedTag = picked.tag
                     lastParentGestureAt = System.currentTimeMillis()
-                    frameChannel?.post(
-                        DesignBridgeParentEnvelopes.transformTarget(bridgeNonce, msg.element.ppmId),
-                    )
+                    transformTargetEnvelope(picked.ppmId, picked.tag)?.let { frameChannel?.post(it) }
                 }
             }
-            is DesignBridgeChildMsg.ElementMenu -> {
-                pickedElement = msg.element
+            is BridgeChildMessage.ElementMenu -> {
+                pickedElement = msg.el.toPickedElement()
                 sidePanel = DesignSidePanel.COMMENTS
             }
-            DesignBridgeChildMsg.PickerExit -> {
+            is BridgeChildMessage.PickerExit -> {
                 pickerEnabled = false
             }
-            is DesignBridgeChildMsg.PinsRects -> {
+            is BridgeChildMessage.PinsRects -> {
                 pinRects.clear()
-                for (p in msg.pins) pinRects[p.id] = p
+                for (p in msg.pins) pinRects[p.id] = p.toPinRect()
             }
-            is DesignBridgeChildMsg.TweakValues -> {
+            is BridgeChildMessage.TweakValues -> {
                 liveTweakValues.clear()
                 liveTweakValues.putAll(msg.values)
             }
-            is DesignBridgeChildMsg.TransformLive -> Unit
-            is DesignBridgeChildMsg.TransformCommit -> {
+            is BridgeChildMessage.TransformLive -> Unit
+            is BridgeChildMessage.TransformCommit -> {
                 val proposal = TransformProposal(
                     ppmId = msg.ppmId,
                     tag = msg.tag,
+                    file = msg.file,
+                    gen = msg.gen,
                     props = msg.props,
                 )
                 val ctx = ProposalContext(
@@ -1481,21 +1521,33 @@ fun DesignTabBody(
                     is ProposalDecision.Reject -> Unit
                 }
             }
-            is DesignBridgeChildMsg.SlidesData -> {
-                model.toast(
-                    ErrorToastMessage(
-                        "Slides ready (${msg.slides.size} slides)",
-                        "Extracted ${msg.slides.size} slides for PPTX export.",
-                        kind = ErrorToastMessage.Kind.INFO,
-                    ),
-                )
+            is BridgeChildMessage.SlidesData -> {
+                scope.launch {
+                    try {
+                        val pptx = withContext(Dispatchers.Default) {
+                            buildPptxArchive(msg.doc, detail.summary.title)
+                        }
+                        val filename = filenameFromContentDisposition(null, "$slug.pptx")
+                        pendingSafExport = PendingDesignExport.Pptx(
+                            suggestedFilename = filename,
+                            bytes = pptx.bytes,
+                            slideCount = msg.doc.slides.size,
+                            warnings = pptx.warnings,
+                        )
+                        createDocumentLauncher.launch(filename)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        model.toast(ErrorToastMessage("Slides export failed", e.message))
+                    }
+                }
             }
-            is DesignBridgeChildMsg.SlidesError -> {
+            is BridgeChildMessage.SlidesError -> {
                 model.toast(ErrorToastMessage("Slides export failed", msg.message))
             }
-            is DesignBridgeChildMsg.CheckResult -> {
-                pendingCheckScreenshots.remove(msg.requestId)?.complete(msg.screenshotDataUrl)
-                val layoutWithIssues = msg.layout.withRuntimeIssues(runtimeIssues.toList())
+            is BridgeChildMessage.CheckResult -> {
+                pendingCheckScreenshots.remove(msg.requestId)?.complete(msg.report.screenshot?.dataUrl)
+                val layoutWithIssues = msg.report.withRuntimeIssues(runtimeIssues.toList())
                 val fullReport = CanvasCheckReport(
                     layout = layoutWithIssues,
                     file = activeVariant,
@@ -1511,7 +1563,7 @@ fun DesignTabBody(
                     }
                 }
             }
-            is DesignBridgeChildMsg.CheckError -> {
+            is BridgeChildMessage.CheckError -> {
                 pendingCheckScreenshots.remove(msg.requestId)?.complete(null)
                 if (api != null && !msg.requestId.startsWith("handoff-") && !msg.requestId.startsWith("post-turn-")) {
                     val vp = CheckSize(canvasWidthPx.coerceAtLeast(1), canvasHeightPx.coerceAtLeast(1))
@@ -1540,10 +1592,10 @@ fun DesignTabBody(
         scope.launch {
             var screenshot: String? = null
             if (previewPhase == PreviewPhase.READY && frameChannel != null) {
-                val reqId = "handoff-${UUID.randomUUID()}"
+                val reqId = "handoff-${newBridgeNonce()}"
                 val deferred = CompletableDeferred<String?>()
                 pendingCheckScreenshots[reqId] = deferred
-                frameChannel?.post(DesignBridgeParentEnvelopes.checkRun(bridgeNonce, reqId, screenshot = true))
+                checkRunEnvelope(reqId, screenshot = true)?.let { frameChannel?.post(it) }
                 screenshot = withTimeoutOrNull(3_000L) { deferred.await() }
                 pendingCheckScreenshots.remove(reqId)
             }
@@ -1609,7 +1661,7 @@ fun DesignTabBody(
                     val next = !pickerEnabled
                     pickerEnabled = next
                     if (next) transformModeOn = false
-                    frameChannel?.post(DesignBridgeParentEnvelopes.picker(bridgeNonce, next))
+                    frameChannel?.post(pickerEnvelope(next))
                 },
                 transformModeOn = transformModeOn,
                 onToggleTransform = {
@@ -1617,7 +1669,7 @@ fun DesignTabBody(
                     transformModeOn = next
                     if (next) pickerEnabled = false
                     lastParentGestureAt = System.currentTimeMillis()
-                    frameChannel?.post(DesignBridgeParentEnvelopes.transformMode(bridgeNonce, next))
+                    transformModeEnvelope(next, scale = zoom.toDouble())?.let { frameChannel?.post(it) }
                 },
                 undoCount = undoCount,
                 isStreaming = isStreaming,
@@ -1672,21 +1724,21 @@ fun DesignTabBody(
                                 onDismissBlockedNav = { blockedNavHref = null },
                                 onSelectParent = {
                                     lastParentGestureAt = System.currentTimeMillis()
-                                    frameChannel?.post(DesignBridgeParentEnvelopes.selectParent(bridgeNonce))
+                                    frameChannel?.post(selectParentEnvelope())
                                 },
                                 onClearSelection = {
                                     pickedElement = null
                                     armedPpmId = null
-                                    frameChannel?.post(DesignBridgeParentEnvelopes.clearSelection(bridgeNonce))
+                                    frameChannel?.post(clearSelectionEnvelope())
                                 },
                                 onOpenAddComment = { sidePanel = DesignSidePanel.COMMENTS },
                                 onNudge = { dx, dy ->
                                     lastParentGestureAt = System.currentTimeMillis()
-                                    frameChannel?.post(DesignBridgeParentEnvelopes.transformNudge(bridgeNonce, dx, dy))
+                                    transformNudgeEnvelope(dx, dy)?.let { frameChannel?.post(it) }
                                 },
                                 onCancelTransform = {
                                     lastParentGestureAt = System.currentTimeMillis()
-                                    frameChannel?.post(DesignBridgeParentEnvelopes.transformCancel(bridgeNonce))
+                                    frameChannel?.post(transformCancelEnvelope())
                                 },
                                 onManualReload = { mintAndLoadPreview(resetRecovery = true) },
                                 onCanvasMeasured = { w, h ->
@@ -1740,21 +1792,21 @@ fun DesignTabBody(
                             onDismissBlockedNav = { blockedNavHref = null },
                             onSelectParent = {
                                 lastParentGestureAt = System.currentTimeMillis()
-                                frameChannel?.post(DesignBridgeParentEnvelopes.selectParent(bridgeNonce))
+                                frameChannel?.post(selectParentEnvelope())
                             },
                             onClearSelection = {
                                 pickedElement = null
                                 armedPpmId = null
-                                frameChannel?.post(DesignBridgeParentEnvelopes.clearSelection(bridgeNonce))
+                                frameChannel?.post(clearSelectionEnvelope())
                             },
                             onOpenAddComment = { sidePanel = DesignSidePanel.COMMENTS },
                             onNudge = { dx, dy ->
                                 lastParentGestureAt = System.currentTimeMillis()
-                                frameChannel?.post(DesignBridgeParentEnvelopes.transformNudge(bridgeNonce, dx, dy))
+                                transformNudgeEnvelope(dx, dy)?.let { frameChannel?.post(it) }
                             },
                             onCancelTransform = {
                                 lastParentGestureAt = System.currentTimeMillis()
-                                frameChannel?.post(DesignBridgeParentEnvelopes.transformCancel(bridgeNonce))
+                                frameChannel?.post(transformCancelEnvelope())
                             },
                             onManualReload = { mintAndLoadPreview(resetRecovery = true) },
                             onCanvasMeasured = { w, h ->
@@ -1790,14 +1842,12 @@ fun DesignTabBody(
                                 onAddComment = { body ->
                                     val el = pickedElement ?: return@DesignCommentsPanel
                                     val anchor = CommentAnchor(
-                                        selector = el.selector,
+                                        file = el.file.ifBlank { activeVariant },
                                         ppmId = el.ppmId,
+                                        gen = el.gen ?: fileGens[activeVariant],
                                         tag = el.tag,
-                                        textQuote = el.textQuote,
-                                        xPct = el.xPct,
-                                        yPct = el.yPct,
-                                        elXPct = el.elXPct,
-                                        elYPct = el.elYPct,
+                                        cssPath = el.cssPath,
+                                        quote = el.quote,
                                     )
                                     if (api != null) {
                                         scope.launch {
@@ -1869,11 +1919,11 @@ fun DesignTabBody(
                                 onChangeValue = { def, rawVal ->
                                     val clean = sanitizeTweakValue(def, rawVal) ?: return@DesignTweaksPanel
                                     currentTweakValues[def.variable] = clean
-                                    frameChannel?.post(DesignBridgeParentEnvelopes.tweakSet(bridgeNonce, def.variable, clean))
+                                    tweakSetEnvelope(def.variable, clean)?.let { frameChannel?.post(it) }
                                 },
                                 onResetAll = {
                                     currentTweakValues.clear()
-                                    frameChannel?.post(DesignBridgeParentEnvelopes.tweakReset(bridgeNonce))
+                                    tweakResetEnvelope()?.let { frameChannel?.post(it) }
                                 },
                                 onApply = {
                                     val changes = pendingChanges(tweakDefs, savedTweakValues, currentTweakValues)
@@ -1938,40 +1988,25 @@ fun DesignTabBody(
                                 onClose = { sidePanel = DesignSidePanel.NONE },
                                 onDownloadZip = {
                                     if (api == null) return@DesignExportPanel
-                                    scope.launch {
-                                        runCatching { api.designDownloadExport(projectName, slug, "zip") }
-                                            .onSuccess { payload ->
-                                                saveExportToDownloads(payload.filename, payload.bytes)
-                                                model.toast(
-                                                    ErrorToastMessage(
-                                                        "Saved ${payload.filename}",
-                                                        "Downloaded ZIP archive (${payload.bytes.size} bytes).",
-                                                        kind = ErrorToastMessage.Kind.INFO,
-                                                    ),
-                                                )
-                                            }
-                                            .onFailure { model.toast(ErrorToastMessage("ZIP export failed", it.message)) }
-                                    }
+                                    val safeName = filenameFromContentDisposition(null, "$slug.zip")
+                                    pendingSafExport = PendingDesignExport.Zip(
+                                        projectName = projectName,
+                                        slug = slug,
+                                        suggestedFilename = safeName,
+                                    )
+                                    createDocumentLauncher.launch(safeName)
                                 },
                                 onDownloadHtml = {
                                     if (api == null) return@DesignExportPanel
-                                    scope.launch {
-                                        runCatching { api.designDownloadExport(projectName, slug, "html", activeVariant) }
-                                            .onSuccess { payload ->
-                                                saveExportToDownloads(payload.filename, payload.bytes)
-                                                val warnNote = if (payload.warningCount > 0) {
-                                                    " (${payload.warningCount} warning(s): ${payload.warnings.joinToString(", ")})"
-                                                } else ""
-                                                model.toast(
-                                                    ErrorToastMessage(
-                                                        "Saved ${payload.filename}",
-                                                        "Downloaded standalone HTML$warnNote.",
-                                                        kind = if (payload.warningCount > 0) ErrorToastMessage.Kind.ERROR else ErrorToastMessage.Kind.INFO,
-                                                    ),
-                                                )
-                                            }
-                                            .onFailure { model.toast(ErrorToastMessage("HTML export failed", it.message)) }
-                                    }
+                                    val fallbackHtml = activeVariant.substringAfterLast('/').ifBlank { "$slug.html" }
+                                    val safeName = filenameFromContentDisposition(null, fallbackHtml)
+                                    pendingSafExport = PendingDesignExport.Html(
+                                        projectName = projectName,
+                                        slug = slug,
+                                        entry = activeVariant,
+                                        suggestedFilename = safeName,
+                                    )
+                                    createDocumentLauncher.launch(safeName)
                                 },
                                 onPrintPdf = {
                                     if (api == null) return@DesignExportPanel
@@ -1979,12 +2014,16 @@ fun DesignTabBody(
                                         runCatching {
                                             api.designMintPreview(projectName, slug, purpose = "print", entry = activeVariant)
                                         }.onSuccess { cap ->
-                                            model.toast(
-                                                ErrorToastMessage(
-                                                    "Print / PDF ready",
-                                                    "Prepared print view for ${detail.summary.title} (${cap.url}).",
-                                                    kind = ErrorToastMessage.Kind.INFO,
-                                                ),
+                                            val fullUrl = api.baseUrl.newBuilder()
+                                                .encodedPath(api.baseUrl.encodedPath.trimEnd('/') + "/" + cap.url.trimStart('/'))
+                                                .build()
+                                                .toString()
+                                            printDesignUrlToPdf(
+                                                context = context,
+                                                url = fullUrl,
+                                                jobName = "$slug - ${detail.summary.title}",
+                                                docName = "$slug.pdf",
+                                                onError = { msg -> model.toast(ErrorToastMessage("Print failed", msg)) },
                                             )
                                         }.onFailure { model.toast(ErrorToastMessage("Print failed", it.message)) }
                                     }
@@ -2010,8 +2049,8 @@ fun DesignTabBody(
                                     }
                                 },
                                 onExportPptx = {
-                                    val reqId = "slides-${UUID.randomUUID()}"
-                                    frameChannel?.post(DesignBridgeParentEnvelopes.slidesExtract(bridgeNonce, reqId))
+                                    val reqId = newBridgeNonce()
+                                    slidesExtractEnvelope(reqId)?.let { frameChannel?.post(it) }
                                 },
                             )
                             DesignSidePanel.NONE -> Unit
@@ -2444,10 +2483,10 @@ private fun DesignCanvasArea(
                     }
 
                     // Numbered comment pins overlay
-                    for (comment in comments) {
+                    for ((idx, comment) in comments.withIndex()) {
                         val rect = pinRects[comment.id]
-                        val xDp = if (rect != null && rect.found) rect.x.dp else (comment.anchor.xPct * 2).dp
-                        val yDp = if (rect != null && rect.found) rect.y.dp else (comment.anchor.yPct * 2).dp
+                        val xDp = if (rect != null && rect.found) rect.x.dp else (24 + (idx % 6) * 28).dp
+                        val yDp = if (rect != null && rect.found) rect.y.dp else (24 + (idx / 6) * 28).dp
                         Box(
                             Modifier
                                 .offset { IntOffset(xDp.roundToPx(), yDp.roundToPx()) }
@@ -2468,71 +2507,6 @@ private fun DesignCanvasArea(
         }
     }
 }
-
-private fun buildCanvasHostHtml(
-    slug: String,
-    entry: String,
-    previewUrl: String?,
-    nonce: String,
-): String = """
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-  html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #ffffff; }
-</style>
-</head>
-<body>
-<script>
-(function() {
-  var NONCE = "$nonce";
-  function send(msg) {
-    if (window.ppmSend) {
-      window.ppmSend({ channel: "design-bridge", v: 1, nonce: NONCE, msg: msg });
-    }
-  }
-  window.addEventListener("load", function() {
-    send({ type: "ready", width: window.innerWidth || 1024, height: window.innerHeight || 768 });
-  });
-  window.addEventListener("error", function(e) {
-    send({ type: "issue", kind: "page-error", message: String(e.message || "Error") });
-  });
-  window.addEventListener("message", function(ev) {
-    var d = ev.data;
-    if (!d || d.channel !== "design-bridge" || d.nonce !== NONCE || !d.msg) return;
-    var m = d.msg;
-    if (m.type === "tweak-set" && m.name) {
-      document.documentElement.style.setProperty(m.name, m.value || "");
-    } else if (m.type === "tweak-reset") {
-      document.documentElement.removeAttribute("style");
-    } else if (m.type === "check-run") {
-      send({
-        type: "check-result",
-        requestId: m.requestId,
-        layout: {
-          viewport: {
-            width: window.innerWidth || 1024,
-            height: window.innerHeight || 768,
-            scrollWidth: document.documentElement.scrollWidth || 1024,
-            scrollHeight: document.documentElement.scrollHeight || 768
-          },
-          overflows: [],
-          clipped: [],
-          offscreen: [],
-          overlaps: [],
-          brokenImages: []
-        }
-      });
-    }
-  });
-})();
-</script>
-<!-- Design: $slug/$entry (${previewUrl.orEmpty()}) -->
-</body>
-</html>
-""".trimIndent()
 
 @Composable
 private fun DesignChatPaneContainer(
@@ -2953,12 +2927,206 @@ internal fun DesignExportPanel(
     }
 }
 
-private suspend fun saveExportToDownloads(filename: String, bytes: ByteArray) {
-    withContext(Dispatchers.IO) {
-        runCatching {
-            val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            dir.mkdirs()
-            File(dir, filename).writeBytes(bytes)
+internal data class PreviewSelfHealOutcome(
+    val phase: PreviewPhase,
+    val token: String?,
+    val url: String?,
+    val gen: String?,
+    val hasRecoveredOnce: Boolean,
+    val attempts: Int,
+)
+
+internal suspend fun loadPreviewWithSelfHeal(
+    api: ApiClient,
+    projectName: String,
+    slug: String,
+    entry: String,
+    initialToken: String?,
+    initialRecoveredOnce: Boolean = false,
+    retryDelayMs: Long = 0L,
+): PreviewSelfHealOutcome {
+    var currentToken = initialToken
+    var recoveredOnce = initialRecoveredOnce
+    var attempts = 0
+    while (true) {
+        attempts++
+        try {
+            val cap = api.designMintPreview(
+                projectName = projectName,
+                slug = slug,
+                purpose = "canvas",
+                token = currentToken,
+                entry = entry,
+            )
+            currentToken = cap.token
+            val gen = api.designHeadPreviewGen(cap.url)
+            return PreviewSelfHealOutcome(
+                phase = PreviewPhase.LOADING,
+                token = cap.token,
+                url = cap.url,
+                gen = gen,
+                hasRecoveredOnce = recoveredOnce,
+                attempts = attempts,
+            )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            val recovery = recoverPreviewOnFailure(currentToken, recoveredOnce)
+            recoveredOnce = recovery.hasRecoveredOnce
+            currentToken = recovery.nextToken
+            if (recovery.phase == PreviewPhase.RECOVERING) {
+                if (retryDelayMs > 0L) delay(retryDelayMs)
+                continue
+            }
+            return PreviewSelfHealOutcome(
+                phase = PreviewPhase.DEAD,
+                token = null,
+                url = null,
+                gen = null,
+                hasRecoveredOnce = recoveredOnce,
+                attempts = attempts,
+            )
         }
     }
+}
+
+internal sealed interface PendingDesignExport {
+    val suggestedFilename: String
+    val failureTitle: String
+
+    data class Zip(
+        val projectName: String,
+        val slug: String,
+        override val suggestedFilename: String = "$slug.zip",
+    ) : PendingDesignExport {
+        override val failureTitle: String = "ZIP export failed"
+    }
+
+    data class Html(
+        val projectName: String,
+        val slug: String,
+        val entry: String,
+        override val suggestedFilename: String = entry.substringAfterLast('/').ifBlank { "$slug.html" },
+    ) : PendingDesignExport {
+        override val failureTitle: String = "HTML export failed"
+    }
+
+    data class Pptx(
+        override val suggestedFilename: String,
+        val bytes: ByteArray,
+        val slideCount: Int,
+        val warnings: List<String> = emptyList(),
+    ) : PendingDesignExport {
+        override val failureTitle: String = "Slides export failed"
+    }
+}
+
+internal fun writeStreamToSafUri(
+    resolver: ContentResolver,
+    uri: Uri,
+    input: InputStream,
+): Long {
+    val out = resolver.openOutputStream(uri)
+        ?: resolver.openOutputStream(uri, "w")
+        ?: throw IOException("Could not open output stream for $uri")
+    return out.use { stream -> input.copyTo(stream) }
+}
+
+internal suspend fun completeDesignSafExport(
+    resolver: ContentResolver,
+    uri: Uri?,
+    export: PendingDesignExport,
+    api: ApiClient? = null,
+    onToast: (ErrorToastMessage) -> Unit,
+): Boolean {
+    if (uri == null) return false
+    return try {
+        when (export) {
+            is PendingDesignExport.Zip -> {
+                val client = api ?: throw IOException("Not connected to server")
+                val streamed = client.designStreamExport(export.projectName, export.slug, "zip") { _, input ->
+                    writeStreamToSafUri(resolver, uri, input)
+                }
+                val safeName = filenameFromContentDisposition("""filename="${streamed.filename}"""", export.suggestedFilename)
+                onToast(
+                    ErrorToastMessage(
+                        "Saved $safeName",
+                        "Downloaded ZIP archive (${streamed.bytesWritten} bytes).",
+                        kind = ErrorToastMessage.Kind.INFO,
+                    ),
+                )
+            }
+            is PendingDesignExport.Html -> {
+                val client = api ?: throw IOException("Not connected to server")
+                val streamed = client.designStreamExport(export.projectName, export.slug, "html", export.entry) { _, input ->
+                    writeStreamToSafUri(resolver, uri, input)
+                }
+                val safeName = filenameFromContentDisposition("""filename="${streamed.filename}"""", export.suggestedFilename)
+                val warnNote = if (streamed.warningCount > 0) {
+                    " (${streamed.warningCount} warning(s): ${streamed.warnings.joinToString(", ")})"
+                } else ""
+                onToast(
+                    ErrorToastMessage(
+                        "Saved $safeName",
+                        "Downloaded standalone HTML$warnNote.",
+                        kind = if (streamed.warningCount > 0) ErrorToastMessage.Kind.ERROR else ErrorToastMessage.Kind.INFO,
+                    ),
+                )
+            }
+            is PendingDesignExport.Pptx -> {
+                val safeName = filenameFromContentDisposition(null, export.suggestedFilename)
+                withContext(Dispatchers.IO) {
+                    ByteArrayInputStream(export.bytes).use { input ->
+                        writeStreamToSafUri(resolver, uri, input)
+                    }
+                }
+                val warnNote = if (export.warnings.isNotEmpty()) {
+                    " (${export.warnings.size} note(s): ${export.warnings.first()})"
+                } else ""
+                onToast(
+                    ErrorToastMessage(
+                        "Saved $safeName",
+                        "Exported ${export.slideCount} slide(s)$warnNote.",
+                        kind = ErrorToastMessage.Kind.INFO,
+                    ),
+                )
+            }
+        }
+        true
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        onToast(ErrorToastMessage(export.failureTitle, e.message))
+        false
+    }
+}
+
+private fun printDesignUrlToPdf(
+    context: Context,
+    url: String,
+    jobName: String,
+    docName: String,
+    onError: (String) -> Unit,
+) {
+    val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager
+    if (printManager == null) {
+        onError("Print service is not available on this device")
+        return
+    }
+    val webView = WebView(context).apply {
+        settings.javaScriptEnabled = false
+        settings.allowFileAccess = false
+        settings.allowContentAccess = false
+        webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, loadedUrl: String) {
+                runCatching {
+                    val adapter = view.createPrintDocumentAdapter(docName)
+                    printManager.print(jobName, adapter, PrintAttributes.Builder().build())
+                }.onFailure {
+                    onError(it.message ?: "Failed to start print job")
+                }
+            }
+        }
+    }
+    webView.loadUrl(url)
 }

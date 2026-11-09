@@ -1,27 +1,38 @@
 package com.hienlh.ppm.state.design
 
-import com.hienlh.ppm.protocol.BRIDGE_CHANNEL
-import com.hienlh.ppm.protocol.BRIDGE_NONCE_RE
-import com.hienlh.ppm.protocol.BRIDGE_VERSION
-import com.hienlh.ppm.protocol.LayoutCheckReport
+import com.hienlh.ppm.protocol.BRIDGE_TAG_RE
+import com.hienlh.ppm.protocol.BridgeCommentAnchor
+import com.hienlh.ppm.protocol.BridgePickedElement
+import com.hienlh.ppm.protocol.BridgePinRect
+import com.hienlh.ppm.protocol.BridgePinTarget
+import com.hienlh.ppm.protocol.BridgeTextQuote
+import com.hienlh.ppm.protocol.DESIGN_GEN_RE
+import com.hienlh.ppm.protocol.SlideColor
+import com.hienlh.ppm.protocol.SlideDoc
+import com.hienlh.ppm.protocol.SlideItem
 import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.double
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.int
 import com.hienlh.ppm.protocol.obj
+import com.hienlh.ppm.protocol.parseBridgePpmId
+import com.hienlh.ppm.protocol.parseBridgeTransformProps
 import com.hienlh.ppm.protocol.string
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import kotlin.math.abs
+import java.io.ByteArrayOutputStream
+import java.util.Base64
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.round
+import kotlin.math.roundToLong
 
 // ===========================================================================
 // 1. Design Models & Variants (design-types.ts + design-variants.ts)
@@ -294,21 +305,8 @@ fun computeDeviceFrameScale(
 }
 
 // ===========================================================================
-// 4. Full Design Bridge Protocol (design-bridge-protocol.ts + sub-validators)
+// 4. Bridge Domain Adapters (protocol/DesignBridge.kt)
 // ===========================================================================
-
-private const val MAX_SCROLL = 1_000_000.0
-private const val MAX_DIM = 100_000
-private const val MAX_STR = 512
-private const val MAX_HREF = 2048
-private val SAFE_OPEN_LINK_RE = Regex("^(https?://|mailto:)", RegexOption.IGNORE_CASE)
-private val CONTROL_CHAR_RE = Regex("[\\u0000-\\u001f\\u007f]")
-private val PPM_ID_RE = Regex("^ppm-\\d+$")
-private val TRANSFORM_TAG_RE = Regex("^[a-z][a-z0-9-]{0,31}$")
-private val TRANSFORM_VALUE_RE = Regex("^-?\\d{1,5}(?:\\.\\d{1,2})?px$")
-private val ALLOWED_TRANSFORM_PROPS = setOf(
-    "position", "left", "top", "margin-left", "margin-top", "width", "height",
-)
 
 data class ElementRect(
     val x: Double,
@@ -318,18 +316,21 @@ data class ElementRect(
 )
 
 data class PickedElement(
-    val selector: String,
-    val ppmId: String? = null,
+    val cssPath: String,
+    val ppmId: Int? = null,
+    val gen: String? = null,
+    val file: String = "index.html",
     val tag: String,
-    val textQuote: CommentQuote? = null,
-    val xPct: Double,
-    val yPct: Double,
-    val elXPct: Double? = null,
-    val elYPct: Double? = null,
+    val quote: CommentQuote = CommentQuote(exact = ""),
+    val outerHtml: String = "",
+    val text: String = "",
     val rect: ElementRect,
-    val hasParent: Boolean = false,
-    val canTransform: Boolean = false,
-)
+    val hasParent: Boolean = true,
+    val canTransform: Boolean = ppmId != null,
+) {
+    val selector: String get() = cssPath
+    val textQuote: CommentQuote get() = quote
+}
 
 data class PinRect(
     val id: String,
@@ -337,444 +338,48 @@ data class PinRect(
     val x: Double = 0.0,
     val y: Double = 0.0,
     val rect: ElementRect? = null,
+    val ppmId: Int? = null,
+    val gen: String? = null,
+    val reanchored: Boolean = false,
 )
 
-data class SlideRun(
-    val text: String,
-    val fontSizePt: Double,
-    val bold: Boolean,
-    val italic: Boolean,
-    val color: String,
-    val fontFace: String,
-)
-
-data class SlideElement(
-    val kind: String, // "text" | "box" | "image"
-    val x: Double,
-    val y: Double,
-    val w: Double,
-    val h: Double,
-    val runs: List<SlideRun> = emptyList(),
-    val align: String = "left",
-    val valign: String = "top",
-    val bgColor: String? = null,
-    val borderColor: String? = null,
-    val borderPt: Double = 0.0,
-    val radiusPt: Double = 0.0,
-    val src: String? = null,
-)
-
-data class SlideSpec(
-    val index: Int,
-    val bgColor: String? = null,
-    val bgImage: String? = null,
-    val elements: List<SlideElement> = emptyList(),
-)
-
-sealed interface DesignBridgeChildMsg {
-    data class Ready(val width: Int, val height: Int) : DesignBridgeChildMsg
-    data class Scroll(val x: Double, val y: Double) : DesignBridgeChildMsg
-    data class Issue(val kind: String, val message: String, val detail: String?) : DesignBridgeChildMsg
-    data class NavigateBlocked(val href: String) : DesignBridgeChildMsg
-    data class OpenLink(val href: String) : DesignBridgeChildMsg
-    data object Expired : DesignBridgeChildMsg
-    data class Hover(val element: PickedElement?) : DesignBridgeChildMsg
-    data class Select(val element: PickedElement) : DesignBridgeChildMsg
-    data class ElementMenu(val element: PickedElement, val x: Double, val y: Double) : DesignBridgeChildMsg
-    data object PickerExit : DesignBridgeChildMsg
-    data class PinsRects(val pins: List<PinRect>) : DesignBridgeChildMsg
-    data class TweakValues(val values: Map<String, String>) : DesignBridgeChildMsg
-    data class TransformLive(
-        val ppmId: String,
-        val tag: String,
-        val kind: String,
-        val summary: String,
-        val rect: ElementRect,
-    ) : DesignBridgeChildMsg
-    data class TransformCommit(
-        val ppmId: String,
-        val tag: String,
-        val props: Map<String, String>,
-    ) : DesignBridgeChildMsg
-    data class SlidesData(
-        val requestId: String,
-        val slides: List<SlideSpec>,
-        val themeBg: String?,
-    ) : DesignBridgeChildMsg
-    data class SlidesError(val requestId: String, val message: String) : DesignBridgeChildMsg
-    data class CheckResult(
-        val requestId: String,
-        val layout: LayoutCheckReport,
-        val screenshotDataUrl: String?,
-    ) : DesignBridgeChildMsg
-    data class CheckError(val requestId: String, val message: String) : DesignBridgeChildMsg
-}
-
-private fun parseRect(raw: JsonElement?): ElementRect? {
-    val obj = raw?.obj ?: return null
-    val x = obj["x"].double ?: return null
-    val y = obj["y"].double ?: return null
-    val w = obj["width"].double ?: return null
-    val h = obj["height"].double ?: return null
-    if (!x.isFinite() || !y.isFinite() || !w.isFinite() || !h.isFinite()) return null
-    if (x < -MAX_DIM || x > MAX_DIM || y < -MAX_DIM || y > MAX_DIM) return null
-    if (w < 0.0 || w > MAX_DIM || h < 0.0 || h > MAX_DIM) return null
-    return ElementRect(x = x, y = y, width = w, height = h)
-}
-
-private fun parsePickedElement(raw: JsonElement?): PickedElement? {
-    val obj = raw?.obj ?: return null
-    val selector = obj["selector"].string?.takeIf { it.isNotEmpty() && it.length <= 512 } ?: return null
-    val tag = obj["tag"].string?.takeIf { it.isNotEmpty() && it.length <= 64 } ?: return null
-    val ppmId = obj["ppmId"].string?.takeIf { PPM_ID_RE.matches(it) }
-    val xPct = obj["xPct"].double?.takeIf { it in 0.0..100.0 } ?: return null
-    val yPct = obj["yPct"].double?.takeIf { it in 0.0..100.0 } ?: return null
-    val elXPct = obj["elXPct"].double?.takeIf { it in 0.0..100.0 }
-    val elYPct = obj["elYPct"].double?.takeIf { it in 0.0..100.0 }
-    val rect = parseRect(obj["rect"]) ?: return null
-    val quoteObj = obj["textQuote"]?.obj
-    val quote = if (quoteObj != null) {
-        val exact = quoteObj["exact"].string?.take(300).orEmpty()
-        if (exact.isNotEmpty()) {
-            CommentQuote(
-                exact = exact,
-                prefix = quoteObj["prefix"].string?.take(80),
-                suffix = quoteObj["suffix"].string?.take(80),
-            )
-        } else null
-    } else null
-    return PickedElement(
-        selector = selector,
+fun BridgePickedElement.toPickedElement(): PickedElement =
+    PickedElement(
+        cssPath = cssPath,
         ppmId = ppmId,
-        tag = tag.lowercase(),
-        textQuote = quote,
-        xPct = xPct,
-        yPct = yPct,
-        elXPct = elXPct,
-        elYPct = elYPct,
-        rect = rect,
-        hasParent = obj["hasParent"].bool ?: false,
-        canTransform = obj["canTransform"].bool ?: false,
+        gen = gen,
+        file = file,
+        tag = tag,
+        quote = CommentQuote(exact = quote.exact, prefix = quote.prefix, suffix = quote.suffix),
+        outerHtml = outerHtml,
+        text = text,
+        rect = ElementRect(x = rect.x, y = rect.y, width = rect.w, height = rect.h),
+        hasParent = cssPath.contains(">") || tag != "body",
+        canTransform = ppmId != null,
     )
-}
 
-/**
- * Validates every child-to-parent postMessage envelope from the design canvas iframe.
- */
-fun validateDesignBridgeChildEnvelope(
-    raw: JsonElement?,
-    expectedNonce: String,
-): DesignBridgeChildMsg? {
-    val obj = raw?.obj ?: return null
-    if (obj["channel"].string != BRIDGE_CHANNEL) return null
-    if (obj["v"].int != BRIDGE_VERSION) return null
-    val nonce = obj["nonce"].string ?: return null
-    if (nonce != expectedNonce || !BRIDGE_NONCE_RE.matches(nonce)) return null
-    val msg = obj["msg"]?.obj ?: return null
-    return when (msg["type"].string) {
-        "ready" -> {
-            val w = msg["width"].int ?: return null
-            val h = msg["height"].int ?: return null
-            if (w !in 0..MAX_DIM || h !in 0..MAX_DIM) return null
-            DesignBridgeChildMsg.Ready(width = w, height = h)
-        }
-        "scroll" -> {
-            val x = msg["x"].double ?: return null
-            val y = msg["y"].double ?: return null
-            if (!x.isFinite() || !y.isFinite() || abs(x) > MAX_SCROLL || abs(y) > MAX_SCROLL) return null
-            DesignBridgeChildMsg.Scroll(x = x, y = y)
-        }
-        "issue" -> {
-            val kind = msg["kind"].string ?: return null
-            if (kind != "console-error" && kind != "page-error" && kind != "request-failed") return null
-            val message = msg["message"].string ?: return null
-            val detail = msg["detail"].string
-            DesignBridgeChildMsg.Issue(
-                kind = kind,
-                message = message.take(MAX_STR),
-                detail = detail?.take(MAX_STR),
-            )
-        }
-        "navigate-blocked" -> {
-            val href = msg["href"].string ?: return null
-            DesignBridgeChildMsg.NavigateBlocked(href = href.take(MAX_STR))
-        }
-        "open-link" -> {
-            val href = msg["href"].string?.trim() ?: return null
-            if (href.isEmpty() || href.length > MAX_HREF) return null
-            if (CONTROL_CHAR_RE.containsMatchIn(href)) return null
-            if (!SAFE_OPEN_LINK_RE.containsMatchIn(href)) return null
-            DesignBridgeChildMsg.OpenLink(href = href)
-        }
-        "expired" -> DesignBridgeChildMsg.Expired
-        "hover" -> {
-            val elRaw = msg["element"]
-            if (elRaw == null || elRaw is kotlinx.serialization.json.JsonNull) {
-                DesignBridgeChildMsg.Hover(element = null)
-            } else {
-                val el = parsePickedElement(elRaw) ?: return null
-                DesignBridgeChildMsg.Hover(element = el)
-            }
-        }
-        "select" -> {
-            val el = parsePickedElement(msg["element"]) ?: return null
-            DesignBridgeChildMsg.Select(element = el)
-        }
-        "element-menu" -> {
-            val el = parsePickedElement(msg["element"]) ?: return null
-            val x = msg["x"].double ?: return null
-            val y = msg["y"].double ?: return null
-            if (x !in -MAX_DIM.toDouble()..MAX_DIM.toDouble() || y !in -MAX_DIM.toDouble()..MAX_DIM.toDouble()) return null
-            DesignBridgeChildMsg.ElementMenu(element = el, x = x, y = y)
-        }
-        "picker-exit" -> DesignBridgeChildMsg.PickerExit
-        "pins-rects" -> {
-            val arr = msg["pins"]?.array ?: return null
-            if (arr.size > 200) return null
-            val pins = ArrayList<PinRect>(arr.size)
-            for (item in arr) {
-                val id = item["id"].string?.takeIf { it.isNotEmpty() && it.length <= 64 } ?: return null
-                val found = item["found"].bool ?: return null
-                if (!found) {
-                    pins.add(PinRect(id = id, found = false))
-                } else {
-                    val x = item["x"].double ?: return null
-                    val y = item["y"].double ?: return null
-                    val rect = parseRect(item["rect"]) ?: return null
-                    pins.add(PinRect(id = id, found = true, x = x, y = y, rect = rect))
-                }
-            }
-            DesignBridgeChildMsg.PinsRects(pins = pins)
-        }
-        "tweak-values" -> {
-            val rawValues = msg["values"]?.obj ?: return null
-            if (rawValues.size > MAX_TWEAKS) return null
-            val out = LinkedHashMap<String, String>()
-            for ((k, v) in rawValues) {
-                if (!CSS_VAR_RE.matches(k)) continue
-                val str = v.string ?: continue
-                if (isSafeTweakValueShape(str)) out[k] = str.trim()
-            }
-            DesignBridgeChildMsg.TweakValues(values = out)
-        }
-        "transform-live" -> {
-            val ppmId = msg["ppmId"].string?.takeIf { PPM_ID_RE.matches(it) } ?: return null
-            val tag = msg["tag"].string?.takeIf { TRANSFORM_TAG_RE.matches(it) } ?: return null
-            val kind = msg["kind"].string?.takeIf { it == "move" || it == "resize" } ?: return null
-            val summary = msg["summary"].string?.takeIf { it.length <= 64 } ?: return null
-            val rect = parseRect(msg["rect"]) ?: return null
-            DesignBridgeChildMsg.TransformLive(
-                ppmId = ppmId,
-                tag = tag,
-                kind = kind,
-                summary = summary,
-                rect = rect,
-            )
-        }
-        "transform-commit" -> {
-            val ppmId = msg["ppmId"].string?.takeIf { PPM_ID_RE.matches(it) } ?: return null
-            val tag = msg["tag"].string?.takeIf { TRANSFORM_TAG_RE.matches(it) } ?: return null
-            val props = parseTransformProps(msg["props"]) ?: return null
-            DesignBridgeChildMsg.TransformCommit(
-                ppmId = ppmId,
-                tag = tag,
-                props = props,
-            )
-        }
-        "slides-data" -> {
-            val reqId = msg["requestId"].string?.takeIf { it.isNotEmpty() && it.length <= 64 } ?: return null
-            val slidesArr = msg["slides"]?.array ?: return null
-            if (slidesArr.isEmpty() || slidesArr.size > 80) return null
-            val slides = slidesArr.mapIndexed { idx, s ->
-                SlideSpec(
-                    index = s["index"].int ?: idx,
-                    bgColor = s["bgColor"].string,
-                    bgImage = s["bgImage"].string,
-                )
-            }
-            DesignBridgeChildMsg.SlidesData(
-                requestId = reqId,
-                slides = slides,
-                themeBg = msg["themeBg"].string,
-            )
-        }
-        "slides-error" -> {
-            val reqId = msg["requestId"].string?.takeIf { it.isNotEmpty() && it.length <= 64 } ?: return null
-            val errMsg = msg["message"].string?.take(MAX_STR) ?: return null
-            DesignBridgeChildMsg.SlidesError(requestId = reqId, message = errMsg)
-        }
-        "check-result" -> {
-            val reqId = msg["requestId"].string?.takeIf { it.isNotEmpty() && it.length <= 64 } ?: return null
-            val layout = LayoutCheckReport.from(msg["layout"]) ?: return null
-            val shot = msg["screenshotDataUrl"].string
-            if (shot != null && (!shot.startsWith("data:image/") || shot.length > 600_000)) return null
-            DesignBridgeChildMsg.CheckResult(
-                requestId = reqId,
-                layout = layout,
-                screenshotDataUrl = shot,
-            )
-        }
-        "check-error" -> {
-            val reqId = msg["requestId"].string?.takeIf { it.isNotEmpty() && it.length <= 64 } ?: return null
-            val errMsg = msg["message"].string?.take(MAX_STR) ?: return null
-            DesignBridgeChildMsg.CheckError(requestId = reqId, message = errMsg)
-        }
-        else -> null
+fun BridgePinRect.toPinRect(): PinRect {
+    val r = rect
+    return if (r == null) {
+        PinRect(
+            id = id,
+            found = false,
+            ppmId = ppmId,
+            gen = gen,
+            reanchored = reanchored,
+        )
+    } else {
+        PinRect(
+            id = id,
+            found = true,
+            x = r.x,
+            y = r.y,
+            rect = ElementRect(x = r.x, y = r.y, width = r.w, height = r.h),
+            ppmId = ppmId,
+            gen = gen,
+            reanchored = reanchored,
+        )
     }
-}
-
-object DesignBridgeParentEnvelopes {
-    private fun wrap(nonce: String, msg: JsonObject): JsonObject =
-        buildJsonObject {
-            put("channel", BRIDGE_CHANNEL)
-            put("v", BRIDGE_VERSION)
-            put("nonce", nonce)
-            put("msg", msg)
-        }
-
-    fun restoreScroll(nonce: String, x: Double, y: Double): JsonObject =
-        wrap(
-            nonce,
-            buildJsonObject {
-                put("type", "restore-scroll")
-                put("x", x)
-                put("y", y)
-            },
-        )
-
-    fun picker(nonce: String, enabled: Boolean): JsonObject =
-        wrap(
-            nonce,
-            buildJsonObject {
-                put("type", "picker")
-                put("enabled", enabled)
-            },
-        )
-
-    fun pinsSet(nonce: String, comments: List<DesignComment>): JsonObject =
-        wrap(
-            nonce,
-            buildJsonObject {
-                put("type", "pins-set")
-                put(
-                    "pins",
-                    buildJsonArray {
-                        for (c in comments) {
-                            add(
-                                buildJsonObject {
-                                    put("id", c.id)
-                                    put("number", c.number)
-                                    put("resolved", c.resolved)
-                                    put("selector", c.anchor.selector)
-                                    if (c.anchor.ppmId != null) put("ppmId", c.anchor.ppmId)
-                                    put("tag", c.anchor.tag)
-                                    if (c.anchor.textQuote != null) {
-                                        put(
-                                            "textQuote",
-                                            buildJsonObject {
-                                                put("exact", c.anchor.textQuote.exact)
-                                                if (c.anchor.textQuote.prefix != null) put("prefix", c.anchor.textQuote.prefix)
-                                                if (c.anchor.textQuote.suffix != null) put("suffix", c.anchor.textQuote.suffix)
-                                            },
-                                        )
-                                    }
-                                    put("xPct", c.anchor.xPct)
-                                    put("yPct", c.anchor.yPct)
-                                    if (c.anchor.elXPct != null) put("elXPct", c.anchor.elXPct)
-                                    if (c.anchor.elYPct != null) put("elYPct", c.anchor.elYPct)
-                                },
-                            )
-                        }
-                    },
-                )
-            },
-        )
-
-    fun selectParent(nonce: String): JsonObject =
-        wrap(nonce, buildJsonObject { put("type", "select-parent") })
-
-    fun clearSelection(nonce: String): JsonObject =
-        wrap(nonce, buildJsonObject { put("type", "clear-selection") })
-
-    fun tweakSet(nonce: String, name: String, value: String): JsonObject =
-        wrap(
-            nonce,
-            buildJsonObject {
-                put("type", "tweak-set")
-                put("name", name)
-                put("value", value)
-            },
-        )
-
-    fun tweakReset(nonce: String, names: List<String>? = null): JsonObject =
-        wrap(
-            nonce,
-            buildJsonObject {
-                put("type", "tweak-reset")
-                if (names != null) {
-                    put("names", buildJsonArray { names.forEach { add(JsonPrimitive(it)) } })
-                }
-            },
-        )
-
-    fun tweakRead(nonce: String, names: List<String>): JsonObject =
-        wrap(
-            nonce,
-            buildJsonObject {
-                put("type", "tweak-read")
-                put("names", buildJsonArray { names.forEach { add(JsonPrimitive(it)) } })
-            },
-        )
-
-    fun transformMode(nonce: String, enabled: Boolean): JsonObject =
-        wrap(
-            nonce,
-            buildJsonObject {
-                put("type", "transform-mode")
-                put("enabled", enabled)
-            },
-        )
-
-    fun transformTarget(nonce: String, ppmId: String?): JsonObject =
-        wrap(
-            nonce,
-            buildJsonObject {
-                put("type", "transform-target")
-                if (ppmId != null) put("ppmId", ppmId) else put("ppmId", kotlinx.serialization.json.JsonNull)
-            },
-        )
-
-    fun transformNudge(nonce: String, dx: Int, dy: Int): JsonObject =
-        wrap(
-            nonce,
-            buildJsonObject {
-                put("type", "transform-nudge")
-                put("dx", dx)
-                put("dy", dy)
-            },
-        )
-
-    fun transformCancel(nonce: String): JsonObject =
-        wrap(nonce, buildJsonObject { put("type", "transform-cancel") })
-
-    fun slidesExtract(nonce: String, requestId: String): JsonObject =
-        wrap(
-            nonce,
-            buildJsonObject {
-                put("type", "slides-extract")
-                put("requestId", requestId)
-            },
-        )
-
-    fun checkRun(nonce: String, requestId: String, screenshot: Boolean): JsonObject =
-        wrap(
-            nonce,
-            buildJsonObject {
-                put("type", "check-run")
-                put("requestId", requestId)
-                put("screenshot", screenshot)
-            },
-        )
 }
 
 // ===========================================================================
@@ -784,14 +389,16 @@ object DesignBridgeParentEnvelopes {
 const val PARENT_GESTURE_WINDOW_MS = 5000L
 
 data class TransformProposal(
-    val ppmId: String,
+    val ppmId: Int,
     val tag: String,
+    val file: String = "index.html",
+    val gen: String = "",
     val props: Map<String, String>,
 )
 
 data class ProposalContext(
     val transformModeOn: Boolean,
-    val armedPpmId: String?,
+    val armedPpmId: Int?,
     val armedTag: String?,
     val lastParentGestureAt: Long,
     val now: Long,
@@ -805,7 +412,7 @@ sealed interface ProposalDecision {
     data class Accept(
         val file: String,
         val gen: String,
-        val ppmId: String,
+        val ppmId: Int,
         val tag: String,
         val props: Map<String, String>,
     ) : ProposalDecision
@@ -813,22 +420,8 @@ sealed interface ProposalDecision {
     data class Reject(val reason: String) : ProposalDecision
 }
 
-fun parseTransformProps(raw: JsonElement?): Map<String, String>? {
-    val obj = raw?.obj ?: return null
-    if (obj.isEmpty() || obj.size > ALLOWED_TRANSFORM_PROPS.size) return null
-    val out = LinkedHashMap<String, String>()
-    for ((k, v) in obj) {
-        if (k !in ALLOWED_TRANSFORM_PROPS) return null
-        val str = v.string ?: return null
-        if (k == "position") {
-            if (str != "relative") return null
-        } else {
-            if (!TRANSFORM_VALUE_RE.matches(str)) return null
-        }
-        out[k] = str
-    }
-    return out
-}
+fun parseTransformProps(raw: JsonElement?): Map<String, String>? =
+    parseBridgeTransformProps(raw)
 
 fun decideTransformProposal(
     proposal: TransformProposal,
@@ -838,33 +431,33 @@ fun decideTransformProposal(
     if (ctx.isStreaming) return ProposalDecision.Reject("streaming")
     if (ctx.inFlight) return ProposalDecision.Reject("in-flight")
     if (ctx.gen.isNullOrBlank()) return ProposalDecision.Reject("missing-gen")
-    if (ctx.armedPpmId.isNullOrBlank() || ctx.armedTag.isNullOrBlank()) {
+    if (ctx.armedPpmId == null || ctx.armedTag.isNullOrBlank()) {
         return ProposalDecision.Reject("unarmed")
     }
-    if (!PPM_ID_RE.matches(proposal.ppmId) || proposal.ppmId != ctx.armedPpmId) {
+    if (proposal.ppmId < 0 || proposal.ppmId != ctx.armedPpmId) {
         return ProposalDecision.Reject("target-mismatch")
     }
-    if (!TRANSFORM_TAG_RE.matches(proposal.tag) || proposal.tag != ctx.armedTag) {
+    if (!BRIDGE_TAG_RE.matches(proposal.tag) || proposal.tag != ctx.armedTag) {
         return ProposalDecision.Reject("tag-mismatch")
+    }
+    if (proposal.file.isNotEmpty() && proposal.file != ctx.file) {
+        return ProposalDecision.Reject("stale-frame")
+    }
+    if (proposal.gen.isNotEmpty() && proposal.gen != ctx.gen) {
+        return ProposalDecision.Reject("stale-frame")
     }
     val age = ctx.now - ctx.lastParentGestureAt
     if (ctx.lastParentGestureAt <= 0L || age < 0L || age > PARENT_GESTURE_WINDOW_MS) {
         return ProposalDecision.Reject("no-parent-gesture")
     }
-    if (proposal.props.isEmpty() || proposal.props.size > ALLOWED_TRANSFORM_PROPS.size) {
-        return ProposalDecision.Reject("invalid-props")
-    }
-    for ((k, v) in proposal.props) {
-        if (k !in ALLOWED_TRANSFORM_PROPS) return ProposalDecision.Reject("invalid-props")
-        if (k == "position" && v != "relative") return ProposalDecision.Reject("invalid-props")
-        if (k != "position" && !TRANSFORM_VALUE_RE.matches(v)) return ProposalDecision.Reject("invalid-props")
-    }
+    val propsJson = buildJsonObject { proposal.props.forEach { (k, v) -> put(k, v) } }
+    val validatedProps = parseBridgeTransformProps(propsJson) ?: return ProposalDecision.Reject("invalid-props")
     return ProposalDecision.Accept(
         file = ctx.file,
         gen = ctx.gen,
         ppmId = proposal.ppmId,
         tag = proposal.tag,
-        props = proposal.props,
+        props = validatedProps,
     )
 }
 
@@ -992,7 +585,7 @@ fun sanitizeTweakValue(def: TweakDef, raw: String): String? {
 }
 
 fun parseTweaks(raw: JsonElement?): ParsedTweaks {
-    if (raw == null || raw is kotlinx.serialization.json.JsonNull) {
+    if (raw == null || raw is JsonNull) {
         return ParsedTweaks(emptyList(), emptyList())
     }
     val arr = raw.array ?: return ParsedTweaks(emptyList(), listOf("tweaks must be an array"))
@@ -1165,26 +758,41 @@ fun buildFixTweaksPrompt(entryFile: String, errors: List<String>): String =
 
 data class CommentQuote(
     val exact: String,
-    val prefix: String? = null,
-    val suffix: String? = null,
+    val prefix: String? = "",
+    val suffix: String? = "",
 )
 
 data class CommentAnchor(
-    val selector: String,
-    val ppmId: String? = null,
+    val file: String = "index.html",
+    val ppmId: Int? = null,
+    val gen: String? = null,
     val tag: String,
-    val textQuote: CommentQuote? = null,
-    val xPct: Double,
-    val yPct: Double,
-    val elXPct: Double? = null,
-    val elYPct: Double? = null,
-    val context: String? = null,
+    val cssPath: String,
+    val quote: CommentQuote = CommentQuote(exact = ""),
     val snippet: String? = null,
-)
+    val context: String? = null,
+) {
+    val selector: String get() = cssPath
+    val textQuote: CommentQuote get() = quote
+
+    fun toBridgeAnchor(): BridgeCommentAnchor =
+        BridgeCommentAnchor(
+            file = file,
+            ppmId = ppmId,
+            gen = gen,
+            tag = tag,
+            cssPath = cssPath,
+            quote = BridgeTextQuote(
+                exact = quote.exact,
+                prefix = quote.prefix.orEmpty(),
+                suffix = quote.suffix.orEmpty(),
+            ),
+        )
+}
 
 data class DesignCommentReply(
     val id: String,
-    val author: String, // "user" | "ai"
+    val author: String, // "user" | "owner" | "guest" | "ai"
     val body: String,
     val createdAt: String,
 )
@@ -1199,80 +807,75 @@ data class DesignComment(
     val createdAt: String,
     val updatedAt: String,
     val replies: List<DesignCommentReply> = emptyList(),
-)
+) {
+    fun toBridgePinTarget(): BridgePinTarget =
+        BridgePinTarget(id = id, anchor = anchor.toBridgeAnchor())
+}
 
-fun parseCommentAnchor(raw: JsonElement?): CommentAnchor? {
+fun parseCommentAnchor(raw: JsonElement?, defaultFile: String = "index.html"): CommentAnchor? {
     val obj = raw?.obj ?: return null
-    val selector = obj["selector"].string ?: return null
-    val tag = obj["tag"].string ?: "div"
-    val quoteObj = obj["textQuote"]?.obj
+    val file = obj["file"].string?.takeIf { it.isNotBlank() } ?: defaultFile
+    val cssPath = obj["cssPath"].string ?: obj["selector"].string ?: return null
+    val tag = obj["tag"].string?.lowercase() ?: "div"
+    val ppmId = parseBridgePpmId(obj["ppmId"])
+    val gen = obj["gen"].string?.takeIf { DESIGN_GEN_RE.matches(it) }
+    val quoteObj = (obj["quote"] ?: obj["textQuote"])?.obj
     val quote = if (quoteObj != null) {
-        val exact = quoteObj["exact"].string.orEmpty()
-        if (exact.isNotEmpty()) {
-            CommentQuote(
-                exact = exact,
-                prefix = quoteObj["prefix"].string,
-                suffix = quoteObj["suffix"].string,
-            )
-        } else null
-    } else null
+        CommentQuote(
+            exact = quoteObj["exact"].string.orEmpty(),
+            prefix = quoteObj["prefix"].string.orEmpty(),
+            suffix = quoteObj["suffix"].string.orEmpty(),
+        )
+    } else {
+        CommentQuote(exact = "")
+    }
     return CommentAnchor(
-        selector = selector,
-        ppmId = obj["ppmId"].string,
+        file = file,
+        ppmId = ppmId,
+        gen = gen,
         tag = tag,
-        textQuote = quote,
-        xPct = obj["xPct"].double ?: 50.0,
-        yPct = obj["yPct"].double ?: 50.0,
-        elXPct = obj["elXPct"].double,
-        elYPct = obj["elYPct"].double,
-        context = obj["context"].string,
+        cssPath = cssPath,
+        quote = quote,
         snippet = obj["snippet"].string,
+        context = obj["context"].string,
     )
 }
 
 fun commentAnchorToJson(anchor: CommentAnchor): JsonObject =
-    buildJsonObject {
-        put("selector", anchor.selector)
-        if (anchor.ppmId != null) put("ppmId", anchor.ppmId)
-        put("tag", anchor.tag)
-        if (anchor.textQuote != null) {
-            put(
-                "textQuote",
-                buildJsonObject {
-                    put("exact", anchor.textQuote.exact)
-                    if (anchor.textQuote.prefix != null) put("prefix", anchor.textQuote.prefix)
-                    if (anchor.textQuote.suffix != null) put("suffix", anchor.textQuote.suffix)
-                },
-            )
-        }
-        put("xPct", anchor.xPct)
-        put("yPct", anchor.yPct)
-        if (anchor.elXPct != null) put("elXPct", anchor.elXPct)
-        if (anchor.elYPct != null) put("elYPct", anchor.elYPct)
-        if (anchor.context != null) put("context", anchor.context)
-        if (anchor.snippet != null) put("snippet", anchor.snippet)
-    }
+    anchor.toBridgeAnchor().json
 
-fun parseDesignComment(raw: JsonElement?): DesignComment? {
+fun parseDesignComment(raw: JsonElement?, fallbackNumber: Int = 1): DesignComment? {
     val obj = raw?.obj ?: return null
     val id = obj["id"].string ?: return null
-    val anchor = parseCommentAnchor(obj["anchor"]) ?: return null
+    val file = obj["file"].string ?: "index.html"
+    val baseAnchor = parseCommentAnchor(obj["anchor"], defaultFile = file) ?: return null
+    val topSnippet = obj["snippet"].string
+    val anchor = if (topSnippet != null && baseAnchor.snippet == null) {
+        baseAnchor.copy(snippet = topSnippet)
+    } else {
+        baseAnchor
+    }
     val replies = obj["replies"].array.orEmpty().mapNotNull { r ->
         val rid = r["id"].string ?: return@mapNotNull null
+        val authorStr = r["author"].string
+            ?: r["author"]?.get("name").string
+            ?: r["author"]?.get("kind").string
+            ?: "user"
         DesignCommentReply(
             id = rid,
-            author = r["author"].string ?: "user",
+            author = authorStr,
             body = r["body"].string ?: "",
             createdAt = r["createdAt"].string ?: "",
         )
     }
+    val resolved = !obj["resolvedAt"].string.isNullOrBlank() || (obj["resolved"].bool == true)
     return DesignComment(
         id = id,
-        number = obj["number"].int ?: 1,
-        file = obj["file"].string ?: "index.html",
+        number = obj["number"].int ?: fallbackNumber,
+        file = file,
         anchor = anchor,
         body = obj["body"].string ?: "",
-        resolved = obj["resolved"].bool ?: false,
+        resolved = resolved,
         createdAt = obj["createdAt"].string ?: "",
         updatedAt = obj["updatedAt"].string ?: "",
         replies = replies,
@@ -1309,9 +912,9 @@ fun buildCommentsPrompt(
     for (c in open) {
         val loc = c.anchor.context ?: c.file
         val ppmAttr = if (c.anchor.ppmId != null) " data-ppm-id=\"${c.anchor.ppmId}\"" else ""
-        lines.add("### #${c.number} — `<${c.anchor.tag}$ppmAttr>` (`${c.anchor.selector}` in `$loc`)")
-        val quoteExact = c.anchor.textQuote?.exact
-        if (!quoteExact.isNullOrEmpty()) {
+        lines.add("### #${c.number} — `<${c.anchor.tag}$ppmAttr>` (`${c.anchor.cssPath}` in `$loc`)")
+        val quoteExact = c.anchor.quote.exact
+        if (quoteExact.isNotEmpty()) {
             val f = fenceFor(quoteExact)
             lines.add("Visible text:")
             lines.add("$f text")
@@ -1388,7 +991,7 @@ fun buildHandoffPrompt(input: HandoffInput): String {
 }
 
 // ===========================================================================
-// 8. Canvas Lifecycle & Check Guard (10b.2 & 10b.4 invariants)
+// 8. Canvas Lifecycle, Self-Heal & Check Guard (10b.2 & 10b.4 invariants)
 // ===========================================================================
 
 enum class PreviewPhase {
@@ -1398,12 +1001,31 @@ enum class PreviewPhase {
     DEAD,
 }
 
+data class PreviewRecoveryState(
+    val phase: PreviewPhase,
+    val nextToken: String?,
+    val hasRecoveredOnce: Boolean,
+)
+
 /**
  * Single auto-recovery rule: on expired or missing `ready` within timeout, recover once;
  * if the second attempt also fails, transition to [PreviewPhase.DEAD] with a manual Reload button.
  */
 fun onPreviewExpiredOrTimeout(hasRecoveredOnce: Boolean): PreviewPhase =
     if (!hasRecoveredOnce) PreviewPhase.RECOVERING else PreviewPhase.DEAD
+
+/**
+ * Computes the next preview state on failure/expiry, clearing [currentToken] to `null` so a
+ * self-heal retry mints a fresh capability token instead of resending the dead token.
+ */
+fun recoverPreviewOnFailure(currentToken: String?, hasRecoveredOnce: Boolean): PreviewRecoveryState {
+    val nextPhase = onPreviewExpiredOrTimeout(hasRecoveredOnce)
+    return PreviewRecoveryState(
+        phase = nextPhase,
+        nextToken = null,
+        hasRecoveredOnce = true,
+    )
+}
 
 /**
  * Only a visible, laid-out canvas (`width > 0 && height > 0`) in [PreviewPhase.READY] may answer
@@ -1430,4 +1052,243 @@ fun fitCheckReportUnderLimit(report: JsonObject): JsonObject {
             if (k != "screenshot") put(k, v)
         }
     }
+}
+
+// ===========================================================================
+// 9. Slide Deck -> OOXML PowerPoint (.pptx) Export (pptx-slide-mapper.ts)
+// ===========================================================================
+
+data class PptxArchiveResult(
+    val bytes: ByteArray,
+    val warnings: List<String>,
+)
+
+private fun pxToEmu(px: Double): Long = ((px / 96.0) * 914400.0).roundToLong()
+private fun pxToHundredthPt(px: Double): Int = (px * 75.0).roundToLong().toInt().coerceIn(100, 400_000)
+
+private fun xmlEscape(text: String): String =
+    buildString(text.length) {
+        for (c in text) {
+            when (c) {
+                '&' -> append("&amp;")
+                '<' -> append("&lt;")
+                '>' -> append("&gt;")
+                '"' -> append("&quot;")
+                '\'' -> append("&apos;")
+                else -> if (c.code >= 0x20 || c == '\n' || c == '\r' || c == '\t') append(c)
+            }
+        }
+    }
+
+private fun solidFillXml(color: SlideColor): String {
+    val alphaVal = (color.alpha.coerceIn(0.0, 1.0) * 100_000.0).roundToLong()
+    val alphaTag = if (alphaVal < 100_000L) "<a:alpha val=\"$alphaVal\"/>" else ""
+    return "<a:solidFill><a:srgbClr val=\"${color.hex}\">$alphaTag</a:srgbClr></a:solidFill>"
+}
+
+/**
+ * Builds a valid OOXML `.pptx` presentation archive from a measured [SlideDoc], porting
+ * `src/web/lib/design/pptx-slide-mapper.ts`.
+ */
+fun buildPptxArchive(doc: SlideDoc, title: String): PptxArchiveResult {
+    val fonts = LinkedHashSet<String>()
+    for (slide in doc.slides) {
+        for (item in slide.items) {
+            if (item is SlideItem.Text) {
+                for (run in item.runs) {
+                    if (!run.font.isNullOrBlank()) fonts.add(run.font!!)
+                }
+            }
+        }
+    }
+    val warnings = ArrayList(doc.warnings)
+    if (fonts.isNotEmpty()) {
+        val list = fonts.take(8).joinToString(", ")
+        val suffix = if (fonts.size > 8) ", …" else ""
+        warnings.add("Fonts are referenced by name ($list$suffix); PowerPoint substitutes any it does not have.")
+    }
+
+    val slideCx = pxToEmu(doc.width)
+    val slideCy = pxToEmu(doc.height)
+    val out = ByteArrayOutputStream()
+    ZipOutputStream(out).use { zip ->
+        fun putXml(path: String, xml: String) {
+            zip.putNextEntry(ZipEntry(path))
+            zip.write(xml.toByteArray(Charsets.UTF_8))
+            zip.closeEntry()
+        }
+
+        val mediaEntries = ArrayList<Pair<String, String>>() // (path, contentType)
+        val slideXmls = ArrayList<String>(doc.slides.size)
+        val slideRelsXmls = ArrayList<String>(doc.slides.size)
+
+        for ((sIdx, slide) in doc.slides.withIndex()) {
+            val slideNum = sIdx + 1
+            val rels = ArrayList<String>()
+            val shapes = StringBuilder()
+            var nextShapeId = 2
+
+            for (item in slide.items) {
+                val id = nextShapeId++
+                val offX = pxToEmu(item.x)
+                val offY = pxToEmu(item.y)
+                val extCx = pxToEmu(item.w)
+                val extCy = pxToEmu(item.h)
+                val rotAttr = item.rotation?.let { " rot=\"${(it * 60_000.0).roundToLong()}\"" } ?: ""
+                val xfrm = "<a:xfrm$rotAttr><a:off x=\"$offX\" y=\"$offY\"/><a:ext cx=\"$extCx\" cy=\"$extCy\"/></a:xfrm>"
+
+                when (item) {
+                    is SlideItem.Shape -> {
+                        val prst = if ((item.radiusPx ?: 0.0) > 0.0) "roundRect" else "rect"
+                        val fillXml = item.fill?.let(::solidFillXml) ?: "<a:noFill/>"
+                        val lineXml = if (item.borderColor != null && (item.borderWidthPx ?: 0.0) > 0.0) {
+                            "<a:ln w=\"${pxToEmu(item.borderWidthPx!!)}\">${solidFillXml(item.borderColor!!)}</a:ln>"
+                        } else {
+                            ""
+                        }
+                        shapes.append(
+                            """<p:sp><p:nvSpPr><p:cNvPr id="$id" name="Shape $id"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>""" +
+                                """<p:spPr>$xfrm<a:prstGeom prst="$prst"><a:avLst/></a:prstGeom>$fillXml$lineXml</p:spPr></p:sp>""",
+                        )
+                    }
+                    is SlideItem.Text -> {
+                        val anchor = when (item.valign) {
+                            "middle" -> "ctr"
+                            "bottom" -> "b"
+                            else -> "t"
+                        }
+                        val algn = when (item.align) {
+                            "center" -> "ctr"
+                            "right" -> "r"
+                            "justify" -> "just"
+                            else -> "l"
+                        }
+                        val paragraphs = StringBuilder()
+                        var pRuns = StringBuilder()
+                        fun flushParagraph() {
+                            val buXml = when (item.bullet) {
+                                "bullet" -> "<a:buChar char=\"•\"/>"
+                                "number" -> "<a:buAutoNum type=\"arabicPeriod\"/>"
+                                else -> "<a:buNone/>"
+                            }
+                            paragraphs.append("<a:p><a:pPr algn=\"$algn\">$buXml</a:pPr>$pRuns</a:p>")
+                            pRuns = StringBuilder()
+                        }
+                        for (run in item.runs) {
+                            val sz = pxToHundredthPt(run.sizePx ?: 16.0)
+                            val bAttr = if (run.bold) " b=\"1\"" else ""
+                            val iAttr = if (run.italic) " i=\"1\"" else ""
+                            val uAttr = if (run.underline) " u=\"sng\"" else ""
+                            val fill = run.color?.let(::solidFillXml) ?: ""
+                            val fontXml = run.font?.let { "<a:latin typeface=\"${xmlEscape(it)}\"/>" } ?: ""
+                            pRuns.append(
+                                "<a:r><a:rPr lang=\"en-US\" sz=\"$sz\"$bAttr$iAttr$uAttr dirty=\"0\">$fill$fontXml</a:rPr>" +
+                                    "<a:t>${xmlEscape(run.text)}</a:t></a:r>",
+                            )
+                            if (run.breakLine) flushParagraph()
+                        }
+                        if (pRuns.isNotEmpty() || paragraphs.isEmpty()) flushParagraph()
+                        shapes.append(
+                            """<p:sp><p:nvSpPr><p:cNvPr id="$id" name="Text $id"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>""" +
+                                """<p:spPr>$xfrm<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>""" +
+                                """<p:txBody><a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="$anchor"/><a:lstStyle/>$paragraphs</p:txBody></p:sp>""",
+                        )
+                    }
+                    is SlideItem.Image -> {
+                        val isPng = item.data.startsWith("data:image/png;base64,")
+                        val ext = if (isPng) "png" else "jpg"
+                        val mime = if (isPng) "image/png" else "image/jpeg"
+                        val b64 = item.data.substringAfter(";base64,", "")
+                        val imgBytes = runCatching { Base64.getDecoder().decode(b64) }.getOrNull()
+                        if (imgBytes != null) {
+                            val mediaIdx = mediaEntries.size + 1
+                            val mediaName = "image$mediaIdx.$ext"
+                            val mediaPath = "ppt/media/$mediaName"
+                            zip.putNextEntry(ZipEntry(mediaPath))
+                            zip.write(imgBytes)
+                            zip.closeEntry()
+                            mediaEntries.add(mediaName to mime)
+                            val rId = "rImg${rels.size + 1}"
+                            rels.add(
+                                """<Relationship Id="$rId" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/$mediaName"/>""",
+                            )
+                            shapes.append(
+                                """<p:pic><p:nvPicPr><p:cNvPr id="$id" name="Picture $id"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr>""" +
+                                    """<p:blipFill><a:blip r:embed="$rId"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>""" +
+                                    """<p:spPr>$xfrm<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>""",
+                            )
+                        }
+                    }
+                }
+            }
+
+            val bgXml = slide.background?.let { "<p:bg><p:bgPr>${solidFillXml(it)}<a:effectLst/></p:bgPr></p:bg>" } ?: ""
+            slideXmls.add(
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>""" +
+                    """<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" """ +
+                    """xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" """ +
+                    """xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">""" +
+                    """<p:cSld>$bgXml<p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>""" +
+                    """<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>""" +
+                    """$shapes</p:spTree></p:cSld></p:sld>""",
+            )
+            slideRelsXmls.add(
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>""" +
+                    """<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">""" +
+                    rels.joinToString("") +
+                    """</Relationships>""",
+            )
+            putXml("ppt/slides/slide$slideNum.xml", slideXmls.last())
+            putXml("ppt/slides/_rels/slide$slideNum.xml.rels", slideRelsXmls.last())
+        }
+
+        val slideOverrides = (1..doc.slides.size).joinToString("") { n ->
+            """<Override PartName="/ppt/slides/slide$n.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>"""
+        }
+        putXml(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>""" +
+                """<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">""" +
+                """<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>""" +
+                """<Default Extension="xml" ContentType="application/xml"/>""" +
+                """<Default Extension="png" ContentType="image/png"/>""" +
+                """<Default Extension="jpg" ContentType="image/jpeg"/>""" +
+                """<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>""" +
+                slideOverrides +
+                """</Types>""",
+        )
+        putXml(
+            "_rels/.rels",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>""" +
+                """<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">""" +
+                """<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>""" +
+                """</Relationships>""",
+        )
+        val sldIdLst = (1..doc.slides.size).joinToString("") { n ->
+            """<p:sldId id="${255 + n}" r:id="rSlide$n"/>"""
+        }
+        putXml(
+            "ppt/presentation.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>""" +
+                """<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" """ +
+                """xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" """ +
+                """xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" saveSubsetFonts="1">""" +
+                """<p:sldIdLst>$sldIdLst</p:sldIdLst>""" +
+                """<p:sldSz cx="$slideCx" cy="$slideCy"/>""" +
+                """<p:notesSz cx="$slideCy" cy="$slideCx"/>""" +
+                """</p:presentation>""",
+        )
+        val presRels = (1..doc.slides.size).joinToString("") { n ->
+            """<Relationship Id="rSlide$n" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide$n.xml"/>"""
+        }
+        putXml(
+            "ppt/_rels/presentation.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>""" +
+                """<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">""" +
+                presRels +
+                """</Relationships>""",
+        )
+    }
+
+    return PptxArchiveResult(bytes = out.toByteArray(), warnings = warnings)
 }

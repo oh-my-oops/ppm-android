@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui.design
 
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -9,7 +10,11 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.test.core.app.ApplicationProvider
+import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.withComposeActivity
+import com.hienlh.ppm.client.ApiClient
+import com.hienlh.ppm.client.filenameFromContentDisposition
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.state.design.CommentAnchor
@@ -24,15 +29,31 @@ import com.hienlh.ppm.state.design.DesignVariant
 import com.hienlh.ppm.state.design.ElementRect
 import com.hienlh.ppm.state.design.PickedElement
 import com.hienlh.ppm.state.design.PinRect
+import com.hienlh.ppm.state.design.PreviewPhase
 import com.hienlh.ppm.state.design.SelectOption
 import com.hienlh.ppm.state.design.TweakDef
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.io.OutputStream
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import mockwebserver3.Dispatcher
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import mockwebserver3.RecordedRequest
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -73,15 +94,14 @@ class Phase10bDesignModeUiTest {
 
         val comments = listOf(
             DesignComment(
-                id = "c-1",
+                id = "a1b2c3d4e5f6",
                 number = 1,
                 file = "index.html",
                 anchor = CommentAnchor(
-                    selector = "section.hero > h1",
-                    ppmId = "ppm-1",
+                    file = "index.html",
+                    ppmId = 1,
                     tag = "h1",
-                    xPct = 40.0,
-                    yPct = 20.0,
+                    cssPath = "section.hero > h1",
                 ),
                 body = "Increase heading contrast",
                 resolved = false,
@@ -90,7 +110,7 @@ class Phase10bDesignModeUiTest {
             ),
         )
         val pinRects = mapOf(
-            "c-1" to PinRect(id = "c-1", found = false),
+            "a1b2c3d4e5f6" to PinRect(id = "a1b2c3d4e5f6", found = false),
         )
 
         val tweakDefs = listOf(
@@ -146,11 +166,9 @@ class Phase10bDesignModeUiTest {
                         slug = "pitch-deck",
                         activeVariant = "index.html",
                         pickedElement = PickedElement(
-                            selector = "section.hero > h1",
-                            ppmId = "ppm-1",
+                            cssPath = "section.hero > h1",
+                            ppmId = 1,
                             tag = "h1",
-                            xPct = 40.0,
-                            yPct = 20.0,
                             rect = ElementRect(10.0, 20.0, 200.0, 40.0),
                         ),
                         comments = comments,
@@ -230,11 +248,190 @@ class Phase10bDesignModeUiTest {
         composeRule.onNodeWithContentDescription("Restore").performClick()
         assertEquals("snap-1", restoredSnapId)
 
-        // 5. Export panel assertions: ZIP, HTML, Print, and Slides PPTX
+        // 5. Export panel assertions: ZIP, HTML, Print, and Slides PPTX + filename sanitisation
         activePanel = "export"
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Download ZIP (.zip)").assertIsDisplayed()
         composeRule.onNodeWithText("Export Slide Deck (.pptx)").performClick()
         assertTrue(exportedPptx)
+        assertEquals("pitch-deck.zip", filenameFromContentDisposition("""attachment; filename="../../evil.zip"""", "pitch-deck.zip"))
+        assertEquals("hero-v2.zip", filenameFromContentDisposition("""attachment; filename="hero-v2.zip"""", "pitch-deck.zip"))
+    }
+
+    @Test
+    fun previewSelfHealOn404_clearsTokenRetriesOnceAndEntersDeadState() = runBlocking {
+        val mintBodies = mutableListOf<String>()
+        var failAll = false
+        val server = MockWebServer()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.url.encodedPath
+                return when {
+                    request.method == "POST" && path == "/api/design-preview" -> {
+                        val raw = request.body?.utf8().orEmpty()
+                        mintBodies += raw
+                        val obj = Json.parseToJsonElement(raw).jsonObject
+                        val passedToken = obj["token"]?.jsonPrimitive?.content
+                        val issued = if (failAll) {
+                            "tok-dead"
+                        } else if (passedToken == "tok-stale") {
+                            "tok-stale"
+                        } else {
+                            "tok-fresh"
+                        }
+                        MockResponse.Builder()
+                            .code(200)
+                            .addHeader("Content-Type", "application/json")
+                            .body("""{"ok":true,"data":{"token":"$issued","url":"/dp/$issued/index.html","expiresAt":999999}}""")
+                            .build()
+                    }
+                    request.method == "HEAD" && path == "/dp/tok-stale/index.html" -> {
+                        MockResponse.Builder().code(404).build()
+                    }
+                    request.method == "HEAD" && path == "/dp/tok-dead/index.html" -> {
+                        MockResponse.Builder().code(404).build()
+                    }
+                    request.method == "HEAD" && path == "/dp/tok-fresh/index.html" -> {
+                        MockResponse.Builder()
+                            .code(200)
+                            .addHeader("X-PPM-Gen", "gen-2")
+                            .build()
+                    }
+                    else -> MockResponse.Builder().code(404).build()
+                }
+            }
+        }
+        server.start()
+        try {
+            val baseUrl = server.url("/")
+            val api = ApiClient(baseUrl = baseUrl, token = "test-token")
+
+            // 1) First 404 clears the stale token, retries once with token = null, and recovers on 200.
+            val recovered = loadPreviewWithSelfHeal(
+                api = api,
+                projectName = "demo",
+                slug = "pitch-deck",
+                entry = "index.html",
+                initialToken = "tok-stale",
+                initialRecoveredOnce = false,
+                retryDelayMs = 0L,
+            )
+            assertEquals(PreviewPhase.LOADING, recovered.phase)
+            assertEquals("tok-fresh", recovered.token)
+            assertEquals("/dp/tok-fresh/index.html", recovered.url)
+            assertEquals("gen-2", recovered.gen)
+            assertTrue(recovered.hasRecoveredOnce)
+            assertEquals(2, recovered.attempts)
+            assertEquals(2, mintBodies.size)
+            assertEquals(
+                "tok-stale",
+                Json.parseToJsonElement(mintBodies[0]).jsonObject["token"]?.jsonPrimitive?.content,
+            )
+            assertNull(Json.parseToJsonElement(mintBodies[1]).jsonObject["token"])
+
+            // 2) When both attempts answer HTTP 404, token is cleared, one retry runs, then phase is DEAD.
+            mintBodies.clear()
+            failAll = true
+            val dead = loadPreviewWithSelfHeal(
+                api = api,
+                projectName = "demo",
+                slug = "pitch-deck",
+                entry = "index.html",
+                initialToken = "tok-stale",
+                initialRecoveredOnce = false,
+                retryDelayMs = 0L,
+            )
+            assertEquals(PreviewPhase.DEAD, dead.phase)
+            assertNull(dead.token)
+            assertNull(dead.url)
+            assertNull(dead.gen)
+            assertTrue(dead.hasRecoveredOnce)
+            assertEquals(2, dead.attempts)
+            assertEquals(2, mintBodies.size)
+            assertEquals(
+                "tok-stale",
+                Json.parseToJsonElement(mintBodies[0]).jsonObject["token"]?.jsonPrimitive?.content,
+            )
+            assertNull(Json.parseToJsonElement(mintBodies[1]).jsonObject["token"])
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun completeDesignSafExport_writesToSafUriAndShowsSavedToastOnlyOnSuccess() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val resolver = context.contentResolver
+        val shadowResolver = Shadows.shadowOf(resolver)
+        val toasts = mutableListOf<ErrorToastMessage>()
+
+        // 1) Succeeding SAF write: toast says "Saved ..." only after the stream finishes writing.
+        val okUri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload%2Fpitch-deck.pptx")
+        val sink = ByteArrayOutputStream()
+        var closedBeforeToast = false
+        val trackedStream = object : OutputStream() {
+            var closed = false
+            override fun write(b: Int) {
+                assertTrue("No toast may be shown before write completes", toasts.isEmpty())
+                sink.write(b)
+            }
+
+            override fun write(b: ByteArray, off: Int, len: Int) {
+                assertTrue("No toast may be shown before write completes", toasts.isEmpty())
+                sink.write(b, off, len)
+            }
+
+            override fun close() {
+                closed = true
+                super.close()
+            }
+        }
+        shadowResolver.registerOutputStream(okUri, trackedStream)
+
+        val payload = "PK\u0003\u0004-saf-create-document-pptx".toByteArray(Charsets.UTF_8)
+        val okResult = completeDesignSafExport(
+            resolver = resolver,
+            uri = okUri,
+            export = PendingDesignExport.Pptx(
+                suggestedFilename = "pitch-deck.pptx",
+                bytes = payload,
+                slideCount = 4,
+            ),
+            onToast = { msg ->
+                closedBeforeToast = trackedStream.closed
+                toasts += msg
+            },
+        )
+        assertTrue(okResult)
+        assertTrue(closedBeforeToast)
+        assertArrayEquals(payload, sink.toByteArray())
+        assertEquals(1, toasts.size)
+        assertEquals("Saved pitch-deck.pptx", toasts.single().title)
+        assertEquals("Exported 4 slide(s).", toasts.single().description)
+
+        // 2) Failing SAF write: throws IOException -> error toast shown, never "Saved ...".
+        toasts.clear()
+        val failUri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADownload%2Fbroken.pptx")
+        val failingStream = object : OutputStream() {
+            override fun write(b: Int): Unit = throw IOException("No space left on device")
+            override fun write(b: ByteArray, off: Int, len: Int): Unit = throw IOException("No space left on device")
+        }
+        shadowResolver.registerOutputStream(failUri, failingStream)
+
+        val failResult = completeDesignSafExport(
+            resolver = resolver,
+            uri = failUri,
+            export = PendingDesignExport.Pptx(
+                suggestedFilename = "broken.pptx",
+                bytes = payload,
+                slideCount = 4,
+            ),
+            onToast = { toasts += it },
+        )
+        assertFalse(failResult)
+        assertEquals(1, toasts.size)
+        assertEquals("Slides export failed", toasts.single().title)
+        assertEquals("No space left on device", toasts.single().description)
+        assertEquals(ErrorToastMessage.Kind.ERROR, toasts.single().kind)
     }
 }

@@ -42,6 +42,7 @@ import com.hienlh.ppm.client.uploadedFile
 import com.hienlh.ppm.client.putUiPrefs
 import com.hienlh.ppm.client.renameSession
 import com.hienlh.ppm.client.setSessionAccount
+import com.hienlh.ppm.client.settingsListThemes
 import com.hienlh.ppm.client.reorderProjects
 import com.hienlh.ppm.client.resetTags
 import com.hienlh.ppm.client.setDefaultTag
@@ -887,8 +888,30 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** The theme picked on any device (`/api/settings/theme`). */
     var themeSelection by mutableStateOf(ThemeSelection("aurora", "system"))
         private set
+    var customThemes by mutableStateOf(emptyList<PpmTheme>())
+        private set
     var systemIsDark by mutableStateOf(true)
-    val theme: PpmTheme get() = PpmTheme.resolve(themeSelection.style, themeSelection.mode, systemIsDark)
+    val theme: PpmTheme
+        get() = PpmTheme.resolve(
+            style = themeSelection.style,
+            mode = themeSelection.mode,
+            systemIsDark = systemIsDark,
+            customThemes = customThemes,
+            customThemeId = themeSelection.customThemeId,
+        )
+
+    fun updateCustomThemes(items: List<com.hienlh.ppm.state.settings.ImportedThemeItem>) {
+        customThemes = items.map { item ->
+            PpmTheme.fromCustom(
+                id = item.id,
+                name = item.name,
+                mode = item.mode,
+                tokenMap = item.tokens,
+                mobileOverrides = item.mobileOverrides,
+                swatchStrings = item.swatch,
+            )
+        }
+    }
 
     /** The app-wide socket of the open server: running and unread sessions. */
     var events by mutableStateOf<GlobalEvents?>(null)
@@ -2158,6 +2181,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     suspend fun loadTheme() {
         val api = api ?: return
         quietly { api.themeSelection() }?.let { themeSelection = it }
+        quietly { api.settingsListThemes() }?.let { raw ->
+            updateCustomThemes(com.hienlh.ppm.state.settings.parseImportedThemes(raw))
+        }
     }
 
     /** Picks the theme for every device, as the web's status bar picker does. */

@@ -75,6 +75,13 @@ data class DesignExportPayload(
     val warnings: List<String>,
 )
 
+data class DesignExportStreamResult(
+    val bytesWritten: Long,
+    val filename: String,
+    val warningCount: Int,
+    val warnings: List<String>,
+)
+
 private fun designBasePath(projectName: String): String =
     "/api/project/${ApiClient.escape(projectName)}/designs"
 
@@ -187,15 +194,20 @@ suspend fun ApiClient.designHeadPreviewGen(previewPathOrUrl: String): String? {
     val req = Request.Builder()
         .url(resolvedUrl)
         .head()
-        .header("Authorization", "Bearer $token")
         .header("x-ppm-client", PpmHttp.CLIENT_NAME)
         .build()
     return withContext(Dispatchers.IO) {
-        runCatching {
-            PpmHttp.client.newCall(req).await().use { res ->
-                if (!res.isSuccessful) null else res.header("X-PPM-Gen")
+        val res = try {
+            PpmHttp.client.newCall(req).await()
+        } catch (error: IOException) {
+            throw PpmError.Unreachable( error.message ?: "Network error")
+        }
+        res.use { response ->
+            if (!response.isSuccessful) {
+                throw PpmError.Server(response.code, "Preview answered HTTP ${response.code}.")
             }
-        }.getOrNull()
+            response.header("X-PPM-Gen")
+        }
     }
 }
 
@@ -345,7 +357,7 @@ suspend fun ApiClient.designApplyStyle(
     slug: String,
     file: String,
     gen: String,
-    ppmId: String,
+    ppmId: Int,
     tag: String,
     props: Map<String, String>,
 ): DesignStyleEditResult {
@@ -458,13 +470,32 @@ suspend fun ApiClient.designSubmitCheckResult(
 }
 
 private val FILENAME_FROM_DISPOSITION_RE = Regex("""filename="([^"]+)"""")
+private val SAFE_EXPORT_FILENAME_RE = Regex("^[A-Za-z0-9._-]{1,200}$")
 
-suspend fun ApiClient.designDownloadExport(
+/**
+ * Extracts and sanitises the filename from `Content-Disposition` (`filenameFrom` in `design-export-client.ts`).
+ * Rejects path separators, `..`, control characters, or names > 200 chars, falling back to [fallback].
+ */
+fun filenameFromContentDisposition(disposition: String?, fallback: String): String {
+    val name = FILENAME_FROM_DISPOSITION_RE.find(disposition.orEmpty())?.groupValues?.getOrNull(1).orEmpty()
+    return if (name != "." && name != ".." && SAFE_EXPORT_FILENAME_RE.matches(name)) name else fallback
+}
+
+private fun parseExportWarnings(warnListRaw: String): List<String> {
+    if (warnListRaw.isBlank()) return emptyList()
+    return runCatching {
+        val decoded = java.net.URLDecoder.decode(warnListRaw, "UTF-8")
+        WireJson.parseOrNull(decoded)?.array?.mapNotNull { it.string }?.take(50).orEmpty()
+    }.getOrDefault(emptyList())
+}
+
+suspend fun ApiClient.designStreamExport(
     projectName: String,
     slug: String,
     kind: String, // "zip" | "html"
     entry: String? = null,
-): DesignExportPayload {
+    writeTo: (filename: String, java.io.InputStream) -> Long,
+): DesignExportStreamResult {
     val query = if (kind == "html" && !entry.isNullOrBlank() && entry != "index.html") {
         listOf("entry" to entry)
     } else {
@@ -486,26 +517,38 @@ suspend fun ApiClient.designDownloadExport(
                 val text = res.body.string()
                 ApiClient.unwrap(res.code, res.header("Content-Type"), text)
             }
-            val bytes = res.body.bytes()
-            val disp = res.header("Content-Disposition").orEmpty()
+            val disp = res.header("Content-Disposition")
             val defaultName = if (kind == "zip") "$slug.zip" else "$slug.html"
-            val filename = FILENAME_FROM_DISPOSITION_RE.find(disp)?.groupValues?.getOrNull(1) ?: defaultName
+            val filename = filenameFromContentDisposition(disp, defaultName)
             val warnCount = res.header("X-PPM-Export-Warnings")?.toIntOrNull()?.coerceAtLeast(0) ?: 0
-            val warnListRaw = res.header("X-PPM-Export-Warning-List").orEmpty()
-            val warnings = if (warnListRaw.isNotBlank()) {
-                runCatching {
-                    val decoded = java.net.URLDecoder.decode(warnListRaw, "UTF-8")
-                    WireJson.parseOrNull(decoded)?.array?.mapNotNull { it.string }.orEmpty()
-                }.getOrDefault(emptyList())
-            } else {
-                emptyList()
+            val warnings = parseExportWarnings(res.header("X-PPM-Export-Warning-List").orEmpty())
+            val bytesWritten = res.body.byteStream().use { input ->
+                writeTo(filename, input)
             }
-            DesignExportPayload(
-                bytes = bytes,
+            DesignExportStreamResult(
+                bytesWritten = bytesWritten,
                 filename = filename,
                 warningCount = warnCount,
                 warnings = warnings,
             )
         }
     }
+}
+
+suspend fun ApiClient.designDownloadExport(
+    projectName: String,
+    slug: String,
+    kind: String, // "zip" | "html"
+    entry: String? = null,
+): DesignExportPayload {
+    val out = java.io.ByteArrayOutputStream()
+    val streamed = designStreamExport(projectName, slug, kind, entry) { _, input ->
+        input.copyTo(out)
+    }
+    return DesignExportPayload(
+        bytes = out.toByteArray(),
+        filename = streamed.filename,
+        warningCount = streamed.warningCount,
+        warnings = streamed.warnings,
+    )
 }

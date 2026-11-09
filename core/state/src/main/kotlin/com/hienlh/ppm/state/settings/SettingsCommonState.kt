@@ -1,5 +1,6 @@
 package com.hienlh.ppm.state.settings
 
+import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.get
@@ -12,7 +13,10 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.util.Locale
+import java.util.zip.ZipInputStream
 
 // ===========================================================================
 // 1. Settings Categories & Deep-Link Resolution (Phase 12a.1)
@@ -184,16 +188,22 @@ fun parseUpgradeStatus(element: JsonElement?): UpgradeStatusInfo? {
 }
 
 // ===========================================================================
-// 4. Imported Custom Themes (Phase 12a.2)
+// 4. Imported Custom Themes & .vsix Extraction (Phase 12a.2)
 // ===========================================================================
 
 data class ImportedThemeItem(
     val id: String,
     val name: String,
-    val base: String,
-    val previewColors: List<String> = emptyList(),
-    val variables: Map<String, String> = emptyMap(),
-)
+    val style: String = "custom",
+    val mode: String = "dark", // "dark" | "light"
+    val tokens: Map<String, String> = emptyMap(),
+    val swatch: List<String> = emptyList(),
+    val mobileOverrides: Map<String, String> = emptyMap(),
+) {
+    val base: String get() = mode
+    val previewColors: List<String> get() = swatch
+    val variables: Map<String, String> get() = tokens
+}
 
 fun parseImportedThemes(element: JsonElement?): List<ImportedThemeItem> {
     val arr = element.array ?: return emptyList()
@@ -205,32 +215,37 @@ fun parseThemeImportResponse(element: JsonElement?): List<ImportedThemeItem> {
     return obj["themes"].array?.mapNotNull(::parseImportedThemeItem) ?: emptyList()
 }
 
+private fun parseStringMap(obj: Map<String, JsonElement>?): Map<String, String> = buildMap {
+    if (obj != null) {
+        for ((k, v) in obj) {
+            v.string?.let { put(k, it) }
+        }
+    }
+}
+
 private fun parseImportedThemeItem(element: JsonElement?): ImportedThemeItem? {
     val obj = element.obj ?: return null
     val id = obj["id"].string ?: return null
     val name = obj["name"].string ?: id
-    val base = obj["base"].string ?: "dark"
-    val preview = obj["previewColors"].array?.mapNotNull { it.string } ?: emptyList()
-    val varsObj = obj["variables"].obj
-    val vars = buildMap {
-        if (varsObj != null) {
-            for ((k, v) in varsObj) {
-                v.string?.let { put(k, it) }
-            }
-        }
-    }
+    val style = obj["style"].string ?: "custom"
+    val mode = obj["mode"].string ?: "dark"
+    val tokens = parseStringMap(obj["tokens"].obj)
+    val swatch = obj["swatch"].array?.mapNotNull { it.string } ?: emptyList()
+    val mobileOverrides = parseStringMap(obj["mobileOverrides"].obj)
     return ImportedThemeItem(
         id = id,
         name = name,
-        base = base,
-        previewColors = preview,
-        variables = vars,
+        style = style,
+        mode = mode,
+        tokens = tokens,
+        swatch = swatch,
+        mobileOverrides = mobileOverrides,
     )
 }
 
 enum class ThemeUploadKind(val wireSource: String) {
     VSIX("upload"),
-    JSON("json"),
+    JSON("upload"),
     UNSUPPORTED(""),
 }
 
@@ -240,6 +255,146 @@ fun detectThemeUploadKind(fileName: String): ThemeUploadKind {
         lower.endsWith(".vsix") -> ThemeUploadKind.VSIX
         lower.endsWith(".json") || lower.endsWith(".jsonc") -> ThemeUploadKind.JSON
         else -> ThemeUploadKind.UNSUPPORTED
+    }
+}
+
+private const val MAX_VSIX_TOTAL_UNCOMPRESSED = 50L * 1024L * 1024L
+private const val MAX_VSIX_ENTRIES = 500
+private const val MAX_VSIX_ENTRY_BYTES = 5 * 1024 * 1024
+
+data class ExtractedVsixTheme(
+    val label: String,
+    val uiTheme: String? = null,
+    val jsonText: String,
+)
+
+data class ThemeImportUploadRequest(
+    val source: String,
+    val value: String,
+    val name: String? = null,
+)
+
+fun isUnsafeVsixEntryName(name: String): Boolean {
+    if (name.contains("..")) return true
+    if (name.startsWith("/") || name.startsWith("\\")) return true
+    if (Regex("^[a-zA-Z]:[/\\\\]").containsMatchIn(name)) return true
+    return false
+}
+
+private fun resolveVsixThemeEntryName(themePath: String): String? {
+    val p = themePath.replace("\\", "/").removePrefix("./")
+    if (isUnsafeVsixEntryName(p)) return null
+    val full = if (p.startsWith("extension/")) p else "extension/$p"
+    if (full.split("/").any { it == ".." }) return null
+    return full
+}
+
+/**
+ * Port of `src/services/theme-import/unzip-vsix.ts`: extracts theme JSON documents from a `.vsix`
+ * archive so each theme can be sent to `POST /api/settings/themes` with `source = "upload"` (which
+ * expects a JSON theme string on the server).
+ */
+fun extractVsixThemes(bytes: ByteArray): List<ExtractedVsixTheme> {
+    val entries = LinkedHashMap<String, ByteArray>()
+    var entryCount = 0
+    var totalUncompressed = 0L
+
+    ZipInputStream(ByteArrayInputStream(bytes)).use { zis ->
+        while (true) {
+            val entry = zis.nextEntry ?: break
+            entryCount++
+            if (entryCount > MAX_VSIX_ENTRIES) {
+                throw IllegalArgumentException("Archive has too many entries")
+            }
+            val name = entry.name
+            if (isUnsafeVsixEntryName(name)) {
+                throw IllegalArgumentException("Unsafe entry path: $name")
+            }
+            if (!entry.isDirectory) {
+                val out = ByteArrayOutputStream()
+                val buf = ByteArray(8192)
+                var entryBytes = 0
+                while (true) {
+                    val read = zis.read(buf)
+                    if (read < 0) break
+                    entryBytes += read
+                    totalUncompressed += read
+                    if (totalUncompressed > MAX_VSIX_TOTAL_UNCOMPRESSED) {
+                        throw IllegalArgumentException("Archive too large when decompressed")
+                    }
+                    if (entryBytes <= MAX_VSIX_ENTRY_BYTES) {
+                        out.write(buf, 0, read)
+                    }
+                }
+                if (entryBytes <= MAX_VSIX_ENTRY_BYTES) {
+                    entries[name] = out.toByteArray()
+                }
+            }
+            zis.closeEntry()
+        }
+    }
+
+    val pkgBytes = entries["extension/package.json"]
+        ?: throw IllegalArgumentException("Not a valid extension: missing extension/package.json")
+    val pkgObj = WireJson.parseOrNull(pkgBytes.toString(Charsets.UTF_8)).obj
+        ?: throw IllegalArgumentException("Invalid extension/package.json")
+    val contributed = pkgObj["contributes"].obj?.get("themes").array
+    if (contributed.isNullOrEmpty()) {
+        throw IllegalArgumentException("Extension contributes no themes")
+    }
+
+    val out = mutableListOf<ExtractedVsixTheme>()
+    for (item in contributed) {
+        val t = item.obj ?: continue
+        val path = t["path"].string ?: continue
+        val entryName = resolveVsixThemeEntryName(path) ?: continue
+        val themeBytes = entries[entryName] ?: continue
+        val text = themeBytes.toString(Charsets.UTF_8)
+        if (WireJson.parseOrNull(text).obj != null) {
+            out.add(
+                ExtractedVsixTheme(
+                    label = t["label"].string ?: "Imported Theme",
+                    uiTheme = t["uiTheme"].string,
+                    jsonText = text,
+                ),
+            )
+        }
+    }
+    if (out.isEmpty()) {
+        throw IllegalArgumentException("No readable themes found in extension")
+    }
+    return out
+}
+
+fun buildThemeFileUploadRequests(
+    fileName: String,
+    bytes: ByteArray,
+    nameHint: String? = null,
+): List<ThemeImportUploadRequest> {
+    val cleanHint = nameHint?.trim()?.takeIf { it.isNotEmpty() }
+    return when (detectThemeUploadKind(fileName)) {
+        ThemeUploadKind.VSIX -> {
+            extractVsixThemes(bytes).map { item ->
+                ThemeImportUploadRequest(
+                    source = "upload",
+                    value = item.jsonText,
+                    name = if (cleanHint != null) "$cleanHint ${item.label}" else item.label,
+                )
+            }
+        }
+        ThemeUploadKind.JSON -> {
+            val defaultName = fileName.replace(Regex("\\.jsonc?$", RegexOption.IGNORE_CASE), "")
+            listOf(
+                ThemeImportUploadRequest(
+                    source = "upload",
+                    value = bytes.toString(Charsets.UTF_8),
+                    name = cleanHint ?: defaultName,
+                ),
+            )
+        }
+        ThemeUploadKind.UNSUPPORTED -> {
+            throw IllegalArgumentException("Unsupported file type. Choose a .json, .jsonc, or .vsix file.")
+        }
     }
 }
 
@@ -520,16 +675,24 @@ data class LspServerRow(
     val installed: Boolean,
     val origin: String? = null,
     val installHint: String = "",
-    val canInstall: Boolean = false,
+    val installable: Boolean = false,
+    val installWith: String? = null,
     val removable: Boolean = false,
     val alsoRemoves: List<String> = emptyList(),
-)
+) {
+    val canInstall: Boolean get() = installable
+}
 
 data class LspRunningRow(
-    val id: String,
+    val serverId: String,
     val rootPath: String,
-    val ready: Boolean,
-)
+    val state: String = "ready",
+    val subscribers: Int = 0,
+    val key: String = "",
+) {
+    val id: String get() = serverId
+    val ready: Boolean get() = state == "ready"
+}
 
 data class LspServersOverview(
     val servers: List<LspServerRow> = emptyList(),
@@ -549,18 +712,21 @@ fun parseLspServersOverview(element: JsonElement?): LspServersOverview {
             installed = s["installed"].bool ?: false,
             origin = s["origin"].string,
             installHint = s["installHint"].string ?: "",
-            canInstall = s["canInstall"].bool ?: false,
+            installable = s["installable"].bool ?: false,
+            installWith = s["installWith"].string,
             removable = s["removable"].bool ?: false,
             alsoRemoves = s["alsoRemoves"].array?.mapNotNull { it.string } ?: emptyList(),
         )
     }
     val running = obj["running"].array.orEmpty().mapNotNull { item ->
         val r = item.obj ?: return@mapNotNull null
-        val id = r["id"].string ?: return@mapNotNull null
+        val serverId = r["serverId"].string ?: return@mapNotNull null
         LspRunningRow(
-            id = id,
+            serverId = serverId,
             rootPath = r["rootPath"].string ?: "",
-            ready = r["ready"].bool ?: false,
+            state = r["state"].string ?: "ready",
+            subscribers = r["subscribers"].int ?: 0,
+            key = r["key"].string ?: "",
         )
     }
     return LspServersOverview(
@@ -570,30 +736,42 @@ fun parseLspServersOverview(element: JsonElement?): LspServersOverview {
     )
 }
 
-fun lspOriginLabel(origin: String?, installDir: String): String = when (origin) {
-    "ppm" -> if (installDir.isNotBlank()) "Installed by PPM in $installDir" else "Installed by PPM"
-    "path" -> "Found on PATH"
-    "bundled" -> "Bundled with PPM"
-    "project" -> "In project node_modules"
-    else -> ""
+fun lspOriginLabel(origin: String?, installDir: String = ""): String = when (origin) {
+    "project" -> "In project"
+    "path" -> "On PATH"
+    "bundled" -> "Bundled"
+    else -> "Installed"
 }
 
 // ===========================================================================
 // 9. Database Drivers (Phase 12a.3)
 // ===========================================================================
 
+data class DbDriverInstalledInfo(
+    val version: String,
+    val installedAt: String,
+    val bytes: Long,
+    val sha256: String = "",
+)
+
 data class DbDriverRow(
     val id: String,
     val displayName: String,
-    val dbTypes: List<String>,
-    val npmPackage: String,
+    val engines: List<String>,
+    val usedFor: String = "",
+    val pkg: String,
     val version: String,
-    val approxBytes: Long,
-    val status: String, // "not_installed" | "installing" | "installed" | "failed"
-    val installedAt: String? = null,
-    val sizeBytes: Long? = null,
-    val error: String? = null,
-)
+    val license: String = "",
+    val homepage: String = "",
+    val state: String, // "missing" | "installed" | "outdated"
+    val installed: DbDriverInstalledInfo? = null,
+    val installing: Boolean = false,
+    val removing: Boolean = false,
+) {
+    val dbTypes: List<String> get() = engines
+    val npmPackage: String get() = pkg
+    val sizeBytes: Long? get() = installed?.bytes
+}
 
 fun parseDbDrivers(element: JsonElement?): List<DbDriverRow> {
     val arr = element.array ?: return emptyList()
@@ -603,53 +781,93 @@ fun parseDbDrivers(element: JsonElement?): List<DbDriverRow> {
 fun parseDbDriverRow(element: JsonElement?): DbDriverRow? {
     val obj = element.obj ?: return null
     val id = obj["id"].string ?: return null
+    val installedObj = obj["installed"].obj
+    val installedInfo = if (installedObj != null) {
+        DbDriverInstalledInfo(
+            version = installedObj["version"].string ?: "",
+            installedAt = installedObj["installedAt"].string ?: "",
+            bytes = installedObj["bytes"].long ?: 0L,
+            sha256 = installedObj["sha256"].string ?: "",
+        )
+    } else {
+        null
+    }
     return DbDriverRow(
         id = id,
         displayName = obj["displayName"].string ?: id,
-        dbTypes = obj["dbTypes"].array?.mapNotNull { it.string } ?: emptyList(),
-        npmPackage = obj["npmPackage"].string ?: "",
+        engines = obj["engines"].array?.mapNotNull { it.string } ?: emptyList(),
+        usedFor = obj["usedFor"].string ?: "",
+        pkg = obj["package"].string ?: "",
         version = obj["version"].string ?: "",
-        approxBytes = obj["approxBytes"].long ?: 0L,
-        status = obj["status"].string ?: "not_installed",
-        installedAt = obj["installedAt"].string,
-        sizeBytes = obj["sizeBytes"].long,
-        error = obj["error"].string,
+        license = obj["license"].string ?: "",
+        homepage = obj["homepage"].string ?: "",
+        state = obj["state"].string ?: "missing",
+        installed = installedInfo,
+        installing = obj["installing"].bool ?: false,
+        removing = obj["removing"].bool ?: false,
     )
 }
 
 fun hasBusyDbDriver(drivers: List<DbDriverRow>): Boolean =
-    drivers.any { it.status == "installing" }
+    drivers.any { it.installing || it.removing }
 
 fun formatDriverBytes(bytes: Long): String {
-    if (bytes < 1024L) return "$bytes B"
-    if (bytes < 1024L * 1024L) return "${Math.round(bytes / 1024.0)} KB"
-    return String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
+    if (bytes >= 1024L * 1024L) {
+        return String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
+    }
+    return "${maxOf(1L, Math.round(bytes / 1024.0))} KB"
 }
 
 // ===========================================================================
 // 10. Remote Desktop WebRTC Relay (Phase 12a.3)
 // ===========================================================================
 
-data class RelayStatusState(
-    val status: String = "missing", // "ready" | "downloading" | "error" | "missing"
-    val source: String? = null, // "bundled" | "system" | null
-    val progress: Double? = null, // 0.0 .. 1.0
+data class RelayInstallJobState(
+    val receivedBytes: Long = 0L,
+    val totalBytes: Long = 0L,
+    val done: Boolean = false,
     val error: String? = null,
+)
+
+data class RelayStatusState(
+    val installed: Boolean = false,
     val path: String? = null,
+    val source: String? = null, // "bundled" | "system" | null
+    val pinnedVersion: String = "",
+    val available: Boolean = true,
+    val job: RelayInstallJobState? = null,
 ) {
-    val isReady: Boolean get() = status == "ready"
-    val isDownloading: Boolean get() = status == "downloading"
-    val canUninstall: Boolean get() = status == "ready" && source == "bundled"
+    val isReady: Boolean get() = installed
+    val isDownloading: Boolean get() = job != null && !job.done
+    val canUninstall: Boolean get() = installed && source == "bundled"
+    val progressPercent: Int?
+        get() = if (job != null && job.totalBytes > 0L) {
+            Math.round((job.receivedBytes.toDouble() / job.totalBytes.toDouble()) * 100.0).toInt()
+        } else {
+            null
+        }
+    val error: String? get() = job?.error
 }
 
 fun parseRelayStatus(element: JsonElement?): RelayStatusState {
     val obj = element.obj ?: return RelayStatusState()
-    val rawProgress = obj["progress"]?.toString()?.toDoubleOrNull()
+    val jobObj = obj["job"].obj
+    val job = if (jobObj != null) {
+        RelayInstallJobState(
+            receivedBytes = jobObj["receivedBytes"].long ?: 0L,
+            totalBytes = jobObj["totalBytes"].long ?: 0L,
+            done = jobObj["done"].bool ?: false,
+            error = jobObj["error"].string,
+        )
+    } else {
+        null
+    }
     return RelayStatusState(
-        status = obj["status"].string ?: "missing",
-        source = obj["source"].string,
-        progress = rawProgress,
-        error = obj["error"].string,
+        installed = obj["installed"].bool ?: false,
         path = obj["path"].string,
+        source = obj["source"].string,
+        pinnedVersion = obj["pinnedVersion"].string ?: "",
+        available = obj["available"].bool ?: true,
+        job = job,
     )
 }

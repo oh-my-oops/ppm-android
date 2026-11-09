@@ -64,6 +64,19 @@ data class Rgba(val r: Double, val g: Double, val b: Double, val a: Double) {
             fun byte(shift: Int) = ((v shr shift) and 0xFF) / 255.0
             return if (s.length == 6) Rgba(byte(16), byte(8), byte(0), 1.0) else Rgba(byte(24), byte(16), byte(8), byte(0))
         }
+
+        private val RGBA_REGEX = Regex("""^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$""", RegexOption.IGNORE_CASE)
+
+        /** `#rgb`, `#rrggbb`, `#rrggbbaa`, `rgb(...)`, or `rgba(...)`. */
+        fun parse(text: String): Rgba? {
+            hex(text)?.let { return it }
+            val m = RGBA_REGEX.matchEntire(text.trim()) ?: return null
+            val r = m.groupValues[1].toDoubleOrNull() ?: return null
+            val g = m.groupValues[2].toDoubleOrNull() ?: return null
+            val b = m.groupValues[3].toDoubleOrNull() ?: return null
+            val a = if (m.groupValues[4].isEmpty()) 1.0 else (m.groupValues[4].toDoubleOrNull() ?: return null)
+            return Rgba((r / 255.0).coerceIn(0.0, 1.0), (g / 255.0).coerceIn(0.0, 1.0), (b / 255.0).coerceIn(0.0, 1.0), a.coerceIn(0.0, 1.0))
+        }
     }
 }
 
@@ -145,11 +158,93 @@ data class PpmTheme(
     val mobileTokens: ThemeTokens,
 ) {
     companion object {
+        private val SHADOW_REGEX = Regex("""^\s*(-?[\d.]+)(?:px)?\s+(-?[\d.]+)(?:px)?\s+([\d.]+)(?:px)?\s+(-?[\d.]+)(?:px)?\s+(.+)$""")
+
+        private fun parseShadow(raw: String, fallback: ThemeShadow): ThemeShadow {
+            val m = SHADOW_REGEX.matchEntire(raw.trim()) ?: return fallback
+            val x = m.groupValues[1].toDoubleOrNull() ?: return fallback
+            val y = m.groupValues[2].toDoubleOrNull() ?: return fallback
+            val blur = m.groupValues[3].toDoubleOrNull() ?: return fallback
+            val spread = m.groupValues[4].toDoubleOrNull() ?: return fallback
+            val color = Rgba.parse(m.groupValues[5]) ?: return fallback
+            return ThemeShadow(x, y, blur, spread, color)
+        }
+
+        private fun applyTokenMap(base: ThemeTokens, map: Map<String, String>): ThemeTokens {
+            if (map.isEmpty()) return base
+            val bgSolid = map["bgSolid"]?.let(Rgba::parse) ?: base.bgSolid
+            val bg = map["bg"]?.let(Rgba::parse)?.let { ThemeBackground.Solid(it) }
+                ?: if (map.containsKey("bgSolid")) ThemeBackground.Solid(bgSolid) else base.background
+            val panel = map["panel"]?.let(Rgba::parse) ?: base.panel
+            return base.copy(
+                background = bg,
+                bgSolid = bgSolid,
+                rail = map["rail"]?.let(Rgba::parse) ?: map["panel"]?.let(Rgba::parse) ?: base.rail,
+                panel = panel,
+                panel2 = map["panel2"]?.let(Rgba::parse) ?: base.panel2,
+                border = map["border"]?.let(Rgba::parse) ?: base.border,
+                borderSoft = map["borderSoft"]?.let(Rgba::parse) ?: base.borderSoft,
+                text = map["text"]?.let(Rgba::parse) ?: base.text,
+                text2 = map["text2"]?.let(Rgba::parse) ?: base.text2,
+                text3 = map["text3"]?.let(Rgba::parse) ?: base.text3,
+                accent = map["accent"]?.let(Rgba::parse) ?: base.accent,
+                accentFg = map["accentFg"]?.let(Rgba::parse) ?: base.accentFg,
+                accent2 = map["accent2"]?.let(Rgba::parse) ?: base.accent2,
+                accentWash = map["accentWash"]?.let(Rgba::parse) ?: base.accentWash,
+                accentWashBorder = map["accentWashBorder"]?.let(Rgba::parse) ?: base.accentWashBorder,
+                success = map["success"]?.let(Rgba::parse) ?: base.success,
+                warning = map["warning"]?.let(Rgba::parse) ?: base.warning,
+                error = map["error"]?.let(Rgba::parse) ?: base.error,
+                info = map["info"]?.let(Rgba::parse) ?: base.info,
+                shadowPanel = map["shadowPanel"]?.let { parseShadow(it, base.shadowPanel) } ?: base.shadowPanel,
+                shadowFloat = map["shadowFloat"]?.let { parseShadow(it, base.shadowFloat) } ?: base.shadowFloat,
+                rad = map["rad"]?.removeSuffix("px")?.trim()?.toDoubleOrNull() ?: base.rad,
+                radSm = map["radSm"]?.removeSuffix("px")?.trim()?.toDoubleOrNull() ?: base.radSm,
+            )
+        }
+
+        /** Build a [PpmTheme] from an imported custom theme's token map (`src/web/theme/resolve-theme.ts`). */
+        fun fromCustom(
+            id: String,
+            name: String,
+            mode: String,
+            tokenMap: Map<String, String>,
+            mobileOverrides: Map<String, String> = emptyMap(),
+            swatchStrings: List<String> = emptyList(),
+        ): PpmTheme {
+            val isDark = mode != "light"
+            val baseTheme = if (isDark) BuiltInThemes.auroraDark else BuiltInThemes.auroraLight
+            val resolvedTokens = applyTokenMap(baseTheme.tokens, tokenMap)
+            val resolvedMobile = if (mobileOverrides.isEmpty()) resolvedTokens else applyTokenMap(resolvedTokens, mobileOverrides)
+            val parsedSwatch = swatchStrings.mapNotNull(Rgba::parse).ifEmpty {
+                listOf(resolvedTokens.bgSolid, resolvedTokens.accent, resolvedTokens.accent2)
+            }
+            return PpmTheme(
+                id = id,
+                name = name,
+                style = "custom",
+                isDark = isDark,
+                swatch = parsedSwatch,
+                shikiTheme = if (isDark) "github-dark-dimmed" else "github-light",
+                tokens = resolvedTokens,
+                mobileTokens = resolvedMobile,
+            )
+        }
+
         /**
-         * `{style, mode}` → theme, as `resolveTheme` does on the web. `system` follows the OS; an
-         * imported (custom) theme is not drawn natively yet, so it falls back to Aurora.
+         * `{style, mode}` → theme, as `resolveTheme` does on the web (`src/web/theme/resolve-theme.ts`).
+         * `system` follows the OS; `custom` resolves the imported theme matching [customThemeId].
          */
-        fun resolve(style: String, mode: String, systemIsDark: Boolean): PpmTheme {
+        fun resolve(
+            style: String,
+            mode: String,
+            systemIsDark: Boolean,
+            customThemes: List<PpmTheme> = emptyList(),
+            customThemeId: String? = null,
+        ): PpmTheme {
+            if (style == "custom" && !customThemeId.isNullOrBlank()) {
+                customThemes.firstOrNull { it.id == customThemeId }?.let { return it }
+            }
             val dark = if (mode == "system") systemIsDark else mode != "light"
             val id = "$style-${if (dark) "dark" else "light"}"
             return BuiltInThemes.all.firstOrNull { it.id == id } ?: if (dark) BuiltInThemes.auroraDark else BuiltInThemes.auroraLight

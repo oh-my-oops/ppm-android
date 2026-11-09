@@ -49,8 +49,8 @@ val NOTIFICATION_DELAY_OPTIONS: List<Pair<Int, String>> = listOf(
 data class NotificationSettingsState(
     val events: Map<String, Boolean> = NOTIFICATION_EVENT_DEFS.associate { it.key to true },
     val delaySeconds: Int = 60,
-    val telegram: Boolean = false,
-    val ntfy: Boolean = false,
+    val telegram: Boolean = true,
+    val ntfy: Boolean = true,
 ) {
     fun toJsonPatch(): JsonObject = buildJsonObject {
         put(
@@ -76,8 +76,8 @@ fun parseNotificationSettings(element: JsonElement?): NotificationSettingsState 
     return NotificationSettingsState(
         events = events,
         delaySeconds = delaySeconds,
-        telegram = root["telegram"]?.bool ?: false,
-        ntfy = root["ntfy"]?.bool ?: false,
+        telegram = root["telegram"]?.bool ?: true,
+        ntfy = root["ntfy"]?.bool ?: true,
     )
 }
 
@@ -216,66 +216,123 @@ enum class TailscaleStepId(val id: String, val title: String) {
 }
 
 data class TailscaleLoginState(
-    val status: String = "idle", // "idle" | "starting" | "url_ready" | "error"
-    val authUrl: String? = null,
-    val error: String? = null,
+    val state: String = "idle", // "idle" | "starting" | "waiting" | "done" | "error" | "cancelled"
+    val url: String? = null,
+    val message: String? = null,
+)
+
+data class TailscaleDeviceInfo(
+    val name: String = "",
+    val dnsName: String? = null,
+    val ips: List<String> = emptyList(),
+    val tags: List<String> = emptyList(),
 )
 
 data class TailscaleServiceInfo(
-    val status: String = "disabled", // "disabled" | "starting" | "advertising" | "ready" | "needs_approval" | "conflict" | "error"
     val name: String = "ppm",
     val url: String? = null,
-    val port: Int? = null,
-    val existingTarget: String? = null,
-    val error: String? = null,
+    val defined: Boolean = false,
+    val approved: Boolean = false,
+    val advertised: Boolean = false,
+    val target: String? = null,
+    val pointsAtPpm: Boolean = false,
 )
 
 data class TailscaleState(
-    val platform: String = "linux",
-    val cliInstalled: Boolean = false,
-    val backendState: String = "Unknown",
-    val selfDnsName: String? = null,
-    val tailnetName: String? = null,
-    val magicDnsSuffix: String? = null,
-    val ipv4: String? = null,
-    val httpsAvailable: Boolean = false,
-    val operatorReady: Boolean = false,
-    val operatorCommand: String? = null,
-    val tags: List<String> = emptyList(),
-    val login: TailscaleLoginState = TailscaleLoginState(),
+    val installed: Boolean = false,
+    val backendState: String? = null, // "NoState" | "NeedsLogin" | "NeedsMachineAuth" | "Stopped" | "Starting" | "Running" | null
+    val canManage: Boolean? = null,
+    val osUser: String = "",
+    val platform: String = "linux", // "linux" | "darwin" | "win32" | "other"
+    val tailnet: String? = null,
+    val dnsSuffix: String? = null,
+    val magicDns: Boolean = false,
+    val httpsCertificates: Boolean = false,
+    val device: TailscaleDeviceInfo? = null,
     val service: TailscaleServiceInfo = TailscaleServiceInfo(),
-)
+    val enabled: Boolean = false,
+    val ppmPort: Int = 8080,
+    val login: TailscaleLoginState = TailscaleLoginState(),
+    val authEnabled: Boolean = false,
+) {
+    val operatorCommand: String?
+        get() = if (canManage == false && platform == "linux") {
+            tailscaleOperatorCommand(osUser)
+        } else {
+            null
+        }
+}
+
+private val PLAIN_OPERATOR_USER_REGEX = Regex("^[\\w.@-]+$")
+
+/**
+ * Mirrors `operatorCommand(user)` in `src/web/components/settings/tailscale/tailscale-setup-steps.tsx:41-42`.
+ */
+fun tailscaleOperatorCommand(user: String): String {
+    if (user.isBlank()) return "sudo tailscale set --operator=\$USER"
+    val arg = if (PLAIN_OPERATOR_USER_REGEX.matches(user)) {
+        user
+    } else {
+        "'${user.replace("'", "'\\''")}'"
+    }
+    return "sudo tailscale set --operator=$arg"
+}
+
+fun parseTailscaleLoginSnapshot(element: JsonElement?): TailscaleLoginState {
+    val obj = element?.obj ?: return TailscaleLoginState()
+    return TailscaleLoginState(
+        state = obj["state"].string ?: "idle",
+        url = obj["url"].string,
+        message = obj["message"].string,
+    )
+}
 
 fun parseTailscaleState(element: JsonElement?): TailscaleState {
     val root = element?.obj ?: return TailscaleState()
-    val loginObj = root["login"]?.obj
+    val devObj = root["device"]?.obj
     val svcObj = root["service"]?.obj
     return TailscaleState(
+        installed = root["installed"]?.bool ?: false,
+        backendState = root["backendState"].string,
+        canManage = root["canManage"]?.bool,
+        osUser = root["osUser"].string.orEmpty(),
         platform = root["platform"].string ?: "linux",
-        cliInstalled = root["cliInstalled"]?.bool ?: false,
-        backendState = root["backendState"].string ?: "Unknown",
-        selfDnsName = root["selfDnsName"].string?.trimEnd('.'),
-        tailnetName = root["tailnetName"].string,
-        magicDnsSuffix = root["magicDnsSuffix"].string?.trimEnd('.'),
-        ipv4 = root["ipv4"].string,
-        httpsAvailable = root["httpsAvailable"]?.bool ?: false,
-        operatorReady = root["operatorReady"]?.bool ?: false,
-        operatorCommand = root["operatorCommand"].string,
-        tags = root["tags"]?.array.orEmpty().mapNotNull { it.string },
-        login = TailscaleLoginState(
-            status = loginObj?.get("status").string ?: "idle",
-            authUrl = loginObj?.get("authUrl").string,
-            error = loginObj?.get("error").string,
-        ),
+        tailnet = root["tailnet"].string,
+        dnsSuffix = root["dnsSuffix"].string?.trimEnd('.'),
+        magicDns = root["magicDns"]?.bool ?: false,
+        httpsCertificates = root["httpsCertificates"]?.bool ?: false,
+        device = devObj?.let { dev ->
+            TailscaleDeviceInfo(
+                name = dev["name"].string.orEmpty(),
+                dnsName = dev["dnsName"].string?.trimEnd('.'),
+                ips = dev["ips"]?.array.orEmpty().mapNotNull { it.string },
+                tags = dev["tags"]?.array.orEmpty().mapNotNull { it.string },
+            )
+        },
         service = TailscaleServiceInfo(
-            status = svcObj?.get("status").string ?: "disabled",
             name = svcObj?.get("name").string ?: "ppm",
             url = svcObj?.get("url").string,
-            port = svcObj?.get("port")?.int,
-            existingTarget = svcObj?.get("existingTarget").string,
-            error = svcObj?.get("error").string,
+            defined = svcObj?.get("defined")?.bool ?: false,
+            approved = svcObj?.get("approved")?.bool ?: false,
+            advertised = svcObj?.get("advertised")?.bool ?: false,
+            target = svcObj?.get("target").string,
+            pointsAtPpm = svcObj?.get("pointsAtPpm")?.bool ?: false,
         ),
+        enabled = root["enabled"]?.bool ?: false,
+        ppmPort = root["ppmPort"]?.int ?: 8080,
+        login = parseTailscaleLoginSnapshot(root["login"]),
+        authEnabled = root["authEnabled"]?.bool ?: false,
     )
+}
+
+/**
+ * Applies either a full `TailscaleSettingsState` or a partial `TailscaleLoginSnapshot`
+ * returned by `POST /api/tailscale/login` and `POST /api/tailscale/login/cancel`.
+ */
+fun applyTailscaleLoginSnapshot(current: TailscaleState, element: JsonElement?): TailscaleState {
+    val obj = element?.obj ?: return current
+    if ("installed" in obj || "service" in obj) return parseTailscaleState(element)
+    return current.copy(login = parseTailscaleLoginSnapshot(element))
 }
 
 /**
@@ -283,15 +340,17 @@ fun parseTailscaleState(element: JsonElement?): TailscaleState {
  * `"install" -> "start" -> "operator" -> "sign-in" -> "dns" -> "tag" -> "service"`.
  */
 fun currentTailscaleSetupStep(s: TailscaleState): TailscaleStepId? {
-    if (!s.cliInstalled) return TailscaleStepId.Install
-    if (s.backendState == "Stopped" || s.backendState == "NoState" || s.backendState == "Unknown") {
+    if (!s.installed) return TailscaleStepId.Install
+    if (s.backendState == null || s.backendState == "Stopped" || s.backendState == "NoState") {
         return TailscaleStepId.Start
     }
-    if (s.platform == "linux" && !s.operatorReady) return TailscaleStepId.Operator
-    if (s.backendState != "Running") return TailscaleStepId.SignIn
-    if (!s.httpsAvailable || s.magicDnsSuffix.isNullOrBlank()) return TailscaleStepId.Dns
-    if (s.tags.isEmpty()) return TailscaleStepId.Tag
-    if (s.service.status != "ready") return TailscaleStepId.Service
+    if (s.canManage == false) return TailscaleStepId.Operator
+    if (s.backendState == "NeedsLogin" || s.backendState == "NeedsMachineAuth" || s.backendState != "Running") {
+        return TailscaleStepId.SignIn
+    }
+    if (!s.magicDns || !s.httpsCertificates) return TailscaleStepId.Dns
+    if (s.device == null || s.device.tags.isEmpty()) return TailscaleStepId.Tag
+    if (!s.enabled || !s.service.pointsAtPpm || !s.service.approved) return TailscaleStepId.Service
     return null
 }
 
@@ -303,6 +362,17 @@ fun blockingTailscaleSetupStep(s: TailscaleState): TailscaleStepId? {
     val step = currentTailscaleSetupStep(s)
     return if (step == TailscaleStepId.Service) null else step
 }
+
+/**
+ * Mirrors `POLL_MS = 4000` and `needsPolling(s)` in `src/web/components/settings/tailscale/tailscale-settings-section.tsx:34, 39-43`.
+ */
+const val TAILSCALE_POLL_MS: Long = 4_000L
+
+fun tailscaleNeedsPolling(s: TailscaleState): Boolean =
+    s.login.state == "starting" ||
+        s.login.state == "waiting" ||
+        currentTailscaleSetupStep(s) != null ||
+        (s.enabled && !s.service.approved)
 
 private val SERVICE_NAME_REGEX = Regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
@@ -320,10 +390,11 @@ fun validateTailscaleServiceName(raw: String): String? {
 }
 
 fun tailscaleServiceUrl(s: TailscaleState, draftName: String = s.service.name): String? {
-    if (!s.service.url.isNullOrBlank() && draftName == s.service.name) return s.service.url
-    val suffix = s.magicDnsSuffix?.trim('.')?.takeIf { it.isNotEmpty() } ?: return null
     val cleanName = draftName.trim().takeIf { validateTailscaleServiceName(it) == null } ?: return null
-    return "https://$cleanName.$suffix"
+    val suffix = s.dnsSuffix?.trim('.')?.takeIf { it.isNotEmpty() }
+    if (suffix != null) return "https://$cleanName.$suffix"
+    if (!s.service.url.isNullOrBlank() && cleanName == s.service.name) return s.service.url
+    return null
 }
 
 /**
@@ -362,6 +433,21 @@ fun parsePublicTunnelState(element: JsonElement?): PublicTunnelState {
     )
 }
 
+/**
+ * Applies `POST /api/tunnel/enabled` (`{ enabled, reload }`) without wiping `active`, `url`, or `localUrl`
+ * when enabling, while clearing `active` and `url` when disabling.
+ */
+fun applyPublicTunnelEnabledResult(current: PublicTunnelState, element: JsonElement?): PublicTunnelState {
+    val root = element?.obj ?: return current
+    if ("active" in root || "localUrl" in root) return parsePublicTunnelState(element)
+    val enabled = root["enabled"]?.bool ?: current.enabled
+    return if (enabled) {
+        current.copy(enabled = true)
+    } else {
+        current.copy(enabled = false, active = false, url = null)
+    }
+}
+
 data class NamedTunnelState(
     val mode: String = "quick", // "quick" | "named"
     val liveMode: String = "quick",
@@ -370,7 +456,7 @@ data class NamedTunnelState(
     val tokenMasked: String? = null,
     val certState: String = "missing", // "missing" | "valid" | "expired"
     val dismissed: Boolean = false,
-    val loginState: String = "idle", // "idle" | "starting" | "url_ready" | "success" | "error"
+    val loginState: String = "idle", // "idle" | "starting" | "waiting" | "slow" | "success" | "timeout" | "cancelled" | "error"
     val loginUrl: String? = null,
     val loginError: String? = null,
     val tunnelWarning: String? = null,
@@ -390,9 +476,63 @@ fun parseNamedTunnelState(element: JsonElement?): NamedTunnelState {
         dismissed = root["dismissed"]?.bool ?: false,
         loginState = login?.get("state").string ?: "idle",
         loginUrl = login?.get("url").string,
-        loginError = login?.get("error").string,
+        loginError = login?.get("message").string ?: login?.get("error").string,
         tunnelWarning = root["tunnelWarning"].string,
         authEnabled = root["authEnabled"]?.bool ?: true,
+    )
+}
+
+/**
+ * Applies `POST /api/tunnel/named/login` (`{ state, url, message }`) or
+ * `POST /api/tunnel/named/login/cancel` (`{ state: "cancelled" }`) onto [current]
+ * without wiping `mode`, `certState`, `hostname`, `tunnelName`, or `authEnabled`.
+ */
+fun applyNamedTunnelLoginSnapshot(current: NamedTunnelState, element: JsonElement?): NamedTunnelState {
+    val root = element?.obj ?: return current
+    if ("login" in root || "certState" in root) return parseNamedTunnelState(element)
+    val nextState = root["state"].string ?: current.loginState
+    val nextUrl = when {
+        "url" in root -> root["url"].string
+        nextState == "cancelled" || nextState == "idle" -> null
+        else -> current.loginUrl
+    }
+    val nextError = when {
+        "message" in root || "error" in root -> root["message"].string ?: root["error"].string
+        nextState == "cancelled" || nextState == "idle" -> null
+        else -> current.loginError
+    }
+    return current.copy(
+        loginState = nextState,
+        loginUrl = nextUrl,
+        loginError = nextError,
+        certState = if (nextState == "success") "valid" else current.certState,
+    )
+}
+
+/**
+ * Applies `POST /api/tunnel/named/setup` (`{ hostname, tunnelName, pending?, message? }`) onto [current].
+ */
+fun applyNamedTunnelSetupResult(current: NamedTunnelState, element: JsonElement?): NamedTunnelState {
+    val root = element?.obj ?: return current
+    if ("certState" in root || "login" in root) return parseNamedTunnelState(element)
+    val pending = root["pending"]?.bool ?: false
+    return current.copy(
+        mode = if (pending) current.mode else "named",
+        hostname = root["hostname"].string ?: current.hostname,
+        tunnelName = root["tunnelName"].string ?: current.tunnelName,
+        tunnelWarning = root["message"].string ?: current.tunnelWarning,
+    )
+}
+
+/**
+ * Applies `POST /api/tunnel/named/disable` (`{ mode: "quick" }`) onto [current].
+ */
+fun applyNamedTunnelDisableResult(current: NamedTunnelState, element: JsonElement?): NamedTunnelState {
+    val root = element?.obj ?: return current
+    if ("certState" in root || "login" in root) return parseNamedTunnelState(element)
+    return current.copy(
+        mode = root["mode"].string ?: "quick",
+        liveMode = root["mode"].string ?: "quick",
     )
 }
 
@@ -422,6 +562,63 @@ fun parseCloudStatus(element: JsonElement?): CloudStatusState {
         deviceId = root["device_id"].string,
         tunnelActive = root["tunnel_active"]?.bool ?: false,
         tunnelUrl = root["tunnel_url"].string,
+    )
+}
+
+data class CloudDeviceCodeFlowState(
+    val deviceCode: String = "",
+    val userCode: String = "",
+    val verificationUri: String = "",
+    val cloudUrl: String = "https://ppm.bot",
+    val expiresInSec: Int = 600,
+    val intervalSec: Int = 5,
+    val status: String = "idle", // "idle" | "starting" | "waiting" | "approved" | "expired" | "error"
+    val error: String? = null,
+)
+
+data class CloudDeviceCodePollState(
+    val status: String = "pending", // "pending" | "approved" | "expired" | "error"
+    val accessToken: String? = null,
+    val email: String? = null,
+    val error: String? = null,
+)
+
+fun parseCloudLoginUrl(element: JsonElement?): String {
+    val root = element?.obj ?: return "https://ppm.bot"
+    return root["cloud_url"].string?.ifBlank { "https://ppm.bot" } ?: "https://ppm.bot"
+}
+
+fun parseCloudDeviceCodeStart(element: JsonElement?, cloudUrl: String = "https://ppm.bot"): CloudDeviceCodeFlowState {
+    val root = element?.obj ?: return CloudDeviceCodeFlowState(cloudUrl = cloudUrl, status = "error", error = "Invalid device code response")
+    val deviceCode = root["device_code"].string.orEmpty()
+    val userCode = root["user_code"].string.orEmpty()
+    val verificationUri = root["verification_uri"].string.orEmpty()
+    if (deviceCode.isBlank() || userCode.isBlank() || verificationUri.isBlank()) {
+        return CloudDeviceCodeFlowState(
+            cloudUrl = cloudUrl,
+            status = "error",
+            error = root["error"].string ?: "Failed to start device code sign-in",
+        )
+    }
+    return CloudDeviceCodeFlowState(
+        deviceCode = deviceCode,
+        userCode = userCode,
+        verificationUri = verificationUri,
+        cloudUrl = cloudUrl,
+        expiresInSec = root["expires_in"]?.int ?: 600,
+        intervalSec = (root["interval"]?.int ?: 5).coerceAtLeast(1),
+        status = "waiting",
+        error = null,
+    )
+}
+
+fun parseCloudDeviceCodePoll(element: JsonElement?): CloudDeviceCodePollState {
+    val root = element?.obj ?: return CloudDeviceCodePollState(status = "pending")
+    return CloudDeviceCodePollState(
+        status = root["status"].string ?: "pending",
+        accessToken = root["access_token"].string,
+        email = root["email"].string,
+        error = root["error"].string,
     )
 }
 
@@ -614,9 +811,35 @@ fun parseJiraResults(element: JsonElement?): List<JiraResultRow> {
 /** Clamps Jira watcher polling interval between 30s (`30_000`) and 1h (`3_600_000`). */
 fun clampJiraIntervalMs(ms: Int): Int = ms.coerceIn(30_000, 3_600_000)
 
+/**
+ * Mirrors `src/server/routes/jira-watcher-routes.ts:130` and `src/web/components/jira/jira-ticket-card.tsx:41-42`:
+ * only `pending` or `failed` results can be debugged (and when `failed` already has a session, Resume is shown instead).
+ */
+fun canDebugJiraWatcherResult(status: String, sessionId: String? = null): Boolean =
+    status == "pending" || (status == "failed" && sessionId.isNullOrBlank())
+
+/**
+ * Mirrors `src/server/routes/jira-watcher-routes.ts:146-147`:
+ * only `failed` results that have a `sessionId` can be resumed.
+ */
+fun canResumeJiraWatcherResult(status: String, sessionId: String?): Boolean =
+    status == "failed" && !sessionId.isNullOrBlank()
+
+/**
+ * Mirrors `src/server/routes/jira-watcher-routes.ts:165`:
+ * only `queued` or `running` results can be cancelled.
+ */
+fun canCancelJiraWatcherResult(status: String): Boolean =
+    status == "queued" || status == "running"
+
 // ===========================================================================
 // 5. Schedules State, Cron Validators, Template Parser & Logs Ring Buffer
 // ===========================================================================
+
+data class ScheduleProjectOption(
+    val name: String,
+    val path: String,
+)
 
 data class ScheduleInputDeclState(
     val key: String,
@@ -630,45 +853,50 @@ data class ScheduleInputDeclState(
 data class ScheduleStatusState(
     val state: String = "idle", // "idle" | "running" | "backoff" | "stopped"
     val pid: Int? = null,
-    val startedAt: Long? = null,
-    val restartCount: Int = 0,
-    val nextRetryAt: Long? = null,
-    val lastExitCode: Int? = null,
+    val since: Long? = null,
+    val restartAt: Long? = null,
+    val restarts: Int = 0,
+    val lastError: String? = null,
 )
 
 data class ScheduleRowState(
     val id: Int,
-    val projectId: Int,
-    val projectName: String,
     val name: String,
+    val description: String? = null,
     val kind: String = "prompt", // "prompt" | "script"
     val mode: String = "tick", // "tick" | "always-on"
-    val cron: String = "* * * * *",
-    val prompt: String? = null,
+    val cronExpr: String = "* * * * *",
+    val providerId: String = "claude",
+    val projectPath: String = "",
+    val prompt: String = "",
     val script: String? = null,
-    val providerId: String? = null,
+    val permissionMode: String = "default",
+    val maxTurns: Int = 20,
     val timeoutMs: Int = 900_000,
     val enabled: Boolean = true,
-    val nextRunAt: Long? = null,
-    val lastRunAt: Long? = null,
-    val lastStatus: String? = null,
-    val lastSessionId: String? = null,
-    val lastError: String? = null,
+    val sessionId: String? = null,
+    val lastRunAt: String? = null,
+    val nextFireAt: String? = null,
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
     val inputs: List<ScheduleInputDeclState> = emptyList(),
     val inputValues: Map<String, String> = emptyMap(),
-    val configuredSecrets: List<String> = emptyList(),
+    val secretsSet: List<String> = emptyList(),
     val status: ScheduleStatusState = ScheduleStatusState(),
 )
 
 data class ScheduleRunRow(
     val id: Int,
-    val taskId: Int,
-    val startedAt: Long,
-    val finishedAt: Long? = null,
-    val status: String,
+    val scheduleId: Int,
     val sessionId: String? = null,
-    val exitCode: Int? = null,
+    val rotatedToSessionId: String? = null,
+    val status: String,
+    val outputTruncated: String? = null,
+    val contextWindowPct: Double? = null,
+    val costUsd: Double? = null,
     val error: String? = null,
+    val startedAt: String,
+    val endedAt: String? = null,
 )
 
 data class ScheduleLogLine(
@@ -689,10 +917,10 @@ private fun parseScheduleStatus(obj: Map<String, JsonElement>?): ScheduleStatusS
     return ScheduleStatusState(
         state = obj["state"].string ?: "idle",
         pid = obj["pid"]?.int,
-        startedAt = obj["startedAt"]?.jsonPrimitive?.contentOrNull?.toLongOrNull(),
-        restartCount = obj["restartCount"]?.int ?: 0,
-        nextRetryAt = obj["nextRetryAt"]?.jsonPrimitive?.contentOrNull?.toLongOrNull(),
-        lastExitCode = obj["lastExitCode"]?.int,
+        since = obj["since"]?.jsonPrimitive?.contentOrNull?.toLongOrNull(),
+        restartAt = obj["restartAt"]?.jsonPrimitive?.contentOrNull?.toLongOrNull(),
+        restarts = obj["restarts"]?.int ?: 0,
+        lastError = obj["lastError"].string,
     )
 }
 
@@ -716,28 +944,33 @@ fun parseSchedulesList(element: JsonElement?): List<ScheduleRowState> {
         val inputValues = obj["inputValues"]?.obj?.entries?.associate { (k, v) ->
             k to (v.jsonPrimitive.contentOrNull.orEmpty())
         }.orEmpty()
-        val secrets = obj["configuredSecrets"]?.array.orEmpty().mapNotNull { it.string }
+        val secrets = obj["secretsSet"]?.array.orEmpty().mapNotNull { it.string }
+        val enabledVal = obj["enabled"]?.let { el ->
+            el.bool ?: (el.int != 0)
+        } ?: true
         ScheduleRowState(
             id = id,
-            projectId = obj["projectId"]?.int ?: 0,
-            projectName = obj["projectName"].string ?: "",
             name = obj["name"].string ?: "Schedule #$id",
+            description = obj["description"].string,
             kind = obj["kind"].string ?: "prompt",
             mode = obj["mode"].string ?: "tick",
-            cron = obj["cron"].string ?: "* * * * *",
-            prompt = obj["prompt"].string,
+            cronExpr = obj["cron_expr"].string ?: "* * * * *",
+            providerId = obj["provider_id"].string ?: "claude",
+            projectPath = obj["project_path"].string.orEmpty(),
+            prompt = obj["prompt"].string.orEmpty(),
             script = obj["script"].string,
-            providerId = obj["providerId"].string,
-            timeoutMs = obj["timeoutMs"]?.int ?: 900_000,
-            enabled = obj["enabled"]?.bool ?: true,
-            nextRunAt = obj["nextRunAt"]?.jsonPrimitive?.contentOrNull?.toLongOrNull(),
-            lastRunAt = obj["lastRunAt"]?.jsonPrimitive?.contentOrNull?.toLongOrNull(),
-            lastStatus = obj["lastStatus"].string,
-            lastSessionId = obj["lastSessionId"].string,
-            lastError = obj["lastError"].string,
+            permissionMode = obj["permission_mode"].string ?: "default",
+            maxTurns = obj["max_turns"]?.int ?: 20,
+            timeoutMs = obj["timeout_ms"]?.int ?: 900_000,
+            enabled = enabledVal,
+            sessionId = obj["session_id"].string,
+            lastRunAt = obj["last_run_at"].string,
+            nextFireAt = obj["next_fire_at"].string,
+            createdAt = obj["created_at"].string,
+            updatedAt = obj["updated_at"].string,
             inputs = inputs,
             inputValues = inputValues,
-            configuredSecrets = secrets,
+            secretsSet = secrets,
             status = parseScheduleStatus(obj["status"]?.obj),
         )
     }
@@ -750,13 +983,16 @@ fun parseScheduleRuns(element: JsonElement?): List<ScheduleRunRow> {
         val id = obj["id"]?.int ?: return@mapNotNull null
         ScheduleRunRow(
             id = id,
-            taskId = obj["taskId"]?.int ?: 0,
-            startedAt = obj["startedAt"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L,
-            finishedAt = obj["finishedAt"]?.jsonPrimitive?.contentOrNull?.toLongOrNull(),
+            scheduleId = obj["schedule_id"]?.int ?: 0,
+            sessionId = obj["session_id"].string,
+            rotatedToSessionId = obj["rotated_to_session_id"].string,
             status = obj["status"].string ?: "running",
-            sessionId = obj["sessionId"].string,
-            exitCode = obj["exitCode"]?.int,
+            outputTruncated = obj["output_truncated"].string,
+            contextWindowPct = obj["context_window_pct"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull(),
+            costUsd = obj["cost_usd"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull(),
             error = obj["error"].string,
+            startedAt = obj["started_at"].string.orEmpty(),
+            endedAt = obj["ended_at"].string,
         )
     }
 }
@@ -896,7 +1132,7 @@ fun cronProblem(expr: String, kind: String = "prompt"): String? {
  */
 fun scheduleFormProblems(
     name: String,
-    projectName: String,
+    projectPath: String,
     kind: String,
     mode: String,
     cron: String,
@@ -911,7 +1147,7 @@ fun scheduleFormProblems(
     } else if (cleanName.length > 120) {
         problems.add("Name must be 120 characters or fewer")
     }
-    if (projectName.isBlank()) {
+    if (projectPath.isBlank()) {
         problems.add("Project is required")
     }
     if (kind != "prompt" && kind != "script") {
@@ -938,6 +1174,7 @@ fun scheduleFormProblems(
 private val TEMPLATE_KNOWN_FIELDS = setOf(
     "ppmScheduleTemplate",
     "name",
+    "description",
     "kind",
     "mode",
     "cron",
@@ -945,6 +1182,8 @@ private val TEMPLATE_KNOWN_FIELDS = setOf(
     "script",
     "providerId",
     "timeoutMs",
+    "maxTurns",
+    "permissionMode",
     "inputs",
 )
 
@@ -953,6 +1192,7 @@ private val INPUT_KEY_REGEX = Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 data class ParsedScheduleTemplate(
     val rawJson: JsonObject,
     val name: String,
+    val description: String? = null,
     val kind: String,
     val mode: String,
     val cron: String,
@@ -960,19 +1200,23 @@ data class ParsedScheduleTemplate(
     val script: String? = null,
     val providerId: String? = null,
     val timeoutMs: Int = 900_000,
+    val maxTurns: Int? = null,
+    val permissionMode: String? = null,
     val inputs: List<ScheduleInputDeclState> = emptyList(),
 )
 
 /**
  * Mirrors `parseScheduleTemplate(input)` in `src/shared/schedule-template.ts`.
  * Returns `Result.success(ParsedScheduleTemplate)` or `Result.failure(IllegalArgumentException)`.
+ * Also unwraps `{ template: { ... } }` if an export response wrapper is passed directly.
  */
 fun parseScheduleTemplateJson(rawText: String): Result<ParsedScheduleTemplate> = runCatching {
     val element = runCatching { Json.parseToJsonElement(rawText) }.getOrElse {
         throw IllegalArgumentException("Invalid JSON: ${it.message}")
     }
-    val obj = element as? JsonObject
+    val outerObj = element as? JsonObject
         ?: throw IllegalArgumentException("Schedule template must be a JSON object")
+    val obj = (outerObj["template"] as? JsonObject) ?: outerObj
 
     val version = obj["ppmScheduleTemplate"]?.int
     if (version != 1) {
@@ -986,6 +1230,10 @@ fun parseScheduleTemplateJson(rawText: String): Result<ParsedScheduleTemplate> =
     val name = obj["name"].string?.trim().orEmpty()
     if (name.isEmpty() || name.length > 120) {
         throw IllegalArgumentException("Template name must be 1–120 characters")
+    }
+    val description = obj["description"].string?.trim()
+    if (description != null && description.length > 2000) {
+        throw IllegalArgumentException("Template description must be 2000 characters or fewer")
     }
     val kind = obj["kind"].string ?: throw IllegalArgumentException("Template kind is required")
     if (kind != "prompt" && kind != "script") {
@@ -1017,6 +1265,14 @@ fun parseScheduleTemplateJson(rawText: String): Result<ParsedScheduleTemplate> =
     val timeoutMs = obj["timeoutMs"]?.int ?: 900_000
     if (mode == "tick" && timeoutMs < 10_000) {
         throw IllegalArgumentException("timeoutMs must be at least 10000")
+    }
+    val maxTurns = obj["maxTurns"]?.int
+    if (maxTurns != null && (maxTurns < 1 || maxTurns > 200)) {
+        throw IllegalArgumentException("maxTurns must be between 1 and 200")
+    }
+    val permissionMode = obj["permissionMode"].string
+    if (permissionMode != null && permissionMode !in setOf("default", "acceptEdits", "plan", "bypassPermissions")) {
+        throw IllegalArgumentException("Invalid permissionMode '$permissionMode'")
     }
 
     val inputsArr = obj["inputs"]?.array.orEmpty()
@@ -1051,6 +1307,7 @@ fun parseScheduleTemplateJson(rawText: String): Result<ParsedScheduleTemplate> =
     ParsedScheduleTemplate(
         rawJson = obj,
         name = name,
+        description = description,
         kind = kind,
         mode = mode,
         cron = cron,
@@ -1058,6 +1315,8 @@ fun parseScheduleTemplateJson(rawText: String): Result<ParsedScheduleTemplate> =
         script = script,
         providerId = obj["providerId"].string,
         timeoutMs = timeoutMs,
+        maxTurns = maxTurns,
+        permissionMode = permissionMode,
         inputs = inputs,
     )
 }

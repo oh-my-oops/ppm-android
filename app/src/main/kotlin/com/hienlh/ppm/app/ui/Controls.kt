@@ -584,6 +584,7 @@ fun ConfirmDialog(
     message: String,
     confirm: String,
     destructive: Boolean = true,
+    confirmTestTag: String? = null,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -613,6 +614,7 @@ fun ConfirmDialog(
                         .height(44.dp)
                         .clip(buttonShape)
                         .background(danger.color)
+                        .then(if (confirmTestTag != null) Modifier.testTag(confirmTestTag) else Modifier)
                         .ppmClickable(pressedColor = Color.Black.copy(alpha = 0.1f), shape = buttonShape) {
                             onDismiss()
                             onConfirm()

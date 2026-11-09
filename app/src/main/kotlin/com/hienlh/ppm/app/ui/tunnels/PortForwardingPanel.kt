@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.ui.ConfirmDialog
 import com.hienlh.ppm.app.ui.PpmTextField
 import com.hienlh.ppm.app.ui.pressable
@@ -101,6 +102,10 @@ fun PortForwardingPanel(
     var error by remember { mutableStateOf<String?>(null) }
     var confirmStop by remember { mutableStateOf<TunnelEntry?>(null) }
 
+    LaunchedEffect(portInput.text) {
+        error = null
+    }
+
     suspend fun fetchTunnels(force: Boolean = false) {
         val api = model.api ?: run {
             loading = false
@@ -109,11 +114,10 @@ fun PortForwardingPanel(
         try {
             val data = api.tunnelsList(force)
             tunnels = TunnelsModel.parseList(data)
-            error = null
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
-            error = e.message ?: "Failed to load tunnels"
+        } catch (_: Exception) {
+            // Keep the last known list: a failed poll is not shown as an inline error (port-forwarding-panel.tsx:85-87).
         } finally {
             loading = false
         }
@@ -132,7 +136,9 @@ fun PortForwardingPanel(
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
-                tailscale = TailscaleAvailability(available = false, reason = "Could not check Tailscale on the host")
+                if (tailscale == null) {
+                    tailscale = TailscaleAvailability(available = false, reason = "Could not check Tailscale on the host")
+                }
             }
         }
         val cfJob = scope.launch {
@@ -143,7 +149,7 @@ fun PortForwardingPanel(
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
-                cloudflareError = true
+                if (cloudflare == null) cloudflareError = true
             }
         }
         tsJob.join()
@@ -163,7 +169,10 @@ fun PortForwardingPanel(
             }
             while (isActive) {
                 delay(10_000L)
-                if (model.api != null) fetchTunnels()
+                if (model.api != null) {
+                    fetchTunnels()
+                    fetchSetup()
+                }
             }
         }
     }
@@ -171,7 +180,7 @@ fun PortForwardingPanel(
     fun handleStart() {
         val portNum = portInput.text.toString().trim().toIntOrNull()
         if (portNum == null || portNum < 1 || portNum > 65535) {
-            error = "Enter a valid port (1–65535)"
+            error = "The port must be a number from 1 to 65535."
             return
         }
         val api = model.api ?: return
@@ -192,7 +201,7 @@ fun PortForwardingPanel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                error = e.message ?: "Failed to start tunnel"
+                error = e.message?.takeIf { it.isNotBlank() } ?: "Could not forward port $portNum"
             } finally {
                 starting = false
             }
@@ -210,7 +219,7 @@ fun PortForwardingPanel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                error = e.message ?: "Failed to stop tunnel"
+                model.toast(ErrorToastMessage("Could not stop the forward (pid $pid)", e.message))
             } finally {
                 stoppingPid = null
             }

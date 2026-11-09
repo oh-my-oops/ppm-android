@@ -1,14 +1,9 @@
 package com.hienlh.ppm.app.ui.shell
 
-import android.app.Activity
 import android.app.ActivityManager
 import android.app.ApplicationExitInfo
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
-import android.view.DragAndDropPermissions
-import android.view.DragEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -17,10 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -32,11 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,11 +34,6 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.PointerIcon
-import androidx.compose.ui.input.pointer.pointerHoverIcon
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -66,135 +49,49 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmText
-import com.hienlh.ppm.state.shell.ClassifiedExternalDrop
-import com.hienlh.ppm.state.shell.ExternalDropItem
-import com.hienlh.ppm.state.shell.FoldablePosture
-import com.hienlh.ppm.state.shell.FoldableSplitDecision
-import com.hienlh.ppm.state.shell.HingeBounds
-import com.hienlh.ppm.state.shell.OnboardingEvidence
 import com.hienlh.ppm.state.shell.OnboardingFamiliarity
 import com.hienlh.ppm.state.shell.OnboardingGoalId
 import com.hienlh.ppm.state.shell.OnboardingState
 import com.hienlh.ppm.state.shell.OnboardingStepDef
-import com.hienlh.ppm.state.shell.PointerRegionKind
 import com.hienlh.ppm.state.shell.PreviousExitCrashInfo
-import com.hienlh.ppm.state.shell.classifyExternalDrop
-import com.hienlh.ppm.state.shell.computeFoldableSplit
-import com.hienlh.ppm.state.shell.formatTurnCompleteAnnouncement
-
-// ===========================================================================
-// 13a.2 · Mouse / Trackpad / Stylus Pointer Hover Icon & Cross-App Drag-Drop
-// ===========================================================================
-
-@Composable
-fun Modifier.ppmPointerRegion(kind: PointerRegionKind): Modifier {
-    val icon = when (kind) {
-        PointerRegionKind.DEFAULT -> PointerIcon.Default
-        PointerRegionKind.CLICKABLE_HAND -> PointerIcon.Hand
-        PointerRegionKind.TEXT_IBEAM -> PointerIcon.Text
-        PointerRegionKind.CROSSHAIR -> PointerIcon.Crosshair
-        else -> PointerIcon(kind.androidPointerType)
-    }
-    return this.pointerHoverIcon(icon)
-}
-
-fun extractAndroidDragDrop(
-    dragEvent: DragEvent,
-    isCrossApp: Boolean = dragEvent.localState == null,
-): ClassifiedExternalDrop {
-    val desc = dragEvent.clipDescription
-    val mimeTypes = buildList {
-        if (desc != null) {
-            for (i in 0 until desc.mimeTypeCount) {
-                add(desc.getMimeType(i))
-            }
-        }
-    }
-    val clip = dragEvent.clipData
-    val items = buildList {
-        if (clip != null) {
-            for (i in 0 until clip.itemCount) {
-                val item = clip.getItemAt(i)
-                add(
-                    ExternalDropItem(
-                        uriString = item.uri?.toString(),
-                        mimeType = mimeTypes.firstOrNull(),
-                        text = item.text?.toString(),
-                    ),
-                )
-            }
-        }
-    }
-    return classifyExternalDrop(mimeTypes, items, isCrossApp = isCrossApp)
-}
-
-fun requestAndroidDragPermissions(
-    activity: Activity?,
-    dragEvent: DragEvent,
-): DragAndDropPermissions? = runCatching {
-    activity?.requestDragAndDropPermissions(dragEvent)
-}.getOrNull()
-
-// ===========================================================================
-// 13a.3 · Foldable Posture Container (Book & Tabletop Split around Hinge)
-// ===========================================================================
-
-@Composable
-fun FoldablePostureLayout(
-    hinge: HingeBounds?,
-    windowWidthPx: Int,
-    windowHeightPx: Int,
-    modifier: Modifier = Modifier,
-    primaryPane: @Composable () -> Unit,
-    secondaryPane: @Composable () -> Unit,
-) {
-    val density = LocalDensity.current
-    val split: FoldableSplitDecision = remember(hinge, windowWidthPx, windowHeightPx) {
-        computeFoldableSplit(hinge, windowWidthPx, windowHeightPx)
-    }
-    when (split.posture) {
-        FoldablePosture.FLAT -> {
-            Box(modifier.fillMaxSize().testTag("foldable-posture-flat")) {
-                primaryPane()
-            }
-        }
-        FoldablePosture.BOOK -> {
-            val leftWeight = split.bookLeftFraction.coerceIn(0.25f, 0.75f)
-            val rightWeight = (1f - leftWeight).coerceAtLeast(0.25f)
-            val gapDp = with(density) { split.hingeGapPx.toDp() }
-            Row(modifier.fillMaxSize().testTag("foldable-posture-book")) {
-                Box(Modifier.weight(leftWeight).fillMaxHeight().testTag("foldable-book-left")) {
-                    primaryPane()
-                }
-                if (split.hingeGapPx > 0) {
-                    Spacer(Modifier.width(gapDp).fillMaxHeight().testTag("foldable-hinge-gap"))
-                }
-                Box(Modifier.weight(rightWeight).fillMaxHeight().testTag("foldable-book-right")) {
-                    secondaryPane()
-                }
-            }
-        }
-        FoldablePosture.TABLETOP -> {
-            val topDp = with(density) { split.tabletopTopHeightPx.toDp() }
-            val gapDp = with(density) { split.hingeGapPx.toDp() }
-            Column(modifier.fillMaxSize().testTag("foldable-posture-tabletop")) {
-                Box(Modifier.fillMaxWidth().height(topDp).testTag("foldable-tabletop-top")) {
-                    primaryPane()
-                }
-                if (split.hingeGapPx > 0) {
-                    Spacer(Modifier.fillMaxWidth().height(gapDp).testTag("foldable-hinge-gap"))
-                }
-                Box(Modifier.fillMaxWidth().weight(1f).testTag("foldable-tabletop-bottom")) {
-                    secondaryPane()
-                }
-            }
-        }
-    }
-}
+import com.hienlh.ppm.state.shell.shouldShowCrashExit
 
 // ===========================================================================
 // 13b.1 · Onboarding "Learn PPM" Guide & Quick Orientation (2 Pages)
 // ===========================================================================
+
+private const val SHELL_PREFS_NAME = "ppm_shell_prefs"
+private const val KEY_LEARN_PPM_STATE = "learn_ppm.state"
+private const val KEY_DISMISSED_CRASH_TS = "dismissed_crash_exit_ts"
+
+fun loadOnboardingStateFromPrefs(context: Context): OnboardingState {
+    val raw = context.getSharedPreferences(SHELL_PREFS_NAME, Context.MODE_PRIVATE)
+        .getString(KEY_LEARN_PPM_STATE, null)
+    return OnboardingState.fromJsonString(raw)
+}
+
+fun saveOnboardingStateToPrefs(context: Context, state: OnboardingState) {
+    context.getSharedPreferences(SHELL_PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .putString(KEY_LEARN_PPM_STATE, state.toJson().toString())
+        .apply()
+}
+
+fun getDismissedCrashTimestamp(context: Context): Long? {
+    val prefs = context.getSharedPreferences(SHELL_PREFS_NAME, Context.MODE_PRIVATE)
+    return if (prefs.contains(KEY_DISMISSED_CRASH_TS)) {
+        prefs.getLong(KEY_DISMISSED_CRASH_TS, -1L).takeIf { it >= 0L }
+    } else {
+        null
+    }
+}
+
+fun saveDismissedCrashTimestamp(context: Context, timestampMs: Long) {
+    context.getSharedPreferences(SHELL_PREFS_NAME, Context.MODE_PRIVATE)
+        .edit()
+        .putLong(KEY_DISMISSED_CRASH_TS, timestampMs)
+        .apply()
+}
 
 @Composable
 fun LearnPpmDialog(
@@ -498,36 +395,13 @@ fun QuickOrientationDialog(
 }
 
 // ===========================================================================
-// 13b.3 · TalkBack Turn Completion Announcer
-// ===========================================================================
-
-@Composable
-fun AccessibilityTurnAnnouncer(
-    isStreaming: Boolean,
-    projectName: String?,
-    sessionTitle: String?,
-    hasPendingApproval: Boolean = false,
-) {
-    val view = LocalView.current
-    var wasStreaming by remember { mutableStateOf(false) }
-    LaunchedEffect(isStreaming, hasPendingApproval) {
-        if ((wasStreaming && !isStreaming) || hasPendingApproval) {
-            val announcement = formatTurnCompleteAnnouncement(
-                projectName = projectName,
-                sessionTitle = sessionTitle,
-                hasPendingApproval = hasPendingApproval,
-            )
-            view.announceForAccessibility(announcement)
-        }
-        wasStreaming = isStreaming
-    }
-}
-
-// ===========================================================================
 // 14.4 · ApplicationExitInfo Previous Crash / ANR Inspector & Report Card
 // ===========================================================================
 
-fun inspectLatestCrashOrAnrExit(context: Context): PreviousExitCrashInfo? {
+fun inspectLatestCrashOrAnrExit(
+    context: Context,
+    dismissedTimestampMs: Long? = null,
+): PreviousExitCrashInfo? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
     return runCatching {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return null
@@ -546,7 +420,7 @@ fun inspectLatestCrashOrAnrExit(context: Context): PreviousExitCrashInfo? {
         val trace = runCatching {
             actionable.traceInputStream?.bufferedReader()?.use { it.readText().take(4_000) }
         }.getOrNull()
-        PreviousExitCrashInfo(
+        val info = PreviousExitCrashInfo(
             reasonCode = actionable.reason,
             reasonName = reasonName,
             timestampMs = actionable.timestamp,
@@ -554,6 +428,7 @@ fun inspectLatestCrashOrAnrExit(context: Context): PreviousExitCrashInfo? {
             description = actionable.description,
             traceSnippet = trace,
         )
+        info.takeIf { shouldShowCrashExit(it, dismissedTimestampMs) }
     }.getOrNull()
 }
 
@@ -598,8 +473,15 @@ fun PreviousExitCrashCard(
             )
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SecondaryButton("Dismiss", Modifier.weight(1f), onClick = onDismiss)
-            PrimaryButton("Copy Crash Report", Modifier.weight(1f)) { onCopyReport(markdown) }
+            SecondaryButton(
+                "Dismiss",
+                Modifier.weight(1f).testTag("previous-exit-crash-dismiss"),
+                onClick = onDismiss,
+            )
+            PrimaryButton(
+                "Copy Crash Report",
+                Modifier.weight(1f).testTag("previous-exit-crash-copy"),
+            ) { onCopyReport(markdown) }
         }
     }
 }

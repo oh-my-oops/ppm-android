@@ -1,10 +1,12 @@
 package com.hienlh.ppm.app.ui
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
+import android.os.PersistableBundle
 import android.provider.OpenableColumns
-import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -70,6 +72,7 @@ import com.hienlh.ppm.client.dbUninstallDriver
 import com.hienlh.ppm.client.lspGlobalInstall
 import com.hienlh.ppm.client.lspGlobalServers
 import com.hienlh.ppm.client.lspGlobalUninstall
+import com.hienlh.ppm.client.listProjectDirectory
 import com.hienlh.ppm.client.remoteDesktopRelayInstall
 import com.hienlh.ppm.client.remoteDesktopRelayStatus
 import com.hienlh.ppm.client.remoteDesktopRelayUninstall
@@ -114,6 +117,7 @@ import com.hienlh.ppm.state.settings.QueryAuditState
 import com.hienlh.ppm.state.settings.RelayStatusState
 import com.hienlh.ppm.state.settings.ThemeUploadKind
 import com.hienlh.ppm.state.settings.addExcludePattern
+import com.hienlh.ppm.state.settings.buildThemeFileUploadRequests
 import com.hienlh.ppm.state.settings.detectThemeUploadKind
 import com.hienlh.ppm.state.settings.effectiveKeyCombo
 import com.hienlh.ppm.state.settings.formatAuditByteSize
@@ -138,13 +142,20 @@ import com.hienlh.ppm.state.settings.validateQueryAuditInputs
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import com.hienlh.ppm.app.ui.shell.LearnPpmDialog
 import com.hienlh.ppm.app.ui.shell.PreviousExitCrashCard
+import com.hienlh.ppm.app.ui.shell.getDismissedCrashTimestamp
 import com.hienlh.ppm.app.ui.shell.inspectLatestCrashOrAnrExit
+import com.hienlh.ppm.app.ui.shell.loadOnboardingStateFromPrefs
+import com.hienlh.ppm.app.ui.shell.saveDismissedCrashTimestamp
+import com.hienlh.ppm.app.ui.shell.saveOnboardingStateToPrefs
 import com.hienlh.ppm.state.shell.OnboardingEvidence
 import com.hienlh.ppm.state.shell.OnboardingState
+import com.hienlh.ppm.state.shell.PreviousExitCrashInfo
 import com.hienlh.ppm.state.shell.applySuggestedPromptToDraft
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // ===========================================================================
 // 1. General Settings Section (Device Name, Keep Screen Awake, Password, About)
@@ -359,20 +370,58 @@ private fun AboutBlock(model: AppModel) {
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
     var upgrading by remember { mutableStateOf(false) }
+    var reconnecting by remember { mutableStateOf(false) }
+    var confirmUpgradeOpen by remember { mutableStateOf(false) }
     var availableVersion by remember { mutableStateOf<String?>(null) }
     var statusNote by remember { mutableStateOf<String?>(null) }
     var learnPpmOpen by remember { mutableStateOf(false) }
-    var onboardingState by remember {
-        mutableStateOf(
-            OnboardingState(active = true).mergeEvidence(
-                OnboardingEvidence(
-                    hasProjectSelected = model.selectedProject != null,
-                    chatSessionCount = model.sessions.size,
-                ),
-            ),
+    fun currentWorkspaceEvidence(fileCount: Int = 0): OnboardingEvidence {
+        val openTabs = model.layout?.panels?.values?.flatMap { panel -> panel.tabs }.orEmpty()
+        return OnboardingEvidence(
+            hasProjectSelected = model.selectedProject != null,
+            projectFileCount = fileCount,
+            chatSessionCount = model.sessions.size,
+            hasOpenedFileTab = openTabs.any { tab -> tab.type == "editor" || tab.type == "file" },
+            hasOpenedTerminalTab = openTabs.any { tab -> tab.type == "terminal" },
+            hasOpenedGitTab = openTabs.any { tab -> tab.type == "git-status" || tab.type == "git-graph" },
         )
     }
-    var crashExitInfo by remember { mutableStateOf(inspectLatestCrashOrAnrExit(context)) }
+    var onboardingState by remember {
+        val saved = loadOnboardingStateFromPrefs(context)
+        val initial = saved.mergeEvidence(currentWorkspaceEvidence())
+        saveOnboardingStateToPrefs(context, initial)
+        mutableStateOf(initial)
+    }
+    fun updateOnboarding(next: OnboardingState) {
+        onboardingState = next
+        saveOnboardingStateToPrefs(context, next)
+    }
+    fun refreshOnboardingEvidence() {
+        val baseMerged = onboardingState.mergeEvidence(currentWorkspaceEvidence())
+        updateOnboarding(baseMerged)
+        val client = api ?: return
+        val proj = model.selectedProject ?: return
+        scope.launch {
+            val fileCount = withContext(Dispatchers.IO) {
+                runCatching { client.listProjectDirectory(proj, "").size }.getOrDefault(0)
+            }
+            updateOnboarding(onboardingState.mergeEvidence(currentWorkspaceEvidence(fileCount)))
+        }
+    }
+    var crashExitInfo by remember { mutableStateOf<PreviousExitCrashInfo?>(null) }
+
+    LaunchedEffect(Unit) {
+        val dismissedTs = getDismissedCrashTimestamp(context)
+        crashExitInfo = withContext(Dispatchers.IO) {
+            inspectLatestCrashOrAnrExit(context, dismissedTimestampMs = dismissedTs)
+        }
+    }
+
+    LaunchedEffect(learnPpmOpen) {
+        if (learnPpmOpen) {
+            refreshOnboardingEvidence()
+        }
+    }
 
     LaunchedEffect(api) {
         if (api == null) return@LaunchedEffect
@@ -411,23 +460,15 @@ private fun AboutBlock(model: AppModel) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (!availableVersion.isNullOrBlank()) {
                         SettingsButton(
-                            label = if (upgrading) "Upgrading…" else "Update to v$availableVersion",
-                            primary = true,
-                            enabled = !upgrading && api != null,
-                            onClick = {
-                                val client = api ?: return@SettingsButton
-                                upgrading = true
-                                scope.launch {
-                                    try {
-                                        val res = client.applyUpgrade()
-                                        statusNote = res.message ?: "Upgrading to v${res.newVersion ?: availableVersion}…"
-                                    } catch (t: Throwable) {
-                                        statusNote = t.message ?: "Upgrade failed"
-                                    } finally {
-                                        upgrading = false
-                                    }
-                                }
+                            label = when {
+                                reconnecting -> "Updating, reconnecting…"
+                                upgrading -> "Updating…"
+                                else -> "Update to v$availableVersion"
                             },
+                            primary = true,
+                            enabled = !upgrading && !reconnecting && api != null,
+                            modifier = Modifier.testTag("about-upgrade-btn"),
+                            onClick = { confirmUpgradeOpen = true },
                         )
                     } else {
                         SettingsButton(
@@ -457,6 +498,64 @@ private fun AboutBlock(model: AppModel) {
             }
             if (statusNote != null) {
                 BasicText(statusNote!!, style = ppmText(11f).copy(color = tokens.text2.color))
+            }
+            if (confirmUpgradeOpen && !availableVersion.isNullOrBlank()) {
+                val targetVersion = availableVersion!!
+                ConfirmDialog(
+                    title = "Update PPM Server to v$targetVersion?",
+                    message = "The server will install v$targetVersion and restart. Active connections will briefly reconnect.",
+                    confirm = "Update now",
+                    confirmTestTag = "about-upgrade-confirm",
+                    onDismiss = { confirmUpgradeOpen = false },
+                    onConfirm = {
+                        confirmUpgradeOpen = false
+                        val client = api ?: return@ConfirmDialog
+                        upgrading = true
+                        statusNote = "Updating to v$targetVersion…"
+                        val serverUpgrade = model.upgrade
+                        if (serverUpgrade != null) {
+                            serverUpgrade.update(targetVersion)
+                        }
+                        scope.launch {
+                            var shouldPollRestart = false
+                            try {
+                                if (serverUpgrade == null) {
+                                    val res = client.applyUpgrade()
+                                    if (res.restart) {
+                                        shouldPollRestart = true
+                                    } else {
+                                        statusNote = res.message ?: "Upgrade installed. Restart PPM manually."
+                                        availableVersion = null
+                                    }
+                                } else {
+                                    shouldPollRestart = true
+                                }
+                            } catch (e: Exception) {
+                                val failure = com.hienlh.ppm.state.UpgradeOffer.failure(e)
+                                if (failure == com.hienlh.ppm.state.UpgradeFailure.Restarting) {
+                                    shouldPollRestart = true
+                                } else {
+                                    statusNote = e.message ?: "Upgrade failed"
+                                }
+                            }
+                            if (shouldPollRestart) {
+                                reconnecting = true
+                                statusNote = "Server restarting, reconnecting…"
+                                val deadline = System.currentTimeMillis() + 60_000L
+                                while (System.currentTimeMillis() < deadline) {
+                                    val alive = runCatching { client.health() }.isSuccess
+                                    if (alive) break
+                                    delay(2_000L)
+                                }
+                                runCatching { model.loadProjects() }
+                                availableVersion = null
+                                statusNote = "Updated to v$targetVersion"
+                            }
+                            upgrading = false
+                            reconnecting = false
+                        }
+                    },
+                )
             }
             Separator()
             Row(
@@ -489,35 +588,39 @@ private fun AboutBlock(model: AppModel) {
                     cm?.setPrimaryClip(ClipData.newPlainText("PPM Crash Report", md))
                     model.toast(ErrorToastMessage("Crash report copied", "You can paste it into Report Bug.", kind = ErrorToastMessage.Kind.INFO))
                 },
-                onDismiss = { crashExitInfo = null },
+                onDismiss = {
+                    saveDismissedCrashTimestamp(context, info.timestampMs)
+                    crashExitInfo = null
+                },
             )
         }
         if (learnPpmOpen) {
             LearnPpmDialog(
                 state = onboardingState,
-                onStateChange = { onboardingState = it },
-                onRefreshEvidence = {
-                    onboardingState = onboardingState.mergeEvidence(
-                        OnboardingEvidence(
-                            hasProjectSelected = model.selectedProject != null,
-                            chatSessionCount = model.sessions.size,
+                onStateChange = { updateOnboarding(it) },
+                onRefreshEvidence = { refreshOnboardingEvidence() },
+                onInsertSuggestedPrompt = { prompt ->
+                    val openTabs = model.layout?.panels?.values?.flatMap { panel -> panel.tabs }.orEmpty()
+                    val existingChat = model.activeTab?.let { model.chat(it.id) }
+                        ?: openTabs.firstNotNullOfOrNull { tab -> model.chat(tab.id) }
+                    if (existingChat != null) {
+                        val updated = applySuggestedPromptToDraft(existingChat.draft.text.toString(), prompt)
+                        existingChat.draft.setTextAndPlaceCursorAtEnd(updated)
+                        model.activate(existingChat.tabId)
+                        existingChat.requestFocus()
+                    } else if (model.selectedProject != null) {
+                        model.newChat(pendingMessage = prompt)
+                    } else {
+                        model.terminalToChat(prompt, newTab = true, asContext = false)
+                    }
+                    updateOnboarding(onboardingState.markStepCompleted("ai.send"))
+                    model.toast(
+                        ErrorToastMessage(
+                            "Prompt inserted into composer",
+                            "Review the prompt in your chat composer before sending.",
+                            kind = ErrorToastMessage.Kind.INFO,
                         ),
                     )
-                },
-                onInsertSuggestedPrompt = { prompt ->
-                    val activeTab = model.activeTab
-                    val chat = activeTab?.let { model.chat(it.id) }
-                    if (chat != null) {
-                        val updated = applySuggestedPromptToDraft(chat.draft.text.toString(), prompt)
-                        chat.draft.setTextAndPlaceCursorAtEnd(updated)
-                        model.toast(
-                            ErrorToastMessage(
-                                "Prompt inserted into composer",
-                                "Review the prompt in your chat composer before sending.",
-                                kind = ErrorToastMessage.Kind.INFO,
-                            ),
-                        )
-                    }
                     learnPpmOpen = false
                 },
                 onDismiss = { learnPpmOpen = false },
@@ -546,6 +649,7 @@ internal fun AppearanceExtrasSection(model: AppModel) {
         scope.launch {
             runCatching { parseImportedThemes(client.settingsListThemes()) }.getOrNull()?.let {
                 importedThemes = it
+                model.updateCustomThemes(it)
             }
         }
     }
@@ -596,12 +700,26 @@ internal fun AppearanceExtrasSection(model: AppModel) {
                             .background(tokens.panel.color)
                             .cssBorder((if (active) tokens.accent else tokens.border).color, shape)
                             .clickable {
-                                scope.launch { model.pickCustomTheme(custom.id, custom.base == "dark") }
+                                scope.launch { model.pickCustomTheme(custom.id, custom.mode == "dark") }
                             }
                             .padding(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
+                        if (custom.swatch.isNotEmpty()) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                for (hex in custom.swatch.take(3)) {
+                                    val c = Rgba.parse(hex)?.color ?: tokens.accent.color
+                                    Box(
+                                        Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(c)
+                                            .cssBorder(tokens.border.color, CircleShape),
+                                    )
+                                }
+                            }
+                        }
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             if (editingThemeId == custom.id) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -635,7 +753,7 @@ internal fun AppearanceExtrasSection(model: AppModel) {
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 BasicText(
-                                    if (custom.base == "dark") "Dark" else "Light",
+                                    custom.mode,
                                     style = ppmText(10f).copy(color = tokens.text3.color),
                                 )
                             }
@@ -740,10 +858,15 @@ internal fun AppearanceExtrasSection(model: AppModel) {
             onDismiss = { importDialogOpen = false },
             onImported = { imported ->
                 importDialogOpen = false
+                if (imported.isNotEmpty()) {
+                    val merged = (importedThemes.filterNot { existing -> imported.any { it.id == existing.id } } + imported)
+                    importedThemes = merged
+                    model.updateCustomThemes(merged)
+                }
                 reloadCustomThemes()
                 val first = imported.firstOrNull()
                 if (first != null) {
-                    scope.launch { model.pickCustomTheme(first.id, first.base == "dark") }
+                    scope.launch { model.pickCustomTheme(first.id, first.mode == "dark") }
                 }
             },
         )
@@ -772,31 +895,32 @@ private fun ThemeImportDialog(
             loading = true
             error = null
             try {
-                var fileName = "theme.json"
-                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-                    if (c.moveToFirst()) {
-                        val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        if (idx >= 0) fileName = c.getString(idx) ?: fileName
+                val (fileName, requests) = withContext(Dispatchers.IO) {
+                    var resolvedName = "theme.json"
+                    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                        if (c.moveToFirst()) {
+                            val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (idx >= 0) resolvedName = c.getString(idx) ?: resolvedName
+                        }
                     }
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: error("Could not read selected file")
+                    resolvedName to buildThemeFileUploadRequests(
+                        fileName = resolvedName,
+                        bytes = bytes,
+                        nameHint = nameInput.trim().ifEmpty { null },
+                    )
                 }
-                val kind = detectThemeUploadKind(fileName)
-                if (kind == ThemeUploadKind.UNSUPPORTED) {
-                    error = "Unsupported file type. Choose a .json, .jsonc, or .vsix file."
-                    return@launch
+                val importedAll = mutableListOf<ImportedThemeItem>()
+                for (req in requests) {
+                    val res = api.settingsImportTheme(
+                        source = req.source,
+                        value = req.value,
+                        name = req.name ?: fileName.substringBeforeLast('.'),
+                    )
+                    importedAll.addAll(com.hienlh.ppm.state.settings.parseThemeImportResponse(res))
                 }
-                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    ?: error("Could not read selected file")
-                val value = if (kind == ThemeUploadKind.VSIX) {
-                    Base64.encodeToString(bytes, Base64.NO_WRAP)
-                } else {
-                    bytes.toString(Charsets.UTF_8)
-                }
-                val res = api.settingsImportTheme(
-                    source = kind.wireSource,
-                    value = value,
-                    name = nameInput.trim().ifEmpty { fileName.substringBeforeLast('.') },
-                )
-                onImported(com.hienlh.ppm.state.settings.parseThemeImportResponse(res))
+                onImported(importedAll)
             } catch (t: Throwable) {
                 error = t.message ?: "Import failed"
             } finally {
@@ -1882,7 +2006,7 @@ internal fun LanguageServersContent(
                                 onClick = { onRequestUninstall(srv) },
                             )
                         }
-                        !srv.installed && srv.canInstall -> {
+                        !srv.installed && srv.installable -> {
                             SettingsButton(
                                 label = if (isBusy && busyAction == "install") "Installing…" else "Install",
                                 primary = true,
@@ -1918,7 +2042,7 @@ internal fun LanguageServersContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        BasicText(proc.id, style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text.color))
+                        BasicText(proc.serverId, style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text.color))
                         BasicText(
                             proc.rootPath,
                             style = ppmText(10f, kind = FontKind.MONO).copy(color = tokens.text3.color),
@@ -1971,9 +2095,9 @@ internal fun DatabaseDriversSection(model: AppModel) {
                     if (updated != null) {
                         drivers = drivers.map { if (it.id == driver.id) updated else it }
                     }
-                    model.toast(ErrorToastMessage("${driver.displayName} driver installed", kind = ErrorToastMessage.Kind.SUCCESS))
+                    model.toast(ErrorToastMessage("Installed the ${driver.displayName} driver", kind = ErrorToastMessage.Kind.SUCCESS))
                 } catch (t: Throwable) {
-                    model.toast(ErrorToastMessage("Failed to install ${driver.displayName}", t.message))
+                    model.toast(ErrorToastMessage("Could not install the ${driver.displayName} driver", t.message))
                     runCatching { parseDbDrivers(client.dbListDrivers()) }.getOrNull()?.let { drivers = it }
                 } finally {
                     busyIds = busyIds - driver.id
@@ -1985,9 +2109,9 @@ internal fun DatabaseDriversSection(model: AppModel) {
 
     confirmUninstall?.let { target ->
         ConfirmDialog(
-            title = "Uninstall ${target.displayName} driver?",
-            message = "Open ${target.displayName} connections will stop working until the driver is installed again.",
-            confirm = "Uninstall",
+            title = "Remove the ${target.displayName} driver",
+            message = "Open ${target.usedFor.ifBlank { "${target.displayName} connections" }} close now, and none can connect until the driver is installed again. Saved connections stay.",
+            confirm = "Remove",
             onConfirm = {
                 val client = api ?: return@ConfirmDialog
                 confirmUninstall = null
@@ -1998,9 +2122,9 @@ internal fun DatabaseDriversSection(model: AppModel) {
                         if (updated != null) {
                             drivers = drivers.map { if (it.id == target.id) updated else it }
                         }
-                        model.toast(ErrorToastMessage("${target.displayName} driver uninstalled", kind = ErrorToastMessage.Kind.SUCCESS))
+                        model.toast(ErrorToastMessage("Removed the ${target.displayName} driver", kind = ErrorToastMessage.Kind.SUCCESS))
                     } catch (t: Throwable) {
-                        model.toast(ErrorToastMessage("Failed to uninstall ${target.displayName}", t.message))
+                        model.toast(ErrorToastMessage("Could not remove the ${target.displayName} driver", t.message))
                     } finally {
                         busyIds = busyIds - target.id
                     }
@@ -2021,12 +2145,12 @@ internal fun DatabaseDriversContent(
     val tokens = LocalPpmTokens.current
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         BasicText(
-            "PostgreSQL, MySQL, MariaDB, and SQLite are built into PPM. Install additional database drivers on demand below.",
+            "PostgreSQL and SQLite are built in. Other databases need a driver, which PPM downloads when you press Install: the exact release PPM was tested with, every package checked against the digest recorded for it, into PPM's own folder. Nothing you installed yourself is used or changed, and Remove deletes exactly that folder.",
             style = ppmText(11f, lineHeight = 16f).copy(color = tokens.text3.color),
         )
         for (driver in drivers) {
-            val isBusy = driver.id in busyIds || driver.status == "installing"
-            val installed = driver.status == "installed"
+            val isWorking = driver.id in busyIds || driver.installing || driver.removing
+            val isRemoving = isWorking && driver.removing
             val shape = RoundedCornerShape(10.dp)
             Column(
                 Modifier
@@ -2044,45 +2168,56 @@ internal fun DatabaseDriversContent(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            BasicText(driver.displayName, style = ppmText(13f, FontWeight.Medium).copy(color = tokens.text.color))
+                        BasicText(driver.displayName, style = ppmText(13f, FontWeight.Medium).copy(color = tokens.text.color))
+                        val usedForLabel = driver.usedFor.replaceFirstChar { it.uppercase() }
+                        val metaParts = listOfNotNull(
+                            usedForLabel.takeIf { it.isNotBlank() },
+                            "${driver.pkg} ${driver.version}".trim().takeIf { it.isNotBlank() },
+                            driver.license.takeIf { it.isNotBlank() },
+                        )
+                        BasicText(
+                            metaParts.joinToString(" · "),
+                            style = ppmText(11f).copy(color = tokens.text3.color),
+                        )
+                        val installedInfo = driver.installed
+                        if (driver.state == "outdated" && installedInfo != null) {
                             BasicText(
-                                "${driver.npmPackage}@${driver.version}",
-                                style = ppmText(10f, kind = FontKind.MONO).copy(color = tokens.text3.color),
+                                "${installedInfo.version} is installed; this PPM was tested with ${driver.version}.",
+                                style = ppmText(11f).copy(color = tokens.warning.color),
                             )
                         }
-                        val driverSize = driver.sizeBytes
-                        val sizeLabel = if (installed && driverSize != null) {
-                            "Installed (${formatDriverBytes(driverSize)})"
-                        } else {
-                            "~${formatDriverBytes(driver.approxBytes)} download"
-                        }
-                        BasicText(sizeLabel, style = ppmText(11f).copy(color = tokens.text3.color))
                     }
-                    if (installed) {
+                    if (driver.state == "missing") {
                         SettingsButton(
-                            label = if (isBusy) "Removing…" else "Uninstall",
-                            enabled = !isBusy,
-                            modifier = Modifier.testTag("db-driver-uninstall-${driver.id}"),
-                            onClick = { onRequestUninstall(driver) },
-                        )
-                    } else {
-                        SettingsButton(
-                            label = when {
-                                isBusy -> "Installing…"
-                                driver.status == "failed" -> "Retry"
-                                else -> "Install (~${formatDriverBytes(driver.approxBytes)})"
-                            },
+                            label = if (isWorking) "Installing…" else "Install",
                             primary = true,
-                            enabled = !isBusy,
+                            enabled = !isWorking && busyIds.isEmpty(),
                             modifier = Modifier.testTag("db-driver-install-${driver.id}"),
                             onClick = { onInstall(driver) },
                         )
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            if (driver.state == "outdated") {
+                                SettingsButton(
+                                    label = "Update",
+                                    enabled = !isWorking && busyIds.isEmpty(),
+                                    modifier = Modifier.testTag("db-driver-install-${driver.id}"),
+                                    onClick = { onInstall(driver) },
+                                )
+                            } else {
+                                BasicText(
+                                    driver.installed?.let { formatDriverBytes(it.bytes) } ?: "Installed",
+                                    style = ppmText(11f).copy(color = tokens.text3.color),
+                                )
+                            }
+                            SettingsButton(
+                                label = if (isRemoving) "Removing…" else "Remove",
+                                enabled = !isWorking && busyIds.isEmpty(),
+                                modifier = Modifier.testTag("db-driver-uninstall-${driver.id}"),
+                                onClick = { onRequestUninstall(driver) },
+                            )
+                        }
                     }
-                }
-                val driverErr = driver.error
-                if (driver.status == "failed" && !driverErr.isNullOrBlank()) {
-                    BasicText(driverErr, style = ppmText(11f).copy(color = tokens.error.color))
                 }
             }
         }
@@ -2099,6 +2234,13 @@ internal fun RemoteDesktopSettingsSection(model: AppModel) {
     val scope = rememberCoroutineScope()
     var relay by remember { mutableStateOf(RelayStatusState()) }
     var busy by remember { mutableStateOf(false) }
+
+    fun reload() {
+        val client = api ?: return
+        scope.launch {
+            runCatching { parseRelayStatus(client.remoteDesktopRelayStatus()) }.getOrNull()?.let { relay = it }
+        }
+    }
 
     LaunchedEffect(api) {
         if (api == null) return@LaunchedEffect
@@ -2123,9 +2265,10 @@ internal fun RemoteDesktopSettingsSection(model: AppModel) {
             busy = true
             scope.launch {
                 try {
-                    relay = parseRelayStatus(client.remoteDesktopRelayInstall())
+                    client.remoteDesktopRelayInstall()
+                    runCatching { parseRelayStatus(client.remoteDesktopRelayStatus()) }.getOrNull()?.let { relay = it }
                 } catch (t: Throwable) {
-                    model.toast(ErrorToastMessage("Failed to install WebRTC relay", t.message))
+                    model.toast(ErrorToastMessage("Could not start the download", t.message))
                 } finally {
                     busy = false
                 }
@@ -2136,9 +2279,10 @@ internal fun RemoteDesktopSettingsSection(model: AppModel) {
             busy = true
             scope.launch {
                 try {
-                    relay = parseRelayStatus(client.remoteDesktopRelayUninstall())
+                    client.remoteDesktopRelayUninstall()
+                    runCatching { parseRelayStatus(client.remoteDesktopRelayStatus()) }.getOrNull()?.let { relay = it }
                 } catch (t: Throwable) {
-                    model.toast(ErrorToastMessage("Failed to remove WebRTC relay", t.message))
+                    model.toast(ErrorToastMessage("Could not remove the relay", t.message))
                 } finally {
                     busy = false
                 }
@@ -2156,12 +2300,20 @@ internal fun RemoteDesktopRelayContent(
 ) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(10.dp)
+    val job = relay.job
+    val percent = relay.progressPercent
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         BasicText(
-            "MediaMTX provides low-latency WebRTC streaming for browser clients. The Android app decodes H.264 directly via MediaCodec.",
+            "Streams the desktop over WebRTC instead of a WebSocket. It repackages the video this host already encoded — it never re-encodes, so the picture and the CPU cost are unchanged.",
             style = ppmText(11f, lineHeight = 16f).copy(color = tokens.text3.color),
         )
+        if (!relay.available && !relay.installed) {
+            BasicText(
+                "MediaMTX publishes no build for this platform. You can install it yourself and put mediamtx on this host's PATH — PPM generates its own configuration either way.",
+                style = ppmText(11f, lineHeight = 16f).copy(color = tokens.text3.color),
+            )
+        }
         Column(
             Modifier
                 .fillMaxWidth()
@@ -2178,39 +2330,47 @@ internal fun RemoteDesktopRelayContent(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    BasicText("WebRTC Relay (MediaMTX)", style = ppmText(13f, FontWeight.Medium).copy(color = tokens.text.color))
+                    BasicText("WebRTC relay", style = ppmText(13f, FontWeight.Medium).copy(color = tokens.text.color))
                     val statusText = when {
-                        relay.isReady && relay.source == "system" -> "System binary (${relay.path.orEmpty()})"
-                        relay.isReady -> "Installed (${relay.path.orEmpty()})"
-                        relay.isDownloading -> {
-                            val pct = ((relay.progress ?: 0.0) * 100).toInt()
-                            "Downloading… $pct%"
-                        }
-                        relay.status == "error" -> relay.error ?: "Error"
+                        relay.installed && relay.source == "system" -> "Installed on this host (not by PPM)"
+                        relay.installed -> "Installed — MediaMTX ${relay.pinnedVersion}".trim()
                         else -> "Not installed"
                     }
                     BasicText(
                         statusText,
-                        style = ppmText(11f).copy(
-                            color = if (relay.status == "error") tokens.error.color else tokens.text3.color,
-                        ),
+                        style = ppmText(11f).copy(color = tokens.text3.color),
                     )
+                    if (relay.isDownloading && job != null) {
+                        val mbReceived = Math.round(job.receivedBytes / 1_000_000.0)
+                        val mbTotal = if (job.totalBytes > 0L) " of ${Math.round(job.totalBytes / 1_000_000.0)} MB" else ""
+                        BasicText("${mbReceived} MB$mbTotal", style = ppmText(11f).copy(color = tokens.text3.color))
+                    }
+                    if (!job?.error.isNullOrBlank()) {
+                        BasicText(job!!.error!!, style = ppmText(11f).copy(color = tokens.error.color))
+                    }
+                    if (!relay.path.isNullOrBlank()) {
+                        BasicText(relay.path!!, style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text3.color))
+                    }
                 }
 
                 when {
                     relay.canUninstall -> {
                         SettingsButton(
-                            label = if (busy) "Removing…" else "Remove",
-                            enabled = !busy,
+                            label = "Remove",
+                            enabled = !busy && !relay.isDownloading,
                             modifier = Modifier.testTag("rd-relay-remove"),
                             onClick = onUninstall,
                         )
                     }
-                    !relay.isReady && !relay.isDownloading -> {
+                    !relay.installed && relay.available -> {
                         SettingsButton(
-                            label = if (relay.status == "error") "Retry" else "Download",
+                            label = if (relay.isDownloading) {
+                                "Downloading${if (percent != null) " $percent%" else ""}"
+                            } else {
+                                "Install"
+                            },
                             primary = true,
-                            enabled = !busy,
+                            enabled = !busy && !relay.isDownloading,
                             modifier = Modifier.testTag("rd-relay-download"),
                             onClick = onInstall,
                         )
@@ -2447,4 +2607,23 @@ internal fun SettingsPasswordInput(
             )
         }
     }
+}
+
+/**
+ * Copies a secret/token/backup to the system clipboard with `ClipDescription.EXTRA_IS_SENSITIVE = true`
+ * (`"android.content.extra.IS_SENSITIVE"` on pre-Tiramisu) so Android masks the clipboard preview.
+ */
+internal fun copySensitiveClip(context: Context, label: String, text: String): ClipData {
+    val clip = ClipData.newPlainText(label, text)
+    val extras = PersistableBundle().apply {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+        } else {
+            putBoolean("android.content.extra.IS_SENSITIVE", true)
+        }
+    }
+    clip.description.extras = extras
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+    cm?.setPrimaryClip(clip)
+    return clip
 }

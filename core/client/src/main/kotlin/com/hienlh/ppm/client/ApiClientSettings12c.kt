@@ -1,10 +1,20 @@
 package com.hienlh.ppm.client
 
+import com.hienlh.ppm.protocol.WireJson
+import com.hienlh.ppm.protocol.bool
+import com.hienlh.ppm.protocol.get
+import com.hienlh.ppm.protocol.string
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 
 // ===========================================================================
 // 1. Notifications (/api/notifications/*, /api/settings/telegram*)
@@ -151,6 +161,51 @@ suspend fun ApiClient.namedTunnelDisable(): JsonElement =
 
 suspend fun ApiClient.cloudGetStatus(): JsonElement =
     call("GET", "/api/cloud/status")
+
+suspend fun ApiClient.cloudGetLoginUrl(): JsonElement =
+    call("GET", "/api/cloud/login-url")
+
+private val CLOUD_JSON_MEDIA_TYPE = "application/json".toMediaType()
+
+private suspend fun callCloudJson(url: String, body: JsonObject): JsonElement {
+    val request = Request.Builder()
+        .url(url)
+        .post(body.toString().toRequestBody(CLOUD_JSON_MEDIA_TYPE))
+        .header("Accept", "application/json")
+        .build()
+    val response = try {
+        PpmHttp.client.newCall(request).await()
+    } catch (e: IOException) {
+        throw PpmError.Unreachable(describe(e))
+    }
+    return withContext(Dispatchers.IO) {
+        response.use { res ->
+            val text = try {
+                res.body.string()
+            } catch (e: IOException) {
+                throw PpmError.Unreachable(describe(e))
+            }
+            val parsed = WireJson.parseOrNull(text)
+                ?: throw PpmError.BadResponse("Cloud server answered HTTP ${res.code}.")
+            if (!res.isSuccessful || parsed["ok"].bool == false) {
+                throw PpmError.Server(
+                    status = res.code,
+                    serverMessage = parsed["error"].string ?: "Cloud server answered HTTP ${res.code}.",
+                )
+            }
+            parsed["data"]?.takeIf { it !is JsonNull } ?: parsed
+        }
+    }
+}
+
+suspend fun ApiClient.cloudRequestDeviceCode(cloudUrl: String): JsonElement =
+    callCloudJson("${cloudUrl.trimEnd('/')}/auth/device-code", buildJsonObject {})
+
+suspend fun ApiClient.cloudPollDeviceCode(cloudUrl: String, deviceCode: String): JsonElement =
+    callCloudJson(
+        "${cloudUrl.trimEnd('/')}/auth/device-code/poll",
+        buildJsonObject { put("device_code", deviceCode) },
+    )
 
 suspend fun ApiClient.cloudLogin(
     accessToken: String,

@@ -12,6 +12,7 @@ window = "1.5.1"
 javascriptengine = "1.1.1"
 webkit = "1.14.0"
 androidsvg = "1.4"
+zxing = "3.4.1"
 junit = "4.13.2"
 robolectric = "4.17"
 mockito = "5.24.0"
@@ -37,6 +38,7 @@ androidx-window = { module = "androidx.window:window", version.ref = "window" }
 androidx-javascriptengine = { module = "androidx.javascriptengine:javascriptengine", version.ref = "javascriptengine" }
 androidx-webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }
 androidsvg = { module = "com.caverock:androidsvg-aar", version.ref = "androidsvg" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 androidx-compose-foundation = { module = "androidx.compose.foundation:foundation" }
 androidx-compose-ui = { module = "androidx.compose.ui:ui" }

@@ -161,19 +161,71 @@ fun parseTokenTestReport(json: JsonElement?): TokenTestReport {
     )
 }
 
+/** Matches `DEFAULT_PASSWORD` in `src/web/components/settings/accounts/account-backup-format.ts`. */
+const val CLAUDE_BACKUP_DEFAULT_PASSWORD = "ppm-hienlh"
+
+fun effectiveClaudeBackupPassword(password: String): String =
+    password.trim().ifEmpty { CLAUDE_BACKUP_DEFAULT_PASSWORD }
+
 data class UsageSnapshotPoint(
-    val timestamp: Long,
+    val recordedAt: String,
+    val timestamp: Long = 0L,
     val fiveHour: Double,
     val sevenDay: Double,
 )
 
+private fun parseRecordedAtEpochMs(raw: String): Long? {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return null
+    trimmed.toLongOrNull()?.let { return it }
+    val iso = if (trimmed.contains('T')) {
+        if (trimmed.endsWith("Z") || trimmed.contains('+') || trimmed.drop(10).contains('-')) trimmed else "${trimmed}Z"
+    } else {
+        trimmed.replace(' ', 'T') + "Z"
+    }
+    return runCatching { java.time.Instant.parse(iso).toEpochMilli() }.getOrNull()
+}
+
+/**
+ * Parses `LimitSnapshotRow[]` from `GET /api/accounts/:id/usage-history`
+ * (`src/services/db.service.ts`: `{ recorded_at, five_hour_util, weekly_util, ... }`).
+ */
 fun parseUsageHistory(json: JsonElement?): List<UsageSnapshotPoint> =
     json?.array.orEmpty().mapNotNull { row ->
-        val ts = row["timestamp"].long ?: row["created_at"].long ?: return@mapNotNull null
-        val fh = row["five_hour"].double ?: row["fiveHour"].double ?: 0.0
-        val sd = row["seven_day"].double ?: row["sevenDay"].double ?: 0.0
-        UsageSnapshotPoint(timestamp = ts, fiveHour = fh, sevenDay = sd)
+        val recordedAt = row["recorded_at"].string
+            ?: row["timestamp"].long?.toString()
+            ?: row["created_at"].long?.toString()
+            ?: return@mapNotNull null
+        val ts = parseRecordedAtEpochMs(recordedAt) ?: row["timestamp"].long ?: row["created_at"].long ?: 0L
+        val fh = row["five_hour_util"].double ?: row["five_hour"].double ?: row["fiveHour"].double ?: 0.0
+        val sd = row["weekly_util"].double ?: row["seven_day"].double ?: row["sevenDay"].double ?: 0.0
+        UsageSnapshotPoint(recordedAt = recordedAt, timestamp = ts, fiveHour = fh, sevenDay = sd)
     }
+
+/**
+ * Server `DeviceLoginStatus` returned by both
+ * `GET /api/codex-accounts/device-login/:id/status` and
+ * `GET /api/codex-accounts/browser-login/:id/status` (`src/services/codex-account-login.ts`):
+ * `{ state: "pending" } | { state: "done", account } | { state: "error", error }`.
+ */
+data class CodexLoginPollStatus(
+    val state: String,
+    val accountId: String? = null,
+    val error: String? = null,
+) {
+    val isDone: Boolean get() = state == "done"
+    val isError: Boolean get() = state == "error"
+    val isPending: Boolean get() = state == "pending"
+}
+
+fun parseCodexLoginPollStatus(json: JsonElement?): CodexLoginPollStatus? {
+    val state = json?.get("state")?.string?.takeIf { it.isNotBlank() } ?: return null
+    return CodexLoginPollStatus(
+        state = state,
+        accountId = json["account"]["id"].string,
+        error = json["error"].string,
+    )
+}
 
 data class CodexDeviceLoginFlow(
     val id: String,
@@ -189,9 +241,17 @@ fun parseCodexDeviceLogin(json: JsonElement?): CodexDeviceLoginFlow? {
         id = id,
         userCode = json["userCode"].string.orEmpty(),
         verificationUrl = json["verificationUrl"].string.orEmpty(),
-        status = json["status"].string ?: "pending",
+        status = json["state"].string ?: json["status"].string ?: "pending",
         error = json["error"].string,
     )
+}
+
+fun applyCodexDeviceLoginPoll(
+    current: CodexDeviceLoginFlow,
+    pollJson: JsonElement?,
+): CodexDeviceLoginFlow {
+    val polled = parseCodexLoginPollStatus(pollJson) ?: return current
+    return current.copy(status = polled.state, error = polled.error)
 }
 
 data class CodexBrowserLoginFlow(
@@ -206,9 +266,17 @@ fun parseCodexBrowserLogin(json: JsonElement?): CodexBrowserLoginFlow? {
     return CodexBrowserLoginFlow(
         id = id,
         authUrl = json["authUrl"].string.orEmpty(),
-        status = json["status"].string ?: "pending",
+        status = json["state"].string ?: json["status"].string ?: "pending",
         error = json["error"].string,
     )
+}
+
+fun applyCodexBrowserLoginPoll(
+    current: CodexBrowserLoginFlow,
+    pollJson: JsonElement?,
+): CodexBrowserLoginFlow {
+    val polled = parseCodexLoginPollStatus(pollJson) ?: return current
+    return current.copy(status = polled.state, error = polled.error)
 }
 
 /** Detects a localhost callback URL (`http://localhost:1455/auth/callback?code=...`) copied from the browser. */
@@ -432,6 +500,19 @@ fun filterAiResources(
     }
 }
 
+/**
+ * Mirrors `src/server/routes/ai-resources.ts:18,77` (`VALID_SCOPES = new Set(["project", "user"])`):
+ * when duplicating a `"bundled"` resource, target `"project"` if a project is open, else `"user"`.
+ */
+fun duplicateAiResourceTargetScope(itemScope: String, activeProjectPath: String): String =
+    if (itemScope == "project" || itemScope == "user") {
+        itemScope
+    } else if (activeProjectPath.isNotBlank()) {
+        "project"
+    } else {
+        "user"
+    }
+
 // ===========================================================================
 // 5. PPMBot / Clawbot (Phase 12b.5 — /api/settings/clawbot)
 // ===========================================================================
@@ -467,6 +548,26 @@ data class TelegramPairedChat(
     val username: String? = null,
 )
 
+/**
+ * Response of `POST /api/settings/clawbot/telegram/connect` (`src/services/telegram-connect.service.ts:110-116`).
+ */
+data class TelegramConnectLink(
+    val url: String,
+    val expiresAt: Long,
+)
+
+fun parseTelegramConnectLink(json: JsonElement?): TelegramConnectLink? {
+    val url = json?.get("url")?.string?.takeIf { it.isNotBlank() } ?: return null
+    val expiresAt = json["expiresAt"].long ?: 0L
+    return TelegramConnectLink(url = url, expiresAt = expiresAt)
+}
+
+/**
+ * Matches `PPMBotTelegramStatus` in `src/shared/ppmbot-telegram.ts`:
+ * `connect` on GET is `{ active: boolean, expiresAt: number | null, error: string | null }`.
+ * `connectUrl` comes from `POST /api/settings/clawbot/telegram/connect` (`{ url, expiresAt }`)
+ * and stays while `connectActive` is true and no new chat has consumed the link.
+ */
 data class ClawbotTelegramState(
     val configured: Boolean = false,
     val enabled: Boolean = false,
@@ -474,11 +575,17 @@ data class ClawbotTelegramState(
     val botUsername: String? = null,
     val sharedWithNotifications: Boolean = false,
     val chats: List<TelegramPairedChat> = emptyList(),
+    val connectActive: Boolean = false,
+    val connectExpiresAt: Long? = null,
     val connectUrl: String? = null,
     val connectError: String? = null,
 )
 
-fun parseClawbotTelegram(json: JsonElement?): ClawbotTelegramState {
+fun parseClawbotTelegram(
+    json: JsonElement?,
+    previousConnectUrl: String? = null,
+    previousChatIds: Set<String>? = null,
+): ClawbotTelegramState {
     if (json == null) return ClawbotTelegramState()
     val chats = json["chats"].array.orEmpty().mapNotNull { row ->
         val chatId = row["chatId"].string ?: row["chat_id"].string ?: return@mapNotNull null
@@ -488,6 +595,12 @@ fun parseClawbotTelegram(json: JsonElement?): ClawbotTelegramState {
             username = row["username"].string,
         )
     }
+    val connectObj = json["connect"]
+    val connectActive = connectObj["active"].bool == true
+    val connectExpiresAt = connectObj["expiresAt"].long
+    val connectError = connectObj["error"].string
+    val newChatConnected = previousChatIds != null && chats.any { it.chatId !in previousChatIds }
+    val preservedUrl = connectObj["url"].string ?: if (connectActive && !newChatConnected) previousConnectUrl else null
     return ClawbotTelegramState(
         configured = json["configured"].bool == true,
         enabled = json["enabled"].bool == true,
@@ -495,8 +608,10 @@ fun parseClawbotTelegram(json: JsonElement?): ClawbotTelegramState {
         botUsername = json["botUsername"].string,
         sharedWithNotifications = json["sharedWithNotifications"].bool == true,
         chats = chats,
-        connectUrl = json["connect"]["url"].string,
-        connectError = json["connect"]["error"].string,
+        connectActive = connectActive,
+        connectExpiresAt = connectExpiresAt,
+        connectUrl = preservedUrl,
+        connectError = connectError,
     )
 }
 
