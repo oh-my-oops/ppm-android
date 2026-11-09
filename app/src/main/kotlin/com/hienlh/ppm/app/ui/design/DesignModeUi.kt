@@ -64,9 +64,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
@@ -109,6 +111,7 @@ import com.hienlh.ppm.client.designUpdateSystem
 import com.hienlh.ppm.client.filenameFromContentDisposition
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -273,101 +276,118 @@ fun DesignsSidebarPane(
     }
 
     if (project == null) {
-        Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
             BasicText(
-                "Select a project to view designs",
+                "Select a project to see its designs",
                 style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
             )
         }
         return
     }
 
+    val mobile = LocalPpmMobile.current
+    val headerButtonSize = if (mobile) 44.dp else 28.dp
+
     Column(Modifier.fillMaxSize().background(tokens.panel.color)) {
-        // Header bar
+        // Header bar (matches designs-sidebar-panel.tsx)
         Row(
             Modifier
                 .fillMaxWidth()
                 .height(36.dp)
                 .cssBorder(tokens.border.color, sides = CssSides.Bottom)
-                .padding(horizontal = 10.dp),
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            PpmIcon(ProductIcon.Palette, 14.dp, tokens.accent.color)
             BasicText(
-                "Designs",
-                Modifier.weight(1f),
-                style = ppmText(12f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.text.color),
+                "DESIGNS",
+                style = ppmText(12f, FontWeight.SemiBold, lineHeight = 16f).copy(
+                    color = tokens.text2.color,
+                    letterSpacing = 0.3.sp,
+                ),
             )
-            Box(
-                Modifier
-                    .size(26.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .semantics { contentDescription = "Refresh designs" }
-                    .ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "Refresh designs") { reloadAll() },
-                contentAlignment = Alignment.Center,
-            ) {
-                PpmIcon(ProductIcon.RefreshCw, 13.dp, tokens.text2.color)
-            }
             Row(
-                Modifier
-                    .height(26.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(tokens.accent.color)
-                    .semantics { contentDescription = "New Design" }
-                    .ppmClickable(pressedColor = tokens.accent.opacity(0.85).color, onClickLabel = "New Design") {
-                        showNewDesignDialog = true
-                    }
-                    .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                PpmIcon(ProductIcon.Plus, 12.dp, tokens.accentFg.color)
-                BasicText("New Design", style = ppmText(11f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tokens.accentFg.color))
-            }
-        }
-
-        if (errorMsg != null) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(tokens.error.opacity(0.12).color)
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                PpmIcon(ProductIcon.AlertTriangle, 13.dp, tokens.error.color)
-                BasicText(
-                    errorMsg!!,
-                    Modifier.weight(1f),
-                    style = ppmText(11f, lineHeight = 14f).copy(color = tokens.error.color),
-                )
+                Box(
+                    Modifier
+                        .size(headerButtonSize)
+                        .clip(RoundedCornerShape(6.dp))
+                        .semantics { contentDescription = "Design settings" }
+                        .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, onClickLabel = "Design settings") {
+                            model.openSettings("design")
+                            onNavigate()
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    PpmIcon(ProductIcon.Settings, 16.dp, tokens.text3.color)
+                }
+                Box(
+                    Modifier
+                        .size(headerButtonSize)
+                        .clip(RoundedCornerShape(6.dp))
+                        .semantics { contentDescription = "New design" }
+                        .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, onClickLabel = "New design") {
+                            showNewDesignDialog = true
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    PpmIcon(ProductIcon.Plus, 16.dp, tokens.text3.color)
+                }
             }
         }
 
         val normalDesigns = remember(designs) { designs.filter { it.showcaseFor == null } }
         val showcaseDesigns = remember(designs) { designs.filter { it.showcaseFor != null } }
 
-        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-            if (normalDesigns.isEmpty() && !loading) {
-                item(key = "empty-designs") {
-                    Column(
-                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        PpmIcon(ProductIcon.Palette, 24.dp, tokens.text3.color)
-                        BasicText(
-                            "No designs yet",
-                            style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color),
-                        )
-                        BasicText(
-                            "Create a Page or Slides design to iterate with AI on a live canvas.",
-                            style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
-                        )
+        if (errorMsg != null) {
+            Box(Modifier.weight(1f).fillMaxWidth().padding(4.dp)) {
+                BasicText(
+                    errorMsg!!,
+                    Modifier.padding(horizontal = 8.dp, vertical = 12.dp),
+                    style = ppmText(12f, lineHeight = 16f).copy(color = tokens.error.color),
+                )
+            }
+        } else if (loading && designs.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.TopCenter) {
+                PpmIcon(ProductIcon.Loader2, 16.dp, tokens.accent.color, spinning = true)
+            }
+        } else {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(4.dp)) {
+                if (normalDesigns.isEmpty()) {
+                    item(key = "empty-designs") {
+                        Column(
+                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            PpmIcon(ProductIcon.Palette, 24.dp, tokens.text3.color)
+                            BasicText(
+                                "No designs yet. Start one and describe what you want; the AI builds it beside a live preview.",
+                                style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
+                            )
+                            Box(
+                                Modifier
+                                    .heightIn(min = 44.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .ppmClickable(pressedColor = tokens.panel2.color, onClickLabel = "New design") {
+                                        showNewDesignDialog = true
+                                    }
+                                    .padding(horizontal = 12.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                BasicText(
+                                    "New design",
+                                    style = ppmText(14f, lineHeight = 20f).copy(
+                                        color = tokens.accent.color,
+                                        textDecoration = TextDecoration.Underline,
+                                    ),
+                                )
+                            }
+                        }
                     }
                 }
-            }
 
             items(normalDesigns, key = { "design:${it.slug}" }) { design ->
                 DesignSidebarRow(
@@ -535,6 +555,7 @@ fun DesignsSidebarPane(
                         )
                     }
                 }
+            }
             }
         }
     }
