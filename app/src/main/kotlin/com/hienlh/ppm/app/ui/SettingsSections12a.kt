@@ -175,6 +175,18 @@ internal fun GeneralSection(model: AppModel) {
     var deviceNameErr by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        if (model.info?.minimalMode != true) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SettingsSectionTitle("Learn PPM")
+                BasicText(
+                    "Choose your experience and a task. Guidance is saved on this device.",
+                    style = ppmText(12f, lineHeight = 17f).copy(color = tokens.text3.color),
+                )
+                com.hienlh.ppm.app.ui.shell.OnboardingEntryRow(model, compact = false)
+            }
+            Separator()
+        }
+
         // Device Name
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             SettingsSectionTitle("Device Name")
@@ -571,7 +583,7 @@ private fun AboutBlock(model: AppModel) {
                     SettingsButton(
                         label = "Learn PPM",
                         modifier = Modifier.testTag("settings-learn-ppm-btn"),
-                        onClick = { learnPpmOpen = true },
+                        onClick = { model.learnPpmMode = false },
                     )
                     BasicText(
                         "v${BuildConfig.VERSION_NAME}",

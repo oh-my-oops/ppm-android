@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -34,6 +35,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
@@ -50,6 +52,7 @@ import com.hienlh.ppm.client.gitWorktreeAdd
 import com.hienlh.ppm.client.gitWorktreePrune
 import com.hienlh.ppm.client.gitWorktreeRemove
 import com.hienlh.ppm.client.gitWorktrees
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -142,26 +145,28 @@ internal fun GitStashSection(
             .edge(Edge.Top, tokens.border.color)
             .testTag("git-stash-section"),
     ) {
+        val mobile = LocalPpmMobile.current
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(28.dp)
+                .height(if (mobile) 44.dp else 32.dp)
                 .clickable { open = !open }
-                .padding(horizontal = 8.dp),
+                .padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             PpmIcon(
                 if (open) ProductIcon.ChevronDown else ProductIcon.ChevronRight,
                 size = 14.dp,
-                tint = tokens.text2.color,
+                tint = tokens.text3.color,
             )
             BasicText(
                 text = "STASHES",
-                style = PpmFont.sans(11, FontWeight.SemiBold, lineHeight = 14, color = tokens.text2.color),
-                modifier = Modifier.weight(1f),
+                style = PpmFont.sans(11, FontWeight.SemiBold, lineHeight = 14, color = tokens.text3.color)
+                    .copy(letterSpacing = 0.07.em),
             )
             CountChip(count)
+            Spacer(Modifier.weight(1f))
         }
 
         if (open) {
@@ -363,28 +368,30 @@ internal fun GitWorktreePanel(
             .edge(Edge.Top, tokens.border.color)
             .testTag("git-worktree-section"),
     ) {
+        val mobile = LocalPpmMobile.current
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(28.dp)
+                .height(if (mobile) 44.dp else 32.dp)
                 .clickable { expanded = !expanded }
-                .padding(horizontal = 8.dp),
+                .padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             PpmIcon(
                 if (expanded) ProductIcon.ChevronDown else ProductIcon.ChevronRight,
                 size = 14.dp,
-                tint = tokens.text2.color,
+                tint = tokens.text3.color,
             )
             BasicText(
                 text = "WORKTREES",
-                style = PpmFont.sans(11, FontWeight.SemiBold, lineHeight = 14, color = tokens.text2.color),
-                modifier = Modifier.weight(1f),
+                style = PpmFont.sans(11, FontWeight.SemiBold, lineHeight = 14, color = tokens.text3.color)
+                    .copy(letterSpacing = 0.07.em),
             )
             if (worktrees.isNotEmpty()) {
                 CountChip(worktrees.size)
             }
+            Spacer(Modifier.weight(1f))
             if (expanded) {
                 Box(
                     modifier = Modifier

@@ -3,6 +3,9 @@ package com.hienlh.ppm.app.ui.git
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,7 +45,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
@@ -639,19 +644,22 @@ fun GitStatusPanel(
     Column(
         modifier = Modifier.fillMaxSize().testTag("git-status-panel"),
     ) {
-        // Panel header
+        // Panel header (`SidebarHeader` in `git-status-panel.tsx:580`)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (mobile) 44.dp else 34.dp)
                 .edge(Edge.Bottom, tokens.border.color)
-                .padding(horizontal = 10.dp),
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            PpmIcon(ProductIcon.GitBranch, size = 16.dp, tint = tokens.accent.color)
             BasicText(
-                text = "Source Control",
-                style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text2.color),
+                text = "SOURCE CONTROL",
+                style = PpmFont.sans(12, FontWeight.SemiBold, lineHeight = 16, color = tokens.text2.color)
+                    .copy(letterSpacing = 0.025.em),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             // Flat / Tree view toggle
@@ -912,6 +920,27 @@ fun GitStatusPanel(
                     )
                 }
 
+                @Composable
+                fun Folds() {
+                    // Stashes fold
+                    GitStashSection(
+                        model = model,
+                        project = project,
+                        repo = repo,
+                        count = changes?.stashes ?: 0,
+                        onChanged = ::triggerRefresh,
+                    )
+
+                    // Worktrees fold
+                    GitWorktreePanel(
+                        model = model,
+                        project = project,
+                        repo = repo,
+                        activePath = repo?.path ?: discovery?.root,
+                        refreshSignal = refreshSignal,
+                    )
+                }
+
                 // Scrollable body
                 Column(
                     modifier = Modifier
@@ -1014,23 +1043,14 @@ fun GitStatusPanel(
                         }
                     }
 
-                    // Stashes fold
-                    GitStashSection(
-                        model = model,
-                        project = project,
-                        repo = repo,
-                        count = changes?.stashes ?: 0,
-                        onChanged = ::triggerRefresh,
-                    )
+                    if (mobile && changes != null) {
+                        Folds()
+                    }
+                }
 
-                    // Worktrees fold
-                    GitWorktreePanel(
-                        model = model,
-                        project = project,
-                        repo = repo,
-                        activePath = repo?.path ?: discovery?.root,
-                        refreshSignal = refreshSignal,
-                    )
+                // On desktop/tablet (`!isMobile`), folds sit pinned at the bottom of the panel (`git-status-panel.tsx:705`)
+                if (!mobile && changes != null) {
+                    Folds()
                 }
 
                 // Phone composer sits in the bottom thumb-zone
@@ -1139,31 +1159,31 @@ internal fun ChangeGroupSection(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (mobile) 44.dp else 34.dp)
-                .padding(start = 8.dp, end = if (showCheckAll) 0.dp else 8.dp),
+                .height(if (mobile) 44.dp else if (errorTone) 30.dp else 34.dp)
+                .padding(start = 10.dp, end = if (showCheckAll) 0.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable { open = !open },
+                modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                PpmIcon(
-                    if (open) ProductIcon.ChevronDown else ProductIcon.ChevronRight,
-                    size = 14.dp,
-                    tint = tokens.text2.color,
-                )
+                if (errorTone) {
+                    PpmIcon(
+                        ProductIcon.AlertCircle,
+                        size = 14.dp,
+                        tint = tokens.error.color,
+                    )
+                }
                 BasicText(
                     text = label.uppercase(),
                     style = PpmFont.sans(
                         11,
                         FontWeight.SemiBold,
                         lineHeight = 14,
-                        color = if (errorTone) tokens.error.color else tokens.text2.color,
-                    ),
+                        color = if (errorTone) tokens.error.color else tokens.text3.color,
+                    ).copy(letterSpacing = 0.07.em),
                 )
                 CountChip(files.size, errorTone = errorTone)
             }
@@ -1171,7 +1191,7 @@ internal fun ChangeGroupSection(
                 Row(
                     modifier = Modifier
                         .height(if (mobile) 44.dp else 24.dp)
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(RoundedCornerShape(6.dp))
                         .semantics { contentDescription = "Review block by block" }
                         .clickable(onClick = onReviewAll)
                         .padding(horizontal = 6.dp)
@@ -1180,7 +1200,7 @@ internal fun ChangeGroupSection(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     PpmIcon(LucideIcon.FileDiff, size = 14.dp, tint = tokens.text2.color)
-                    BasicText("Review", style = PpmFont.sans(11, lineHeight = 14, color = tokens.text2.color))
+                    BasicText("Review", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text2.color))
                 }
             }
             if (showCheckAll) {
@@ -1417,7 +1437,15 @@ internal fun GitChangeRow(
         }
     }
 
-    Box(Modifier.fillMaxWidth()) {
+    val rowHover = remember { MutableInteractionSource() }
+    val rowHovered by rowHover.collectIsHoveredAsState()
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .hoverable(rowHover)
+            .background(if (!mobile && rowHovered) tokens.panel2.color else Color.Transparent),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1427,14 +1455,14 @@ internal fun GitChangeRow(
                     onClick = { onOpen(file) },
                     onLongClick = { menuOpen = true },
                 )
-                .padding(start = (depth * 12 + 8).dp)
+                .padding(start = (depth * 12 + 10).dp)
                 .testTag("git-change-row-${file.path}"),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FileIcon(
                 name = name,
-                size = 14.dp,
+                size = 16.dp,
             )
             Column(
                 modifier = Modifier.weight(1f).padding(vertical = 3.dp),
@@ -1443,9 +1471,9 @@ internal fun GitChangeRow(
                 StartTruncatedText(
                     text = name,
                     style = PpmFont.sans(
-                        12,
+                        if (mobile) 14 else 13,
                         FontWeight.Medium,
-                        lineHeight = 16,
+                        lineHeight = if (mobile) 18 else 17,
                         color = if (letter == "D") tokens.text2.color else tokens.text.color,
                     ).copy(
                         textDecoration = if (letter == "D") TextDecoration.LineThrough else TextDecoration.None,
@@ -1454,7 +1482,7 @@ internal fun GitChangeRow(
                 if (!nested && dir.isNotEmpty()) {
                     StartTruncatedText(
                         text = dir,
-                        style = PpmFont.sans(11, lineHeight = 14, color = tokens.text3.color),
+                        style = PpmFont.sans(if (mobile) 12 else 11, lineHeight = 14, color = tokens.text3.color),
                     )
                 }
             }
@@ -1475,38 +1503,12 @@ internal fun GitChangeRow(
                     )
                 }
             } else {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     BlockDots(file)
                     LineCounts(file)
-                }
-                if (!mobile) {
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .semantics { contentDescription = "Open $name" }
-                            .clickable { onOpenFile(file) }
-                            .testTag("git-row-open-file-${file.path}"),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        PpmIcon(ProductIcon.FileCode, size = 12.dp, tint = tokens.text3.color)
-                    }
-                    val canDiscardRow = discardable && !busy
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .alpha(if (canDiscardRow) 1f else 0.4f)
-                            .semantics { contentDescription = "Discard changes to $name" }
-                            .clickable(enabled = canDiscardRow) { onDiscard(file) }
-                            .testTag("git-row-discard-${file.path}"),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        PpmIcon(ProductIcon.Trash2, size = 12.dp, tint = tokens.text3.color)
-                    }
                 }
             }
             StatusTile(file)
@@ -1516,6 +1518,45 @@ internal fun GitChangeRow(
                 tag = "git-change-check-${file.path}",
                 onToggle = { onToggle(file) },
             )
+        }
+
+        // Pointer-only row shortcuts (`git-change-row.tsx:131-159`): hidden (`alpha = 0f`) until hovered, overlaid before CheckCell.
+        if (!mobile && !conflict) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 30.dp)
+                    .alpha(if (rowHovered) 1f else 0f)
+                    .background(if (rowHovered) tokens.panel2.color else Color.Transparent)
+                    .padding(start = 6.dp, end = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .semantics { contentDescription = "Open $name" }
+                        .clickable { onOpenFile(file) }
+                        .testTag("git-row-open-file-${file.path}"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    PpmIcon(ProductIcon.FileText, size = 14.dp, tint = tokens.text3.color)
+                }
+                val canDiscardRow = discardable && !busy
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .alpha(if (canDiscardRow) 1f else 0.4f)
+                        .semantics { contentDescription = "Discard changes to $name" }
+                        .clickable(enabled = canDiscardRow) { onDiscard(file) }
+                        .testTag("git-row-discard-${file.path}"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    PpmIcon(ProductIcon.Trash2, size = 14.dp, tint = tokens.text3.color)
+                }
+            }
         }
 
         if (menuOpen) {

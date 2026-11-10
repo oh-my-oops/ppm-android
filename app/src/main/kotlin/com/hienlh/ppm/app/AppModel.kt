@@ -282,9 +282,36 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     internal fun terminalOf(tabId: String): com.hienlh.ppm.terminal.NativeTerminal? = terminals[tabId]
 
     /** A shell in the open project, or in none: the web opens it all the same, with no project on the tab. */
-    fun openTerminal(inDock: Boolean = wide) {
+    fun openTerminal(inDock: Boolean = wide, panelId: String? = null) {
         val tab = terminalTab(selectedProject)
-        withWorkspace { store -> if (inDock) store.openInDock(tab) else store.openTab(tab) }
+        withWorkspace { store -> if (inDock) store.openInDock(tab) else store.openTab(tab, panelId) }
+    }
+
+    /** An untitled editor tab (`useTabStore.openNewFile`), in [panelId] when given. */
+    fun openNewFile(panelId: String? = null, language: String? = null, title: String? = null) {
+        withWorkspace { store ->
+            val num = com.hienlh.ppm.state.workspace.nextUntitledNumber(store.state.value.panels)
+            store.openTab(
+                NewTab(
+                    type = "editor",
+                    title = title ?: "Untitled-$num",
+                    projectId = null,
+                    metadata = buildJsonObject {
+                        put("isUntitled", true)
+                        put("untitledNumber", num)
+                        language?.let { put("language", it) }
+                    },
+                    closable = true,
+                ),
+                panelId,
+            )
+        }
+    }
+
+    /** Opens the Problems list in the dock on desktop, or as a tab on mobile (`useOpenProblems`). */
+    fun openProblems() {
+        val tab = NewTab(type = "problems", title = "Problems", projectId = null, closable = true)
+        withWorkspace { store -> if (wide) store.openInDock(tab) else store.openTab(tab) }
     }
 
     /**
@@ -818,11 +845,16 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
 
     /** This app's sections in the rail's order: those dragged into place first, then the rest as the web lists them (`resolveTabOrder`). */
     val sidebarSections: List<String>
-        get() = (sidebarTabOrder.filter { it in SIDEBAR_SECTIONS } + SIDEBAR_SECTIONS).distinct()
+        get() {
+            val ordered = (sidebarTabOrder.filter { it in SIDEBAR_SECTIONS } + SIDEBAR_SECTIONS).distinct()
+            return if (info?.minimalMode == true) ordered.filter { it in MINIMAL_SIDEBAR_SECTIONS } else ordered
+        }
 
     /** The section shown: the one opened last, or the rail's first when that is one this app has not (the drawer's fallback). */
     val sidebarSection: String
-        get() = sidebarTab.takeIf { it in SIDEBAR_SECTIONS || it.startsWith("ext:") } ?: sidebarSections.first()
+        get() = sidebarTab
+            .takeIf { (it in SIDEBAR_SECTIONS || it.startsWith("ext:")) && (info?.minimalMode != true || it in MINIMAL_SIDEBAR_SECTIONS) }
+            ?: sidebarSections.first()
 
     /** The open server's OS (`/api/system/host`), kept per server so the first frame already knows it. */
     var hostPlatform by mutableStateOf<String?>(null)
@@ -1263,6 +1295,21 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** What the command palette opened with while it is open; null while it is closed. */
     var paletteQuery by mutableStateOf<String?>(null)
         private set
+
+    /** Whether the Cloud & Share popover (tablet rail) or bottom sheet (phone) is open. */
+    var cloudShareOpen by mutableStateOf(false)
+
+    /** Project name when the New Design dialog is requested from the command palette; null while closed. */
+    var newDesignProject by mutableStateOf<String?>(null)
+
+    /** Whether the global Compare Files picker dialog is open. */
+    var comparePickerOpen by mutableStateOf(false)
+
+    /** One-shot request to open the phone navigation drawer on a given section id. */
+    var mobileDrawerOpenRequest by mutableStateOf<String?>(null)
+
+    /** Non-null when Learn PPM is open (`false` = guided tour, `true` = quick orientation). */
+    var learnPpmMode by mutableStateOf<Boolean?>(null)
 
     /** The keyboard shortcuts in force: the server's overrides over the web's defaults. */
     var keyBindings by mutableStateOf(KeyBindings())
@@ -4011,6 +4058,43 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         paletteQuery = null
     }
 
+    /** Opens or focuses an AI resource editor tab (`src/web/components/ai-resources/open-resource-tab.ts`). */
+    fun openAiResourceTab(item: com.hienlh.ppm.state.settings.AiResourceItem, projectPath: String) {
+        withWorkspace { store ->
+            val st = store.state.value
+            for (pid in st.gridPanelIds) {
+                val existing = st.panels[pid]?.tabs?.firstOrNull { tab ->
+                    tab.type == "ai-resource" && tab.metadata["filePath"].string == item.filePath
+                }
+                if (existing != null) {
+                    store.setActiveTab(existing.id, pid)
+                    store.setFocusedPanel(pid)
+                    return@withWorkspace
+                }
+            }
+            store.openTab(
+                NewTab(
+                    type = "ai-resource",
+                    title = item.name,
+                    projectId = null,
+                    closable = true,
+                    metadata = buildJsonObject {
+                        put("filePath", item.filePath)
+                        put("name", item.name)
+                        put("resourceType", item.type)
+                        put("scope", item.scope)
+                        put("readOnly", item.readOnly)
+                        put("shadowed", item.shadowed)
+                        item.shadowedBySource?.let { src ->
+                            put("shadowedBy", buildJsonObject { put("source", src) })
+                        }
+                        put("project", projectPath)
+                    },
+                ),
+            )
+        }
+    }
+
     /** Alt+] / Alt+[: the focused panel's next or previous tab, round the ends. */
     fun cycleTab(forward: Boolean) {
         val state = layout ?: return
@@ -4167,6 +4251,16 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         sidebarTab = id
         saveUiPrefs()
         putUiPref { put("sidebarActiveTab", id) }
+    }
+
+    /** Shows [id] in the sidebar without folding an already-open panel (`setSidebarActiveTab` / `showSection`). */
+    fun showSidebarSection(id: String) {
+        openSidebarSection(id)
+        if (wide) {
+            if (sidebarCollapsed) toggleSidebar()
+        } else {
+            mobileDrawerOpenRequest = id
+        }
     }
 
     /** The tab bar's "Wrap Tabs" / "Scroll Tabs". */
@@ -4628,9 +4722,9 @@ internal fun filePathTab(path: String, projectName: String?) = NewTab(
 
 private val DOCK_POSITIONS = setOf("bottom", "left", "right")
 
-/** The sidebar sections this app has, in the web's order (`BUILTIN_SIDEBAR_TABS`). */
-/** The sections this app has, in the web's default rail order (`BUILTIN_SIDEBAR_TABS`); AI Resources and Jira are not ported. */
-private val SIDEBAR_SECTIONS = listOf("history", "teams", "designs", "explorer", "search", "git", "database", "tunnels")
+/** The sections this app has, in the web's default rail order (`BUILTIN_SIDEBAR_TABS`). */
+private val SIDEBAR_SECTIONS = listOf("history", "teams", "designs", "explorer", "search", "git", "database", "tunnels", "ai-resources")
+private val MINIMAL_SIDEBAR_SECTIONS = setOf("history", "explorer", "search")
 
 private val PROJECT_SORT_MODES = setOf("recent", "priority", "name")
 

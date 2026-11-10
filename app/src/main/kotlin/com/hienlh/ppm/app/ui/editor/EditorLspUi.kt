@@ -428,7 +428,7 @@ fun LspStatusChip(
     if (!enabled) {
         Row(
             modifier = Modifier
-                .heightIn(min = if (mobile) 44.dp else 22.dp)
+                .heightIn(min = if (mobile) 44.dp else 20.dp)
                 .clip(RoundedCornerShape(4.dp))
                 .ppmClickable(
                     pressedColor = tokens.panel.color,
@@ -441,8 +441,8 @@ fun LspStatusChip(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            PpmIcon(ProductIcon.Code.vector, 12.dp, tokens.text3.color)
-            BasicText("LSP off", style = ppmText(11f, lineHeight = 14f).copy(color = tokens.text3.color))
+            PpmIcon(ProductIcon.ZapOff.vector, 12.dp, tokens.text2.color)
+            BasicText("LSP off", style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color))
         }
         return
     }
@@ -462,7 +462,7 @@ fun LspStatusChip(
 
     Row(
         modifier = Modifier
-            .heightIn(min = if (mobile) 44.dp else 22.dp)
+            .heightIn(min = if (mobile) 44.dp else 20.dp)
             .clip(RoundedCornerShape(4.dp))
             .ppmClickable(
                 pressedColor = tokens.panel.color,
@@ -476,14 +476,14 @@ fun LspStatusChip(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         when {
-            status is LspDocumentStatus.Opening -> PpmIcon(ProductIcon.RefreshCw.vector, 12.dp, tint, spinning = true)
+            status is LspDocumentStatus.Opening -> PpmIcon(ProductIcon.Loader2.vector, 12.dp, tint, spinning = true)
             missing -> PpmIcon(ProductIcon.AlertTriangle.vector, 12.dp, tint)
-            else -> PpmIcon(ProductIcon.Sparkles.vector, 12.dp, tint)
+            else -> PpmIcon(ProductIcon.Zap.vector, 12.dp, tint)
         }
         BasicText(
             label,
             modifier = Modifier.widthIn(max = 96.dp),
-            style = ppmText(11f, lineHeight = 14f).copy(color = tint),
+            style = ppmText(12f, lineHeight = 16f).copy(color = tint),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -491,13 +491,13 @@ fun LspStatusChip(
             BasicText(
                 errors.toString(),
                 modifier = Modifier.testTag("editor-lsp-chip-errors"),
-                style = ppmText(11f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tokens.error.color),
+                style = ppmText(12f, lineHeight = 16f).copy(color = tokens.error.color),
             )
         } else if (warnings > 0) {
             BasicText(
                 warnings.toString(),
                 modifier = Modifier.testTag("editor-lsp-chip-warnings"),
-                style = ppmText(11f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tokens.warning.color),
+                style = ppmText(12f, lineHeight = 16f).copy(color = tokens.warning.color),
             )
         }
     }

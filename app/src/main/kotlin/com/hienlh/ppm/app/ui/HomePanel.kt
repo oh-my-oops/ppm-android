@@ -62,10 +62,9 @@ import com.hienlh.ppm.state.HistoryList
 import kotlinx.coroutines.launch
 
 /**
- * What a panel with no tab shows (`EmptyPanel` in editor-panel.tsx): the tiles that open a tab,
- * Close Panel when there is another panel ([onClosePanel]), then the project's chats. Only AI
- * Chat is a tab this app has, so it is the one tile. On the desktop layout the new chat opens in
- * [panelId]; a phone has only the one.
+ * What a panel with no tab shows (`EmptyPanel` in editor-panel.tsx): the tiles that open a tab
+ * (Terminal, AI Chat, New File), Close Panel when there is another panel ([onClosePanel]), then the
+ * project's chats. On the desktop layout the new tab opens in [panelId]; a phone has only the one.
  */
 @Composable
 fun EmptyPanel(
@@ -76,6 +75,7 @@ fun EmptyPanel(
     onClosePanel: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
+    val minimalMode = model.info?.minimalMode == true
     BoxWithConstraints(modifier.fillMaxSize()) {
         val viewport = maxHeight
         Column(Modifier.fillMaxSize().cssScrollY()) {
@@ -90,13 +90,24 @@ fun EmptyPanel(
                     load == AppModel.Load.Loaded && model.projects.isEmpty() -> Notice("No projects on this server yet. Add one in the PPM web app.")
                     else -> {
                         BasicText("Open a tab to get started", style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text2.color))
-                        // `grid-cols-3 gap-2 max-w-sm`: one tile keeps a third of the row.
-                        BoxWithConstraints(Modifier.widthIn(max = 384.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            QuickOpenTile(ProductIcon.MessageSquare, "AI Chat", Modifier.width((maxWidth - 16.dp) / 3)) {
-                                model.newChat(panelId = panelId)
+                        // `grid grid-cols-3 gap-2 w-full max-w-sm`.
+                        BoxWithConstraints(Modifier.widthIn(max = 384.dp).fillMaxWidth()) {
+                            val tileWidth = (maxWidth - 16.dp) / 3
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (!minimalMode) {
+                                    QuickOpenTile(ProductIcon.Terminal, "Terminal", Modifier.width(tileWidth)) {
+                                        model.openTerminal(inDock = false, panelId = panelId)
+                                    }
+                                }
+                                QuickOpenTile(ProductIcon.MessageSquare, "AI Chat", Modifier.width(tileWidth)) {
+                                    model.newChat(panelId = panelId)
+                                }
+                                QuickOpenTile(ProductIcon.FilePlus, "New File", Modifier.width(tileWidth)) {
+                                    model.openNewFile(panelId = panelId)
+                                }
                             }
                         }
-                        if (onClosePanel != null) {
+                        if (onClosePanel != null && !minimalMode) {
                             // `px-4 py-3.5 rounded-md text-xs text-text-subtle hover:text-foreground`, an X before the words.
                             val hover = rememberHover()
                             val text = tokens.text.mix(tokens.text3, hover.lit.toDouble()).color
@@ -138,7 +149,7 @@ private fun QuickOpenTile(icon: ProductIcon, label: String, modifier: Modifier, 
             .background(tokens.panel.color)
             .pressable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, shape = shape, onClick = onClick)
             .cssBorder(tokens.border.color, shape)
-            .padding(horizontal = 8.dp, vertical = 12.dp),
+            .padding(horizontal = 9.dp, vertical = 13.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {

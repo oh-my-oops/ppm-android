@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -50,9 +51,12 @@ import com.hienlh.ppm.app.LightboxRequest
 import com.hienlh.ppm.app.leavesTextOnTap
 import com.hienlh.ppm.app.ui.extensions.ExtensionOverlays
 import com.hienlh.ppm.app.ui.tablet.TabletShell
+import com.hienlh.ppm.client.designListSystems
 import com.hienlh.ppm.design.ImageViewer
 import com.hienlh.ppm.design.LocalIconFramework
 import com.hienlh.ppm.design.LocalImageViewer
+import com.hienlh.ppm.protocol.array
+import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmThemeProvider
 import kotlinx.coroutines.launch
@@ -161,6 +165,11 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
                 model.explorerSheetPath?.let { com.hienlh.ppm.app.ui.osexplorer.HostExplorerSheet(model, it) }
                 model.agentSheet?.let { AgentSessionSheet(model, it) }
                 model.paletteQuery?.let { CommandPalette(model, it, model::closePalette) }
+                if (mobile && model.cloudShareOpen) {
+                    BottomSheet(onDismiss = { model.cloudShareOpen = false }) {
+                        CloudSharePopover(model, onClose = { model.cloudShareOpen = false }, sheet = true)
+                    }
+                }
                 model.backgroundOutput?.let { BackgroundOutputPanel(model, it) }
                 // A new sheet for each sign-in, as the web mounts a new body per server.
                 model.mcpSignIn?.let { key(it) { McpSignInPanel(model, it) } }
@@ -203,6 +212,126 @@ private fun Dialogs(model: AppModel) {
             confirm = "Delete",
             onConfirm = { model.scope.launch { model.deleteSessions(days) } },
             onDismiss = { deleteOlderThan = null },
+        )
+    }
+    val designProj = model.newDesignProject
+    val api = model.api
+    if (designProj != null && api != null) {
+        var systems by remember(designProj, api) { mutableStateOf(emptyList<com.hienlh.ppm.state.design.DesignSystemSummary>()) }
+        LaunchedEffect(designProj, api) {
+            val rawSys = runCatching { api.designListSystems(designProj) }.getOrNull()
+            val sysArr = rawSys?.get("systems")?.array ?: rawSys?.array.orEmpty()
+            systems = sysArr.mapNotNull { com.hienlh.ppm.state.design.DesignSystemSummary.fromJson(it) }
+        }
+        com.hienlh.ppm.app.ui.design.NewDesignDialog(
+            api = api,
+            projectName = designProj,
+            systems = systems,
+            onDismiss = { model.newDesignProject = null },
+            onCreated = { created, chosenProvider ->
+                model.newDesignProject = null
+                model.openDesignTab(
+                    slug = created.slug,
+                    title = created.title,
+                    projectName = designProj,
+                    sessionId = created.sessionId,
+                    providerId = chosenProvider ?: created.providerId,
+                    fresh = true,
+                )
+            },
+        )
+    }
+    if (model.comparePickerOpen) {
+        val project = model.selectedProject
+        val allTabs = model.layout?.panels?.values?.flatMap { it.tabs }.orEmpty()
+        val openTabs = remember(allTabs) {
+            allTabs.mapNotNull { t ->
+                val p = t.metaString("filePath") ?: t.metaString("path") ?: return@mapNotNull null
+                com.hienlh.ppm.state.editor.CompareCandidate(
+                    id = "tab:${t.id}",
+                    path = p,
+                    label = p.substringAfterLast('/').substringAfterLast('\\'),
+                    source = "tab",
+                )
+            }
+        }
+        val indexState = model.fileIndex?.state?.collectAsState()?.value
+        val indexedPaths = remember(indexState?.entries) {
+            indexState?.entries.orEmpty().filter { !it.isDirectory }.map { it.path }
+        }
+        androidx.compose.ui.window.Dialog(onDismissRequest = { model.comparePickerOpen = false }) {
+            com.hienlh.ppm.app.ui.editor.CompareFilesDialogContent(
+                initialSelectionA = com.hienlh.ppm.app.ui.editor.SharedCompareStore.store.selection,
+                candidates = com.hienlh.ppm.state.editor.buildCompareCandidates(openTabs, indexedPaths),
+                onPickPair = { selA, candB ->
+                    model.comparePickerOpen = false
+                    com.hienlh.ppm.app.ui.editor.SharedCompareStore.store.clearSelection()
+                    val proj = selA.projectName.ifEmpty { project.orEmpty() }
+                    model.openWorkspaceTab(
+                        type = "git-diff",
+                        title = com.hienlh.ppm.state.editor.formatCompareTabTitle(selA.filePath, candB.path),
+                        projectId = proj.ifEmpty { null },
+                        metadata = kotlinx.serialization.json.JsonObject(
+                            buildMap {
+                                if (proj.isNotEmpty()) put("projectName", kotlinx.serialization.json.JsonPrimitive(proj))
+                                put("file1", kotlinx.serialization.json.JsonPrimitive(selA.filePath))
+                                put("file2", kotlinx.serialization.json.JsonPrimitive(candB.path))
+                            },
+                        ),
+                    )
+                },
+                onClose = { model.comparePickerOpen = false },
+            )
+        }
+    }
+    val learnMode = model.learnPpmMode
+    if (learnMode != null) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        var onboardingState by remember(learnMode) {
+            val saved = com.hienlh.ppm.app.ui.shell.loadOnboardingStateFromPrefs(context)
+            mutableStateOf(if (learnMode) saved.openQuickOrientation() else saved.resumeGuide().copy(quickOrientationPage = null))
+        }
+        fun updateOnboarding(next: com.hienlh.ppm.state.shell.OnboardingState) {
+            val closedOrientation = learnMode && next.quickOrientationPage == null
+            onboardingState = next
+            com.hienlh.ppm.app.ui.shell.saveOnboardingStateToPrefs(context, next)
+            if (closedOrientation) model.learnPpmMode = null
+        }
+        com.hienlh.ppm.app.ui.shell.LearnPpmDialog(
+            state = onboardingState,
+            onStateChange = ::updateOnboarding,
+            onRefreshEvidence = {
+                val openTabs = model.layout?.panels?.values?.flatMap { p -> p.tabs }.orEmpty()
+                val ev = com.hienlh.ppm.state.shell.OnboardingEvidence(
+                    hasProjectSelected = model.selectedProject != null,
+                    chatSessionCount = model.sessions.size,
+                    hasOpenedFileTab = openTabs.any { t -> t.type == "editor" || t.type == "file" },
+                    hasOpenedTerminalTab = openTabs.any { t -> t.type == "terminal" },
+                    hasOpenedGitTab = openTabs.any { t -> t.type == "git-status" || t.type == "git-graph" },
+                )
+                updateOnboarding(onboardingState.mergeEvidence(ev))
+            },
+            onInsertSuggestedPrompt = { prompt ->
+                val openTabs = model.layout?.panels?.values?.flatMap { p -> p.tabs }.orEmpty()
+                val existingChat = model.activeTab?.let { model.chat(it.id) }
+                    ?: openTabs.firstNotNullOfOrNull { t -> model.chat(t.id) }
+                if (existingChat != null) {
+                    val updated = com.hienlh.ppm.state.shell.applySuggestedPromptToDraft(existingChat.draft.text.toString(), prompt)
+                    existingChat.draft.setTextAndPlaceCursorAtEnd(updated)
+                    model.activate(existingChat.tabId)
+                    existingChat.requestFocus()
+                } else if (model.selectedProject != null) {
+                    model.newChat(pendingMessage = prompt)
+                } else {
+                    model.terminalToChat(prompt, newTab = true, asContext = false)
+                }
+                updateOnboarding(onboardingState.markStepCompleted("ai.send"))
+                model.learnPpmMode = null
+            },
+            onDismiss = {
+                if (!learnMode) updateOnboarding(onboardingState.pauseOnEscape())
+                model.learnPpmMode = null
+            },
         )
     }
 }

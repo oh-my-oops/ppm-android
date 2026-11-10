@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -34,21 +35,26 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.BuildConfig
 import com.hienlh.ppm.app.ui.PrimaryButton
 import com.hienlh.ppm.app.ui.SecondaryButton
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.state.shell.OnboardingFamiliarity
 import com.hienlh.ppm.state.shell.OnboardingGoalId
 import com.hienlh.ppm.state.shell.OnboardingState
@@ -91,6 +97,60 @@ fun saveDismissedCrashTimestamp(context: Context, timestampMs: Long) {
         .edit()
         .putLong(KEY_DISMISSED_CRASH_TS, timestampMs)
         .apply()
+}
+
+/**
+ * Matches `src/web/components/onboarding/onboarding-entry.tsx` (`OnboardingEntry`):
+ * `[Sparkles] Open guided tour | [Info] Quick orientation`.
+ */
+@Composable
+fun OnboardingEntryRow(
+    model: AppModel,
+    compact: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
+    val context = LocalContext.current
+    val state = remember(model.learnPpmMode) { loadOnboardingStateFromPrefs(context) }
+    val canResume = state.paused && state.currentStep != null
+    val tourLabel = if (canResume) "Resume guided tour" else "Open guided tour"
+    val buttonHeight = if (mobile) 44.dp else 28.dp
+    val shape = RoundedCornerShape(4.dp)
+
+    @Composable
+    fun EntryButton(icon: ProductIcon, label: String, onClick: () -> Unit) {
+        val hover = rememberHover()
+        val fg = tokens.text.mix(tokens.text2, hover.lit.toDouble()).color
+        Row(
+            Modifier
+                .height(buttonHeight)
+                .clip(shape)
+                .ppmClickable(
+                    pressedColor = tokens.panel2.color,
+                    hoverColor = tokens.panel2.opacity(0.6).color,
+                    shape = shape,
+                    source = hover.source,
+                    onClick = onClick,
+                )
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            PpmIcon(icon, 12.dp, fg)
+            BasicText(label, style = ppmText(12f, lineHeight = 16f).copy(color = fg), maxLines = 1)
+        }
+    }
+
+    Row(
+        modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp, if (compact) Alignment.CenterHorizontally else Alignment.Start),
+    ) {
+        EntryButton(ProductIcon.Sparkles, tourLabel) { model.learnPpmMode = false }
+        Box(Modifier.width(1.dp).height(12.dp).background(tokens.border.color))
+        EntryButton(ProductIcon.Info, "Quick orientation") { model.learnPpmMode = true }
+    }
 }
 
 @Composable

@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,6 +40,7 @@ import com.hienlh.ppm.app.ui.DropdownAboveEnd
 import com.hienlh.ppm.app.ui.MenuItem
 import com.hienlh.ppm.app.ui.ThemeSwatch
 import com.hienlh.ppm.app.ui.UpgradeButton
+import com.hienlh.ppm.app.ui.editor.SharedProblemsRegistry
 import com.hienlh.ppm.app.ui.extensions.ExtensionStatusBarItems
 import com.hienlh.ppm.app.ui.screenKeptAwake
 import com.hienlh.ppm.app.ui.windows.WindowDock
@@ -82,8 +84,9 @@ fun StatusBar(model: AppModel) {
                 // The side that gives way: the branch name ellipsizes, then the group clips.
                 Row(Modifier.clipToBounds(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     GitStatus(model, text, narrow)
-                    DockToggle(model, text)
+                    ProblemsStatus(model, text)
                     ExtensionStatusBarItems(model, "left")
+                    DockToggle(model, text)
                 }
             },
             // The floating windows' taskbar takes the free middle.
@@ -184,6 +187,43 @@ private fun GitCount(icon: ProductIcon, count: Int, text: TextStyle) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         PpmIcon(icon, 12.dp, text.color)
         BasicText("$count", style = text, maxLines = 1)
+    }
+}
+
+/**
+ * Error and warning counts for the open project (`ProblemsStatus`, problems-status.tsx): shown
+ * even at zero, opening the Problems panel in the dock when clicked.
+ */
+@Composable
+private fun ProblemsStatus(model: AppModel, text: TextStyle) {
+    val tokens = LocalPpmTokens.current
+    val rev by SharedProblemsRegistry.revision.collectAsState()
+    val totals = remember(model.selectedProject, rev) { SharedProblemsRegistry.problemCounts(model.selectedProject) }
+    val hover = rememberHover()
+    val lit = tokens.text.mix(tokens.text3, hover.lit.toDouble())
+    val errColor = if (totals.errors > 0) tokens.error.color else lit.color
+    val warnColor = if (totals.warnings > 0) tokens.warning.color else lit.color
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .ppmClickable(
+                pressedColor = tokens.panel2.opacity(0.15).color,
+                hoverColor = tokens.panel2.opacity(0.15).color,
+                onClickLabel = "Open the Problems panel",
+                source = hover.source,
+            ) { model.openProblems() }
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            PpmIcon(ProductIcon.CircleX, 11.dp, errColor)
+            BasicText("${totals.errors}", style = text.copy(color = errColor), maxLines = 1)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            PpmIcon(ProductIcon.AlertTriangle, 11.dp, warnColor)
+            BasicText("${totals.warnings}", style = text.copy(color = warnColor), maxLines = 1)
+        }
     }
 }
 

@@ -47,8 +47,8 @@ internal fun ExplorerMutationToolbar(
         }
     }
     BoxWithConstraints(Modifier.fillMaxWidth().cssBorder(tokens.border.color, sides = CssSides.Bottom).padding(8.dp)) {
-        // At sidebar min-width all five commands must remain reachable beside the 52dp rail.
-        if (hasProject && onCreate != null && maxWidth < 224.dp) {
+        // At narrow resized sidebar widths all commands remain reachable beside the 52dp rail.
+        if (hasProject && onCreate != null && maxWidth < 170.dp) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) { ExplorerTitle() }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp, Alignment.End), content = actions)

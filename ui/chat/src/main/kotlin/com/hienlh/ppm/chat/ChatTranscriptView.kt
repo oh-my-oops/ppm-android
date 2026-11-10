@@ -160,6 +160,8 @@ fun ChatTranscriptView(
     jumps: Flow<Int> = emptyFlow(),
     /** Under the welcome while the chat has no message: the project's chats. */
     welcome: @Composable () -> Unit = {},
+    /** Optional learn/onboarding buttons shown directly under "Send a message…". */
+    welcomeActions: (@Composable () -> Unit)? = null,
     /** One message out of this view (an error's Dismiss), by id. */
     onDismiss: (String) -> Unit = {},
     /** Every error out of this view. */
@@ -183,7 +185,7 @@ fun ChatTranscriptView(
             state.sessionId != null && !state.hasLoadedHistory && state.items.isEmpty() && state.historyError == null ->
                 CenteredNotice("Loading messages...", pulsing = true)
             state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null ->
-                Welcome(welcome)
+                Welcome(welcome, welcomeActions)
             else -> TranscriptList(
                 state, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply, edits, jumpRequest, onJumpTaken,
                 bottomFade = bottomFade,
@@ -948,7 +950,7 @@ private fun CenteredNotice(text: String, pulsing: Boolean) {
  * `justify-center` would push the top out of reach.
  */
 @Composable
-private fun Welcome(below: @Composable () -> Unit) {
+private fun Welcome(below: @Composable () -> Unit, actions: (@Composable () -> Unit)? = null) {
     val tokens = LocalPpmTokens.current
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val viewport = maxHeight
@@ -958,13 +960,17 @@ private fun Welcome(below: @Composable () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterVertically),
             ) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     PpmIcon(ProductIcon.Bot, 40.dp, tokens.text3.color)
                     BasicText(
                         "Send a message to start a new conversation",
-                        Modifier.padding(top = 12.dp),
-                        ppmText(14f, lineHeight = 20f).copy(color = tokens.text2.color),
+                        style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text2.color),
                     )
+                    actions?.invoke()
                 }
                 below()
             }

@@ -185,13 +185,13 @@ private class ExplorerExternalDrop(private val drop: (DragEvent) -> Boolean) : D
     override fun onDrop(event: DragAndDropEvent): Boolean { over = false; return drop(event.toAndroidDragEvent()) }
 }
 
-private class CreateExplorerDocument : ActivityResultContract<Pair<String, String>, Uri?>() {
+internal class CreateExplorerDocument : ActivityResultContract<Pair<String, String>, Uri?>() {
     override fun createIntent(context: Context, input: Pair<String, String>) = Intent(Intent.ACTION_CREATE_DOCUMENT)
         .addCategory(Intent.CATEGORY_OPENABLE).setType(input.second).putExtra(Intent.EXTRA_TITLE, input.first)
     override fun parseResult(resultCode: Int, intent: Intent?): Uri? = intent?.data.takeIf { resultCode == Activity.RESULT_OK }
 }
 
-private suspend fun removeDownload(context: Context, uri: Uri): Boolean = withContext(NonCancellable + Dispatchers.IO) {
+internal suspend fun removeDownload(context: Context, uri: Uri): Boolean = withContext(NonCancellable + Dispatchers.IO) {
     runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }.getOrDefault(false)
 }
 
@@ -217,7 +217,7 @@ internal fun explorerDownloadName(node: FileTreeNode): String {
         ?: if (node.isDirectory) "folder" else "file"
     return if (node.isDirectory) "$name.zip" else name
 }
-private fun explorerDownloadMime(node: FileTreeNode): String = if (node.isDirectory) "application/zip"
+internal fun explorerDownloadMime(node: FileTreeNode): String = if (node.isDirectory) "application/zip"
     else MimeTypeMap.getSingleton().getMimeTypeFromExtension(node.name.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
 
 internal fun encodeDownloadTarget(node: FileTreeNode): String = buildJsonObject {
