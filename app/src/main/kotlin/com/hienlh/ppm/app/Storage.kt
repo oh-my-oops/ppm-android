@@ -4,6 +4,10 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.core.content.edit
 import com.hienlh.ppm.client.KeyValueStore
 import com.hienlh.ppm.client.SecretStore
@@ -21,6 +25,73 @@ class PrefsStore(context: Context, name: String = "ppm") : KeyValueStore {
 
     override fun put(key: String, value: String?) = prefs.edit { if (value == null) remove(key) else putString(key, value) }
 }
+
+/**
+ * Device-local preferences that stay on this device (not synced to the server).
+ *
+ * [redesign] toggles the mobile & tablet redesign (default `false`; exposed in Settings -> About
+ * on debug builds until Task 23 enables it by default).
+ */
+class LocalPrefs(private val store: KeyValueStore) {
+    private var state by mutableStateOf(readRedesign(store))
+
+    var redesign: Boolean
+        get() = state
+        set(value) {
+            state = value
+            writeRedesign(store, value)
+            sharedState = value
+        }
+
+    fun refresh(): Boolean {
+        val current = readRedesign(store)
+        state = current
+        sharedState = current
+        return current
+    }
+
+    companion object {
+        const val REDESIGN_KEY = "redesign"
+        const val DEFAULT_REDESIGN = false
+
+        private var boundStore: KeyValueStore? = null
+        private var sharedState by mutableStateOf(DEFAULT_REDESIGN)
+
+        fun readRedesign(store: KeyValueStore): Boolean =
+            store.get(REDESIGN_KEY)?.toBooleanStrictOrNull() ?: DEFAULT_REDESIGN
+
+        fun writeRedesign(store: KeyValueStore, enabled: Boolean) {
+            store.put(REDESIGN_KEY, enabled.toString())
+        }
+
+        fun bind(store: KeyValueStore): LocalPrefs {
+            boundStore = store
+            sharedState = readRedesign(store)
+            return LocalPrefs(store)
+        }
+
+        fun of(context: Context): LocalPrefs = bind(PrefsStore(context.applicationContext ?: context))
+
+        var redesign: Boolean
+            get() = sharedState
+            set(value) {
+                sharedState = value
+                boundStore?.let { writeRedesign(it, value) }
+            }
+    }
+}
+
+/** Convenience accessor on any [KeyValueStore] for the local redesign toggle. */
+var KeyValueStore.redesign: Boolean
+    get() = LocalPrefs.readRedesign(this)
+    set(value) {
+        LocalPrefs.writeRedesign(this, value)
+        LocalPrefs.redesign = value
+    }
+
+/** Whether the mobile & tablet redesign is active in the current composition tree. */
+val LocalRedesign = staticCompositionLocalOf { LocalPrefs.DEFAULT_REDESIGN }
+
 
 /**
  * Passwords sealed with an AES-GCM key that never leaves the Android Keystore; the sealed bytes

@@ -48,6 +48,8 @@ import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.FocusAnchor
 import com.hienlh.ppm.app.FocusStartAnchor
 import com.hienlh.ppm.app.LightboxRequest
+import com.hienlh.ppm.app.LocalPrefs
+import com.hienlh.ppm.app.LocalRedesign
 import com.hienlh.ppm.app.leavesTextOnTap
 import com.hienlh.ppm.app.ui.extensions.ExtensionOverlays
 import com.hienlh.ppm.app.ui.tablet.TabletShell
@@ -63,9 +65,9 @@ import kotlinx.coroutines.launch
 
 /**
  * Everything the activity shows: the connect screen until there is a server, then the phone
- * layout under 768 dp — the web's `md` breakpoint — and the desktop one from there, with the
- * dialogs and the toasts over it. [beforeIme] sees each key going to a field in it before the IME
- * does, which may type the key itself.
+ * layout under 600 dp ([SizeClass.Phone]) and the tablet layout from 600 dp up ([SizeClass.Tablet]),
+ * with the dialogs and the toasts over it. [beforeIme] sees each key going to a field in it before
+ * the IME does, which may type the key itself.
  */
 @Composable
 fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
@@ -114,6 +116,10 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
     val focusManager = LocalFocusManager.current
     val rootAnchor = remember { FocusAnchor() }
     val toaster = remember { ToasterState() }
+    val tabScrollStore = rememberTabScrollStore()
+    val context = LocalContext.current
+    val localPrefs = remember(context) { LocalPrefs.of(context) }
+    val redesign = localPrefs.redesign
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
@@ -129,17 +135,24 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
             .semantics { testTagsAsResourceId = true },
     ) {
         FocusStartAnchor(rootAnchor, parkOnStart = true)
-        val mobile = maxWidth < 768.dp
-        // The layout follows the window, not the device: a rotation or a split screen can cross it.
-        SideEffect { model.setWindowWide(!mobile) }
+        val sizeClass = SizeClass.of(maxWidth, maxHeight)
+        val mobile = sizeClass == SizeClass.Phone
+        // The layout follows the window, not the device: a rotation, split screen or foldable unfold can cross it.
+        SideEffect { model.setWindowWide(sizeClass == SizeClass.Tablet) }
         val viewer = remember(model) { ImageViewer { images, index -> model.lightbox = LightboxRequest(images, index) } }
-        CompositionLocalProvider(LocalConnectionLost provides model.connectionLost, LocalImageViewer provides viewer, LocalIconFramework provides model.iconFramework) {
+        CompositionLocalProvider(
+            LocalConnectionLost provides model.connectionLost,
+            LocalImageViewer provides viewer,
+            LocalIconFramework provides model.iconFramework,
+            LocalSizeClass provides sizeClass,
+            LocalRedesign provides redesign,
+            LocalTabScrollStore provides tabScrollStore,
+        ) {
             PpmThemeProvider(theme, mobile) {
                 // Chrome's own word on a download, which the web leaves to the browser.
                 val download = rememberImageDownload { saved ->
                     model.toast(ErrorToastMessage("File downloaded", "${saved.name} (${downloadSize(saved.size)})", ErrorToastMessage.Action("Open", saved.open), kind = ErrorToastMessage.Kind.PLAIN))
                 }
-                val context = LocalContext.current
                 val clipboard = LocalClipboard.current
                 // `backdrop-blur-sm` under the connection-lost overlay, the lightbox and the background
                 // output panel: CSS's blur(8px) is a sigma of 8, which Android's blur reaches at a radius
@@ -148,7 +161,7 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
                 Box(Modifier.fillMaxSize().then(if (blurred) Modifier.blur(13.dp) else Modifier)) {
                     when {
                         !model.hasServer -> ConnectScreen(model, signIn = false)
-                        mobile -> PhoneShell(model)
+                        sizeClass == SizeClass.Phone -> PhoneShell(model)
                         else -> TabletShell(model)
                     }
                     model.screenOverlay?.let { overlay ->
