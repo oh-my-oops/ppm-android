@@ -114,7 +114,10 @@ internal fun ProjectActionsDialog(model: AppModel, project: ProjectInfo) {
                 HostDialogButton("Rename", onClick = ::submitRename)
             }
         } else if (deleteMode) {
-            BasicText("Remove this project from PPM? Files on the host will be kept.", style = ppmText(14f).copy(color = tokens.text.color))
+            BasicText(
+                "Remove ${project.name} from PPM? The files on disk won't be deleted.",
+                style = ppmText(14f).copy(color = tokens.text.color),
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 HostDialogButton("Cancel") { deleteMode = false }
                 HostDialogButton("Delete", danger = true) { registration { model.removeRegisteredProject(api, project) } }

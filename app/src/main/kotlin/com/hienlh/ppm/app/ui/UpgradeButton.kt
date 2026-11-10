@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -145,6 +146,130 @@ internal fun UpgradeButton(
                 }
             }
         }
+    }
+}
+
+/**
+ * Phone drawer footer row (`Phone 2 · UP1`) showing either the green `"New version · vX.Y.Z"` pill
+ * or the current server version, and opening the server update bottom sheet on tap.
+ */
+@Composable
+fun ServerUpdateDrawerRow(
+    model: AppModel,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalPpmTokens.current
+    val upgrade = model.upgrade ?: return
+    val state by upgrade.state.collectAsState()
+    val offer = state.offer(model.info?.version)
+    val current = offer.current ?: return
+    var openSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(openSheet) {
+        if (openSheet) {
+            upgrade.refresh()
+            upgrade.loadNotes()
+        }
+    }
+
+    val shape = RoundedCornerShape(10.dp)
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .clip(shape)
+            .background(if (offer.hasUpdate) tokens.success.opacity(0.12).color else Color.Transparent)
+            .then(
+                if (offer.hasUpdate) {
+                    Modifier.cssBorder(tokens.success.opacity(0.3).color, shape)
+                } else {
+                    Modifier
+                },
+            )
+            .ppmClickable(pressedColor = tokens.panel2.color) { openSheet = true }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        when (state.phase) {
+            ServerUpgrade.Phase.UPGRADING, ServerUpgrade.Phase.RESTARTING -> {
+                PpmIcon(ProductIcon.Loader2, 14.dp, tokens.success.color, spinning = true)
+                BasicText(
+                    if (state.phase == ServerUpgrade.Phase.RESTARTING) "Updating, reconnecting…" else "Updating…",
+                    style = ppmText(12.5f, FontWeight.SemiBold, lineHeight = 18f).copy(color = tokens.success.color),
+                )
+            }
+            ServerUpgrade.Phase.IDLE -> {
+                if (offer.hasUpdate) {
+                    PpmIcon(ProductIcon.ArrowUpCircle, 14.dp, tokens.success.color)
+                    BasicText(
+                        "New version · v${offer.offered}",
+                        Modifier.weight(1f),
+                        style = ppmText(12.5f, FontWeight.SemiBold, lineHeight = 18f).copy(color = tokens.success.color),
+                    )
+                } else {
+                    BasicText(
+                        "PPM v$current",
+                        Modifier.weight(1f),
+                        style = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text3.color),
+                    )
+                }
+            }
+        }
+    }
+
+    if (openSheet) {
+        BottomSheet(onDismiss = { openSheet = false }) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                UpgradePopover(
+                    offer = offer,
+                    notesLoading = state.notesLoading,
+                    update = {
+                        openSheet = false
+                        upgrade.update(offer.offered)
+                    },
+                    later = {
+                        upgrade.dismiss(offer.offered)
+                        openSheet = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Top strip shown while the PPM server is restarting during a self-update (`Phone 2 · UP2` / `Tablet 2 · UP2`).
+ */
+@Composable
+fun ServerRestartingStrip(
+    model: AppModel,
+    modifier: Modifier = Modifier,
+) {
+    val upgrade = model.upgrade ?: return
+    val state by upgrade.state.collectAsState()
+    if (state.phase != ServerUpgrade.Phase.UPGRADING && state.phase != ServerUpgrade.Phase.RESTARTING) return
+    val tokens = LocalPpmTokens.current
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(32.dp)
+            .background(tokens.warning.opacity(0.14).color)
+            .cssBorder(tokens.warning.opacity(0.3).color, sides = CssSides.Bottom)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+    ) {
+        PpmIcon(ProductIcon.Loader2, 13.dp, tokens.warning.color, spinning = true)
+        BasicText(
+            if (state.phase == ServerUpgrade.Phase.RESTARTING) {
+                "Updating PPM server, reconnecting…"
+            } else {
+                "Installing PPM server update…"
+            },
+            style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.warning.color),
+            maxLines = 1,
+        )
     }
 }
 

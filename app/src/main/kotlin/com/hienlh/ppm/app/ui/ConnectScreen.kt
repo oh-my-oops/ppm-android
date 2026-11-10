@@ -50,10 +50,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.tracksTextFocus
-import com.hienlh.ppm.design.FontKind
-import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.PpmError
+import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -64,6 +64,8 @@ import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberChromeCaret
 import com.hienlh.ppm.design.themeBackground
+import com.hienlh.ppm.state.AddressSafety
+import com.hienlh.ppm.state.ConnectivityState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -71,11 +73,20 @@ import kotlinx.coroutines.launch
  * Adds a server, or asks for the password again after it was changed on the server — drawn as
  * the web's sign-in screen (`login-screen.tsx`), with the server's address added because this
  * app is not served by the server it talks to.
+ *
+ * Covers Requirements 5.1, 5.2, and 5.3:
+ * - 5.1: Connect flow (`Phone 2`: address, password, saved servers) and remember the server.
+ * - 5.2: Plain HTTP warning when the address is plain HTTP and is not loopback, private LAN, or
+ *   Tailscale; warns that the password would cross the internet unencrypted before sending it,
+ *   and sends it only after the user confirms.
+ * - 5.3: When the device itself has no network, shows `"This phone is offline"` (or
+ *   `"This tablet is offline"` on tablet) instead of reporting the server as unreachable.
  */
 @Composable
 fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = null) {
     val tokens = LocalPpmTokens.current
-    val fieldStyle = if (LocalPpmMobile.current) ppmText(16f, lineHeight = 24f) else FIELD_DESKTOP
+    val mobile = LocalPpmMobile.current
+    val fieldStyle = if (mobile) ppmText(16f, lineHeight = 24f) else FIELD_DESKTOP
     val scope = rememberCoroutineScope()
     val address = remember { TextFieldState() }
     val password = remember { TextFieldState() }
@@ -83,14 +94,41 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var focused by remember { mutableStateOf<String?>(null) }
+    var pendingPlainHttpUrl by remember { mutableStateOf<String?>(null) }
+    var confirmedPlainHttpUrl by remember { mutableStateOf<String?>(null) }
     val addressFocus = remember { FocusRequester() }
     val passwordFocus = remember { FocusRequester() }
+    val deviceOnline = rememberDeviceOnline()
+    val offlineTitle = ConnectivityState.offlineTitle(isTablet = !mobile)
+    val offlineSubtitle = ConnectivityState.DEVICE_OFFLINE_BODY
     LaunchedEffect(Unit) { (if (signIn) passwordFocus else addressFocus).requestFocus() }
 
-    fun connect() {
+    fun connect(confirmedUrl: String? = confirmedPlainHttpUrl) {
         if (busy) return
         if (password.text.isBlank()) {
             error = "Enter your password to continue"
+            return
+        }
+        val targetUrl: String = if (signIn) {
+            model.api?.baseUrl?.toString().orEmpty()
+        } else {
+            val normalized = ApiClient.normalizedServerUrl(address.text.toString())
+            if (normalized == null) {
+                error = PpmError.InvalidUrl().message ?: "Invalid server URL"
+                return
+            }
+            normalized.toString()
+        }
+        // Requirement 5.2: warn before sending password over plain HTTP to a public address.
+        if (targetUrl.isNotBlank() && AddressSafety.needsPlainHttpWarning(targetUrl) && confirmedUrl != targetUrl) {
+            pendingPlainHttpUrl = targetUrl
+            error = null
+            return
+        }
+        pendingPlainHttpUrl = null
+        // Requirement 5.3: if the device itself has no network, report device offline instead of server unreachable.
+        if (!deviceOnline) {
+            error = "$offlineTitle\n\n$offlineSubtitle"
             return
         }
         error = null
@@ -107,7 +145,11 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: PpmError.Unreachable) {
-                error = "Can't reach the server. ${failure.reason}\n\nCheck that this device is on the same network (or Tailscale), and that PPM is running."
+                error = if (!deviceOnline) {
+                    "$offlineTitle\n\n$offlineSubtitle"
+                } else {
+                    "Can't reach the server. ${failure.reason}\n\nCheck that this device is on the same network (or Tailscale), and that PPM is running."
+                }
             } catch (failure: Exception) {
                 error = failure.message ?: failure.toString()
             } finally {
@@ -149,6 +191,12 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
                         if (signIn) ServerChip(model.serverName)
                     }
                     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (!deviceOnline) {
+                            OfflineDeviceBanner(
+                                title = offlineTitle,
+                                subtitle = offlineSubtitle,
+                            )
+                        }
                         if (!signIn) {
                             LoginField(focused = focused == "address") {
                                 PpmTextField(
@@ -200,6 +248,17 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
                                 )
                             }
                         }
+                        pendingPlainHttpUrl?.let { warningUrl ->
+                            PlainHttpWarningBox(
+                                url = warningUrl,
+                                onCancel = { pendingPlainHttpUrl = null },
+                                onConfirm = {
+                                    confirmedPlainHttpUrl = warningUrl
+                                    pendingPlainHttpUrl = null
+                                    connect(confirmedUrl = warningUrl)
+                                },
+                            )
+                        }
                         error?.let { message ->
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 PpmIcon(ProductIcon.AlertCircle, 15.dp, tokens.error.color, Modifier.padding(top = 2.dp))
@@ -217,9 +276,9 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
                             radius = 8.dp,
                             fontSize = 15f,
                             lineHeight = 22.5f,
-                            onClick = ::connect,
+                            onClick = { connect() },
                         )
-                        if (signIn && model.debug == null) OtherServers(model)
+                        if (model.debug == null) OtherServers(model, signIn = signIn)
                         if (onCancel != null) {
                             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 BasicText(
@@ -232,6 +291,109 @@ fun ConnectScreen(model: AppModel, signIn: Boolean, onCancel: (() -> Unit)? = nu
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Plain HTTP warning shown when a server address uses plain `http://` over a non-local,
+ * non-private-LAN, non-Tailscale host (Requirement 5.2).
+ */
+@Composable
+internal fun PlainHttpWarningBox(
+    url: String,
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(tokens.warning.opacity(0.1).color)
+            .cssBorder(tokens.warning.opacity(0.35).color, shape)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PpmIcon(ProductIcon.ShieldAlert, 16.dp, tokens.warning.color)
+            BasicText(
+                AddressSafety.PLAIN_HTTP_CONFIRM_TITLE,
+                style = ppmText(13f, FontWeight.SemiBold, lineHeight = 18f).copy(color = tokens.warning.color),
+            )
+        }
+        BasicText(
+            AddressSafety.PLAIN_HTTP_CONFIRM_MESSAGE,
+            style = ppmText(12.5f, lineHeight = 18f).copy(color = tokens.text2.color),
+        )
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val btnShape = RoundedCornerShape(8.dp)
+            Box(
+                Modifier
+                    .clip(btnShape)
+                    .background(tokens.panel2.color)
+                    .cssBorder(tokens.border.color, btnShape)
+                    .ppmClickable(pressedColor = tokens.panel.color, onClick = onCancel)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(
+                    "Cancel",
+                    style = ppmText(12.5f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color),
+                )
+            }
+            Box(
+                Modifier
+                    .clip(btnShape)
+                    .background(tokens.warning.color)
+                    .ppmClickable(pressedColor = tokens.warning.opacity(0.85).color, onClick = onConfirm)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(
+                    AddressSafety.PLAIN_HTTP_CONFIRM_ACTION,
+                    style = ppmText(12.5f, FontWeight.SemiBold, lineHeight = 16f).copy(color = Color(0xFF1A1204)),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Offline device banner shown when the phone or tablet itself has no network connection (Requirement 5.3).
+ */
+@Composable
+private fun OfflineDeviceBanner(title: String, subtitle: String) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(tokens.warning.opacity(0.1).color)
+            .cssBorder(tokens.warning.opacity(0.3).color, shape)
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        PpmIcon(ProductIcon.WifiOff, 16.dp, tokens.warning.color, Modifier.padding(top = 2.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            BasicText(
+                title,
+                style = ppmText(13f, FontWeight.SemiBold, lineHeight = 18f).copy(color = tokens.text.color),
+            )
+            BasicText(
+                subtitle,
+                style = ppmText(12f, lineHeight = 17f).copy(color = tokens.text2.color),
+            )
         }
     }
 }
@@ -329,15 +491,15 @@ private fun LoginField(focused: Boolean, trailing: (@Composable () -> Unit)? = n
 }
 
 /**
- * Under Unlock once the password is gone (a log out, or one changed on the server): the other
- * saved servers, a tap opening one, and a new address. Settings is not reachable from here.
+ * Under Unlock: saved servers (a tap switches to one), and in sign-in mode "Use another server".
  */
 @Composable
-private fun OtherServers(model: AppModel) {
+private fun OtherServers(model: AppModel, signIn: Boolean) {
     val tokens = LocalPpmTokens.current
     val servers by model.store.servers.collectAsState()
     val selected by model.store.selectedId.collectAsState()
-    val others = servers.filter { it.id != selected }
+    val others = if (signIn) servers.filter { it.id != selected } else servers
+    if (!signIn && others.isEmpty()) return
     Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         for (server in others) {
             val shape = RoundedCornerShape(12.dp)
@@ -358,12 +520,14 @@ private fun OtherServers(model: AppModel) {
                 }
             }
         }
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            BasicText(
-                "Use another server",
-                Modifier.clip(RoundedCornerShape(6.dp)).ppmClickable(pressedColor = tokens.panel2.color) { model.addingServer = true }.padding(horizontal = 12.dp, vertical = 8.dp),
-                style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.accent.color),
-            )
+        if (signIn) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                BasicText(
+                    "Use another server",
+                    Modifier.clip(RoundedCornerShape(6.dp)).ppmClickable(pressedColor = tokens.panel2.color) { model.addingServer = true }.padding(horizontal = 12.dp, vertical = 8.dp),
+                    style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.accent.color),
+                )
+            }
         }
     }
 }

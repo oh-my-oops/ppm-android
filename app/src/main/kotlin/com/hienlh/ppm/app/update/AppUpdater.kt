@@ -25,10 +25,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import java.lang.ref.WeakReference
 
 /**
  * Keeps the app up to date from GitHub Releases ([AppReleases]): looks when the app opens and once
@@ -38,10 +42,21 @@ import java.io.IOException
  * installs, and first sends the user to "Install unknown apps" when PPM may not install apps yet.
  */
 class AppUpdater(private val context: Context, private val model: AppModel) {
+    sealed interface State {
+        data object Idle : State
+        data class Available(val currentVersion: String, val release: AppRelease) : State
+        data class Downloading(val release: AppRelease, val percent: Int?) : State
+        data class ReadyToInstall(val release: AppRelease) : State
+        data class Failed(val release: AppRelease, val reason: String, val canInstallDirectly: Boolean = false) : State
+    }
+
     private val prefs = PrefsStore(context, "ppm_updates")
     private val dir = File(context.cacheDir, "updates")
     private var checkedAt: Long? = null
     private var job: Job? = null
+    private val _state = MutableStateFlow<State>(State.Idle)
+    val state: StateFlow<State> = _state.asStateFlow()
+    private var readyUpdate: Pair<AppRelease, Update>? = null
 
     /** The toast this updater shows last, so it takes back only its own. */
     private var shown: ErrorToastMessage? = null
@@ -53,6 +68,7 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
     private class Update(val apk: File, val profile: File?)
 
     init {
+        activeInstance = WeakReference(this)
         // An app left open for days, on a tablet kept awake, still looks once a day.
         model.scope.launch {
             while (true) {
@@ -76,9 +92,38 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
         // installer away with it: one tap opens it again.
         pending?.let { (release, update) ->
             pending = null
+            readyUpdate = release to update
+            _state.value = State.ReadyToInstall(release)
             show(ready(release, update))
         }
         checkIfDue()
+    }
+
+    fun startUpdate() {
+        val current = _state.value
+        val release = when (current) {
+            is State.Available -> current.release
+            is State.Failed -> current.release
+            else -> return
+        }
+        prefs.put("offeredAt.${release.version}", null)
+        update(release)
+    }
+
+    fun cancelDownload() {
+        job?.cancel()
+        _state.value = State.Idle
+        hide()
+    }
+
+    fun installReadyUpdate() {
+        val pair = readyUpdate ?: return
+        installLater(pair.first, pair.second)
+    }
+
+    fun dismissOffer() {
+        _state.value = State.Idle
+        hide()
     }
 
     /** Looks for a newer release, unless this run of the app looked less than a day ago. */
@@ -107,6 +152,7 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
         val offered = "offeredAt.${release.version}"
         if (prefs.get(offered)?.toLongOrNull()?.let { now - it < DAY } == true) return
         prefs.put(offered, now.toString())
+        _state.value = State.Available(BuildConfig.VERSION_NAME, release)
         show(
             ErrorToastMessage(
                 "Update available",
@@ -127,7 +173,7 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
             // Done with, its own file deleted, before this one is written in its place.
             previous?.cancelAndJoin()
             val apk = File(dir, "ppm-android-${release.version}.apk")
-            val cancel = ErrorToastMessage.Action("Cancel") { job?.cancel() }
+            val cancel = ErrorToastMessage.Action("Cancel") { cancelDownload() }
             fun progress(percent: Int?) = ErrorToastMessage(
                 "Downloading the update",
                 "PPM for Android v${release.version}" + (percent?.let { " · $it%" } ?: ""),
@@ -137,12 +183,14 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
             )
             try {
                 withContext(Dispatchers.IO) { dir.deleteRecursively() }
+                _state.value = State.Downloading(release, null)
                 show(progress(null))
                 var percent: Int? = null
                 AppReleases.download(release, apk) { share ->
                     val now = (share * 100).toInt()
                     if (now != percent) {
                         percent = now
+                        _state.value = State.Downloading(release, now)
                         // Closed, it stays closed: the download goes on.
                         withContext(Dispatchers.Main) { replace(progress(now)) }
                     }
@@ -150,10 +198,13 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
                 val refusal = withContext(Dispatchers.IO) { refusal(apk) }
                 if (refusal != null) {
                     apk.delete()
+                    _state.value = State.Failed(release, refusal)
                     show(ErrorToastMessage("Update failed", refusal, persistent = true))
                     return@launch
                 }
                 val update = Update(apk, profile(release))
+                readyUpdate = release to update
+                _state.value = State.ReadyToInstall(release)
                 hide()
                 // Android opens no window for an app that is not in front: the update waits there.
                 if (model.windowVisible) install(release, update) else show(ready(release, update))
@@ -164,6 +215,7 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
                 // Android cuts an app's connections a few seconds after it leaves the screen, and
                 // a toast that timed out there would never have been seen: this one waits.
                 val reason = if (model.windowVisible) error.message else "The download stopped while PPM was in the background."
+                _state.value = State.Failed(release, reason ?: "Download failed.")
                 show(ErrorToastMessage("Update failed", reason, ErrorToastMessage.Action("Retry") { update(release) }, persistent = true))
             }
         }
@@ -233,6 +285,7 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
         } catch (error: IOException) {
             pending = null
             val reason = error.message ?: "Android's installer did not take the update."
+            _state.value = State.Failed(release, reason, canInstallDirectly = true)
             show(ErrorToastMessage("Update failed", reason, ErrorToastMessage.Action("Retry") { installLater(release, update) }, persistent = true))
         }
     }
@@ -283,6 +336,8 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
                 context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             } else {
                 pending = null
+                readyUpdate = release to update
+                _state.value = State.ReadyToInstall(release)
                 show(ready(release, update))
             }
             return
@@ -290,11 +345,17 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
         pending = null
         when (status) {
             // Seldom heard: installing the update ends this process.
-            PackageInstaller.STATUS_SUCCESS -> Unit
+            PackageInstaller.STATUS_SUCCESS -> _state.value = State.Idle
             // Turned down in the installer's window: one tap asks again.
-            PackageInstaller.STATUS_FAILURE_ABORTED -> show(ready(release, update))
+            PackageInstaller.STATUS_FAILURE_ABORTED -> {
+                readyUpdate = release to update
+                _state.value = State.ReadyToInstall(release)
+                show(ready(release, update))
+            }
             else -> {
                 val reason = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Android did not install the update."
+                readyUpdate = release to update
+                _state.value = State.Failed(release, reason, canInstallDirectly = true)
                 show(ErrorToastMessage("Update failed", reason, ErrorToastMessage.Action("Retry") { installLater(release, update) }, persistent = true))
             }
         }
@@ -318,22 +379,24 @@ class AppUpdater(private val context: Context, private val model: AppModel) {
         shown = null
     }
 
-    private companion object {
-        const val HOUR = 60 * 60 * 1000L
-        const val DAY = 24 * HOUR
+    companion object {
+        internal var activeInstance: WeakReference<AppUpdater>? = null
+
+        private const val HOUR = 60 * 60 * 1000L
+        private const val DAY = 24 * HOUR
 
         /** The broadcast the installer answers an install session with. */
-        const val INSTALL_STATUS = "com.hienlh.ppm.app.update.INSTALL_STATUS"
+        private const val INSTALL_STATUS = "com.hienlh.ppm.app.update.INSTALL_STATUS"
 
         @Suppress("DEPRECATION")
-        val SIGNERS = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+        private val SIGNERS = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
 
         /**
          * The certificates an APK is signed with; for one rotated to a new key, every key it has
          * had, so an update signed with the new key still shares the old one with the app it updates.
          */
         @Suppress("DEPRECATION")
-        fun PackageInfo.signers() = (
+        private fun PackageInfo.signers() = (
             if (Build.VERSION.SDK_INT >= 28) {
                 signingInfo?.let { if (it.hasMultipleSigners()) it.apkContentsSigners else it.signingCertificateHistory }
             } else {

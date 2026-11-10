@@ -23,7 +23,12 @@ import kotlinx.coroutines.launch
 
 /** Mobile web project-bottom-sheet: Enter/Done or blur saves, Escape cancels. */
 @Composable
-internal fun InlineProjectRename(model: AppModel, project: ProjectInfo) {
+internal fun InlineProjectRename(
+    model: AppModel,
+    project: ProjectInfo,
+    modifier: Modifier = Modifier,
+    onDone: () -> Unit = {},
+) {
     val api = model.api ?: return
     val field = rememberTextFieldState(project.name)
     val focus = remember { FocusRequester() }
@@ -35,6 +40,7 @@ internal fun InlineProjectRename(model: AppModel, project: ProjectInfo) {
         finished = true
         val name = field.text.toString().trim()
         model.phoneProjectRename = null
+        onDone()
         if (save && name.isNotEmpty() && name != project.name) model.scope.launch {
             try { model.renameRegisteredProject(api, project, name) }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -47,7 +53,7 @@ internal fun InlineProjectRename(model: AppModel, project: ProjectInfo) {
         TextInputFocus.asked()
         focus.requestFocus()
     }
-    PpmTextField(field, "Project name", Modifier.fillMaxWidth().drawBehind {
+    PpmTextField(field, "Project name", modifier.fillMaxWidth().drawBehind {
         drawLine(accent, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
     }.onPreviewKeyEvent {
         if (it.type != KeyEventType.KeyDown || field.composition != null) false

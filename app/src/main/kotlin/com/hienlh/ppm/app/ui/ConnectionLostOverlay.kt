@@ -44,17 +44,66 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.LucideIcon
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalContext
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
+import com.hienlh.ppm.state.ConnectivityState
 import kotlinx.coroutines.launch
 
 private const val CLOUD_URL = "https://cloud.ppm.sh"
+
+/**
+ * Observes Android's [ConnectivityManager] to know whether the phone or tablet itself has an active
+ * network connection (`NET_CAPABILITY_INTERNET`), so the app can distinguish device-offline from
+ * server-unreachable (Requirement 5.3).
+ */
+@Composable
+internal fun rememberDeviceOnline(): Boolean {
+    val context = LocalContext.current
+    val cm = remember(context) {
+        context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+    }
+    fun checkOnline(): Boolean {
+        val manager = cm ?: return true
+        val active = manager.activeNetwork ?: return false
+        val caps = manager.getNetworkCapabilities(active) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+    var online by remember { mutableStateOf(checkOnline()) }
+    DisposableEffect(cm) {
+        val manager = cm ?: return@DisposableEffect onDispose {}
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                online = checkOnline()
+            }
+
+            override fun onLost(network: Network) {
+                online = checkOnline()
+            }
+
+            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                online = checkOnline()
+            }
+        }
+        runCatching { manager.registerDefaultNetworkCallback(callback) }
+        onDispose {
+            runCatching { manager.unregisterNetworkCallback(callback) }
+        }
+    }
+    return online
+}
 
 /**
  * The connection-lost overlay is up. Dialogs, menus and pickers are windows of their own, above
@@ -77,12 +126,28 @@ fun closedByConnectionLost(onDismiss: () -> Unit): Boolean {
  * through the server's own named hostname, that the address is fine and the machine is not)
  * and offers the server's own-network address and PPM Cloud; Retry opens the server again if it
  * answers.
+ *
+ * When the device itself has no network (Requirement 5.3), shows `"This phone is offline"` (or
+ * `"This tablet is offline"` on tablet) instead of reporting the server as unreachable.
  */
 @Composable
 fun ConnectionLostOverlay(model: AppModel) {
     val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
+    val deviceOnline = rememberDeviceOnline()
     val host = model.api?.baseUrl?.host.orEmpty()
     val named = model.namedHostname
+    val snapshot = ConnectivityState.resolve(
+        deviceOnline = deviceOnline,
+        serverUp = false,
+        outageDurationMs = ConnectivityState.OUTAGE_OVERLAY_MS,
+        host = host,
+        namedHostname = named,
+        localUrl = model.localUrl,
+        isTablet = !mobile,
+        serverName = model.serverName,
+    )
+    val deviceOffline = !snapshot.deviceOnline
     // `isTunnelDomain` / `isNamedDomain`: reached through a cloudflared tunnel, not straight in.
     val isNamed = named != null && host == named
     val isTunnel = isNamed || host.endsWith(".trycloudflare.com")
@@ -105,34 +170,30 @@ fun ConnectionLostOverlay(model: AppModel) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
-            Box(Modifier.clip(CircleShape).background(tokens.error.opacity(0.1).color).padding(16.dp)) {
-                if (isTunnel) PpmIcon(ProductIcon.WifiOff, 40.dp, tokens.error.color) else PpmIcon(LucideIcon.ServerOff, 40.dp, tokens.error.color)
+            val iconTint = if (deviceOffline) tokens.warning else tokens.error
+            Box(Modifier.clip(CircleShape).background(iconTint.opacity(0.1).color).padding(16.dp)) {
+                if (deviceOffline || isTunnel) {
+                    PpmIcon(ProductIcon.WifiOff, 40.dp, iconTint.color)
+                } else {
+                    PpmIcon(LucideIcon.ServerOff, 40.dp, iconTint.color)
+                }
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 BasicText(
-                    when {
-                        isNamed -> "Domain Not Responding"
-                        isTunnel -> "Connection Lost"
-                        else -> "Server Unreachable"
-                    },
+                    snapshot.title,
                     style = ppmText(20f, FontWeight.SemiBold, lineHeight = 28f).copy(color = tokens.text.color, textAlign = TextAlign.Center),
                 )
                 BasicText(
-                    when {
-                        // A named hostname never rotates: the address is fine, what is behind it is not.
-                        isNamed -> "This address stays the same, so keep it. The machine may be asleep, offline, or restarting — it will answer again on this same URL."
-                        isTunnel -> "The tunnel appears to have closed. The server may have restarted with a new URL."
-                        else -> "Cannot connect to the PPM server. It may have stopped or is restarting."
-                    },
+                    snapshot.body,
                     style = ppmText(14f, lineHeight = 22.75f).copy(color = tokens.text2.color, textAlign = TextAlign.Center),
                 )
             }
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // The own-network address skips Cloudflare, so it works when only the hostname is broken.
-                if (isTunnel && localUrl != null) {
+                if (!deviceOffline && isTunnel && localUrl != null) {
                     OverlayButton("Open on local network", primary = true, icon = ProductIcon.Home, onClick = model::openLocalNetwork)
                 }
-                if (isTunnel) {
+                if (!deviceOffline && isTunnel) {
                     OverlayButton("Open PPM Cloud", primary = localUrl == null) { runCatching { uriHandler.openUri(CLOUD_URL) } }
                 }
                 OverlayButton(
@@ -152,7 +213,7 @@ fun ConnectionLostOverlay(model: AppModel) {
                     }
                 }
             }
-            if (!isTunnel) RestartHint()
+            if (!deviceOffline && !isTunnel) RestartHint()
         }
     }
 }

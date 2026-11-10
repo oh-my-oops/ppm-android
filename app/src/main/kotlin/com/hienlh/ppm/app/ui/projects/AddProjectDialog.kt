@@ -30,6 +30,23 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlin.random.Random
+
+private val SLUG_ADJECTIVES = listOf(
+    "amber", "brisk", "calm", "cobalt", "crisp", "dawn", "emerald", "frost",
+    "golden", "lunar", "misty", "nimble", "quiet", "rapid", "silver", "solar",
+)
+
+private val SLUG_NOUNS = listOf(
+    "beacon", "canyon", "comet", "falcon", "forge", "harbor", "horizon", "meadow",
+    "orbit", "otter", "pioneer", "quartz", "river", "sparrow", "summit", "willow",
+)
+
+internal fun generateRandomProjectSlug(random: Random = Random.Default): String {
+    val adj = SLUG_ADJECTIVES[random.nextInt(SLUG_ADJECTIVES.size)]
+    val noun = SLUG_NOUNS[random.nextInt(SLUG_NOUNS.size)]
+    return "$adj-$noun"
+}
 
 @Composable
 fun AddProjectDialog(model: AppModel) {
@@ -110,7 +127,15 @@ fun AddProjectDialog(model: AppModel) {
         } else {
             ProjectFormField("Git URL", gitUrl, "https://github.com/user/repo.git", busy, ::submit)
             ProjectFormField("Clone to", cloneDir, "~/Projects", busy, onSubmit = ::submit, onBrowse = { browse = true })
-            ProjectFormField("Name (auto-parsed from URL)", cloneName, "repo-name", busy, ::submit)
+            ProjectFormField(
+                label = "Name (auto-parsed from URL)",
+                value = cloneName,
+                placeholder = "repo-name",
+                busy = busy,
+                onSubmit = ::submit,
+                onBrowse = { cloneName.setTextAndPlaceCursorAtEnd(generateRandomProjectSlug()) },
+                browseLabel = "Random",
+            )
         }
         error?.let { BasicText(it, style = ppmText(12f).copy(color = tokens.error.color)) }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, androidx.compose.ui.Alignment.End)) {
@@ -131,7 +156,7 @@ fun AddProjectDialog(model: AppModel) {
 
 @Composable
 internal fun ProjectFormField(label: String, value: TextFieldState, placeholder: String, busy: Boolean = false,
-                              onSubmit: () -> Unit = {}, onBrowse: (() -> Unit)? = null) {
+                              onSubmit: () -> Unit = {}, onBrowse: (() -> Unit)? = null, browseLabel: String = "Browse") {
     val tokens = LocalPpmTokens.current
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         BasicText(label, style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text.color))
@@ -141,7 +166,7 @@ internal fun ProjectFormField(label: String, value: TextFieldState, placeholder:
             if (busy) BasicText(value.text.toString(), modifier, style = ppmText(14f).copy(color = tokens.text2.color))
             else PpmTextField(value, placeholder, modifier, desktopStyle = ppmText(14f),
                 keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done), onKeyboardAction = { onSubmit() })
-            if (onBrowse != null) HostDialogButton("Browse", !busy, onClick = onBrowse)
+            if (onBrowse != null) HostDialogButton(browseLabel, !busy, onClick = onBrowse)
         }
     }
 }
