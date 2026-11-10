@@ -783,6 +783,154 @@ suspend fun ApiClient.putGitCommitDraft(
     return CommitDraft.from(call("PUT", "/api/project/${ApiClient.escape(project)}/git/commit-draft", gitRepoScope(repo), body))
 }
 
+/** Friendly reason shown when `POST /git/commit-message` answers HTTP 409 or nothing is staged (`design.md` Error Handling, Requirement 10.4). */
+const val WRITE_WITH_AI_NOTHING_STAGED_MESSAGE: String = "Stage changes first"
+
+/** Thrown when the connected PPM server predates `POST /git/commit-message` (HTTP 404). */
+class CommitMessageUnsupported(
+    override val message: String = "This server does not support Write with AI.",
+    cause: Throwable? = null,
+) : Exception(message, cause)
+
+/** Thrown when `POST /git/commit-message` answers HTTP 409 because nothing is staged. */
+class CommitMessageNothingStaged(
+    override val message: String = WRITE_WITH_AI_NOTHING_STAGED_MESSAGE,
+    val rawServerMessage: String? = null,
+    cause: Throwable? = null,
+) : Exception(message, cause)
+
+/** Whether [this] failure indicates the server does not have `POST /git/commit-message` (HTTP 404). */
+fun Throwable.isCommitMessageUnsupported(): Boolean = when (this) {
+    is CommitMessageUnsupported -> true
+    is PpmError.OutdatedServer -> true
+    is PpmError.Server -> status == 404
+    is PpmError.BadResponse -> reason.contains("404")
+    else -> cause?.isCommitMessageUnsupported() == true
+}
+
+/** Whether [this] failure indicates nothing is staged (HTTP 409). */
+fun Throwable.isCommitMessageNothingStaged(): Boolean = when (this) {
+    is CommitMessageNothingStaged -> true
+    is PpmError.Server -> status == 409
+    else -> cause?.isCommitMessageNothingStaged() == true
+}
+
+/** Structured result of `POST /git/commit-message` (`design.md` Section 2, Requirement 10). */
+sealed interface CommitMessageResult {
+    data class Generated(val message: String) : CommitMessageResult
+    data class NothingStaged(
+        val message: String = WRITE_WITH_AI_NOTHING_STAGED_MESSAGE,
+        val rawServerMessage: String? = null,
+    ) : CommitMessageResult
+    data class Unsupported(
+        val message: String = "This server does not support Write with AI.",
+    ) : CommitMessageResult
+    data class Failed(val message: String, val status: Int? = null) : CommitMessageResult
+}
+
+/**
+ * Generate a commit message from the staged diff via `POST /api/project/:name/git/commit-message`
+ * (`?repo=` when [repo] is a sub-repository). Never commits.
+ */
+suspend fun ApiClient.gitCommitMessage(project: String, repo: GitRepo? = null): String {
+    val data = try {
+        call(
+            "POST",
+            "/api/project/${ApiClient.escape(project)}/git/commit-message",
+            gitRepoScope(repo),
+            buildJsonObject {},
+        )
+    } catch (error: PpmError.OutdatedServer) {
+        throw CommitMessageUnsupported(error.message ?: "This server does not support Write with AI.", error)
+    } catch (error: PpmError.Server) {
+        when (error.status) {
+            404 -> throw CommitMessageUnsupported(error.serverMessage, error)
+            409 -> throw PpmError.Server(
+                status = 409,
+                serverMessage = WRITE_WITH_AI_NOTHING_STAGED_MESSAGE,
+                code = error.code,
+                hint = error.hint ?: error.serverMessage,
+                data = error.data,
+            )
+            else -> throw error
+        }
+    } catch (error: PpmError.BadResponse) {
+        if (error.reason.contains("404")) {
+            throw CommitMessageUnsupported(error.reason, error)
+        }
+        throw error
+    }
+    return data["message"].string?.trim() ?: ""
+}
+
+/**
+ * `Result<String>` wrapper for `POST /api/project/:name/git/commit-message` (`design.md` Section 2).
+ */
+suspend fun ApiClient.commitMessage(project: String, repo: GitRepo? = null): Result<String> =
+    try {
+        val msg = gitCommitMessage(project, repo)
+        if (msg.isEmpty()) {
+            Result.failure(PpmError.Server(502, "The AI returned an empty commit message"))
+        } else {
+            Result.success(msg)
+        }
+    } catch (error: kotlinx.coroutines.CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        Result.failure(error)
+    }
+
+/**
+ * Structured outcome of `POST /api/project/:name/git/commit-message` distinguishing 200, 404, 409, and 502/network failures.
+ */
+suspend fun ApiClient.gitCommitMessageResult(
+    project: String,
+    repo: GitRepo? = null,
+): CommitMessageResult =
+    try {
+        val msg = gitCommitMessage(project, repo)
+        if (msg.isEmpty()) {
+            CommitMessageResult.Failed(message = "The AI returned an empty commit message", status = 502)
+        } else {
+            CommitMessageResult.Generated(msg)
+        }
+    } catch (error: kotlinx.coroutines.CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        when {
+            error.isCommitMessageUnsupported() -> CommitMessageResult.Unsupported(
+                message = error.message ?: "This server does not support Write with AI.",
+            )
+            error.isCommitMessageNothingStaged() -> CommitMessageResult.NothingStaged(
+                message = WRITE_WITH_AI_NOTHING_STAGED_MESSAGE,
+                rawServerMessage = (error as? PpmError.Server)?.hint ?: error.message,
+            )
+            error is PpmError.Server -> CommitMessageResult.Failed(
+                message = error.serverMessage,
+                status = error.status,
+            )
+            else -> CommitMessageResult.Failed(
+                message = error.message ?: "Failed to generate commit message",
+            )
+        }
+    }
+
+/**
+ * Helper wrapper around [ApiClient] for git commit-message generation (`design.md`: `ApiClientGit.commitMessage(project, repo): Result<String>`).
+ */
+class ApiClientGit(private val api: ApiClient) {
+    suspend fun commitMessage(project: String, repo: GitRepo? = null): Result<String> =
+        api.commitMessage(project = project, repo = repo)
+
+    suspend fun commitMessageResult(project: String, repo: GitRepo? = null): CommitMessageResult =
+        api.gitCommitMessageResult(project = project, repo = repo)
+
+    companion object {
+        suspend fun commitMessage(api: ApiClient, project: String, repo: GitRepo? = null): Result<String> =
+            api.commitMessage(project = project, repo = repo)
+    }
+}
+
 suspend fun ApiClient.gitStage(project: String, files: List<String>, repo: GitRepo? = null) {
     val body = buildJsonObject { put("files", JsonArray(files.map(::JsonPrimitive))) }
     call("POST", "/api/project/${ApiClient.escape(project)}/git/stage", gitRepoScope(repo), body)
