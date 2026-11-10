@@ -104,6 +104,9 @@ class GlobalEvents(
     /** A session tool created a session (`session:created`): session lists refresh without a reload. */
     var onSessionCreated: ((SessionCreatedPush) -> Unit)? = null
 
+    /** A notification feed entry was added or had its read state changed (`notifications:feed_changed`). */
+    var onNotificationsFeedChanged: (() -> Unit)? = null
+
     /** Seeds server-known links for [sessionId] (`GET …/sessions/:id/links`). */
     fun seedSessionLinks(sessionId: String, links: List<SessionLink>) {
         if (links.isEmpty()) return
@@ -112,6 +115,7 @@ class GlobalEvents(
 
     private val scope = CoroutineScope(parent.coroutineContext + SupervisorJob(parent.coroutineContext[Job]))
     private val readyListeners = LinkedHashSet<() -> Unit>()
+    private val feedChangedListeners = LinkedHashSet<() -> Unit>()
     private val agentListeners = LinkedHashSet<(AgentTranscriptFrame) -> Unit>()
     private val logsLinesListeners = LinkedHashSet<(JsonElement) -> Unit>()
     private val logsIssuesListeners = LinkedHashSet<() -> Unit>()
@@ -119,6 +123,9 @@ class GlobalEvents(
     private val designCommentsListeners = LinkedHashSet<(String, String) -> Unit>()
     private val designCheckListeners = LinkedHashSet<(String, String, String?, Boolean) -> Unit>()
     private var socket: SocketConnection? = null
+
+    /** Persisted notification feed (`/api/notifications/feed`), with fallback to [unread] on older servers. */
+    val feed: NotificationFeed = NotificationFeed(api, this, scope, clock)
 
     /** Reads the socket, or waits to connect again. */
     private var socketJob: Job? = null
@@ -164,8 +171,13 @@ class GlobalEvents(
      * a chat does this even when it was marked unread by hand.
      */
     fun markRead(sessionId: String) {
-        if (sessionId !in _unread.value) return
-        _unread.value -= sessionId
+        val wasUnread = sessionId in _unread.value
+        if (wasUnread) {
+            _unread.value -= sessionId
+            feed.onUnreadChanged(_unread.value)
+        }
+        val feedChanged = feed.markSessionReadLocal(sessionId)
+        if (!wasUnread && !feedChanged) return
         val project = project ?: return
         fire { api.markRead(project, sessionId) }
     }
@@ -180,6 +192,7 @@ class GlobalEvents(
             sessionTitle = title ?: _unread.value[sessionId]?.sessionTitle,
             manual = true,
         )
+        feed.onUnreadChanged(_unread.value)
         fire { api.markUnread(project, sessionId) }
     }
 
@@ -187,6 +200,18 @@ class GlobalEvents(
     fun seen(sessionId: String) {
         val entry = _unread.value[sessionId] ?: return
         if (!entry.manual) markRead(sessionId)
+    }
+
+    internal fun clearSessionUnreadLocal(sessionId: String) {
+        if (sessionId !in _unread.value) return
+        _unread.value -= sessionId
+        feed.onUnreadChanged(_unread.value)
+    }
+
+    internal fun clearUnreadLocal() {
+        if (_unread.value.isEmpty()) return
+        _unread.value = emptyMap()
+        feed.onUnreadChanged(_unread.value)
     }
 
     /**
@@ -198,6 +223,7 @@ class GlobalEvents(
         val entries = _unread.value
         if (entries.isEmpty()) return
         _unread.value = emptyMap()
+        feed.onUnreadChanged(_unread.value)
         scope.launch {
             try {
                 api.markAllRead(entries.keys.toList())
@@ -206,6 +232,7 @@ class GlobalEvents(
             } catch (_: Exception) {
                 val now = _unread.value
                 _unread.value = now + entries.filterKeys { it !in now }
+                feed.onUnreadChanged(_unread.value)
             }
         }
     }
@@ -222,6 +249,11 @@ class GlobalEvents(
     override fun onGlobalReady(listener: () -> Unit): () -> Unit {
         readyListeners += listener
         return { readyListeners -= listener }
+    }
+
+    fun onNotificationFeedChanged(listener: () -> Unit): () -> Unit {
+        feedChangedListeners += listener
+        return { feedChangedListeners -= listener }
     }
 
     override fun onAgentFrame(listener: (AgentTranscriptFrame) -> Unit): () -> Unit {
@@ -268,6 +300,10 @@ class GlobalEvents(
                 loadUnread()
                 onReady?.invoke()
                 readyListeners.toList().forEach { it() }
+            }
+            "notifications:feed_changed" -> {
+                onNotificationsFeedChanged?.invoke()
+                feedChangedListeners.toList().forEach { it() }
             }
             "session:unread_changed" -> applyUnread(frame)
             "session:phase_changed" -> {
@@ -328,6 +364,7 @@ class GlobalEvents(
         val count = frame["unreadCount"].int
         if (count == 0) {
             _unread.value -= id
+            feed.onUnreadChanged(_unread.value)
             return
         }
         val existing = _unread.value[id]
@@ -341,6 +378,7 @@ class GlobalEvents(
             // The broadcast of a hand-made mark carries it; others keep what was there.
             manual = frame["manual"].bool ?: existing?.manual ?: false,
         )
+        feed.onUnreadChanged(_unread.value)
         if (isShown?.invoke(id) == true) seen(id)
     }
 
@@ -354,6 +392,7 @@ class GlobalEvents(
         fire {
             val entries = api.unreadSessions(project)
             _unread.value = entries
+            feed.onUnreadChanged(_unread.value)
             for (id in entries.keys) if (isShown?.invoke(id) == true) seen(id)
         }
     }
