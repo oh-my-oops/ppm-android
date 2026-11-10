@@ -1,13 +1,14 @@
 package com.hienlh.ppm.app.ui
 
+import android.content.res.Configuration
 import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.widthIn
@@ -39,6 +41,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -60,12 +63,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -87,11 +92,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.LocalRedesign
 import com.hienlh.ppm.app.liftsAsTap
 import com.hienlh.ppm.app.ui.editor.DeviceLspPreference
 import com.hienlh.ppm.app.ui.editor.SharedCompareStore
 import com.hienlh.ppm.app.ui.extensions.ExtensionIcons
 import com.hienlh.ppm.app.ui.tablet.Edge
+import com.hienlh.ppm.app.ui.tablet.LocalTabletShellState
 import com.hienlh.ppm.app.ui.tablet.edge
 import com.hienlh.ppm.client.designList
 import com.hienlh.ppm.client.fsList
@@ -123,6 +130,7 @@ import com.hienlh.ppm.state.database.queryTabMetadata
 import com.hienlh.ppm.state.design.DesignSummary
 import com.hienlh.ppm.state.editor.CompareSelection
 import com.hienlh.ppm.state.formatShortcut
+import com.hienlh.ppm.state.workspace.SourceLine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -131,6 +139,36 @@ import kotlinx.serialization.json.put
 
 /** Tailwind's `shadow-2xl`. */
 internal val SHADOW_2XL = ThemeShadow(0.0, 25.0, 50.0, -12.0, Rgba(0.0, 0.0, 0.0, 0.25))
+
+/**
+ * Cycles through `All` (`emptySet()`) and each group in [groups] when `Tab` / `Shift+Tab` is
+ * pressed inside the command palette search field (`Requirement 11.5`).
+ */
+internal fun cyclePaletteFilter(
+    groups: List<PaletteGroup>,
+    active: Set<PaletteGroup>,
+    forward: Boolean = true,
+): Set<PaletteGroup> {
+    if (groups.size <= 1) return emptySet()
+    val slots: List<Set<PaletteGroup>> = listOf(emptySet<PaletteGroup>()) + groups.map { setOf(it) }
+    val currentIndex = slots.indexOfFirst { it == active }.takeIf { it >= 0 } ?: 0
+    val nextIndex = if (forward) {
+        (currentIndex + 1) % slots.size
+    } else {
+        (currentIndex - 1 + slots.size) % slots.size
+    }
+    return slots[nextIndex]
+}
+
+/**
+ * Whether desktop-only actions (`Turn On/Off Language Server`) are shown in the Command Palette:
+ * hidden on phone, and hidden on pure-touch tablet unless a hardware keyboard or pointer is connected.
+ */
+internal fun shouldShowDesktopOnlyPaletteActions(
+    mobile: Boolean,
+    hasHardwareKeyboard: Boolean,
+    hasPointer: Boolean,
+): Boolean = !mobile && (hasHardwareKeyboard || hasPointer)
 
 /** One action (`CommandItem`): what it is called, the words that also find it, its shortcut, what it does. */
 private fun action(
@@ -150,17 +188,28 @@ private fun action(
  * files and, for a path that starts with `/`, `~/` or a drive, the host's own folders; Enter on no
  * match asking AI in a new chat. A `:120` or `:120-140` after a path opens the file there. Chips
  * narrow the list to actions, files or the host's files once more than one kind exists. On the
- * desktop layout a 448 dp card a fifth of the way down; on a phone a sheet on the bottom edge, at
- * most 80% of the screen. ↑ ↓ pick, Enter runs, Esc or a tap outside closes. Database tables and
- * the actions of features this app does not have yet join with those features.
- *
- * What is searched is read from the file list while the palette is open, and ranked off the main
- * thread: the list shown stays until the next one lands, as it does for the web's deferred query.
+ * tablet layout a 640 dp card (flipping its search input to the bottom when the soft keyboard is
+ * up on touch). ↑ ↓ pick, Tab cycles filters, Enter runs, Esc or a tap outside closes.
  */
 @Composable
 fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit) {
+    val sizeClass = LocalSizeClass.current
+    val redesign = LocalRedesign.current
+    // On redesigned phone (`< 600 dp`), Command Palette is replaced by the Search tab.
+    if (sizeClass.isPhone && redesign) {
+        LaunchedEffect(Unit) { onDismiss() }
+        return
+    }
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
+    val configuration = LocalConfiguration.current
+    val hasHardwareKeyboard = configuration.keyboard != Configuration.KEYBOARD_NOKEYS
+    val hasPointer = LocalTabletShellState.current?.pointerConnected == true
+    val showDesktopOnlyActions = if (redesign) {
+        shouldShowDesktopOnlyPaletteActions(mobile = mobile, hasHardwareKeyboard = hasHardwareKeyboard, hasPointer = hasPointer)
+    } else {
+        !mobile
+    }
     val query = rememberTextFieldState(initialQuery)
     val focus = remember { FocusRequester() }
     var quietFocus by remember { mutableStateOf(true) }
@@ -183,7 +232,7 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
         val arr = raw?.get("designs")?.array ?: raw?.array.orEmpty()
         designs = arr.mapNotNull { DesignSummary.fromJson(it) }
     }
-    val actions = remember(model, bindings, extContribs, mobile, lspEnabled, project, designs) {
+    val actions = remember(model, bindings, extContribs, mobile, showDesktopOnlyActions, lspEnabled, project, designs) {
         fun run(action: () -> Unit): () -> Unit = {
             onDismiss()
             action()
@@ -236,7 +285,7 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
                     model.comparePickerOpen = true
                 },
             ))
-            if (!mobile) {
+            if (showDesktopOnlyActions) {
                 add(action(
                     label = if (lspEnabled) "Turn Off Language Server" else "Turn On Language Server",
                     icon = ProductIcon.Zap,
@@ -419,6 +468,10 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
         activeGroups = if (group in activeGroups) activeGroups - group else activeGroups + group
         selected = 0
     }
+    fun clearGroups() {
+        activeGroups = emptySet()
+        selected = 0
+    }
     fun askAi() {
         val message = text.trim()
         if (message.isEmpty()) return
@@ -456,6 +509,9 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
                 focus.requestFocus()
             }
         }
+        val imeBottom = WindowInsets.ime.exclude(WindowInsets.navigationBars).asPaddingValues().calculateBottomPadding()
+        val keyboardUpOnTouch = redesign && !mobile && imeBottom > 0.dp && !quietFocus && !hasHardwareKeyboard
+
         Box(Modifier.fillMaxSize()) {
             Box(
                 Modifier
@@ -463,84 +519,126 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
                     .background(Color.Black.copy(alpha = 0.5f))
                     .clickable(remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
             )
-            val card: @Composable (Modifier, Boolean) -> Unit = { modifier, showEsc ->
-                Column(modifier) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .edge(Edge.Bottom, tokens.border.color)
-                            .pointerInput(Unit) {
-                                awaitEachGesture {
-                                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                                    quietFocus = false
-                                    if (liftsAsTap(down, PointerEventPass.Final)) {
-                                        softwareKeyboard?.show()
-                                    }
+            val searchRow: @Composable (Boolean, Boolean) -> Unit = { showEsc, bottomBorder ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .then(if (bottomBorder) Modifier.edge(Edge.Bottom, tokens.border.color) else Modifier.edge(Edge.Top, tokens.border.color))
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                quietFocus = false
+                                if (liftsAsTap(down, PointerEventPass.Final)) {
+                                    softwareKeyboard?.show()
                                 }
                             }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        PpmIcon(ProductIcon.Search, 16.dp, tokens.text3.color)
-                        PpmTextField(
-                            query,
-                            "Search actions & files... (type / or ~/ for filesystem)",
-                            Modifier.weight(1f).onPreviewKeyEvent { event ->
-                                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                                val count = shown.size
-                                when (event.key) {
-                                    Key.DirectionDown -> if (count > 0) selected = (selected + 1) % count
-                                    Key.DirectionUp -> if (count > 0) selected = (selected - 1 + count) % count
-                                    Key.Enter, Key.NumPadEnter -> enter()
-                                    Key.Escape -> onDismiss()
-                                    else -> return@onPreviewKeyEvent false
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    PpmIcon(ProductIcon.Search, 16.dp, tokens.text3.color)
+                    PpmTextField(
+                        query,
+                        "Search actions & files... (type / or ~/ for filesystem)",
+                        Modifier.weight(1f).onPreviewKeyEvent { event ->
+                            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                            val count = shown.size
+                            when (event.key) {
+                                Key.DirectionDown -> if (count > 0) selected = (selected + 1) % count
+                                Key.DirectionUp -> if (count > 0) selected = (selected - 1 + count) % count
+                                Key.Tab -> {
+                                    if (!pathMode && groups.size > 1) {
+                                        activeGroups = cyclePaletteFilter(groups, activeGroups, forward = !event.isShiftPressed)
+                                        selected = 0
+                                    }
                                 }
-                                true
-                            },
-                            desktopStyle = ppmText(14f, lineHeight = 20f),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go, showKeyboardOnFocus = !quietFocus),
-                            onKeyboardAction = { enter() },
-                            focusRequester = focus,
-                            onFocusChanged = { if (!it) quietFocus = false },
+                                Key.Enter, Key.NumPadEnter -> enter()
+                                Key.Escape -> onDismiss()
+                                else -> return@onPreviewKeyEvent false
+                            }
+                            true
+                        },
+                        desktopStyle = ppmText(14f, lineHeight = 20f),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go, showKeyboardOnFocus = !quietFocus),
+                        onKeyboardAction = { enter() },
+                        focusRequester = focus,
+                        onFocusChanged = { if (!it) quietFocus = false },
+                    )
+                    if (listing) PpmIcon(ProductIcon.Loader2, 14.dp, tokens.text3.color, spinning = true)
+                    if (showEsc) Kbd("ESC", horizontal = 6)
+                }
+            }
+            val resultsSection: @Composable () -> Unit = {
+                if (pathMode && !listing && filesystemPaths.isEmpty() && text.length < 4) {
+                    HintLine("Type a directory path to browse files (e.g. ~/Projects/)")
+                }
+                val status = index?.status ?: FileIndexStore.Status.IDLE
+                if (!pathMode && (status == FileIndexStore.Status.LOADING || status == FileIndexStore.Status.IDLE)) IndexingLine()
+                if (!pathMode && status == FileIndexStore.Status.FAILED) {
+                    RetryLine { if (fileStore != null && project != null) fileStore.load(project) }
+                }
+                if (shown.isEmpty()) {
+                    when {
+                        listing -> EmptyLine("Searching...")
+                        activeGroups.isNotEmpty() && filtered.isNotEmpty() -> FilteredOutEmptyState(
+                            otherCount = filtered.size,
+                            onShowAll = ::clearGroups,
                         )
-                        if (listing) PpmIcon(ProductIcon.Loader2, 14.dp, tokens.text3.color, spinning = true)
-                        if (showEsc) Kbd("ESC", horizontal = 6)
+                        text.isNotBlank() -> AskAiRow(text.trim(), ::askAi)
+                        else -> EmptyLine("No results")
                     }
-                    if (pathMode && !listing && filesystemPaths.isEmpty() && text.length < 4) {
-                        HintLine("Type a directory path to browse files (e.g. ~/Projects/)")
-                    }
-                    val status = index?.status ?: FileIndexStore.Status.IDLE
-                    if (!pathMode && (status == FileIndexStore.Status.LOADING || status == FileIndexStore.Status.IDLE)) IndexingLine()
-                    if (!pathMode && status == FileIndexStore.Status.FAILED) {
-                        RetryLine { if (fileStore != null && project != null) fileStore.load(project) }
-                    }
-                    if (!pathMode && groups.size > 1) FilterChips(groups, counts, activeGroups, ::toggleGroup)
-                    if (shown.isEmpty()) {
-                        when {
-                            listing -> EmptyLine("Searching...")
-                            activeGroups.isNotEmpty() && filtered.isNotEmpty() -> EmptyLine("No results in selected filters")
-                            text.isNotBlank() -> AskAiRow(text.trim(), ::askAi)
-                            else -> EmptyLine("No results")
-                        }
-                    } else {
-                        LazyColumn(Modifier.weight(1f, fill = false).heightIn(max = 288.dp).cssScrollbar(list), list, PaddingValues(vertical = 4.dp)) {
-                            itemsIndexed(shown) { position, item -> PaletteRow(item, position == selected) { pick(item) } }
-                        }
-                    }
-                    Row(
-                        Modifier.fillMaxWidth().edge(Edge.Top, tokens.border.color).padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                } else {
+                    LazyColumn(
+                        Modifier.heightIn(max = 320.dp).cssScrollbar(list),
+                        list,
+                        PaddingValues(vertical = 4.dp),
                     ) {
-                        val hint = ppmText(10f, lineHeight = 15f).copy(color = tokens.text3.color)
-                        BasicText("Press", style = hint)
-                        Kbd("Shift", horizontal = 4)
-                        Kbd("Shift", horizontal = 4)
-                        BasicText("to open this palette", style = hint)
+                        itemsIndexed(shown) { position, item ->
+                            PaletteRow(
+                                item = item,
+                                selected = position == selected,
+                                targetLine = typed.line,
+                                onFillPath = if (item.group == PaletteGroup.FILESYSTEM) {
+                                    { query.setTextAndPlaceCursorAtEnd(item.keywords) }
+                                } else {
+                                    null
+                                },
+                                onPick = { pick(item) },
+                            )
+                        }
                     }
                 }
             }
+            val card: @Composable (Modifier, Boolean) -> Unit = { modifier, showEsc ->
+                Column(modifier) {
+                    if (keyboardUpOnTouch) {
+                        if (!pathMode && groups.size > 1) {
+                            FilterChips(groups, counts, filtered.size, activeGroups, ::toggleGroup, ::clearGroups)
+                        }
+                        resultsSection()
+                        searchRow(showEsc, false)
+                    } else {
+                        searchRow(showEsc, true)
+                        if (!pathMode && groups.size > 1) {
+                            FilterChips(groups, counts, filtered.size, activeGroups, ::toggleGroup, ::clearGroups)
+                        }
+                        resultsSection()
+                        Row(
+                            Modifier.fillMaxWidth().edge(Edge.Top, tokens.border.color).padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                        ) {
+                            val hint = ppmText(10f, lineHeight = 15f).copy(color = tokens.text3.color)
+                            BasicText("Press", style = hint)
+                            Kbd("Shift", horizontal = 4)
+                            Kbd("Shift", horizontal = 4)
+                            BasicText("to open this palette", style = hint)
+                        }
+                    }
+                }
+            }
+            val maxCardWidth = if (redesign) 640.dp else 448.dp
             if (mobile) {
                 // On the bottom edge, its background under the navigation bar, and above the keyboard.
                 BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -548,7 +646,7 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
                     card(
                         Modifier
                             .align(Alignment.BottomCenter)
-                            .widthIn(max = 448.dp)
+                            .widthIn(max = maxCardWidth)
                             .fillMaxWidth()
                             .heightIn(max = maxHeight * 0.8f)
                             .ppmShadow(SHADOW_2XL, shape)
@@ -561,18 +659,22 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
                     )
                 }
             } else {
-                // `md:pt-[20vh]`, kept where it is when the keyboard comes up: the list gives way instead.
+                // `md:pt-[14vh]`, or docked above the keyboard when flipped on touch.
                 BoxWithConstraints(Modifier.fillMaxSize().systemBarsPadding()) {
-                    val top = maxHeight * 0.2f
-                    val keyboard = WindowInsets.ime.exclude(WindowInsets.navigationBars).asPaddingValues().calculateBottomPadding()
+                    val top = if (keyboardUpOnTouch) 16.dp else maxHeight * 0.16f
                     val shape = RoundedCornerShape(12.dp)
                     card(
                         Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = top)
-                            .widthIn(max = 448.dp)
+                            .align(if (keyboardUpOnTouch) Alignment.BottomCenter else Alignment.TopCenter)
+                            .padding(
+                                top = top,
+                                bottom = if (keyboardUpOnTouch) imeBottom + 8.dp else 0.dp,
+                                start = 16.dp,
+                                end = 16.dp,
+                            )
+                            .widthIn(max = maxCardWidth)
                             .fillMaxWidth()
-                            .heightIn(max = (maxHeight - top - keyboard).coerceAtLeast(120.dp))
+                            .heightIn(max = (maxHeight - top - imeBottom).coerceAtLeast(160.dp))
                             .ppmShadow(SHADOW_2XL, shape)
                             .clip(shape)
                             .background(tokens.bgSolid.color)
@@ -586,28 +688,40 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
 }
 
 /**
- * A result (`px-3 py-2 text-sm transition-colors`): picked in the `accent` surface at 15% and the
- * text colour, else hovered in `surface-elevated`, every change faded. An action's shortcut sits
- * at the right; a file's path does, in `text-xs text-text-subtle`, at most 200 px and cut off at
- * that, not ended with an ellipsis, as a flex box cuts its text. A file the project ignores is at
- * 60% and says so to a mouse (`title="Gitignored file"`).
+ * A result (`56 dp` min height on tablet redesign): picked in the `accent` surface at 15% and the
+ * text colour, else hovered in `surface-elevated`. Supports line-target badges (`CP2`) and
+ * filesystem `↖` path-fill (`CP3`).
  */
 @Composable
-private fun PaletteRow(item: PaletteItem, selected: Boolean, onPick: () -> Unit) {
+private fun PaletteRow(
+    item: PaletteItem,
+    selected: Boolean,
+    targetLine: SourceLine? = null,
+    onFillPath: (() -> Unit)? = null,
+    onPick: () -> Unit,
+) {
     val tokens = LocalPpmTokens.current
+    val redesign = LocalRedesign.current
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
     val picked = colorsFade(selected).toDouble()
     val lit = colorsFade(hovered && !selected).toDouble()
     val color = tokens.text.mix(tokens.text2, picked).color
+    val showLineJump = targetLine != null && item.group != PaletteGroup.ACTION
+    val displayHint = when {
+        showLineJump && item.hint != null -> "${item.hint} · line ${targetLine!!.start}"
+        showLineJump -> "line ${targetLine!!.start}"
+        else -> item.hint
+    }
     Row(
         Modifier
             .fillMaxWidth()
+            .then(if (redesign) Modifier.heightIn(min = 56.dp) else Modifier)
             .then(if (item.ignored) Modifier.alpha(0.6f).webTitle("Gitignored file") else Modifier)
             .background(tokens.panel2.opacity(0.15).mix(tokens.panel2.opacity(lit), picked).color)
             .hoverable(hover)
             .ppmClickable(pressedColor = tokens.panel2.color, onClick = onPick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -623,15 +737,45 @@ private fun PaletteRow(item: PaletteItem, selected: Boolean, onPick: () -> Unit)
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        item.hint?.let {
+        displayHint?.let {
             BasicText(
                 it,
-                Modifier.widthIn(max = 200.dp),
-                style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
+                Modifier.widthIn(max = 220.dp),
+                style = ppmText(12f, lineHeight = 16f).copy(color = if (showLineJump && selected) tokens.accent.color else tokens.text3.color),
                 maxLines = 1,
                 softWrap = false,
                 overflow = TextOverflow.Clip,
             )
+        }
+        if (showLineJump && selected) {
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(tokens.accent.opacity(0.16).color)
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            ) {
+                BasicText(
+                    "Go to line",
+                    style = ppmText(10f, FontWeight.SemiBold, kind = FontKind.MONO, lineHeight = 14f).copy(color = tokens.accent.color),
+                )
+            }
+        }
+        if (onFillPath != null) {
+            Box(
+                Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .semantics { contentDescription = "Fill path" }
+                    .ppmClickable(
+                        hoverColor = tokens.panel2.color,
+                        pressedColor = tokens.panel2.color,
+                        onClickLabel = "Fill path",
+                        onClick = onFillPath,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                PpmIcon(ProductIcon.ArrowUpRight, 14.dp, tokens.text2.color)
+            }
         }
         item.shortcut?.takeIf { it.isNotEmpty() }?.let { Kbd(it, horizontal = 6) }
     }
@@ -686,14 +830,22 @@ private fun RetryLine(onRetry: () -> Unit) {
 }
 
 /**
- * The filter chips (`CommandPaletteFilterChips`): one switch per kind of result that exists, each
- * with how many of the list's results are of it, at half strength when none. `rounded-full border
- * px-2.5 py-1 text-xs font-medium`: on in the accent at 15% with the accent's border, off as a
- * panel with the subtle text, `hover:bg-surface-elevated` faded in. The row scrolls sideways.
+ * The filter chips (`CommandPaletteFilterChips`): an "All" chip plus one switch per kind of result
+ * that exists, each with how many of the list's results are of it.
  */
 @Composable
-private fun FilterChips(groups: List<PaletteGroup>, counts: Map<PaletteGroup, Int>, active: Set<PaletteGroup>, onToggle: (PaletteGroup) -> Unit) {
+private fun FilterChips(
+    groups: List<PaletteGroup>,
+    counts: Map<PaletteGroup, Int>,
+    totalCount: Int,
+    active: Set<PaletteGroup>,
+    onToggle: (PaletteGroup) -> Unit,
+    onClearAll: () -> Unit,
+) {
     val tokens = LocalPpmTokens.current
+    val allSelected = active.isEmpty()
+    val allHover = rememberHover()
+    val allText = if (allSelected) tokens.accent else tokens.text3
     Row(
         Modifier
             .fillMaxWidth()
@@ -703,6 +855,24 @@ private fun FilterChips(groups: List<PaletteGroup>, counts: Map<PaletteGroup, In
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        Row(
+            Modifier
+                .clip(CircleShape)
+                .background((if (allSelected) tokens.accent.opacity(0.15) else tokens.panel.mix(tokens.panel2, allHover.lit.toDouble())).color)
+                .cssBorder((if (allSelected) tokens.accent else tokens.border).color, CircleShape)
+                .pointerHoverIcon(WebCursor.Default)
+                .ppmClickable(pressedColor = Color.Transparent, shape = CircleShape, role = Role.Switch, source = allHover.source) { onClearAll() }
+                .semantics {
+                    toggleableState = ToggleableState(allSelected)
+                    contentDescription = "All results"
+                }
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            BasicText("All", style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = allText.color), maxLines = 1)
+            BasicText("($totalCount)", Modifier.alpha(0.7f), style = ppmText(10f, lineHeight = 13.33f).copy(color = allText.color), maxLines = 1)
+        }
         for (group in groups) {
             val count = counts[group] ?: 0
             val on = group in active
@@ -729,6 +899,49 @@ private fun FilterChips(groups: List<PaletteGroup>, counts: Map<PaletteGroup, In
                 PpmIcon(group.icon, 12.dp, text.color)
                 BasicText(group.label, style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = text.color), maxLines = 1)
                 BasicText("($count)", Modifier.alpha(0.7f), style = ppmText(10f, lineHeight = 13.33f).copy(color = text.color), maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilteredOutEmptyState(
+    otherCount: Int,
+    onShowAll: () -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        BasicText(
+            "No results in selected filters",
+            style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text2.color, textAlign = TextAlign.Center),
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            BasicText(
+                "$otherCount results in other filters.",
+                style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
+            )
+            val btnShape = RoundedCornerShape(6.dp)
+            Box(
+                Modifier
+                    .clip(btnShape)
+                    .background(tokens.accent.opacity(0.15).color)
+                    .cssBorder(tokens.accent.opacity(0.4).color, btnShape)
+                    .ppmClickable(onClickLabel = "Show all", onClick = onShowAll)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                BasicText(
+                    "Show all",
+                    style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.accent.color),
+                )
             }
         }
     }

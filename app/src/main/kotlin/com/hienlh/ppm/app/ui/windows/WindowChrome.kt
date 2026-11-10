@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.LocalRedesign
 import com.hienlh.ppm.app.ui.runningSessions
 import com.hienlh.ppm.app.ui.tabTitle
 import com.hienlh.ppm.app.ui.tablet.Edge
@@ -59,6 +60,8 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.ThemeTokens
+import com.hienlh.ppm.design.kit.HoverTooltip
+import com.hienlh.ppm.design.kit.kitFocusRing
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.vector
@@ -131,26 +134,43 @@ private fun MacosTitlebar(
     onClose: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
+    val redesign = LocalRedesign.current
+    val barHeight = if (redesign) 48.dp else TITLEBAR_HEIGHT
     val actions = listOf(onClose, onMinimize, onToggleMaximize)
     Row(
         modifier
             .fillMaxWidth()
-            .height(TITLEBAR_HEIGHT)
+            .height(barHeight)
             .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp))
             .background(tokens.panel2.color)
             .edge(Edge.Bottom, tokens.border.color),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(Modifier.padding(start = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            Modifier.padding(start = if (redesign) 8.dp else 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (redesign) 2.dp else 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             LIGHTS.forEachIndexed { i, (color, label, glyph) ->
-                Box(
-                    Modifier
-                        .size(12.dp)
-                        .clip(CircleShape)
-                        .background(if (focused) color else UNFOCUSED_LIGHT)
-                        .ppmClickable(pressedColor = Color.Transparent, shape = CircleShape, onClickLabel = label, onClick = actions[i]),
-                    contentAlignment = Alignment.Center,
-                ) { PpmIcon(glyph, 8.dp, Color.Black.copy(alpha = 0.6f)) }
+                HoverTooltip(label) {
+                    Box(
+                        Modifier
+                            .size(if (redesign) 28.dp else 12.dp)
+                            .kitFocusRing(false, CircleShape)
+                            .ppmClickable(pressedColor = Color.Transparent, shape = CircleShape, onClickLabel = label, onClick = actions[i]),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(if (redesign) 14.dp else 12.dp)
+                                .clip(CircleShape)
+                                .background(if (focused) color else UNFOCUSED_LIGHT),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            PpmIcon(glyph, 8.dp, Color.Black.copy(alpha = 0.6f))
+                        }
+                    }
+                }
             }
         }
         // A flex child rather than centred over the bar, so a long title truncates between the lights and the button.
@@ -163,23 +183,25 @@ private fun MacosTitlebar(
             WindowTitleText(title, subtitle, meta.busy, focused, Modifier.weight(1f, fill = false))
         }
         Row(Modifier.padding(end = 8.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            // `size-6 rounded text-text-2`, `text-primary` while snapped.
-            Box(
-                Modifier
-                    .size(24.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .ppmClickable(pressedColor = Color.Transparent, onClickLabel = if (win.state == WindowVisualState.Snapped) "Unsnap" else "Snap to the right", onClick = onToggleSnap),
-                contentAlignment = Alignment.Center,
-            ) { PpmIcon(ProductIcon.PanelRight, 14.dp, (if (win.state == WindowVisualState.Snapped) tokens.accent else tokens.text2).color) }
+            val snapLabel = if (win.state == WindowVisualState.Snapped) "Unsnap" else "Snap to the right"
+            HoverTooltip(snapLabel) {
+                Box(
+                    Modifier
+                        .size(if (redesign) 36.dp else 24.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .kitFocusRing(false, RoundedCornerShape(6.dp))
+                        .ppmClickable(pressedColor = Color.Transparent, onClickLabel = snapLabel, onClick = onToggleSnap),
+                    contentAlignment = Alignment.Center,
+                ) { PpmIcon(ProductIcon.PanelRight, 14.dp, (if (win.state == WindowVisualState.Snapped) tokens.accent else tokens.text2).color) }
+            }
         }
     }
 }
 
 /**
- * windows-window-chrome.tsx: the title at the left (`px-2.5 gap-2`), then 46 px caption buttons
+ * windows-window-chrome.tsx: the title at the left (`px-2.5 gap-2`), then caption buttons
  * the bar's full height — snap, minimize, maximize or restore, close — on `--x-titlebar-bg`
- * with `--x-radius` 8 px. Their hover colours, the close button's red among them, need a
- * pointer that can hover, which a touch screen is not.
+ * with `--x-radius` 8 px.
  */
 @Composable
 private fun WindowsTitlebar(
@@ -195,12 +217,14 @@ private fun WindowsTitlebar(
     onClose: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
+    val redesign = LocalRedesign.current
+    val barHeight = if (redesign) 48.dp else TITLEBAR_HEIGHT
     val maximized = win.state == WindowVisualState.Maximized
     val snapped = win.state == WindowVisualState.Snapped
     Row(
         modifier
             .fillMaxWidth()
-            .height(TITLEBAR_HEIGHT)
+            .height(barHeight)
             .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
             .background(tokens.panel2.color)
             .edge(Edge.Bottom, tokens.border.color),
@@ -216,16 +240,29 @@ private fun WindowsTitlebar(
         CaptionButton(ProductIcon.PanelRight, 14.dp, if (snapped) tokens.accent else tokens.text2, if (snapped) "Unsnap" else "Snap to the right", onToggleSnap)
         CaptionButton(ProductIcon.Minus, 14.dp, tokens.text2, "Minimize window", onMinimize)
         CaptionButton(if (maximized) ProductIcon.Copy else ProductIcon.Square, 12.dp, tokens.text2, if (maximized) "Restore window" else "Maximize window", onToggleMaximize)
-        CaptionButton(ProductIcon.X, 14.dp, tokens.text2, "Close window", onClose)
+        CaptionButton(ProductIcon.X, 14.dp, tokens.text2, "Close window", onClose, isClose = true)
     }
 }
 
 @Composable
-private fun CaptionButton(icon: ProductIcon, size: Dp, tint: Rgba, label: String, onClick: () -> Unit) {
-    Box(
-        Modifier.width(46.dp).fillMaxHeight().ppmClickable(pressedColor = Color.Transparent, onClickLabel = label, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) { PpmIcon(icon, size, tint.color) }
+private fun CaptionButton(icon: ProductIcon, size: Dp, tint: Rgba, label: String, onClick: () -> Unit, isClose: Boolean = false) {
+    val tokens = LocalPpmTokens.current
+    val redesign = LocalRedesign.current
+    HoverTooltip(label) {
+        Box(
+            Modifier
+                .width(if (redesign) 40.dp else 46.dp)
+                .fillMaxHeight()
+                .kitFocusRing(false)
+                .ppmClickable(
+                    pressedColor = if (isClose) tokens.error.opacity(0.85).color else tokens.panel.opacity(0.6).color,
+                    hoverColor = if (isClose) tokens.error.opacity(0.85).color else tokens.panel.opacity(0.5).color,
+                    onClickLabel = label,
+                    onClick = onClick,
+                ),
+            contentAlignment = Alignment.Center,
+        ) { PpmIcon(icon, size, tint.color) }
+    }
 }
 
 /** window-title-identity.tsx `TILE_SIZES`: the box, its radius and the glyph in it. */

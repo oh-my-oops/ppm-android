@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.FocusAnchor
 import com.hienlh.ppm.app.FocusStartAnchor
+import com.hienlh.ppm.app.LocalRedesign
 import com.hienlh.ppm.app.focusStartArea
 import com.hienlh.ppm.app.ui.LocalDropLayer
 import com.hienlh.ppm.app.ui.RefusingDrop
@@ -171,12 +172,14 @@ private fun FloatingWindow(
     content: @Composable (WindowRuntimeState) -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
-    val target = displayedRect(win.state, win.rect, bounds)
+    val redesign = LocalRedesign.current
+    val portraitFullPane = redesign && bounds.h > bounds.w && bounds.w > 0 && bounds.h > 0
+    val target = if (portraitFullPane) WindowRect(0.0, 0.0, bounds.w, bounds.h) else displayedRect(win.state, win.rect, bounds)
     val minimized = win.state == WindowVisualState.Minimized
-    val maximized = win.state == WindowVisualState.Maximized
-    val snapped = win.state == WindowVisualState.Snapped
+    val maximized = win.state == WindowVisualState.Maximized || portraitFullPane
+    val snapped = win.state == WindowVisualState.Snapped && !portraitFullPane
     // Only a normal window is moved and resized by hand; the others are placed by the layer.
-    val floating = win.state == WindowVisualState.Normal
+    val floating = win.state == WindowVisualState.Normal && !portraitFullPane
 
     // What is drawn: the store's rect eased into place (`transition-[transform,width,height]
     // duration-150`), or the live one while a finger holds the window.
@@ -342,6 +345,30 @@ private fun FloatingWindow(
                 androidx.compose.runtime.CompositionLocalProvider(com.hienlh.ppm.app.ui.LocalWindowContentVisible provides !minimized, LocalDropLayer provides layer) {
                     content(win)
                 }
+                if (floating && focused && redesign) {
+                    val gripColor = tokens.text3.opacity(0.45).color
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(4.dp)
+                            .size(12.dp)
+                            .drawBehind {
+                                val stroke = 1.5.dp.toPx()
+                                drawLine(
+                                    color = gripColor,
+                                    start = Offset(size.width * 0.35f, size.height),
+                                    end = Offset(size.width, size.height * 0.35f),
+                                    strokeWidth = stroke,
+                                )
+                                drawLine(
+                                    color = gripColor,
+                                    start = Offset(size.width * 0.7f, size.height),
+                                    end = Offset(size.width, size.height * 0.7f),
+                                    strokeWidth = stroke,
+                                )
+                            },
+                    )
+                }
             }
         }
         if (floating) {
@@ -468,7 +495,22 @@ private fun SnapGhost(bounds: Bounds) {
                     style = Stroke(width, pathEffect = PathEffect.dashPathEffect(floatArrayOf(width * 2, width))),
                 )
             },
-    )
+        contentAlignment = Alignment.Center,
+    ) {
+        val pillShape = RoundedCornerShape(999.dp)
+        Box(
+            Modifier
+                .clip(pillShape)
+                .background(tokens.panel2.color)
+                .cssBorder(tokens.accent.opacity(0.5).color, pillShape)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+        ) {
+            BasicText(
+                "Release to snap right",
+                style = ppmText(12f, androidx.compose.ui.text.font.FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.accent.color),
+            )
+        }
+    }
 }
 
 private fun lerp(from: WindowRect, to: WindowRect, t: Float): WindowRect = WindowRect(

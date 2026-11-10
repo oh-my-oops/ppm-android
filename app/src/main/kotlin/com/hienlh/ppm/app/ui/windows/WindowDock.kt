@@ -63,6 +63,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
@@ -295,7 +296,16 @@ private fun DockChip(
                 if (busy) WindowBusyDot(Modifier.align(Alignment.TopEnd).offset(3.dp, (-3).dp))
             }
             if (showTitle) {
-                BasicText(title, style = CHIP_TEXT.copy(color = color), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                BasicText(
+                    title,
+                    style = CHIP_TEXT.copy(
+                        color = color,
+                        fontStyle = if (state == ChipState.Min) FontStyle.Italic else FontStyle.Normal,
+                    ),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
         if (state != ChipState.Min) {
@@ -378,7 +388,7 @@ private fun WindowDockList(
     PlacedPopup(place, onDismiss, passThrough = true) {
         Column(
             Modifier
-                .width(min(300.0, windowSize.width - 24.0).dp)
+                .width(min(380.0, windowSize.width - 24.0).dp)
                 .heightIn(max = min(440.0, windowSize.height * 0.7).dp)
                 .let { SHADOW_LG.fold(it) { m, s -> m.ppmShadow(s, shape) } }
                 .clip(shape)
@@ -410,10 +420,10 @@ private fun WindowDockList(
                 Modifier
                     .padding(start = 10.dp, end = 10.dp, bottom = 6.dp)
                     .fillMaxWidth()
-                    .height(30.dp)
+                    .height(40.dp)
                     .background(tokens.panel.color, fieldShape)
                     .cssBorder((if (focused) tokens.accentWashBorder else tokens.borderSoft).color, fieldShape)
-                    .padding(horizontal = 8.dp),
+                    .padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -488,6 +498,7 @@ private fun WindowRow(meta: WindowMeta, title: String, front: Boolean, minimized
     Row(
         Modifier
             .fillMaxWidth()
+            .heightIn(min = 52.dp)
             .background(if (front) tokens.accentWash.color else Color.Transparent, RoundedCornerShape(12.dp))
             .drawBehind {
                 if (!front) return@drawBehind
@@ -526,8 +537,8 @@ private fun WindowRow(meta: WindowMeta, title: String, front: Boolean, minimized
         }
         Box(
             Modifier
-                .padding(end = 4.dp)
-                .size(26.dp)
+                .padding(end = 6.dp)
+                .size(36.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .ppmClickable(pressedColor = Color.Transparent, onClickLabel = "Close $title", onClick = onClose),
             contentAlignment = Alignment.Center,

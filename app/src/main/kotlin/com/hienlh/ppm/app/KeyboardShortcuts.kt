@@ -4,12 +4,50 @@ import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.KeyboardShortcutGroup
 import android.view.KeyboardShortcutInfo
+import com.hienlh.ppm.app.ui.editor.SharedCompareStore
 import com.hienlh.ppm.chat.TurnTrayEscape
 import com.hienlh.ppm.state.DOCK_BACKTICK
 import com.hienlh.ppm.state.DoubleShift
 import com.hienlh.ppm.state.KEY_ACTIONS
 import com.hienlh.ppm.state.KeyCombo
 import com.hienlh.ppm.state.KeyPress
+import com.hienlh.ppm.state.editor.CompareSelection
+import com.hienlh.ppm.state.windows.WindowVisualState
+import com.hienlh.ppm.state.windows.frontWindowId
+import com.hienlh.ppm.state.workspace.closesItsTabs
+
+/**
+ * Stack of topmost tablet layers that `Escape` closes in order (`Foundation` Section 2b, Requirement 16.3):
+ * palette -> popovers/menus/sheets -> slide-over sidebar -> floating window.
+ */
+object TabletEscapeStack {
+    private val handlers = mutableListOf<() -> Boolean>()
+
+    fun register(handler: () -> Boolean): () -> Unit {
+        handlers.add(handler)
+        return { handlers.remove(handler) }
+    }
+
+    fun dispatch(): Boolean {
+        for (i in handlers.lastIndex downTo 0) {
+            if (handlers[i]()) return true
+        }
+        return false
+    }
+
+    internal fun clearForTest() {
+        handlers.clear()
+    }
+}
+
+/**
+ * Bridge for tablet shell overlays triggered by global hardware shortcuts (`Ctrl+/` shortcuts sheet,
+ * `Ctrl+Tab` / `Ctrl+Shift+Tab` All Tabs switcher).
+ */
+object TabletShortcutBridge {
+    var onToggleShortcutsSheet: (() -> Boolean)? = null
+    var onOpenTabSwitcher: ((forward: Boolean) -> Boolean)? = null
+}
 
 /**
  * The web's window-wide keyboard shortcuts (use-global-keybindings.ts) for a hardware keyboard:
@@ -98,8 +136,8 @@ class KeyboardShortcuts(private val model: AppModel) {
     /** In the web's order, so that a key set for two actions runs the same one. */
     private fun anywhere(press: KeyPress): Boolean {
         when {
-            // The change tray's own window listener: the one opened last, in the tab in front.
-            press == KeyPress("Escape") && TurnTrayEscape.dispatch() -> Unit
+            // Topmost layer Escape: change tray -> tablet overlays -> front floating window.
+            press == KeyPress("Escape") && (TurnTrayEscape.dispatch() || TabletEscapeStack.dispatch() || closeFrontFloatingWindow()) -> Unit
             // The web's stops the browser's save dialog; there is none here, but no later action takes the key.
             matches(press, "save-prevent") -> Unit
             matches(press, "command-palette") -> model.openPalette()
@@ -107,10 +145,31 @@ class KeyboardShortcuts(private val model: AppModel) {
             toggleDock(press) -> Unit
             matches(press, "next-tab") -> model.cycleTab(forward = true)
             matches(press, "prev-tab") -> model.cycleTab(forward = false)
+            press == KeyPress("Tab", ctrl = true) -> {
+                if (TabletShortcutBridge.onOpenTabSwitcher?.invoke(true) != true) model.cycleTab(forward = true)
+            }
+            press == KeyPress("Tab", ctrl = true, shift = true) -> {
+                if (TabletShortcutBridge.onOpenTabSwitcher?.invoke(false) != true) model.cycleTab(forward = false)
+            }
             matches(press, "open-chat") -> model.newChat()
+            matches(press, "new-file") -> model.openNewFile()
+            (press.key.equals("t", ignoreCase = true) && (press.ctrl || press.meta) && !press.alt && !press.shift) -> model.openPalette()
+            (press.key.equals("w", ignoreCase = true) && (press.ctrl || press.meta) && !press.alt && !press.shift) -> {
+                if (!closeActiveFocusedTab()) return false
+            }
+            (press.key == "/" && (press.ctrl || press.meta) && !press.alt && !press.shift) -> {
+                if (TabletShortcutBridge.onToggleShortcutsSheet?.invoke() != true) model.openSettings("keybindings")
+            }
             // A terminal tab in the focused panel (the first on a phone), as the web opens it; toggle-dock shows the terminal panel instead.
             matches(press, "open-terminal") -> model.openTerminal(inDock = false)
             matches(press, "open-settings") -> model.openSettings()
+            matches(press, "open-git-status") -> model.showSidebarSection("git")
+            matches(press, "open-search") -> model.showSidebarSection("search")
+            matches(press, "open-problems") -> model.openProblems()
+            matches(press, "compare-files") -> openCompareFiles()
+            (press.key.equals("z", ignoreCase = true) && press.alt && !press.ctrl && !press.meta && !press.shift) -> {
+                model.setWordWrapPref(!(if (model.wide) model.wordWrap else model.mobileWordWrap))
+            }
             matches(press, "voice-input") -> model.toggleVoiceInput()
             jumpInChat(press) -> Unit
             else -> {
@@ -123,6 +182,43 @@ class KeyboardShortcuts(private val model: AppModel) {
             }
         }
         return true
+    }
+
+    private fun closeFrontFloatingWindow(): Boolean {
+        if (!model.wide) return false
+        val windows = model.windowState.windows
+        val frontId = frontWindowId(windows) ?: return false
+        val win = windows[frontId] ?: return false
+        if (win.state == WindowVisualState.Minimized || closesItsTabs(win)) return false
+        model.closeWindow(win.id)
+        return true
+    }
+
+    private fun closeActiveFocusedTab(): Boolean {
+        val state = model.layout ?: return false
+        val panelId = state.focusedPanelId.takeIf { it in state.gridPanelIds } ?: state.gridPanelIds.firstOrNull() ?: return false
+        val panel = state.panels[panelId] ?: return false
+        val active = panel.tabs.firstOrNull { it.id == panel.activeTabId } ?: return false
+        if (!active.closable) return false
+        model.closeTab(active.id, panelId)
+        return true
+    }
+
+    private fun openCompareFiles() {
+        val focusedPanel = model.layout?.let { it.panels[it.focusedPanelId] }
+        val activeTab = focusedPanel?.tabs?.firstOrNull { it.id == focusedPanel.activeTabId }
+        val fp = activeTab?.takeIf { it.type == "editor" }?.let { it.metaString("filePath") ?: it.metaString("path") }
+        val proj = activeTab?.metaString("projectName") ?: model.selectedProject
+        if (!fp.isNullOrBlank() && !proj.isNullOrBlank()) {
+            SharedCompareStore.store.selectForCompare(
+                CompareSelection(
+                    filePath = fp,
+                    projectName = proj,
+                    dirtyContent = activeTab.metaString("unsavedContent"),
+                ),
+            )
+        }
+        model.comparePickerOpen = true
     }
 
     /** Extension-contributed keybindings (`use-global-keybindings.ts:301-319`). */
@@ -166,7 +262,23 @@ class KeyboardShortcuts(private val model: AppModel) {
 internal fun shortcutActionIds(wide: Boolean, projectCount: Int): List<String> = buildList {
     add("command-palette")
     if (wide) addAll(listOf("toggle-sidebar", "toggle-dock"))
-    addAll(listOf("next-tab", "prev-tab", "open-chat", "open-terminal", "open-settings", "voice-input", "chat-nav-prev", "chat-nav-next"))
+    addAll(
+        listOf(
+            "next-tab",
+            "prev-tab",
+            "open-chat",
+            "new-file",
+            "open-terminal",
+            "open-settings",
+            "open-git-status",
+            "open-search",
+            "open-problems",
+            "compare-files",
+            "voice-input",
+            "chat-nav-prev",
+            "chat-nav-next",
+        ),
+    )
     for (n in 1..minOf(9, projectCount)) add("switch-project-$n")
 }
 
