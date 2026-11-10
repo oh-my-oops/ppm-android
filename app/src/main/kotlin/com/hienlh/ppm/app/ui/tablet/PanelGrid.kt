@@ -1,13 +1,19 @@
 package com.hienlh.ppm.app.ui.tablet
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -20,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -27,6 +34,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.FocusAnchor
 import com.hienlh.ppm.app.FocusStartAnchor
@@ -35,6 +46,7 @@ import com.hienlh.ppm.app.ui.EmptyPanel
 import com.hienlh.ppm.app.ui.TabBody
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.workspace.WorkspaceState
 import com.hienlh.ppm.state.workspace.visibleTabs
 
@@ -48,6 +60,45 @@ private const val DOCK_MAX = 0.85f
 
 /** A grid pane's `minSize="15%"`. */
 private const val PANE_MIN = 0.15f
+
+/** Minimum width in dp for a chat pane before portrait splits stack or narrow panes fold (`Tablet 1 · Chat` Notes 103 & 110). */
+internal const val CHAT_PANE_MIN_WIDTH_DP = 420f
+
+/**
+ * Whether a row of [columnCount] split panes should stack top/bottom instead of side-by-side
+ * (`Tablet 1 · Chat` Note 110 / `portraitSplits`): in portrait (`gridWidthDp < gridHeightDp`), or
+ * whenever the available width per column would squeeze panes below [CHAT_PANE_MIN_WIDTH_DP] (420 dp).
+ */
+internal fun shouldStackRowInPortrait(
+    columnCount: Int,
+    gridWidthDp: Float,
+    gridHeightDp: Float,
+): Boolean {
+    if (columnCount <= 1 || gridWidthDp <= 0f || gridHeightDp <= 0f) return false
+    return gridWidthDp < gridHeightDp || (gridWidthDp / columnCount) < CHAT_PANE_MIN_WIDTH_DP
+}
+
+/**
+ * Whether a chat pane's body folds to its tab bar (`Tablet 1 · Chat` Note 103): only when
+ * multiple panes are open (`multiple`), the active tab is a `"chat"` tab, [paneWidthDp] has been
+ * measured (`> 0`), and it is narrower than [CHAT_PANE_MIN_WIDTH_DP] (`420` dp).
+ */
+internal fun shouldFoldChatPaneBody(
+    multiple: Boolean,
+    activeTabType: String?,
+    paneWidthDp: Float,
+): Boolean = multiple && activeTabType == "chat" && paneWidthDp > 0f && paneWidthDp < CHAT_PANE_MIN_WIDTH_DP
+
+/**
+ * Action pill label shown inside a panel's tab drop zone (`Tablet 1 · Chat` Note 105 / `dropZone`).
+ */
+internal fun dropZoneLabel(zone: DropZone): String = when (zone) {
+    DropZone.Left -> "Split left"
+    DropZone.Right -> "Split right"
+    DropZone.Top -> "Split up"
+    DropZone.Bottom -> "Split down"
+    DropZone.Center -> "Move here"
+}
 
 /**
  * What a drag of the dock's handle has set: its [share], which stands for as long as the layout's saved height (in percent) is [began], the
@@ -167,26 +218,61 @@ private fun PanelGrid(model: AppModel, state: WorkspaceState) {
     val grid = state.grid
     val count = grid.sumOf { it.size }
     if (count == 0) return
+    val density = LocalDensity.current
     val rows = remember(grid) { equalShares(grid.size) }
     val columns = remember(grid) { grid.map { equalShares(it.size) } }
+    var gridWidthPx by remember { mutableIntStateOf(0) }
     var height by remember { mutableIntStateOf(0) }
-    Column(Modifier.fillMaxSize().onSizeChanged { height = it.height }) {
+    val gridWidthDp = with(density) { gridWidthPx.toDp().value }
+    val gridHeightDp = with(density) { height.toDp().value }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .onSizeChanged {
+                gridWidthPx = it.width
+                height = it.height
+            },
+    ) {
         grid.forEachIndexed { r, row ->
-            var width by remember(grid) { mutableIntStateOf(0) }
-            Row(Modifier.weight(rows[r]).fillMaxWidth().onSizeChanged { width = it.width }) {
-                row.forEachIndexed { c, panelId ->
-                    key(panelId) {
-                        Box(Modifier.weight(columns[r][c]).fillMaxHeight()) { EditorPanel(model, state, panelId, multiple = count > 1) }
+            val stackInPortrait = shouldStackRowInPortrait(row.size, gridWidthDp, gridHeightDp)
+            var rowExtent by remember(grid, stackInPortrait) { mutableIntStateOf(0) }
+            if (stackInPortrait) {
+                Column(Modifier.weight(rows[r]).fillMaxWidth().onSizeChanged { rowExtent = it.height }) {
+                    row.forEachIndexed { c, panelId ->
+                        key(panelId) {
+                            Box(Modifier.weight(columns[r][c]).fillMaxWidth()) {
+                                EditorPanel(model, state, panelId, multiple = count > 1)
+                            }
+                        }
+                        if (c < row.lastIndex) {
+                            val from = remember { FloatArray(1) }
+                            SplitHandle(
+                                vertical = false,
+                                order = 2 * r,
+                                onDragStart = { from[0] = columns[r][c] },
+                                onDrag = { moved -> rowExtent > 0 && columns[r].place(c, from[0] + moved / rowExtent) },
+                            )
+                        }
                     }
-                    if (c < row.lastIndex) {
-                        val from = remember { FloatArray(1) }
-                        SplitHandle(
-                            vertical = true,
-                            // A row's lines, then the line under the row.
-                            order = 2 * r,
-                            onDragStart = { from[0] = columns[r][c] },
-                            onDrag = { moved -> width > 0 && columns[r].place(c, from[0] + moved / width) },
-                        )
+                }
+            } else {
+                Row(Modifier.weight(rows[r]).fillMaxWidth().onSizeChanged { rowExtent = it.width }) {
+                    row.forEachIndexed { c, panelId ->
+                        key(panelId) {
+                            Box(Modifier.weight(columns[r][c]).fillMaxHeight()) {
+                                EditorPanel(model, state, panelId, multiple = count > 1)
+                            }
+                        }
+                        if (c < row.lastIndex) {
+                            val from = remember { FloatArray(1) }
+                            SplitHandle(
+                                vertical = true,
+                                // A row's lines, then the line under the row.
+                                order = 2 * r,
+                                onDragStart = { from[0] = columns[r][c] },
+                                onDrag = { moved -> rowExtent > 0 && columns[r].place(c, from[0] + moved / rowExtent) },
+                            )
+                        }
                     }
                 }
             }
@@ -226,16 +312,20 @@ private fun SnapshotStateList<Float>.place(index: Int, share: Float): Boolean {
 private fun EditorPanel(model: AppModel, state: WorkspaceState, panelId: String, multiple: Boolean) {
     val panel = state.panels[panelId] ?: return
     val tokens = LocalPpmTokens.current
+    val density = LocalDensity.current
     val focused = state.focusedPanelId == panelId
     // A panel holding only another project's tab shows none, and counts as empty (`visibleTabs`).
     val tabs = visibleTabs(panel.tabs, state.currentProject)
     val drag = LocalTabDrag.current
     val panelAnchor = remember { FocusAnchor() }
     val bodyAnchor = remember { FocusAnchor() }
+    var paneWidthPx by remember { mutableIntStateOf(0) }
+    val paneWidthDp = with(density) { paneWidthPx.toDp().value }
     DisposableEffect(drag, panelId) { onDispose { drag?.areas?.remove(panelId) } }
     Column(
         Modifier
             .fillMaxSize()
+            .onSizeChanged { paneWidthPx = it.width }
             .focusStartArea(panelAnchor)
             .then(
                 if (multiple) {
@@ -253,6 +343,15 @@ private fun EditorPanel(model: AppModel, state: WorkspaceState, panelId: String,
     ) {
         FocusStartAnchor(panelAnchor)
         TabBar(model, panelId, tabs, panel.activeTabId)
+        if (multiple && focused) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(tokens.accent.color)
+                    .testTag("active-panel-indicator"),
+            )
+        }
         // The content is where a dragged tab is dropped (`data-panel-drop-zone`).
         Box(
             Modifier
@@ -263,6 +362,7 @@ private fun EditorPanel(model: AppModel, state: WorkspaceState, panelId: String,
         ) {
             FocusStartAnchor(bodyAnchor)
             val active = tabs.firstOrNull { it.id == panel.activeTabId }
+            val foldedChat = shouldFoldChatPaneBody(multiple = multiple, activeTabType = active?.type, paneWidthDp = paneWidthDp)
             when {
                 tabs.isEmpty() -> EmptyPanel(
                     model,
@@ -270,10 +370,60 @@ private fun EditorPanel(model: AppModel, state: WorkspaceState, panelId: String,
                     panelId = panelId,
                     onClosePanel = if (multiple) ({ model.closePanel(panelId) }) else null,
                 )
+                foldedChat -> FoldedChatPaneNotice()
                 active != null -> key(active.id) { TabBody(model, active) }
             }
             val target = drag?.target
-            if (drag?.tab != null && target?.panelId == panelId) DropHighlight(target.zone)
+            if (drag?.tab != null && target?.panelId == panelId) {
+                DropHighlight(target.zone)
+                DropZoneActionPill(target.zone)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FoldedChatPaneNotice() {
+    val tokens = LocalPpmTokens.current
+    Box(
+        Modifier
+            .fillMaxSize()
+            .testTag("folded-chat-pane")
+            .padding(16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            "Chat pane folded (< 420 dp) — widen split or rotate",
+            style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text3.color),
+        )
+    }
+}
+
+@Composable
+private fun DropZoneActionPill(zone: DropZone) {
+    val tokens = LocalPpmTokens.current
+    val label = dropZoneLabel(zone)
+    Box(Modifier.fillMaxSize()) {
+        val zoneBoxModifier = when (zone) {
+            DropZone.Left -> Modifier.fillMaxHeight().fillMaxWidth(0.5f).align(Alignment.CenterStart)
+            DropZone.Right -> Modifier.fillMaxHeight().fillMaxWidth(0.5f).align(Alignment.CenterEnd)
+            DropZone.Top -> Modifier.fillMaxWidth().fillMaxHeight(0.5f).align(Alignment.TopCenter)
+            DropZone.Bottom -> Modifier.fillMaxWidth().fillMaxHeight(0.5f).align(Alignment.BottomCenter)
+            DropZone.Center -> Modifier.fillMaxSize()
+        }
+        Box(zoneBoxModifier, contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .testTag("drop-zone-pill")
+                    .background(tokens.accent.color, CircleShape)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(
+                    label,
+                    style = ppmText(11f, FontWeight.SemiBold, lineHeight = 14f).copy(color = Color.White),
+                )
+            }
         }
     }
 }

@@ -385,6 +385,11 @@ private fun TranscriptList(
         LocalEditAnchors provides anchors,
         LocalTurnsByCall provides rollups.byCall,
     ) {
+        val mobile = LocalPpmMobile.current
+        var paneWidthPx by remember { mutableIntStateOf(0) }
+        val horizPad = with(density) {
+            readingColumnHorizontalPadding(paneWidthPx.toDp().value, mobile).dp
+        }
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
                 TaskTracker(state.tasks)
@@ -418,7 +423,10 @@ private fun TranscriptList(
                         .weight(1f)
                         .fillMaxWidth()
                         .nestedScroll(scroll.connection)
-                        .onGloballyPositioned { anchors.list = it }
+                        .onGloballyPositioned {
+                            anchors.list = it
+                            paneWidthPx = it.size.width
+                        }
                         .testTag("chat-transcript")
                         .then(fadeModifier)
                         .cssScrollbar(list),
@@ -439,7 +447,7 @@ private fun TranscriptList(
                             } else {
                                 null
                             }
-                            val place = stacked(head + index).replyFlash(flashing == row.item.id, tokens.accent).padding(start = 16.dp, end = 16.dp, top = 16.dp)
+                            val place = stacked(head + index).replyFlash(flashing == row.item.id, tokens.accent).padding(start = horizPad, end = horizPad, top = 16.dp)
                             val compaction = row.item.compaction
                             val message: @Composable (Modifier) -> Unit = { modifier ->
                                 ChatMessageView(
@@ -465,26 +473,45 @@ private fun TranscriptList(
                     if (!live.isNullOrEmpty()) {
                         item(key = LIVE) {
                             CompositionLocalProvider(LocalMarkdownImageScope provides LIVE_SCOPE) {
-                                AssistantBlocks(live, live = state.isRunning, actions = null, modifier = stacked(head + rows.size).padding(start = 16.dp, end = 16.dp, top = 16.dp))
+                                AssistantBlocks(live, live = state.isRunning, actions = null, modifier = stacked(head + rows.size).padding(start = horizPad, end = horizPad, top = 16.dp))
                             }
                         }
                     }
                     idleCache?.let { cold ->
-                        item(key = IDLE_CACHE) { Box(stacked(keys.indexOf(IDLE_CACHE))) { IdleCacheNotice(cold) } }
+                        item(key = IDLE_CACHE) {
+                            Box(stacked(keys.indexOf(IDLE_CACHE)).padding(horizontal = (horizPad - 16.dp).coerceAtLeast(0.dp))) {
+                                IdleCacheNotice(cold)
+                            }
+                        }
                     }
                     if (trailing) {
-                        item(key = TRAILING) { Box(stacked(keys.lastIndex)) { Trailing(state, onRespond, bottomFade = bottomFade) } }
+                        item(key = TRAILING) {
+                            Box(stacked(keys.lastIndex)) {
+                                Trailing(state, onRespond, bottomFade = bottomFade, horizontalPadding = horizPad)
+                            }
+                        }
                     }
                 }
             }
-            ScrollNavigator(
-                nav,
-                goUp = { scope.launch { list.toPreviousMessage(userItems, density, scroll::release) } },
-                goDown = { scope.launch { list.toNextMessage(userItems, density, scroll::toEnd) } },
-                goBottom = { scope.launch { scroll.toEnd() } },
-                jumps = jumps,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = if (overlappedByFooter) 24.dp else 12.dp),
-            )
+            val hasPendingApproval = state.pendingApproval != null
+            if (!hasPendingApproval) {
+                ScrollNavigator(
+                    nav,
+                    goUp = { scope.launch { list.toPreviousMessage(userItems, density, scroll::release) } },
+                    goDown = { scope.launch { list.toNextMessage(userItems, density, scroll::toEnd) } },
+                    goBottom = { scope.launch { scroll.toEnd() } },
+                    jumps = jumps,
+                    alwaysOpen = shouldKeepNavigatorOpen(mobile = mobile, totalMessages = nav.total, hasPendingApproval = false),
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = if (overlappedByFooter) 24.dp else 12.dp),
+                )
+            }
+            waitingApprovalPillLabel(state.pendingApproval, nav.atBottom)?.let { waitingLabel ->
+                WaitingApprovalPill(
+                    label = waitingLabel,
+                    onClick = { scope.launch { scroll.toEnd() } },
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = if (overlappedByFooter) 24.dp else 12.dp),
+                )
+            }
             // Both over the top of the chat, the tracker too; the errors button above the other.
             val earlierError = state.earlierError
             if (earlierError != null && !state.loadingEarlier) {
@@ -731,11 +758,16 @@ private suspend fun LazyListState.toNextMessage(items: List<Int>, density: Densi
 
 /** The approval or question the AI waits on, and the thinking line: there while either is, or a turn runs (`hasTrailing`). */
 @Composable
-private fun Trailing(state: ChatState, onRespond: (ApprovalRequest, Boolean, JsonElement?) -> Unit, bottomFade: Boolean = true) {
+private fun Trailing(
+    state: ChatState,
+    onRespond: (ApprovalRequest, Boolean, JsonElement?) -> Unit,
+    bottomFade: Boolean = true,
+    horizontalPadding: Dp = 16.dp,
+) {
     val indicator = indicatorLabel(state)
     val request = state.pendingApproval
     Column(
-        Modifier.fillMaxWidth().padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = if (bottomFade) 12.dp else 16.dp),
+        Modifier.fillMaxWidth().padding(start = horizontalPadding, top = 16.dp, end = horizontalPadding, bottom = if (bottomFade) 12.dp else 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (request != null) {
@@ -1015,9 +1047,70 @@ private val SHADOW_LG = listOf(
 )
 
 /**
- * The bottom-right puck between the user's own messages (`ChatScrollNav`): a tap opens previous ·
- * position · next · latest, which folds away 3.2 s after the last use. Alt+↑ / Alt+↓ jump the
- * same way and show it for a second.
+ * Horizontal padding for the centered 760 dp reading column (`Tablet 1 · Chat` Note 3 /
+ * `readingColumn = 760px`): on a tablet (`!mobile`), when the pane is wider than `760 + 32 = 792` dp,
+ * messages, cards and notices share a centered 760 dp column while the scroll container, task strip
+ * and footer span the full pane.
+ */
+fun readingColumnHorizontalPadding(paneWidthDp: Float, mobile: Boolean): Float {
+    if (mobile || paneWidthDp <= 792f) return 16f
+    return ((paneWidthDp - 760f) / 2f).coerceAtLeast(16f)
+}
+
+/**
+ * Whether the message navigator column (`ScrollNavigator`) stays expanded without folding into a
+ * puck (`Tablet 1 · Chat` Note 97 / Req 4.4): on a tablet (`!mobile`) whenever there is at least
+ * one user message and no approval/question card is waiting at the bottom.
+ */
+fun shouldKeepNavigatorOpen(mobile: Boolean, totalMessages: Int, hasPendingApproval: Boolean): Boolean =
+    !mobile && totalMessages > 0 && !hasPendingApproval
+
+/**
+ * Tooltip / accessibility description for the message navigator (`Tablet 1 · Chat` Note 97:
+ * `"Message 7 of 48"`).
+ */
+fun navigatorTooltipText(position: Int, total: Int): String =
+    if (total <= 0) "Message 0 of 0" else "Message ${position.coerceIn(1, total)} of $total"
+
+/**
+ * Label for the floating "Needs you" pill shown when the user scrolls away from a waiting
+ * approval or question card at the bottom of the transcript (`Tablet 1 · Chat` Section 5.5).
+ */
+fun waitingApprovalPillLabel(approval: ApprovalRequest?, atBottom: Boolean): String? {
+    if (approval == null || atBottom) return null
+    return if (approval.tool == "AskUserQuestion") {
+        "Waiting for answer"
+    } else {
+        "Waiting for approval · ${approval.tool}"
+    }
+}
+
+@Composable
+private fun WaitingApprovalPill(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val tokens = LocalPpmTokens.current
+    val shape = CircleShape
+    Row(
+        SHADOW_LG.fold(modifier.testTag("chat-needs-you-pill")) { m, shadow -> m.ppmShadow(shadow, shape) }
+            .clip(shape)
+            .background(tokens.warning.color, shape)
+            .ppmClickable(pressedColor = Color.Transparent, shape = shape, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        BasicText(
+            label,
+            style = ppmText(12f, FontWeight.SemiBold, lineHeight = 16f).copy(color = Color(0xFF0A0A0A)),
+        )
+        PpmIcon(ProductIcon.ChevronDown, 14.dp, Color(0xFF0A0A0A))
+    }
+}
+
+/**
+ * The bottom-right puck between the user's own messages (`ChatScrollNav`): on a phone a tap opens
+ * previous · position · next · latest, which folds away 3.2 s after the last use; on a tablet
+ * ([alwaysOpen]) the 44 dp navigator column stays open beside the transcript (`Tablet 1 · Chat`
+ * Note 97 / Req 4.4). Alt+↑ / Alt+↓ jump the same way.
  */
 @Composable
 private fun ScrollNavigator(
@@ -1027,6 +1120,7 @@ private fun ScrollNavigator(
     goBottom: () -> Unit,
     jumps: Flow<Int>,
     modifier: Modifier,
+    alwaysOpen: Boolean = false,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -1034,8 +1128,8 @@ private fun ScrollNavigator(
     var collapseMs by remember { mutableLongStateOf(AUTO_COLLAPSE_MS) }
     // Bumped on every jump, so that the fold waits again even where the position stays.
     var jumpTick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(open, nav.position, jumpTick) {
-        if (!open) return@LaunchedEffect
+    LaunchedEffect(open, nav.position, jumpTick, alwaysOpen) {
+        if (alwaysOpen || !open) return@LaunchedEffect
         delay(collapseMs)
         open = false
     }
@@ -1054,32 +1148,36 @@ private fun ScrollNavigator(
         }
     }
 
+    val shownOpen = alwaysOpen || open
     Box(modifier) {
-        if (open) {
-            val shape = RoundedCornerShape(12.dp)
+        if (shownOpen) {
+            val shape = RoundedCornerShape(if (alwaysOpen) 10.dp else 12.dp)
+            val tooltip = navigatorTooltipText(nav.position, nav.total)
             Column(
-                SHADOW_LG.fold(Modifier as Modifier) { m, shadow -> m.ppmShadow(shadow, shape) }
+                SHADOW_LG.fold(Modifier.testTag("chat-scroll-navigator") as Modifier) { m, shadow -> m.ppmShadow(shadow, shape) }
                     .background(tokens.panel2.opacity(0.95).color, shape)
                     .cssBorder(tokens.border.color, shape)
-                    .padding(3.dp),
+                    .padding(3.dp)
+                    .semantics { contentDescription = tooltip },
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                val rowHeight = if (mobile) 36.dp else 30.dp
-                NavRow(ProductIcon.ChevronUp, 15, rowHeight, enabled = nav.hasAbove, label = "Jump to previous message") {
+                val rowWidth = if (alwaysOpen) 38.dp else 34.dp
+                val rowHeight = if (mobile) 36.dp else if (alwaysOpen) 34.dp else 30.dp
+                NavRow(ProductIcon.ChevronUp, 15, rowWidth, rowHeight, enabled = nav.hasAbove, label = "Jump to previous message") {
                     goUp()
                     jumped()
                 }
                 // `text-[10px]` under preflight's `line-height: 1.5`.
                 BasicText(
                     if (nav.total == 0) "0/0" else "${nav.position.coerceAtLeast(1)}/${nav.total}",
-                    Modifier.padding(vertical = 1.dp),
+                    Modifier.padding(vertical = 1.dp).testTag("chat-scroll-navigator-pos"),
                     ppmText(10f, FontWeight.Medium, FontKind.MONO, lineHeight = 15f).copy(color = tokens.text3.color),
                 )
-                NavRow(ProductIcon.ChevronDown, 15, rowHeight, enabled = !nav.atBottom, label = "Jump to next message") {
+                NavRow(ProductIcon.ChevronDown, 15, rowWidth, rowHeight, enabled = !nav.atBottom, label = "Jump to next message") {
                     goDown()
                     jumped()
                 }
-                NavRow(ProductIcon.ChevronsDown, 13, rowHeight, enabled = !nav.atBottom, label = "Jump to latest") {
+                NavRow(ProductIcon.ChevronsDown, 13, rowWidth, rowHeight, enabled = !nav.atBottom, label = "Jump to latest") {
                     goBottom()
                     jumped()
                 }
@@ -1114,9 +1212,9 @@ private fun ScrollNavigator(
     }
 }
 
-/** `w-[34px] h-[30px] rounded-[9px]` (36 px tall on a phone), the surface and the text colour under a pointer. */
+/** `w-[34px] h-[30px] rounded-[9px]` (36 px tall on a phone, 38×34 on tablet), the surface and the text colour under a pointer. */
 @Composable
-private fun NavRow(icon: ProductIcon, size: Int, height: Dp, enabled: Boolean, label: String, onClick: () -> Unit) {
+private fun NavRow(icon: ProductIcon, size: Int, width: Dp, height: Dp, enabled: Boolean, label: String, onClick: () -> Unit) {
     val tokens = LocalPpmTokens.current
     val hover = remember { MutableInteractionSource() }
     val hovered by hover.collectIsHoveredAsState()
@@ -1124,7 +1222,7 @@ private fun NavRow(icon: ProductIcon, size: Int, height: Dp, enabled: Boolean, l
     val shape = RoundedCornerShape(9.dp)
     Box(
         Modifier
-            .size(width = 34.dp, height = height)
+            .size(width = width, height = height)
             .alpha(if (enabled) 1f else 0.3f)
             .background(tokens.panel2.opacity(lit).color, shape)
             .hoverable(hover, enabled)

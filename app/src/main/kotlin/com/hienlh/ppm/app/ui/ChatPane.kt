@@ -6,6 +6,7 @@ import android.view.DragEvent
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -42,6 +44,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -96,6 +99,7 @@ import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.app.ui.files.ENTRY_DRAG_MIME
 import com.hienlh.ppm.app.ui.files.TREE_PATH_MIME
 import com.hienlh.ppm.app.ui.tablet.dashedBorder
+import com.hienlh.ppm.chat.AgentSessionContent
 import com.hienlh.ppm.chat.AgentSessionOpener
 import com.hienlh.ppm.chat.AsyncQuestions
 import com.hienlh.ppm.chat.BackgroundCommandBar
@@ -122,6 +126,7 @@ import com.hienlh.ppm.client.chatUsage
 import com.hienlh.ppm.client.teamActivity
 import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssSides
+import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
@@ -136,13 +141,16 @@ import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberChromeCaret
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.design.webTitle
+import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.TeamMemberActivity
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.UsageInfo
 import com.hienlh.ppm.protocol.agentTranscriptProvider
 import com.hienlh.ppm.state.AgentActivityWatch
+import com.hienlh.ppm.state.AgentSessionFallbacks
 import com.hienlh.ppm.state.AgentSessionIdentity
+import com.hienlh.ppm.state.AgentSessionPayload
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatState
 import com.hienlh.ppm.state.ReconnectStage
@@ -247,7 +255,25 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
     // The session this chat's Agent cards and running agents belong to (`AgentSessionContext`).
     val currentSessionId = tab.session?.id ?: state.sessionId
     val agentIdentity = AgentSessionIdentity(tab.project, agentTranscriptProvider(tab.providerId), currentSessionId.orEmpty())
-    val agentOpener = remember(agentIdentity) { AgentSessionOpener(agentIdentity, model::openAgentSession) }
+    var dockedAgent by remember(tab.tabId) { mutableStateOf<AgentSessionPayload?>(null) }
+    var dockedFallbacks by remember(tab.tabId) { mutableStateOf(AgentSessionFallbacks()) }
+    var dockWidthDp by remember(tab.tabId) { mutableFloatStateOf(440f) }
+    var preferAgentWindow by remember { mutableStateOf(false) }
+    val openAgentSessionFromChat: (AgentSessionPayload, List<ChatEvent>?) -> Unit = remember(model, mobile, preferAgentWindow) {
+        { payload, fallback ->
+            if (payload.sessionId.isNotEmpty()) {
+                if (fallback != null) dockedFallbacks = dockedFallbacks.with(payload.key, fallback)
+                if (mobile || preferAgentWindow) {
+                    model.openAgentSession(payload, fallback)
+                } else {
+                    dockedAgent = payload
+                }
+            }
+        }
+    }
+    val agentOpener = remember(agentIdentity, openAgentSessionFromChat) {
+        AgentSessionOpener(agentIdentity, openAgentSessionFromChat)
+    }
     // Who is running (`useAgentActivity`), and the team's members (`useTeamActivityFeed`) for their type and start.
     val channel = model.events
     val agentActivity = remember(channel, agentIdentity) {
@@ -353,14 +379,26 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
             }
             .dropZone(shouldStartDragAndDrop = { true }, target = fileDrop),
     ) {
+        val paneWidthDp = maxWidth.value
+        val isPortrait = maxWidth < maxHeight
+        val activeDockedAgent = if (!mobile) dockedAgent else null
+        val dockMode = resolveTabletAgentDockMode(paneWidthDp, isPortrait, preferAgentWindow)
+        val clampedDockWidthDp = clampTabletAgentDockWidth(dockWidthDp, paneWidthDp)
+        val dockedSide = activeDockedAgent != null && dockMode == TabletAgentDockMode.DOCKED_SIDE
+        val effectiveChatWidth = if (dockedSide) (maxWidth - (clampedDockWidthDp + 12f).dp).coerceAtLeast(420.dp) else maxWidth
         // The chat's own `@container`: under 420 px the chips drop their words, under 600 px changes drop line totals.
-        val narrow = maxWidth <= 420.dp
-        val hideChangeTotals = maxWidth <= 600.dp
+        val narrow = effectiveChatWidth <= 420.dp
+        val hideChangeTotals = effectiveChatWidth <= 600.dp
         // `backdrop-blur-sm` under the drop overlay and the edit's: CSS's blur(8px) is Android's at a radius of 13.
         val blurred = if (fileDrop.showing || tab.editForking) Modifier.blur(13.dp) else Modifier
 
         CompositionLocalProvider(LocalFooterPopoverHost provides popoverHost) {
-            Box(Modifier.fillMaxSize().then(blurred)) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .then(if (dockedSide) Modifier.padding(end = (clampedDockWidthDp + 12f).dp) else Modifier)
+                    .then(blurred),
+            ) {
                 CssColumn(Modifier.fillMaxSize()) {
                     if (tab.providerPending) NewChatGateLine(model, tab)
                     BackgroundCommandBar(
@@ -525,7 +563,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                                         unreads = unreads,
                                         unlinkedForChat = unlinkedForChat,
                                         narrow = narrow,
-                                        onOpenAgent = { model.openAgentSession(it.payload(agentIdentity, primaryTeam.orEmpty()), null) },
+                                        onOpenAgent = { openAgentSessionFromChat(it.payload(agentIdentity, primaryTeam.orEmpty()), null) },
                                         onOpenLinkedSession = { view ->
                                             model.openLinkedSession(tab.project, view.sessionId, view.providerId, view.title)
                                         },
@@ -654,8 +692,187 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                 }
             }
         }
+        if (activeDockedAgent != null) {
+            val fallbackEvents = dockedFallbacks[activeDockedAgent.key] ?: model.agentFallbacks[activeDockedAgent.key]
+            val onOpenInWindow = {
+                preferAgentWindow = true
+                dockedAgent = null
+                model.openAgentSession(activeDockedAgent, fallbackEvents)
+            }
+            val onCloseDock = { dockedAgent = null }
+            if (dockMode == TabletAgentDockMode.DOCKED_SIDE) {
+                Row(
+                    Modifier
+                        .align(Alignment.CenterEnd)
+                        .width((clampedDockWidthDp + 12f).dp)
+                        .fillMaxHeight(),
+                ) {
+                    TabletAgentResizeHandle(
+                        onDragDeltaDp = { deltaDp ->
+                            dockWidthDp = clampTabletAgentDockWidth(dockWidthDp - deltaDp, paneWidthDp)
+                        },
+                    )
+                    TabletAgentSidePanel(
+                        payload = activeDockedAgent,
+                        model = model,
+                        fallbackEvents = fallbackEvents,
+                        onOpenInWindow = onOpenInWindow,
+                        onClose = onCloseDock,
+                        modifier = Modifier.width(clampedDockWidthDp.dp).fillMaxHeight(),
+                    )
+                }
+            } else if (dockMode == TabletAgentDockMode.SLIDE_OVER) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.42f))
+                        .testTag("agent-dock-scrim")
+                        .ppmClickable(pressedColor = Color.Transparent, onClick = onCloseDock),
+                )
+                val slideOverWidth = 560.dp.coerceAtMost((maxWidth - 48.dp).coerceAtLeast(320.dp))
+                TabletAgentSidePanel(
+                    payload = activeDockedAgent,
+                    model = model,
+                    fallbackEvents = fallbackEvents,
+                    onOpenInWindow = onOpenInWindow,
+                    onClose = onCloseDock,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .width(slideOverWidth)
+                        .fillMaxHeight(),
+                )
+            }
+        }
         if (fileDrop.showing) DropFilesOverlay()
         if (tab.editForking) EditForkingOverlay()
+    }
+}
+
+/** How an agent session is presented from [ChatPane] on a tablet (`Tablet 1 · Chat` Section 9). */
+internal enum class TabletAgentDockMode {
+    /** Resizable side panel docked to the right of the chat (`320..640` dp, default `440` dp) while keeping chat >= 420 dp. */
+    DOCKED_SIDE,
+    /** 560 dp slide-over panel from the right edge with a dimmed scrim when portrait or pane width < 752 dp (420 + 12 + 320). */
+    SLIDE_OVER,
+    /** Floating window in `WindowLayer` when `preferWindow` is chosen (`Open in window`). */
+    WINDOW,
+}
+
+/**
+ * Resolves how an agent session opened from a tablet chat pane should be displayed (`Tablet 1 · Chat`
+ * Notes 70, 88–92):
+ * - When [preferWindow] is true, opens in `WindowLayer` ([TabletAgentDockMode.WINDOW]).
+ * - In portrait ([isPortrait]) or when the pane is narrower than `752` dp (`420` dp min chat + `12` dp handle + `320` dp min dock),
+ *   slides over the right side with a scrim ([TabletAgentDockMode.SLIDE_OVER]) so the chat is never squeezed below 420 dp.
+ * - Otherwise docks beside the chat ([TabletAgentDockMode.DOCKED_SIDE]).
+ */
+internal fun resolveTabletAgentDockMode(
+    paneWidthDp: Float,
+    isPortrait: Boolean,
+    preferWindow: Boolean,
+): TabletAgentDockMode = when {
+    preferWindow -> TabletAgentDockMode.WINDOW
+    isPortrait || paneWidthDp < 752f -> TabletAgentDockMode.SLIDE_OVER
+    else -> TabletAgentDockMode.DOCKED_SIDE
+}
+
+/**
+ * Clamps the docked agent panel width (`320..640` dp, default `440` dp) while ensuring the parent
+ * chat pane retains at least `420` dp plus the `12` dp resize handle (`Tablet 1 · Chat` Notes 88–89).
+ */
+internal fun clampTabletAgentDockWidth(requestedWidthDp: Float, paneWidthDp: Float): Float {
+    val maxAllowed = (paneWidthDp - 432f).coerceAtMost(640f).coerceAtLeast(320f)
+    return requestedWidthDp.coerceIn(320f, maxAllowed)
+}
+
+@Composable
+private fun TabletAgentResizeHandle(onDragDeltaDp: (Float) -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val density = LocalDensity.current
+    val onDrag by rememberUpdatedState(onDragDeltaDp)
+    Box(
+        Modifier
+            .width(12.dp)
+            .fillMaxHeight()
+            .testTag("agent-dock-resize-handle")
+            .pointerInput(density) {
+                detectHorizontalDragGestures { change, dragAmount ->
+                    change.consume()
+                    onDrag(with(density) { dragAmount.toDp().value })
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.width(1.dp).fillMaxHeight().background(tokens.border.color))
+        Box(
+            Modifier
+                .size(width = 4.dp, height = 36.dp)
+                .background(tokens.text3.opacity(0.35).color, RoundedCornerShape(2.dp)),
+        )
+    }
+}
+
+@Composable
+private fun TabletAgentSidePanel(
+    payload: AgentSessionPayload,
+    model: AppModel,
+    fallbackEvents: List<ChatEvent>?,
+    onOpenInWindow: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalPpmTokens.current
+    val title = payload.title?.takeIf { it.isNotBlank() } ?: "Agent session"
+    Column(
+        modifier
+            .testTag("agent-dock-panel")
+            .background(tokens.panel.color)
+            .cssBorder(tokens.border.color, sides = CssSides.Start),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(42.dp)
+                .background(tokens.panel2.color)
+                .cssBorder(tokens.border.color, sides = CssSides.Bottom)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PpmIcon(ProductIcon.Bot, 14.dp, tokens.accent.color)
+            BasicText(
+                title,
+                Modifier.weight(1f),
+                style = ppmText(12f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.text.color),
+                maxLines = 1,
+            )
+            Box(
+                Modifier
+                    .testTag("agent-dock-open-window")
+                    .background(tokens.panel.color, RoundedCornerShape(6.dp))
+                    .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
+                    .ppmClickable(pressedColor = tokens.panel2.color, shape = RoundedCornerShape(6.dp), onClick = onOpenInWindow)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(
+                    "Open in window",
+                    style = ppmText(11f, FontWeight.Medium, lineHeight = 14f).copy(color = tokens.text2.color),
+                )
+            }
+            Box(
+                Modifier
+                    .size(28.dp)
+                    .testTag("agent-dock-close")
+                    .ppmClickable(pressedColor = tokens.panel.color, shape = RoundedCornerShape(6.dp), onClick = onClose),
+                contentAlignment = Alignment.Center,
+            ) {
+                PpmIcon(ProductIcon.X, 14.dp, tokens.text2.color)
+            }
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            AgentSessionContent(payload, model.events, fallbackEvents)
+        }
     }
 }
 
