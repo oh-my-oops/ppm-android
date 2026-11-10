@@ -6,8 +6,8 @@ import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,19 +20,21 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -47,7 +49,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.app.LocalRedesign
 import com.hienlh.ppm.app.TextInputFocus
+import com.hienlh.ppm.app.ui.phone.terminal.PhoneTerminalActionsSheet
+import com.hienlh.ppm.app.ui.phone.terminal.PhoneTerminalBottomBarMode
+import com.hienlh.ppm.app.ui.phone.terminal.PhoneTerminalExitedBottomBar
+import com.hienlh.ppm.app.ui.phone.terminal.PhoneTerminalSelectionActionsBar
+import com.hienlh.ppm.app.ui.phone.terminal.PhoneTerminalStatusBar
+import com.hienlh.ppm.app.ui.phone.terminal.collectPhoneProjectTerminals
+import com.hienlh.ppm.app.ui.phone.terminal.phoneTerminalIndex
+import com.hienlh.ppm.app.ui.phone.terminal.resolvePhoneTerminalBottomBarMode
+import com.hienlh.ppm.app.ui.phone.terminal.resolvePhoneTerminalTab
+import com.hienlh.ppm.app.ui.phone.terminal.shouldFoldPhoneTerminalBarInLandscape
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTheme
@@ -58,23 +71,111 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.terminal.MobileKey
-import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.state.terminal.TerminalText
+import com.hienlh.ppm.state.workspace.DOCK_PANEL_ID
+import com.hienlh.ppm.state.workspace.SplitDirection
+import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.terminal.TerminalFonts
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import org.connectbot.terminal.ModifierManager
 import org.connectbot.terminal.ComposeController
 import org.connectbot.terminal.ImeShortcutInputMode
-import org.connectbot.terminal.TerminalImeController
-import org.connectbot.terminal.TerminalImeMode
+import org.connectbot.terminal.ModifierManager
 import org.connectbot.terminal.SelectionController
 import org.connectbot.terminal.Terminal
+import org.connectbot.terminal.TerminalImeController
+import org.connectbot.terminal.TerminalImeMode
+
+/**
+ * Moves a terminal tab from the dock into an editor panel or splits it to the right so two
+ * terminals can sit side-by-side (`Tablet 4` Note 73: `"Split terminal uses editor groups"`).
+ */
+internal fun splitTerminalToEditorRight(
+    model: AppModel,
+    tabId: String,
+    sourcePanelId: String,
+) {
+    val state = model.layout ?: return
+    if (sourcePanelId == DOCK_PANEL_ID) {
+        val targetPanelId = state.focusedPanelId.takeIf { it in state.gridPanelIds }
+            ?: state.gridPanelIds.firstOrNull()
+            ?: return
+        val targetTabs = state.panels[targetPanelId]?.tabs.orEmpty()
+        if (targetTabs.isEmpty()) {
+            model.moveTab(tabId, DOCK_PANEL_ID, targetPanelId)
+        } else {
+            model.splitPanel(SplitDirection.Right, tabId, DOCK_PANEL_ID, targetPanelId)
+        }
+    } else {
+        model.splitPanel(SplitDirection.Right, tabId, sourcePanelId, sourcePanelId)
+    }
+}
+
+/**
+ * Moves a terminal tab between the dock (`DOCK_PANEL_ID`) and the focused editor grid panel
+ * (`Tablet 4` Note 73).
+ */
+internal fun toggleTerminalDockOrEditor(
+    model: AppModel,
+    tabId: String,
+    sourcePanelId: String,
+) {
+    val state = model.layout ?: return
+    if (sourcePanelId == DOCK_PANEL_ID) {
+        val targetPanelId = state.focusedPanelId.takeIf { it in state.gridPanelIds }
+            ?: state.gridPanelIds.firstOrNull()
+            ?: return
+        model.moveTab(tabId, DOCK_PANEL_ID, targetPanelId)
+    } else {
+        model.moveTab(tabId, sourcePanelId, DOCK_PANEL_ID)
+        model.setDockVisible(true)
+    }
+}
 
 /** The shell owns its parser outside composition; this view only owns input focus/selection. */
 @Composable
 fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
-    val session = remember(model, tab.id) { model.terminal(tab) } ?: return
+    val isPhoneRedesign = LocalSizeClass.current == SizeClass.Phone && LocalRedesign.current
+    val gridTabs = model.openTabs.map { it.first }
+    val dockTabs = model.dockTabs
+    val activeDockTabId = model.layout?.dockPanel?.activeTabId
+    val projectTerminals = remember(gridTabs, dockTabs, model.selectedProject) {
+        collectPhoneProjectTerminals(gridTabs, dockTabs, model.selectedProject)
+    }
+    val autoResolvedTab = remember(tab, gridTabs, dockTabs, activeDockTabId, model.selectedProject, isPhoneRedesign) {
+        if (isPhoneRedesign) {
+            resolvePhoneTerminalTab(
+                requestedTab = tab,
+                gridTabs = gridTabs,
+                dockTabs = dockTabs,
+                activeDockTabId = activeDockTabId,
+                currentProject = model.selectedProject,
+            )
+        } else {
+            tab
+        }
+    }
+    // User can pick another running terminal from the `⋮` sheet on phone; if a newer terminal or
+    // a pendingCommand arrives from the AI afterwards, automatically switch to that newest terminal.
+    var userPickedTabId by remember(tab.id) { mutableStateOf<String?>(null) }
+    var lastAutoMaxIndex by remember(tab.id) { mutableIntStateOf(phoneTerminalIndex(autoResolvedTab)) }
+    val currentMaxIndex = remember(projectTerminals) {
+        projectTerminals.maxOfOrNull(::phoneTerminalIndex) ?: 0
+    }
+    val hasIncomingPendingCommand = !autoResolvedTab.metaString("pendingCommand").isNullOrEmpty()
+    LaunchedEffect(currentMaxIndex, hasIncomingPendingCommand, autoResolvedTab.id) {
+        if (hasIncomingPendingCommand || currentMaxIndex > lastAutoMaxIndex) {
+            userPickedTabId = null
+            lastAutoMaxIndex = currentMaxIndex
+        }
+    }
+    val effectiveTab = if (isPhoneRedesign && userPickedTabId != null) {
+        projectTerminals.firstOrNull { it.id == userPickedTabId } ?: autoResolvedTab
+    } else {
+        autoResolvedTab
+    }
+
+    val session = remember(model, effectiveTab.id) { model.terminal(effectiveTab) } ?: return
     val state by session.controller.state.collectAsState()
     val tokens = LocalPpmTokens.current
     val theme = LocalPpmTheme.current
@@ -85,16 +186,19 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
     var selection by remember(emulator) { mutableStateOf<SelectionController?>(null) }
     var inputControl by remember(emulator) { mutableStateOf<ComposeController?>(null) }
     var imeController by remember(emulator) { mutableStateOf<TerminalImeController?>(null) }
-    val kb = remember { TerminalKeyboardState() }
+    val kb = remember(effectiveTab.id) { TerminalKeyboardState() }
     LaunchedEffect(emulator) { kb.selecting = false }
     var links by remember { mutableStateOf<List<String>?>(null) }
     var oscLink by remember { mutableStateOf<String?>(null) }
+    var actionsSheetOpen by remember { mutableStateOf(false) }
+    var landscapeBarExpanded by remember { mutableStateOf(false) }
     val modifiers = remember(emulator) { TerminalModifiers() }
-    val focus = remember { FocusRequester() }
+    val focus = remember(effectiveTab.id) { FocusRequester() }
     val visible = LocalWindowContentVisible.current
     val windowFocused = LocalWindowInfo.current.isWindowFocused
     val inputReady = visible && state.connected && state.shellReady && !state.exited && state.error == null
     val focusManager = LocalFocusManager.current
+    val localKeyRowOverride = LocalTerminalKeyRowOverride.current ?: remember { TerminalKeyRowOverrideState() }
     // One for the session's life, not the engine's: the keyboard's pan is given its lambdas when the terminal takes the focus, which an
     // engine replaced afterwards does not repeat.
     val caret = remember(session) { TerminalCaret() }
@@ -115,10 +219,10 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
             releaseFocus = { TextInputFocus.releaseNative(session) },
         )
     }
-    LaunchedEffect(tab.metaString("pendingCommand")) {
-        tab.metaString("pendingCommand")?.takeIf { it.isNotEmpty() }?.let {
+    LaunchedEffect(effectiveTab.id, effectiveTab.metaString("pendingCommand")) {
+        effectiveTab.metaString("pendingCommand")?.takeIf { it.isNotEmpty() }?.let {
             session.pendingCommand = it
-            model.terminalCommandTaken(tab.id)
+            model.terminalCommandTaken(effectiveTab.id)
         }
     }
     LaunchedEffect(state.shellReady, state.connected, session.pendingCommand) {
@@ -130,7 +234,9 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
                 session.pendingCommand = null
                 // Like the web, type it without Enter; the user decides when to execute it.
                 kb.terminalFocused = true
+                kb.keyboardRequested = true
                 runCatching { focus.requestFocus() }
+                imeController?.showKeyboard()
             }
         }
     }
@@ -181,143 +287,300 @@ fun TerminalBody(model: AppModel, tab: WorkspaceTab) {
         model.terminalToChat(draft.text, draft.label, session.project)
         model.toast(ErrorToastMessage("Sent to chat", kind = ErrorToastMessage.Kind.SUCCESS, durationMillis = TERMINAL_TOAST_MS))
     }
+    fun restartShell() {
+        kb.terminalFocused = false
+        kb.keyboardRequested = false
+        session.restart()
+    }
     fun openLink(value: String) = openInBrowser(context, value) {
         model.toast(ErrorToastMessage("No browser is available to open this link"))
     }
-    Column(Modifier.fillMaxSize().background(tokens.bgSolid.color)) {
-        Row(
-            Modifier.fillMaxWidth().background(tokens.panel.color).cssBorder(tokens.border.color, sides = CssSides.Bottom).padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            val color = when { state.exited -> tokens.error; state.connected -> tokens.success; state.reconnecting -> tokens.warning; else -> tokens.error }
-            Box(Modifier.size(8.dp).background(color.color, CircleShape))
-            BasicText(when { state.exited -> "Process exited"; state.connected -> "Connected"; state.reconnecting -> "Reconnecting..."; else -> "Disconnected" }, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color))
-            if (state.exited) TerminalAction("Restart", ProductIcon.RotateCcw, compact = true) {
-                kb.terminalFocused = false
-                kb.keyboardRequested = false
-                session.restart()
+
+    val cwd = effectiveTab.metaString("cwd")
+    val hostPanelId = model.layout?.panelOf(effectiveTab.id)?.id
+
+    CompositionLocalProvider(LocalTerminalKeyRowOverride provides localKeyRowOverride) {
+        BoxWithConstraints(Modifier.fillMaxSize().background(tokens.bgSolid.color)) {
+            val isLandscape = maxWidth > maxHeight
+            val imeUp = kb.imeWasVisible || kb.keyboardRequested
+            LaunchedEffect(isLandscape, imeUp) {
+                if (!isLandscape || !imeUp) landscapeBarExpanded = false
             }
-            Spacer(Modifier.weight(1f))
-            TerminalAction("Chat", ProductIcon.MessageSquare, compact = true, action = ::chat)
-            state.sessionId?.let {
-                BasicText(it, Modifier.weight(1f, fill = false), style = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text3.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-        if (emulator == null) {
-            Spacer(Modifier.weight(1f).fillMaxWidth())
-        } else {
-            key(emulator) {
-                Terminal(
-                    terminalEmulator = emulator,
-                    modifier = Modifier.weight(1f).fillMaxWidth().padding(4.dp)
-                        .pointerInput(session) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                                    if (event.type == PointerEventType.Press) TextInputFocus.pressed(session)
-                                }
+            val foldedInLandscape = isPhoneRedesign && shouldFoldPhoneTerminalBarInLandscape(
+                widthDp = maxWidth.value,
+                heightDp = maxHeight.value,
+                imeVisible = imeUp,
+                manuallyExpanded = landscapeBarExpanded,
+            )
+
+            Column(Modifier.fillMaxSize().background(tokens.bgSolid.color)) {
+                if (isPhoneRedesign) {
+                    PhoneTerminalStatusBar(
+                        state = state,
+                        cwd = cwd,
+                        foldedInLandscape = foldedInLandscape,
+                        canFoldInLandscape = isLandscape && imeUp && landscapeBarExpanded,
+                        onShowFullBar = { landscapeBarExpanded = true },
+                        onFoldBar = { landscapeBarExpanded = false },
+                        onOpenActionsSheet = { actionsSheetOpen = true },
+                        onRetryConnection = { session.controller.foreground() },
+                        onRestart = ::restartShell,
+                    )
+                } else {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(tokens.panel.color)
+                            .cssBorder(tokens.border.color, sides = CssSides.Bottom)
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        val color = when {
+                            state.exited -> tokens.error
+                            state.connected -> tokens.success
+                            state.reconnecting -> tokens.warning
+                            else -> tokens.error
+                        }
+                        Box(Modifier.size(8.dp).background(color.color, CircleShape))
+                        BasicText(
+                            when {
+                                state.exited -> "Process exited"
+                                state.connected -> "Connected"
+                                state.reconnecting -> "Reconnecting..."
+                                else -> "Disconnected"
+                            },
+                            style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+                        )
+                        if (!cwd.isNullOrBlank()) {
+                            BasicText(
+                                "· $cwd",
+                                Modifier.weight(1f, fill = false),
+                                style = ppmText(11.5f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text3.color),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (state.exited) {
+                            TerminalAction("Restart", ProductIcon.RotateCcw, compact = true, action = ::restartShell)
+                        } else if (state.reconnecting || !state.connected) {
+                            TerminalAction("Retry now", ProductIcon.RefreshCw, compact = true) {
+                                session.controller.foreground()
                             }
                         }
-                        .onGloballyPositioned(caret::terminalPlaced)
-                        .onFocusChanged { focusState ->
-                            // A tap on nothing blurs the terminal as it does xterm's textarea: the keyboard goes with the
-                            // focus, and the next tap on the terminal asks for it again like the first one did.
-                            if (focusState.hasFocus) {
-                                kb.terminalFocused = true
-                                TextInputFocus.takeNative(session, focusManager, onBlur = {
-                                    kb.terminalFocused = false
-                                    kb.keyboardRequested = false
-                                    imeController?.hideKeyboard()
-                                }, keep = caret::keysIn, bounds = caret::cursorIn)
-                            } else {
-                                if (TextInputFocus.field !== session && inputReady && !kb.selecting && session.emulator === emulator) {
-                                    kb.terminalFocused = false
-                                    kb.keyboardRequested = false
-                                }
-                                TextInputFocus.releaseNative(session)
-                            }
-                        },
-                    typeface = face, initialFontSize = 13.sp,
-                    backgroundColor = tokens.bgSolid.color, foregroundColor = tokens.text.color,
-                    selectionBackgroundColor = tokens.accentWash.color, selectionForegroundColor = tokens.text.color,
-                    cursorColor = tokens.accent.color, cursorAccent = tokens.bgSolid.color, minimumContrastRatio = 4.5,
-                    keyboardEnabled = kb.keyboardEnabled(inputReady), showSoftKeyboard = kb.showSoftKeyboard(inputReady), focusRequester = focus,
-                    imeMode = TerminalImeMode.CommittedText,
-                    onComposeControllerAvailable = { inputControl = it },
-                    onImeControllerAvailable = { imeController = it },
-                    onImeVisibilityChanged = { imeVisible ->
-                        kb.onImeVisibilityChanged(imeVisible = imeVisible, inputReady = inputReady)
-                    },
-                    // Every tap asks, as the web's touchend does, except in select mode, which raises nothing (it has no touchend).
-                    onTerminalTap = {
-                        kb.onTerminalTap(
-                            askFocus = TextInputFocus::asked,
-                            showKeyboard = { imeController?.showKeyboard() },
-                        )
-                    },
-                    onCursorBoundsChanged = caret::cursorMoved,
-                    modifierManager = modifiers,
-                    onSelectionControllerAvailable = { selection = it },
-                    // Select mode: a one-finger drag selects from where it came down (useTerminalTouchSelection) and does not scroll.
-                    touchSelect = kb.selecting,
-                    selectionActions = { selected ->
-                        TerminalText.selectionContext(selected.getSelectionText())?.let { context ->
-                            FlowRow(
-                                Modifier.shadow(4.dp, RoundedCornerShape(6.dp)).clip(RoundedCornerShape(6.dp))
-                                    .background(tokens.panel.color).cssBorder(tokens.border.color, RoundedCornerShape(6.dp)).padding(2.dp),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                        Spacer(Modifier.weight(1f))
+                        if (model.wide && hostPanelId != null) {
+                            val inDock = hostPanelId == DOCK_PANEL_ID
+                            TerminalAction(
+                                label = if (inDock) "Move to Editor" else "Move to Dock",
+                                icon = if (inDock) ProductIcon.ArrowUpRight else ProductIcon.PanelBottom,
+                                compact = true,
                             ) {
-                                for ((label, newTab) in listOf("Add to current chat" to false, "Add to new chat" to true)) {
-                                    Row(
-                                        Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(4.dp)).background(tokens.panel2.color)
-                                            .ppmClickable(onClickLabel = label, pressedColor = tokens.accent.color) {
-                                                model.terminalToChat(context.text, context.label, session.project, newTab, asContext = true)
-                                                selected.clearSelection()
-                                            }.padding(horizontal = 12.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        PpmIcon(if (newTab) ProductIcon.MessageSquarePlus else ProductIcon.MessageSquare, 16.dp, tokens.text.color)
-                                        BasicText(label, style = ppmText(14f).copy(color = tokens.text.color))
+                                toggleTerminalDockOrEditor(model, effectiveTab.id, hostPanelId)
+                            }
+                            TerminalAction(
+                                label = "Split right",
+                                icon = ProductIcon.Columns2,
+                                compact = true,
+                            ) {
+                                splitTerminalToEditorRight(model, effectiveTab.id, hostPanelId)
+                            }
+                        }
+                        TerminalAction("Chat", ProductIcon.MessageSquare, compact = true, action = ::chat)
+                        state.sessionId?.let {
+                            BasicText(
+                                it,
+                                Modifier.weight(1f, fill = false),
+                                style = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text3.color),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+
+                if (emulator == null) {
+                    Spacer(Modifier.weight(1f).fillMaxWidth())
+                } else {
+                    val outputAlpha = if (state.reconnecting) 0.55f else 1f
+                    key(emulator) {
+                        Terminal(
+                            terminalEmulator = emulator,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .alpha(outputAlpha)
+                                .padding(4.dp)
+                                .pointerInput(session) {
+                                    awaitPointerEventScope {
+                                        while (true) {
+                                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                                            if (event.type == PointerEventType.Press) TextInputFocus.pressed(session)
+                                        }
                                     }
                                 }
-                            }
-                        }
-                    },
-                    onPasteRequest = ::paste,
-                    // A plain address opens at once, as the web's `WebLinksAddon` does; an OSC 8 one asks first, as xterm's own handler does.
-                    onHyperlinkClick = ::openLink,
-                    onOsc8HyperlinkClick = { oscLink = it },
-                )
+                                .onGloballyPositioned(caret::terminalPlaced)
+                                .onFocusChanged { focusState ->
+                                    // A tap on nothing blurs the terminal as it does xterm's textarea: the keyboard goes with the
+                                    // focus, and the next tap on the terminal asks for it again like the first one did.
+                                    if (focusState.hasFocus) {
+                                        kb.terminalFocused = true
+                                        TextInputFocus.takeNative(session, focusManager, onBlur = {
+                                            kb.terminalFocused = false
+                                            kb.keyboardRequested = false
+                                            imeController?.hideKeyboard()
+                                        }, keep = caret::keysIn, bounds = caret::cursorIn)
+                                    } else {
+                                        if (TextInputFocus.field !== session && inputReady && !kb.selecting && session.emulator === emulator) {
+                                            kb.terminalFocused = false
+                                            kb.keyboardRequested = false
+                                        }
+                                        TextInputFocus.releaseNative(session)
+                                    }
+                                },
+                            typeface = face,
+                            initialFontSize = 13.sp,
+                            backgroundColor = tokens.bgSolid.color,
+                            foregroundColor = tokens.text.color,
+                            selectionBackgroundColor = tokens.accentWash.color,
+                            selectionForegroundColor = tokens.text.color,
+                            cursorColor = tokens.accent.color,
+                            cursorAccent = tokens.bgSolid.color,
+                            minimumContrastRatio = 4.5,
+                            keyboardEnabled = kb.keyboardEnabled(inputReady),
+                            showSoftKeyboard = kb.showSoftKeyboard(inputReady),
+                            focusRequester = focus,
+                            imeMode = TerminalImeMode.CommittedText,
+                            onComposeControllerAvailable = { inputControl = it },
+                            onImeControllerAvailable = { imeController = it },
+                            onImeVisibilityChanged = { imeVisible ->
+                                kb.onImeVisibilityChanged(imeVisible = imeVisible, inputReady = inputReady)
+                            },
+                            // Every tap asks, as the web's touchend does, except in select mode, which raises nothing (it has no touchend).
+                            onTerminalTap = {
+                                kb.onTerminalTap(
+                                    askFocus = TextInputFocus::asked,
+                                    showKeyboard = { imeController?.showKeyboard() },
+                                )
+                            },
+                            onCursorBoundsChanged = caret::cursorMoved,
+                            modifierManager = modifiers,
+                            onSelectionControllerAvailable = { selection = it },
+                            // Select mode: a one-finger drag selects from where it came down (useTerminalTouchSelection) and does not scroll.
+                            touchSelect = kb.selecting,
+                            selectionActions = { selected ->
+                                TerminalText.selectionContext(selected.getSelectionText())?.let { selContext ->
+                                    PhoneTerminalSelectionActionsBar(
+                                        onAddToCurrentChat = {
+                                            model.terminalToChat(selContext.text, selContext.label, session.project, newTab = false, asContext = true)
+                                            selected.clearSelection()
+                                        },
+                                        onAddToNewChat = {
+                                            model.terminalToChat(selContext.text, selContext.label, session.project, newTab = true, asContext = true)
+                                            selected.clearSelection()
+                                        },
+                                        onCopy = {
+                                            copy()
+                                            selected.clearSelection()
+                                        },
+                                    )
+                                }
+                            },
+                            onPasteRequest = ::paste,
+                            // A plain address opens at once, as the web's `WebLinksAddon` does; an OSC 8 one asks first, as xterm's own handler does.
+                            onHyperlinkClick = ::openLink,
+                            onOsc8HyperlinkClick = { oscLink = it },
+                        )
+                    }
+                }
+
+                val bottomMode = if (isPhoneRedesign) {
+                    resolvePhoneTerminalBottomBarMode(state)
+                } else {
+                    PhoneTerminalBottomBarMode.KeyRow
+                }
+                when (bottomMode) {
+                    PhoneTerminalBottomBarMode.ExitedRestartBar -> {
+                        PhoneTerminalExitedBottomBar(
+                            isError = false,
+                            cwd = cwd,
+                            sessionId = state.sessionId,
+                            onRestart = ::restartShell,
+                            modifier = Modifier.onGloballyPositioned(caret::keysPlaced),
+                        )
+                    }
+                    PhoneTerminalBottomBarMode.ErrorRestartBar -> {
+                        PhoneTerminalExitedBottomBar(
+                            isError = true,
+                            errorMessage = state.error,
+                            cwd = cwd,
+                            sessionId = state.sessionId,
+                            onRestart = ::restartShell,
+                            modifier = Modifier.onGloballyPositioned(caret::keysPlaced),
+                        )
+                    }
+                    PhoneTerminalBottomBarMode.KeyRow -> {
+                        TerminalMobileToolbar(
+                            ctrlMode = modifiers.ctrl,
+                            onToggleCtrl = {
+                                focusTerminal()
+                                modifiers.ctrl = MobileKey.Ctrl.press(modifiers.ctrl).ctrlArmed
+                            },
+                            selectMode = kb.selecting,
+                            // Like the web's, it selects nothing by itself: the drag does, and a selection outlives the mode.
+                            onToggleSelect = {
+                                kb.onToggleSelect(hideKeyboard = { imeController?.hideKeyboard() })
+                            },
+                            onKey = { key, repeated ->
+                                if (!repeated) {
+                                    focusTerminal()
+                                    imeController?.finishBeforeExternalInput()
+                                }
+                                val press = key.press(modifiers.ctrl)
+                                modifiers.ctrl = press.ctrlArmed
+                                press.keystroke?.let(session::sendKey)
+                            },
+                            onCopy = ::copy,
+                            onPaste = ::paste,
+                            onSendToChat = ::chat,
+                            onOpenLinks = { links = session.bufferUrls() },
+                            phoneKeyRowMode = isPhoneRedesign,
+                            forceVisible = localKeyRowOverride.forceVisible,
+                            modifier = Modifier.onGloballyPositioned(caret::keysPlaced),
+                        )
+                    }
+                }
             }
         }
-        TerminalMobileToolbar(
-            ctrlMode = modifiers.ctrl,
-            onToggleCtrl = {
-                focusTerminal()
-                modifiers.ctrl = MobileKey.Ctrl.press(modifiers.ctrl).ctrlArmed
-            },
+    }
+
+    if (actionsSheetOpen) {
+        val currentSelection = selection?.getSelectionText().orEmpty()
+        val detectedUrls = remember(session, actionsSheetOpen) { session.bufferUrls() }
+        PhoneTerminalActionsSheet(
+            sessionId = state.sessionId,
+            cwd = cwd,
+            hasSelection = currentSelection.isNotEmpty(),
             selectMode = kb.selecting,
-            // Like the web's, it selects nothing by itself: the drag does, and a selection outlives the mode.
+            linkCount = detectedUrls.size,
+            exited = state.exited,
+            projectTerminals = projectTerminals,
+            activeTerminalId = effectiveTab.id,
+            onCopy = ::copy,
+            onPaste = ::paste,
             onToggleSelect = {
                 kb.onToggleSelect(hideKeyboard = { imeController?.hideKeyboard() })
             },
-            onKey = { key, repeated ->
-                if (!repeated) {
-                    focusTerminal()
-                    imeController?.finishBeforeExternalInput()
-                }
-                val press = key.press(modifiers.ctrl)
-                modifiers.ctrl = press.ctrlArmed
-                press.keystroke?.let(session::sendKey)
-            },
-            onCopy = ::copy,
-            onPaste = ::paste,
+            onOpenLinks = { links = detectedUrls },
             onSendToChat = ::chat,
-            onOpenLinks = { links = session.bufferUrls() },
-            modifier = Modifier.onGloballyPositioned(caret::keysPlaced),
+            onRestart = ::restartShell,
+            onSelectTerminal = { chosen ->
+                userPickedTabId = chosen.id
+            },
+            onDismiss = { actionsSheetOpen = false },
         )
     }
+
     oscLink?.let { uri -> Osc8LinkConfirm(uri, open = ::openLink, onDismiss = { oscLink = null }) }
     links?.let { urls ->
         TerminalLinksSheet(
@@ -437,16 +700,24 @@ private class TerminalModifiers : ModifierManager {
 private fun TerminalAction(label: String, icon: ProductIcon? = null, compact: Boolean = false, action: () -> Unit) {
     val tokens = LocalPpmTokens.current
     Row(
-        Modifier.heightIn(min = if (compact) 20.dp else 44.dp)
+        Modifier
+            .heightIn(min = if (compact) 20.dp else 44.dp)
             .then(if (compact) Modifier else Modifier.width(44.dp))
             .clip(RoundedCornerShape(4.dp))
             .background(tokens.panel2.color)
             .ppmClickable(onClickLabel = label, pressedColor = tokens.accent.color, onClick = action)
             .padding(horizontal = if (compact) 6.dp else 0.dp, vertical = if (compact) 2.dp else 0.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
         val color = tokens.text.color
         if (icon != null) PpmIcon(icon, if (compact) 10.dp else 16.dp, color)
-        if (icon == null || compact) BasicText(label, Modifier.then(if (icon != null) Modifier.padding(start = 4.dp) else Modifier), style = ppmText(12f, kind = if (icon == null) FontKind.MONO else FontKind.SANS, lineHeight = 16f).copy(color = color))
+        if (icon == null || compact) {
+            BasicText(
+                label,
+                Modifier.then(if (icon != null) Modifier.padding(start = 4.dp) else Modifier),
+                style = ppmText(12f, kind = if (icon == null) FontKind.MONO else FontKind.SANS, lineHeight = 16f).copy(color = color),
+            )
+        }
     }
 }
