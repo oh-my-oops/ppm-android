@@ -135,6 +135,7 @@ import kotlinx.serialization.json.put
 fun DatabaseSidebarPane(
     model: AppModel,
     onNavigate: () -> Unit = {},
+    readOnly: Boolean = LocalPpmMobile.current,
 ) {
     val api = model.api
     val scope = rememberCoroutineScope()
@@ -404,6 +405,7 @@ fun DatabaseSidebarPane(
                         if (dbParam != null) put("database", dbParam)
                         put("tableName", item.name)
                         if (item.schema != null) put("schema", item.schema)
+                        if (readOnly || conn.readonly == 1) put("readonly", true)
                     },
                 )
                 onNavigate()
@@ -442,7 +444,7 @@ fun DatabaseSidebarPane(
                         put("dbType", conn.type)
                         put("tableName", item.name)
                         if (item.schema != null) put("schema", item.schema)
-                        put("readonly", conn.readonly == 1)
+                        put("readonly", readOnly || conn.readonly == 1)
                     },
                 )
                 onNavigate()
@@ -483,6 +485,7 @@ fun DatabaseSidebarPane(
                 )
                 onNavigate()
             },
+            readOnly = readOnly,
         )
     }
 }
@@ -535,6 +538,7 @@ internal fun DatabaseSidebarContent(
     onOpenObjectStructure: (DbObjectItem) -> Unit = {},
     onNewTable: () -> Unit = {},
     onOpenImpExp: (mode: String?, tableName: String?) -> Unit = { _, _ -> },
+    readOnly: Boolean = false,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -613,41 +617,52 @@ internal fun DatabaseSidebarContent(
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (readOnly) {
+                    BasicText(
+                        "Read-only",
+                        style = ppmText(10f, FontWeight.SemiBold, kind = FontKind.MONO, lineHeight = 14f)
+                            .copy(color = tokens.text3.color),
+                        modifier = Modifier.testTag("db-sidebar-readonly-badge"),
+                    )
+                }
                 SettingsButton(
                     label = "+ Query",
                     modifier = Modifier.testTag("db-new-query-btn"),
                     onClick = onNewQuery,
                 )
-                SettingsButton(
-                    label = "+ Table",
-                    modifier = Modifier.testTag("db-new-table-btn"),
-                    onClick = onNewTable,
-                )
-                SettingsButton(
-                    label = "Imp/Exp",
-                    modifier = Modifier.testTag("db-open-impexp-btn"),
-                    onClick = { onOpenImpExp(null, null) },
-                )
-                SettingsButton(
-                    label = "+ Folder",
-                    modifier = Modifier.testTag("db-new-folder-btn"),
-                    onClick = {
-                        creatingFolder = !creatingFolder
-                        newFolderName = ""
-                    },
-                )
-                SettingsButton(
-                    label = "Export",
-                    modifier = Modifier.testTag("db-export-btn"),
-                    onClick = { showExportWarning = true },
-                )
-                SettingsButton(
-                    label = "+ Connection",
-                    primary = true,
-                    modifier = Modifier.testTag("db-new-connection-btn"),
-                    onClick = onNewConnection,
-                )
+                if (!readOnly) {
+                    SettingsButton(
+                        label = "+ Table",
+                        modifier = Modifier.testTag("db-new-table-btn"),
+                        onClick = onNewTable,
+                    )
+                    SettingsButton(
+                        label = "Imp/Exp",
+                        modifier = Modifier.testTag("db-open-impexp-btn"),
+                        onClick = { onOpenImpExp(null, null) },
+                    )
+                    SettingsButton(
+                        label = "+ Folder",
+                        modifier = Modifier.testTag("db-new-folder-btn"),
+                        onClick = {
+                            creatingFolder = !creatingFolder
+                            newFolderName = ""
+                        },
+                    )
+                    SettingsButton(
+                        label = "Export",
+                        modifier = Modifier.testTag("db-export-btn"),
+                        onClick = { showExportWarning = true },
+                    )
+                    SettingsButton(
+                        label = "+ Connection",
+                        primary = true,
+                        modifier = Modifier.testTag("db-new-connection-btn"),
+                        onClick = onNewConnection,
+                    )
+                }
             }
         }
 
@@ -871,12 +886,20 @@ internal fun DatabaseSidebarContent(
                                             )
                                             val missingDriver = st.missingDriverId
                                             if (missingDriver != null) {
-                                                SettingsButton(
-                                                    label = "Install Driver",
-                                                    primary = true,
-                                                    modifier = Modifier.testTag("db-install-driver-$missingDriver"),
-                                                    onClick = { onInstallDriver(missingDriver) },
-                                                )
+                                                if (readOnly) {
+                                                    BasicText(
+                                                        "Install the driver on a tablet.",
+                                                        style = ppmText(10f, lineHeight = 14f).copy(color = tokens.text3.color),
+                                                        modifier = Modifier.testTag("db-readonly-driver-tablet-note"),
+                                                    )
+                                                } else {
+                                                    SettingsButton(
+                                                        label = "Install Driver",
+                                                        primary = true,
+                                                        modifier = Modifier.testTag("db-install-driver-$missingDriver"),
+                                                        onClick = { onInstallDriver(missingDriver) },
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -895,20 +918,31 @@ internal fun DatabaseSidebarContent(
                                                     onSelectDbRef(c.singleDbRef ?: DbRef(c.id, null), true)
                                                 },
                                             )
-                                            SettingsButton(
-                                                label = "Edit",
-                                                onClick = {
-                                                    menuConn = null
-                                                    onEditConnection(c)
-                                                },
-                                            )
-                                            SettingsButton(
-                                                label = "Duplicate",
-                                                onClick = {
-                                                    menuConn = null
-                                                    onDuplicateConnection(c.id)
-                                                },
-                                            )
+                                            if (readOnly) {
+                                                SettingsButton(
+                                                    label = "New query",
+                                                    onClick = {
+                                                        menuConn = null
+                                                        onNewQuery()
+                                                    },
+                                                )
+                                            }
+                                            if (!readOnly) {
+                                                SettingsButton(
+                                                    label = "Edit",
+                                                    onClick = {
+                                                        menuConn = null
+                                                        onEditConnection(c)
+                                                    },
+                                                )
+                                                SettingsButton(
+                                                    label = "Duplicate",
+                                                    onClick = {
+                                                        menuConn = null
+                                                        onDuplicateConnection(c.id)
+                                                    },
+                                                )
+                                            }
                                             SettingsButton(
                                                 label = "Disconnect",
                                                 onClick = {
@@ -916,13 +950,15 @@ internal fun DatabaseSidebarContent(
                                                     onDisconnectConnection(c.id)
                                                 },
                                             )
-                                            SettingsButton(
-                                                label = "Delete",
-                                                onClick = {
-                                                    menuConn = null
-                                                    onDeleteConnection(c.id)
-                                                },
-                                            )
+                                            if (!readOnly) {
+                                                SettingsButton(
+                                                    label = "Delete",
+                                                    onClick = {
+                                                        menuConn = null
+                                                        onDeleteConnection(c.id)
+                                                    },
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -954,6 +990,15 @@ internal fun DatabaseSidebarContent(
                             else -> {}
                         }
                     }
+                }
+                if (readOnly) {
+                    BasicText(
+                        "Add or edit connections on a tablet.",
+                        style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+                        modifier = Modifier
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .testTag("db-readonly-connections-tablet-note"),
+                    )
                 }
             }
         }
@@ -1149,7 +1194,7 @@ internal fun DatabaseSidebarContent(
                                                 style = ppmText(10f, kind = FontKind.MONO, lineHeight = 13f).copy(color = tokens.text3.color),
                                             )
                                         }
-                                        if (row.expandable) {
+                                        if (row.expandable && !readOnly) {
                                             Box(
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(4.dp))

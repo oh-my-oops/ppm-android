@@ -30,7 +30,7 @@ internal sealed interface DeviceToolCall {
     data class RunInTerminal(val command: String, val cwd: String? = null) : DeviceToolCall
 }
 
-internal data class DbToolCall(
+data class DbToolCall(
     val tool: String,
     val connection: String,
     val sql: String,
@@ -40,7 +40,10 @@ internal data class DbToolCall(
 )
 
 internal const val OPEN_URL_TOOL = "open_url"
-internal const val DB_EXECUTE_TOOL = "db_execute"
+const val OPEN_QUERY_TOOL = "open_query"
+const val DB_QUERY_TOOL = "db_query"
+const val DB_EXECUTE_TOOL = "db_execute"
+const val DB_EXECUTE_APPROVAL = "ppm:db_execute"
 
 private val TAB_TOOL_NAME = Regex("""(?:mcp__ppm-tabs__|ppm_tabs:)(open_file|open_preview)""")
 private val DEVICE_TOOL_NAME = Regex("""(?:mcp__ppm-tabs__|ppm_tabs:)(open_url|read_terminal|run_in_terminal)""")
@@ -50,7 +53,7 @@ private val DB_TOOL_NAME = Regex("""(?:mcp__ppm-db__|ppm_db:)(db_query|open_quer
 private const val MAX_TAB_LINE = 10_000_000
 
 /** What each database tool does, as its card names it (`DB_TOOL_LABELS`). */
-internal val DB_TOOL_LABELS = mapOf("db_query" to "Database query", "open_query" to "Open query", "db_execute" to "Database change")
+val DB_TOOL_LABELS = mapOf("db_query" to "Database query", "open_query" to "Open query", "db_execute" to "Database change")
 
 private fun JsonElement?.text(): String? = (this as? JsonPrimitive)?.takeIf { it.isString }?.content
 
@@ -89,10 +92,10 @@ internal fun deviceToolCall(name: String, input: JsonElement?): DeviceToolCall? 
 }
 
 /** The database tool a tool name is, under either provider's name, or null. */
-internal fun dbToolOf(name: String): String? = DB_TOOL_NAME.matchEntire(name)?.groupValues?.get(1)
+fun dbToolOf(name: String): String? = DB_TOOL_NAME.matchEntire(name)?.groupValues?.get(1)
 
 /** The database tool call an event is, under either provider's name, or null. */
-internal fun dbToolCall(name: String, input: JsonElement?): DbToolCall? {
+fun dbToolCall(name: String, input: JsonElement?): DbToolCall? {
     val tool = dbToolOf(name) ?: return null
     if (input !is JsonObject) return null
     val args = (input["arguments"] as? JsonObject) ?: input
@@ -106,6 +109,48 @@ internal fun dbToolCall(name: String, input: JsonElement?): DbToolCall? {
         reason = args["reason"].text()?.takeIf { it.isNotEmpty() },
         expectedRows = args["expected_rows"].number(),
     )
+}
+
+data class DbExecuteApprovalInput(
+    val connection: String,
+    val database: String? = null,
+    val sql: String,
+    val reason: String,
+    val expectedRows: Double? = null,
+    val dbType: String? = null,
+)
+
+/** Extract approval card payload for `ppm:db_execute` (`db-execute-approval-card.tsx`). */
+fun dbExecuteApprovalInput(input: JsonElement?): DbExecuteApprovalInput? {
+    if (input !is JsonObject) return null
+    val args = (input["arguments"] as? JsonObject) ?: input
+    val connection = args["connection"].text()?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val sql = args["sql"].text()?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val reason = args["reason"].text()?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return DbExecuteApprovalInput(
+        connection = connection,
+        database = args["database"].text()?.trim()?.takeIf { it.isNotEmpty() },
+        sql = sql,
+        reason = reason,
+        expectedRows = args["expected_rows"].number() ?: args["expectedRows"].number(),
+        dbType = args["dbType"].text()?.trim()?.takeIf { it.isNotEmpty() },
+    )
+}
+
+private val DDL_SELF_COMMIT_AFTER = Regex(
+    """(?:^|;)\s*(?:CREATE|ALTER|DROP|TRUNCATE|RENAME)\b[\s\S]*?;\s*\S""",
+    RegexOption.IGNORE_CASE,
+)
+
+/** Whether a script contains DDL statements that auto-commit before a subsequent statement on MySQL/MariaDB. */
+fun commitsByItself(sql: String): Boolean = DDL_SELF_COMMIT_AFTER.containsMatchIn(sql)
+
+/** Warning note shown on `ppm:db_execute` approval cards for MySQL/MariaDB scripts with auto-committing DDL. */
+fun selfCommitNote(dbType: String?, sql: String): String? {
+    val normalized = dbType?.trim()?.lowercase()
+    if (normalized != "mysql" && normalized != "mariadb") return null
+    if (!commitsByItself(sql)) return null
+    return "MySQL and MariaDB commit CREATE, ALTER, DROP, TRUNCATE and RENAME by themselves, with everything before them. If a later statement fails, only what follows the last one is rolled back."
 }
 
 /** How Codex's events label an image block of a result (`mcpResultText`). */

@@ -1615,8 +1615,15 @@ fun PhoneRowFormSheet(
                     },
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (!readonly) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (readonly) {
+                    BasicText(
+                        "Read-only",
+                        style = ppmText(10f, FontWeight.SemiBold, kind = FontKind.MONO, lineHeight = 14f)
+                            .copy(color = tokens.text3.color),
+                        modifier = Modifier.testTag("db-phone-form-readonly-badge"),
+                    )
+                } else {
                     SettingsButton(
                         label = "Save",
                         primary = true,

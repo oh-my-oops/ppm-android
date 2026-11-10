@@ -501,6 +501,7 @@ fun DatabaseQueryTabBody(model: AppModel, tab: WorkspaceTab) {
                 setUnsavedGridRows(tab.id, count, slot = "query-results")
                 model.patchTabMetadata(tab.id, "unsavedGridRows" to if (count > 0) JsonPrimitive(count) else null)
             },
+            readOnly = LocalPpmMobile.current,
         )
     }
 }
@@ -520,6 +521,7 @@ internal fun DatabaseQueryTabContent(
     dbType: String = "postgres",
     database: String? = null,
     readonlyConnection: Boolean = false,
+    readOnly: Boolean = false,
     connections: List<TreeConnection> = emptyList(),
     databases: List<String> = emptyList(),
     schemas: List<String> = emptyList(),
@@ -1022,6 +1024,14 @@ internal fun DatabaseQueryTabContent(
                             onClick = { showHistoryPanel = !showHistoryPanel },
                         )
                     }
+                    if (readOnly) {
+                        BasicText(
+                            "Read-only",
+                            style = ppmText(10f, FontWeight.SemiBold, kind = FontKind.MONO, lineHeight = 14f)
+                                .copy(color = tokens.text3.color),
+                            modifier = Modifier.testTag("db-query-readonly-badge"),
+                        )
+                    }
                 } else {
                     // Phone compact top bar actions: Format, Save, History
                     SettingsButton(
@@ -1040,6 +1050,14 @@ internal fun DatabaseQueryTabContent(
                             primary = showHistoryPanel,
                             modifier = Modifier.testTag("db-query-history-btn"),
                             onClick = { showHistoryPanel = !showHistoryPanel },
+                        )
+                    }
+                    if (readOnly) {
+                        BasicText(
+                            "Read-only",
+                            style = ppmText(10f, FontWeight.SemiBold, kind = FontKind.MONO, lineHeight = 14f)
+                                .copy(color = tokens.text3.color),
+                            modifier = Modifier.testTag("db-query-readonly-badge"),
                         )
                     }
                 }
@@ -1138,12 +1156,20 @@ internal fun DatabaseQueryTabContent(
                         "Driver $missingDriverId is not installed.",
                         style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.error.color),
                     )
-                    SettingsButton(
-                        label = "Install Driver",
-                        primary = true,
-                        modifier = Modifier.testTag("db-query-install-driver-btn"),
-                        onClick = { onInstallMissingDriver(missingDriverId!!) },
-                    )
+                    if (readOnly) {
+                        BasicText(
+                            "Install the driver on a tablet.",
+                            style = ppmText(11f, lineHeight = 14f).copy(color = tokens.text3.color),
+                            modifier = Modifier.testTag("db-readonly-driver-tablet-note"),
+                        )
+                    } else {
+                        SettingsButton(
+                            label = "Install Driver",
+                            primary = true,
+                            modifier = Modifier.testTag("db-query-install-driver-btn"),
+                            onClick = { onInstallMissingDriver(missingDriverId!!) },
+                        )
+                    }
                 }
             }
 
@@ -1436,12 +1462,20 @@ internal fun DatabaseQueryTabContent(
                             }
 
                             if (readonlyRefused) {
-                                SettingsButton(
-                                    label = "Run with write access (once)",
-                                    primary = true,
-                                    modifier = Modifier.testTag("db-query-write-once-btn"),
-                                    onClick = { showWriteOnceDialog = true },
-                                )
+                                if (readOnly) {
+                                    BasicText(
+                                        "Run it with write access on a tablet.",
+                                        style = ppmText(11f, lineHeight = 14f).copy(color = tokens.text3.color),
+                                        modifier = Modifier.testTag("db-query-readonly-tablet-note"),
+                                    )
+                                } else {
+                                    SettingsButton(
+                                        label = "Run with write access (once)",
+                                        primary = true,
+                                        modifier = Modifier.testTag("db-query-write-once-btn"),
+                                        onClick = { showWriteOnceDialog = true },
+                                    )
+                                }
                             }
                         }
 
@@ -1468,13 +1502,14 @@ internal fun DatabaseQueryTabContent(
                                         tableCols,
                                         extracted,
                                         readonlyConnection,
+                                        readOnly,
                                         currentRun?.kind,
                                     ) {
                                         resultEditability(
                                             resultColumns = resultSet.columns,
                                             tableColumns = tableCols,
                                             source = extracted,
-                                            readonly = readonlyConnection,
+                                            readonly = readonlyConnection || readOnly,
                                             explain = currentRun?.kind == "explain",
                                         )
                                     }
@@ -1513,6 +1548,7 @@ internal fun DatabaseQueryTabContent(
                                                     },
                                                 ),
                                                 readonlyEnabled = editability !is ResultEditability.Editable,
+                                                readOnly = readOnly,
                                                 onChangesetDirtyChanged = { dirty ->
                                                     dirtyResultTabs[shownTab] = dirty
                                                 },
