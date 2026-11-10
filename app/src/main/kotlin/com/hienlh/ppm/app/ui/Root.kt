@@ -161,7 +161,7 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
                 Box(Modifier.fillMaxSize().then(if (blurred) Modifier.blur(13.dp) else Modifier)) {
                     when {
                         !model.hasServer -> ConnectScreen(model, signIn = false)
-                        sizeClass == SizeClass.Phone -> PhoneShell(model)
+                        sizeClass == SizeClass.Phone -> if (redesign) com.hienlh.ppm.app.ui.phone.PhoneShell(model) else PhoneShell(model)
                         else -> TabletShell(model)
                     }
                     model.screenOverlay?.let { overlay ->
