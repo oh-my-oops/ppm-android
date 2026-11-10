@@ -535,7 +535,7 @@ enum class SessionRowActionKind {
 /**
  * Descriptor for a single row action on a [SessionInfo] item.
  */
-data class SessionRowAction(
+data class HistoryRowAction(
     val kind: SessionRowActionKind,
     val label: String,
     val destructive: Boolean = false,
@@ -648,14 +648,14 @@ object HistoryByDay {
      * Returns the 3 left-swipe actions (`76 dp` each) for a session row (Phone 1 Section 7 G2):
      * `Pin` / `Unpin`, `Rename`, and `Delete`.
      */
-    fun swipeActionsForSession(session: SessionInfo): List<SessionRowAction> = listOf(
+    fun swipeActionsForSession(session: SessionInfo): List<HistoryRowAction> = listOf(
         if (session.pinned) {
-            SessionRowAction(SessionRowActionKind.UNPIN, "Unpin")
+            HistoryRowAction(SessionRowActionKind.UNPIN, "Unpin")
         } else {
-            SessionRowAction(SessionRowActionKind.PIN, "Pin")
+            HistoryRowAction(SessionRowActionKind.PIN, "Pin")
         },
-        SessionRowAction(SessionRowActionKind.RENAME, "Rename"),
-        SessionRowAction(SessionRowActionKind.DELETE, "Delete", destructive = true),
+        HistoryRowAction(SessionRowActionKind.RENAME, "Rename"),
+        HistoryRowAction(SessionRowActionKind.DELETE, "Delete", destructive = true),
     )
 
     /**
@@ -666,22 +666,22 @@ object HistoryByDay {
         session: SessionInfo,
         isUnread: Boolean = false,
         hasTags: Boolean = true,
-    ): List<SessionRowAction> = buildList {
+    ): List<HistoryRowAction> = buildList {
         add(
             if (session.pinned) {
-                SessionRowAction(SessionRowActionKind.UNPIN, "Unpin")
+                HistoryRowAction(SessionRowActionKind.UNPIN, "Unpin")
             } else {
-                SessionRowAction(SessionRowActionKind.PIN, "Pin")
+                HistoryRowAction(SessionRowActionKind.PIN, "Pin")
             },
         )
         if (!isUnread) {
-            add(SessionRowAction(SessionRowActionKind.MARK_UNREAD, "Mark as unread"))
+            add(HistoryRowAction(SessionRowActionKind.MARK_UNREAD, "Mark as unread"))
         }
-        add(SessionRowAction(SessionRowActionKind.RENAME, "Rename"))
+        add(HistoryRowAction(SessionRowActionKind.RENAME, "Rename"))
         if (hasTags) {
-            add(SessionRowAction(SessionRowActionKind.SET_TAG, "Set Tag"))
+            add(HistoryRowAction(SessionRowActionKind.SET_TAG, "Set Tag"))
         }
-        add(SessionRowAction(SessionRowActionKind.DELETE, "Delete", destructive = true))
+        add(HistoryRowAction(SessionRowActionKind.DELETE, "Delete", destructive = true))
     }
 
     /** Formats the subtitle line of a 68 dp phone session row (Phone 1 Section 7 G1). */

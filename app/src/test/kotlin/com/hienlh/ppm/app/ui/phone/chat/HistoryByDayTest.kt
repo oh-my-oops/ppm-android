@@ -14,7 +14,8 @@ import com.hienlh.ppm.app.ui.SessionRowActionKind
 import com.hienlh.ppm.chat.SessionDebugKeyValueCard
 import com.hienlh.ppm.chat.debugInfoFields
 import com.hienlh.ppm.chat.middleEllipsis
-import com.hienlh.ppm.design.PpmTheme
+import com.hienlh.ppm.design.BuiltInThemes
+import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.protocol.SessionDebugInfo
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionTag
@@ -33,8 +34,10 @@ import java.time.ZoneId
 @Config(sdk = [34], qualifiers = "w390dp-h844dp")
 class HistoryByDayTest {
 
+    private val composeRule = createComposeRule()
+
     @get:Rule
-    val composeRule = createComposeRule()
+    val rules: org.junit.rules.RuleChain = com.hienlh.ppm.app.withComposeActivity(composeRule)
 
     private val zone = ZoneId.of("Asia/Ho_Chi_Minh")
     private val now = Instant.parse("2026-04-17T08:00:00Z") // 2026-04-17 15:00 +07
@@ -188,7 +191,7 @@ class HistoryByDayTest {
         var deletedId: String? = null
 
         composeRule.setContent {
-            PpmTheme(mobile = true) {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
                 PhoneSessionHistoryList(
                     groups = groups,
                     runningSessionIds = setOf("s-today"),
@@ -204,10 +207,24 @@ class HistoryByDayTest {
         composeRule.onNodeWithText("Pinned architecture review").assertIsDisplayed()
         composeRule.onNodeWithText("Implement phone chat").assertIsDisplayed()
         composeRule.onNodeWithText("Running · now").assertIsDisplayed()
+    }
+
+    @Test
+    fun swipeExpandedRowExposesPinAndDelete() {
+        val session = SessionInfo(
+            id = "s-today",
+            providerId = "codex",
+            title = "Implement phone chat",
+            updatedAt = Instant.parse("2026-04-17T06:00:00Z"),
+            pinned = false,
+        )
+        val sessions = listOf(session, session)
+        var pinnedToggledId: String? = null
+        var deletedId: String? = null
 
         // Verify swipe-expanded row exposes Pin, Rename, Delete actions
         composeRule.setContent {
-            PpmTheme(mobile = true) {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
                 PhoneSessionHistoryRow(
                     session = sessions[1],
                     liveState = SessionLiveState.NEEDS_YOU,
@@ -257,7 +274,7 @@ class HistoryByDayTest {
         assertEquals("short-id", middleEllipsis("short-id", head = 8, tail = 8))
 
         composeRule.setContent {
-            PpmTheme(mobile = true) {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
                 SessionDebugKeyValueCard(fields = fields)
             }
         }

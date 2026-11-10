@@ -266,17 +266,17 @@ internal fun shortcutActionIds(wide: Boolean, projectCount: Int): List<String> =
         listOf(
             "next-tab",
             "prev-tab",
-            "open-chat",
             "new-file",
+            "open-chat",
             "open-terminal",
             "open-settings",
             "open-git-status",
             "open-search",
             "open-problems",
-            "compare-files",
             "voice-input",
             "chat-nav-prev",
             "chat-nav-next",
+            "compare-files",
         ),
     )
     for (n in 1..minOf(9, projectCount)) add("switch-project-$n")

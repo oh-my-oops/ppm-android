@@ -6,7 +6,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import com.hienlh.ppm.design.PpmTheme
+import com.hienlh.ppm.design.BuiltInThemes
+import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.state.WaitingCardKind
 import com.hienlh.ppm.state.needsYouPillLabel
@@ -26,8 +27,10 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34], qualifiers = "w390dp-h844dp")
 class NeedsYouTest {
 
+    private val composeRule = createComposeRule()
+
     @get:Rule
-    val composeRule = createComposeRule()
+    val rules: org.junit.rules.RuleChain = com.hienlh.ppm.app.withComposeActivity(composeRule)
 
     private fun json(raw: String) = Json.parseToJsonElement(raw)
 
@@ -95,13 +98,14 @@ class NeedsYouTest {
     fun phoneChatScreenShowsNeedsYouPillWhenScrolledAwayAndScrollsOnTap() {
         val bashReq = ApprovalRequest("r-1", "Bash", json("""{"command":"git status"}"""))
         var scrolledToWaitingCard = 0
+        val atBottom = androidx.compose.runtime.mutableStateOf(false)
 
         composeRule.setContent {
-            PpmTheme(mobile = true) {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
                 PhoneChatScreen(
                     composerState = TextFieldState(""),
                     pendingApproval = bashReq,
-                    atBottom = false,
+                    atBottom = atBottom.value,
                     modelLabel = "Sonnet 4.6",
                     onSendMessage = { _, _ -> },
                     onStopTurn = {},
@@ -117,19 +121,8 @@ class NeedsYouTest {
         assertEquals(1, scrolledToWaitingCard)
 
         // When atBottom is true, NeedsYouPill disappears
-        composeRule.setContent {
-            PpmTheme(mobile = true) {
-                PhoneChatScreen(
-                    composerState = TextFieldState(""),
-                    pendingApproval = bashReq,
-                    atBottom = true,
-                    modelLabel = "Sonnet 4.6",
-                    onSendMessage = { _, _ -> },
-                    onStopTurn = {},
-                    onScrollToWaitingCard = { scrolledToWaitingCard++ },
-                )
-            }
-        }
+        atBottom.value = true
+        composeRule.waitForIdle()
 
         assertEquals(
             0,
