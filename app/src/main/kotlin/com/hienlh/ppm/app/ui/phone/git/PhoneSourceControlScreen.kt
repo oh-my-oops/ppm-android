@@ -99,6 +99,7 @@ import com.hienlh.ppm.state.git.GitChangeGroups
 import com.hienlh.ppm.state.git.GitChangesView
 import com.hienlh.ppm.state.git.PhoneFileActionKind
 import com.hienlh.ppm.state.git.PhoneGitCapabilities
+import com.hienlh.ppm.state.git.WriteWithAi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -199,8 +200,7 @@ fun PhoneSourceControlScreen(
     var diffLoading by remember { mutableStateOf(false) }
     var diffError by remember { mutableStateOf<String?>(null) }
 
-    var aiLoading by remember { mutableStateOf(false) }
-    var aiError by remember { mutableStateOf<String?>(null) }
+    var aiState by remember { mutableStateOf<WriteWithAi>(WriteWithAi.Idle) }
 
     val discardController = remember(projectName) { DiscardUndoController() }
     var discardUiTick by remember { mutableIntStateOf(0) }
@@ -569,21 +569,21 @@ fun PhoneSourceControlScreen(
     fun handleWriteWithAi() {
         val generator = onWriteWithAi
         if (generator == null) {
-            aiError = "AI commit message generator is not configured."
+            aiState = WriteWithAi.Failed("AI commit message generator is not configured.", commitMessage)
             return
         }
         scope.launch {
-            aiLoading = true
-            aiError = null
+            aiState = WriteWithAi.Writing
             try {
                 val generated = generator(resolvedRepo)
                 if (!generated.isNullOrBlank()) {
                     commitMessage = generated.trim()
+                    aiState = WriteWithAi.Written(commitMessage)
+                } else {
+                    aiState = WriteWithAi.Idle
                 }
             } catch (error: Throwable) {
-                aiError = error.message ?: "Failed to generate commit message"
-            } finally {
-                aiLoading = false
+                aiState = WriteWithAi.Failed(error.message ?: "Failed to generate commit message", commitMessage)
             }
         }
     }
@@ -626,9 +626,9 @@ fun PhoneSourceControlScreen(
             commitMessage = next
         },
         aiAvailable = aiAvailable,
-        aiLoading = aiLoading,
-        aiErrorMessage = aiError,
-        onDismissAiError = { aiError = null },
+        aiLoading = aiState is WriteWithAi.Writing,
+        aiErrorMessage = (aiState as? WriteWithAi.Failed)?.message,
+        onDismissAiError = { aiState = WriteWithAi.Idle },
         onWriteWithAiClick = ::handleWriteWithAi,
         bannerError = bannerError ?: discardController.errorMessage,
         bannerInfo = bannerInfo ?: discardController.warningMessage,
