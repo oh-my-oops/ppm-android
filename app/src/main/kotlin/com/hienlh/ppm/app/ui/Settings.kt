@@ -49,7 +49,6 @@ import androidx.compose.ui.unit.em
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.phone.settings.PhoneSettingsRoute
 import com.hienlh.ppm.app.ui.phone.settings.PhoneSettingsScreen
-import com.hienlh.ppm.app.ui.phone.settings.RedesignDebugToggleCard
 import com.hienlh.ppm.app.ui.phone.settings.resolvePhoneSettingsCategory
 import com.hienlh.ppm.app.ui.phone.settings.resolvePhoneSettingsRoute
 import com.hienlh.ppm.app.ui.tablet.Edge
@@ -531,10 +530,7 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 when (category) {
-                    SettingsCategory.General -> {
-                        GeneralSection(model)
-                        RedesignDebugToggleCard()
-                    }
+                    SettingsCategory.General -> GeneralSection(model)
                     SettingsCategory.Appearance -> AppearanceSection(model)
                     SettingsCategory.Servers -> ServersSection(model)
                     SettingsCategory.Voice -> VoiceSection(model)

@@ -194,7 +194,6 @@ class PhoneSettingsTest {
         var systemNotifyClicked by mutableStateOf(false)
         var pickedThemeMode by mutableStateOf("dark")
         var pickedServerId by mutableStateOf("srv-1")
-        var redesignFlag by mutableStateOf(false)
 
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
@@ -239,11 +238,7 @@ class PhoneSettingsTest {
                         onLogOut = {},
                         onAddServer = {},
                     )
-                    else -> PhoneAboutContent(
-                        serverVersion = "v0.10.22",
-                        redesignEnabled = redesignFlag,
-                        onToggleRedesign = { redesignFlag = it },
-                    )
+                    else -> PhoneAboutContent(serverVersion = "v0.10.22")
                 }
             }
         }
@@ -272,12 +267,10 @@ class PhoneSettingsTest {
         composeRule.onNodeWithTag("phone-server-card-srv-2").performClick()
         assertEquals("srv-2", pickedServerId)
 
-        // Page 4: About (with debug redesign toggle)
+        // Page 4: About
         pageIndex = 4
         composeRule.waitForIdle()
         composeRule.onNodeWithText("PPM — Personal Project Manager").assertIsDisplayed()
-        composeRule.onNodeWithTag("settings-about-redesign-toggle").performClick()
-        assertTrue(redesignFlag)
     }
 
     @Test

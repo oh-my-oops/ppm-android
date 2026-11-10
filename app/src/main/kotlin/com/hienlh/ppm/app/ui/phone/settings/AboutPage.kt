@@ -23,13 +23,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.BuildConfig
-import com.hienlh.ppm.app.LocalPrefs
 import com.hienlh.ppm.app.ui.Separator
 import com.hienlh.ppm.app.ui.SettingsToggleRow
 import com.hienlh.ppm.app.ui.phone.OpenOnTabletNotice
@@ -50,14 +48,12 @@ fun PhoneAboutPage(
     onBack: () -> Unit,
 ) {
     val api = model.api
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     var availableVersion by remember { mutableStateOf<String?>(null) }
     var checking by remember { mutableStateOf(false) }
     var upgrading by remember { mutableStateOf(false) }
     var statusNote by remember { mutableStateOf<String?>(null) }
-    val localPrefs = remember(context) { LocalPrefs.of(context) }
 
     LaunchedEffect(api) {
         val client = api ?: return@LaunchedEffect
@@ -86,10 +82,6 @@ fun PhoneAboutPage(
             checking = checking,
             upgrading = upgrading,
             statusNote = statusNote,
-            redesignEnabled = localPrefs.redesign,
-            onToggleRedesign = { enabled ->
-                localPrefs.redesign = enabled
-            },
             onCheckUpdates = {
                 val client = api ?: return@PhoneAboutContent
                 checking = true
@@ -145,8 +137,6 @@ fun PhoneAboutContent(
     checking: Boolean = false,
     upgrading: Boolean = false,
     statusNote: String? = null,
-    redesignEnabled: Boolean = LocalPrefs.redesign,
-    onToggleRedesign: (Boolean) -> Unit = { LocalPrefs.redesign = it },
     onCheckUpdates: () -> Unit = {},
     onConfirmUpgrade: (String) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -248,12 +238,6 @@ fun PhoneAboutContent(
             }
         }
 
-        // 3. Debug / Experimental Redesign Toggle (Requirement / Design: LocalPrefs.redesign in Settings -> About)
-        RedesignDebugToggleCard(
-            redesignEnabled = redesignEnabled,
-            onToggleRedesign = onToggleRedesign,
-        )
-
         OpenOnTabletNotice(
             text = "Device name, server password and onboarding guide open on a tablet.",
         )
@@ -293,34 +277,5 @@ fun PhoneAboutContent(
                 )
             }
         }
-    }
-}
-
-/**
- * Debug toggle card in `Settings → About` that controls `LocalPrefs.redesign`.
- */
-@Composable
-internal fun RedesignDebugToggleCard(
-    redesignEnabled: Boolean = LocalPrefs.redesign,
-    onToggleRedesign: (Boolean) -> Unit = { LocalPrefs.redesign = it },
-    modifier: Modifier = Modifier,
-) {
-    val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(12.dp)
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(tokens.panel.color)
-            .cssBorder(tokens.borderSoft.color, shape)
-            .padding(12.dp),
-    ) {
-        SettingsToggleRow(
-            title = "Mobile & Tablet Redesign",
-            subtitle = "Use the redesigned phone and tablet workspace shell",
-            checked = redesignEnabled,
-            testTag = "settings-about-redesign-toggle",
-            onCheckedChange = onToggleRedesign,
-        )
     }
 }
