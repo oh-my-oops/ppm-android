@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertContentDescriptionEquals
@@ -21,10 +22,19 @@ import androidx.compose.ui.test.performTextReplacement
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
+import com.hienlh.ppm.protocol.LimitBucket
 import com.hienlh.ppm.protocol.UsageInfo
 import com.hienlh.ppm.state.MANY_SWITCH_ACCOUNTS
 import com.hienlh.ppm.state.SwitchAccount
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlin.math.roundToInt
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -41,6 +51,14 @@ class ChatFooterToolsTest {
     @get:Rule
     val rules: RuleChain = withComposeActivity(composeRule)
 
+    private val fixedZone: ZoneId = ZoneId.of("Asia/Ho_Chi_Minh")
+    private val fixedNow: Long = ZonedDateTime.of(2026, 11, 10, 0, 40, 0, 0, fixedZone).toInstant().toEpochMilli()
+    private val isoUtc: DateTimeFormatter =
+        DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).withZone(ZoneId.of("UTC"))
+
+    private fun inMinsFrom(baseMs: Long, mins: Long): String =
+        isoUtc.format(Instant.ofEpochMilli(baseMs + mins * 60_000L))
+
     private fun acc(
         id: String,
         label: String,
@@ -48,12 +66,16 @@ class ChatFooterToolsTest {
         wk: Int,
         refusal: String? = null,
         signedOut: Boolean = false,
+        fiveHourResetsAt: String? = inMinsFrom(fixedNow, 192),
+        weekResetsAt: String? = inMinsFrom(fixedNow, 2 * 1440L + 8 * 60L + 20L),
     ) = SwitchAccount(
         id = id,
         label = label,
         plan = "Max",
         fiveHourPct = h5,
         weekPct = wk,
+        fiveHourResetsAt = fiveHourResetsAt,
+        weekResetsAt = weekResetsAt,
         refusal = refusal,
         signedOut = signedOut,
     )
@@ -61,7 +83,7 @@ class ChatFooterToolsTest {
     private val threeAccounts = listOf(
         acc("v2", "Victor 2 (Nxsys)", 47, 52),
         acc("v", "Victor", 12, 30),
-        acc("s", "Nxsys shared", 100, 88, "5-hour limit reached · resets in 2h 10m"),
+        acc("s", "Nxsys shared", 100, 88, "5-hour limit reached"),
     )
 
     private val nineAccounts = threeAccounts + listOf(
@@ -286,7 +308,7 @@ class ChatFooterToolsTest {
         assertEquals(listOf("v2", "v", "s"), renderedRowIds())
         composeRule.onNodeWithTag("account-active:v2", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithTag("account-row:s").assert(hasStateDescription("disabled"))
-        composeRule.onNodeWithText("5-hour limit reached · resets in 2h 10m").assertIsDisplayed()
+        composeRule.onNodeWithText("5-hour limit reached").assertIsDisplayed()
         composeRule.onNodeWithText("Add account").assertIsDisplayed()
         composeRule.onNodeWithText("Manage in Settings").assertIsDisplayed()
 
@@ -329,7 +351,7 @@ class ChatFooterToolsTest {
         composeRule.onNodeWithTag("out-of-usage-toggle").performScrollTo().performClick()
         composeRule.onNodeWithTag("out-of-usage-toggle").assert(hasStateDescription("expanded"))
         composeRule.onNodeWithTag("account-row:s").performScrollTo().performClick()
-        composeRule.onNodeWithText("Cannot switch to Nxsys shared — 5-hour limit reached · resets in 2h 10m.").assertIsDisplayed()
+        composeRule.onNodeWithText("Cannot switch to Nxsys shared — 5-hour limit reached.").assertIsDisplayed()
         composeRule.onNodeWithTag("account-row:o").performScrollTo().performClick()
         assertEquals(listOf("o"), reauthed)
         assertEquals(emptyList<String>(), picked)
@@ -345,5 +367,96 @@ class ChatFooterToolsTest {
         composeRule.waitForIdle()
         assertEquals(emptyList<String>(), renderedRowIds())
         composeRule.onNodeWithText("No account matches.").assertIsDisplayed()
+    }
+
+    @Test
+    fun usageResetDisplay_showsRingCountdownMenuMetersAccountCardResetLinesRedOnFullAndTicksLive() {
+        // Plain non-Compose variable so advancing `fakeNow` alone CANNOT recompose unless `rememberResetClockMillis` ticks!
+        var fakeNow = fixedNow
+        val reset5h = inMinsFrom(fixedNow, 192)
+        val resetWeek = inMinsFrom(fixedNow, 2 * 1440L + 8 * 60L + 20L)
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                CompositionLocalProvider(
+                    LocalReducedMotion provides true,
+                    LocalResetClock provides { fakeNow },
+                    LocalResetZone provides fixedZone,
+                ) {
+                    Column {
+                        ChatFooterTools(
+                            usageInfo = UsageInfo(
+                                activeAccountId = "v2",
+                                activeAccountLabel = "Victor 2 (Nxsys)",
+                                fiveHour = 0.47,
+                                sevenDay = 0.52,
+                                session = LimitBucket(0.47, reset5h, null, null, 5.0),
+                                weekly = LimitBucket(0.52, resetWeek, null, null, 168.0),
+                            ),
+                            providerId = "claude",
+                            narrow = false,
+                            switcher = SwitchAccountsState(accounts = threeAccounts, loading = false),
+                        )
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        // 1. Usage ring tooltip / contentDescription carries each window's countdown alone.
+        composeRule.onNodeWithTag("usage-ring")
+            .assertContentDescriptionEquals("Usage: Victor 2 (Nxsys) · 5h 47% (resets in 3h 12m) · Week 52% (resets in 2d 8h)")
+
+        // 2. Open ··· menu: meters show countdown alone on the right.
+        composeRule.onNodeWithTag("footer-more").performClick()
+        composeRule.waitForIdle()
+        assertEquals(
+            "in 3h 12m",
+            composeRule.onNodeWithTag("meter-reset:5 hours", useUnmergedTree = true)
+                .fetchSemanticsNode().config.getOrNull(SemanticsProperties.Text)?.single()?.text,
+        )
+        assertEquals(
+            "in 2d 8h",
+            composeRule.onNodeWithTag("meter-reset:Week", useUnmergedTree = true)
+                .fetchSemanticsNode().config.getOrNull(SemanticsProperties.Text)?.single()?.text,
+        )
+
+        // 3. While open on screen, advancing 1 minute + ticking the 30s clock updates the countdown live!
+        fakeNow += 60_000L
+        composeRule.mainClock.advanceTimeBy(31_000L)
+        composeRule.waitForIdle()
+        assertEquals(
+            "in 3h 11m",
+            composeRule.onNodeWithTag("meter-reset:5 hours", useUnmergedTree = true)
+                .fetchSemanticsNode().config.getOrNull(SemanticsProperties.Text)?.single()?.text,
+        )
+        composeRule.onNodeWithTag("usage-ring")
+            .assertContentDescriptionEquals("Usage: Victor 2 (Nxsys) · 5h 47% (resets in 3h 11m) · Week 52% (resets in 2d 8h)")
+
+        // 4. Drill into Switch account: every bar shows "Resets in … · clock", red when >= 100%, equal bar widths, no "resets in" on refusal.
+        composeRule.onNodeWithTag("more-switch-account").performClick()
+        composeRule.waitForIdle()
+
+        val v5hNode = composeRule.onNodeWithTag("account-reset:v:5h", useUnmergedTree = true).fetchSemanticsNode()
+        val vWeekNode = composeRule.onNodeWithTag("account-reset:v:Week", useUnmergedTree = true).fetchSemanticsNode()
+        assertEquals("Resets in 3h 11m · 03:52", v5hNode.config.getOrNull(SemanticsProperties.Text)?.single()?.text)
+        assertEquals("Resets in 2d 8h · Thu 09:00", vWeekNode.config.getOrNull(SemanticsProperties.Text)?.single()?.text)
+        assertEquals("muted", v5hNode.config.getOrNull(AccountResetToneKey))
+        assertEquals("muted", vWeekNode.config.getOrNull(AccountResetToneKey))
+
+        val s5hNode = composeRule.onNodeWithTag("account-reset:s:5h", useUnmergedTree = true).fetchSemanticsNode()
+        val sWeekNode = composeRule.onNodeWithTag("account-reset:s:Week", useUnmergedTree = true).fetchSemanticsNode()
+        assertEquals("error", s5hNode.config.getOrNull(AccountResetToneKey))
+        assertEquals("muted", sWeekNode.config.getOrNull(AccountResetToneKey))
+
+        val sTexts = composeRule.onNodeWithTag("account-row:s").fetchSemanticsNode()
+            .config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString(" | ") { it.text }
+        assertTrue("Expected window-only refusal on s, got: $sTexts", sTexts.contains("5-hour limit reached"))
+        assertFalse("Expected refusal not to repeat 'resets in', got: $sTexts", sTexts.contains("· resets in"))
+
+        val barWidths = listOf("v2" to "5h", "v2" to "Week", "v" to "5h", "v" to "Week", "s" to "5h", "s" to "Week").map { (id, w) ->
+            composeRule.onNodeWithTag("account-bar:$id:$w", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.width.roundToInt()
+        }
+        assertEquals("Expected all 6 account usage bars to share one width, got $barWidths", 1, barWidths.toSet().size)
     }
 }

@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.selected
@@ -55,6 +56,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.design.CssSides
@@ -69,10 +71,15 @@ import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.state.MANY_SWITCH_ACCOUNTS
 import com.hienlh.ppm.state.SwitchAccount
+import com.hienlh.ppm.state.formatResetLine
 import com.hienlh.ppm.state.matchesAccountQuery
 import com.hienlh.ppm.state.orderSwitchAccounts
+import java.time.ZoneId
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+/** Exposes `"error"` (when window >= 100%) or `"muted"` on each account reset line for tests. */
+val AccountResetToneKey = SemanticsPropertyKey<String>("AccountResetTone")
 
 /**
  * Drill-in "Switch account" view inside the chat's ··· menu (`SwitchAccountView` in
@@ -570,13 +577,33 @@ private fun SwitchAccountCard(
         }
 
         if (!account.signedOut) {
+            val now = rememberResetClockMillis()
+            val zone = LocalResetZone.current
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.Top,
             ) {
-                AccountCardMeter("5h", account.fiveHourPct, dim = blocked, modifier = Modifier.weight(1f))
-                AccountCardMeter("Week", account.weekPct, dim = blocked, modifier = Modifier.weight(1f))
+                AccountCardMeter(
+                    accountId = account.id,
+                    label = "5h",
+                    pct = account.fiveHourPct,
+                    resetsAt = account.fiveHourResetsAt,
+                    dim = blocked,
+                    now = now,
+                    zone = zone,
+                    modifier = Modifier.weight(1f),
+                )
+                AccountCardMeter(
+                    accountId = account.id,
+                    label = "Week",
+                    pct = account.weekPct,
+                    resetsAt = account.weekResetsAt,
+                    dim = blocked,
+                    now = now,
+                    zone = zone,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }
@@ -584,35 +611,73 @@ private fun SwitchAccountCard(
 
 @Composable
 private fun AccountCardMeter(
+    accountId: String,
     label: String,
     pct: Int?,
+    resetsAt: String?,
     dim: Boolean,
+    now: Long,
+    zone: ZoneId,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
-    Row(
+    val reset = formatResetLine(resetsAt, now, zone)
+    val isFull = (pct ?: 0) >= 100
+    Column(
         modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        BasicText(
-            label,
-            Modifier.width(30.dp),
-            style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
-            maxLines = 1,
-            softWrap = false,
-        )
-        UsageTrack(pct = pct, modifier = Modifier.weight(1f))
-        BasicText(
-            if (pct != null) "$pct%" else "--%",
-            Modifier.width(32.dp),
-            style = ppmText(11f, lineHeight = 15f).copy(
-                color = if (dim) tokens.text3.color else tokens.text2.color,
-                textAlign = TextAlign.End,
-                fontFeatureSettings = "tnum",
-            ),
-            maxLines = 1,
-            softWrap = false,
-        )
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            BasicText(
+                label,
+                Modifier.width(30.dp),
+                style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+                maxLines = 1,
+                softWrap = false,
+            )
+            UsageTrack(
+                pct = pct,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("account-bar:$accountId:$label"),
+            )
+            BasicText(
+                if (pct != null) "$pct%" else "--%",
+                Modifier.width(32.dp),
+                style = ppmText(11f, lineHeight = 15f).copy(
+                    color = if (dim) tokens.text3.color else tokens.text2.color,
+                    textAlign = TextAlign.End,
+                    fontFeatureSettings = "tnum",
+                ),
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+        if (reset != null) {
+            BasicText(
+                reset,
+                Modifier
+                    .fillMaxWidth()
+                    .testTag("account-reset:$accountId:$label")
+                    .semantics {
+                        this[AccountResetToneKey] = if (isFull) "error" else "muted"
+                    },
+                style = ppmText(
+                    10.5f,
+                    if (isFull) FontWeight.Medium else FontWeight.Normal,
+                    lineHeight = 15f,
+                ).copy(
+                    color = if (isFull) tokens.error.color else tokens.text3.color,
+                    fontFeatureSettings = "tnum",
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                softWrap = false,
+            )
+        }
     }
 }

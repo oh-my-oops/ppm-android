@@ -66,6 +66,7 @@ import com.hienlh.ppm.protocol.SessionLinkRelation
 import com.hienlh.ppm.state.LinkedSessionStatus
 import com.hienlh.ppm.state.LinkedSessionView
 import com.hienlh.ppm.state.UNDO_UNLINK_MS
+import com.hienlh.ppm.state.byAttention
 import com.hienlh.ppm.state.canUnlink
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -198,9 +199,10 @@ fun LinkedSessionsPanel(
         undo = null
     }
 
+    // A heading with nothing under it goes too. Inside each, what needs the person or runs comes first.
     val grouped = remember(visible) {
         GROUP_ORDER.mapNotNull { relation ->
-            val list = visible.filter { (it.relations.firstOrNull() ?: SessionLinkRelation.MESSAGED) == relation }
+            val list = byAttention(visible.filter { (it.relations.firstOrNull() ?: SessionLinkRelation.MESSAGED) == relation })
             if (list.isEmpty()) null else relation to list
         }
     }

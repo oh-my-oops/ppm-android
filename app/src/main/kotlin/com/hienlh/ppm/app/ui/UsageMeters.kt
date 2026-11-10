@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,6 +37,30 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.FooterUsageTone
 import com.hienlh.ppm.state.footerUsageTone
+import com.hienlh.ppm.state.formatResetCountdown
+import java.time.ZoneId
+import kotlinx.coroutines.delay
+
+/** Wall-clock source for usage reset countdowns; overridable in tests. */
+val LocalResetClock = compositionLocalOf<() -> Long> { System::currentTimeMillis }
+
+/** Viewer timezone for usage reset clock times; overridable in tests. */
+val LocalResetZone = compositionLocalOf<ZoneId> { ZoneId.systemDefault() }
+
+/**
+ * Ticks every [intervalMs] while mounted so usage reset countdowns update live while the footer,
+ * `ChatMoreMenu`, or `SwitchAccountView` stays open.
+ */
+@Composable
+fun rememberResetClockMillis(intervalMs: Long = 30_000L): Long {
+    val clock = LocalResetClock.current
+    return produceState(initialValue = clock(), key1 = clock, key2 = intervalMs) {
+        while (true) {
+            delay(intervalMs)
+            value = clock()
+        }
+    }.value
+}
 
 /** Ring/track fill colour for [pct] (`STROKE` / `FILL` in `usage-meters.tsx`). */
 @Composable
@@ -190,15 +216,19 @@ fun UsageTrack(
 
 /**
  * One labelled meter row in `ChatMoreMenu` (`UsageMeter` in `usage-meters.tsx`):
- * `"5 hours ▬▬▬── 47%"` (`52dp` label, flexible track, `36dp` right-aligned figure).
+ * `"5 hours ▬▬▬── 47%  in 3h 12m"`. A quick view, so the reset is the countdown alone (`64dp`
+ * right-aligned column); `SwitchAccountView`'s cards add the clock time.
  */
 @Composable
 fun UsageMeter(
     label: String,
     pct: Int?,
+    resetsAt: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
+    val now = rememberResetClockMillis()
+    val reset = formatResetCountdown(resetsAt, now)
     Row(
         modifier
             .padding(top = 6.dp)
@@ -219,6 +249,19 @@ fun UsageMeter(
             Modifier.width(36.dp),
             style = ppmText(11f, lineHeight = 16f).copy(
                 color = tokens.text2.color,
+                textAlign = TextAlign.End,
+                fontFeatureSettings = "tnum",
+            ),
+            maxLines = 1,
+            softWrap = false,
+        )
+        BasicText(
+            reset.orEmpty(),
+            Modifier
+                .width(64.dp)
+                .testTag("meter-reset:$label"),
+            style = ppmText(10.5f, lineHeight = 15f).copy(
+                color = tokens.text3.color,
                 textAlign = TextAlign.End,
                 fontFeatureSettings = "tnum",
             ),

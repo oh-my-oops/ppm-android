@@ -298,6 +298,51 @@ class ChatFooterLeftChipsTest {
     }
 
     @Test
+    fun linkedSessionsPanel_ordersEachGroupByAttentionStably() {
+        fun kid(n: Int, status: LinkedSessionStatus) = LinkedSessionView(
+            sessionId = "cccccccc-0000-4000-8000-00000000000$n",
+            title = "Kid $n",
+            providerId = "claude",
+            relations = listOf(SessionLinkRelation.CHILD),
+            status = status,
+        )
+        val initial = listOf(
+            kid(1, LinkedSessionStatus.IDLE),
+            kid(2, LinkedSessionStatus.NEW_MESSAGE),
+            kid(3, LinkedSessionStatus.RUNNING),
+            kid(4, LinkedSessionStatus.IDLE),
+            kid(5, LinkedSessionStatus.NEEDS_APPROVAL),
+        )
+
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = false) {
+                CompositionLocalProvider(LocalReducedMotion provides true) {
+                    LinkedSessionsPanel(
+                        groups = LinkedSessionGroups(
+                            visible = initial,
+                            hidden = emptyList(),
+                            onUnlink = {},
+                            onRelink = {},
+                        ),
+                        onOpenSession = {},
+                        onStopChildSessions = {},
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val renderedOrder = (1..5)
+            .map { n ->
+                val node = composeRule.onNodeWithTag("linked-session:cccccccc-0000-4000-8000-00000000000$n").fetchSemanticsNode()
+                "Kid $n" to node.positionInRoot.y
+            }
+            .sortedBy { it.second }
+            .map { it.first }
+        assertEquals(listOf("Kid 5", "Kid 3", "Kid 2", "Kid 1", "Kid 4"), renderedOrder)
+    }
+
+    @Test
     fun linkedSessionsPanel_flushesMidSlideUnlinkWhenDisposedEarly() {
         val peer = LinkedSessionView(
             peerId, "Peer", "codex", listOf(SessionLinkRelation.MESSAGED),

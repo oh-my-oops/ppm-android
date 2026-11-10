@@ -148,8 +148,9 @@ fun rememberSwitchAccounts(
         }
     }
 
+    val clock = LocalResetClock.current
     val accounts = remember(isCodex, codexPair, claudeState.accounts, claudeState.usages) {
-        val now = System.currentTimeMillis()
+        val now = clock()
         if (isCodex) {
             val (list, usages) = codexPair ?: return@remember emptyList()
             list.map { acc ->
@@ -240,13 +241,15 @@ fun ChatFooterTools(
         toggle(FooterToolsPanel.More)
     }
 
-    val resolved = remember(providerId, usageInfo, pickedAccountId, pickedAccountLabel, switcher.accounts) {
+    val nowMs = rememberResetClockMillis()
+    val resolved = remember(providerId, usageInfo, pickedAccountId, pickedAccountLabel, switcher.accounts, nowMs) {
         resolveFooterUsage(
             providerId = providerId,
             usageInfo = usageInfo,
             pickedAccountId = pickedAccountId,
             pickedAccountLabel = pickedAccountLabel,
             switcherAccounts = switcher.accounts,
+            now = nowMs,
         )
     }
 
@@ -381,6 +384,8 @@ fun ChatFooterTools(
                 who = if (hasAccounts) resolved.who else null,
                 fiveHourPct = resolved.fiveHourPct,
                 weekPct = resolved.weekPct,
+                fiveHourResetsAt = resolved.fiveHourResetsAt,
+                weekResetsAt = resolved.weekResetsAt,
                 sessionCostUsd = usageInfo.totalCostUsd,
                 accountCount = if (switcher.loading) null else maxOf(switcher.accounts.size, 1),
                 onSwitchAccount = if (hasAccounts) {

@@ -70,6 +70,8 @@ fun ChatMoreMenu(
     who: String? = null,
     fiveHourPct: Int? = null,
     weekPct: Int? = null,
+    fiveHourResetsAt: String? = null,
+    weekResetsAt: String? = null,
     sessionCostUsd: Double? = null,
     accountCount: Int? = null,
     onSwitchAccount: (() -> Unit)? = null,
@@ -109,8 +111,8 @@ fun ChatMoreMenu(
                     ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
                     Modifier.padding(bottom = 2.dp),
                 )
-                UsageMeter("5 hours", fiveHourPct)
-                UsageMeter("Week", weekPct)
+                UsageMeter("5 hours", fiveHourPct, resetsAt = fiveHourResetsAt)
+                UsageMeter("Week", weekPct, resetsAt = weekResetsAt)
                 if (sessionCostUsd != null) {
                     BasicText(
                         "This session $${String.format(Locale.US, "%.4f", sessionCostUsd)}",
