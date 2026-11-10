@@ -1,16 +1,21 @@
 package com.hienlh.ppm.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -23,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -34,16 +40,23 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.chat.RelativeTime
+import com.hienlh.ppm.design.CssSides
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.PpmIcon
@@ -51,15 +64,23 @@ import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssScrollbar
+import com.hienlh.ppm.design.kit.Sheet
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.SessionInfo
+import com.hienlh.ppm.protocol.SessionTag
 import com.hienlh.ppm.state.ChatSearch
 import com.hienlh.ppm.state.HistoryList
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * The History tab of the drawer (`SessionHistoryList`, sidebar variant): a header that says when
@@ -155,6 +176,7 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
         }
         val sessions = state.shown(all)
         val sessionList = rememberLazyListState()
+        val mobile = LocalPpmMobile.current
         when {
             state.loading && all.isEmpty() || (state.searchPage == null && model.sessionsLoad == AppModel.Load.Loading && all.isEmpty()) ->
                 Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
@@ -165,6 +187,42 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
                 Modifier.fillMaxWidth().padding(vertical = 12.dp),
                 style = ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
             )
+            mobile -> {
+                val groups = remember(sessions) { HistoryByDay.groupSessionsByDay(sessions) }
+                PhoneSessionHistoryList(
+                    groups = groups,
+                    unreadTypes = unread.mapValues { it.value.type },
+                    tags = model.tags.tags,
+                    hasMore = state.hasMore(model.hasMoreSessions),
+                    loadingMore = state.loadingMore,
+                    onOpenSession = { session ->
+                        model.openTab(session)
+                        onNavigate()
+                    },
+                    onTogglePin = { session ->
+                        model.scope.launch { model.togglePin(session) }
+                    },
+                    onMarkUnread = { session ->
+                        model.markUnread(session)
+                    },
+                    onRenameSession = { session, newTitle ->
+                        model.scope.launch { model.rename(session, newTitle) }
+                    },
+                    onSetTag = { session, tag ->
+                        model.scope.launch { model.setTag(tag, session) }
+                    },
+                    onDeleteSession = { session ->
+                        model.confirmDeleteSession = session
+                    },
+                    onLoadMore = {
+                        scope.launch { list.loadMore(model.sessions, model.hasMoreSessions) }
+                    },
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    renderInlineRename = { session, done ->
+                        InlineRename(model, session, RenameField.HistoryList, Modifier.weight(1f), done)
+                    },
+                )
+            }
             else -> LazyColumn(Modifier.weight(1f).fillMaxWidth().cssScrollbar(sessionList), sessionList) {
                 items(sessions, key = { it.id }) { session ->
                     val entry = unread[session.id]
@@ -438,3 +496,811 @@ private fun SearchHitRow(hit: ChatSearchHit, open: () -> Unit) {
         }
     }
 }
+
+/**
+ * Day-group bucket classification for chat history (`designs/ppm-mobile-tablet-redesign/phone/1-chat/index.html`,
+ * Section 7 G1, Requirement 4.3).
+ */
+enum class SessionDayBucketKind {
+    PINNED,
+    TODAY,
+    YESTERDAY,
+    DATED,
+}
+
+/**
+ * A group of sessions in the phone Chat History list (`Pinned`, `Today`, `Yesterday`, or a date header).
+ */
+data class SessionDayGroup(
+    val key: String,
+    val label: String,
+    val kind: SessionDayBucketKind,
+    val date: LocalDate? = null,
+    val sessions: List<SessionInfo>,
+)
+
+/**
+ * Row action types available via left-swipe (`76 dp` buttons) and long-press sheet in phone Chat History
+ * (`designs/ppm-mobile-tablet-redesign/phone/1-chat/index.html`, Section 7 G2).
+ */
+enum class SessionRowActionKind {
+    PIN,
+    UNPIN,
+    RENAME,
+    DELETE,
+    MARK_UNREAD,
+    SET_TAG,
+}
+
+/**
+ * Descriptor for a single row action on a [SessionInfo] item.
+ */
+data class SessionRowAction(
+    val kind: SessionRowActionKind,
+    val label: String,
+    val destructive: Boolean = false,
+)
+
+/**
+ * Live status state displayed on a session row (`Running · now`, `Needs you · 2 min ago`, or relative time).
+ */
+enum class SessionLiveState {
+    IDLE,
+    RUNNING,
+    NEEDS_YOU,
+    UNREAD,
+}
+
+/**
+ * Pure day-grouping and row-action helpers for Chat History (Requirement 4.3, Phone 1 Section 7 G1–G3).
+ */
+object HistoryByDay {
+    private val sameYearFormatter = DateTimeFormatter.ofPattern("MMM d", Locale.US)
+    private val otherYearFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.US)
+
+    /**
+     * Groups [sessions] into:
+     * 1. `Pinned` (at top, if any pinned session exists), sorted by `lastActive` descending.
+     * 2. `Today`, `Yesterday`, and dated groups (`MMM d` or `MMM d, yyyy`) for unpinned sessions,
+     *    evaluated in [zoneId] relative to [now].
+     */
+    fun groupSessionsByDay(
+        sessions: List<SessionInfo>,
+        now: Instant = Instant.now(),
+        zoneId: ZoneId = ZoneId.systemDefault(),
+    ): List<SessionDayGroup> {
+        if (sessions.isEmpty()) return emptyList()
+        val today = now.atZone(zoneId).toLocalDate()
+        val yesterday = today.minusDays(1)
+
+        val comparator = compareByDescending<SessionInfo> { it.lastActive ?: Instant.EPOCH }
+            .thenBy { it.id }
+
+        val pinned = sessions.filter { it.pinned }.sortedWith(comparator)
+        val unpinned = sessions.filterNot { it.pinned }.sortedWith(comparator)
+
+        val groups = mutableListOf<SessionDayGroup>()
+        if (pinned.isNotEmpty()) {
+            groups += SessionDayGroup(
+                key = "pinned",
+                label = "Pinned",
+                kind = SessionDayBucketKind.PINNED,
+                date = null,
+                sessions = pinned,
+            )
+        }
+
+        val byDate = LinkedHashMap<LocalDate?, MutableList<SessionInfo>>()
+        for (session in unpinned) {
+            val localDate = session.lastActive?.atZone(zoneId)?.toLocalDate()
+            byDate.getOrPut(localDate) { mutableListOf() }.add(session)
+        }
+
+        for ((date, daySessions) in byDate) {
+            val group = when (date) {
+                today -> SessionDayGroup(
+                    key = "today",
+                    label = "Today",
+                    kind = SessionDayBucketKind.TODAY,
+                    date = date,
+                    sessions = daySessions,
+                )
+                yesterday -> SessionDayGroup(
+                    key = "yesterday",
+                    label = "Yesterday",
+                    kind = SessionDayBucketKind.YESTERDAY,
+                    date = date,
+                    sessions = daySessions,
+                )
+                null -> SessionDayGroup(
+                    key = "earlier",
+                    label = "Earlier",
+                    kind = SessionDayBucketKind.DATED,
+                    date = null,
+                    sessions = daySessions,
+                )
+                else -> SessionDayGroup(
+                    key = date.toString(),
+                    label = formatDayHeader(date, today),
+                    kind = SessionDayBucketKind.DATED,
+                    date = date,
+                    sessions = daySessions,
+                )
+            }
+            groups += group
+        }
+
+        return groups
+    }
+
+    /** Formats a historical [date] header relative to [today]. */
+    fun formatDayHeader(date: LocalDate, today: LocalDate): String = when (date) {
+        today -> "Today"
+        today.minusDays(1) -> "Yesterday"
+        else -> if (date.year == today.year) {
+            date.format(sameYearFormatter)
+        } else {
+            date.format(otherYearFormatter)
+        }
+    }
+
+    /**
+     * Returns the 3 left-swipe actions (`76 dp` each) for a session row (Phone 1 Section 7 G2):
+     * `Pin` / `Unpin`, `Rename`, and `Delete`.
+     */
+    fun swipeActionsForSession(session: SessionInfo): List<SessionRowAction> = listOf(
+        if (session.pinned) {
+            SessionRowAction(SessionRowActionKind.UNPIN, "Unpin")
+        } else {
+            SessionRowAction(SessionRowActionKind.PIN, "Pin")
+        },
+        SessionRowAction(SessionRowActionKind.RENAME, "Rename"),
+        SessionRowAction(SessionRowActionKind.DELETE, "Delete", destructive = true),
+    )
+
+    /**
+     * Returns the long-press action sheet rows for a session row (Phone 1 Section 7 G2):
+     * `Pin` / `Unpin`, `Mark as unread` (when not already unread), `Rename`, `Set Tag`, and `Delete`.
+     */
+    fun longPressActionsForSession(
+        session: SessionInfo,
+        isUnread: Boolean = false,
+        hasTags: Boolean = true,
+    ): List<SessionRowAction> = buildList {
+        add(
+            if (session.pinned) {
+                SessionRowAction(SessionRowActionKind.UNPIN, "Unpin")
+            } else {
+                SessionRowAction(SessionRowActionKind.PIN, "Pin")
+            },
+        )
+        if (!isUnread) {
+            add(SessionRowAction(SessionRowActionKind.MARK_UNREAD, "Mark as unread"))
+        }
+        add(SessionRowAction(SessionRowActionKind.RENAME, "Rename"))
+        if (hasTags) {
+            add(SessionRowAction(SessionRowActionKind.SET_TAG, "Set Tag"))
+        }
+        add(SessionRowAction(SessionRowActionKind.DELETE, "Delete", destructive = true))
+    }
+
+    /** Formats the subtitle line of a 68 dp phone session row (Phone 1 Section 7 G1). */
+    fun formatSessionSubtitle(
+        liveState: SessionLiveState,
+        relativeAge: String,
+    ): String = when (liveState) {
+        SessionLiveState.RUNNING -> "Running · now"
+        SessionLiveState.NEEDS_YOU -> if (relativeAge.isNotEmpty()) "Needs you · $relativeAge" else "Needs you"
+        SessionLiveState.UNREAD, SessionLiveState.IDLE -> relativeAge.ifEmpty { "Just now" }
+    }
+}
+
+/** Width of each swipe-revealed action button in phone Chat History (Phone 1 G2 = 76 dp). */
+val PhoneHistorySwipeActionWidth = 76.dp
+
+/** Height of each two-line session row in phone Chat History (Phone 1 G1 = 68 dp). */
+val PhoneHistoryRowHeight = 68.dp
+
+/**
+ * Day-grouped phone Chat History list (`Pinned`, `Today`, `Yesterday`, dated groups) with
+ * 68 dp rows, left-swipe row actions (`Pin`/`Unpin`, `Rename`, `Delete`), and long-press sheet
+ * (`designs/ppm-mobile-tablet-redesign/phone/1-chat/index.html`, Section 7 G1–G3).
+ */
+@Composable
+fun PhoneSessionHistoryList(
+    groups: List<SessionDayGroup>,
+    onOpenSession: (SessionInfo) -> Unit,
+    onTogglePin: (SessionInfo) -> Unit,
+    onDeleteSession: (SessionInfo) -> Unit,
+    modifier: Modifier = Modifier,
+    unreadTypes: Map<String, String?> = emptyMap(),
+    runningSessionIds: Set<String> = emptySet(),
+    needsYouSessionIds: Set<String> = emptySet(),
+    activeSessionId: String? = null,
+    tags: List<SessionTag> = emptyList(),
+    hasMore: Boolean = false,
+    loadingMore: Boolean = false,
+    onMarkUnread: (SessionInfo) -> Unit = {},
+    onRenameSession: (SessionInfo, String) -> Unit = { _, _ -> },
+    onSetTag: (SessionInfo, SessionTag?) -> Unit = { _, _ -> },
+    onLoadMore: () -> Unit = {},
+    renderInlineRename: (@Composable (SessionInfo, () -> Unit) -> Unit)? = null,
+) {
+    val tokens = LocalPpmTokens.current
+    val listState = rememberLazyListState()
+    var swipedSessionId by remember { mutableStateOf<String?>(null) }
+    var renamingSessionId by remember { mutableStateOf<String?>(null) }
+    var sheetSession by remember { mutableStateOf<SessionInfo?>(null) }
+
+    Box(modifier = modifier) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .cssScrollbar(listState),
+            state = listState,
+        ) {
+            groups.forEach { group ->
+                item(key = "header_${group.key}") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (group.kind == SessionDayBucketKind.PINNED) {
+                            PpmIcon(ProductIcon.Pin, 11.dp, tokens.text3.color)
+                        }
+                        BasicText(
+                            text = group.label.uppercase(Locale.US),
+                            style = ppmText(11f, FontWeight.Bold, lineHeight = 14f)
+                                .copy(color = tokens.text3.color, letterSpacing = 0.6.sp),
+                        )
+                    }
+                }
+                items(group.sessions, key = { "${group.key}_${it.id}" }) { session ->
+                    val unreadType = unreadTypes[session.id]
+                    val isUnread = unreadTypes.containsKey(session.id)
+                    val liveState = when {
+                        session.id in needsYouSessionIds ||
+                            unreadType == "approval_request" ||
+                            unreadType == "question" -> SessionLiveState.NEEDS_YOU
+                        session.id in runningSessionIds -> SessionLiveState.RUNNING
+                        isUnread -> SessionLiveState.UNREAD
+                        else -> SessionLiveState.IDLE
+                    }
+                    PhoneSessionHistoryRow(
+                        session = session,
+                        liveState = liveState,
+                        unreadType = unreadType,
+                        selected = session.id == activeSessionId,
+                        swipeExpanded = swipedSessionId == session.id,
+                        onSwipeExpandChange = { expanded ->
+                            swipedSessionId = if (expanded) session.id else if (swipedSessionId == session.id) null else swipedSessionId
+                        },
+                        renaming = renamingSessionId == session.id,
+                        onStartRename = {
+                            swipedSessionId = null
+                            renamingSessionId = session.id
+                        },
+                        onFinishRename = { renamingSessionId = null },
+                        onOpen = {
+                            swipedSessionId = null
+                            onOpenSession(session)
+                        },
+                        onLongPress = {
+                            swipedSessionId = null
+                            sheetSession = session
+                        },
+                        onTogglePin = {
+                            swipedSessionId = null
+                            onTogglePin(session)
+                        },
+                        onDelete = {
+                            swipedSessionId = null
+                            onDeleteSession(session)
+                        },
+                        renderInlineRename = renderInlineRename,
+                    )
+                }
+            }
+
+            if (hasMore) {
+                item(key = "load_more") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .ppmClickable(
+                                enabled = !loadingMore,
+                                pressedColor = tokens.panel2.color,
+                                hoverColor = tokens.panel2.color,
+                                onClickLabel = "Load more",
+                                onClick = onLoadMore,
+                            ),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (loadingMore) {
+                            PpmIcon(ProductIcon.Loader2, 14.dp, tokens.text2.color, spinning = true)
+                        }
+                        BasicText(
+                            text = if (loadingMore) "Loading..." else "Load more",
+                            style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.text2.color),
+                        )
+                    }
+                }
+            }
+        }
+
+        val activeSheetSession = sheetSession
+        if (activeSheetSession != null) {
+            PhoneSessionActionSheet(
+                session = activeSheetSession,
+                isUnread = unreadTypes.containsKey(activeSheetSession.id),
+                tags = tags,
+                onDismiss = { sheetSession = null },
+                onTogglePin = {
+                    val target = activeSheetSession
+                    sheetSession = null
+                    onTogglePin(target)
+                },
+                onMarkUnread = {
+                    val target = activeSheetSession
+                    sheetSession = null
+                    onMarkUnread(target)
+                },
+                onRename = {
+                    val target = activeSheetSession
+                    sheetSession = null
+                    renamingSessionId = target.id
+                },
+                onSetTag = { tag ->
+                    val target = activeSheetSession
+                    sheetSession = null
+                    onSetTag(target, tag)
+                },
+                onDelete = {
+                    val target = activeSheetSession
+                    sheetSession = null
+                    onDeleteSession(target)
+                },
+            )
+        }
+    }
+}
+
+/**
+ * 68 dp two-line phone session row with left-swipe 76 dp action tray (`Pin`/`Unpin`, `Rename`, `Delete`)
+ * and long-press sheet trigger (Phone 1 Section 7 G1 & G2).
+ */
+@Composable
+fun PhoneSessionHistoryRow(
+    session: SessionInfo,
+    onOpen: () -> Unit,
+    onTogglePin: () -> Unit,
+    onStartRename: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+    liveState: SessionLiveState = SessionLiveState.IDLE,
+    unreadType: String? = null,
+    selected: Boolean = false,
+    swipeExpanded: Boolean = false,
+    onSwipeExpandChange: (Boolean) -> Unit = {},
+    renaming: Boolean = false,
+    onFinishRename: () -> Unit = {},
+    onLongPress: () -> Unit = {},
+    renderInlineRename: (@Composable (SessionInfo, () -> Unit) -> Unit)? = null,
+) {
+    val tokens = LocalPpmTokens.current
+    val density = LocalDensity.current
+    val actions = remember(session.pinned) { HistoryByDay.swipeActionsForSession(session) }
+    val totalRevealWidth = PhoneHistorySwipeActionWidth * actions.size
+    val maxRevealPx = with(density) { totalRevealWidth.toPx() }
+    var dragOffsetPx by remember(session.id) {
+        mutableFloatStateOf(if (swipeExpanded) -maxRevealPx else 0f)
+    }
+    LaunchedEffect(swipeExpanded, maxRevealPx) {
+        dragOffsetPx = if (swipeExpanded) -maxRevealPx else 0f
+    }
+
+    val bot = session.title.startsWith("[PPM]")
+    val cleanTitle = PpmFormat.collapsedWhitespace(if (bot) session.title.drop(7) else session.title).ifEmpty { "Untitled" }
+    val isUnread = liveState != SessionLiveState.IDLE
+    val rowBg = when {
+        selected -> tokens.accentWash.color
+        liveState == SessionLiveState.NEEDS_YOU -> tokens.warning.opacity(0.08).color
+        liveState == SessionLiveState.UNREAD -> tokens.notification(unreadType).opacity(0.10).color
+        else -> tokens.bgSolid.color
+    }
+    val statusDotColor = when (liveState) {
+        SessionLiveState.RUNNING -> tokens.success.color
+        SessionLiveState.NEEDS_YOU -> tokens.warning.color
+        SessionLiveState.UNREAD -> tokens.notification(unreadType).color
+        SessionLiveState.IDLE -> if (selected) tokens.accent.color else null
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(PhoneHistoryRowHeight)
+            .clip(RoundedCornerShape(0.dp)),
+    ) {
+        // Swipe action tray behind the foreground row (revealed when swiped left)
+        if (swipeExpanded || dragOffsetPx < -1f) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                actions.forEach { action ->
+                    val actionBg = when (action.kind) {
+                        SessionRowActionKind.PIN, SessionRowActionKind.UNPIN -> tokens.accent.color
+                        SessionRowActionKind.RENAME -> tokens.panel2.color
+                        SessionRowActionKind.DELETE -> tokens.error.color
+                        else -> tokens.panel2.color
+                    }
+                    val actionFg = when (action.kind) {
+                        SessionRowActionKind.PIN, SessionRowActionKind.UNPIN -> tokens.accentFg.color
+                        SessionRowActionKind.DELETE -> Color.White
+                        else -> tokens.text.color
+                    }
+                    val actionIcon = when (action.kind) {
+                        SessionRowActionKind.PIN -> ProductIcon.Pin
+                        SessionRowActionKind.UNPIN -> ProductIcon.PinOff
+                        SessionRowActionKind.RENAME -> ProductIcon.Pencil
+                        SessionRowActionKind.DELETE -> ProductIcon.Trash2
+                        else -> ProductIcon.Circle
+                    }
+                    Column(
+                        modifier = Modifier
+                            .width(PhoneHistorySwipeActionWidth)
+                            .fillMaxHeight()
+                            .background(actionBg)
+                            .ppmClickable(
+                                onClickLabel = action.label,
+                                onClick = {
+                                    when (action.kind) {
+                                        SessionRowActionKind.PIN, SessionRowActionKind.UNPIN -> onTogglePin()
+                                        SessionRowActionKind.RENAME -> onStartRename()
+                                        SessionRowActionKind.DELETE -> onDelete()
+                                        else -> {}
+                                    }
+                                },
+                            )
+                            .semantics { contentDescription = action.label },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
+                    ) {
+                        PpmIcon(actionIcon, 16.dp, actionFg)
+                        BasicText(
+                            text = action.label,
+                            style = ppmText(11f, FontWeight.SemiBold, lineHeight = 14f).copy(color = actionFg),
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+
+        // Foreground row content
+        Row(
+            modifier = Modifier
+                .offset { IntOffset(dragOffsetPx.roundToInt(), 0) }
+                .fillMaxSize()
+                .background(rowBg)
+                .cssBorder(tokens.borderSoft.color, sides = CssSides.Bottom)
+                .pointerInput(session.id, maxRevealPx) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            val shouldExpand = dragOffsetPx < -maxRevealPx * 0.35f
+                            dragOffsetPx = if (shouldExpand) -maxRevealPx else 0f
+                            onSwipeExpandChange(shouldExpand)
+                        },
+                        onDragCancel = {
+                            dragOffsetPx = if (swipeExpanded) -maxRevealPx else 0f
+                        },
+                        onHorizontalDrag = { _, dragAmount ->
+                            val next = (dragOffsetPx + dragAmount).coerceIn(-maxRevealPx, 0f)
+                            dragOffsetPx = next
+                        },
+                    )
+                }
+                .pressable(
+                    pressedColor = tokens.surfaceHover.color,
+                    hoverColor = tokens.surfaceHover.color,
+                    enabled = !renaming,
+                    onLongClick = { onLongPress() },
+                    onClick = {
+                        if (swipeExpanded) {
+                            onSwipeExpandChange(false)
+                        } else {
+                            onOpen()
+                        }
+                    },
+                )
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            ProviderBadge(session.providerId)
+
+            if (renaming && renderInlineRename != null) {
+                renderInlineRename(session, onFinishRename)
+            } else {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (bot) {
+                            PpmIcon(ProductIcon.Bot, 14.dp, tokens.text2.color)
+                        }
+                        BasicText(
+                            text = cleanTitle,
+                            modifier = Modifier.weight(1f, fill = false),
+                            style = ppmText(
+                                size = 14f,
+                                weight = if (isUnread || selected) FontWeight.SemiBold else FontWeight.Medium,
+                                lineHeight = 19f,
+                            ).copy(color = tokens.text.color),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        session.tag?.let { tag ->
+                            val tagColor = Rgba.hex(tag.color) ?: tokens.accent
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(tagColor.opacity(0.14).color)
+                                    .cssBorder(tagColor.opacity(0.35).color, RoundedCornerShape(999.dp))
+                                    .padding(horizontal = 7.dp, vertical = 1.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                BasicText(
+                                    text = tag.name,
+                                    style = ppmText(10.5f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tagColor.color),
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        val subColor = when (liveState) {
+                            SessionLiveState.RUNNING -> tokens.success.color
+                            SessionLiveState.NEEDS_YOU -> tokens.warning.color
+                            else -> tokens.text3.color
+                        }
+                        val subWeight = when (liveState) {
+                            SessionLiveState.RUNNING, SessionLiveState.NEEDS_YOU -> FontWeight.Medium
+                            else -> FontWeight.Normal
+                        }
+                        when (liveState) {
+                            SessionLiveState.RUNNING -> BasicText(
+                                text = "Running · now",
+                                style = ppmText(12f, subWeight, lineHeight = 16f).copy(color = subColor),
+                                maxLines = 1,
+                            )
+                            SessionLiveState.NEEDS_YOU -> {
+                                BasicText(
+                                    text = "Needs you",
+                                    style = ppmText(12f, subWeight, lineHeight = 16f).copy(color = subColor),
+                                    maxLines = 1,
+                                )
+                                session.lastActive?.let { instant ->
+                                    BasicText(
+                                        text = "·",
+                                        style = ppmText(12f, subWeight, lineHeight = 16f).copy(color = subColor),
+                                    )
+                                    RelativeTime(instant, ppmText(12f, subWeight, lineHeight = 16f).copy(color = subColor))
+                                }
+                            }
+                            else -> {
+                                val instant = session.lastActive
+                                if (instant != null) {
+                                    RelativeTime(instant, ppmText(12f, subWeight, lineHeight = 16f).copy(color = subColor))
+                                } else {
+                                    BasicText(
+                                        text = "Just now",
+                                        style = ppmText(12f, subWeight, lineHeight = 16f).copy(color = subColor),
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (statusDotColor != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(9.dp)
+                            .clip(CircleShape)
+                            .background(statusDotColor),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Long-press bottom sheet for a session row in phone Chat History (Phone 1 Section 7 G2):
+ * `Pin` / `Unpin`, `Mark as unread`, `Rename`, `Set Tag`, and a divider before red `Delete`.
+ */
+@Composable
+fun PhoneSessionActionSheet(
+    session: SessionInfo,
+    onDismiss: () -> Unit,
+    onTogglePin: () -> Unit,
+    onMarkUnread: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+    isUnread: Boolean = false,
+    tags: List<SessionTag> = emptyList(),
+    onSetTag: (SessionTag?) -> Unit = {},
+) {
+    val tokens = LocalPpmTokens.current
+    var pickingTag by remember { mutableStateOf(false) }
+    val cleanTitle = PpmFormat.collapsedWhitespace(
+        if (session.title.startsWith("[PPM]")) session.title.drop(7) else session.title,
+    ).ifEmpty { "Untitled" }
+
+    Sheet(
+        title = if (pickingTag) "Set Tag" else cleanTitle,
+        subtitle = if (pickingTag) cleanTitle else null,
+        onDismiss = onDismiss,
+        onBack = if (pickingTag) ({ pickingTag = false }) else null,
+        forceBottomSheet = true,
+        modifier = modifier,
+    ) {
+        if (pickingTag) {
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                tags.forEach { tag ->
+                    val tagColor = Rgba.hex(tag.color) ?: tokens.accent
+                    val isSelected = session.tag?.id == tag.id
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .ppmClickable(
+                                hoverColor = tokens.surfaceHover.color,
+                                onClickLabel = tag.name,
+                                onClick = { onSetTag(tag) },
+                            )
+                            .padding(horizontal = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(12.dp)
+                                .clip(CircleShape)
+                                .background(tagColor.color),
+                        )
+                        BasicText(
+                            text = tag.name,
+                            modifier = Modifier.weight(1f),
+                            style = ppmText(14f, FontWeight.Medium, lineHeight = 19f).copy(color = tokens.text.color),
+                        )
+                        if (isSelected) {
+                            PpmIcon(ProductIcon.Check, 18.dp, tokens.accent.color)
+                        }
+                    }
+                }
+                if (session.tag != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .height(1.dp)
+                            .background(tokens.borderSoft.color),
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .ppmClickable(
+                                hoverColor = tokens.surfaceHover.color,
+                                onClickLabel = "Remove tag",
+                                onClick = { onSetTag(null) },
+                            )
+                            .padding(horizontal = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        PpmIcon(ProductIcon.X, 18.dp, tokens.text2.color)
+                        BasicText(
+                            text = "Remove tag",
+                            style = ppmText(14f, FontWeight.Medium, lineHeight = 19f).copy(color = tokens.text2.color),
+                        )
+                    }
+                }
+            }
+        } else {
+            val actions = remember(session.pinned, isUnread, tags.isNotEmpty()) {
+                HistoryByDay.longPressActionsForSession(
+                    session = session,
+                    isUnread = isUnread,
+                    hasTags = true,
+                )
+            }
+            Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                actions.forEach { action ->
+                    if (action.destructive) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .height(1.dp)
+                                .background(tokens.borderSoft.color),
+                        )
+                    }
+                    val rowColor = if (action.destructive) tokens.error.color else tokens.text.color
+                    val iconTint = if (action.destructive) tokens.error.color else tokens.text2.color
+                    val rowIcon = when (action.kind) {
+                        SessionRowActionKind.PIN -> ProductIcon.Pin
+                        SessionRowActionKind.UNPIN -> ProductIcon.PinOff
+                        SessionRowActionKind.MARK_UNREAD -> ProductIcon.Circle
+                        SessionRowActionKind.RENAME -> ProductIcon.Pencil
+                        SessionRowActionKind.SET_TAG -> ProductIcon.Tag
+                        SessionRowActionKind.DELETE -> ProductIcon.Trash2
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .ppmClickable(
+                                hoverColor = tokens.surfaceHover.color,
+                                onClickLabel = action.label,
+                                onClick = {
+                                    when (action.kind) {
+                                        SessionRowActionKind.PIN, SessionRowActionKind.UNPIN -> onTogglePin()
+                                        SessionRowActionKind.MARK_UNREAD -> onMarkUnread()
+                                        SessionRowActionKind.RENAME -> onRename()
+                                        SessionRowActionKind.SET_TAG -> {
+                                            if (tags.isNotEmpty()) {
+                                                pickingTag = true
+                                            } else {
+                                                onSetTag(null)
+                                            }
+                                        }
+                                        SessionRowActionKind.DELETE -> onDelete()
+                                    }
+                                },
+                            )
+                            .padding(horizontal = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        PpmIcon(rowIcon, 18.dp, iconTint)
+                        BasicText(
+                            text = action.label,
+                            modifier = Modifier.weight(1f),
+                            style = ppmText(14f, FontWeight.Medium, lineHeight = 19f).copy(color = rowColor),
+                        )
+                        if (action.kind == SessionRowActionKind.SET_TAG) {
+                            session.tag?.let { tag ->
+                                BasicText(
+                                    text = tag.name,
+                                    style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text3.color),
+                                )
+                            }
+                            PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text3.color)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

@@ -48,6 +48,7 @@ import com.hienlh.ppm.design.CssColumn
 import com.hienlh.ppm.design.CssMixedText
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.PpmIcon
@@ -86,6 +87,160 @@ class SessionDebugSource(
 )
 
 /**
+ * A labelled key-value row in the phone Session Debug sheet
+ * (`designs/ppm-mobile-tablet-redesign/phone/1-chat/index.html`, Section 8 H1 & Note 103).
+ */
+data class SessionDebugField(
+    val label: String,
+    val displayValue: String,
+    val fullValue: String = displayValue,
+    val mono: Boolean = true,
+)
+
+/**
+ * Middle-truncates long session IDs and file paths (`c8e3f4a1…9f2b1408`) so they do not wrap
+ * across multiple lines on narrow phone screens while keeping both ends readable.
+ */
+fun middleEllipsis(value: String, head: Int = 8, tail: Int = 8): String {
+    val trimmed = value.trim()
+    if (trimmed.length <= head + tail + 3) return trimmed
+    return "${trimmed.take(head)}…${trimmed.takeLast(tail)}"
+}
+
+/**
+ * Builds structured key-value rows from [SessionDebugInfo] and [renderStats] for the phone
+ * Session Debug sheet (H1). On native Android ([nativeApp] = true), browser-only DOM node and
+ * JS heap lines are omitted per Section 11.
+ */
+fun debugInfoFields(
+    data: SessionDebugInfo,
+    renderStats: List<String> = emptyList(),
+    nativeApp: Boolean = true,
+): List<SessionDebugField> {
+    val weight = data.jsonlSizeBytes?.let { size ->
+        " (${fmtMB(size)}${data.jsonlLines?.let { ", $it records" } ?: ""})"
+    } ?: ""
+    val jsonlFull = if (!data.jsonlPath.isNullOrEmpty()) "${data.jsonlPath}$weight" else "not found"
+    val jsonlDisplay = if (!data.jsonlPath.isNullOrEmpty()) {
+        "${middleEllipsis(data.jsonlPath!!, head = 10, tail = 14)}$weight"
+    } else {
+        "not found"
+    }
+    val rows = mutableListOf(
+        SessionDebugField(
+            label = "PPM Session",
+            displayValue = middleEllipsis(data.ppmSessionId, head = 8, tail = 8),
+            fullValue = data.ppmSessionId,
+            mono = true,
+        ),
+        SessionDebugField(
+            label = "SDK Session",
+            displayValue = middleEllipsis(data.sdkSessionId, head = 8, tail = 8),
+            fullValue = data.sdkSessionId,
+            mono = true,
+        ),
+        SessionDebugField(
+            label = "JSONL",
+            displayValue = jsonlDisplay,
+            fullValue = jsonlFull,
+            mono = true,
+        ),
+    )
+    if (data.projectPath.isNotEmpty()) {
+        rows += SessionDebugField(
+            label = "Project",
+            displayValue = data.projectPath,
+            fullValue = data.projectPath,
+            mono = true,
+        )
+    }
+    for (stat in renderStats) {
+        val clean = stat.trim()
+        if (clean.isEmpty()) continue
+        if (nativeApp && (clean.startsWith("DOM", ignoreCase = true) || clean.startsWith("JS heap", ignoreCase = true))) {
+            continue
+        }
+        val colonIdx = clean.indexOf(':')
+        if (colonIdx > 0) {
+            val key = clean.substring(0, colonIdx).trim()
+            val rawVal = clean.substring(colonIdx + 1).trim()
+            rows += SessionDebugField(
+                label = key,
+                displayValue = rawVal,
+                fullValue = rawVal,
+                mono = false,
+            )
+        } else {
+            rows += SessionDebugField(
+                label = "Rendered",
+                displayValue = clean,
+                fullValue = clean,
+                mono = false,
+            )
+        }
+    }
+    return rows
+}
+
+/**
+ * Phone key-value card replacing the raw monospace dump in Session Debug (Phone 1 Section 8 H1).
+ */
+@Composable
+fun SessionDebugKeyValueCard(
+    fields: List<SessionDebugField>,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(10.dp)
+    CssColumn(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(tokens.panel.color)
+            .cssBorder(tokens.border.color, shape)
+            .padding(horizontal = 12.dp),
+        top = 8.dp,
+        bottom = 8.dp,
+    ) {
+        fields.forEachIndexed { index, field ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (index > 0) {
+                            Modifier.cssBorder(tokens.borderSoft.color, sides = CssSides.Top)
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .padding(vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                BasicText(
+                    text = field.label,
+                    modifier = Modifier.width(88.dp),
+                    style = ppmText(11.5f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text3.color),
+                    maxLines = 1,
+                )
+                BasicText(
+                    text = field.displayValue,
+                    modifier = Modifier.weight(1f),
+                    style = ppmText(
+                        size = 12f,
+                        weight = FontWeight.Normal,
+                        kind = if (field.mono) FontKind.MONO else FontKind.SANS,
+                        lineHeight = 17f,
+                    ).copy(color = tokens.text2.color),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/**
  * The dialog's body (`flex flex-col gap-3`): the session's ids and transcript file with a Copy
  * button, then its token history and its transcript images, each loading on its own, stacked in
  * fractions of a pixel as Chrome stacks them, [top] and [bottom] inside its edges.
@@ -100,19 +255,25 @@ fun SessionDebugBody(
     modifier: Modifier = Modifier,
     top: Dp = 0.dp,
     bottom: Dp = 0.dp,
+    useKeyValueLayout: Boolean = LocalPpmMobile.current,
 ) {
     val tokens = LocalPpmTokens.current
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     var info by remember(source) { mutableStateOf<String?>(null) }
+    var fields by remember(source) { mutableStateOf<List<SessionDebugField>?>(null) }
     var copied by remember(source) { mutableStateOf(false) }
     LaunchedEffect(source) {
-        info = try {
-            debugInfoText(source.info(), renderStats())
+        try {
+            val loadedInfo = source.info()
+            val stats = renderStats()
+            info = debugInfoText(loadedInfo, stats)
+            fields = debugInfoFields(loadedInfo, stats)
         } catch (error: CancellationException) {
             throw error
         } catch (_: Exception) {
-            "Failed to load debug info"
+            info = "Failed to load debug info"
+            fields = null
         }
     }
     CssColumn(modifier.fillMaxWidth(), gap = 12.dp, top = top, bottom = bottom) {
@@ -121,32 +282,39 @@ fun SessionDebugBody(
             PpmIcon(ProductIcon.Bug, 16.dp, tokens.accent.color)
             BasicText("Session debug info", style = ppmText(14f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color))
         }
-        // `max-h-[35vh] overflow-y-auto whitespace-pre-wrap break-all rounded-md border border-border
-        // bg-surface p-2.5 font-mono text-[11px] leading-relaxed text-text-secondary select-text`.
-        val shape = RoundedCornerShape(8.dp)
-        val scroll = rememberScrollState()
-        CssColumn(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(max = viewport.height * 0.35f)
-                .chromeScrollbar(scroll, vertical = true, tokens.border.color, border = 1.dp)
-                .clip(shape)
-                .background(tokens.panel.color)
-                .cssBorder(tokens.border.color, shape)
-                .verticalScroll(scroll)
-                .padding(horizontal = 10.dp),
-            top = 10.dp,
-            bottom = 10.dp,
-        ) {
-            Mono(info ?: "Loading...", tokens.text2, Modifier.cssLines(17.875f), breakAll = true, style = ppmText(11f, kind = FontKind.MONO, lineHeight = 17.875f))
+        val loadedFields = fields
+        if (useKeyValueLayout && loadedFields != null) {
+            SessionDebugKeyValueCard(fields = loadedFields)
+        } else {
+            // `max-h-[35vh] overflow-y-auto whitespace-pre-wrap break-all rounded-md border border-border
+            // bg-surface p-2.5 font-mono text-[11px] leading-relaxed text-text-secondary select-text`.
+            val shape = RoundedCornerShape(8.dp)
+            val scroll = rememberScrollState()
+            CssColumn(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = viewport.height * 0.35f)
+                    .chromeScrollbar(scroll, vertical = true, tokens.border.color, border = 1.dp)
+                    .clip(shape)
+                    .background(tokens.panel.color)
+                    .cssBorder(tokens.border.color, shape)
+                    .verticalScroll(scroll)
+                    .padding(horizontal = 10.dp),
+                top = 10.dp,
+                bottom = 10.dp,
+            ) {
+                Mono(info ?: "Loading...", tokens.text2, Modifier.cssLines(17.875f), breakAll = true, style = ppmText(11f, kind = FontKind.MONO, lineHeight = 17.875f))
+            }
         }
         // `Button size="sm" className="w-full"`, disabled until there is something to copy.
         val text = info
+        val copyHeight = if (useKeyValueLayout) 40.dp else 32.dp
         ReviewButton(
             if (copied) "Copied!" else "Copy",
             WebVariant.DEFAULT,
             WebSize.SM,
-            Modifier.fillMaxWidth().cssHeight(32.dp),
+            Modifier.fillMaxWidth().cssHeight(copyHeight),
+            height = copyHeight,
             icon = if (copied) ProductIcon.ClipboardCheck else ProductIcon.Copy,
             iconSize = 14.dp,
             enabled = text != null,
@@ -517,15 +685,18 @@ private fun plural(n: Int) = if (n == 1) "" else "s"
  */
 @Composable
 private fun StripButtons(audit: ImageAudit, busy: StripMode?, row: Boolean, onStrip: (StripMode) -> Unit) {
+    val mobile = LocalPpmMobile.current
     val density = LocalDensity.current
     val border = with(density) { cssBorderPx(1.dp).toDp() }
+    val stackedOversizedHeight = if (mobile) 44.dp else 20.dp + border * 2
+    val stackedAllHeight = if (mobile) 44.dp else 20.dp
     val oversized: @Composable (Modifier) -> Unit = { modifier ->
         ReviewButton(
             "Remove oversized" + if (audit.oversized > 0) " (${audit.oversized} · ${fmtSize(audit.oversizedBytes)})" else "",
             WebVariant.OUTLINE,
             WebSize.SM,
             modifier,
-            height = if (row) 32.dp else 20.dp + border * 2,
+            height = if (row) 32.dp else stackedOversizedHeight,
             icon = if (busy == StripMode.OVERSIZED) ProductIcon.Loader2 else ProductIcon.ImageOff,
             iconSize = 14.dp,
             spinning = busy == StripMode.OVERSIZED,
@@ -538,7 +709,7 @@ private fun StripButtons(audit: ImageAudit, busy: StripMode?, row: Boolean, onSt
             WebVariant.DESTRUCTIVE,
             WebSize.SM,
             modifier,
-            height = if (row) 32.dp else 20.dp,
+            height = if (row) 32.dp else stackedAllHeight,
             icon = if (busy == StripMode.ALL) ProductIcon.Loader2 else ProductIcon.ImageOff,
             iconSize = 14.dp,
             spinning = busy == StripMode.ALL,
@@ -551,9 +722,9 @@ private fun StripButtons(audit: ImageAudit, busy: StripMode?, row: Boolean, onSt
             all(Modifier)
         }
     } else {
-        CssColumn(Modifier.fillMaxWidth(), gap = 6.dp) {
-            oversized(Modifier.fillMaxWidth().cssHeight(20.dp + border * 2))
-            all(Modifier.fillMaxWidth().cssHeight(20.dp))
+        CssColumn(Modifier.fillMaxWidth(), gap = if (mobile) 8.dp else 6.dp) {
+            oversized(Modifier.fillMaxWidth().cssHeight(stackedOversizedHeight))
+            all(Modifier.fillMaxWidth().cssHeight(stackedAllHeight))
         }
     }
 }

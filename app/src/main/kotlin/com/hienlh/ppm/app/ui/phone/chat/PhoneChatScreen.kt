@@ -1,0 +1,981 @@
+package com.hienlh.ppm.app.ui.phone.chat
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.app.ui.PpmTextField
+import com.hienlh.ppm.design.CssSides
+import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.PpmIcon
+import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.kit.AccountChip
+import com.hienlh.ppm.design.kit.ActionIconButton
+import com.hienlh.ppm.design.kit.ActionPrimaryButton
+import com.hienlh.ppm.design.kit.BottomActionCard
+import com.hienlh.ppm.design.kit.Chip
+import com.hienlh.ppm.design.kit.KitSpec
+import com.hienlh.ppm.design.kit.NeedsYouPill
+import com.hienlh.ppm.design.ppmClickable
+import com.hienlh.ppm.design.ppmShadow
+import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.design.vector
+import com.hienlh.ppm.protocol.ApprovalRequest
+import com.hienlh.ppm.protocol.SessionInfo
+import com.hienlh.ppm.state.AttentionNotice
+import com.hienlh.ppm.state.NeedsYouState
+import com.hienlh.ppm.state.WaitingCardKind
+import com.hienlh.ppm.state.resolveNeedsYouState
+
+/**
+ * Queued follow-up message priority while a turn is streaming
+ * (`designs/ppm-mobile-tablet-redesign/phone/1-chat/index.html`, Section 2 B10 & B11).
+ */
+enum class PhoneMessagePriority(val chipLabel: String, val queueDescription: String, val snackbarTitle: String) {
+    NOW(
+        chipLabel = "Now",
+        queueDescription = "Interrupt — sends right away",
+        snackbarTitle = "Next message: Interrupt",
+    ),
+    NEXT(
+        chipLabel = "Next",
+        queueDescription = "Queue — sends when this turn ends",
+        snackbarTitle = "Next message: Queue",
+    ),
+    LATER(
+        chipLabel = "Later",
+        queueDescription = "Later — sends when the chat is idle",
+        snackbarTitle = "Next message: Later",
+    ),
+    ;
+
+    fun next(): PhoneMessagePriority = when (this) {
+        NOW -> NEXT
+        NEXT -> LATER
+        LATER -> NOW
+    }
+}
+
+/**
+ * Reply or Edit banner state shown as a 52 dp strip above the composer (Phone 1 Section 2 B13).
+ */
+data class PhoneReplyEditBanner(
+    val isEditing: Boolean,
+    val title: String = if (isEditing) "Editing message" else "Replying to AI",
+    val snippet: String,
+)
+
+/**
+ * Task tracker summary shown as a 52 dp bar under the app bar (Phone 1 Section 3 C6).
+ */
+data class PhoneTaskProgressSummary(
+    val completedCount: Int,
+    val totalCount: Int,
+    val currentTaskTitle: String,
+)
+
+/**
+ * Complete Phone 1 · Chat screen scaffold (`designs/ppm-mobile-tablet-redesign/phone/1-chat/index.html`,
+ * Requirements 4.1, 4.2, 4.3).
+ *
+ * Integrates:
+ * - Top task tracker bar (52 dp) & background command bar (52 dp)
+ * - Empty new-chat welcome or active transcript content
+ * - Floating `NeedsYouPill` (Requirement 4.2: shown when [pendingApproval] is non-null and
+ *   `!atBottom`, scrolling to the waiting card on tap), `PhoneTurnJumpPill`, and `PhoneClearErrorsPill`
+ * - Waiting-card keyboard focus collapse (`needsYouState.hidesComposerOnKeyboard`): when a waiting
+ *   card's own text input (`AskUserQuestion` "Other..." or `ppm:db_execute` password field) has
+ *   keyboard focus, the bottom composer and context chip row step aside so the card sits directly
+ *   above the keyboard
+ * - Turn-stop bar, Reply/Edit 52 dp strip, context chip row (52 dp), and `BottomActionCard` composer
+ * - Sticky cross-session attention snackbar (`PhoneAttentionSnackbar`, D7)
+ */
+@Composable
+fun PhoneChatScreen(
+    composerState: TextFieldState,
+    onSendMessage: (String, PhoneMessagePriority) -> Unit,
+    onStopTurn: () -> Unit,
+    onScrollToWaitingCard: () -> Unit,
+    modifier: Modifier = Modifier,
+    isNewChat: Boolean = false,
+    startingConversation: Boolean = false,
+    projectName: String = "",
+    recentSessions: List<SessionInfo> = emptyList(),
+    onOpenRecentSession: (SessionInfo) -> Unit = {},
+    onQuickOrientation: () -> Unit = {},
+    pendingApproval: ApprovalRequest? = null,
+    atBottom: Boolean = true,
+    cardKeyboardFocused: Boolean = false,
+    streaming: Boolean = false,
+    elapsedTurnLabel: String = "0:04",
+    turnTokensLabel: String? = null,
+    providerId: String = "claude",
+    modelLabel: String = "Sonnet 4.6",
+    effortLabel: String = "Medium",
+    permissionModeId: String = "default",
+    permissionModeLabel: String = "Ask",
+    accountName: String = "Primary",
+    accountUsageText: String? = null,
+    specModeEnabled: Boolean = false,
+    onToggleSpecMode: () -> Unit = {},
+    changedFiles: List<PhoneChangedFileItem> = emptyList(),
+    taskProgress: PhoneTaskProgressSummary? = null,
+    backgroundCommand: String? = null,
+    backgroundElapsedLabel: String = "running",
+    onViewBackgroundOutput: () -> Unit = {},
+    onStopBackgroundCommand: () -> Unit = {},
+    viewingTurnNumber: Int? = null,
+    onBackToLatestTurn: () -> Unit = {},
+    errorCount: Int = 0,
+    onClearAllErrors: () -> Unit = {},
+    replyEditBanner: PhoneReplyEditBanner? = null,
+    onCancelReplyEdit: () -> Unit = {},
+    attachments: List<PhoneDraftAttachment> = emptyList(),
+    onRemoveAttachment: (String) -> Unit = {},
+    onOpenAttachSheet: () -> Unit = {},
+    voiceRecording: Boolean = false,
+    voiceElapsedLabel: String = "0:00",
+    onToggleVoiceRecording: () -> Unit = {},
+    onOpenModelEffortSheet: () -> Unit = {},
+    onOpenModesSheet: () -> Unit = {},
+    onOpenAccountSwitcher: () -> Unit = {},
+    onOpenSessionChangesSheet: () -> Unit = {},
+    onOpenSessionInfoSheet: () -> Unit = {},
+    crossSessionNotice: AttentionNotice? = null,
+    onGoToCrossSession: () -> Unit = {},
+    onDismissCrossSessionNotice: () -> Unit = {},
+    transcriptContent: @Composable () -> Unit = {},
+) {
+    val tokens = LocalPpmTokens.current
+    val needsYouState: NeedsYouState = remember(pendingApproval, atBottom, cardKeyboardFocused) {
+        resolveNeedsYouState(
+            pendingApproval = pendingApproval,
+            atBottom = atBottom,
+            cardKeyboardFocused = cardKeyboardFocused,
+        )
+    }
+    var priority by remember { mutableStateOf(PhoneMessagePriority.NEXT) }
+    var previousPriority by remember { mutableStateOf<PhoneMessagePriority?>(null) }
+    var showPrioritySnackbar by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(tokens.bgSolid.color),
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Top bar 1: Task tracker strip (52 dp, Phone 1 C6)
+            if (taskProgress != null && taskProgress.totalCount > 0) {
+                PhoneTaskTrackerBar(progress = taskProgress)
+            }
+
+            // Top bar 2: Running background command bar (52 dp, Phone 1 F1)
+            if (!backgroundCommand.isNullOrEmpty()) {
+                PhoneBackgroundCommandBar(
+                    command = backgroundCommand,
+                    elapsedLabel = backgroundElapsedLabel,
+                    onViewOutput = onViewBackgroundOutput,
+                    onStop = onStopBackgroundCommand,
+                )
+            }
+
+            // Main transcript or new-chat welcome
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                if (isNewChat) {
+                    PhoneNewChatWelcome(
+                        projectName = projectName,
+                        sessions = recentSessions,
+                        onOpenSession = onOpenRecentSession,
+                        onQuickOrientation = onQuickOrientation,
+                        startingConversation = startingConversation,
+                    )
+                } else {
+                    transcriptContent()
+                }
+
+                // Floating pills above the bottom area (NeedsYouPill, TurnJumpPill, ClearErrorsPill)
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (errorCount >= 2) {
+                        PhoneClearErrorsPill(
+                            errorCount = errorCount,
+                            onClearAll = onClearAllErrors,
+                        )
+                    }
+                    if (viewingTurnNumber != null) {
+                        PhoneTurnJumpPill(
+                            turnNumber = viewingTurnNumber,
+                            onBackToLatest = onBackToLatestTurn,
+                        )
+                    }
+                    if (needsYouState.visible) {
+                        NeedsYouPill(
+                            label = needsYouState.label,
+                            onClick = onScrollToWaitingCard,
+                        )
+                    }
+                }
+            }
+
+            // Priority snackbar when cycling Now / Next / Later (Phone 1 B11)
+            if (showPrioritySnackbar && streaming) {
+                PhonePrioritySnackbar(
+                    title = priority.snackbarTitle,
+                    subtitle = priority.queueDescription,
+                    onUndo = {
+                        previousPriority?.let { priority = it }
+                        showPrioritySnackbar = false
+                    },
+                )
+            }
+
+            // Cross-session sticky attention snackbar (Phone 1 D7, 64 dp)
+            if (crossSessionNotice != null) {
+                PhoneAttentionSnackbar(
+                    notice = crossSessionNotice,
+                    onGoToSession = onGoToCrossSession,
+                    onDismiss = onDismissCrossSessionNotice,
+                )
+            }
+
+            // When a waiting card's text input (AskUserQuestion "Other..." or db_execute password)
+            // has keyboard focus, the composer and context chip row step aside so the card sits
+            // directly above the keyboard (Phone 1 D2 & D3 `cardKeyboard`).
+            if (!needsYouState.hidesComposerOnKeyboard) {
+                if (streaming) {
+                    PhoneTurnStopBar(
+                        elapsedLabel = elapsedTurnLabel,
+                        tokensLabel = turnTokensLabel,
+                        onStop = onStopTurn,
+                    )
+                }
+
+                if (replyEditBanner != null) {
+                    PhoneReplyEditStrip(
+                        banner = replyEditBanner,
+                        onCancel = onCancelReplyEdit,
+                    )
+                }
+
+                // 52 dp horizontal context chip row above the composer
+                PhoneContextChipRow(
+                    providerId = providerId,
+                    modelLabel = modelLabel,
+                    effortLabel = effortLabel,
+                    permissionModeId = permissionModeId,
+                    permissionModeLabel = permissionModeLabel,
+                    accountName = accountName,
+                    accountUsageText = accountUsageText,
+                    specModeEnabled = specModeEnabled,
+                    changedFiles = changedFiles,
+                    onOpenModelEffortSheet = onOpenModelEffortSheet,
+                    onOpenModesSheet = onOpenModesSheet,
+                    onOpenAccountSwitcher = onOpenAccountSwitcher,
+                    onToggleSpecMode = onToggleSpecMode,
+                    onOpenSessionChangesSheet = onOpenSessionChangesSheet,
+                    onOpenSessionInfoSheet = onOpenSessionInfoSheet,
+                )
+
+                // Composer inside BottomActionCard (Requirement 4.1, Phone 1 Section 5)
+                val draftText = composerState.text.toString()
+                val canSend = draftText.isNotBlank() || attachments.isNotEmpty()
+                BottomActionCard(
+                    applyWindowInsets = true,
+                    topContent = if (attachments.isNotEmpty()) {
+                        {
+                            PhoneAttachmentTray(
+                                attachments = attachments,
+                                onRemove = onRemoveAttachment,
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                    chipsContent = {
+                        ActionIconButton(
+                            icon = ProductIcon.Plus.vector,
+                            label = "Attach",
+                            onClick = onOpenAttachSheet,
+                        )
+                        ActionIconButton(
+                            icon = ProductIcon.Mic.vector,
+                            label = if (voiceRecording) "Stop voice input" else "Voice input",
+                            active = voiceRecording,
+                            onClick = onToggleVoiceRecording,
+                        )
+                        if (streaming) {
+                            Chip(
+                                label = priority.chipLabel,
+                                icon = ProductIcon.Clock,
+                                selected = priority == PhoneMessagePriority.NOW,
+                                onClick = {
+                                    previousPriority = priority
+                                    priority = priority.next()
+                                    showPrioritySnackbar = true
+                                },
+                            )
+                        }
+                    },
+                    primaryAction = {
+                        if (voiceRecording) {
+                            ActionPrimaryButton(
+                                icon = ProductIcon.Square,
+                                label = "Stop",
+                                destructive = true,
+                                onClick = onToggleVoiceRecording,
+                            )
+                        } else {
+                            ActionPrimaryButton(
+                                icon = ProductIcon.ArrowUp,
+                                contentDescriptionLabel = "Send message",
+                                enabled = canSend,
+                                onClick = {
+                                    if (canSend) {
+                                        onSendMessage(draftText, priority)
+                                    }
+                                },
+                            )
+                        }
+                    },
+                ) {
+                    if (voiceRecording) {
+                        PhoneVoiceRecordingBar(
+                            elapsedLabel = voiceElapsedLabel,
+                            onStop = onToggleVoiceRecording,
+                        )
+                    } else {
+                        PpmTextField(
+                            state = composerState,
+                            placeholder = if (specModeEnabled) {
+                                "Describe the feature or bug for Spec mode…"
+                            } else {
+                                "Message ${modelLabel}…"
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 28.dp, max = 140.dp)
+                                .padding(horizontal = 4.dp, vertical = 4.dp),
+                            style = ppmText(15f, lineHeight = 21f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 52 dp task progress bar pinned under the app bar (Phone 1 Section 3 C6).
+ */
+@Composable
+fun PhoneTaskTrackerBar(
+    progress: PhoneTaskProgressSummary,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalPpmTokens.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .background(tokens.panel.color)
+            .cssBorder(tokens.border.color, sides = CssSides.Bottom)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        PpmIcon(ProductIcon.ListChecks, 16.dp, tokens.accent.color)
+        BasicText(
+            text = "Tasks ${progress.completedCount}/${progress.totalCount} done",
+            style = ppmText(12.5f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.text.color),
+        )
+        BasicText(
+            text = progress.currentTaskTitle,
+            modifier = Modifier.weight(1f),
+            style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * Turn-stop bar shown above the context chip row while a turn is streaming (Phone 1 Section 6 F2).
+ */
+@Composable
+fun PhoneTurnStopBar(
+    elapsedLabel: String,
+    tokensLabel: String?,
+    onStop: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalPpmTokens.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .background(tokens.panel.color)
+            .cssBorder(tokens.borderSoft.color, sides = CssSides.Top)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        PpmIcon(ProductIcon.Loader2, 15.dp, tokens.accent.color, spinning = true)
+        BasicText(
+            text = buildString {
+                append("Generating · ")
+                append(elapsedLabel)
+                if (!tokensLabel.isNullOrEmpty()) {
+                    append(" · ")
+                    append(tokensLabel)
+                }
+            },
+            modifier = Modifier.weight(1f),
+            style = ppmText(12f, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.text2.color),
+            maxLines = 1,
+        )
+        Box(
+            modifier = Modifier
+                .height(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(tokens.error.opacity(0.14).color)
+                .cssBorder(tokens.error.opacity(0.40).color, RoundedCornerShape(10.dp))
+                .ppmClickable(
+                    shape = RoundedCornerShape(10.dp),
+                    onClickLabel = "Stop generating",
+                    onClick = onStop,
+                )
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                PpmIcon(ProductIcon.Square, 12.dp, tokens.error.color)
+                BasicText(
+                    text = "Stop",
+                    style = ppmText(12f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.error.color),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 52 dp Reply / Edit strip above the composer (`Replying to AI` / `Editing message`, Phone 1 B13).
+ */
+@Composable
+fun PhoneReplyEditStrip(
+    banner: PhoneReplyEditBanner,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalPpmTokens.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .background(tokens.panel.color)
+            .cssBorder(tokens.borderSoft.color, sides = CssSides.Top)
+            .padding(start = 14.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        PpmIcon(
+            icon = if (banner.isEditing) ProductIcon.Pencil else ProductIcon.ArrowLeft,
+            size = 16.dp,
+            tint = tokens.accent.color,
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            BasicText(
+                text = banner.title,
+                style = ppmText(12f, FontWeight.SemiBold, lineHeight = 15f).copy(color = tokens.accent.color),
+                maxLines = 1,
+            )
+            BasicText(
+                text = banner.snippet,
+                style = ppmText(12f, lineHeight = 15f).copy(color = tokens.text2.color),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(KitSpec.MinTouchTarget)
+                .clip(CircleShape)
+                .ppmClickable(
+                    shape = CircleShape,
+                    onClickLabel = "Cancel ${banner.title}",
+                    onClick = onCancel,
+                )
+                .semantics { contentDescription = "Cancel ${banner.title}" },
+            contentAlignment = Alignment.Center,
+        ) {
+            PpmIcon(ProductIcon.X, 16.dp, tokens.text2.color)
+        }
+    }
+}
+
+/**
+ * 52 dp horizontally scrollable context chip row above the composer (Phone 1 Sections 1, 5, 6 & 9).
+ */
+@Composable
+fun PhoneContextChipRow(
+    providerId: String,
+    modelLabel: String,
+    effortLabel: String,
+    permissionModeId: String,
+    permissionModeLabel: String,
+    accountName: String,
+    accountUsageText: String?,
+    specModeEnabled: Boolean,
+    changedFiles: List<PhoneChangedFileItem>,
+    onOpenModelEffortSheet: () -> Unit,
+    onOpenModesSheet: () -> Unit,
+    onOpenAccountSwitcher: () -> Unit,
+    onToggleSpecMode: () -> Unit,
+    onOpenSessionChangesSheet: () -> Unit,
+    onOpenSessionInfoSheet: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalPpmTokens.current
+    val isBypass = permissionModeId == "bypassPermissions"
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        // Model & Effort chip
+        Chip(
+            label = modelLabel,
+            providerId = providerId,
+            secondaryLabel = effortLabel,
+            showCaret = true,
+            onClick = onOpenModelEffortSheet,
+        )
+
+        // Permission Mode chip
+        Chip(
+            label = permissionModeLabel,
+            icon = ProductIcon.ShieldAlert,
+            alert = isBypass,
+            showCaret = true,
+            onClick = onOpenModesSheet,
+        )
+
+        // Account switcher chip
+        AccountChip(
+            name = accountName,
+            usageText = accountUsageText,
+            onClick = onOpenAccountSwitcher,
+        )
+
+        // Spec mode toggle chip (Section 9 I1: `✦ Spec`)
+        Chip(
+            label = "✦ Spec",
+            selected = specModeEnabled,
+            onClick = onToggleSpecMode,
+        )
+
+        // Session changes pill when files changed (Section 6 F4)
+        if (changedFiles.isNotEmpty()) {
+            val adds = changedFiles.sumOf { it.additions }
+            val dels = changedFiles.sumOf { it.deletions }
+            Chip(
+                label = "${changedFiles.size} file${if (changedFiles.size == 1) "" else "s"}",
+                secondaryLabel = "+$adds −$dels",
+                icon = ProductIcon.FileCode,
+                onClick = onOpenSessionChangesSheet,
+            )
+        }
+
+        // Session info chip (Section 8 H2)
+        Chip(
+            label = "Info",
+            icon = ProductIcon.Info,
+            onClick = onOpenSessionInfoSheet,
+        )
+    }
+}
+
+/**
+ * Voice recording status bar inside the composer card (Phone 1 Section 5 E7).
+ */
+@Composable
+fun PhoneVoiceRecordingBar(
+    elapsedLabel: String,
+    onStop: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalPpmTokens.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .padding(horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(tokens.error.color),
+        )
+        BasicText(
+            text = elapsedLabel,
+            style = ppmText(13f, FontWeight.SemiBold, FontKind.MONO, lineHeight = 17f).copy(color = tokens.text.color),
+        )
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            val heights = listOf(8.dp, 16.dp, 12.dp, 20.dp, 10.dp, 18.dp, 14.dp, 9.dp)
+            heights.forEach { h ->
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .height(h)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(tokens.accent.color),
+                )
+            }
+        }
+        BasicText(
+            text = "Listening…",
+            style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+        )
+    }
+}
+
+/**
+ * Priority chip change snackbar (`"Next message: Interrupt"` + `Undo`, Phone 1 Section 2 B11).
+ */
+@Composable
+fun PhonePrioritySnackbar(
+    title: String,
+    subtitle: String,
+    onUndo: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(shape)
+            .background(tokens.panel2.color)
+            .cssBorder(tokens.border.color, shape)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            BasicText(
+                text = title,
+                style = ppmText(12.5f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.text.color),
+            )
+            BasicText(
+                text = subtitle,
+                style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .height(36.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .ppmClickable(
+                    shape = RoundedCornerShape(8.dp),
+                    onClickLabel = "Undo",
+                    onClick = onUndo,
+                )
+                .padding(horizontal = 10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                text = "Undo",
+                style = ppmText(12.5f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.accent.color),
+            )
+        }
+    }
+}
+
+/**
+ * Sticky 64 dp cross-session attention snackbar when another session needs permission or asks a
+ * question (`"{tool} needs permission"` / `"AI has a question"` / `"AI wants to change {conn}"`,
+ * Phone 1 Section 4 D7).
+ */
+@Composable
+fun PhoneAttentionSnackbar(
+    notice: AttentionNotice,
+    onGoToSession: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(14.dp)
+    val accent = if (notice.warning) tokens.warning else tokens.accent
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .heightIn(min = 64.dp)
+            .ppmShadow(tokens.shadowFloat, shape)
+            .clip(shape)
+            .background(tokens.panel2.color)
+            .cssBorder(accent.opacity(0.50).color, shape, width = 1.5.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        PpmIcon(
+            icon = if (notice.warning) ProductIcon.ShieldAlert else ProductIcon.CircleHelp,
+            size = 18.dp,
+            tint = accent.color,
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            BasicText(
+                text = notice.title,
+                style = ppmText(13f, FontWeight.SemiBold, lineHeight = 17f).copy(color = tokens.text.color),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            BasicText(
+                text = notice.description,
+                style = ppmText(11.5f, lineHeight = 15f).copy(color = tokens.text2.color),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .height(40.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(accent.color)
+                .ppmClickable(
+                    shape = RoundedCornerShape(10.dp),
+                    onClickLabel = "Go to session",
+                    onClick = onGoToSession,
+                )
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                text = "Go to session",
+                style = ppmText(12f, FontWeight.SemiBold, lineHeight = 16f)
+                    .copy(color = if (notice.warning) Color.Black else tokens.accentFg.color),
+            )
+        }
+    }
+}
+
+/**
+ * Session collaboration approval card on phone (Phone 1 Section 4 D4 & D5, Note 83):
+ * - For `CREATE_SESSION` / `ELEVATE_SESSION`: 3 full-width 48 dp buttons stacked bottom-up
+ *   (`Deny` on top, `Allow for this session` outlined in the middle, `Allow once` solid at the bottom).
+ * - For `RATE_LIMIT`: 2 side-by-side 48 dp buttons (`Deny` | `Allow 5 more`).
+ */
+@Composable
+fun PhoneSessionCollabApprovalCard(
+    kind: WaitingCardKind,
+    title: String,
+    details: List<Pair<String, String>>,
+    onDeny: () -> Unit,
+    onAllowOnce: () -> Unit,
+    onAllowForSession: () -> Unit = {},
+    onAllowMoreTurns: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(14.dp)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(tokens.panel.color)
+            .cssBorder(tokens.warning.color, shape, width = 2.dp)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PpmIcon(ProductIcon.Users, 18.dp, tokens.warning.color)
+            BasicText(
+                text = title,
+                style = ppmText(14f, FontWeight.SemiBold, lineHeight = 19f).copy(color = tokens.text.color),
+            )
+        }
+
+        if (details.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(tokens.panel2.color)
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                details.forEach { (key, value) ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        BasicText(
+                            text = key,
+                            modifier = Modifier.width(76.dp),
+                            style = ppmText(11.5f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text3.color),
+                        )
+                        BasicText(
+                            text = value,
+                            modifier = Modifier.weight(1f),
+                            style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text.color),
+                        )
+                    }
+                }
+            }
+        }
+
+        if (kind == WaitingCardKind.RATE_LIMIT) {
+            // 2 side-by-side 48 dp buttons: Deny | Allow 5 more
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CollabActionButton(
+                    label = "Deny",
+                    destructive = true,
+                    outlined = true,
+                    onClick = onDeny,
+                    modifier = Modifier.weight(1f),
+                )
+                CollabActionButton(
+                    label = "Allow 5 more",
+                    primary = true,
+                    onClick = onAllowMoreTurns,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        } else {
+            // 3 stacked 48 dp buttons bottom-up (Note 83):
+            // Top: Deny (destructive outline)
+            // Middle: Allow for this session (accent outline)
+            // Bottom: Allow once (solid accent primary)
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CollabActionButton(
+                    label = "Deny",
+                    destructive = true,
+                    outlined = true,
+                    onClick = onDeny,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                CollabActionButton(
+                    label = "Allow for this session",
+                    outlined = true,
+                    onClick = onAllowForSession,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                CollabActionButton(
+                    label = "Allow once",
+                    primary = true,
+                    onClick = onAllowOnce,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollabActionButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    primary: Boolean = false,
+    destructive: Boolean = false,
+    outlined: Boolean = false,
+) {
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(12.dp)
+    val bg = when {
+        primary -> tokens.accent.color
+        destructive && outlined -> tokens.error.opacity(0.10).color
+        else -> tokens.panel2.color
+    }
+    val border = when {
+        primary -> Color.Transparent
+        destructive -> tokens.error.opacity(0.45).color
+        outlined -> tokens.accentWashBorder.color
+        else -> tokens.border.color
+    }
+    val fg = when {
+        primary -> tokens.accentFg.color
+        destructive -> tokens.error.color
+        else -> tokens.accent.color
+    }
+    Box(
+        modifier = modifier
+            .height(KitSpec.MinTouchTarget)
+            .clip(shape)
+            .background(bg)
+            .then(if (!primary) Modifier.cssBorder(border, shape) else Modifier)
+            .ppmClickable(
+                shape = shape,
+                onClickLabel = label,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            text = label,
+            style = ppmText(13.5f, FontWeight.SemiBold, lineHeight = 18f).copy(color = fg),
+        )
+    }
+}
