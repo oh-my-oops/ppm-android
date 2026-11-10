@@ -2022,6 +2022,10 @@ internal fun RemoteDesktopTabletToolbar(
     onToggleRecording: () -> Unit,
     onScreenshot: () -> Unit,
     modifier: Modifier = Modifier,
+    inputMode: String = "mouse",
+    onToggleInputMode: () -> Unit = {},
+    keyboardCaptured: Boolean = false,
+    onReleaseKeyboard: () -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     val context = LocalContext.current
@@ -2331,6 +2335,32 @@ internal fun RemoteDesktopTabletToolbar(
             onClick = onToggleStats,
             tag = "remote-desktop-stats-trigger",
         )
+
+        ToolbarIconButton(
+            icon = if (inputMode == "mouse") ProductIcon.MousePointer2 else ProductIcon.Hand,
+            active = inputMode == "mouse",
+            onClick = onToggleInputMode,
+            tag = "remote-desktop-input-mode-toggle",
+        )
+
+        if (keyboardCaptured) {
+            val pillShape = RoundedCornerShape(4.dp)
+            Row(
+                Modifier
+                    .height(28.dp)
+                    .clip(pillShape)
+                    .background(Color.Black.copy(alpha = 0.75f))
+                    .ppmClickable(shape = pillShape, onClick = onReleaseKeyboard)
+                    .padding(horizontal = 8.dp)
+                    .testTag("remote-desktop-release-keyboard"),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BasicText(
+                    "Release keyboard Ctrl+Alt+Shift",
+                    style = ppmText(11f, FontWeight.Medium, lineHeight = 15f).copy(color = Color.White),
+                )
+            }
+        }
     }
 }
 

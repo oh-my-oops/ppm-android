@@ -71,6 +71,7 @@ import com.hienlh.ppm.client.systemServiceAction
 import com.hienlh.ppm.client.systemServiceDetails
 import com.hienlh.ppm.client.systemServices
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -141,8 +142,12 @@ fun SystemMonitorBody(
     initialInventory: HardwareInventory? = null,
 ) {
     val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
     var activeTab by remember(initialTab) { mutableStateOf(initialTab) }
     var selectedPerfDevice by remember { mutableStateOf("cpu") }
+    var preferencesOpen by remember { mutableStateOf(false) }
+    var tempUnitFahrenheit by remember { mutableStateOf(false) }
+    var showKernelTimes by remember { mutableStateOf(true) }
 
     val initialHistory = remember(initialSnapshot) {
         if (initialSnapshot != null) SysMonRingBuffer.appendSnapshot(emptyList(), initialSnapshot)
@@ -224,6 +229,55 @@ fun SystemMonitorBody(
                             .copy(color = if (active) tokens.accent.color else tokens.text2.color),
                     )
                 }
+            }
+            if (!mobile) {
+                Spacer(Modifier.weight(1f))
+                val prefShape = RoundedCornerShape(6.dp)
+                Row(
+                    Modifier
+                        .height(28.dp)
+                        .clip(prefShape)
+                        .background(if (preferencesOpen) tokens.accent.opacity(0.15).color else Color.Transparent)
+                        .ppmClickable(shape = prefShape) { preferencesOpen = !preferencesOpen }
+                        .padding(horizontal = 8.dp)
+                        .testTag("sysmon-preferences-trigger"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    PpmIcon(ProductIcon.Settings, 13.dp, tokens.text2.color)
+                    BasicText(
+                        "Preferences",
+                        style = ppmText(11f, FontWeight.Medium, lineHeight = 15f).copy(color = tokens.text2.color),
+                    )
+                }
+            }
+        }
+
+        if (preferencesOpen && !mobile) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(tokens.panel2.color)
+                    .edge(Edge.Bottom, tokens.border.color)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .testTag("sysmon-preferences-card"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                BasicText(
+                    "Temperature unit: ${if (tempUnitFahrenheit) "°F" else "°C"}",
+                    Modifier
+                        .ppmClickable { tempUnitFahrenheit = !tempUnitFahrenheit }
+                        .testTag("sysmon-pref-temp-unit"),
+                    style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color),
+                )
+                BasicText(
+                    if (showKernelTimes) "Kernel times: On" else "Kernel times: Off",
+                    Modifier
+                        .ppmClickable { showKernelTimes = !showKernelTimes }
+                        .testTag("sysmon-pref-kernel-times"),
+                    style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text2.color),
+                )
             }
         }
 
@@ -1113,11 +1167,12 @@ private fun AppsPanel(
                     val members = app.memberPids.mapNotNull { byPid[it] }
                     val isProtected = ProcessTableModel.isGroupProtected(members)
                     val canEnd = !isProtected && members.isNotEmpty()
+                    val isMobileReadOnly = LocalPpmMobile.current
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .edge(Edge.Bottom, tokens.border.opacity(0.4).color)
-                            .ppmClickable { menuApp = app }
+                            .ppmClickable(enabled = !isMobileReadOnly) { if (!isMobileReadOnly) menuApp = app }
                             .padding(horizontal = 12.dp, vertical = 10.dp)
                             .testTag("app-row-${app.id}"),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1162,34 +1217,36 @@ private fun AppsPanel(
                                 style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color),
                             )
                         }
-                        val btnShape = RoundedCornerShape(6.dp)
-                        Box(
-                            Modifier
-                                .height(26.dp)
-                                .alpha(if (canEnd) 1f else 0.4f)
-                                .clip(btnShape)
-                                .background(tokens.error.opacity(0.12).color)
-                                .ppmClickable(enabled = canEnd, shape = btnShape) {
-                                    killTarget = KillTarget.GroupTarget(
-                                        group = AppRowsModel.groupForApp(app),
-                                        members = members,
-                                    )
-                                }
-                                .padding(horizontal = 10.dp)
-                                .testTag("app-end-task-${app.id}"),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            BasicText("End task", style = ppmText(11f, FontWeight.Medium, lineHeight = 15f).copy(color = tokens.error.color))
-                        }
-                        Box(
-                            Modifier
-                                .size(24.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .ppmClickable { menuApp = app }
-                                .testTag("app-menu-${app.id}"),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            PpmIcon(ProductIcon.MoreVertical, 14.dp, tokens.text2.color)
+                        if (!isMobileReadOnly) {
+                            val btnShape = RoundedCornerShape(6.dp)
+                            Box(
+                                Modifier
+                                    .height(26.dp)
+                                    .alpha(if (canEnd) 1f else 0.4f)
+                                    .clip(btnShape)
+                                    .background(tokens.error.opacity(0.12).color)
+                                    .ppmClickable(enabled = canEnd, shape = btnShape) {
+                                        killTarget = KillTarget.GroupTarget(
+                                            group = AppRowsModel.groupForApp(app),
+                                            members = members,
+                                        )
+                                    }
+                                    .padding(horizontal = 10.dp)
+                                    .testTag("app-end-task-${app.id}"),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                BasicText("End task", style = ppmText(11f, FontWeight.Medium, lineHeight = 15f).copy(color = tokens.error.color))
+                            }
+                            Box(
+                                Modifier
+                                    .size(24.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .ppmClickable { menuApp = app }
+                                    .testTag("app-menu-${app.id}"),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                PpmIcon(ProductIcon.MoreVertical, 14.dp, tokens.text2.color)
+                            }
                         }
                     }
                 }
@@ -1495,31 +1552,33 @@ private fun ProcessesPanel(
                                 PerformanceDevices.formatRam(g.ramMB),
                                 style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color),
                             )
-                            val groupKillTooltip = if (isProtected) {
-                                "Protected: this app contains a PPM or OS-critical process — cannot be ended as a whole."
-                            } else {
-                                "End ${g.label} (${g.count} processes)"
-                            }
-                            Box(
-                                Modifier
-                                    .size(22.dp)
-                                    .alpha(if (isProtected || members.isEmpty()) 0.4f else 1f)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .webTitle(groupKillTooltip)
-                                    .ppmClickable(enabled = !isProtected && members.isNotEmpty()) {
-                                        killTarget = KillTarget.GroupTarget(g, members)
-                                    }
-                                    .semantics {
-                                        contentDescription = "End ${g.label} and its ${g.count} processes"
-                                    }
-                                    .testTag("proc-group-kill-${g.key}"),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                PpmIcon(
-                                    ProductIcon.X,
-                                    13.dp,
-                                    if (isProtected || members.isEmpty()) tokens.text2.color else tokens.error.color,
-                                )
+                            if (!LocalPpmMobile.current) {
+                                val groupKillTooltip = if (isProtected) {
+                                    "Protected: this app contains a PPM or OS-critical process — cannot be ended as a whole."
+                                } else {
+                                    "End ${g.label} (${g.count} processes)"
+                                }
+                                Box(
+                                    Modifier
+                                        .size(22.dp)
+                                        .alpha(if (isProtected || members.isEmpty()) 0.4f else 1f)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .webTitle(groupKillTooltip)
+                                        .ppmClickable(enabled = !isProtected && members.isNotEmpty()) {
+                                            killTarget = KillTarget.GroupTarget(g, members)
+                                        }
+                                        .semantics {
+                                            contentDescription = "End ${g.label} and its ${g.count} processes"
+                                        }
+                                        .testTag("proc-group-kill-${g.key}"),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    PpmIcon(
+                                        ProductIcon.X,
+                                        13.dp,
+                                        if (isProtected || members.isEmpty()) tokens.text2.color else tokens.error.color,
+                                    )
+                                }
                             }
                         }
                     }
@@ -1581,34 +1640,36 @@ private fun ProcessesPanel(
                                 PerformanceDevices.formatRam(p.ramMB),
                                 style = ppmText(11f, kind = FontKind.MONO, lineHeight = 15f).copy(color = tokens.text2.color),
                             )
-                            if (!p.protected) {
+                            if (!LocalPpmMobile.current) {
+                                if (!p.protected) {
+                                    Box(
+                                        Modifier
+                                            .size(22.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .ppmClickable { killTarget = KillTarget.SingleProcess(p) }
+                                            .testTag("proc-kill-${p.pid}"),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        PpmIcon(ProductIcon.X, 13.dp, tokens.error.color)
+                                    }
+                                } else {
+                                    Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
+                                        PpmIcon(ProductIcon.Lock, 11.dp, tokens.text2.opacity(0.6).color)
+                                    }
+                                }
                                 Box(
                                     Modifier
                                         .size(22.dp)
                                         .clip(RoundedCornerShape(4.dp))
-                                        .ppmClickable { killTarget = KillTarget.SingleProcess(p) }
-                                        .testTag("proc-kill-${p.pid}"),
+                                        .ppmClickable {
+                                            menuProc = p
+                                            signalSubmenuOpen = false
+                                        }
+                                        .testTag("proc-menu-${p.pid}"),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    PpmIcon(ProductIcon.X, 13.dp, tokens.error.color)
+                                    PpmIcon(ProductIcon.MoreVertical, 13.dp, tokens.text2.color)
                                 }
-                            } else {
-                                Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
-                                    PpmIcon(ProductIcon.Lock, 11.dp, tokens.text2.opacity(0.6).color)
-                                }
-                            }
-                            Box(
-                                Modifier
-                                    .size(22.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .ppmClickable {
-                                        menuProc = p
-                                        signalSubmenuOpen = false
-                                    }
-                                    .testTag("proc-menu-${p.pid}"),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                PpmIcon(ProductIcon.MoreVertical, 13.dp, tokens.text2.color)
                             }
                         }
                     }
@@ -2228,7 +2289,7 @@ private fun ServicesPanel(
                         // Action buttons
                         if (isBusy) {
                             PpmIcon(ProductIcon.Loader2, 14.dp, tokens.text2.color, spinning = true)
-                        } else {
+                        } else if (!LocalPpmMobile.current) {
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 if (svc.running) {
                                     val stopRefused = svc.refused.containsKey("stop")

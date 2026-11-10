@@ -404,29 +404,31 @@ fun LogsAppBody(
                     id = "logs",
                     label = "Logs",
                     icon = ProductIcon.ScrollText,
-                    active = activeView == "logs",
+                    active = activeView == "logs" || phone,
                     badge = null,
                     badgeColor = tokens.accent.color,
                     onClick = { selectView("logs") },
                 )
-                LogsSubTabButton(
-                    id = "issues",
-                    label = "Issues",
-                    icon = ProductIcon.Sparkles,
-                    active = activeView == "issues",
-                    badge = likelyBugCount.takeIf { it > 0 }?.toString(),
-                    badgeColor = tokens.error.color,
-                    onClick = { selectView("issues") },
-                )
-                LogsSubTabButton(
-                    id = "report",
-                    label = "Report Bug",
-                    icon = ProductIcon.Bug,
-                    active = activeView == "report",
-                    badge = snippets.size.takeIf { it > 0 }?.toString(),
-                    badgeColor = tokens.accent.color,
-                    onClick = { selectView("report") },
-                )
+                if (!phone) {
+                    LogsSubTabButton(
+                        id = "issues",
+                        label = "Issues",
+                        icon = ProductIcon.Sparkles,
+                        active = activeView == "issues",
+                        badge = likelyBugCount.takeIf { it > 0 }?.toString(),
+                        badgeColor = tokens.error.color,
+                        onClick = { selectView("issues") },
+                    )
+                    LogsSubTabButton(
+                        id = "report",
+                        label = "Report Bug",
+                        icon = ProductIcon.Bug,
+                        active = activeView == "report",
+                        badge = snippets.size.takeIf { it > 0 }?.toString(),
+                        badgeColor = tokens.accent.color,
+                        onClick = { selectView("report") },
+                    )
+                }
             }
 
             Row(
@@ -1039,13 +1041,16 @@ private fun LogsStreamPane(
                             else -> tokens.accent.color
                         }
 
+                        val isPhoneReadOnly = LocalPpmMobile.current
                         Column(
                             Modifier
                                 .fillMaxWidth()
-                                .background(if (selected) tokens.accent.opacity(0.12).color else Color.Transparent)
+                                .background(if (selected && !isPhoneReadOnly) tokens.accent.opacity(0.12).color else Color.Transparent)
                                 .edge(Edge.Bottom, tokens.border.opacity(0.28).color)
-                                .ppmClickable {
-                                    selectedKeys = if (selected) selectedKeys - row.key else selectedKeys + row.key
+                                .ppmClickable(enabled = !isPhoneReadOnly) {
+                                    if (!isPhoneReadOnly) {
+                                        selectedKeys = if (selected) selectedKeys - row.key else selectedKeys + row.key
+                                    }
                                 }
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
                                 .testTag("log-row-${row.key}"),
@@ -1166,6 +1171,21 @@ private fun LogsStreamPane(
                         .testTag("logs-selection-add-report"),
                 ) {
                     BasicText("Add to report", style = ppmText(11f, FontWeight.Medium, lineHeight = 15f).copy(color = tokens.accentFg.color))
+                }
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(tokens.panel.color)
+                        .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
+                        .ppmClickable {
+                            val raw = selectedRows.joinToString("\n") { rawLogLine(it.entry, it.count) }
+                            onCopyLines(raw)
+                            selectedKeys = emptySet()
+                        }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .testTag("logs-selection-ask-ai"),
+                ) {
+                    BasicText("Ask AI", style = ppmText(11f, FontWeight.Medium, lineHeight = 15f).copy(color = tokens.accent.color))
                 }
                 Box(
                     Modifier

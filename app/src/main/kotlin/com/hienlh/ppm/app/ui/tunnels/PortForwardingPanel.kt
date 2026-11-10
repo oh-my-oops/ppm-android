@@ -48,6 +48,7 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.ui.ConfirmDialog
 import com.hienlh.ppm.app.ui.PpmTextField
+import com.hienlh.ppm.app.ui.phone.OpenOnTabletNotice
 import com.hienlh.ppm.client.namedTunnelStatus
 import com.hienlh.ppm.client.tunnelStart
 import com.hienlh.ppm.client.tunnelStop
@@ -326,6 +327,12 @@ fun PortForwardingPanel(
                         onNavigate()
                     },
                 )
+                if (mobile && (!tsSetup.done || !cfSetup.done)) {
+                    OpenOnTabletNotice(
+                        text = "Set up Tailscale or Cloudflare on a tablet.",
+                        modifier = Modifier.testTag("tunnels-phone-tablet-notice"),
+                    )
+                }
             }
 
             // Forward form
@@ -735,32 +742,35 @@ private fun SetupRow(
                 )
             }
         }
-        Box(
-            Modifier
-                .heightIn(min = if (mobile) 44.dp else 32.dp)
-                .clip(btnShape)
-                .then(
-                    if (setup.done) {
-                        Modifier
-                    } else {
-                        Modifier
-                            .background(tokens.bgSolid.color)
-                            .cssBorder(tokens.border.color, btnShape)
-                    },
+        if (!mobile) {
+            Box(
+                Modifier
+                    .heightIn(min = 32.dp)
+                    .clip(btnShape)
+                    .then(
+                        if (setup.done) {
+                            Modifier
+                        } else {
+                            Modifier
+                                .background(tokens.bgSolid.color)
+                                .cssBorder(tokens.border.color, btnShape)
+                        },
+                    )
+                    .ppmClickable(
+                        pressedColor = tokens.surfaceHover.color,
+                        hoverColor = tokens.surfaceHover.color,
+                        shape = btnShape,
+                        onClick = onOpen,
+                    )
+                    .padding(horizontal = 12.dp)
+                    .testTag("tunnel-setup-${name.lowercase()}"),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(
+                    if (setup.done) "Manage" else "Set up",
+                    style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color),
                 )
-                .ppmClickable(
-                    pressedColor = tokens.surfaceHover.color,
-                    hoverColor = tokens.surfaceHover.color,
-                    shape = btnShape,
-                    onClick = onOpen,
-                )
-                .padding(horizontal = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            BasicText(
-                if (setup.done) "Manage" else "Set up",
-                style = ppmText(12f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.text.color),
-            )
+            }
         }
     }
 }
