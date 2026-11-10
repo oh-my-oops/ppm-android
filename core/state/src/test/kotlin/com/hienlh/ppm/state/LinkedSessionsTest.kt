@@ -292,4 +292,25 @@ class LinkedSessionsTest {
         val malformed = ChatFromSession.decode("plain\n\n<ppm-from-session-v1>\nwrong\n${WireJson.parse("{}")}\n</ppm-from-session-v1>")
         assertNull(malformed.fromSession)
     }
+
+    @Test
+    fun `byAttention lists needs_approval first, then running, then new_message, then idle stably`() {
+        fun kid(n: Int, status: LinkedSessionStatus) = LinkedSessionView(
+            sessionId = "cccccccc-0000-4000-8000-00000000000$n",
+            title = "Kid $n",
+            providerId = "claude",
+            relations = listOf(SessionLinkRelation.CHILD),
+            status = status,
+        )
+        val ordered = byAttention(
+            listOf(
+                kid(1, LinkedSessionStatus.IDLE),
+                kid(2, LinkedSessionStatus.NEW_MESSAGE),
+                kid(3, LinkedSessionStatus.RUNNING),
+                kid(4, LinkedSessionStatus.IDLE),
+                kid(5, LinkedSessionStatus.NEEDS_APPROVAL),
+            ),
+        )
+        assertEquals(listOf("Kid 5", "Kid 3", "Kid 2", "Kid 1", "Kid 4"), ordered.map { it.title })
+    }
 }

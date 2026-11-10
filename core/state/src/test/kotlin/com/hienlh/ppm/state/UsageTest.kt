@@ -21,6 +21,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /** The usage chip's figures and the account cards' rules (account-usage-format.ts, use-usage.ts, usage-badge.tsx). */
 class UsageTest {
@@ -57,6 +61,53 @@ class UsageTest {
         assertNull(formatResetTime(bucket(0.1), now))
         assertNull(formatResetTime(null, now))
     }
+
+    @Test
+    fun `footer reset formatters match account-reset-format cases with fixed now and zone`() {
+        val zone = ZoneId.of("Asia/Ho_Chi_Minh")
+        // Fixed local moment matching `account-reset-format.test.ts`: Tuesday 10 Nov 2026, 00:40.
+        val localNow = ZonedDateTime.of(2026, 11, 10, 0, 40, 0, 0, zone).toInstant().toEpochMilli()
+        val isoFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+            .withZone(ZoneId.of("UTC"))
+        fun at(mins: Long): String = isoFormatter.format(Instant.ofEpochMilli(localNow + mins * 60_000L))
+
+        // formatResetCountdown: keeps two units at most, rounds minutes up (ceil), "now" once past, null otherwise.
+        assertEquals("in 3h 12m", formatResetCountdown(at(192), localNow))
+        assertEquals("in 2d 8h", formatResetCountdown(at(2 * 1440 + 8 * 60 + 15), localNow))
+        assertEquals("in 40m", formatResetCountdown(at(40), localNow))
+        assertEquals("in 2h", formatResetCountdown(at(120), localNow))
+        assertEquals("in 1d", formatResetCountdown(at(1440), localNow))
+        assertEquals("in 1m", formatResetCountdown(isoFormatter.format(Instant.ofEpochMilli(localNow + 1_000L)), localNow))
+        assertEquals("now", formatResetCountdown(at(-5), localNow))
+        assertNull(formatResetCountdown(null, localNow))
+        assertNull(formatResetCountdown("not a date", localNow))
+
+        // formatResetClock: bare 24h time within 12h (even past midnight), "today HH:mm", weekday within 6.5d, "MMM d HH:mm" beyond.
+        assertEquals("03:52", formatResetClock(at(192), localNow, zone))
+        val lateNight = ZonedDateTime.of(2026, 11, 9, 23, 30, 0, 0, zone).toInstant().toEpochMilli()
+        assertEquals("00:40", formatResetClock(isoFormatter.format(Instant.ofEpochMilli(localNow)), lateNight, zone))
+        assertEquals("today 18:00", formatResetClock(at(17 * 60 + 20), localNow, zone))
+        assertEquals("Thu 09:00", formatResetClock(at(2 * 1440 + 8 * 60 + 20), localNow, zone))
+        assertEquals("Nov 18 00:40", formatResetClock(at(8 * 1440), localNow, zone))
+        // Different viewer zone formats the same instant in that zone's 24h clock.
+        assertEquals("20:52", formatResetClock(at(192), localNow, ZoneId.of("UTC")))
+
+        // formatResetLine: joins countdown and clock, or "Resets now".
+        assertEquals("Resets in 3h 12m · 03:52", formatResetLine(at(192), localNow, zone))
+        assertEquals("Resets in 2d 8h · Thu 09:00", formatResetLine(at(2 * 1440 + 8 * 60 + 20), localNow, zone))
+        assertEquals("Resets in 17h 20m · today 18:00", formatResetLine(at(17 * 60 + 20), localNow, zone))
+        assertEquals("Resets now", formatResetLine(at(-1), localNow, zone))
+        assertNull(formatResetLine(null, localNow, zone))
+
+        // bucketResetsAt: prefers server ISO moment, else converts countdown minutes/hours into ISO, else null.
+        assertEquals(at(30), bucketResetsAt(bucket(0.4, resetsAt = at(30), minutes = 99, hours = null), localNow))
+        assertEquals(at(90), bucketResetAtOrNull(bucket(0.4, resetsAt = "", minutes = 90, hours = null), localNow))
+        assertEquals(at(120), bucketResetsAt(bucket(0.4, resetsAt = "", minutes = null, hours = 2.0), localNow))
+        assertNull(bucketResetsAt(bucket(0.4, resetsAt = "", minutes = null, hours = null), localNow))
+        assertNull(bucketResetsAt(null, localNow))
+    }
+
+    private fun bucketResetAtOrNull(bucket: LimitBucket?, now: Long): String? = bucketResetsAt(bucket, now)
 
     @Test
     fun `ages and expiries read as the cards print them`() {

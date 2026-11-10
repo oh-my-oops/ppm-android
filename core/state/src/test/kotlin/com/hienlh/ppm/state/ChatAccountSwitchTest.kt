@@ -38,11 +38,11 @@ class ChatAccountSwitchTest {
         assertEquals(listOf("b", "a"), bobCurrent.usable.map { it.id })
 
         fun acc(id: String, label: String, h5: Int, wk: Int, refusal: String? = null, signedOut: Boolean = false) =
-            SwitchAccount(id, label, "Max", h5, wk, refusal, signedOut)
+            SwitchAccount(id = id, label = label, plan = "Max", fiveHourPct = h5, weekPct = wk, refusal = refusal, signedOut = signedOut)
         val nine = listOf(
             acc("v2", "Victor 2 (Nxsys)", 47, 52),
             acc("v", "Victor", 12, 30),
-            acc("s", "Nxsys shared", 100, 88, "5-hour limit reached · resets in 2h 10m"),
+            acc("s", "Nxsys shared", 100, 88, "5-hour limit reached"),
             acc("a", "Nxsys team A", 5, 18),
             acc("b", "Nxsys team B", 33, 41),
             acc("h", "Hien personal", 64, 71),
@@ -56,28 +56,60 @@ class ChatAccountSwitchTest {
     }
 
     @Test
-    fun `claudeSwitchAccount and codexSwitchAccount compute refusals, plans, and signedOut flags`() {
+    fun `claudeSwitchAccount and codexSwitchAccount compute reset timestamps, window-only refusals, plans, and signedOut flags`() {
+        val fixedNow = 1_762_710_000_000L // 2025-11-09T17:40:00.000Z
         val reauth = claudeSwitchAccount(
-            entry = AccountUsageEntry("a", "Alice", "active", isOAuth = true, usage = AccountUsage(session = LimitBucket(0.5, "", null, null, 5.0))),
+            entry = AccountUsageEntry("a", "Alice", "active", isOAuth = true, usage = AccountUsage(session = LimitBucket(0.5, "", 90, null, 5.0))),
             info = AccountInfo("a", "Alice", "alice@example.com", "active", expiresAt = null, hasRefreshToken = true, reauthRequired = true, grantExpiresAt = null, hasClaudeMax = true),
+            now = fixedNow,
         )
         assertTrue(reauth.refusal.orEmpty().contains("Signed out"))
         assertTrue(reauth.signedOut)
         assertEquals("Max", reauth.plan)
+        assertEquals(bucketResetsAt(LimitBucket(0.5, "", 90, null, 5.0), fixedNow), reauth.fiveHourResetsAt)
+        assertNull(reauth.weekResetsAt)
 
-        val capped = claudeSwitchAccount(
-            entry = AccountUsageEntry("a", "Alice", "active", isOAuth = true, usage = AccountUsage(session = LimitBucket(1.0, "", null, null, 5.0))),
+        // Full 5h and weekly windows carry their reset timestamps on the account and name ONLY the window in refusal.
+        val capped5h = claudeSwitchAccount(
+            entry = AccountUsageEntry(
+                "a",
+                "Alice",
+                "active",
+                isOAuth = true,
+                usage = AccountUsage(
+                    session = LimitBucket(1.0, "2026-11-10T05:00:00.000Z", 120, null, 5.0),
+                    weekly = LimitBucket(0.88, "2026-11-12T09:00:00.000Z", null, null, 168.0),
+                ),
+            ),
+            now = fixedNow,
         )
-        assertTrue(capped.refusal.orEmpty().contains("5-hour limit reached"))
+        assertEquals("5-hour limit reached", capped5h.refusal)
+        assertFalse(capped5h.refusal.orEmpty().contains("resets"))
+        assertEquals("2026-11-10T05:00:00.000Z", capped5h.fiveHourResetsAt)
+        assertEquals("2026-11-12T09:00:00.000Z", capped5h.weekResetsAt)
+
+        val cappedWeekCodex = codexSwitchAccount(
+            account = CodexAccount("c-cap", "Codex Full", "chatgpt", "pro", "active", dailyGuardEnabled = false, signedOut = false),
+            usage = UsageInfo(
+                session = LimitBucket(0.4, "", 45, null, 5.0),
+                weekly = LimitBucket(1.0, "2026-11-14T10:00:00.000Z", null, null, 168.0),
+            ),
+            now = fixedNow,
+        )
+        assertEquals("Weekly limit reached", cappedWeekCodex.refusal)
+        assertEquals(bucketResetsAt(LimitBucket(0.4, "", 45, null, 5.0), fixedNow), cappedWeekCodex.fiveHourResetsAt)
+        assertEquals("2026-11-14T10:00:00.000Z", cappedWeekCodex.weekResetsAt)
 
         val at99 = claudeSwitchAccount(
             entry = AccountUsageEntry("a", "Alice", "active", isOAuth = true, usage = AccountUsage(session = LimitBucket(0.99, "", null, null, 5.0))),
+            now = fixedNow,
         )
         assertNull(at99.refusal)
 
         val codexChatgpt = codexSwitchAccount(
             account = CodexAccount("c1", "ChatGPT Account", "chatgpt", "plus", "active", dailyGuardEnabled = false, signedOut = true),
             usage = UsageInfo(sevenDay = 0.5),
+            now = fixedNow,
         )
         assertTrue(codexChatgpt.refusal.orEmpty().contains("Signed out"))
         assertTrue(codexChatgpt.signedOut)
@@ -87,6 +119,7 @@ class ChatAccountSwitchTest {
             account = CodexAccount("c2", "Non-ChatGPT", "other", null, "active", dailyGuardEnabled = false, signedOut = true),
             usage = UsageInfo(sevenDay = 0.5),
             plan = null,
+            now = fixedNow,
         )
         assertTrue(codexOther.refusal.orEmpty().contains("Signed out"))
         assertFalse(codexOther.signedOut)
@@ -94,7 +127,7 @@ class ChatAccountSwitchTest {
 
     @Test
     fun `matchesAccountQuery, footerUsageTone, and highestPct match web rules`() {
-        val account = SwitchAccount("a", "Alice Pro", "Plus", 50, 60, null, false)
+        val account = SwitchAccount(id = "a", label = "Alice Pro", plan = "Plus", fiveHourPct = 50, weekPct = 60, refusal = null, signedOut = false)
         assertTrue(matchesAccountQuery(account, "alice"))
         assertTrue(matchesAccountQuery(account, "ALICE"))
         assertTrue(matchesAccountQuery(account, "pro"))
@@ -157,5 +190,49 @@ class ChatAccountSwitchTest {
         assertNull(oneWindow.fiveHourPct)
         assertEquals(52, oneWindow.weekPct)
         assertTrue(oneWindow.hasUsage)
+
+        val fixedNow = 1_762_710_000_000L
+        val reset5h = bucketResetsAt(LimitBucket(0.47, "", 192, null, 5.0), fixedNow)!!
+        val resetWk = bucketResetsAt(LimitBucket(0.82, "", 2 * 1440L + 8 * 60L, null, 168.0), fixedNow)!!
+        val withResets = resolveFooterUsage(
+            providerId = "claude",
+            usageInfo = UsageInfo(
+                activeAccountId = "developers",
+                activeAccountLabel = "Developers",
+                fiveHour = 0.47,
+                sevenDay = 0.82,
+                session = LimitBucket(0.47, "", 192, null, 5.0),
+                sevenDayResetsAt = resetWk,
+            ),
+            now = fixedNow,
+        )
+        assertEquals(reset5h, withResets.fiveHourResetsAt)
+        assertEquals(resetWk, withResets.weekResetsAt)
+        assertEquals("Developers · 5h 47% (resets in 3h 12m) · Week 82% (resets in 2d 8h)", withResets.ringTitle)
+
+        // When pickedAccountId disagrees with usageInfo.activeAccountId, reset timestamps fall back to switcherAccounts (never leaking usageInfo's).
+        val fallbackListed = resolveFooterUsage(
+            providerId = "claude",
+            usageInfo = UsageInfo(
+                activeAccountId = "vincent",
+                fiveHour = 0.99,
+                fiveHourResetsAt = "2026-11-10T01:00:00.000Z",
+            ),
+            pickedAccountId = "developers",
+            switcherAccounts = listOf(
+                SwitchAccount(
+                    id = "developers",
+                    label = "Developers",
+                    plan = "Max",
+                    fiveHourPct = 20,
+                    weekPct = null,
+                    fiveHourResetsAt = reset5h,
+                ),
+            ),
+            now = fixedNow,
+        )
+        assertEquals(reset5h, fallbackListed.fiveHourResetsAt)
+        assertNull(fallbackListed.weekResetsAt)
+        assertEquals("Developers · 5h 20% (resets in 3h 12m)", fallbackListed.ringTitle)
     }
 }

@@ -6,8 +6,14 @@ import com.hienlh.ppm.protocol.AntigravityAccount
 import com.hienlh.ppm.protocol.CodexAccount
 import com.hienlh.ppm.protocol.LimitBucket
 import com.hienlh.ppm.protocol.UsageInfo
+import java.time.DayOfWeek
 import java.time.Instant
+import java.time.Month
 import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.floor
 
@@ -69,6 +75,108 @@ fun formatResetTime(bucket: LimitBucket?, now: Long): String? {
     if (d > 0) return if (m > 0) "${d}d ${h}h ${m}m" else if (h > 0) "${d}d ${h}h" else "${d}d"
     if (h > 0) return if (m > 0) "${h}h ${m}m" else "${h}h"
     return "${m}m"
+}
+
+private val JsIsoFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).withZone(ZoneOffset.UTC)
+
+private val ClockTimeFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("HH:mm", Locale.US)
+
+private const val TWELVE_HOURS_MILLIS = 12L * 3_600_000L
+
+/** `6.5 * 86_400_000` in exact milliseconds. */
+private const val SIX_AND_HALF_DAYS_MILLIS = 13L * 86_400_000L / 2L
+
+private fun shortWeekday(day: DayOfWeek): String = when (day) {
+    DayOfWeek.MONDAY -> "Mon"
+    DayOfWeek.TUESDAY -> "Tue"
+    DayOfWeek.WEDNESDAY -> "Wed"
+    DayOfWeek.THURSDAY -> "Thu"
+    DayOfWeek.FRIDAY -> "Fri"
+    DayOfWeek.SATURDAY -> "Sat"
+    DayOfWeek.SUNDAY -> "Sun"
+}
+
+private fun shortMonth(month: Month): String = when (month) {
+    Month.JANUARY -> "Jan"
+    Month.FEBRUARY -> "Feb"
+    Month.MARCH -> "Mar"
+    Month.APRIL -> "Apr"
+    Month.MAY -> "May"
+    Month.JUNE -> "Jun"
+    Month.JULY -> "Jul"
+    Month.AUGUST -> "Aug"
+    Month.SEPTEMBER -> "Sep"
+    Month.OCTOBER -> "Oct"
+    Month.NOVEMBER -> "Nov"
+    Month.DECEMBER -> "Dec"
+}
+
+/**
+ * When a bucket resets, as an ISO timestamp, whichever of the three shapes the server sent
+ * (`bucketResetsAt` in `account-usage-format.ts`). A countdown is turned into a moment once,
+ * here, so it keeps counting down after it arrived.
+ */
+fun bucketResetsAt(bucket: LimitBucket?, now: Long = System.currentTimeMillis()): String? {
+    if (bucket == null) return null
+    if (bucket.resetsAt.isNotEmpty() && isoMillis(bucket.resetsAt) != null) return bucket.resetsAt
+    if (bucket.resetsInMinutes != null) {
+        return JsIsoFormatter.format(Instant.ofEpochMilli(now + bucket.resetsInMinutes!! * 60_000L))
+    }
+    if (bucket.resetsInHours != null) {
+        return JsIsoFormatter.format(Instant.ofEpochMilli(now + (bucket.resetsInHours!! * 3_600_000.0).toLong()))
+    }
+    return null
+}
+
+/**
+ * The countdown to a reset in two units at most — `"in 3h 12m"`, `"in 2d 8h"`, `"in 40m"` —
+ * the way the quick views (the ··· menu, the usage rings' tooltip) say it (`formatResetCountdown`).
+ * `"now"` once it has passed.
+ */
+fun formatResetCountdown(resetsAt: String?, now: Long = System.currentTimeMillis()): String? {
+    val at = isoMillis(resetsAt) ?: return null
+    val mins = ceil((at - now) / 60_000.0).toLong()
+    if (mins <= 0L) return "now"
+    val d = mins / 1440L
+    val h = (mins % 1440L) / 60L
+    val m = mins % 60L
+    if (d > 0L) return if (h > 0L) "in ${d}d ${h}h" else "in ${d}d"
+    if (h > 0L) return if (m > 0L) "in ${h}h ${m}m" else "in ${h}h"
+    return "in ${m}m"
+}
+
+/**
+ * The clock time of a reset in [zone], as short as it can be without being ambiguous
+ * (`formatResetClock`): `"03:52"` within 12 hours, `"today 18:00"` later the same day,
+ * `"Thu 09:00"` within 6.5 days, `"Nov 18 09:00"` beyond it.
+ */
+fun formatResetClock(
+    resetsAt: String?,
+    now: Long = System.currentTimeMillis(),
+    zone: ZoneId = ZoneId.systemDefault(),
+): String? {
+    val atMs = isoMillis(resetsAt) ?: return null
+    val atZoned = Instant.ofEpochMilli(atMs).atZone(zone)
+    val time = ClockTimeFormatter.format(atZoned)
+    val diff = atMs - now
+    if (diff <= TWELVE_HOURS_MILLIS) return time
+    val nowZoned = Instant.ofEpochMilli(now).atZone(zone)
+    if (atZoned.toLocalDate() == nowZoned.toLocalDate()) return "today $time"
+    if (diff < SIX_AND_HALF_DAYS_MILLIS) return "${shortWeekday(atZoned.dayOfWeek)} $time"
+    return "${shortMonth(atZoned.month)} ${atZoned.dayOfMonth} $time"
+}
+
+/** Both, for Switch account's cards (`formatResetLine`): `"Resets in 3h 12m · 03:52"`. */
+fun formatResetLine(
+    resetsAt: String?,
+    now: Long = System.currentTimeMillis(),
+    zone: ZoneId = ZoneId.systemDefault(),
+): String? {
+    val countdown = formatResetCountdown(resetsAt, now) ?: return null
+    if (countdown == "now") return "Resets now"
+    return "Resets $countdown · ${formatResetClock(resetsAt, now, zone)}"
 }
 
 /** Time until a sign-in or token ends (`formatExpiry`), from milliseconds. */

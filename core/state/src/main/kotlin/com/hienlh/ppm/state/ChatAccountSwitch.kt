@@ -37,6 +37,9 @@ data class SwitchAccount(
     val plan: String? = null,
     val fiveHourPct: Int? = null,
     val weekPct: Int? = null,
+    /** When each window resets (ISO), shown under its bar; null when the provider did not say. */
+    val fiveHourResetsAt: String? = null,
+    val weekResetsAt: String? = null,
     /** Why this account cannot take a turn now; non-null means unselectable. */
     val refusal: String? = null,
     /** Login was refused or expired without refresh: row offers signing in again. */
@@ -60,17 +63,9 @@ fun claudePlanLabel(info: AccountInfo?): String? = when {
 fun shortCodexPlan(planType: String?): String? =
     codexPlanLabel(planType)?.replace(Regex("^ChatGPT\\s+", RegexOption.IGNORE_CASE), "")
 
-private fun limitRefusal(session: LimitBucket?, weekly: LimitBucket?, now: Long): String? {
-    if ((usagePercentOrNull(session?.utilization) ?: 0) >= 100) {
-        val reset = if (!session?.resetsAt.isNullOrEmpty()) formatResetTime(session, now) else null
-        val suffix = if (reset != null) " · resets ${if (reset == "now") "now" else "in $reset"}" else ""
-        return "5-hour limit reached$suffix"
-    }
-    if ((usagePercentOrNull(weekly?.utilization) ?: 0) >= 100) {
-        val reset = if (!weekly?.resetsAt.isNullOrEmpty()) formatResetTime(weekly, now) else null
-        val suffix = if (reset != null) " · resets ${if (reset == "now") "now" else "in $reset"}" else ""
-        return "Weekly limit reached$suffix"
-    }
+private fun limitRefusal(session: LimitBucket?, weekly: LimitBucket?): String? {
+    if ((usagePercentOrNull(session?.utilization) ?: 0) >= 100) return "5-hour limit reached"
+    if ((usagePercentOrNull(weekly?.utilization) ?: 0) >= 100) return "Weekly limit reached"
     return null
 }
 
@@ -93,7 +88,7 @@ fun claudeSwitchAccount(
         signedOut = true
     }
     if (refusal == null) {
-        refusal = limitRefusal(entry.usage.session, entry.usage.weekly, now)
+        refusal = limitRefusal(entry.usage.session, entry.usage.weekly)
     }
     return SwitchAccount(
         id = entry.accountId,
@@ -101,6 +96,8 @@ fun claudeSwitchAccount(
         plan = claudePlanLabel(info),
         fiveHourPct = usagePercentOrNull(entry.usage.session?.utilization),
         weekPct = usagePercentOrNull(entry.usage.weekly?.utilization),
+        fiveHourResetsAt = bucketResetsAt(entry.usage.session, now),
+        weekResetsAt = bucketResetsAt(entry.usage.weekly, now),
         refusal = refusal,
         signedOut = signedOut,
     )
@@ -128,7 +125,7 @@ fun codexSwitchAccount(
         val weeklyBucket = usage?.weekly ?: usage?.sevenDay?.let {
             LimitBucket(utilization = it, resetsAt = usage.sevenDayResetsAt.orEmpty(), resetsInMinutes = null, resetsInHours = null, windowHours = 168.0)
         }
-        refusal = limitRefusal(sessionBucket, weeklyBucket, now)
+        refusal = limitRefusal(sessionBucket, weeklyBucket)
     }
     return SwitchAccount(
         id = account.id,
@@ -136,6 +133,8 @@ fun codexSwitchAccount(
         plan = plan,
         fiveHourPct = usagePercentOrNull(usage?.session?.utilization ?: usage?.fiveHour),
         weekPct = usagePercentOrNull(usage?.weekly?.utilization ?: usage?.sevenDay),
+        fiveHourResetsAt = bucketResetsAt(usage?.session, now),
+        weekResetsAt = bucketResetsAt(usage?.weekly, now),
         refusal = refusal,
         signedOut = signedOut,
     )
@@ -181,6 +180,8 @@ data class FooterUsageSummary(
     val usageMatches: Boolean,
     val fiveHourPct: Int?,
     val weekPct: Int?,
+    val fiveHourResetsAt: String?,
+    val weekResetsAt: String?,
     val hasUsage: Boolean,
     val accountLabel: String?,
     val plan: String?,
@@ -194,6 +195,7 @@ fun resolveFooterUsage(
     pickedAccountId: String? = null,
     pickedAccountLabel: String? = null,
     switcherAccounts: List<SwitchAccount> = emptyList(),
+    now: Long = System.currentTimeMillis(),
 ): FooterUsageSummary {
     val providerName = if (providerId == "codex") "Codex" else "Claude"
     val currentId = pickedAccountId ?: usageInfo?.activeAccountId
@@ -201,22 +203,39 @@ fun resolveFooterUsage(
     val listed = switcherAccounts.firstOrNull { it.id == currentId }
     val fiveHourPct = if (usageMatches) usagePercentOrNull(usageInfo?.fiveHour) else listed?.fiveHourPct
     val weekPct = if (usageMatches) usagePercentOrNull(usageInfo?.sevenDay) else listed?.weekPct
+    val fiveHourResetsAt = if (usageMatches) {
+        bucketResetsAt(usageInfo?.session, now) ?: usageInfo?.fiveHourResetsAt?.takeIf { isoMillis(it) != null }
+    } else {
+        listed?.fiveHourResetsAt
+    }
+    val weekResetsAt = if (usageMatches) {
+        bucketResetsAt(usageInfo?.weekly, now) ?: usageInfo?.sevenDayResetsAt?.takeIf { isoMillis(it) != null }
+    } else {
+        listed?.weekResetsAt
+    }
     val hasUsage = fiveHourPct != null || weekPct != null
     val accountLabel = pickedAccountLabel
         ?: (if (usageMatches) usageInfo?.activeAccountLabel else null)
         ?: listed?.label
     val plan = listed?.plan
     val who = "${accountLabel ?: "Default account"} · $providerName${if (!plan.isNullOrEmpty()) " $plan" else ""}"
+    fun windowTitle(label: String, pct: Int?, resetsAt: String?): String? {
+        if (pct == null) return null
+        val reset = formatResetCountdown(resetsAt, now)
+        return "$label $pct%${if (reset != null) " (resets $reset)" else ""}"
+    }
     val ringTitle = listOfNotNull(
         accountLabel?.takeIf(String::isNotEmpty),
-        fiveHourPct?.let { "5h $it%" },
-        weekPct?.let { "Week $it%" },
+        windowTitle("5h", fiveHourPct, fiveHourResetsAt),
+        windowTitle("Week", weekPct, weekResetsAt),
     ).joinToString(" · ")
     return FooterUsageSummary(
         currentId = currentId,
         usageMatches = usageMatches,
         fiveHourPct = fiveHourPct,
         weekPct = weekPct,
+        fiveHourResetsAt = fiveHourResetsAt,
+        weekResetsAt = weekResetsAt,
         hasUsage = hasUsage,
         accountLabel = accountLabel,
         plan = plan,

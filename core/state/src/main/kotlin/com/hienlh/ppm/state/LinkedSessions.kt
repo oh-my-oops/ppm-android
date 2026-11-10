@@ -23,11 +23,11 @@ import kotlinx.serialization.json.JsonObject
 const val UNDO_UNLINK_MS = 6_000L
 
 /** Live status of a linked session (`LinkedSessionStatus` in `linked-sessions.ts`). */
-enum class LinkedSessionStatus(val wire: String, val label: String) {
-    RUNNING("running", "Running"),
-    IDLE("idle", "Idle"),
-    NEEDS_APPROVAL("needs_approval", "Needs you"),
-    NEW_MESSAGE("new_message", "New message"),
+enum class LinkedSessionStatus(val wire: String, val label: String, val attentionRank: Int) {
+    RUNNING("running", "Running", attentionRank = 1),
+    IDLE("idle", "Idle", attentionRank = 3),
+    NEEDS_APPROVAL("needs_approval", "Needs you", attentionRank = 0),
+    NEW_MESSAGE("new_message", "New message", attentionRank = 2),
 }
 
 /** One session linked to the current chat (`LinkedSession`). */
@@ -170,6 +170,14 @@ fun linkedSessionStatus(
     if (mark != null && mark.count > 0) return LinkedSessionStatus.NEW_MESSAGE
     return LinkedSessionStatus.IDLE
 }
+
+/**
+ * A list's order for the person reading it (`byAttention` in `linked-sessions.ts`): the sessions
+ * waiting on them first, then the ones running, then unread answers, then the idle and done.
+ * Stable, so equals keep their order.
+ */
+fun byAttention(sessions: List<LinkedSessionView>): List<LinkedSessionView> =
+    sessions.sortedBy { it.status.attentionRank }
 
 /** Idle and finished sessions can be hidden; one still working or waiting on the person cannot (`canUnlink`). */
 fun canUnlink(status: LinkedSessionStatus): Boolean =
