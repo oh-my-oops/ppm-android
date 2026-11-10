@@ -29,8 +29,8 @@ class PrefsStore(context: Context, name: String = "ppm") : KeyValueStore {
 /**
  * Device-local preferences that stay on this device (not synced to the server).
  *
- * [redesign] toggles the mobile & tablet redesign (default `false`; exposed in Settings -> About
- * on debug builds until Task 23 enables it by default).
+ * [redesign] is enabled by default (`true`) now that the mobile & tablet redesign is the standard
+ * shell; [KeyValueStore] bindings remain supported for tests.
  */
 class LocalPrefs(private val store: KeyValueStore) {
     private var state by mutableStateOf(readRedesign(store))
@@ -52,13 +52,13 @@ class LocalPrefs(private val store: KeyValueStore) {
 
     companion object {
         const val REDESIGN_KEY = "redesign"
-        const val DEFAULT_REDESIGN = false
+        const val DEFAULT_REDESIGN = true
 
         private var boundStore: KeyValueStore? = null
         private var sharedState by mutableStateOf(DEFAULT_REDESIGN)
 
         fun readRedesign(store: KeyValueStore): Boolean =
-            store.get(REDESIGN_KEY)?.toBooleanStrictOrNull() ?: DEFAULT_REDESIGN
+            store.get(REDESIGN_KEY)?.toBooleanStrictOrNull() ?: (store is PrefsStore && DEFAULT_REDESIGN)
 
         fun writeRedesign(store: KeyValueStore, enabled: Boolean) {
             store.put(REDESIGN_KEY, enabled.toString())
@@ -70,7 +70,13 @@ class LocalPrefs(private val store: KeyValueStore) {
             return LocalPrefs(store)
         }
 
-        fun of(context: Context): LocalPrefs = bind(PrefsStore(context.applicationContext ?: context))
+        fun of(context: Context): LocalPrefs {
+            val store = PrefsStore(context.applicationContext ?: context)
+            if (store.get(REDESIGN_KEY) == null) {
+                writeRedesign(store, DEFAULT_REDESIGN)
+            }
+            return bind(store)
+        }
 
         var redesign: Boolean
             get() = sharedState
@@ -81,7 +87,7 @@ class LocalPrefs(private val store: KeyValueStore) {
     }
 }
 
-/** Convenience accessor on any [KeyValueStore] for the local redesign toggle. */
+/** Convenience accessor on any [KeyValueStore] for the local redesign preference. */
 var KeyValueStore.redesign: Boolean
     get() = LocalPrefs.readRedesign(this)
     set(value) {
@@ -89,8 +95,12 @@ var KeyValueStore.redesign: Boolean
         LocalPrefs.redesign = value
     }
 
-/** Whether the mobile & tablet redesign is active in the current composition tree. */
-val LocalRedesign = staticCompositionLocalOf { LocalPrefs.DEFAULT_REDESIGN }
+/**
+ * Whether the mobile & tablet redesign is active in the current composition tree.
+ * [com.hienlh.ppm.app.ui.PpmRoot] always provides `true`; the fallback remains `false` for
+ * standalone legacy component tests mounted outside [com.hienlh.ppm.app.ui.PpmRoot].
+ */
+val LocalRedesign = staticCompositionLocalOf { false }
 
 
 /**

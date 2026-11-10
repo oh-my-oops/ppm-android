@@ -5,16 +5,31 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.EaseInOut
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.StartOffset
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
@@ -26,19 +41,30 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreInterceptKeyBeforeSoftKeyboard
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -48,19 +74,22 @@ import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.app.FocusAnchor
 import com.hienlh.ppm.app.FocusStartAnchor
 import com.hienlh.ppm.app.LightboxRequest
-import com.hienlh.ppm.app.LocalPrefs
 import com.hienlh.ppm.app.LocalRedesign
 import com.hienlh.ppm.app.leavesTextOnTap
 import com.hienlh.ppm.app.ui.extensions.ExtensionOverlays
+import com.hienlh.ppm.app.ui.phone.PhoneShell
 import com.hienlh.ppm.app.ui.tablet.TabletShell
 import com.hienlh.ppm.client.designListSystems
 import com.hienlh.ppm.design.ImageViewer
 import com.hienlh.ppm.design.LocalIconFramework
 import com.hienlh.ppm.design.LocalImageViewer
+import com.hienlh.ppm.design.PpmThemeProvider
+import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.Rgba
+import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.get
-import com.hienlh.ppm.design.LocalPpmTokens
-import com.hienlh.ppm.design.PpmThemeProvider
 import kotlinx.coroutines.launch
 
 /**
@@ -118,8 +147,6 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
     val toaster = remember { ToasterState() }
     val tabScrollStore = rememberTabScrollStore()
     val context = LocalContext.current
-    val localPrefs = remember(context) { LocalPrefs.of(context) }
-    val redesign = localPrefs.redesign
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
@@ -145,7 +172,7 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
             LocalImageViewer provides viewer,
             LocalIconFramework provides model.iconFramework,
             LocalSizeClass provides sizeClass,
-            LocalRedesign provides redesign,
+            LocalRedesign provides true,
             LocalTabScrollStore provides tabScrollStore,
         ) {
             PpmThemeProvider(theme, mobile) {
@@ -161,7 +188,7 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
                 Box(Modifier.fillMaxSize().then(if (blurred) Modifier.blur(13.dp) else Modifier)) {
                     when {
                         !model.hasServer -> ConnectScreen(model, signIn = false)
-                        sizeClass == SizeClass.Phone -> if (redesign) com.hienlh.ppm.app.ui.phone.PhoneShell(model) else PhoneShell(model)
+                        sizeClass == SizeClass.Phone -> PhoneShell(model)
                         else -> TabletShell(model)
                     }
                     model.screenOverlay?.let { overlay ->
@@ -346,5 +373,124 @@ private fun Dialogs(model: AppModel) {
                 model.learnPpmMode = null
             },
         )
+    }
+}
+
+/**
+ * The project's avatar (`ProjectAvatar`): its uploaded image, cropped to fill — nothing while it
+ * loads —, else its colour — a picked hex or a palette gradient, else the palette by position —
+ * with initials that tell it from the others; a circle, or the 7 px squircle the desktop sidebar
+ * uses ([square]). An image that will not load gives the colour and initials, as on the web.
+ */
+@Composable
+fun ProjectAvatar(model: AppModel, project: ProjectInfo, size: Dp, square: Boolean = false) {
+    val names = model.projects.map { it.name }
+    val index = names.indexOf(project.name).coerceAtLeast(0)
+    val shape = if (square) RoundedCornerShape(7.dp) else CircleShape
+    if (project.image != null) {
+        var asked by remember(project.name, project.image) { mutableStateOf(false) }
+        val image by produceState<ImageBitmap?>(null, project.name, project.image) {
+            value = model.projectImage(project)
+            asked = true
+        }
+        image?.let {
+            Image(it, project.name, Modifier.size(size).clip(shape), contentScale = ContentScale.Crop)
+            return
+        }
+        if (!asked) {
+            Box(Modifier.size(size))
+            return
+        }
+    }
+    Box(
+        Modifier.size(size).clip(shape).background(projectBackground(project.color, index)),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            projectInitials(project.name, names),
+            style = ppmText(if (size <= 24.dp) 10f else 11f, FontWeight.Bold, lineHeight = if (size <= 24.dp) 15f else 16.5f).copy(color = Color.White),
+            maxLines = 1,
+        )
+    }
+}
+
+/** `project-palette.ts`. */
+internal val PROJECT_PALETTE = listOf(
+    "linear-gradient(135deg, #667eea, #764ba2)",
+    "linear-gradient(135deg, #f5576c, #f093fb)",
+    "linear-gradient(135deg, #4facfe, #00c6ff)",
+    "linear-gradient(135deg, #43e97b, #38f9d7)",
+    "linear-gradient(135deg, #fa709a, #fee140)",
+    "linear-gradient(135deg, #a18cd1, #6a3de8)",
+    "linear-gradient(135deg, #fd7043, #ff8a65)",
+    "linear-gradient(135deg, #26c6da, #0097a7)",
+    "linear-gradient(135deg, #ab47bc, #7b1fa2)",
+    "linear-gradient(135deg, #ef5350, #b71c1c)",
+    "linear-gradient(135deg, #1976d2, #42a5f5)",
+    "linear-gradient(135deg, #2e7d32, #66bb6a)",
+)
+
+private val hexColor = Regex("#[0-9a-fA-F]{3,8}")
+
+/** `resolveProjectColor`: a project's own colour, else the palette's by its position, as a CSS `background`. */
+internal fun projectBackground(color: String?, index: Int): Brush = projectFill(color ?: PROJECT_PALETTE[index % PROJECT_PALETTE.size])
+
+/** A CSS `background` of one hex or a 135° two-stop gradient, which runs corner to corner. */
+private fun projectFill(color: String): Brush {
+    val stops = hexColor.findAll(color).mapNotNull { Rgba.hex(it.value)?.color }.toList()
+    return when {
+        stops.size >= 2 -> Brush.linearGradient(stops, start = Offset.Zero, end = Offset.Infinite)
+        stops.size == 1 -> SolidColor(stops.first())
+        else -> SolidColor(Color(0xFF4F86C6))
+    }
+}
+
+/** `getProjectInitials`: one letter while it is unique, two when that is, else the position. */
+internal fun projectInitials(name: String, all: List<String>): String {
+    fun words(n: String) = n.split(Regex("[-_.\\s]+")).filter { it.isNotEmpty() }
+    fun first(n: String) = (words(n).firstOrNull()?.firstOrNull() ?: n.firstOrNull())?.uppercaseChar()?.toString() ?: ""
+    fun two(n: String): String {
+        val w = words(n)
+        val f = first(n)
+        return if (w.size > 1) f + (w[1].firstOrNull()?.uppercaseChar()?.toString() ?: "") else f
+    }
+    val mine = first(name).ifEmpty { "?" }
+    val others = all.filter { it != name }
+    if (others.none { first(it) == mine }) return mine
+    val pair = two(name)
+    if (others.none { two(it) == pair }) return pair
+    val index = all.indexOf(name)
+    return if (index >= 0) "${index + 1}" else "?"
+}
+
+/** project-sort.ts's `SORT_OPTIONS`, shared by the project sheet and the desktop flyout. */
+internal val PROJECT_SORTS = listOf(
+    Triple("recent", "Recent", ProductIcon.Clock),
+    Triple("priority", "Priority", ProductIcon.ArrowDownUp),
+    Triple("name", "Name", ProductIcon.ArrowDownAZ),
+)
+
+/** `tab-typing-dot`: three 2 px dots hopping 1.5 px in turn, a second each. */
+@Composable
+internal fun TypingDots(color: Rgba, modifier: Modifier) {
+    val transition = rememberInfiniteTransition(label = "typing")
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(1.5.dp), verticalAlignment = Alignment.CenterVertically) {
+        for (index in 0 until 3) {
+            val lift by transition.animateFloat(
+                0f, 0f,
+                infiniteRepeatable(
+                    keyframes {
+                        durationMillis = 1_000
+                        0f at 0 using EaseInOut
+                        -1.5f at 300 using EaseInOut
+                        0f at 600 using EaseInOut
+                    },
+                    initialStartOffset = StartOffset(index * 150),
+                    repeatMode = RepeatMode.Restart,
+                ),
+                label = "dot$index",
+            )
+            Box(Modifier.graphicsLayer { translationY = lift * density }.size(2.dp).clip(CircleShape).background(color.color))
+        }
     }
 }
