@@ -1,6 +1,5 @@
 package com.hienlh.ppm.app.ui
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +18,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -40,12 +40,18 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ui.phone.settings.PhoneSettingsRoute
+import com.hienlh.ppm.app.ui.phone.settings.PhoneSettingsScreen
+import com.hienlh.ppm.app.ui.phone.settings.RedesignDebugToggleCard
+import com.hienlh.ppm.app.ui.phone.settings.resolvePhoneSettingsCategory
+import com.hienlh.ppm.app.ui.phone.settings.resolvePhoneSettingsRoute
 import com.hienlh.ppm.app.ui.tablet.Edge
 import com.hienlh.ppm.app.ui.tablet.edge
 import com.hienlh.ppm.client.ServerProfile
@@ -72,15 +78,22 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /**
- * Settings as a tab: on a phone the category list over the pane, a row opening its pane and
- * Back returning to the list. Only the categories this app has are listed — Appearance's theme,
- * the servers it connects to, which the web has no need of, and Voice Input.
+ * Settings as a tab:
+ * - On a phone (`< 600.dp`), shows [PhoneSettingsScreen] with the 6 everyday phone sections
+ *   as full pages and `"Open on a tablet"` for any other section (Requirements 15.1 & 15.2).
+ * - On a tablet (`>= 600.dp`), shows the list–detail layout with every section in the left rail
+ *   beside the selected section's detail (Requirement 15.3).
  */
 @Composable
 fun SettingsTab(model: AppModel) {
     val requested = model.requestedSettingsCategory
     val initial = requested?.let(SettingsCategory::resolveOrDefault)
-    SettingsBody(model, initialCategory = initial, backReturnsToList = true)
+    SettingsBody(
+        model = model,
+        initialCategory = initial,
+        rawRequestedCategory = requested,
+        backReturnsToList = true,
+    )
 }
 
 /**
@@ -91,22 +104,34 @@ fun SettingsTab(model: AppModel) {
 fun SettingsWindowContent(model: AppModel, win: WindowRuntimeState) {
     val raw = win.payload["category"].string ?: model.requestedSettingsCategory
     val category = raw?.let(SettingsCategory::resolveOrDefault)
-    SettingsBody(model, initialCategory = category, onCategoryChange = { next ->
-        model.windows?.setPayload(win.id, buildJsonObject { put("category", next.id) })
-    })
+    SettingsBody(
+        model = model,
+        initialCategory = category,
+        rawRequestedCategory = raw,
+        onCategoryChange = { next ->
+            model.windows?.setPayload(win.id, buildJsonObject { put("category", next.id) })
+        },
+    )
 }
 
 /**
- * `settings-body.tsx`, laid out by its own width as the web's `@container` does: from 640 dp the
- * categories sit in a rail beside the pane; narrower, the list covers the pane until a category
- * is picked. The pane stays mounted either way, so picking a category never rebuilds it.
- * [initialCategory] opens straight on its pane; [backReturnsToList] lets Android's Back bring the
- * list back over it.
+ * Computes the left category rail width on a tablet (`Tablet 6 · Settings`):
+ * - Landscape (`maxWidth >= 840.dp`): `336.dp`
+ * - Portrait (`maxWidth < 840.dp`): `300.dp`
  */
+internal fun tabletSettingsRailWidth(maxWidth: Dp): Dp =
+    if (maxWidth >= TABLET_LANDSCAPE_BREAKPOINT) TABLET_RAIL_LANDSCAPE_WIDTH else TABLET_RAIL_PORTRAIT_WIDTH
+
+internal val TABLET_LANDSCAPE_BREAKPOINT = 840.dp
+internal val TABLET_RAIL_LANDSCAPE_WIDTH = 336.dp
+internal val TABLET_RAIL_PORTRAIT_WIDTH = 300.dp
+internal val TABLET_DETAIL_MAX_WIDTH = 760.dp
+
 @Composable
 internal fun SettingsBody(
     model: AppModel,
     initialCategory: SettingsCategory? = null,
+    rawRequestedCategory: String? = null,
     backReturnsToList: Boolean = false,
     onCategoryChange: (SettingsCategory) -> Unit = {},
 ) {
@@ -114,29 +139,63 @@ internal fun SettingsBody(
     var category by rememberSaveable(initialCategory) {
         mutableStateOf(initialCategory ?: SettingsCategory.General)
     }
-    var showList by rememberSaveable(initialCategory) { mutableStateOf(initialCategory == null) }
     val select: (SettingsCategory) -> Unit = {
         category = it
         model.requestedSettingsCategory = null
-        // Also cleared from the rail: should the body narrow later, a stale list would cover the pane just picked.
-        showList = false
         onCategoryChange(it)
     }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val split = maxWidth >= SPLIT_WIDTH
-        BackHandler(enabled = backReturnsToList && !split && !showList) { showList = true }
-        Row(Modifier.fillMaxSize()) {
-            if (split) SettingsRail(category, minimalMode, select)
-            Box(Modifier.weight(1f).fillMaxHeight()) {
-                SettingsPane(model, category, split, onBack = { showList = true })
-                if (showList && !split) SettingsIndex(minimalMode, select)
+        val isPhone = SizeClass.of(maxWidth) == SizeClass.Phone
+        if (isPhone) {
+            val initialPhoneRoute = remember(rawRequestedCategory, initialCategory) {
+                when {
+                    !rawRequestedCategory.isNullOrBlank() -> resolvePhoneSettingsRoute(rawRequestedCategory)
+                    initialCategory != null -> resolvePhoneSettingsCategory(initialCategory)
+                    else -> PhoneSettingsRoute.Home
+                }
+            }
+            PhoneSettingsScreen(
+                model = model,
+                initialRoute = initialPhoneRoute,
+                onRouteChanged = { route ->
+                    if (route is PhoneSettingsRoute.FullPage) {
+                        route.section.category?.let(onCategoryChange)
+                    } else if (route is PhoneSettingsRoute.TabletOnlyPage) {
+                        onCategoryChange(route.category)
+                    }
+                },
+            )
+        } else {
+            val railWidth = tabletSettingsRailWidth(maxWidth)
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(LocalPpmTokens.current.bgSolid.color)
+                    .testTag("tablet-settings-split"),
+            ) {
+                SettingsRail(
+                    active = category,
+                    minimalMode = minimalMode,
+                    railWidth = railWidth,
+                    onSelect = select,
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                ) {
+                    SettingsPane(
+                        model = model,
+                        category = category,
+                        split = true,
+                        onBack = {},
+                    )
+                }
             }
         }
     }
 }
-
-/** `@[640px]`: the body's width from which the rail shows. */
-private val SPLIT_WIDTH = 640.dp
 
 enum class SettingsCategory(
     val id: String,
@@ -180,11 +239,22 @@ enum class SettingsCategory(
     ;
 
     companion object {
-        /** Resolves [raw] by category `id` or falls back to [General]. */
-        fun resolveOrDefault(raw: String?): SettingsCategory {
-            if (raw.isNullOrBlank()) return General
-            return entries.firstOrNull { it.id.equals(raw.trim(), ignoreCase = true) } ?: General
+        /** Resolves [raw] by category `id` (or common alias) or returns `null` if unknown. */
+        fun resolveOrNull(raw: String?): SettingsCategory? {
+            val cleaned = raw?.trim()?.lowercase().orEmpty()
+            if (cleaned.isEmpty()) return null
+            entries.firstOrNull { it.id.equals(cleaned, ignoreCase = true) }?.let { return it }
+            return when (cleaned) {
+                "keybindings", "keyboard", "keyboard-shortcuts" -> Shortcuts
+                "theme", "themes" -> Appearance
+                "storage" -> QueryAudit
+                else -> null
+            }
         }
+
+        /** Resolves [raw] by category `id` or falls back to [General]. */
+        fun resolveOrDefault(raw: String?): SettingsCategory =
+            resolveOrNull(raw) ?: General
     }
 }
 
@@ -212,97 +282,123 @@ private fun GroupHeading(label: String, modifier: Modifier) {
 }
 
 /**
- * settings-category-rail.tsx: `w-[210px] border-r`, every category at once in `p-2 space-y-4`, a
- * group's rows `space-y-1` under its heading (`px-2 pt-1`).
+ * Tablet list–detail category rail (`Tablet 6 · Settings`, Requirement 15.3):
+ * `336.dp` in landscape (`>= 840.dp`) and `300.dp` in portrait (`< 840.dp`), with a search filter
+ * and every category grouped under its heading.
  */
 @Composable
-private fun SettingsRail(active: SettingsCategory, minimalMode: Boolean, onSelect: (SettingsCategory) -> Unit) {
+internal fun SettingsRail(
+    active: SettingsCategory,
+    minimalMode: Boolean,
+    railWidth: Dp = TABLET_RAIL_LANDSCAPE_WIDTH,
+    onSelect: (SettingsCategory) -> Unit,
+) {
     val tokens = LocalPpmTokens.current
+    var searchQuery by remember { mutableStateOf("") }
+    val needle = searchQuery.trim().lowercase()
+
     Column(
         Modifier
-            .width(210.dp)
+            .width(railWidth)
             .fillMaxHeight()
+            .background(tokens.panel.color)
             .edge(Edge.Right, tokens.border.color)
-            .verticalScroll(rememberScrollState())
-            .padding(8.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .testTag("tablet-settings-rail"),
     ) {
-        for (group in SettingsGroup.entries) {
-            val cats = group.categories(minimalMode)
-            if (cats.isEmpty()) continue
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                group.label?.let { GroupHeading(it, Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp)) }
-                for (category in cats) {
-                    val on = category == active
-                    val shape = RoundedCornerShape(8.dp)
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(shape)
-                            .then(if (on) Modifier.background(tokens.panel2.color) else Modifier)
-                            .pointerHoverIcon(WebCursor.Pointer)
-                            .ppmClickable(
-                                pressedColor = tokens.panel2.color,
-                                hoverColor = if (on) Color.Transparent else tokens.panel2.opacity(0.5).color,
-                                shape = shape,
-                            ) { onSelect(category) }
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        PpmIcon(category.icon, 16.dp, (if (on) tokens.text else tokens.text2).color)
-                        BasicText(category.label, style = ppmText(14f, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            }
+        // Rail header + Search settings input
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            BasicText(
+                text = "Settings",
+                style = ppmText(16f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color),
+            )
+            SettingsTextInput(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = "Search settings",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("tablet-settings-search"),
+            )
         }
-    }
-}
-
-/** `absolute inset-0 bg-background`: "Settings", then a row per category in `p-3 space-y-5`, each group under its heading (`px-1 pb-1`). */
-@Composable
-private fun SettingsIndex(minimalMode: Boolean, onSelect: (SettingsCategory) -> Unit) {
-    val tokens = LocalPpmTokens.current
-    Column(Modifier.fillMaxSize().background(tokens.bgSolid.color)) {
-        BasicText(
-            "Settings",
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            style = ppmText(14f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color),
-        )
         Separator()
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 10.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             for (group in SettingsGroup.entries) {
-                val cats = group.categories(minimalMode)
+                val cats = group.categories(minimalMode).filter { cat ->
+                    needle.isEmpty() ||
+                        cat.label.lowercase().contains(needle) ||
+                        cat.subtitle.lowercase().contains(needle) ||
+                        cat.id.lowercase().contains(needle)
+                }
                 if (cats.isEmpty()) continue
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    group.label?.let { GroupHeading(it, Modifier.padding(start = 4.dp, end = 4.dp, bottom = 4.dp)) }
+                    group.label?.let { GroupHeading(it, Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp)) }
                     for (category in cats) {
-                        val shape = RoundedCornerShape(12.dp)
-                        val hover = rememberHover(instant = true)
+                        val on = category == active
+                        val shape = RoundedCornerShape(10.dp)
                         Row(
                             Modifier
                                 .fillMaxWidth()
                                 .clip(shape)
+                                .then(
+                                    if (on) {
+                                        Modifier
+                                            .background(tokens.accentWash.color)
+                                            .cssBorder(tokens.accent.opacity(0.35).color, shape)
+                                    } else {
+                                        Modifier
+                                    },
+                                )
                                 .pointerHoverIcon(WebCursor.Pointer)
                                 .ppmClickable(
                                     pressedColor = tokens.panel2.color,
-                                    hoverColor = tokens.panel2.opacity(0.5).color,
+                                    hoverColor = if (on) Color.Transparent else tokens.panel2.opacity(0.5).color,
                                     shape = shape,
-                                    source = hover.source,
                                 ) { onSelect(category) }
-                                .padding(horizontal = 10.dp, vertical = 12.dp),
+                                .padding(horizontal = 10.dp, vertical = 9.dp)
+                                .testTag("tablet-settings-category-${category.id}"),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             Box(
-                                Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).background(tokens.panel2.mix(tokens.panel, hover.lit.toDouble()).color),
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (on) tokens.accent.opacity(0.18).color else tokens.panel2.color),
                                 contentAlignment = Alignment.Center,
-                            ) { PpmIcon(category.icon, 16.dp, tokens.text2.color) }
-                            Column(Modifier.weight(1f)) {
-                                BasicText(category.label, style = ppmText(14f, FontWeight.Medium, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                BasicText(category.subtitle, style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            ) {
+                                PpmIcon(category.icon, 16.dp, (if (on) tokens.accent else tokens.text2).color)
                             }
-                            PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text2.color)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                BasicText(
+                                    text = category.label,
+                                    style = ppmText(
+                                        size = 13f,
+                                        weight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                                        lineHeight = 18f,
+                                    ).copy(color = if (on) tokens.accent.color else tokens.text.color),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                BasicText(
+                                    text = category.subtitle,
+                                    style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 }
@@ -312,60 +408,157 @@ private fun SettingsIndex(minimalMode: Boolean, onSelect: (SettingsCategory) -> 
 }
 
 /**
- * The pane: the category's icon and name (`px-2 py-2.5`, `px-4` beside the rail), then its
- * content in `p-4 pb-8`. Back to the list leads the row when there is no rail.
+ * Stateless Tablet list–detail Settings scaffold (`Tablet 6 · Settings`, Requirement 15.3)
+ * that can be mounted directly in tests or previews.
+ */
+@Composable
+internal fun TabletSettingsLayout(
+    activeCategory: SettingsCategory,
+    onSelectCategory: (SettingsCategory) -> Unit,
+    minimalMode: Boolean = false,
+    detailContent: @Composable (SettingsCategory) -> Unit,
+) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(LocalPpmTokens.current.bgSolid.color)
+            .testTag("tablet-settings-layout"),
+    ) {
+        val railWidth = tabletSettingsRailWidth(maxWidth)
+        Row(Modifier.fillMaxSize()) {
+            SettingsRail(
+                active = activeCategory,
+                minimalMode = minimalMode,
+                railWidth = railWidth,
+                onSelect = onSelectCategory,
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .testTag("tablet-settings-detail-${activeCategory.id}"),
+            ) {
+                TabletDetailHeader(category = activeCategory)
+                Separator()
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 24.dp, vertical = 20.dp),
+                    contentAlignment = Alignment.TopCenter,
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = TABLET_DETAIL_MAX_WIDTH),
+                    ) {
+                        detailContent(activeCategory)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabletDetailHeader(
+    category: SettingsCategory,
+    split: Boolean = true,
+    onBack: () -> Unit = {},
+) {
+    val tokens = LocalPpmTokens.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .padding(horizontal = if (split) 20.dp else 8.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (!split) {
+            val ghost = ghostHover(tokens, isSystemInDarkTheme())
+            Box(
+                Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .pointerHoverIcon(WebCursor.Pointer)
+                    .ppmClickable(pressedColor = ghost, hoverColor = ghost, onClickLabel = "Back to settings list", onClick = onBack),
+                contentAlignment = Alignment.Center,
+            ) { PpmIcon(ProductIcon.ArrowLeft, 16.dp, tokens.text.color) }
+        }
+        PpmIcon(category.icon, 18.dp, tokens.accent.color)
+        Column(modifier = Modifier.weight(1f)) {
+            BasicText(
+                category.label,
+                style = ppmText(15f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            BasicText(
+                category.subtitle,
+                style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * The detail pane on a tablet: 48 dp header bar with category icon, title and subtitle, followed
+ * by a centered reading column capped at [TABLET_DETAIL_MAX_WIDTH] (`760.dp`).
  */
 @Composable
 private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boolean, onBack: () -> Unit) {
-    val tokens = LocalPpmTokens.current
-    Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = if (split) 16.dp else 8.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (!split) {
-                // The `ghost` button: `hover:bg-accent`, `dark:hover:bg-accent/50`, `cursor-pointer`.
-                val ghost = ghostHover(tokens, isSystemInDarkTheme())
-                Box(
-                    Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .pointerHoverIcon(WebCursor.Pointer)
-                        .ppmClickable(pressedColor = ghost, hoverColor = ghost, onClickLabel = "Back to settings list", onClick = onBack),
-                    contentAlignment = Alignment.Center,
-                ) { PpmIcon(ProductIcon.ArrowLeft, 16.dp, tokens.text.color) }
-            }
-            PpmIcon(category.icon, 16.dp, tokens.text2.color)
-            BasicText(category.label, style = ppmText(14f, FontWeight.SemiBold, lineHeight = 20f).copy(color = tokens.text.color), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .testTag("tablet-settings-detail-${category.id}"),
+    ) {
+        TabletDetailHeader(category = category, split = split, onBack = onBack)
         Separator()
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 32.dp)) {
-            when (category) {
-                SettingsCategory.General -> GeneralSection(model)
-                SettingsCategory.Appearance -> AppearanceSection(model)
-                SettingsCategory.Servers -> ServersSection(model)
-                SettingsCategory.Voice -> VoiceSection(model)
-                SettingsCategory.Shortcuts -> KeyboardShortcutsSection(model)
-                SettingsCategory.Files -> FilesSettingsSection(model)
-                SettingsCategory.Ai -> AiProviderSettingsSection(model)
-                SettingsCategory.Tools -> ToolsSettingsSection(model)
-                SettingsCategory.Accounts -> AccountsSettingsSection(model)
-                SettingsCategory.Mcp -> McpSettingsSection(model)
-                SettingsCategory.AiResources -> AiResourcesSettingsSection(model)
-                SettingsCategory.PpmBot -> PpmBotSettingsSection(model)
-                SettingsCategory.Design -> DesignSettingsSection(model)
-                SettingsCategory.Notifications -> NotificationsSettingsSection(model)
-                SettingsCategory.RemoteAccess -> RemoteAccessSettingsSection(model)
-                SettingsCategory.Cloud -> CloudSettingsSection(model)
-                SettingsCategory.Proxy -> ProxySettingsSection(model)
-                SettingsCategory.Extensions -> ExtensionsSettingsSection(model)
-                SettingsCategory.Jira -> JiraSettingsSection(model)
-                SettingsCategory.Schedules -> SchedulesSettingsSection(model)
-                SettingsCategory.QueryAudit -> QueryAuditSection(model)
-                SettingsCategory.LanguageServers -> LanguageServersSection(model)
-                SettingsCategory.DatabaseDrivers -> DatabaseDriversSection(model)
-                SettingsCategory.RemoteDesktop -> RemoteDesktopSettingsSection(model)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 32.dp),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = TABLET_DETAIL_MAX_WIDTH),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                when (category) {
+                    SettingsCategory.General -> {
+                        GeneralSection(model)
+                        RedesignDebugToggleCard()
+                    }
+                    SettingsCategory.Appearance -> AppearanceSection(model)
+                    SettingsCategory.Servers -> ServersSection(model)
+                    SettingsCategory.Voice -> VoiceSection(model)
+                    SettingsCategory.Shortcuts -> KeyboardShortcutsSection(model)
+                    SettingsCategory.Files -> FilesSettingsSection(model)
+                    SettingsCategory.Ai -> AiProviderSettingsSection(model)
+                    SettingsCategory.Tools -> ToolsSettingsSection(model)
+                    SettingsCategory.Accounts -> AccountsSettingsSection(model)
+                    SettingsCategory.Mcp -> McpSettingsSection(model)
+                    SettingsCategory.AiResources -> AiResourcesSettingsSection(model)
+                    SettingsCategory.PpmBot -> PpmBotSettingsSection(model)
+                    SettingsCategory.Design -> DesignSettingsSection(model)
+                    SettingsCategory.Notifications -> NotificationsSettingsSection(model)
+                    SettingsCategory.RemoteAccess -> RemoteAccessSettingsSection(model)
+                    SettingsCategory.Cloud -> CloudSettingsSection(model)
+                    SettingsCategory.Proxy -> ProxySettingsSection(model)
+                    SettingsCategory.Extensions -> ExtensionsSettingsSection(model)
+                    SettingsCategory.Jira -> JiraSettingsSection(model)
+                    SettingsCategory.Schedules -> SchedulesSettingsSection(model)
+                    SettingsCategory.QueryAudit -> QueryAuditSection(model)
+                    SettingsCategory.LanguageServers -> LanguageServersSection(model)
+                    SettingsCategory.DatabaseDrivers -> DatabaseDriversSection(model)
+                    SettingsCategory.RemoteDesktop -> RemoteDesktopSettingsSection(model)
+                }
             }
         }
     }
