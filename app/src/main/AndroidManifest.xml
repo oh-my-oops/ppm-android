@@ -7,6 +7,9 @@
     <!-- Handing Android's installer an update downloaded from GitHub Releases. Android still
          asks the user to let PPM install apps ("Install unknown apps") before the first one. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Push notifications: requested only when the user turns on the "This device" switch
+         in Settings -> Notifications, never on first launch. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- The camera and camcorder the paperclip's chooser offers beside Files, as Chrome's does.
          Neither needs the CAMERA permission: the app never declares it, so the camera app asks. -->
@@ -20,6 +23,14 @@
         <!-- The speech recognisers the mic can use, Google's first as Chrome picks it. -->
         <intent>
             <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <!-- UnifiedPush distributors (ntfy, NextPush, etc.) discovered on Android 11+. -->
+        <intent>
+            <action android:name="org.unifiedpush.android.distributor.REGISTER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="unifiedpush" android:host="link" />
         </intent>
     </queries>
 
@@ -71,5 +82,17 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/image_paths" />
         </provider>
+        <receiver
+            android:name=".push.UnifiedPushReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.MESSAGE" />
+                <action android:name="org.unifiedpush.android.connector.UNREGISTERED" />
+                <action android:name="org.unifiedpush.android.connector.NEW_ENDPOINT" />
+                <action android:name="org.unifiedpush.android.connector.REGISTRATION_FAILED" />
+                <action android:name="org.unifiedpush.android.connector.TEMP_UNAVAILABLE" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

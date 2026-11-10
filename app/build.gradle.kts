@@ -69,6 +69,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidsvg)
     implementation(libs.zxing.core)
+    implementation("org.unifiedpush.android:connector:3.3.5")
     implementation(libs.androidx.compose.ui.tooling.preview)
     // Hands the Baseline Profile to Android on an install that is not from Play, where nothing else
     // would: the system compiles it when the device is next idle.
