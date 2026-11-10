@@ -7,12 +7,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,6 +56,8 @@ import com.hienlh.ppm.app.ui.editor.LspStatusChip
 import com.hienlh.ppm.app.ui.editor.SharedBlamePreference
 import com.hienlh.ppm.app.ui.editor.SharedProjectLspRegistry
 import com.hienlh.ppm.app.ui.isHtmlEditorTab
+import com.hienlh.ppm.app.ui.osexplorer.HostExplorerTab
+import com.hienlh.ppm.app.ui.osexplorer.isOsExplorerTab
 import com.hienlh.ppm.client.downloadProjectFile
 import com.hienlh.ppm.client.listProjectDirectory
 import com.hienlh.ppm.design.CssSides
@@ -86,8 +90,11 @@ import java.io.IOException
 /** The first native file-viewer slice. HTML keeps its existing preview and toolbar. */
 @Composable
 fun FileBody(model: AppModel, tab: WorkspaceTab) {
-    if (isHtmlEditorTab(tab)) HtmlEditorBody(model, tab)
-    else key(tab.id) { DocumentBody(model, tab, forceCode = false) }
+    when {
+        isOsExplorerTab(tab) -> key(tab.id) { HostExplorerTab(model, tab) }
+        isHtmlEditorTab(tab) -> HtmlEditorBody(model, tab)
+        else -> key(tab.id) { DocumentBody(model, tab, forceCode = false) }
+    }
 }
 
 /**
@@ -150,6 +157,7 @@ private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean,
     val aiStamp = (tab.metadata["aiOpenAt"] as? JsonPrimitive)?.content
     val aiView = tab.metaString("aiView")
     var preview by remember(path) { mutableStateOf(viewer == FileDocumentViewer.MARKDOWN && aiView != "code" && line == null) }
+    var splitMarkdown by remember(path) { mutableStateOf(aiView == "split") }
     var csvTable by remember(path) { mutableStateOf(true) }
     var wrap by remember { mutableStateOf(mobile) }
     // The web's Refresh button spins, disabled, while the reload it asked for runs; a reload the watcher asked for shows nothing.
@@ -271,6 +279,8 @@ private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean,
                         viewer = viewer,
                         preview = preview,
                         onPreviewChange = { preview = it },
+                        splitMarkdown = splitMarkdown,
+                        onSplitMarkdownChange = { splitMarkdown = it },
                         csvTable = csvTable,
                         onCsvTableChange = { csvTable = it },
                         wordWrap = wrap,
@@ -331,7 +341,38 @@ private fun DocumentBody(model: AppModel, tab: WorkspaceTab, forceCode: Boolean,
                 state.content != null -> {
                     if (viewer == FileDocumentViewer.DOCX) key(state.revision) { FileDocxView(model, state.content!!) }
                     else if (viewer == FileDocumentViewer.CSV && csvTable) FileCsvView(state.content!!, wrap)
-                    else if (viewer == FileDocumentViewer.MARKDOWN && preview) FileMarkdownView(model, project, state.content!!)
+                    else if (viewer == FileDocumentViewer.MARKDOWN && splitMarkdown && !mobile) {
+                        Row(Modifier.fillMaxSize()) {
+                            Box(Modifier.weight(1f).fillMaxHeight()) {
+                                if (!ownsController || tab.metadata["readOnly"].bool == true) {
+                                    FileCodeView(
+                                        state.content!!,
+                                        effectiveHighlightLanguage,
+                                        wrap, line, end, reveal,
+                                    )
+                                } else {
+                                    com.hienlh.ppm.app.ui.editor.EditableFileCodeView(
+                                        model = model,
+                                        project = project,
+                                        path = path,
+                                        initialContent = state.content!!,
+                                        initialLanguage = effectiveHighlightLanguage,
+                                        wrap = wrap,
+                                        onToggleWrap = { wrap = !wrap },
+                                        lineNumber = line,
+                                        endLine = end,
+                                        revealAt = reveal,
+                                        isUntitled = isUntitled,
+                                        readOnly = buffer != null && !isUntitled,
+                                        useWebHeader = true,
+                                        onDirtyChange = { isDirty -> controller?.setDirty(isDirty) },
+                                    )
+                                }
+                            }
+                            Box(Modifier.width(1.dp).fillMaxHeight().background(colors.border.color))
+                            FileMarkdownView(model, project, state.content!!, Modifier.weight(1f).fillMaxHeight())
+                        }
+                    } else if (viewer == FileDocumentViewer.MARKDOWN && preview) FileMarkdownView(model, project, state.content!!)
                     else if (!ownsController || tab.metadata["readOnly"].bool == true) {
                         FileCodeView(
                             state.content!!,
@@ -636,6 +677,8 @@ private fun EditorDesktopToolbar(
     viewer: FileDocumentViewer,
     preview: Boolean,
     onPreviewChange: (Boolean) -> Unit,
+    splitMarkdown: Boolean = false,
+    onSplitMarkdownChange: (Boolean) -> Unit = {},
     csvTable: Boolean,
     onCsvTableChange: (Boolean) -> Unit,
     wordWrap: Boolean,
@@ -652,8 +695,18 @@ private fun EditorDesktopToolbar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (viewer == FileDocumentViewer.MARKDOWN) {
-            EditorToolbarButton(ProductIcon.Code, "Edit", active = !preview) { onPreviewChange(false) }
-            EditorToolbarButton(ProductIcon.Eye, "Preview", active = preview) { onPreviewChange(true) }
+            EditorToolbarButton(ProductIcon.Code, "Edit", active = !preview && !splitMarkdown) {
+                onSplitMarkdownChange(false)
+                onPreviewChange(false)
+            }
+            EditorToolbarButton(ProductIcon.Columns3, "Split", active = splitMarkdown) {
+                onSplitMarkdownChange(true)
+                onPreviewChange(false)
+            }
+            EditorToolbarButton(ProductIcon.Eye, "Preview", active = preview && !splitMarkdown) {
+                onSplitMarkdownChange(false)
+                onPreviewChange(true)
+            }
         }
         if (viewer == FileDocumentViewer.CSV) {
             EditorToolbarButton(ProductIcon.Table, "Table", active = csvTable) { onCsvTableChange(true) }

@@ -91,6 +91,7 @@ import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.windows.DockMode
+import com.hienlh.ppm.state.windows.WindowKind
 import com.hienlh.ppm.state.windows.WindowRuntimeState
 import com.hienlh.ppm.state.windows.WindowStore
 import com.hienlh.ppm.state.windows.WindowVisualState
@@ -144,7 +145,11 @@ private enum class ChipState { Front, Behind, Min }
 @Composable
 internal fun WindowDock(model: AppModel, modifier: Modifier = Modifier) {
     val store = model.windows ?: return
-    val windows = model.windowState.windows
+    val windows = if (model.layout != null) {
+        model.windowState.windows.filterValues { it.kind != WindowKind.Explorer }
+    } else {
+        model.windowState.windows
+    }
     val list = windowsInOpenOrder(windows)
     if (list.isEmpty()) return
     val tokens = LocalPpmTokens.current

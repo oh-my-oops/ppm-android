@@ -165,6 +165,7 @@ fun ExplorerTree(
             hasProject = state.project != null,
             busy = busy,
             onCreate = commands?.let { { directory -> create("", directory) } },
+            onOpenExplorer = onOpenExplorer?.let { open -> { open("") } },
             refreshing = state.loading,
             revealing = revealJob?.isActive == true,
             onRefresh = { revealJob?.cancel(); revealError = null; tree.refresh() },

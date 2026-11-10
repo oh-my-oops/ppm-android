@@ -22,6 +22,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import com.hienlh.ppm.design.CssSides
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -33,13 +34,18 @@ import com.hienlh.ppm.design.ppmText
 internal fun ExplorerMutationToolbar(
     hasProject: Boolean, refreshing: Boolean, revealing: Boolean, busy: Boolean,
     onRefresh: () -> Unit, onCollapse: () -> Unit, onReveal: (() -> Unit)?, onCreate: ((Boolean) -> Unit)?,
+    onOpenExplorer: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
     val actions: @Composable RowScope.() -> Unit = {
         if (hasProject) {
             if (onCreate != null) {
                 ExplorerTool("New File", ProductIcon.FilePlus, enabled = !busy) { onCreate(false) }
                 ExplorerTool("New Folder", ProductIcon.FolderPlus, enabled = !busy) { onCreate(true) }
+            }
+            if (!mobile && onOpenExplorer != null) {
+                ExplorerTool("Open File Explorer", ProductIcon.FolderOpen, enabled = !busy, onClick = onOpenExplorer)
             }
             if (onReveal != null) ExplorerTool("Reveal Active File", if (revealing) ProductIcon.Loader2 else ProductIcon.Crosshair, revealing, !busy, onReveal)
             ExplorerTool("Collapse All", ProductIcon.ChevronsDownUp, enabled = !busy, onClick = onCollapse)

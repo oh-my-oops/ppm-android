@@ -3,6 +3,8 @@ package com.hienlh.ppm.app.ui.files
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
 import com.hienlh.ppm.design.RegexHighlight
 import com.hienlh.ppm.protocol.FileSearchMatch
 import com.hienlh.ppm.protocol.FileSearchResult
@@ -49,3 +51,84 @@ internal fun searchMutationReport(report: FileReplaceReport, projectRoot: String
     affectedDirectories = report.paths.map { absoluteProjectPath(projectRoot, it.substringBeforeLast('/', "")) }.toSet(),
     cancelled = report.cancelled,
 )
+
+/**
+ * Confirmation summary before running Replace All (Requirement 8.4, Tablet 3 S2):
+ * names how many matches in how many files will change.
+ */
+data class ReplaceAllConfirmation(
+    val matchCount: Int,
+    val fileCount: Int,
+) {
+    val title: String get() = replaceAllConfirmTitle(matchCount, fileCount)
+    val detail: String get() = REPLACE_ALL_CONFIRM_DETAIL
+}
+
+internal const val REPLACE_ALL_CONFIRM_DETAIL =
+    "Files open with unsaved edits are skipped. Each changed file can be undone from its tab with Ctrl+Z."
+
+internal fun replaceAllConfirmTitle(matchCount: Int, fileCount: Int): String =
+    "Replace $matchCount ${if (matchCount == 1) "match" else "matches"} in $fileCount ${if (fileCount == 1) "file" else "files"}?"
+
+internal fun replaceAllConfirmation(
+    results: List<FileSearchResult>,
+    total: Int = results.sumOf { it.matches.size },
+): ReplaceAllConfirmation? {
+    if (results.isEmpty()) return null
+    val matches = results.sumOf { it.matches.size }.let { sum -> if (total > 0) maxOf(total, sum) else sum }
+    if (matches <= 0) return null
+    return ReplaceAllConfirmation(matchCount = matches, fileCount = results.size)
+}
+
+/**
+ * Inline replacement preview in result rows when the Replace box is non-empty (Tablet 3 S2 Note 69):
+ * each matched span is struck through and followed by [replacement].
+ */
+internal fun searchReplacementPreviewText(
+    text: String,
+    highlights: List<RegexHighlight>,
+    replacement: String,
+    matchHighlight: Color,
+    deleteColor: Color,
+    deleteBackground: Color,
+    insertColor: Color,
+    insertBackground: Color,
+): AnnotatedString {
+    if (replacement.isEmpty() || highlights.isEmpty()) {
+        return searchHighlightedText(text, highlights, matchHighlight)
+    }
+    val valid = highlights
+        .filter { it.start >= 0 && it.end > it.start && it.end <= text.length }
+        .sortedBy { it.start }
+    if (valid.isEmpty()) return AnnotatedString(text)
+    return buildAnnotatedString {
+        var cursor = 0
+        for (range in valid) {
+            if (range.start < cursor) continue
+            if (range.start > cursor) {
+                append(text.substring(cursor, range.start))
+            }
+            pushStyle(
+                SpanStyle(
+                    color = deleteColor,
+                    background = deleteBackground,
+                    textDecoration = TextDecoration.LineThrough,
+                ),
+            )
+            append(text.substring(range.start, range.end))
+            pop()
+            pushStyle(
+                SpanStyle(
+                    color = insertColor,
+                    background = insertBackground,
+                ),
+            )
+            append(replacement)
+            pop()
+            cursor = range.end
+        }
+        if (cursor < text.length) {
+            append(text.substring(cursor))
+        }
+    }
+}

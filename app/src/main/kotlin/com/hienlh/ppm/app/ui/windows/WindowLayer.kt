@@ -72,6 +72,7 @@ import com.hienlh.ppm.app.ui.RefusingDrop
 import com.hienlh.ppm.app.ui.SettingsWindowContent
 import com.hienlh.ppm.app.ui.TabBody
 import com.hienlh.ppm.app.ui.dropZone
+import com.hienlh.ppm.app.ui.osexplorer.openOsExplorerTab
 import com.hienlh.ppm.app.ui.tablet.LocalHeldCursor
 import com.hienlh.ppm.chat.AgentSessionContent
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -82,6 +83,7 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.cssBorderPx
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.AgentSessionPayload
 import com.hienlh.ppm.state.windows.Bounds
 import com.hienlh.ppm.state.windows.ResizeHandle
@@ -104,6 +106,25 @@ import kotlin.math.floor
 import com.hienlh.ppm.state.windows.Rect as WindowRect
 
 /**
+ * Requirement 8.5 / Tablet 3 X1: On a tablet workspace, OS File Explorer opens as a tab, not as a floating window.
+ * Converts any [WindowKind.Explorer] windows in [state] into workspace tabs via [openTab] and closes them in [store],
+ * returning the remaining floating windows.
+ */
+internal fun absorbExplorerWindowsToTabs(
+    store: WindowStore,
+    state: WindowsState,
+    openTab: (path: String) -> Unit,
+): Map<String, WindowRuntimeState> {
+    val explorers = state.windows.values.filter { it.kind == WindowKind.Explorer }
+    for (win in explorers) {
+        val path = win.payload?.get("path").string ?: "~"
+        openTab(path)
+        store.close(win.id)
+    }
+    return state.windows.filterValues { it.kind != WindowKind.Explorer }
+}
+
+/**
  * window-layer.tsx: the floating windows over the working area, on a tablet only. It covers the
  * panels and stops at the status bar, so a maximized window never hides the dock that brings the
  * others back; windows are clamped against it and clipped to it.
@@ -122,6 +143,19 @@ internal fun WindowLayer(
     state: WindowsState,
     content: @Composable (WindowRuntimeState) -> Unit = { WindowContent(model, it) },
 ) {
+    val promoteExplorersToTabs = model.layout != null && store === model.windows
+    LaunchedEffect(promoteExplorersToTabs, state.windows) {
+        if (promoteExplorersToTabs) {
+            absorbExplorerWindowsToTabs(store, state) { path ->
+                openOsExplorerTab(model, path, newInstance = true)
+            }
+        }
+    }
+    val visibleWindows = if (promoteExplorersToTabs) {
+        state.windows.filterValues { it.kind != WindowKind.Explorer }
+    } else {
+        state.windows
+    }
     // The keyboard does not shrink it: the page pans instead, as Chrome's does (KeyboardPannedPage).
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds()) {
         val bounds = Bounds(cssRound(maxWidth.value.toDouble()), cssRound(maxHeight.value.toDouble()))
@@ -131,9 +165,9 @@ internal fun WindowLayer(
             store.restoreAll(bounds)
         }
         if (state.snapPreviewId != null) SnapGhost(bounds)
-        val frontId = frontWindowId(state.windows)
+        val frontId = frontWindowId(visibleWindows)
         // The drop layer of each is above the one behind it, as the window is drawn; the panels are layer 0.
-        for ((index, win) in windowsInRankOrder(state.windows).withIndex()) {
+        for ((index, win) in windowsInRankOrder(visibleWindows).withIndex()) {
             key(win.id) { FloatingWindow(model, store, win, bounds, focused = win.id == frontId, layer = index + 1, content = content) }
         }
     }

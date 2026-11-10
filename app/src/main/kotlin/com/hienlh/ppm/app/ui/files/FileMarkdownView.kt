@@ -18,7 +18,12 @@ import com.hienlh.ppm.state.workspace.SourceLine
 
 /** Uses the same host/project link resolution and absolute-only local images as web Markdown. */
 @Composable
-internal fun FileMarkdownView(model: AppModel, project: String?, content: String) {
+internal fun FileMarkdownView(
+    model: AppModel,
+    project: String?,
+    content: String,
+    modifier: Modifier = Modifier.fillMaxSize(),
+) {
     val images = remember(model, project, model.api) {
         object : MarkdownImages {
             override suspend fun local(path: String) = model.toolImage(project.orEmpty(), path)
@@ -37,6 +42,6 @@ internal fun FileMarkdownView(model: AppModel, project: String?, content: String
         }
     }
     CompositionLocalProvider(LocalMarkdownImages provides images, LocalChatTabs provides tabs) {
-        MarkdownView(content, Modifier.fillMaxSize().cssScrollY().padding(16.dp))
+        MarkdownView(content, modifier.cssScrollY().padding(16.dp))
     }
 }

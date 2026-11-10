@@ -10,6 +10,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ui.osexplorer.openOsExplorerTab
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.workspace.absoluteProjectPath
@@ -64,7 +65,7 @@ fun ExplorerBody(model: AppModel, onNavigate: () -> Unit = {}) {
         },
         onOpenExplorer = model.currentProject?.path?.let { root ->
             { directory ->
-                model.openExplorer(absoluteProjectPath(root, directory))
+                openOsExplorerTab(model, absoluteProjectPath(root, directory))
                 onNavigate()
             }
         },

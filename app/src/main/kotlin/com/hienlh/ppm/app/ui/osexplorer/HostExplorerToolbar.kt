@@ -63,7 +63,9 @@ private fun BarButton(icon: ProductIcon, label: String, enabled: Boolean = true,
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun HostExplorerToolbar(session: ExplorerSession, state: ExplorerSessionState, preferences: ExplorerViewPreferences,
-                                 canUpload: Boolean, commands: HostExplorerCommands? = null, onUpload: (folder: Boolean) -> Unit) {
+                                 canUpload: Boolean, commands: HostExplorerCommands? = null,
+                                 onTogglePlaces: (() -> Unit)? = null, placesOpen: Boolean = false,
+                                 onUpload: (folder: Boolean) -> Unit) {
     val tokens = LocalPpmTokens.current
     val drops = rememberHostEntryDrops(commands, LocalPpmMobile.current, announce = false)
     var editing by remember { mutableStateOf(false) }
@@ -80,6 +82,9 @@ internal fun HostExplorerToolbar(session: ExplorerSession, state: ExplorerSessio
         .padding(horizontal = 6.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp),
         itemVerticalAlignment = Alignment.CenterVertically) {
+        if (onTogglePlaces != null) {
+            BarButton(ProductIcon.PanelLeft, "Places", active = placesOpen, onClick = onTogglePlaces)
+        }
         // Every button is an item of the bar's own, as in the web's `flex-wrap`, so the bar breaks between any two of them.
         BarButton(ProductIcon.ArrowLeft, "Back", state.canBack, onClick = session::back)
         BarButton(ProductIcon.ArrowRight, "Forward", state.canForward, onClick = session::forward)
