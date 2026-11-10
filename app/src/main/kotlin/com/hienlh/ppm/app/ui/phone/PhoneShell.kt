@@ -1,54 +1,32 @@
 package com.hienlh.ppm.app.ui.phone
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import com.hienlh.ppm.app.AppModel
-import com.hienlh.ppm.app.ui.CloudSharePopover
-import com.hienlh.ppm.app.ui.SessionHistoryPanel
-import com.hienlh.ppm.app.ui.TabBody
-import com.hienlh.ppm.app.ui.database.DatabaseSidebarPane
-import com.hienlh.ppm.app.ui.files.ExplorerBody
-import com.hienlh.ppm.app.ui.git.GitStatusPanel
-import com.hienlh.ppm.app.ui.tunnels.PortForwardingPanel
+import com.hienlh.ppm.app.PrefsStore
+import com.hienlh.ppm.app.ui.phone.notifications.NotificationsSheet
+import com.hienlh.ppm.app.ui.phone.onboarding.PhoneOnboardingController
+import com.hienlh.ppm.app.ui.phone.onboarding.PhoneOnboardingHost
+import com.hienlh.ppm.app.ui.phone.onboarding.rememberPhoneOnboardingController
+import com.hienlh.ppm.app.ui.projects.ProjectSwitcherSheet
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.LucideIcon
-import com.hienlh.ppm.design.PpmFonts
-import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
-import com.hienlh.ppm.design.cssBorder
-import com.hienlh.ppm.design.cssScrollY
-import com.hienlh.ppm.design.kit.ActionPrimaryButton
 import com.hienlh.ppm.design.kit.AppBar
 import com.hienlh.ppm.design.kit.AppBarAction
 import com.hienlh.ppm.design.kit.AppBarConnectionState
@@ -57,19 +35,15 @@ import com.hienlh.ppm.design.kit.DrawerNavItem
 import com.hienlh.ppm.design.kit.DrawerProjectInfo
 import com.hienlh.ppm.design.kit.DrawerToolTileItem
 import com.hienlh.ppm.design.kit.KitSpec
-import com.hienlh.ppm.design.kit.ListRow
 import com.hienlh.ppm.design.kit.NewTabOption
 import com.hienlh.ppm.design.kit.PhoneDrawer
-import com.hienlh.ppm.design.kit.Sheet
 import com.hienlh.ppm.design.kit.TabCardItem
 import com.hienlh.ppm.design.kit.TabDotKind
 import com.hienlh.ppm.design.kit.TabSwitcherSheet
-import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.themeBackground
 import com.hienlh.ppm.design.vector
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import com.hienlh.ppm.state.workspace.tabSessionId
-import kotlinx.coroutines.launch
 
 /**
  * Redesigned phone shell (`designs/ppm-mobile-tablet-redesign/foundation/index.html`,
@@ -84,23 +58,36 @@ import kotlinx.coroutines.launch
  *   5-tab bottom bar.
  * - Left overlay: [PhoneDrawer] with project switcher, phone workspace screens, 2×2 tool tiles,
  *   Notifications, and Settings.
- * - Bottom sheets: [TabSwitcherSheet], Project switcher, Notifications, Cloud & Share.
+ * - Bottom sheets: [TabSwitcherSheet], [ProjectSwitcherSheet], [NotificationsSheet], and
+ *   Cloud & Share ([PhoneCloudShareAreaHost]).
+ * - First-launch onboarding: [PhoneOnboardingHost] controlled by [rememberPhoneOnboardingController].
  */
 @Composable
 fun PhoneShell(
     model: AppModel,
     nav: PhoneNav = rememberPhoneNav(model.activeTabId),
+    prefs: PrefsStore? = null,
+    onboardingController: PhoneOnboardingController? = null,
+    overrideOpenTabs: List<WorkspaceTab>? = null,
+    overrideActiveTab: WorkspaceTab? = null,
     bottomAction: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
-    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val resolvedPrefs = remember(prefs, context) {
+        prefs ?: PrefsStore(context)
+    }
+    val resolvedOnboarding = onboardingController
+        ?: rememberPhoneOnboardingController(resolvedPrefs)
 
     val openTabPairs = model.openTabs
-    val openTabs = openTabPairs.map { it.first }
+    val openTabs = overrideOpenTabs ?: openTabPairs.map { it.first }
     val openTabIds = openTabs.mapTo(LinkedHashSet()) { it.id }
-    val activeWorkspaceTab = model.activeTab
-    val activeWorkspaceTabId = model.activeTabId
+    val activeWorkspaceTab = overrideActiveTab
+        ?: openTabs.firstOrNull { it.id == nav.currentTabId }
+        ?: model.activeTab
+    val activeWorkspaceTabId = activeWorkspaceTab?.id
 
     // Synchronize workspace tab changes into PhoneNav while keeping synthetic area views intact.
     LaunchedEffect(openTabIds, activeWorkspaceTabId) {
@@ -254,10 +241,12 @@ fun PhoneShell(
             ) {
                 when {
                     syntheticArea != null -> {
-                        PhoneSyntheticAreaBody(
+                        PhoneWorkspaceAreaBody(
                             model = model,
                             area = syntheticArea,
+                            tab = null,
                             nav = nav,
+                            showChatHistoryInitially = syntheticArea == PhoneArea.CHAT,
                         )
                     }
                     activeWorkspaceTab != null -> {
@@ -270,17 +259,21 @@ fun PhoneShell(
                                 )
                             }
                             is PhoneTabRoute.Area -> {
-                                TabBody(
+                                PhoneWorkspaceAreaBody(
                                     model = model,
+                                    area = route.area,
                                     tab = route.tab,
+                                    nav = nav,
                                 )
                             }
                         }
                     }
                     else -> {
-                        PhoneEmptyWorkspace(
+                        PhoneChatAreaHost(
                             model = model,
+                            tab = null,
                             nav = nav,
+                            showHistoryInitially = false,
                         )
                     }
                 }
@@ -362,16 +355,6 @@ fun PhoneShell(
                     onClick = {
                         nav.closeDrawer()
                         handleDrawerSelection(model, PhoneArea.DATABASE.id, openTabs, nav)
-                    },
-                ),
-                DrawerNavItem(
-                    id = PhoneArea.SCHEDULES.id,
-                    label = PhoneArea.SCHEDULES.title,
-                    icon = ProductIcon.CalendarClock,
-                    selected = activeArea == PhoneArea.SCHEDULES,
-                    onClick = {
-                        nav.closeDrawer()
-                        handleDrawerSelection(model, PhoneArea.SCHEDULES.id, openTabs, nav)
                     },
                 ),
             ),
@@ -517,134 +500,50 @@ fun PhoneShell(
             )
         }
 
-        // Project switcher sheet
+        // Project switcher sheet (Task 9)
         if (nav.topSheet == SheetKey.ProjectSwitcher) {
-            Sheet(
-                title = "Projects",
+            ProjectSwitcherSheet(
+                model = model,
                 onDismiss = { nav.closeSheet(SheetKey.ProjectSwitcher) },
-                forceBottomSheet = true,
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .cssScrollY()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    for (project in model.sortedProjects) {
-                        val isSelected = project.name == model.selectedProject
-                        val projUnread = model.unread(project.name, unreadMap).size
-                        val branch = model.gitBranches[project.name]?.branch
-                        ListRow(
-                            title = project.name,
-                            subtitle = listOfNotNull(branch, project.path.takeIf { it.isNotBlank() }).joinToString(" · "),
-                            selected = isSelected,
-                            leadingContent = {
-                                PpmIcon(
-                                    icon = if (isSelected) ProductIcon.FolderOpen else ProductIcon.Folder,
-                                    size = 18.dp,
-                                    tint = if (isSelected) tokens.accent.color else tokens.text2.color,
-                                )
-                            },
-                            trailingContent = {
-                                if (projUnread > 0) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(tokens.accent.color),
-                                    )
-                                } else if (isSelected) {
-                                    PpmIcon(ProductIcon.Check, 16.dp, tokens.accent.color)
-                                }
-                            },
-                            onClick = {
-                                nav.closeSheet(SheetKey.ProjectSwitcher)
-                                scope.launch { model.openProject(project.name) }
-                            },
-                        )
-                    }
-                }
-            }
+                asFlyoutCard = false,
+                modifier = Modifier.testTag("project-switcher-sheet"),
+            )
         }
 
-        // Notifications sheet
+        // Notifications sheet (Task 10)
         if (nav.topSheet == SheetKey.Notifications) {
-            Sheet(
-                title = "Notifications",
+            NotificationsSheet(
+                model = model,
                 onDismiss = { nav.closeSheet(SheetKey.Notifications) },
-                forceBottomSheet = true,
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .cssScrollY()
-                        .padding(horizontal = 12.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    val entries = unreadMap.entries.toList()
-                    if (entries.isEmpty()) {
-                        BasicText(
-                            text = "No unread notifications.",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 24.dp),
-                            style = TextStyle(
-                                fontFamily = PpmFonts.sans,
-                                fontSize = 13.sp,
-                                lineHeight = 18.sp,
-                                color = tokens.text2.color,
-                                textAlign = TextAlign.Center,
-                            ),
-                        )
-                    } else {
-                        for ((sessionId, item) in entries) {
-                            ListRow(
-                                title = item.sessionTitle?.takeIf { it.isNotBlank() } ?: "Chat session",
-                                subtitle = listOfNotNull(
-                                    item.projectName.takeIf { it.isNotBlank() },
-                                    item.type,
-                                ).joinToString(" · "),
-                                leadingContent = {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(tokens.notification(item.type).color),
-                                    )
-                                },
-                                onClick = {
-                                    nav.closeSheet(SheetKey.Notifications)
-                                    if (item.projectName.isNotBlank()) {
-                                        model.openUnreadSession(sessionId, item.projectName)
-                                    }
-                                },
-                            )
-                        }
-                    }
-                }
-            }
+                modifier = Modifier.testTag("notifications-sheet"),
+            )
         }
 
-        // Cloud & Share sheet
+        // Cloud & Share sheet (Task 19)
         if (nav.topSheet == SheetKey.CloudShare) {
-            Sheet(
-                title = "Cloud & Share",
+            PhoneCloudShareAreaHost(
+                model = model,
                 onDismiss = { nav.closeSheet(SheetKey.CloudShare) },
-                forceBottomSheet = true,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                ) {
-                    CloudSharePopover(
-                        model = model,
-                        onClose = { nav.closeSheet(SheetKey.CloudShare) },
-                    )
-                }
-            }
+            )
         }
+
+        // First-launch onboarding (Task 9)
+        PhoneOnboardingHost(
+            model = model,
+            controller = resolvedOnboarding,
+            onOpenProjectSwitcher = { nav.pushSheet(SheetKey.ProjectSwitcher) },
+            onOpenNewChat = {
+                model.newChat()
+                model.activeTabId?.let(nav::visitTab)
+            },
+            onInsertDraftPrompt = { prompt ->
+                model.newChat(pendingMessage = prompt)
+                model.activeTabId?.let(nav::visitTab)
+            },
+            onOpenFiles = { nav.visitTab(PhoneNav.areaTabId(PhoneArea.FILES)) },
+            onOpenTerminal = { focusOrOpenTerminal(model, openTabs, nav) },
+            onOpenSourceControl = { nav.visitTab(PhoneNav.areaTabId(PhoneArea.SOURCE_CONTROL)) },
+        )
     }
 }
 
@@ -823,186 +722,5 @@ private fun focusOrOpenTerminal(
     } else {
         model.openTerminal(inDock = false)
         model.activeTabId?.let(nav::visitTab)
-    }
-}
-
-@Composable
-private fun PhoneSyntheticAreaBody(
-    model: AppModel,
-    area: PhoneArea,
-    nav: PhoneNav,
-) {
-    val onNavigateToWorkspaceTab: () -> Unit = {
-        model.activeTabId?.let(nav::visitTab)
-    }
-    when (area) {
-        PhoneArea.CHAT -> {
-            val list = model.sidebarList
-            val search = model.sidebarSearch
-            if (list != null && search != null) {
-                SessionHistoryPanel(
-                    model = model,
-                    list = list,
-                    search = search,
-                    onNavigate = onNavigateToWorkspaceTab,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                PhoneEmptyWorkspace(model = model, nav = nav)
-            }
-        }
-        PhoneArea.FILES -> {
-            ExplorerBody(
-                model = model,
-                onNavigate = onNavigateToWorkspaceTab,
-            )
-        }
-        PhoneArea.SOURCE_CONTROL -> {
-            GitStatusPanel(
-                model = model,
-                onNavigate = onNavigateToWorkspaceTab,
-            )
-        }
-        PhoneArea.DATABASE -> {
-            DatabaseSidebarPane(
-                model = model,
-                onNavigate = onNavigateToWorkspaceTab,
-            )
-        }
-        PhoneArea.PORT_FORWARDING -> {
-            PortForwardingPanel(
-                model = model,
-                onNavigate = onNavigateToWorkspaceTab,
-            )
-        }
-        PhoneArea.SCHEDULES -> {
-            PhoneSchedulesPlaceholder(model = model)
-        }
-        else -> {
-            val tab = model.activeTab
-            if (tab != null) {
-                TabBody(model = model, tab = tab)
-            } else {
-                PhoneEmptyWorkspace(model = model, nav = nav)
-            }
-        }
-    }
-}
-
-@Composable
-private fun PhoneSchedulesPlaceholder(
-    model: AppModel,
-) {
-    val tokens = LocalPpmTokens.current
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(tokens.bgSolid.color)
-            .padding(horizontal = 20.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        BasicText(
-            text = "Scheduled tasks for ${model.selectedProject ?: "this project"}",
-            style = TextStyle(
-                fontFamily = PpmFonts.sans,
-                fontSize = 14.sp,
-                lineHeight = 20.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = tokens.text.color,
-            ),
-        )
-        OpenOnTabletNotice(
-            text = "Create and edit cron expressions on a tablet.",
-        )
-    }
-}
-
-@Composable
-private fun PhoneEmptyWorkspace(
-    model: AppModel,
-    nav: PhoneNav,
-) {
-    val tokens = LocalPpmTokens.current
-    val cardShape = RoundedCornerShape(16.dp)
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 32.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(cardShape)
-                .background(tokens.panel.color)
-                .cssBorder(color = tokens.borderSoft.color, shape = cardShape, width = 1.dp)
-                .padding(horizontal = 20.dp, vertical = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            PpmIcon(
-                icon = ProductIcon.MessageSquare,
-                size = 24.dp,
-                tint = tokens.accent.color,
-            )
-            Spacer(Modifier.height(12.dp))
-            BasicText(
-                text = model.selectedProject ?: "Welcome to PPM",
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = TextStyle(
-                    fontFamily = PpmFonts.sans,
-                    fontSize = 16.sp,
-                    lineHeight = 22.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = tokens.text.color,
-                    textAlign = TextAlign.Center,
-                ),
-            )
-            Spacer(Modifier.height(6.dp))
-            BasicText(
-                text = "Start a new chat or open a tool from the menu.",
-                style = TextStyle(
-                    fontFamily = PpmFonts.sans,
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
-                    color = tokens.text2.color,
-                    textAlign = TextAlign.Center,
-                ),
-            )
-            Spacer(Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                ActionPrimaryButton(
-                    icon = ProductIcon.Plus,
-                    label = "New Chat",
-                    onClick = {
-                        model.newChat()
-                        model.activeTabId?.let(nav::visitTab)
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            Spacer(Modifier.height(10.dp))
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .ppmClickable { nav.openDrawer() }
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-            ) {
-                BasicText(
-                    text = "Open menu",
-                    style = TextStyle(
-                        fontFamily = PpmFonts.sans,
-                        fontSize = 13.sp,
-                        lineHeight = 18.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = tokens.accent.color,
-                    ),
-                )
-            }
-        }
     }
 }
