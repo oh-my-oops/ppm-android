@@ -793,14 +793,70 @@ suspend fun ApiClient.gitUnstage(project: String, files: List<String>, repo: Git
     call("POST", "/api/project/${ApiClient.escape(project)}/git/unstage", gitRepoScope(repo), body)
 }
 
+/** Friendly message shown when `POST /git/discard/undo` answers HTTP 409 (`design.md` Section 2, Requirement 9.4). */
+const val DISCARD_UNDO_CONFLICT_MESSAGE: String = "The file changed since, so Undo would overwrite it"
+
+/** Structured result of `POST /git/discard/undo` for callers that inspect 200 vs 409 without catching exceptions. */
+sealed interface DiscardUndoResult {
+    data class Restored(val paths: List<String> = emptyList()) : DiscardUndoResult
+    data class Conflict(
+        val message: String = DISCARD_UNDO_CONFLICT_MESSAGE,
+        val rawServerMessage: String? = null,
+    ) : DiscardUndoResult
+    data class Error(val message: String, val status: Int? = null) : DiscardUndoResult
+}
+
 suspend fun ApiClient.gitDiscard(project: String, files: List<String>, repo: GitRepo? = null): DiscardRecord? {
     val body = buildJsonObject { put("files", JsonArray(files.map(::JsonPrimitive))) }
     return DiscardRecord.from(call("POST", "/api/project/${ApiClient.escape(project)}/git/discard", gitRepoScope(repo), body))
 }
 
+suspend fun ApiClient.gitDiscards(project: String, repo: GitRepo? = null): List<DiscardRecord> {
+    val data = call("GET", "/api/project/${ApiClient.escape(project)}/git/discards", gitRepoScope(repo))
+    val arr = data["records"].array ?: data.array
+    return arr.orEmpty().mapNotNull(DiscardRecord::from)
+}
+
 suspend fun ApiClient.gitDiscardUndo(project: String, id: String, repo: GitRepo? = null) {
     val body = buildJsonObject { put("id", id) }
-    call("POST", "/api/project/${ApiClient.escape(project)}/git/discard/undo", gitRepoScope(repo), body)
+    try {
+        call("POST", "/api/project/${ApiClient.escape(project)}/git/discard/undo", gitRepoScope(repo), body)
+    } catch (error: PpmError.Server) {
+        if (error.status == 409) {
+            throw PpmError.Server(
+                status = 409,
+                serverMessage = DISCARD_UNDO_CONFLICT_MESSAGE,
+                code = error.code,
+                hint = error.hint ?: error.serverMessage,
+                data = error.data,
+            )
+        }
+        throw error
+    }
+}
+
+suspend fun ApiClient.gitDiscardUndoResult(
+    project: String,
+    id: String,
+    repo: GitRepo? = null,
+): DiscardUndoResult {
+    val body = buildJsonObject { put("id", id) }
+    return try {
+        val data = call("POST", "/api/project/${ApiClient.escape(project)}/git/discard/undo", gitRepoScope(repo), body)
+        val restored = (data["restored"].array ?: data["paths"].array).orEmpty().mapNotNull { it.string }
+        DiscardUndoResult.Restored(restored)
+    } catch (error: PpmError.Server) {
+        if (error.status == 409) {
+            DiscardUndoResult.Conflict(
+                message = DISCARD_UNDO_CONFLICT_MESSAGE,
+                rawServerMessage = error.serverMessage,
+            )
+        } else {
+            DiscardUndoResult.Error(message = error.serverMessage, status = error.status)
+        }
+    } catch (error: PpmError) {
+        DiscardUndoResult.Error(message = error.message ?: "Undo failed")
+    }
 }
 
 suspend fun ApiClient.gitHunks(
