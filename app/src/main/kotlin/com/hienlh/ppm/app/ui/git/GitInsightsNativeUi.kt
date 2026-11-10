@@ -68,6 +68,8 @@ import com.hienlh.ppm.state.git.GitCompareCounts
 import com.hienlh.ppm.state.git.GitCompareExtMessage
 import com.hienlh.ppm.state.git.GitCompareFileChange
 import com.hienlh.ppm.state.git.GitCompareRefEntry
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.hienlh.ppm.state.git.GitCompareWebviewMessages
 import com.hienlh.ppm.state.git.GitFileHistoryEntry
 import com.hienlh.ppm.state.git.GitFileHistoryExtMessage
@@ -620,6 +622,25 @@ internal fun GitBlameNativeContent(
                             )
                         }
                         SettingsButton(
+                            label = "File History",
+                            modifier = Modifier.testTag("git-blame-act-file-history"),
+                            onClick = {
+                                onSendMessage(GitBlameWebviewMessages.openHistory(blameData.filePath))
+                            },
+                        )
+                        SettingsButton(
+                            label = "Graph",
+                            modifier = Modifier.testTag("git-blame-act-graph"),
+                            onClick = {
+                                onSendMessage(
+                                    buildJsonObject {
+                                        put("command", "openGraphAtCommit")
+                                        put("hash", activeCommit.hash)
+                                    },
+                                )
+                            },
+                        )
+                        SettingsButton(
                             label = "Close",
                             modifier = Modifier.testTag("git-blame-act-close"),
                             onClick = {
@@ -742,10 +763,12 @@ internal fun GitFileHistoryNativeContent(
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
     var linesMode by remember(lineStart, lineEnd) { mutableStateOf(lineStart != null && lineEnd != null) }
     var startInput by remember(lineStart) { mutableStateOf(lineStart?.toString().orEmpty()) }
     var endInput by remember(lineEnd) { mutableStateOf(lineEnd?.toString().orEmpty()) }
     var localError by remember { mutableStateOf<String?>(null) }
+    var selectedEntry by remember(filePath) { mutableStateOf<GitFileHistoryEntry?>(null) }
 
     val displayError = localError ?: errorMessage
 
@@ -892,93 +915,157 @@ internal fun GitFileHistoryNativeContent(
                     )
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .testTag("git-fh-list"),
-                ) {
-                    items(entries, key = { it.hash }) { e ->
-                        val effectivePath = e.path.ifEmpty { filePath }
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .cssBorder(tokens.border.color, sides = CssSides.Bottom)
-                                .clickable {
-                                    onSendMessage(GitFileHistoryWebviewMessages.openDiff(effectivePath, e.hash))
-                                }
-                                .padding(horizontal = 10.dp, vertical = 8.dp)
-                                .testTag("git-fh-row-${e.hash}"),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                BasicText(
-                                    e.subject,
-                                    style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text.color),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    GitInsightAvatar(e.author, e.authorEmail, sizeDp = 14)
-                                    BasicText(e.author, style = ppmText(10f).copy(color = tokens.text3.color))
-                                    BasicText(
-                                        formatGitGraphDate(e.authorDate, "relative"),
-                                        style = ppmText(10f).copy(color = tokens.text3.color),
-                                    )
-                                    BasicText(
-                                        e.hash.take(7),
-                                        style = ppmText(10f, kind = FontKind.MONO).copy(color = tokens.text3.color),
-                                    )
-                                    if (e.status.isNotEmpty()) {
-                                        BasicText(
-                                            e.status,
-                                            style = ppmText(9f, FontWeight.Bold, FontKind.MONO).copy(color = tokens.accent.color),
-                                        )
+                Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .testTag("git-fh-list"),
+                    ) {
+                        items(entries, key = { it.hash }) { e ->
+                            val effectivePath = e.path.ifEmpty { filePath }
+                            val isSelected = selectedEntry?.hash == e.hash
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(if (isSelected) tokens.accent.opacity(0.12).color else Color.Transparent)
+                                    .cssBorder(tokens.border.color, sides = CssSides.Bottom)
+                                    .clickable {
+                                        selectedEntry = e
+                                        onSendMessage(GitFileHistoryWebviewMessages.openDiff(effectivePath, e.hash))
                                     }
-                                    if (!e.oldPath.isNullOrEmpty()) {
+                                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                                    .testTag("git-fh-row-${e.hash}"),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    BasicText(
+                                        e.subject,
+                                        style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text.color),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        GitInsightAvatar(e.author, e.authorEmail, sizeDp = 14)
+                                        BasicText(e.author, style = ppmText(10f).copy(color = tokens.text3.color))
                                         BasicText(
-                                            "renamed from ${e.oldPath}",
-                                            style = ppmText(10f, kind = FontKind.MONO).copy(color = tokens.accent.color),
+                                            formatGitGraphDate(e.authorDate, "relative"),
+                                            style = ppmText(10f).copy(color = tokens.text3.color),
                                         )
+                                        BasicText(
+                                            e.hash.take(7),
+                                            style = ppmText(10f, kind = FontKind.MONO).copy(color = tokens.text3.color),
+                                        )
+                                        if (e.status.isNotEmpty()) {
+                                            BasicText(
+                                                e.status,
+                                                style = ppmText(9f, FontWeight.Bold, FontKind.MONO).copy(color = tokens.accent.color),
+                                            )
+                                        }
+                                        if (!e.oldPath.isNullOrEmpty()) {
+                                            BasicText(
+                                                "renamed from ${e.oldPath}",
+                                                style = ppmText(10f, kind = FontKind.MONO).copy(color = tokens.accent.color),
+                                            )
+                                        }
                                     }
                                 }
-                            }
-                            SettingsButton(
-                                label = "Blame",
-                                modifier = Modifier.testTag("git-fh-row-blame-${e.hash}"),
-                                onClick = {
-                                    onSendMessage(GitFileHistoryWebviewMessages.openBlame(effectivePath, e.hash))
-                                },
-                            )
-                        }
-                    }
-                    item {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().padding(10.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (hasMore) {
                                 SettingsButton(
-                                    label = "Load more",
-                                    modifier = Modifier.testTag("git-fh-load-more-btn"),
+                                    label = "Blame",
+                                    modifier = Modifier.testTag("git-fh-row-blame-${e.hash}"),
                                     onClick = {
-                                        onSendMessage(
-                                            GitFileHistoryWebviewMessages.requestHistory(
-                                                filePath = filePath,
-                                                append = true,
-                                                skip = entries.size,
-                                                lineStart = lineStart,
-                                                lineEnd = lineEnd,
-                                            ),
-                                        )
+                                        onSendMessage(GitFileHistoryWebviewMessages.openBlame(effectivePath, e.hash))
                                     },
                                 )
-                            } else {
-                                BasicText("End of history", style = ppmText(10f).copy(color = tokens.text3.color))
+                            }
+                        }
+                        item {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(10.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (hasMore) {
+                                    SettingsButton(
+                                        label = "Load more",
+                                        modifier = Modifier.testTag("git-fh-load-more-btn"),
+                                        onClick = {
+                                            onSendMessage(
+                                                GitFileHistoryWebviewMessages.requestHistory(
+                                                    filePath = filePath,
+                                                    append = true,
+                                                    skip = entries.size,
+                                                    lineStart = lineStart,
+                                                    lineEnd = lineEnd,
+                                                ),
+                                            )
+                                        },
+                                    )
+                                } else {
+                                    BasicText("End of history", style = ppmText(10f).copy(color = tokens.text3.color))
+                                }
+                            }
+                        }
+                    }
+
+                    val preview = selectedEntry
+                    if (!mobile && preview != null) {
+                        val effectivePath = preview.path.ifEmpty { filePath }
+                        Column(
+                            modifier = Modifier
+                                .width(320.dp)
+                                .fillMaxHeight()
+                                .background(tokens.panel.color)
+                                .cssBorder(tokens.border.color, sides = CssSides.Start)
+                                .padding(12.dp)
+                                .testTag("git-fh-preview-pane"),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                BasicText(
+                                    preview.hash.take(10),
+                                    style = ppmText(11f, FontWeight.SemiBold, FontKind.MONO).copy(color = tokens.accent.color),
+                                )
+                                SettingsButton(
+                                    label = "×",
+                                    onClick = { selectedEntry = null },
+                                )
+                            }
+                            BasicText(
+                                preview.subject,
+                                style = ppmText(13f, FontWeight.SemiBold).copy(color = tokens.text.color),
+                            )
+                            BasicText(
+                                "${preview.author} · ${formatGitGraphDate(preview.authorDate, "relative")}",
+                                style = ppmText(11f).copy(color = tokens.text2.color),
+                            )
+                            BasicText(
+                                effectivePath,
+                                style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text3.color),
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                SettingsButton(
+                                    label = "Open diff",
+                                    primary = true,
+                                    modifier = Modifier.testTag("git-fh-preview-open-diff"),
+                                    onClick = {
+                                        onSendMessage(GitFileHistoryWebviewMessages.openDiff(effectivePath, preview.hash))
+                                    },
+                                )
+                                SettingsButton(
+                                    label = "Blame at ${preview.hash.take(7)}",
+                                    modifier = Modifier.testTag("git-fh-preview-blame"),
+                                    onClick = {
+                                        onSendMessage(GitFileHistoryWebviewMessages.openBlame(effectivePath, preview.hash))
+                                    },
+                                )
                             }
                         }
                     }

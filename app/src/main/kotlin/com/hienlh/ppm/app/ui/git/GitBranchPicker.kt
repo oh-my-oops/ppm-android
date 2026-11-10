@@ -49,6 +49,7 @@ import com.hienlh.ppm.client.GitRepo
 import com.hienlh.ppm.client.gitCheckout
 import com.hienlh.ppm.client.gitCreateBranch
 import com.hienlh.ppm.client.gitRefs
+import com.hienlh.ppm.client.gitStash
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
@@ -86,6 +87,8 @@ internal fun GitBranchPickerModal(
     var query by remember { mutableStateOf("") }
     var branchName by remember { mutableStateOf("") }
     var selected by remember { mutableIntStateOf(0) }
+    var pickerError by remember { mutableStateOf<String?>(null) }
+    var refusedCheckoutTarget by remember { mutableStateOf<Pair<String, String?>?>(null) }
 
     LaunchedEffect(project, repo?.path, api) {
         if (api == null || repo == null) return@LaunchedEffect
@@ -109,9 +112,11 @@ internal fun GitBranchPickerModal(
         selected = GitRefPicker.firstSelectable(rows)
     }
 
-    fun runGit(block: suspend () -> Unit) {
+    fun runGit(checkoutTarget: Pair<String, String?>? = null, block: suspend () -> Unit) {
         if (busy || api == null) return
         busy = true
+        pickerError = null
+        refusedCheckoutTarget = null
         scope.launch {
             try {
                 block()
@@ -120,16 +125,32 @@ internal fun GitBranchPickerModal(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                model.actionError(model.describe(e))
+                val msg = model.describe(e)
+                pickerError = msg
+                if (checkoutTarget != null) {
+                    refusedCheckoutTarget = checkoutTarget
+                }
+                model.actionError(msg)
             } finally {
                 busy = false
             }
         }
     }
 
+    fun handleStashAndSwitch() {
+        val target = refusedCheckoutTarget ?: return
+        runGit {
+            api?.gitStash(project, includeUntracked = true, repo = repo)
+            api?.gitCheckout(project, target.first, target.second, repo)
+            model.toast(ErrorToastMessage("Stashed changes and switched to ${target.first}", kind = ErrorToastMessage.Kind.SUCCESS))
+        }
+    }
+
     fun handleAction(action: String) {
         query = ""
         branchName = ""
+        pickerError = null
+        refusedCheckoutTarget = null
         stage = when (action) {
             "create" -> BranchPickerStage.Name("create")
             "create-from" -> BranchPickerStage.Name("from")
@@ -147,7 +168,7 @@ internal fun GitBranchPickerModal(
                     model.toast(ErrorToastMessage("Switched to new branch $newName", kind = ErrorToastMessage.Kind.SUCCESS))
                 }
             } else {
-                runGit {
+                runGit(checkoutTarget = ref.name to "detach") {
                     api?.gitCheckout(project, ref.name, "detach", repo)
                     model.toast(ErrorToastMessage("Detached at ${ref.shortHash}", kind = ErrorToastMessage.Kind.SUCCESS))
                 }
@@ -159,7 +180,7 @@ internal fun GitBranchPickerModal(
             return
         }
         val target = GitRefPicker.checkoutTarget(ref, refs)
-        runGit {
+        runGit(checkoutTarget = target.ref to target.mode) {
             api?.gitCheckout(project, target.ref, target.mode, repo)
         }
     }
@@ -224,11 +245,17 @@ internal fun GitBranchPickerModal(
                             .weight(1f)
                             .testTag("git-branch-name-input")
                             .onPreviewKeyEvent { ev ->
-                                if (ev.type == KeyEventType.KeyDown && ev.key == Key.Enter) {
-                                    submitBranchName()
-                                    true
-                                } else {
-                                    false
+                                if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                when (ev.key) {
+                                    Key.Enter, Key.NumPadEnter -> {
+                                        submitBranchName()
+                                        true
+                                    }
+                                    Key.Escape -> {
+                                        onClose()
+                                        true
+                                    }
+                                    else -> false
                                 }
                             },
                         decorationBox = { inner ->
@@ -314,8 +341,12 @@ internal fun GitBranchPickerModal(
                                         selected = GitRefPicker.moveSelection(rows, selected, -1)
                                         true
                                     }
-                                    Key.Enter -> {
+                                    Key.Enter, Key.NumPadEnter -> {
                                         activateRow(selected)
+                                        true
+                                    }
+                                    Key.Escape -> {
+                                        onClose()
                                         true
                                     }
                                     else -> false
@@ -339,6 +370,44 @@ internal fun GitBranchPickerModal(
                             contentAlignment = Alignment.Center,
                         ) {
                             PpmIcon(ProductIcon.X, size = 14.dp, tint = tokens.text3.color)
+                        }
+                    }
+                }
+
+                pickerError?.let { err ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(tokens.error.opacity(0.10).color)
+                            .edge(Edge.Bottom, tokens.error.opacity(0.3).color)
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .testTag("git-branch-picker-error"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        PpmIcon(ProductIcon.AlertCircle, size = 14.dp, tint = tokens.error.color)
+                        BasicText(
+                            text = err,
+                            style = PpmFont.sans(11, lineHeight = 15, color = tokens.error.color),
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (refusedCheckoutTarget != null) {
+                            Box(
+                                modifier = Modifier
+                                    .height(28.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(tokens.accent.color)
+                                    .alpha(if (busy) 0.4f else 1f)
+                                    .clickable(enabled = !busy, onClick = ::handleStashAndSwitch)
+                                    .padding(horizontal = 10.dp)
+                                    .testTag("git-branch-picker-stash-switch-btn"),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                BasicText(
+                                    text = "Stash and switch",
+                                    style = PpmFont.sans(11, FontWeight.SemiBold, lineHeight = 14, color = tokens.accentFg.color),
+                                )
+                            }
                         }
                     }
                 }
@@ -443,6 +512,21 @@ internal fun GitBranchPickerModal(
                             }
                         }
                     }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .edge(Edge.Top, tokens.border.color)
+                        .background(tokens.panel2.color)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .testTag("git-branch-picker-kbd-footer"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BasicText(
+                        text = "↑ ↓ move · Enter switch · Esc close",
+                        style = PpmFont.mono(10, lineHeight = 14, color = tokens.text3.color),
+                    )
                 }
             }
         }

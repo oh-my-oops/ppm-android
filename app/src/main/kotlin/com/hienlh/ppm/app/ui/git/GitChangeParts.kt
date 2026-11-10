@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
@@ -868,6 +869,7 @@ internal fun GitOperationBanner(
     busyAction: String?,
     onContinue: () -> Unit,
     onAbort: () -> Unit,
+    onSkip: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -875,6 +877,7 @@ internal fun GitOperationBanner(
     val title = remember(operation, branch.head) { GitChangesView.operationTitle(operation, branch.head) }
     val continuing = busyAction == "continue" || busyAction == "op:continue"
     val aborting = busyAction == "abort" || busyAction == "op:abort"
+    val skipping = busyAction == "skip" || busyAction == "op:skip"
     val btnHeight = if (mobile) 44.dp else 26.dp
 
     Column(
@@ -915,13 +918,34 @@ internal fun GitOperationBanner(
                     .background(tokens.bgSolid.color)
                     .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
                     .alpha(if (busyAction != null) 0.4f else 1f)
-                    .clickable(enabled = busyAction == null, onClick = onAbort),
+                    .clickable(enabled = busyAction == null, onClick = onAbort)
+                    .testTag("git-op-abort"),
                 contentAlignment = Alignment.Center,
             ) {
                 if (aborting) {
                     PpmIcon(ProductIcon.Loader2, size = 12.dp, tint = tokens.text.color)
                 } else {
                     BasicText("Abort $noun", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text.color))
+                }
+            }
+            if (operation.kind == "rebase" && onSkip != null) {
+                Box(
+                    modifier = Modifier
+                        .height(btnHeight)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(tokens.bgSolid.color)
+                        .cssBorder(tokens.border.color, RoundedCornerShape(6.dp))
+                        .alpha(if (busyAction != null) 0.4f else 1f)
+                        .clickable(enabled = busyAction == null, onClick = onSkip)
+                        .padding(horizontal = 10.dp)
+                        .testTag("git-op-skip"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (skipping) {
+                        PpmIcon(ProductIcon.Loader2, size = 12.dp, tint = tokens.text.color)
+                    } else {
+                        BasicText("Skip", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text.color))
+                    }
                 }
             }
             val canCont = busyAction == null && conflicts == 0
@@ -932,7 +956,8 @@ internal fun GitOperationBanner(
                     .clip(RoundedCornerShape(6.dp))
                     .background(tokens.accent.color)
                     .alpha(if (canCont) 1f else 0.4f)
-                    .clickable(enabled = canCont, onClick = onContinue),
+                    .clickable(enabled = canCont, onClick = onContinue)
+                    .testTag("git-op-continue"),
                 contentAlignment = Alignment.Center,
             ) {
                 if (continuing) {
@@ -959,6 +984,10 @@ internal fun GitCommitComposer(
     isBottom: Boolean = false,
     branch: String? = null,
     onInputFocusChanged: ((Boolean) -> Unit)? = null,
+    onWriteWithAi: (() -> Unit)? = null,
+    aiLoading: Boolean = false,
+    aiError: String? = null,
+    touchPlaceholder: Boolean = false,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -979,10 +1008,10 @@ internal fun GitCommitComposer(
     val committing = busyAction == "commit"
     val barHeight = if (mobile) 44.dp else 32.dp
     val triggerWidth = if (mobile) 44.dp else 32.dp
-    val placeholderText = if (!branch.isNullOrEmpty()) {
-        "Message (Ctrl+↵ to commit on $branch)"
-    } else {
-        "Message (Ctrl+↵ to commit)"
+    val placeholderText = when {
+        touchPlaceholder -> "Message — or let the AI write it"
+        !branch.isNullOrEmpty() -> "Message (Ctrl+↵ to commit on $branch)"
+        else -> "Message (Ctrl+↵ to commit)"
     }
 
     var inputFocused by remember { mutableStateOf(false) }
@@ -1018,6 +1047,7 @@ internal fun GitCommitComposer(
                 cursorBrush = SolidColor(tokens.accent.color),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(end = if (onWriteWithAi != null) 34.dp else 0.dp)
                     .testTag("git-commit-input")
                     .onFocusChanged {
                         inputFocused = it.isFocused
@@ -1026,6 +1056,9 @@ internal fun GitCommitComposer(
                     .onPreviewKeyEvent { ev ->
                         if (ev.type == KeyEventType.KeyDown && ev.key == Key.Enter && (ev.isCtrlPressed || ev.isMetaPressed)) {
                             if (ready) onCommit(false, false, false)
+                            true
+                        } else if (ev.type == KeyEventType.KeyDown && ev.key == Key.P && (ev.isCtrlPressed || ev.isMetaPressed) && ev.isAltPressed) {
+                            if (ready) onCommit(false, false, true)
                             true
                         } else {
                             false
@@ -1041,6 +1074,55 @@ internal fun GitCommitComposer(
                     inner()
                 },
             )
+            if (onWriteWithAi != null) {
+                val aiEnabled = !aiLoading && busyAction == null && totals.files > 0 && totals.conflicts == 0
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(tokens.panel2.color)
+                        .alpha(if (aiEnabled) 1f else 0.4f)
+                        .semantics { contentDescription = "Write commit message with AI" }
+                        .clickable(enabled = aiEnabled, onClick = onWriteWithAi)
+                        .testTag("git-ai-msg-btn"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (aiLoading) {
+                        PpmIcon(ProductIcon.Loader2, size = 12.dp, tint = tokens.accent.color)
+                    } else {
+                        BasicText("✦", style = PpmFont.sans(12, FontWeight.Bold, lineHeight = 14, color = tokens.accent.color))
+                    }
+                }
+            }
+        }
+
+        if (!aiError.isNullOrEmpty() && onWriteWithAi != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(tokens.error.opacity(0.12).color)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .testTag("git-ai-error-banner"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                BasicText(
+                    text = aiError,
+                    style = PpmFont.sans(11, lineHeight = 14, color = tokens.error.color),
+                    modifier = Modifier.weight(1f),
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable(onClick = onWriteWithAi)
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .testTag("git-ai-retry-btn"),
+                ) {
+                    BasicText("Retry", style = PpmFont.sans(11, FontWeight.SemiBold, lineHeight = 14, color = tokens.error.color))
+                }
+            }
         }
 
         Box(Modifier.fillMaxWidth()) {

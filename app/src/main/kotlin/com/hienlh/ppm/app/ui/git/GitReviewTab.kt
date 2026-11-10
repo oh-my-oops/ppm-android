@@ -54,6 +54,7 @@ import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -932,6 +933,7 @@ internal fun GitReviewDesktopLayout(
 ) {
     val tokens = LocalPpmTokens.current
     var showKeys by remember { mutableStateOf(false) }
+    var shortcutsSheetOpen by remember { mutableStateOf(false) }
     var filesDrawerOpen by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<ReviewConfirmState?>(null) }
     val rootFocusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
@@ -1046,12 +1048,16 @@ internal fun GitReviewDesktopLayout(
                 val cur = focusedTriple
                 val block = cur?.second
                 val isOpen = block?.state == "open"
+                if (ev.utf16CodePoint == '?'.code) {
+                    shortcutsSheetOpen = true
+                    return@onPreviewKeyEvent true
+                }
                 when (ev.key) {
-                    Key.J -> {
+                    Key.J, Key.DirectionDown -> {
                         onStep(1)
                         true
                     }
-                    Key.K -> {
+                    Key.K, Key.DirectionUp -> {
                         onStep(-1)
                         true
                     }
@@ -1197,6 +1203,16 @@ internal fun GitReviewDesktopLayout(
                             size = 15.dp,
                             tint = if (showKeys) tokens.text.color else tokens.text3.color,
                         )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { shortcutsSheetOpen = true }
+                            .testTag("git-review-shortcuts-btn"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        BasicText("?", style = PpmFont.mono(12, FontWeight.SemiBold, lineHeight = 16, color = tokens.text3.color))
                     }
                 }
             }
@@ -1391,6 +1407,10 @@ internal fun GitReviewDesktopLayout(
             },
             onCancel = { confirm = null },
         )
+    }
+
+    if (shortcutsSheetOpen) {
+        GitShortcutsSheet(onDismiss = { shortcutsSheetOpen = false })
     }
 }
 

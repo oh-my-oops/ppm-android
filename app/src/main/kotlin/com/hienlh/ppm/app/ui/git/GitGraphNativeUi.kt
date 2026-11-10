@@ -55,6 +55,15 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.focus.focusTarget
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -86,6 +95,7 @@ import com.hienlh.ppm.state.git.GIT_GRAPH_FIND_MODES
 import com.hienlh.ppm.state.git.GRAPH_GRID_X
 import com.hienlh.ppm.state.git.GRAPH_MIN_W
 import com.hienlh.ppm.state.git.GRAPH_OFFSET_X
+import com.hienlh.ppm.state.git.GitChangeGroups
 import com.hienlh.ppm.state.git.GitChangesView
 import com.hienlh.ppm.state.git.GitGraphActionResult
 import com.hienlh.ppm.state.git.GitGraphClassifiedRef
@@ -492,6 +502,7 @@ internal fun GitGraphNativeContent(
     var showViewMenu by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showAddWorktreeDialog by remember { mutableStateOf(false) }
+    var showShortcutsSheet by remember { mutableStateOf(false) }
 
     // Context menus for commit, ref pill, or drag-and-drop ref onto commit
     var activeCommitMenu by remember { mutableStateOf<GitGraphVertex?>(null) }
@@ -519,6 +530,37 @@ internal fun GitGraphNativeContent(
             { res ->
                 if (res.ok) {
                     onShowToast(successToast, null)
+                } else if (
+                    action == "checkout" &&
+                    res.error?.let {
+                        it.contains("overwritten", ignoreCase = true) ||
+                            it.contains("local changes", ignoreCase = true)
+                    } == true
+                ) {
+                    activeDialog = GitGraphDialogSpec(
+                        title = "Local changes would be overwritten",
+                        message = res.error.orEmpty(),
+                        confirmLabel = "Stash and checkout",
+                        onConfirm = { _, _ ->
+                            onSendTrackedAction(
+                                "stash",
+                                { rId ->
+                                    GitGraphWebviewMessages.gitAction(
+                                        "stash",
+                                        buildJsonObject { put("includeUntracked", true) },
+                                        rId,
+                                    )
+                                },
+                                { sRes ->
+                                    if (sRes.ok) {
+                                        runGitAction(action, args, successToast, failureTitle)
+                                    } else {
+                                        onShowToast("Could not stash: ${sRes.error.orEmpty()}", null)
+                                    }
+                                },
+                            )
+                        },
+                    )
                 } else {
                     onShowToast("$failureTitle: ${res.error.orEmpty()}", null)
                 }
@@ -893,6 +935,61 @@ internal fun GitGraphNativeContent(
         modifier = modifier
             .fillMaxSize()
             .background(tokens.bgSolid.color)
+            .focusTarget()
+            .onPreviewKeyEvent { ev ->
+                if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when {
+                    ev.utf16CodePoint == '?'.code -> {
+                        showShortcutsSheet = true
+                        true
+                    }
+                    (ev.isCtrlPressed || ev.isMetaPressed) && ev.key == Key.F -> {
+                        findOpen = !findOpen
+                        true
+                    }
+                    ev.key == Key.DirectionDown -> {
+                        if (displayCommits.isEmpty()) return@onPreviewKeyEvent false
+                        val curIdx = displayCommits.indexOfFirst { it.hash == selectedCommitHash }
+                        val nextIdx = if (curIdx < 0) 0 else (curIdx + 1).coerceAtMost(displayCommits.lastIndex)
+                        selectCommit(displayCommits[nextIdx].hash)
+                        true
+                    }
+                    ev.key == Key.DirectionUp -> {
+                        if (displayCommits.isEmpty()) return@onPreviewKeyEvent false
+                        val curIdx = displayCommits.indexOfFirst { it.hash == selectedCommitHash }
+                        val prevIdx = if (curIdx <= 0) 0 else curIdx - 1
+                        selectCommit(displayCommits[prevIdx].hash)
+                        true
+                    }
+                    ev.key == Key.Enter || ev.key == Key.NumPadEnter -> {
+                        if (selectedCommitHash == null && displayCommits.isNotEmpty()) {
+                            selectCommit(displayCommits.first().hash)
+                        } else {
+                            inspectorOpen = true
+                        }
+                        true
+                    }
+                    ev.key == Key.Escape -> {
+                        when {
+                            activeDialog != null -> { activeDialog = null; true }
+                            activeCommitMenu != null -> { activeCommitMenu = null; true }
+                            activeRefMenu != null -> { activeRefMenu = null; true }
+                            activeDropMenu != null -> { activeDropMenu = null; true }
+                            activeFileMenu != null -> { activeFileMenu = null; true }
+                            showScopeMenu -> { showScopeMenu = false; true }
+                            showStashesMenu -> { showStashesMenu = false; true }
+                            showWorktreesMenu -> { showWorktreesMenu = false; true }
+                            showSubmodulesMenu -> { showSubmodulesMenu = false; true }
+                            showViewMenu -> { showViewMenu = false; true }
+                            showSettingsSheet -> { showSettingsSheet = false; true }
+                            findOpen -> { findOpen = false; true }
+                            inspectorOpen -> { inspectorOpen = false; true }
+                            else -> false
+                        }
+                    }
+                    else -> false
+                }
+            }
             .testTag("git-graph-native-root"),
     ) {
         val panelWidthDp = maxWidth
@@ -1091,6 +1188,11 @@ internal fun GitGraphNativeContent(
                     primary = inspectorOpen,
                     modifier = Modifier.testTag("git-graph-inspector-toggle-btn"),
                     onClick = { inspectorOpen = !inspectorOpen },
+                )
+                SettingsButton(
+                    label = "?",
+                    modifier = Modifier.testTag("git-graph-shortcuts-btn"),
+                    onClick = { showShortcutsSheet = true },
                 )
             }
 
@@ -2709,6 +2811,10 @@ internal fun GitGraphNativeContent(
                 }
             }
         }
+
+        if (showShortcutsSheet) {
+            GitShortcutsSheet(onDismiss = { showShortcutsSheet = false })
+        }
     }
 }
 
@@ -2966,6 +3072,7 @@ private fun GitGraphInspectorPane(
         val files = changes?.files.orEmpty()
         val totals = remember(files) { GitChangesView.changeTotals(files) }
         val allState = remember(files) { GitChangesView.allCheckState(files) }
+        val changeGroups = remember(files) { GitChangeGroups.from(files) }
 
         Column(
             modifier = Modifier
@@ -3101,9 +3208,48 @@ private fun GitGraphInspectorPane(
                 }
             }
 
+            if (changeGroups.staged.isNotEmpty() || changeGroups.changes.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (changeGroups.staged.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(tokens.panel2.color)
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                .testTag("git-graph-wip-group-staged"),
+                        ) {
+                            BasicText(
+                                "STAGED (${changeGroups.staged.size})",
+                                style = ppmText(10f, FontWeight.SemiBold, FontKind.MONO).copy(color = tokens.text2.color),
+                            )
+                        }
+                    }
+                    if (changeGroups.changes.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(tokens.panel2.color)
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                .testTag("git-graph-wip-group-changes"),
+                        ) {
+                            BasicText(
+                                "CHANGES (${changeGroups.changes.size})",
+                                style = ppmText(10f, FontWeight.SemiBold, FontKind.MONO).copy(color = tokens.text2.color),
+                            )
+                        }
+                    }
+                }
+            }
+
             for (file in files) {
                 val fState = GitChangesView.fileCheckState(file)
                 val letter = GitChangesView.changeLetter(file)
+                val stagedBlockSummary = file.stagedBlockSummary()
+                val changesBlockSummary = file.changesBlockSummary()
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -3137,9 +3283,7 @@ private fun GitGraphInspectorPane(
                         letter,
                         style = ppmText(10f, FontWeight.Bold, FontKind.MONO).copy(color = tokens.accent.color),
                     )
-                    BasicText(
-                        file.path,
-                        style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text.color),
+                    Column(
                         modifier = Modifier
                             .weight(1f)
                             .clickable {
@@ -3149,9 +3293,21 @@ private fun GitGraphInspectorPane(
                                     onSendMessage(GitGraphWebviewMessages.openReview(file.path))
                                 }
                             },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    ) {
+                        BasicText(
+                            file.path,
+                            style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text.color),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        val subSummary = listOfNotNull(stagedBlockSummary, changesBlockSummary).joinToString(" · ")
+                        if (subSummary.isNotEmpty()) {
+                            BasicText(
+                                subSummary,
+                                style = ppmText(10f, kind = FontKind.MONO).copy(color = tokens.text3.color),
+                            )
+                        }
+                    }
                     if (file.unstaged != null && !file.conflict) {
                         SettingsButton(
                             label = "Discard",

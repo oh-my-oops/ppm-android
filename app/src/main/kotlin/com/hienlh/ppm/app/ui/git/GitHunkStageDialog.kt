@@ -30,7 +30,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -40,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.LocalRedesign
 import com.hienlh.ppm.client.FileHunks
 import com.hienlh.ppm.client.GitRepo
 import com.hienlh.ppm.client.gitDiscardHunks
@@ -69,6 +76,7 @@ internal fun GitHunkStageDialog(
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
+    val redesign = LocalRedesign.current
     val coroutineScope = rememberCoroutineScope()
     val api = model.api
 
@@ -77,6 +85,9 @@ internal fun GitHunkStageDialog(
     var busy by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
     var confirmDiscard by remember { mutableStateOf(false) }
+    var rangeMode by remember { mutableStateOf(false) }
+    var lastClickedLine by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var focusedLineKey by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(project, repo?.path, filePath, scope, api) {
         if (api == null) return@LaunchedEffect
@@ -96,6 +107,7 @@ internal fun GitHunkStageDialog(
 
     val hunks = data?.hunks.orEmpty()
     val allKeys = remember(hunks) { HunkSelection.allChangedKeys(hunks) }
+    val orderedChangedKeys = remember(allKeys) { allKeys.toList() }
     val totalChanged = allKeys.size
     val selectedCount = selected.size
     val allState = when {
@@ -105,6 +117,26 @@ internal fun GitHunkStageDialog(
     }
     val actionLabel = if (scope == "worktree") "Stage" else "Unstage"
     val fileName = filePath.substringAfterLast('/')
+
+    fun handleLineClick(hunkIndex: Int, lineIndex: Int) {
+        confirmDiscard = false
+        val prev = lastClickedLine
+        val hunk = hunks.firstOrNull { it.index == hunkIndex }
+        if (rangeMode && prev != null && prev.first == hunkIndex && hunk != null) {
+            val lo = minOf(prev.second, lineIndex)
+            val hi = maxOf(prev.second, lineIndex)
+            val rangeKeys = (lo..hi).mapNotNull { idx ->
+                val l = hunk.lines.getOrNull(idx)
+                if (l != null && l.type != " ") HunkSelection.lineKey(hunkIndex, idx) else null
+            }.toSet()
+            val targetAdd = HunkSelection.lineKey(hunkIndex, lineIndex) !in selected
+            selected = if (targetAdd) selected + rangeKeys else selected - rangeKeys
+        } else {
+            selected = HunkSelection.toggleLine(hunkIndex, lineIndex, selected)
+        }
+        lastClickedLine = hunkIndex to lineIndex
+        focusedLineKey = HunkSelection.lineKey(hunkIndex, lineIndex)
+    }
 
     fun toggleAll() {
         confirmDiscard = false
@@ -144,17 +176,59 @@ internal fun GitHunkStageDialog(
         } else {
             RoundedCornerShape(8.dp)
         }
+        val dialogWidth = if (redesign) 720.dp else 640.dp
         Box(
             modifier = if (mobile) Modifier.fillMaxSize() else Modifier,
             contentAlignment = if (mobile) Alignment.BottomCenter else Alignment.Center,
         ) {
             Column(
                 modifier = Modifier
-                    .then(if (mobile) Modifier.fillMaxWidth() else Modifier.width(640.dp))
+                    .then(if (mobile) Modifier.fillMaxWidth() else Modifier.width(dialogWidth))
                     .heightIn(max = if (mobile) 560.dp else 520.dp)
                     .clip(shape)
                     .background(tokens.bgSolid.color)
                     .cssBorder(tokens.border.color, shape)
+                    .focusTarget()
+                    .onPreviewKeyEvent { ev ->
+                        if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        when (ev.key) {
+                            Key.Escape -> {
+                                onClose()
+                                true
+                            }
+                            Key.DirectionDown -> {
+                                if (orderedChangedKeys.isEmpty()) return@onPreviewKeyEvent false
+                                val idx = orderedChangedKeys.indexOf(focusedLineKey)
+                                val next = if (idx < 0) 0 else (idx + 1).coerceAtMost(orderedChangedKeys.lastIndex)
+                                focusedLineKey = orderedChangedKeys[next]
+                                true
+                            }
+                            Key.DirectionUp -> {
+                                if (orderedChangedKeys.isEmpty()) return@onPreviewKeyEvent false
+                                val idx = orderedChangedKeys.indexOf(focusedLineKey)
+                                val prev = if (idx <= 0) 0 else idx - 1
+                                focusedLineKey = orderedChangedKeys[prev]
+                                true
+                            }
+                            Key.Spacebar -> {
+                                val fk = focusedLineKey ?: orderedChangedKeys.firstOrNull() ?: return@onPreviewKeyEvent false
+                                val parts = fk.split(":")
+                                val hIdx = parts.getOrNull(0)?.toIntOrNull() ?: return@onPreviewKeyEvent false
+                                val lIdx = parts.getOrNull(1)?.toIntOrNull() ?: return@onPreviewKeyEvent false
+                                handleLineClick(hIdx, lIdx)
+                                true
+                            }
+                            Key.Enter, Key.NumPadEnter -> {
+                                if (!busy && selectedCount > 0) {
+                                    apply(if (scope == "worktree") "stage" else "unstage")
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            else -> false
+                        }
+                    }
                     .testTag("git-hunk-stage-dialog"),
             ) {
             // Header
@@ -209,7 +283,7 @@ internal fun GitHunkStageDialog(
 
                 if (totalChanged > 0) {
                     Row(
-                        modifier = Modifier.height(if (mobile) 44.dp else 28.dp),
+                        modifier = Modifier.fillMaxWidth().height(if (mobile) 44.dp else 28.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -221,8 +295,32 @@ internal fun GitHunkStageDialog(
                         BasicText(
                             text = "$selectedCount of $totalChanged ${if (totalChanged == 1) "line" else "lines"} selected",
                             style = PpmFont.sans(11, lineHeight = 14, color = tokens.text2.color),
-                            modifier = Modifier.clickable(onClick = ::toggleAll),
+                            modifier = Modifier.weight(1f).clickable(onClick = ::toggleAll),
                         )
+                        Box(
+                            modifier = Modifier
+                                .height(if (mobile) 32.dp else 24.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (rangeMode) tokens.accent.opacity(0.14).color else Color.Transparent)
+                                .cssBorder(
+                                    if (rangeMode) tokens.accent.color else tokens.border.color,
+                                    RoundedCornerShape(6.dp),
+                                )
+                                .clickable { rangeMode = !rangeMode }
+                                .padding(horizontal = 8.dp)
+                                .testTag("git-hunk-range-toggle"),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            BasicText(
+                                text = "Range",
+                                style = PpmFont.sans(
+                                    11,
+                                    FontWeight.Medium,
+                                    lineHeight = 14,
+                                    color = if (rangeMode) tokens.accent.color else tokens.text2.color,
+                                ),
+                            )
+                        }
                     }
                 }
             }
@@ -328,16 +426,20 @@ internal fun GitHunkStageDialog(
                                             "-" -> tokens.error.color
                                             else -> tokens.text2.color
                                         }
+                                        val lineHeightDp = when {
+                                            isChanged && (mobile || redesign) -> 44.dp
+                                            !isChanged && redesign && !mobile -> 26.dp
+                                            else -> 22.dp
+                                        }
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .height(if (mobile) 44.dp else 22.dp)
+                                                .height(lineHeightDp)
                                                 .background(rowBg)
                                                 .then(
                                                     if (isChanged) {
                                                         Modifier.clickable {
-                                                            confirmDiscard = false
-                                                            selected = HunkSelection.toggleLine(hunk.index, idx, selected)
+                                                            handleLineClick(hunk.index, idx)
                                                         }
                                                     } else {
                                                         Modifier
@@ -355,8 +457,7 @@ internal fun GitHunkStageDialog(
                                                     CheckCell(
                                                         state = if (checked) CheckState.ALL else CheckState.NONE,
                                                         onToggle = {
-                                                            confirmDiscard = false
-                                                            selected = HunkSelection.toggleLine(hunk.index, idx, selected)
+                                                            handleLineClick(hunk.index, idx)
                                                         },
                                                     )
                                                 }

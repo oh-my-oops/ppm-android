@@ -39,7 +39,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -53,6 +60,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
+import com.hienlh.ppm.app.LocalRedesign
 import com.hienlh.ppm.client.ChangedFile
 import com.hienlh.ppm.client.GitChanges
 import com.hienlh.ppm.client.StashEntry
@@ -79,6 +87,7 @@ import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.state.git.CheckState
+import com.hienlh.ppm.state.git.GitChangeGroups
 import com.hienlh.ppm.state.git.GitChangesView
 import com.hienlh.ppm.state.git.GitFileTree
 import com.hienlh.ppm.state.git.GitRepoScope
@@ -111,6 +120,9 @@ private data class HunkModalTarget(
 fun GitStatusPanel(
     model: AppModel,
     onNavigate: (() -> Unit)? = null,
+    useChangeGroups: Boolean = LocalRedesign.current,
+    isOffline: Boolean = false,
+    touchPlaceholder: Boolean = LocalRedesign.current,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -638,11 +650,102 @@ fun GitStatusPanel(
         onNavigate?.invoke()
     }
 
+    val changeGroups = remember(files) { GitChangeGroups.from(files) }
+    var aiLoading by remember(project, repo?.path) { mutableStateOf(false) }
+    var aiError by remember(project, repo?.path) { mutableStateOf<String?>(null) }
+    var shortcutsOpen by remember { mutableStateOf(false) }
+    var focusedRowKey by remember(project, repo?.path) { mutableStateOf<String?>(null) }
+
+    fun handleWriteWithAi() {
+        val client = api ?: return
+        if (aiLoading) return
+        scope.launch {
+            aiLoading = true
+            aiError = null
+            try {
+                val msg = client.requestAiCommitMessage(project)
+                if (msg.isNotEmpty()) {
+                    model.commitDrafts.setMessage(client, project, repo, msg)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                aiError = model.describe(e)
+            } finally {
+                aiLoading = false
+            }
+        }
+    }
+
+    val orderedRowEntries = remember(conflicts, normalFiles, changeGroups, useChangeGroups, operation) {
+        buildList<Pair<String, ChangedFile>> {
+            for (c in conflicts) add("conflict:${c.path}" to c)
+            if (useChangeGroups && operation == null) {
+                for (s in changeGroups.staged) add("staged:${s.path}" to s.raw)
+                for (ch in changeGroups.changes) add("changes:${ch.path}" to ch.raw)
+            } else {
+                for (f in normalFiles) add("changes:${f.path}" to f)
+            }
+        }
+    }
+
     val showComposer = files.isNotEmpty() && operation == null
+    val composerAtBottom = mobile || useChangeGroups
     val headerIconSize = if (mobile) 44.dp else 24.dp
 
     Column(
-        modifier = Modifier.fillMaxSize().testTag("git-status-panel"),
+        modifier = Modifier
+            .fillMaxSize()
+            .focusTarget()
+            .onPreviewKeyEvent { ev ->
+                if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when {
+                    ev.utf16CodePoint == '?'.code -> {
+                        shortcutsOpen = true
+                        true
+                    }
+                    ev.key == Key.DirectionDown -> {
+                        if (orderedRowEntries.isEmpty()) return@onPreviewKeyEvent false
+                        val idx = orderedRowEntries.indexOfFirst { it.first == focusedRowKey }
+                        val nextIdx = if (idx < 0) 0 else (idx + 1).coerceAtMost(orderedRowEntries.lastIndex)
+                        focusedRowKey = orderedRowEntries[nextIdx].first
+                        true
+                    }
+                    ev.key == Key.DirectionUp -> {
+                        if (orderedRowEntries.isEmpty()) return@onPreviewKeyEvent false
+                        val idx = orderedRowEntries.indexOfFirst { it.first == focusedRowKey }
+                        val prevIdx = if (idx <= 0) 0 else idx - 1
+                        focusedRowKey = orderedRowEntries[prevIdx].first
+                        true
+                    }
+                    ev.key == Key.Spacebar -> {
+                        val entry = orderedRowEntries.firstOrNull { it.first == focusedRowKey } ?: return@onPreviewKeyEvent false
+                        val (key, file) = entry
+                        when {
+                            key.startsWith("staged:") -> unstageFile(file)
+                            key.startsWith("changes:") -> stageFile(file)
+                            else -> toggleFile(file)
+                        }
+                        true
+                    }
+                    ev.key == Key.Enter || ev.key == Key.NumPadEnter -> {
+                        val entry = orderedRowEntries.firstOrNull { it.first == focusedRowKey } ?: return@onPreviewKeyEvent false
+                        openReview(entry.second)
+                        true
+                    }
+                    ev.key == Key.Delete || ev.key == Key.Backspace -> {
+                        val entry = orderedRowEntries.firstOrNull { it.first == focusedRowKey } ?: return@onPreviewKeyEvent false
+                        if (GitChangesView.hasUnstaged(entry.second)) {
+                            askDiscardFiles(listOf(entry.second))
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    else -> false
+                }
+            }
+            .testTag("git-status-panel"),
     ) {
         // Panel header (`SidebarHeader` in `git-status-panel.tsx:580`)
         Row(
@@ -690,6 +793,18 @@ fun GitStatusPanel(
                 contentAlignment = Alignment.Center,
             ) {
                 PpmIcon(ProductIcon.History, size = 14.dp, tint = tokens.text2.color)
+            }
+            // Keyboard & Touch Shortcuts button (?)
+            Box(
+                modifier = Modifier
+                    .size(headerIconSize)
+                    .clip(RoundedCornerShape(4.dp))
+                    .semantics { contentDescription = "Keyboard & Touch Shortcuts" }
+                    .clickable { shortcutsOpen = true }
+                    .testTag("git-shortcuts-button"),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText("?", style = PpmFont.mono(12, FontWeight.SemiBold, lineHeight = 16, color = tokens.text2.color))
             }
             // More menu
             Box {
@@ -796,6 +911,25 @@ fun GitStatusPanel(
             }
         }
 
+        if (isOffline) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(tokens.warning.opacity(0.12).color)
+                    .edge(Edge.Bottom, tokens.warning.opacity(0.3).color)
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .testTag("git-offline-banner"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                PpmIcon(ProductIcon.Loader2, size = 13.dp, tint = tokens.warning.color)
+                BasicText(
+                    text = "Reconnecting… · Staging and commit wait for the connection",
+                    style = PpmFont.sans(11, FontWeight.Medium, lineHeight = 14, color = tokens.warning.color),
+                )
+            }
+        }
+
         // Repo bar when project has nested repos and one is selected
         if (discovery != null && !discovery.rootIsRepo && repo != null) {
             GitRepoBar(
@@ -851,7 +985,7 @@ fun GitStatusPanel(
                         branch = branch,
                         operation = operation,
                         fileCount = files.size,
-                        busyAction = busyAction,
+                        busyAction = if (isOffline) "offline" else busyAction,
                         onOpenPicker = { model.openBranchPicker(project) },
                         onSync = { handleSync(mode) },
                     )
@@ -879,12 +1013,21 @@ fun GitStatusPanel(
                         operation = operation,
                         branch = branch,
                         conflicts = conflicts.size,
-                        busyAction = busyAction,
+                        busyAction = if (isOffline) "offline" else busyAction,
                         onContinue = {
                             runGit("continue", "Could not continue the $noun") {
                                 api?.gitOperation(project, "continue", repo)
                                 model.toast(ErrorToastMessage("The $noun is finished", kind = ErrorToastMessage.Kind.SUCCESS))
                             }
+                        },
+                        onSkip = if (operation.kind == "rebase") {
+                            {
+                                runGit("skip", "Could not skip the commit") {
+                                    api?.gitOperation(project, "skip", repo)
+                                }
+                            }
+                        } else {
+                            null
                         },
                         onAbort = {
                             confirm = ConfirmState(
@@ -903,8 +1046,8 @@ fun GitStatusPanel(
                     )
                 }
 
-                // Tablet composer sits above the change list
-                if (!mobile && showComposer) {
+                // Classic desktop composer sits above the change list when !composerAtBottom
+                if (!composerAtBottom && showComposer) {
                     GitCommitComposer(
                         message = commitMessage,
                         onMessageChange = { model.commitDrafts.setMessage(api, project, repo, it) },
@@ -912,11 +1055,15 @@ fun GitStatusPanel(
                         operation = operation,
                         lastCommit = lastCommit,
                         syncMode = mode,
-                        busyAction = busyAction,
+                        busyAction = if (isOffline) "offline" else busyAction,
                         onCommit = ::handleCommit,
                         onUndoLast = { lastCommit?.let { undoCommit(it.hash) } },
                         isBottom = false,
                         branch = branch.head,
+                        onWriteWithAi = ::handleWriteWithAi,
+                        aiLoading = aiLoading,
+                        aiError = aiError,
+                        touchPlaceholder = touchPlaceholder,
                     )
                 }
 
@@ -983,7 +1130,7 @@ fun GitStatusPanel(
                             CleanState(
                                 last = lastCommit,
                                 operation = operation,
-                                busy = busyAction != null,
+                                busy = busyAction != null || isOffline,
                                 onUndo = { lastCommit?.let { undoCommit(it.hash) } },
                                 onOpenHistory = ::openGraph,
                             )
@@ -997,7 +1144,7 @@ fun GitStatusPanel(
                                     errorTone = true,
                                     showCheckAll = false,
                                     viewMode = model.gitStatusViewMode,
-                                    busy = busyAction != null,
+                                    busy = busyAction != null || isOffline,
                                     onToggleFile = ::toggleFile,
                                     onStageFile = ::stageFile,
                                     onUnstageFile = ::unstageFile,
@@ -1012,26 +1159,48 @@ fun GitStatusPanel(
                                 )
                             }
                             if (normalFiles.isNotEmpty()) {
-                                ChangeGroupSection(
-                                    model = model,
-                                    label = if (operation?.kind == "merge") "Merged" else "Changes",
-                                    files = normalFiles,
-                                    errorTone = false,
-                                    showCheckAll = operation == null,
-                                    viewMode = model.gitStatusViewMode,
-                                    busy = busyAction != null,
-                                    onToggleFile = ::toggleFile,
-                                    onStageFile = ::stageFile,
-                                    onUnstageFile = ::unstageFile,
-                                    onToggleBatch = ::toggleBatch,
-                                    onOpen = ::openReview,
-                                    onOpenDiff = ::openDiff,
-                                    onOpenFile = ::openFile,
-                                    onDiscard = ::askDiscardFiles,
-                                    onStageLines = { f, s -> hunkTarget = HunkModalTarget(f, s) },
-                                    onMarkResolved = ::markResolved,
-                                    onReviewAll = { openReview(null) },
-                                )
+                                if (useChangeGroups && operation == null) {
+                                    GitStagedAndChangesGroups(
+                                        model = model,
+                                        groups = changeGroups,
+                                        viewMode = model.gitStatusViewMode,
+                                        busy = busyAction != null || isOffline,
+                                        focusedRowKey = focusedRowKey,
+                                        onFocusRow = { focusedRowKey = it },
+                                        onToggleFile = ::toggleFile,
+                                        onStageFile = ::stageFile,
+                                        onUnstageFile = ::unstageFile,
+                                        onToggleBatch = ::toggleBatch,
+                                        onOpen = ::openReview,
+                                        onOpenDiff = ::openDiff,
+                                        onOpenFile = ::openFile,
+                                        onDiscard = ::askDiscardFiles,
+                                        onStageLines = { f, s -> hunkTarget = HunkModalTarget(f, s) },
+                                        onMarkResolved = ::markResolved,
+                                        onReviewAll = { openReview(null) },
+                                    )
+                                } else {
+                                    ChangeGroupSection(
+                                        model = model,
+                                        label = if (operation?.kind == "merge") "Merged" else "Changes",
+                                        files = normalFiles,
+                                        errorTone = false,
+                                        showCheckAll = operation == null,
+                                        viewMode = model.gitStatusViewMode,
+                                        busy = busyAction != null || isOffline,
+                                        onToggleFile = ::toggleFile,
+                                        onStageFile = ::stageFile,
+                                        onUnstageFile = ::unstageFile,
+                                        onToggleBatch = ::toggleBatch,
+                                        onOpen = ::openReview,
+                                        onOpenDiff = ::openDiff,
+                                        onOpenFile = ::openFile,
+                                        onDiscard = ::askDiscardFiles,
+                                        onStageLines = { f, s -> hunkTarget = HunkModalTarget(f, s) },
+                                        onMarkResolved = ::markResolved,
+                                        onReviewAll = { openReview(null) },
+                                    )
+                                }
                             }
                             if (changes?.truncated == true) {
                                 BasicText(
@@ -1053,8 +1222,8 @@ fun GitStatusPanel(
                     Folds()
                 }
 
-                // Phone composer sits in the bottom thumb-zone
-                if (mobile && showComposer) {
+                // Bottom-anchored commit composer (phone thumb-zone + Tablet 4 Section 2 bottom composer)
+                if (composerAtBottom && showComposer) {
                     GitCommitComposer(
                         message = commitMessage,
                         onMessageChange = { model.commitDrafts.setMessage(api, project, repo, it) },
@@ -1062,15 +1231,23 @@ fun GitStatusPanel(
                         operation = operation,
                         lastCommit = lastCommit,
                         syncMode = mode,
-                        busyAction = busyAction,
+                        busyAction = if (isOffline) "offline" else busyAction,
                         onCommit = ::handleCommit,
                         onUndoLast = { lastCommit?.let { undoCommit(it.hash) } },
                         isBottom = true,
                         branch = branch.head,
+                        onWriteWithAi = ::handleWriteWithAi,
+                        aiLoading = aiLoading,
+                        aiError = aiError,
+                        touchPlaceholder = touchPlaceholder,
                     )
                 }
             }
         }
+    }
+
+    if (shortcutsOpen) {
+        GitShortcutsSheet(onDismiss = { shortcutsOpen = false })
     }
 
     confirm?.let { c ->
