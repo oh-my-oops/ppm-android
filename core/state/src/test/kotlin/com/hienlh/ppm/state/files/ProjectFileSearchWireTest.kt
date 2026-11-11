@@ -28,7 +28,9 @@ class ProjectFileSearchWireTest {
             val request = server.takeRequest(2, TimeUnit.SECONDS)!!
             assertEquals("/prefix/api/project/${ApiClient.escape("p /雪")}/files/search", request.url.encodedPath)
             assertEquals(options.query, request.url.queryParameter("q"))
-            assertEquals(options.include, request.url.queryParameter("include"))
+            assertEquals(options.include.trim(), request.url.queryParameter("include"))
+            assertEquals("true", request.url.queryParameter("useIgnore"))
+            assertNull(request.url.queryParameter("replace"))
             assertEquals("true", request.url.queryParameter("caseSensitive"))
             assertEquals("false", request.url.queryParameter("wholeWord"))
             assertEquals("true", request.url.queryParameter("regex"))

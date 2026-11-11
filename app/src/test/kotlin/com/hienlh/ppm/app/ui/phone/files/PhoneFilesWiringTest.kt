@@ -11,6 +11,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -90,6 +91,10 @@ class PhoneFilesWiringTest {
                         MockResponse.Builder().code(403).addHeader("Content-Type", "application/json")
                             .body("""{"ok":false,"error":"Read-only file"}""").build()
                     }
+                    // The search host's reply is bare JSON, no envelope.
+                    path.endsWith("/files/search") -> MockResponse.Builder().addHeader("Content-Type", "application/json")
+                        .body("""{"results":[{"file":"src/Main.kt","matches":[{"line":1,"column":0,"length":3,"before":"","cutBefore":false,"text":"fun","after":" main() {}"}]}],"total":1,"files":1,"limitHit":false,"engine":"rg"}""")
+                        .build()
                     path.endsWith("/files/read") -> ok("""{"content":"fun main() {}\n","path":"src/Main.kt"}""")
                     path.endsWith("/files/list-batch") -> ok("""[{"path":"","entries":$ROOT_LISTING},{"path":"src","entries":$SRC_LISTING}]""")
                     path.endsWith("/files/list") ->
@@ -304,6 +309,33 @@ class PhoneFilesWiringTest {
         assertTrue(textShown("Offline for 0 s"))
         composeRule.runOnIdle { stateOf<Boolean>("connectionLost").value = false }
         composeRule.waitUntil(5_000) { !shown("phone-files-offline-banner") }
+    }
+
+    @Test
+    fun filesArea_searchInFilesOpensTheSearchScreen_whichSearchesTheServer_andBackReturnsToTheTree() {
+        com.hienlh.ppm.app.ui.files.installBlankFileIcons()
+        val tree = ProjectFileTree(FileTreeBackend.api(api), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
+        composeRule.setContent {
+            remember(tree) { stateOf<ProjectFileTree?>("fileTree").value = tree }
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
+                com.hienlh.ppm.app.ui.phone.PhoneFilesAreaHost(model = model, tab = null, nav = com.hienlh.ppm.app.ui.phone.PhoneNav())
+            }
+        }
+        composeRule.waitUntil(5_000) { shown("phone-files-search-chip") }
+        composeRule.onNodeWithTag("phone-files-search-chip", useUnmergedTree = true).performClick()
+        composeRule.waitUntil(5_000) { shown("phone-search-screen") }
+        composeRule.onNodeWithTag("phone-search-query").performTextInput("fun")
+        composeRule.waitUntil(5_000) { shown("phone-search-match-src/Main.kt:1:0") }
+        val search = recorded("GET", "/files/search").last()
+        assertEquals("/api/project/ppm/files/search", search.path)
+        assertTrue(search.query.orEmpty(), search.query.orEmpty().contains("q=fun"))
+        composeRule.onNodeWithText("1 result in 1 file").assertExists()
+
+        composeRule.onNodeWithContentDescription("Back").performClick()
+        composeRule.waitUntil(5_000) { !shown("phone-search-screen") && shown("phone-files-search-chip") }
+        // Coming back finds the search as it was left.
+        composeRule.onNodeWithTag("phone-files-search-chip", useUnmergedTree = true).performClick()
+        composeRule.waitUntil(5_000) { shown("phone-search-match-src/Main.kt:1:0") }
     }
 
     @Test

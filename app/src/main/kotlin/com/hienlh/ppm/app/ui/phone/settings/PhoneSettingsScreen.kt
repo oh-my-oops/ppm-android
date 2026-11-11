@@ -173,6 +173,10 @@ fun PhoneSettingsScreen(
                                 .fillMaxWidth(),
                         )
                     }
+                    PhoneSettingsSection.Storage -> PhoneStoragePage(
+                        model = model,
+                        onBack = goHome,
+                    )
                     PhoneSettingsSection.About -> PhoneAboutPage(
                         model = model,
                         onBack = goHome,
@@ -228,6 +232,7 @@ fun PhoneSettingsHomeList(
                             PhoneSettingsSection.Theme -> themeLabel
                             PhoneSettingsSection.Servers -> serverLabel
                             PhoneSettingsSection.Schedules -> null
+                            PhoneSettingsSection.Storage -> null
                             PhoneSettingsSection.About -> aboutLabel
                         }
                         val subtitleText = when (section) {
@@ -274,7 +279,7 @@ fun PhoneSettingsHomeList(
         }
 
         OpenOnTabletNotice(
-            text = "Tools, Remote Access, Storage, Keyboard Shortcuts and the other sections open on a tablet.",
+            text = "Tools, Remote Access, Keyboard Shortcuts and the other sections open on a tablet.",
         )
 
         Spacer(Modifier.height(16.dp))

@@ -25,6 +25,7 @@ enum class PhoneSettingsGroup(val title: String) {
  * - [Theme] (Light / Dark / System mode + color theme grid)
  * - [Servers] (connected server, switch, remove, log out, add server)
  * - [Schedules] (run now / restart, on or off, run history and full log; editing stays on a tablet)
+ * - [Storage] (what the database, backups, session trace and Query Audit take; read-only)
  * - [About] (server & app versions, server update, debug redesign toggle)
  */
 enum class PhoneSettingsSection(
@@ -83,6 +84,15 @@ enum class PhoneSettingsSection(
         group = PhoneSettingsGroup.SERVER,
         category = SettingsCategory.Schedules,
     ),
+    Storage(
+        id = "storage",
+        title = "Storage",
+        subtitle = "Database, backups, session trace & Query Audit",
+        icon = ProductIcon.Database,
+        group = PhoneSettingsGroup.SERVER,
+        // The web folded the Query Audit Log section into Storage.
+        category = SettingsCategory.QueryAudit,
+    ),
     About(
         id = "about",
         title = "About",
@@ -127,6 +137,7 @@ fun isPhoneFullSettingsCategory(category: SettingsCategory): Boolean = when (cat
     SettingsCategory.Appearance,
     SettingsCategory.Servers,
     SettingsCategory.Schedules,
+    SettingsCategory.QueryAudit,
     -> true
     else -> false
 }
@@ -141,6 +152,7 @@ fun resolvePhoneSettingsCategory(category: SettingsCategory): PhoneSettingsRoute
     SettingsCategory.Appearance -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Theme)
     SettingsCategory.Servers -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Servers)
     SettingsCategory.Schedules -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Schedules)
+    SettingsCategory.QueryAudit -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Storage)
     else -> PhoneSettingsRoute.TabletOnlyPage(category)
 }
 
@@ -158,6 +170,7 @@ fun resolvePhoneSettingsRoute(rawCategory: String?): PhoneSettingsRoute {
         "appearance", "theme", "themes" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Theme)
         "servers", "server" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Servers)
         "schedules", "schedule" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Schedules)
+        "storage", "query-audit" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Storage)
         "about" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.About)
         else -> {
             val category = SettingsCategory.resolveOrNull(cleaned) ?: SettingsCategory.General

@@ -71,6 +71,27 @@ val PPM_TOOL_GROUPS: List<PpmToolGroup> = listOf(
         ),
     ),
     PpmToolGroup(
+        title = "Session history",
+        intro = "Earlier chats of the chat's own project, read-only. Another project is reachable only through turn links you sent.",
+        tools = listOf(
+            PpmToolDef(
+                id = "search_sessions",
+                label = "Search chats",
+                note = "Searches the titles and the prompts and answers of this project's chats, never what tools printed, and says which turn each match is in.",
+            ),
+            PpmToolDef(
+                id = "list_session_turns",
+                label = "List turns",
+                note = "Lists the turns of one of this project's chats: number, time and the first line of each prompt.",
+            ),
+            PpmToolDef(
+                id = "read_session_turns",
+                label = "Read turns",
+                note = "Reads chosen turns of this project's chats: prompts, answers and one line per tool call. In another project, only the turns whose links you sent it.",
+            ),
+        ),
+    ),
+    PpmToolGroup(
         title = "Database",
         intro = "On the connections with “Available to the AI chat” on. The AI never sees their passwords.",
         tools = listOf(
@@ -91,11 +112,127 @@ val PPM_TOOL_GROUPS: List<PpmToolGroup> = listOf(
             ),
         ),
     ),
+    PpmToolGroup(
+        title = "Session collaboration",
+        intro = "Sessions of one project opening and messaging each other. Every session an AI creates is an ordinary one you can see, open and stop.",
+        tools = listOf(
+            PpmToolDef(
+                id = "create_session",
+                label = "Create sessions",
+                note = "Opens a new session of this project to hand work to. It shows in your session list, and you can open, chat into or stop it.",
+            ),
+            PpmToolDef(
+                id = "send_to_session",
+                label = "Message sessions",
+                note = "Sends a message to another session of this project, and can wait for its reply. Only an explicit message reaches another session.",
+            ),
+            PpmToolDef(
+                id = "session_status",
+                label = "Check sessions",
+                note = "Reads what the linked sessions are doing: running or idle, waiting on you, and the opening of their last answer.",
+            ),
+        ),
+    ),
+    PpmToolGroup(
+        title = "Spec mode",
+        intro = "Requirements, design and tasks you approve step by step. Thorough checks run the tests the design names, in the project folder.",
+        tools = listOf(
+            PpmToolDef(
+                id = "spec_status",
+                label = "Read the spec",
+                note = "Reads where the chat's spec stands: each document, the tasks and their waves, the last test runs.",
+            ),
+            PpmToolDef(
+                id = "spec_create",
+                label = "Start specs",
+                note = "Starts a spec when you ask for one in an ordinary chat, which then works in Spec mode.",
+            ),
+            PpmToolDef(
+                id = "spec_submit",
+                label = "Submit documents",
+                note = "Says requirements, design or tasks are ready. PPM checks them and asks you to approve; the AI never approves.",
+            ),
+            PpmToolDef(
+                id = "spec_open_design",
+                label = "Draw screens",
+                note = "For a spec with a UI: creates its PPM Design and opens it, for the AI to draw the screens you approve before the design.",
+            ),
+            PpmToolDef(
+                id = "task_start",
+                label = "Start tasks",
+                note = "Starts a task of the approved plan, refused while its dependencies are open or a running task shares its files.",
+            ),
+            PpmToolDef(
+                id = "task_done",
+                label = "Finish tasks",
+                note = "Finishes a task (Standard checks). PPM ticks its box in tasks.md.",
+            ),
+            PpmToolDef(
+                id = "task_red",
+                label = "Run failing tests",
+                note = "Thorough checks: PPM runs the task's new tests and must see them fail before the code exists, then locks them.",
+            ),
+            PpmToolDef(
+                id = "task_green",
+                label = "Run passing tests",
+                note = "Thorough checks: PPM runs the locked tests, finishes the task when they pass, then compares the whole suite with the failures it had before.",
+            ),
+            PpmToolDef(
+                id = "suite_check",
+                label = "Check the suite",
+                note = "Thorough checks: runs the whole test suite again after fixing failures it reported.",
+            ),
+        ),
+    ),
 )
 
-/** Matches `ppmToolOn` in `src/shared/ppm-tools.ts`: every tool is on by default unless explicitly false. */
-fun isPpmToolEnabled(ppmTools: Map<String, Boolean>, toolId: String): Boolean =
-    ppmTools[toolId] != false
+/**
+ * A feature the onboarding tour introduces (`FEATURE_INTROS` of `src/shared/feature-intros.ts`):
+ * its tools stay off until the install answers Turn on or Turn off.
+ */
+data class PpmFeatureIntro(val id: String, val tools: List<String>)
+
+val PPM_FEATURE_INTROS: List<PpmFeatureIntro> = listOf(
+    PpmFeatureIntro(
+        id = "session-tools-2026-11",
+        tools = listOf("search_sessions", "list_session_turns", "read_session_turns", "create_session", "send_to_session", "session_status"),
+    ),
+)
+
+/** `featureIntroOfTool`: the introduced feature [toolId] belongs to, if any. */
+fun ppmFeatureIntroOfTool(toolId: String): PpmFeatureIntro? = PPM_FEATURE_INTROS.firstOrNull { toolId in it.tools }
+
+/** `answerFromSwitches`: on if any of the feature's set switches is on, off if all set ones are off, null while none is set. */
+fun ppmFeatureAnswerFromSwitches(ppmTools: Map<String, Boolean>, intro: PpmFeatureIntro): Boolean? {
+    val set = intro.tools.mapNotNull { ppmTools[it] }
+    return if (set.isEmpty()) null else set.any { it }
+}
+
+/**
+ * `ppmToolOn` of `src/shared/ppm-tools.ts`: a switch the user set is that switch; a tool of an
+ * introduced feature follows the feature's other switches and is off while none is set; every
+ * other tool is on. (`open_file`/`open_preview` follow the older `tab_tools` switch on the
+ * server, which these settings do not carry, so they read as on unless set.)
+ */
+fun isPpmToolEnabled(ppmTools: Map<String, Boolean>, toolId: String): Boolean {
+    ppmTools[toolId]?.let { return it }
+    val intro = ppmFeatureIntroOfTool(toolId) ?: return true
+    return ppmFeatureAnswerFromSwitches(ppmTools, intro) == true
+}
+
+/**
+ * `patchPpmToolSwitches`: [current] with [toolId] set to [on], as the server stores one switch.
+ * A tool of an introduced feature first writes the feature's other tools at the state they show
+ * now, so flipping one never flips its siblings.
+ */
+fun patchPpmToolSwitches(current: Map<String, Boolean>, toolId: String, on: Boolean): Map<String, Boolean> {
+    val next = current.toMutableMap()
+    ppmFeatureIntroOfTool(toolId)?.let { intro ->
+        for (sibling in intro.tools) next[sibling] = isPpmToolEnabled(current, sibling)
+    }
+    next[toolId] = on
+    return next
+}
 
 // ===========================================================================
 // 2. Claude & Codex Accounts (Phase 12b.2 & 12b.3)

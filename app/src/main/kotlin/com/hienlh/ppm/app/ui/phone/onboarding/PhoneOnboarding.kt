@@ -19,10 +19,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -31,13 +31,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.PrefsStore
-import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmMobile
@@ -49,9 +49,6 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
-import com.hienlh.ppm.protocol.array
-import com.hienlh.ppm.protocol.get
-import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.shell.OnboardingEvidence
 import com.hienlh.ppm.state.shell.OnboardingFamiliarity
 import com.hienlh.ppm.state.shell.OnboardingGoalId
@@ -59,57 +56,6 @@ import com.hienlh.ppm.state.shell.OnboardingState
 import com.hienlh.ppm.state.shell.OnboardingStepDef
 import com.hienlh.ppm.state.shell.applySuggestedPromptToDraft
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
-
-data class FeatureIntroStep(
-    val title: String,
-    val description: String = "",
-)
-
-data class FeatureIntroPayload(
-    val id: String,
-    val title: String,
-    val summary: String = "",
-    val steps: List<FeatureIntroStep> = emptyList(),
-) {
-    companion object {
-        fun from(json: JsonElement?): FeatureIntroPayload? {
-            val id = json["id"].string?.takeIf { it.isNotBlank() } ?: return null
-            val title = json["title"].string?.takeIf { it.isNotBlank() } ?: return null
-            val summary = json["summary"].string ?: json["description"].string.orEmpty()
-            val steps = json["steps"].array.orEmpty().mapNotNull { s ->
-                val stepTitle = s["title"].string?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                FeatureIntroStep(
-                    title = stepTitle,
-                    description = s["description"].string ?: s["body"].string.orEmpty(),
-                )
-            }
-            return FeatureIntroPayload(id = id, title = title, summary = summary, steps = steps)
-        }
-    }
-}
-
-private suspend fun ApiClient.fetchPendingFeatureIntros(): List<FeatureIntroPayload> {
-    val json = call("GET", "/api/feature-intros")
-    val list = json["pending"].array ?: json["intros"].array ?: json.array.orEmpty()
-    return list.mapNotNull(FeatureIntroPayload::from)
-}
-
-private suspend fun ApiClient.dismissFeatureIntros(ids: List<String>) {
-    if (ids.isEmpty()) return
-    val body = buildJsonObject {
-        put("ids", buildJsonArray { ids.forEach { add(JsonPrimitive(it)) } })
-    }
-    call("POST", "/api/feature-intros/dismiss", body = body)
-}
-
-private suspend fun ApiClient.resetAllFeatureIntros() {
-    call("POST", "/api/feature-intros/reset-all")
-}
 
 /**
  * First-time onboarding, guided tour, Quick Orientation, and `"PPM has new features"` (`Phone 2 · OB1–OB8`
@@ -120,7 +66,8 @@ private suspend fun ApiClient.resetAllFeatureIntros() {
  *   (into the composer draft without auto-sending), and collapse-to-pill (`OB4`)
  * - `OB6`: Completion card (`"You're all set"`)
  * - `OB7`: 2-page Quick Orientation (`"Spaces & Navigation"` / `"AI Chat, Files & Tools"`)
- * - `OB8`: `"PPM has new features"` (`/api/feature-intros`, `"Next"`, `"Got it"`, `"Don't show again"`).
+ * - `OB8`: `"PPM has new features"` (`onboarding-feature-intro.tsx`): one step per feature, Turn on / Turn off /
+ *   Later, asked once per install through `/api/feature-intros` ([PhoneFeatureIntros]).
  */
 enum class OnboardingPhase {
     HIDDEN,
@@ -131,7 +78,6 @@ enum class OnboardingPhase {
     TOUR_COLLAPSED_PILL,
     COMPLETED,
     QUICK_ORIENTATION,
-    FEATURE_INTROS,
 }
 
 @Stable
@@ -154,11 +100,42 @@ class PhoneOnboardingController(
     )
         private set
 
-    var featureIntros by mutableStateOf<List<FeatureIntroPayload>>(emptyList())
+    /** The new-features question for the connected server; null with no server. */
+    var featureIntros by mutableStateOf<PhoneFeatureIntros?>(null)
         private set
 
-    var featureIntroIndex by mutableIntStateOf(0)
-        private set
+    /** This device has never seen the basic tour: an install already in use is then not offered it. */
+    private val neverSawTour = prefs?.get(PREF_KEY_STATE) == null && prefs?.get(PREF_KEY_DISMISSED) == null
+
+    /** The basic tour is on screen (being set up, running, finished but not closed, or the orientation). */
+    val tourInProgress: Boolean get() = phase != OnboardingPhase.HIDDEN
+
+    /** The basic tour was finished or dismissed on this device. */
+    val tourDone: Boolean get() = prefs?.get(PREF_KEY_DISMISSED) == "1" || !state.active
+
+    /**
+     * Whether the Welcome card may show: not before the server has said which kind of install this
+     * is, and never as an offer to an install already in use that this device has not shown the tour.
+     */
+    val welcomeOffered: Boolean
+        get() {
+            val intros = featureIntros ?: return true
+            if (!intros.settled) return false
+            return !(neverSawTour && intros.view?.isExistingUser == true)
+        }
+
+    /** Whether the new-features part shows now (`useFeaturePartVisible`). */
+    val featurePartVisible: Boolean
+        get() {
+            val intros = featureIntros ?: return false
+            val tourOnScreen = tourInProgress && !(phase == OnboardingPhase.WELCOME && !welcomeOffered)
+            return intros.allowed(tourInProgress = tourOnScreen, tourDone = tourDone)
+        }
+
+    /** Binds the question to [backend] (a new server is a new app open for it) and loads it. */
+    fun bindFeatureIntros(backend: FeatureIntrosBackend?) {
+        featureIntros = backend?.let { PhoneFeatureIntros(it, scope).also(PhoneFeatureIntros::load) }
+    }
 
     private fun save(next: OnboardingState) {
         state = next
@@ -243,46 +220,10 @@ class PhoneOnboardingController(
         val fresh = OnboardingState(active = true, paused = false)
         save(fresh)
         phase = OnboardingPhase.WELCOME
-        val api = model?.api
-        if (api != null) {
-            scope.launch {
-                runCatching { api.resetAllFeatureIntros() }
-            }
-        }
-    }
-
-    fun checkFeatureIntros(model: AppModel) {
-        val api = model.api ?: return
-        scope.launch {
-            val pending = runCatching { api.fetchPendingFeatureIntros() }.getOrDefault(emptyList())
-            if (pending.isNotEmpty() && phase == OnboardingPhase.HIDDEN) {
-                featureIntros = pending
-                featureIntroIndex = 0
-                phase = OnboardingPhase.FEATURE_INTROS
-            }
-        }
-    }
-
-    fun nextFeatureIntro(model: AppModel) {
-        if (featureIntroIndex + 1 < featureIntros.size) {
-            featureIntroIndex++
-        } else {
-            dismissCurrentFeatureIntros(model)
-        }
-    }
-
-    fun dismissCurrentFeatureIntros(model: AppModel) {
-        val ids = featureIntros.map { it.id }
-        featureIntros = emptyList()
-        featureIntroIndex = 0
-        if (phase == OnboardingPhase.FEATURE_INTROS) {
-            phase = OnboardingPhase.HIDDEN
-        }
-        val api = model.api ?: return
-        if (ids.isNotEmpty()) {
-            scope.launch {
-                runCatching { api.dismissFeatureIntros(ids) }
-            }
+        // What was asked and answered is the server's; this device only starts the question afresh.
+        featureIntros?.let {
+            it.reset()
+            it.load()
         }
     }
 
@@ -313,15 +254,44 @@ fun PhoneOnboardingHost(
     modifier: Modifier = Modifier,
 ) {
     LaunchedEffect(model.api) {
-        if (model.api != null) {
-            controller.checkFeatureIntros(model)
+        controller.bindFeatureIntros(model.api?.let(FeatureIntrosBackend::api))
+    }
+    // Answered, put off or settled on any device: load again, and a question put off elsewhere is
+    // put off here too, with no skip of this device's own.
+    DisposableEffect(model.events, controller.featureIntros) {
+        val intros = controller.featureIntros
+        val off = model.events?.onFeatureIntrosChanged { change, id ->
+            if (intros == null) return@onFeatureIntrosChanged
+            if (change == "skip" && id != null) intros.skippedElsewhere(id)
+            intros.load()
         }
+        onDispose { off?.invoke() }
+    }
+
+    val featureIntros = controller.featureIntros
+    if (controller.featurePartVisible && featureIntros != null) {
+        val current = featureIntros.current
+        if (current != null) {
+            OnboardingModalBackdrop(onDismiss = featureIntros::close) {
+                FeatureIntroCard(
+                    intro = current,
+                    position = featureIntros.steps.indexOf(current.id) + 1,
+                    total = featureIntros.steps.size,
+                    busy = featureIntros.busy,
+                    error = featureIntros.error,
+                    onAnswer = { on -> featureIntros.answer(current.id, on) },
+                    onLater = { featureIntros.later(current.id) },
+                    onClose = featureIntros::close,
+                )
+            }
+        }
+        return
     }
 
     when (controller.phase) {
         OnboardingPhase.HIDDEN -> Unit
 
-        OnboardingPhase.WELCOME -> {
+        OnboardingPhase.WELCOME -> if (controller.welcomeOffered) {
             OnboardingModalBackdrop(onDismiss = controller::skipOrDismiss) {
                 WelcomeCard(
                     onStartGuided = controller::startSetup,
@@ -426,20 +396,6 @@ fun PhoneOnboardingHost(
             }
         }
 
-        OnboardingPhase.FEATURE_INTROS -> {
-            val current = controller.featureIntros.getOrNull(controller.featureIntroIndex)
-            if (current != null) {
-                OnboardingModalBackdrop(onDismiss = { controller.dismissCurrentFeatureIntros(model) }) {
-                    FeatureIntroCard(
-                        intro = current,
-                        index = controller.featureIntroIndex,
-                        total = controller.featureIntros.size,
-                        onNext = { controller.nextFeatureIntro(model) },
-                        onDismissAll = { controller.dismissCurrentFeatureIntros(model) },
-                    )
-                }
-            }
-        }
     }
 }
 
@@ -881,13 +837,17 @@ private fun QuickOrientationCard(
     }
 }
 
+/** One feature's step (`FeatureIntroStep` of `onboarding-feature-intro.tsx`). */
 @Composable
 private fun FeatureIntroCard(
-    intro: FeatureIntroPayload,
-    index: Int,
+    intro: FeatureIntro,
+    position: Int,
     total: Int,
-    onNext: () -> Unit,
-    onDismissAll: () -> Unit,
+    busy: Boolean,
+    error: String?,
+    onAnswer: (on: Boolean) -> Unit,
+    onLater: () -> Unit,
+    onClose: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
     Row(
@@ -896,18 +856,19 @@ private fun FeatureIntroCard(
     ) {
         PpmIcon(ProductIcon.Sparkles, 16.dp, tokens.accent.color)
         BasicText(
-            "PPM has new features" + (if (total > 1) " · ${index + 1}/$total" else ""),
-            Modifier.weight(1f),
-            style = ppmText(12f, FontWeight.SemiBold, kind = FontKind.MONO, lineHeight = 16f).copy(color = tokens.accent.color),
+            "PPM HAS NEW FEATURES" + (if (total > 1) " · " + position + " OF " + total else ""),
+            Modifier.weight(1f).testTag("phone-feature-intro-counter"),
+            style = ppmText(11f, FontWeight.Medium, lineHeight = 16f).copy(color = tokens.accent.color),
         )
         Box(
             Modifier
-                .size(26.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .ppmClickable(pressedColor = tokens.panel.color, onClick = onDismissAll),
+                .size(44.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .ppmClickable(pressedColor = tokens.panel.color, onClickLabel = "Close, ask me later", onClick = onClose)
+                .testTag("phone-feature-intro-close"),
             contentAlignment = Alignment.Center,
         ) {
-            PpmIcon(ProductIcon.X, 14.dp, tokens.text3.color)
+            PpmIcon(ProductIcon.X, 16.dp, tokens.text3.color)
         }
     }
 
@@ -915,53 +876,35 @@ private fun FeatureIntroCard(
         intro.title,
         style = ppmText(16f, FontWeight.SemiBold, lineHeight = 22f).copy(color = tokens.text.color),
     )
-    if (intro.summary.isNotBlank()) {
+    BasicText(
+        intro.body,
+        Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState()),
+        style = ppmText(14f, lineHeight = 21f).copy(color = tokens.text2.color),
+    )
+    if (error != null) {
         BasicText(
-            intro.summary,
-            style = ppmText(13f, lineHeight = 19f).copy(color = tokens.text2.color),
+            error,
+            Modifier.testTag("phone-feature-intro-error"),
+            style = ppmText(13f, lineHeight = 18f).copy(color = tokens.error.color),
         )
-    }
-    if (intro.steps.isNotEmpty()) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(max = 180.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            for (step in intro.steps) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    BasicText("•", style = ppmText(13f, lineHeight = 18f).copy(color = tokens.accent.color))
-                    Column(Modifier.weight(1f)) {
-                        BasicText(
-                            step.title,
-                            style = ppmText(12.5f, FontWeight.SemiBold, lineHeight = 17f).copy(color = tokens.text.color),
-                        )
-                        if (step.description.isNotBlank()) {
-                            BasicText(
-                                step.description,
-                                style = ppmText(12f, lineHeight = 16.5f).copy(color = tokens.text2.color),
-                            )
-                        }
-                    }
-                }
-            }
-        }
     }
 
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        OnboardingSecondaryButton("Don't show again", Modifier.weight(1f), onClick = onDismissAll)
-        OnboardingPrimaryButton(
-            if (index + 1 < total) "Next" else "Got it",
-            Modifier.weight(1f),
-            onClick = onNext,
-        )
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OnboardingPrimaryButton("Turn on", Modifier.weight(1f).testTag("phone-feature-intro-on"), enabled = !busy) { onAnswer(true) }
+            OnboardingSecondaryButton("Turn off", Modifier.weight(1f).testTag("phone-feature-intro-off"), enabled = !busy) { onAnswer(false) }
+        }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .ppmClickable(enabled = !busy, pressedColor = tokens.panel.color, onClick = onLater)
+                .testTag("phone-feature-intro-later"),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText("Later", style = ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(color = tokens.text2.color))
+        }
     }
 }
 
@@ -989,6 +932,7 @@ private fun RadioCircle(active: Boolean, tokens: ThemeTokens) {
 private fun OnboardingPrimaryButton(
     label: String,
     modifier: Modifier = Modifier.fillMaxWidth(),
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
@@ -997,8 +941,8 @@ private fun OnboardingPrimaryButton(
         modifier
             .height(42.dp)
             .clip(shape)
-            .background(tokens.accent.color)
-            .ppmClickable(pressedColor = tokens.accent.opacity(0.85).color, onClick = onClick)
+            .background(tokens.accent.opacity(if (enabled) 1.0 else 0.5).color)
+            .ppmClickable(enabled = enabled, pressedColor = tokens.accent.opacity(0.85).color, onClick = onClick)
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -1013,6 +957,7 @@ private fun OnboardingPrimaryButton(
 private fun OnboardingSecondaryButton(
     label: String,
     modifier: Modifier = Modifier.fillMaxWidth(),
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
@@ -1023,7 +968,7 @@ private fun OnboardingSecondaryButton(
             .clip(shape)
             .background(tokens.panel.color)
             .cssBorder(tokens.border.color, shape)
-            .ppmClickable(pressedColor = tokens.panel2.color, onClick = onClick)
+            .ppmClickable(enabled = enabled, pressedColor = tokens.panel2.color, onClick = onClick)
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center,
     ) {

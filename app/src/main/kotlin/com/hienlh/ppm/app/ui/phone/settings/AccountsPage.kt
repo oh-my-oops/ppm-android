@@ -57,6 +57,7 @@ import com.hienlh.ppm.client.codexStartBrowserLogin
 import com.hienlh.ppm.client.codexStartDeviceLogin
 import com.hienlh.ppm.client.codexSubmitBrowserCallback
 import com.hienlh.ppm.client.codexUsages
+import com.hienlh.ppm.client.renameAccount
 import com.hienlh.ppm.client.setAccountStatus
 import com.hienlh.ppm.client.setAntigravityAccountStatus
 import com.hienlh.ppm.client.setCodexAccountStatus
@@ -105,6 +106,8 @@ data class PhoneAccountCardData(
     val isActive: Boolean = false,
     val needsSignIn: Boolean = false,
     val meters: List<PhoneUsageMeterItem> = emptyList(),
+    /** The name the account was given (`accountLabel`, empty for none); null where it cannot be renamed. */
+    val renameCurrent: String? = null,
 ) {
     val isEnabled: Boolean
         get() = status != "disabled"
@@ -157,6 +160,7 @@ fun PhoneAccountsPage(
                     status = entry.accountStatus,
                     isActive = entry.accountId == activeId,
                     needsSignIn = entry.accountStatus == "expired" || entry.accountStatus == "error",
+                    renameCurrent = entry.accountLabel.orEmpty(),
                     meters = listOf(
                         PhoneUsageMeterItem("5-hour session", sPct, sReset),
                         PhoneUsageMeterItem("7-day weekly", wPct, wReset),
@@ -289,6 +293,15 @@ fun PhoneAccountsPage(
                     }
                 }
             },
+            onRenameAccount = api?.let { client ->
+                { card, label ->
+                    // Throws the server's reason, which the sheet shows while staying open.
+                    client.renameAccount(card.id, label)
+                    isError = false
+                    statusMsg = "Account renamed to \"$label\"."
+                    scope.launch { reloadAll() }
+                }
+            },
             onDeleteAccount = { card ->
                 val client = api ?: return@PhoneAccountsContent
                 scope.launch {
@@ -415,9 +428,11 @@ fun PhoneAccountsContent(
     onStartSignIn: (provider: String, method: String) -> Unit = { _, _ -> },
     onSubmitCodeOrKey: (provider: String, mode: String, value: String, label: String?) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier,
+    onRenameAccount: (suspend (PhoneAccountCardData, String) -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     var menuCard by remember { mutableStateOf<PhoneAccountCardData?>(null) }
+    var renameCard by remember { mutableStateOf<PhoneAccountCardData?>(null) }
     var profileCard by remember { mutableStateOf<PhoneAccountCardData?>(null) }
     var confirmDeleteCard by remember { mutableStateOf<PhoneAccountCardData?>(null) }
     var signInSheetOpen by remember { mutableStateOf(false) }
@@ -550,6 +565,18 @@ fun PhoneAccountsContent(
                         profileCard = currentMenuCard
                     },
                 )
+                if (onRenameAccount != null && currentMenuCard.renameCurrent != null) {
+                    ListRow(
+                        title = "Rename account",
+                        subtitle = "Give this account a name of its own",
+                        leadingContent = { PpmIcon(ProductIcon.Pencil, 18.dp, tokens.text2.color) },
+                        modifier = Modifier.testTag("phone-account-rename-${currentMenuCard.id}"),
+                        onClick = {
+                            menuCard = null
+                            renameCard = currentMenuCard
+                        },
+                    )
+                }
                 ListRow(
                     title = "Remove account",
                     subtitle = "Disconnect from this PPM server",
@@ -562,6 +589,15 @@ fun PhoneAccountsContent(
                 )
             }
         }
+    }
+
+    val renaming = renameCard
+    if (renaming != null && onRenameAccount != null) {
+        PhoneAccountRenameSheet(
+            current = renaming.renameCurrent.orEmpty(),
+            onSave = { label -> onRenameAccount(renaming, label); renameCard = null },
+            onCancel = { renameCard = null },
+        )
     }
 
     // Remove Account Confirmation Sheet
@@ -1083,6 +1119,77 @@ private fun PhoneAccountSignInSheet(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
+            }
+        }
+    }
+}
+
+/** Mirrors ACCOUNT_LABEL_MAX on the server, which is what actually enforces it. */
+internal const val PHONE_ACCOUNT_LABEL_MAX = 80
+
+/**
+ * Rename account (`account-rename-dialog.tsx`, its bottom-sheet form): Save is live once the
+ * trimmed name is new; a refusal shows the server's reason and keeps the sheet open.
+ */
+@Composable
+internal fun PhoneAccountRenameSheet(
+    current: String,
+    onSave: suspend (String) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    val scope = rememberCoroutineScope()
+    var name by remember(current) { mutableStateOf(current) }
+    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val trimmed = name.trim()
+    val canSave = trimmed.isNotEmpty() && trimmed != current && !saving
+    Sheet(
+        title = "Rename account",
+        onDismiss = { if (!saving) onCancel() },
+        forceBottomSheet = true,
+        modifier = Modifier.testTag("phone-account-rename-sheet"),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SettingsTextInput(
+                value = name,
+                onValueChange = { name = it.take(PHONE_ACCOUNT_LABEL_MAX) },
+                placeholder = "e.g. Personal, Work",
+                modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).testTag("phone-account-rename-input"),
+            )
+            error?.let {
+                BasicText(it, Modifier.testTag("phone-account-rename-error"), style = ppmText(12f).copy(color = tokens.error.color))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                PhonePillButton(
+                    label = "Cancel",
+                    enabled = !saving,
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                )
+                PhonePillButton(
+                    label = if (saving) "Saving…" else "Save",
+                    primary = true,
+                    enabled = canSave,
+                    onClick = {
+                        saving = true
+                        error = null
+                        scope.launch {
+                            try {
+                                onSave(trimmed)
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                error = e.message?.takeIf { it.isNotBlank() } ?: "Could not rename the account"
+                                saving = false
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f).heightIn(min = 44.dp).testTag("phone-account-rename-save"),
+                )
             }
         }
     }

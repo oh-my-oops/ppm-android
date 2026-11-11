@@ -91,6 +91,7 @@ fun PhoneFilesTreeScreen(
     onNavigate: () -> Unit = {},
     recentTabIds: List<String> = emptyList(),
     modifier: Modifier = Modifier,
+    onSearch: (() -> Unit)? = null,
 ) {
     val tree = model.fileTree
     val project = model.selectedProject
@@ -210,6 +211,7 @@ fun PhoneFilesTreeScreen(
         onGoToFile = { showGoToFile = true },
         onRecentFiles = if (recentFiles.isNotEmpty()) ({ showRecent = true }) else null,
         onMore = { showOverflowSheet = true },
+        onSearch = onSearch,
         modifier = modifier,
     )
 
@@ -393,6 +395,7 @@ fun PhoneFilesTreeContent(
     folderChangedCounts: Map<String, Int> = emptyMap(),
     listState: LazyListState = rememberLazyListState(),
     onMore: (() -> Unit)? = null,
+    onSearch: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
 
@@ -620,16 +623,23 @@ fun PhoneFilesTreeContent(
                         style = ppmText(14.5f, lineHeight = 20f).copy(color = tokens.text3.color),
                     )
                 }
-                if (onRecentFiles != null) Row(
+                if (onRecentFiles != null || onSearch != null) Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Chip(
+                    if (onRecentFiles != null) Chip(
                         label = "Recent",
                         icon = ProductIcon.History,
                         onClick = onRecentFiles,
                         modifier = Modifier.testTag("phone-files-recent-chip"),
+                    )
+                    // Content search, the web sidebar's Search panel (`search-panel.tsx`).
+                    if (onSearch != null) Chip(
+                        label = "Search in files",
+                        icon = ProductIcon.Search,
+                        onClick = onSearch,
+                        modifier = Modifier.testTag("phone-files-search-chip"),
                     )
                 }
             }

@@ -15,6 +15,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -26,11 +29,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.ui.htmlNumberValue
+import com.hienlh.ppm.app.ui.jsParseInt
 import com.hienlh.ppm.app.ui.phone.OpenOnTabletNotice
 import com.hienlh.ppm.client.aiSettings
 import com.hienlh.ppm.client.probeProvider
@@ -52,6 +62,7 @@ import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.ProviderProbeStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
 
 data class PhoneSelectOption(
     val value: String,
@@ -164,22 +175,12 @@ fun PhoneAiProviderPage(
         }
     }
 
-    fun saveField(provider: String, field: String, value: String?) {
-        val current = settings
-        if (current != null) {
-            val prevProvider = current.providers[provider] ?: AiProviderSettings()
-            val nextProvider = when (field) {
-                "model" -> prevProvider.copy(model = value)
-                "effort" -> prevProvider.copy(effort = value)
-                "permission_mode" -> prevProvider.copy(permissionMode = value)
-                else -> prevProvider
-            }
-            settings = current.copy(providers = current.providers + (provider to nextProvider))
-        }
+    fun savePatch(patch: JsonObject, local: (AiSettings) -> AiSettings) {
+        settings = settings?.let(local)
         val client = api ?: return
         scope.launch {
             try {
-                val updated = client.updateAiSettings(AiSettingsPatch.field(provider, field, value))
+                val updated = client.updateAiSettings(patch)
                 model.newChats.preparationCache.clear()
                 model.newChatCache.writeSettings(updated.preparation)
                 settings = updated
@@ -190,6 +191,24 @@ fun PhoneAiProviderPage(
                 errorMsg = e.message
             }
         }
+    }
+
+    fun updateProvider(provider: String, change: (AiProviderSettings) -> AiProviderSettings): (AiSettings) -> AiSettings = { current ->
+        current.copy(providers = current.providers + (provider to change(current.providers[provider] ?: AiProviderSettings())))
+    }
+
+    fun saveField(provider: String, field: String, value: String?) {
+        savePatch(
+            AiSettingsPatch.field(provider, field, value),
+            updateProvider(provider) { prev ->
+                when (field) {
+                    "model" -> prev.copy(model = value)
+                    "effort" -> prev.copy(effort = value)
+                    "permission_mode" -> prev.copy(permissionMode = value)
+                    else -> prev
+                }
+            },
+        )
     }
 
     val providerTabs = settings?.providerTabs?.takeIf { it.isNotEmpty() }
@@ -250,9 +269,40 @@ fun PhoneAiProviderPage(
                 }
             },
             onOpenAccounts = onOpenAccounts,
+            // Not offered until the settings are read: a field showing the default would save it.
+            maxTurns = if (isSdk && settings != null) currentConfig?.maxTurns ?: PHONE_DEFAULT_MAX_TURNS else null,
+            onSaveMaxTurns = { turns ->
+                val provider = activeProvider
+                savePatch(AiSettingsPatch.field(provider, "max_turns", turns), updateProvider(provider) { it.copy(maxTurns = turns) })
+            },
+            leftoverIdleMinutes = settings?.let { phoneLeftoverIdleMinutes(it.leftoverProcessesIdleMinutes) },
+            onSaveLeftoverIdleMinutes = { minutes ->
+                savePatch(AiSettingsPatch.leftoverIdleMinutes(minutes)) { it.copy(leftoverProcessesIdleMinutes = minutes) }
+            },
         )
     }
 }
+
+/** `config?.max_turns ?? 100` of the web's field. */
+internal const val PHONE_DEFAULT_MAX_TURNS = 100
+internal const val PHONE_MAX_TURNS_LIMIT = 1000
+
+/** `MAX_LEFTOVER_IDLE_MINUTES` and `LOG_ONLY_IDLE_MINUTES` of `src/shared/leftover-processes.ts`. */
+internal const val PHONE_MAX_LEFTOVER_IDLE_MINUTES = 1440
+private const val PHONE_LOG_ONLY_IDLE_MINUTES = 30
+
+/** `leftoverIdleMinutes(settings)`: the saved value when it is a valid one, else the default, 0. */
+internal fun phoneLeftoverIdleMinutes(saved: Int?): Int = saved?.takeIf { it in 0..PHONE_MAX_LEFTOVER_IDLE_MINUTES } ?: 0
+
+/**
+ * What the web's number field saves on blur: the typed number brought into [min]..[max], or null for
+ * a field that holds no number (which shows the saved value again rather than looking saved).
+ */
+internal fun phoneClampedNumber(typed: String, min: Int, max: Int): Int? =
+    jsParseInt(htmlNumberValue(typed.trim()))?.coerceIn(min.toDouble(), max.toDouble())?.toInt()
+
+/** The web's warning under Max Turns, at 0 (no limit) or above 500. */
+internal fun phoneMaxTurnsCostWarning(turns: Int): Boolean = turns == 0 || turns > 500
 
 @Composable
 fun PhoneAiProviderContent(
@@ -274,6 +324,12 @@ fun PhoneAiProviderContent(
     onRetryProbe: () -> Unit = {},
     onOpenAccounts: () -> Unit = {},
     modifier: Modifier = Modifier,
+    /** The active provider's Max Turns; null hides the field (not an SDK provider, or nothing read yet). */
+    maxTurns: Int? = null,
+    onSaveMaxTurns: (Int) -> Unit = {},
+    /** `leftover_processes_idle_minutes`, for every provider; null hides the field. */
+    leftoverIdleMinutes: Int? = null,
+    onSaveLeftoverIdleMinutes: (Int) -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     var modelSheetOpen by remember { mutableStateOf(false) }
@@ -452,9 +508,58 @@ fun PhoneAiProviderContent(
             )
         }
 
+        if (maxTurns != null) {
+            PhoneSectionCard {
+                PhoneNumberSetting(
+                    label = "Max Turns (up to 1000, 0 = no limit)",
+                    saved = maxTurns,
+                    min = 0,
+                    max = PHONE_MAX_TURNS_LIMIT,
+                    // A field per provider: switching provider shows that provider's value.
+                    key = activeProvider,
+                    tag = "phone-ai-max-turns",
+                    onSave = onSaveMaxTurns,
+                ) {
+                    if (phoneMaxTurnsCostWarning(maxTurns)) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.testTag("phone-ai-max-turns-warning"),
+                        ) {
+                            PpmIcon(ProductIcon.AlertTriangle, 13.dp, tokens.warning.color)
+                            BasicText(
+                                text = "Every step is a paid model call. With a limit this high, or none, a task left running unattended can go on for hours and run up a large bill.",
+                                style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (leftoverIdleMinutes != null) {
+            PhoneSectionCard {
+                PhoneNumberSetting(
+                    label = "Stop leftover processes after (idle minutes, 0 = log only)",
+                    saved = leftoverIdleMinutes,
+                    min = 0,
+                    max = PHONE_MAX_LEFTOVER_IDLE_MINUTES,
+                    key = "leftover",
+                    tag = "phone-ai-leftover-idle",
+                    onSave = onSaveLeftoverIdleMinutes,
+                ) {
+                    BasicText(
+                        text = "Servers, emulators and other processes a chat's commands started and left running are stopped once " +
+                            "the chat has been idle this long, and at once when the chat is deleted. At 0 nothing is stopped: the " +
+                            "server log names what $PHONE_LOG_ONLY_IDLE_MINUTES idle minutes would have stopped. Linux with systemd only.",
+                        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+                    )
+                }
+            }
+        }
+
         // Tablet-only notice for advanced AI settings
         OpenOnTabletNotice(
-            text = "Keys, limits, MCP, teams and instructions open on a tablet.",
+            text = "Keys, budgets, MCP, teams and instructions open on a tablet.",
         )
 
         Spacer(Modifier.height(16.dp))
@@ -702,5 +807,66 @@ internal fun PhonePillButton(
             ),
             maxLines = 1,
         )
+    }
+}
+
+/**
+ * A number setting saved the way the web's `onBlur` saves it: when the field loses focus or the
+ * keyboard's Done is pressed, the typed number is brought into [min]..[max] and saved, and a
+ * field holding no number shows [saved] again. [key] gives each provider a field of its own.
+ */
+@Composable
+internal fun PhoneNumberSetting(
+    label: String,
+    saved: Int,
+    min: Int,
+    max: Int,
+    key: String,
+    tag: String,
+    onSave: (Int) -> Unit,
+    below: @Composable () -> Unit = {},
+) {
+    val tokens = LocalPpmTokens.current
+    val focusManager = LocalFocusManager.current
+    var text by remember(key, saved) { mutableStateOf(saved.toString()) }
+    var focused by remember(key) { mutableStateOf(false) }
+    // Done clears focus, which commits again before [saved] has caught up: one save per value.
+    var sent by remember(key, saved) { mutableStateOf<Int?>(null) }
+    fun commit() {
+        val value = phoneClampedNumber(text, min, max)
+        text = (value ?: saved).toString()
+        if (value != null && value != saved && value != sent) {
+            sent = value
+            onSave(value)
+        }
+    }
+    val shape = RoundedCornerShape(8.dp)
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        BasicText(label, style = ppmText(14f, FontWeight.Medium).copy(color = tokens.text.color))
+        BasicTextField(
+            value = text,
+            onValueChange = { typed -> text = typed.filter { it.isDigit() || it == '-' }.take(6) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { commit(); focusManager.clearFocus() }),
+            textStyle = ppmText(13f).copy(color = tokens.text.color),
+            cursorBrush = SolidColor(tokens.accent.color),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 44.dp)
+                .onFocusChanged { state ->
+                    if (focused && !state.isFocused) commit()
+                    focused = state.isFocused
+                }
+                .clip(shape)
+                .background(tokens.bgSolid.color)
+                .cssBorder(tokens.border.color, shape)
+                .padding(horizontal = 10.dp, vertical = 12.dp)
+                .testTag(tag),
+        )
+        below()
     }
 }
