@@ -101,6 +101,9 @@ class ChatTranscript(var providerId: String? = null) {
     var mcpNeedsAuth: List<String> = emptyList()
         private set
 
+    /** Messages sent while a turn ran, not yet read by the AI: the server's list. */
+    val queue = MessageQueue()
+
     /** Sends the server may still refuse, by id: what a refusal hands back. Kept a minute, 20 at most. */
     private val unanswered = LinkedHashMap<String, Unanswered>()
 
@@ -191,11 +194,20 @@ class ChatTranscript(var providerId: String? = null) {
                 if (sent != null) rejected = RejectedSend(sent.content, sent.replyTo, frame.message)
             }
             is ChatFrame.UserMessage -> {
-                // Sent from another device; the sender never gets this echo.
+                // One sent from another device, or a queued message (this device's too) that the AI
+                // has just started on. The sender's own bubble, when it drew one, carries the same id.
                 activity++
+                val clientId = frame.clientMessageId
+                val drawn = clientId != null && items.any { it.id == clientId }
+                // Mid-turn it splits the turn: what streamed so far is its own reply, and the stream
+                // after it starts a new one.
+                if (phase.isRunning && !drawn) finalizeLive()
                 val last = items.lastOrNull()
-                if (!(last?.role == ChatItem.Role.USER && last.text == frame.content)) appendUser(frame.content, now = now)
+                val repeated = clientId == null && last?.role == ChatItem.Role.USER && last.text == frame.content
+                if (!drawn && !repeated) appendUser(frame.content, clientId, now)
             }
+            is ChatFrame.QueueState -> queue.replace(frame.queue)
+            is ChatFrame.QueueTakenBack -> queue.answered(frame)
             is ChatFrame.TitleUpdated -> if (frame.title.isNotEmpty()) title = frame.title
             is ChatFrame.ApprovalResolved -> {
                 val id = frame.requestId
@@ -214,10 +226,12 @@ class ChatTranscript(var providerId: String? = null) {
 
     // User actions
 
-    /** The message to put on the socket; the transcript shows it at once. */
     /**
-     * [content] shown at once, with [replyTo] quoted above it as the server will store it, and
-     * the frame that sends it.
+     * The frame that sends [content]. While no turn runs it is shown at once, with [replyTo] quoted
+     * above it as the server will store it. While one runs it is queued (`sendMessage`): nothing is
+     * drawn, the reply streaming goes on untouched, and the message shows in [queue] until the AI
+     * starts on it, when the server's `user_message` puts it in the conversation. [sendNow] has
+     * the AI read the queue at once.
      */
     fun send(
         content: String,
@@ -226,6 +240,7 @@ class ChatTranscript(var providerId: String? = null) {
         replyTo: ReplyReference? = null,
         images: List<InlineImage> = emptyList(),
         imagePaths: List<String> = emptyList(),
+        sendNow: Boolean = false,
     ): ChatClientMessage.Message {
         localCounter++
         val id = "local-user-$localCounter-$now"
@@ -234,15 +249,14 @@ class ChatTranscript(var providerId: String? = null) {
         unanswered.values.removeAll { now - it.sentAt >= 60_000 }
         unanswered[id] = Unanswered(content, replyTo, now)
         if (unanswered.size > 20) unanswered.remove(unanswered.keys.first())
+        if (phase.isRunning) {
+            // A refusal still finds it in [unanswered] and gives its text back.
+            return ChatClientMessage.Message(id, content, options, replyTo, images, imagePaths, queued = true, sendNow = sendNow)
+        }
         // The server skips a pending approval when a message arrives.
         pendingApproval = null
-        if (phase.isRunning) {
-            // A follow-up: what streamed so far stays above the new message.
-            finalizeLive()
-        } else {
-            phase = SessionPhase.INITIALIZING
-            turnFinalized = false
-        }
+        phase = SessionPhase.INITIALIZING
+        turnFinalized = false
         appendUser(ChatReply.encode(content, replyTo), id, now)
         return ChatClientMessage.Message(id, content, options, replyTo, images, imagePaths)
     }
@@ -379,6 +393,8 @@ class ChatTranscript(var providerId: String? = null) {
 
     private fun applySessionState(state: SessionStateFrame, now: Long, effects: MutableList<ChatEffect>) {
         mcpNeedsAuth = state.mcpNeedsAuth
+        // Answers that do not carry the queue leave it as it was.
+        state.queue?.let(queue::replace)
         val wasRunning = phase.isRunning
         phase = state.phase
         val stop = state.turnStop

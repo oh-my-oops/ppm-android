@@ -13,6 +13,7 @@ import com.hienlh.ppm.protocol.ChatFrame
 import com.hienlh.ppm.protocol.InlineImage
 import com.hienlh.ppm.protocol.PickedAccount
 import com.hienlh.ppm.protocol.PromptCacheState
+import com.hienlh.ppm.protocol.QueuedMessage
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionPhase
@@ -89,6 +90,10 @@ data class ChatState(
     val backgroundShells: List<BackgroundShell> = emptyList(),
     /** The MCP servers this chat's Claude cannot use until someone signs in. */
     val mcpNeedsAuth: List<String> = emptyList(),
+    /** Messages sent while a turn ran, not yet read by the AI, in the order it will read them: the server's list. */
+    val queue: List<QueuedMessage> = emptyList(),
+    /** A queued message this device asked back, for the composer ([ChatController.queueAnswerTaken]). */
+    val queueAnswer: QueueTakeBackAnswer? = null,
 ) {
     val isRunning: Boolean get() = phase.isRunning
     /** The socket is open. A message sent while it is not shows at once and goes out once it is. */
@@ -233,7 +238,8 @@ class ChatController(
      * [options] carries the composer's mode and priority; the model, effort and thinking are added
      * here. [replyTo] goes only if it quotes this chat: the server refuses any other. [images] ride
      * in the frame and [imagePaths] name their uploads; a message of pictures alone may have no text.
-     * While the socket is down the message shows at once and goes out once it is back.
+     * While the socket is down the message shows at once and goes out once it is back. Sent while
+     * a turn runs it is queued instead ([ChatState.queue]); [sendNow] then has the AI read the queue at once.
      */
     fun send(
         text: String,
@@ -241,11 +247,12 @@ class ChatController(
         replyTo: ReplyReference? = null,
         images: List<InlineImage> = emptyList(),
         imagePaths: List<String> = emptyList(),
+        sendNow: Boolean = false,
     ) {
         val content = text.trim()
         if ((content.isEmpty() && images.isEmpty()) || sessionId == null || stopped) return
         val reply = replyTo?.takeIf { it.sessionId == sessionId && it.providerId == providerId }
-        transmit(transcript.send(content, settings.turnOptions(options), clock(), reply, images, imagePaths))
+        transmit(transcript.send(content, settings.turnOptions(options), clock(), reply, images, imagePaths, sendNow))
         onAttention?.invoke(ChatAttention.Answered)
         publish()
     }
@@ -287,6 +294,27 @@ class ChatController(
 
     fun takeRejected() {
         transcript.takeRejected()
+        publish()
+    }
+
+    /**
+     * Edit on a queued message (`takeBackQueued`): the server answers with its text, which lands in
+     * [ChatState.queueAnswer]. Remove ([discard]) drops it instead, so nothing comes back.
+     */
+    fun takeBackQueued(id: String, discard: Boolean = false) {
+        if (stopped || id.isEmpty()) return
+        transmit(transcript.queue.takeBack(id, discard))
+    }
+
+    /** Send now (`sendQueuedNow`): the AI reads the queue now instead of at its next step. */
+    fun sendQueuedNow() {
+        if (stopped) return
+        transmit(ChatClientMessage.QueueSendNow)
+    }
+
+    /** The composer has [ChatState.queueAnswer]. */
+    fun queueAnswerTaken() {
+        transcript.queue.answerTaken()
         publish()
     }
 
@@ -661,6 +689,8 @@ class ChatController(
             team = team,
             backgroundShells = transcript.backgroundShells,
             mcpNeedsAuth = transcript.mcpNeedsAuth,
+            queue = transcript.queue.messages,
+            queueAnswer = transcript.queue.answer,
         )
     }
 
