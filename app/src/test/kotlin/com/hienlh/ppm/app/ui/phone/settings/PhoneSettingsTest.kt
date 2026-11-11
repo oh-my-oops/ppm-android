@@ -46,7 +46,7 @@ class PhoneSettingsTest {
     fun `phone settings route model maps the 6 full sections and routes all other categories to Open on a tablet`() {
         // Requirement 15.1: 6 full phone sections
         assertEquals(
-            listOf("Accounts", "AI Provider", "Notifications", "Theme", "Servers", "Schedules", "About"),
+            listOf("Accounts", "AI Provider", "Notifications", "Theme", "Servers", "Schedules", "Storage", "About"),
             PhoneSettingsSection.entries.map { it.title },
         )
         assertEquals(
@@ -81,6 +81,9 @@ class PhoneSettingsTest {
             PhoneSettingsRoute.FullPage(PhoneSettingsSection.Schedules),
             resolvePhoneSettingsRoute("schedules"),
         )
+        // Storage, which the web's Query Audit Log section folded into.
+        assertEquals(PhoneSettingsRoute.FullPage(PhoneSettingsSection.Storage), resolvePhoneSettingsRoute("storage"))
+        assertEquals(PhoneSettingsRoute.FullPage(PhoneSettingsSection.Storage), resolvePhoneSettingsRoute("query-audit"))
 
         // Requirement 15.2: Every other SettingsCategory resolves to TabletOnlyPage
         val fullCategories = setOf(
@@ -90,6 +93,7 @@ class PhoneSettingsTest {
             SettingsCategory.Appearance,
             SettingsCategory.Servers,
             SettingsCategory.Schedules,
+            SettingsCategory.QueryAudit,
         )
         for (category in SettingsCategory.entries) {
             if (category in fullCategories) {
