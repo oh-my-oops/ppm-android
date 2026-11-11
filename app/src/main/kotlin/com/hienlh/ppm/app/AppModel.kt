@@ -1174,6 +1174,9 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** The projects PPM just wrote to a repository of (`git:changed`). */
     private val gitChanged = MutableSharedFlow<String>(extraBufferCapacity = 16)
     val gitChangedEvents: kotlinx.coroutines.flow.SharedFlow<String> get() = gitChanged
+    /** `file:changed` as (project, path): a viewer that reads a file without a document (the xlsx preview) follows its own file. */
+    private val fileChanged = MutableSharedFlow<Pair<String, String?>>(extraBufferCapacity = 16)
+    val fileChangedEvents: kotlinx.coroutines.flow.SharedFlow<Pair<String, String?>> get() = fileChanged
 
     /** Whether the app is in front (the web's `document.hidden`, inverted). */
     private var _windowVisible by mutableStateOf(true)
@@ -1838,6 +1841,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             fileIndex?.markStale(project)
             fileTree?.onFileChanged(project, path)
             documents.values.forEach { it.fileChanged(project, path) }
+            fileChanged.tryEmit(project to path)
             gitChanged.tryEmit(project)
         }
         events.onIndexChanged = { fileIndex?.rebuilt(it) }

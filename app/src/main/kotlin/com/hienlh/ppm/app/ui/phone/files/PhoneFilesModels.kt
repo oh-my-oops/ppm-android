@@ -594,7 +594,8 @@ enum class PhoneViewerOverflowAction(
  * - [IMAGE]: Image viewer (`V1`)
  * - [PDF]: Page-by-page PDF viewer (`V2`, Requirement 8.2)
  * - [MARKDOWN]: Markdown Preview / Code viewer (`V3`)
- * - [TABLET_ONLY_VIEWER]: Spreadsheets (`csv, tsv, xls, xlsx`), Word (`doc, docx`), Audio, Video,
+ * - [TABLET_ONLY_VIEWER]: Spreadsheets (`csv, tsv, xls`; `xlsx`/`xlsm` tabs are taken first by
+ *   [PhoneFileTabHost] to the read-only preview, `PhoneXlsxViewer`), Word (`doc, docx`), Audio, Video,
  *   SQLite, or HTML preview — shows what the file is, `Download`, and
  *   `"Open on a tablet to view or edit it."` (`V9`, Note 41)
  * - [BINARY_UNREADABLE]: Raw binary that no device displays — shows

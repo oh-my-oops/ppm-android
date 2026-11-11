@@ -1,6 +1,8 @@
 package com.hienlh.ppm.client
 
 import com.hienlh.ppm.protocol.array
+import com.hienlh.ppm.protocol.bool
+import com.hienlh.ppm.protocol.int
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.string
 import kotlinx.coroutines.Dispatchers
@@ -106,3 +108,43 @@ suspend fun ApiClient.fsRead(path: String): String = call("GET", "/api/fs/read",
 /** `GET /api/project/:name/files/read`: a text file inside [project], as the web reads `package.json` for its icons. */
 suspend fun ApiClient.readProjectFile(project: String, path: String): String =
     call("GET", "/api/project/${ApiClient.escape(project)}/files/read", listOf("path" to path))["content"].string.orEmpty()
+
+/**
+ * One sheet of a workbook as `GET …/files/xlsx-sheet` answers it (`XlsxSheet` in `xlsx-reader.ts`):
+ * every sheet's name, the index of the one in [rows], the rows from row 1 (`null` an empty cell, a
+ * row may be shorter than [columns]), and whether rows or columns were cut to the server's limits.
+ */
+data class XlsxSheet(
+    val sheets: List<String>,
+    val sheet: Int,
+    val rows: List<List<String?>>,
+    val columns: Int,
+    val truncatedRows: Boolean,
+    val truncatedColumns: Boolean,
+)
+
+/**
+ * The read-only preview's sheet [sheet] of [path] (`xlsx-preview.tsx` `sheetUrl`): an absolute path
+ * through `GET /api/fs/xlsx-sheet`, anything else from inside [project]. A workbook the server
+ * cannot show (legacy `.xls`, password-protected, too large, a sheet that is gone) is a
+ * [PpmError.Server] carrying the server's reason and status.
+ */
+suspend fun ApiClient.xlsxSheet(project: String?, path: String, sheet: Int): XlsxSheet {
+    val query = listOf("path" to path, "sheet" to sheet.toString())
+    val data = if (ABSOLUTE_PATH.containsMatchIn(path) || project == null) {
+        call("GET", "/api/fs/xlsx-sheet", query)
+    } else {
+        call("GET", "/api/project/${ApiClient.escape(project)}/files/xlsx-sheet", query)
+    }
+    val rows = data["rows"].array?.map { row ->
+        row.array?.map { cell -> (cell as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content } ?: emptyList()
+    } ?: throw PpmError.BadResponse("The workbook could not be read.")
+    return XlsxSheet(
+        sheets = data["sheets"].array?.map { it.string.orEmpty() } ?: emptyList(),
+        sheet = data["sheet"].int ?: 0,
+        rows = rows,
+        columns = data["columns"].int ?: rows.maxOfOrNull { it.size } ?: 0,
+        truncatedRows = data["truncatedRows"].bool == true,
+        truncatedColumns = data["truncatedColumns"].bool == true,
+    )
+}

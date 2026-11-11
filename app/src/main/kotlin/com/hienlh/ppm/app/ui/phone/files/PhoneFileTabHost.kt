@@ -52,6 +52,11 @@ fun PhoneFileTabHost(model: AppModel, tab: WorkspaceTab, modifier: Modifier = Mo
     val path = tab.metaString("filePath").orEmpty()
     val project = tab.projectId ?: tab.metaString("projectName")
     val buffer = fileBufferContent(tab)
+    // A workbook is read sheet by sheet by the server (`xlsx-preview.tsx`), never as the tab's file content.
+    if (buffer == null && isPhoneXlsxPath(path) && tab.metadata["isUntitled"].bool != true) {
+        PhoneXlsxViewerHost(model, project, path, modifier)
+        return
+    }
     val isUntitled = tab.metadata["isUntitled"].bool == true
     val api = model.api
     val controller = if (buffer == null) remember(model, api, tab.id, path, project) { model.fileDocument(tab) } else null
