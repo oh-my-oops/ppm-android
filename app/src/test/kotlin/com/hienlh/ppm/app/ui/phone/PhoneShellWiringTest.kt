@@ -113,14 +113,16 @@ class PhoneShellWiringTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("phone-diff-screen").assertExists()
 
-        // 4. Terminal area renders phone terminal screen + status bar + phone 2-row key toolbar
+        // 4. Terminal area with no terminal tab and no server says so, with no key row or status bar for a shell that
+        // does not exist (the live terminal is TerminalBody, covered by TerminalMountTest)
         composeRule.runOnIdle {
             nav.visitTab(PhoneNav.areaTabId(PhoneArea.TERMINAL))
         }
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("phone-terminal-screen").assertExists()
-        composeRule.onNodeWithTag("phone-terminal-status-bar").assertExists()
-        composeRule.onNodeWithTag("terminal-key-row").assertExists()
+        composeRule.onNodeWithTag("phone-terminal-empty").assertExists()
+        assertEquals(0, composeRule.onAllNodesWithTag("terminal-key-row").fetchSemanticsNodes().size)
+        assertEquals(0, composeRule.onAllNodesWithTag("phone-terminal-open").fetchSemanticsNodes().size)
 
         // 5. Database area renders DatabaseSidebarPane in read-only mode
         composeRule.runOnIdle {

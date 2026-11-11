@@ -51,7 +51,10 @@ import com.hienlh.ppm.design.kit.SectionLabel
 import com.hienlh.ppm.design.kit.Sheet
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.state.logs.LogChatInfo
 import com.hienlh.ppm.state.logs.LogEntry
+import com.hienlh.ppm.state.logs.LogRow
+import com.hienlh.ppm.state.logs.clockTime
 import com.hienlh.ppm.state.logs.foldRepeats
 import com.hienlh.ppm.state.logs.restartDividers
 import com.hienlh.ppm.state.settings.ScheduleLogLine
@@ -62,6 +65,7 @@ import com.hienlh.ppm.state.sysmon.PerformanceDevices
 import com.hienlh.ppm.state.sysmon.ServiceDetails
 import com.hienlh.ppm.state.sysmon.ServicesSnapshot
 import com.hienlh.ppm.state.sysmon.TableRow
+import com.hienlh.ppm.state.tunnels.SetupState
 import com.hienlh.ppm.state.tunnels.TunnelEntry
 import java.util.Locale
 
@@ -81,6 +85,7 @@ fun PhoneSystemMonitorScreen(
     snapshot: MetricsSnapshot?,
     servicesSnapshot: ServicesSnapshot? = null,
     serviceDetails: ServiceDetails? = null,
+    servicesError: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
@@ -334,6 +339,24 @@ fun PhoneSystemMonitorScreen(
 
                     PhoneMonitorTab.SERVICES -> {
                         val services = state.filteredServices(servicesSnapshot)
+                        val emptyText = when {
+                            servicesError != null && servicesSnapshot == null -> servicesError
+                            servicesSnapshot == null -> "Loading services…"
+                            !servicesSnapshot.supported -> "Services are not available on this host."
+                            services.isEmpty() -> "No services match."
+                            else -> null
+                        }
+                        if (emptyText != null) {
+                            BasicText(
+                                text = emptyText,
+                                style = ppmText(13f, FontWeight.Normal).copy(
+                                    color = if (servicesError != null && servicesSnapshot == null) tokens.error.color else tokens.text2.color,
+                                ),
+                                modifier = Modifier
+                                    .padding(vertical = 16.dp)
+                                    .testTag("phone-sysmon-services-empty"),
+                            )
+                        }
                         for (svc in services) {
                             // Look-only: tap opens read-only detail sheet; no Start/Stop/Restart buttons
                             ListRow(
@@ -442,7 +465,7 @@ fun PhoneSystemMonitorScreen(
                         text = detailSvc.description.ifBlank { "System service" },
                         style = ppmText(13.5f, FontWeight.Normal).copy(color = tokens.text2.color),
                     )
-                    if (serviceDetails != null && serviceDetails.logs.isNotEmpty()) {
+                    if (serviceDetails != null && serviceDetails.service.unit == detailSvc.unit && serviceDetails.logs.isNotEmpty()) {
                         SectionLabel(text = "Recent Logs")
                         for (line in serviceDetails.logs.takeLast(10)) {
                             BasicText(
@@ -534,19 +557,27 @@ fun PhoneLogsScreen(
     state: PhoneLogsState,
     entries: List<LogEntry>,
     restarts: List<Long> = emptyList(),
-    onDownloadLog: () -> Unit = {},
+    titles: Map<String, String> = emptyMap(),
+    chats: List<LogChatInfo> = emptyList(),
+    hasMore: Boolean = false,
+    loading: Boolean = false,
+    error: String? = null,
+    onLoadOlder: (() -> Unit)? = null,
+    onDownloadLog: ((List<LogRow>) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
     val filtered = remember(
         entries,
+        titles,
         state.source,
         state.search,
         state.caseSensitive,
         state.regex,
         state.levels,
+        state.chat,
     ) {
-        state.filterEntries(entries)
+        state.filterEntries(entries, titles)
     }
     val folded = remember(filtered) { foldRepeats(filtered) }
     val dividers = remember(folded, restarts) { restartDividers(folded, restarts) }
@@ -604,6 +635,61 @@ fun PhoneLogsScreen(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                val chatSid = state.chat
+                if (chatSid != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("phone-logs-chat-filter"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        BasicText(
+                            text = "Only lines naming ${logChatName(chatSid, titles)}",
+                            style = ppmText(12f, FontWeight.Medium).copy(color = tokens.text2.color),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Chip(
+                            label = "All chats",
+                            onClick = { state.chat = null },
+                            modifier = Modifier.testTag("phone-logs-chat-clear"),
+                        )
+                    }
+                }
+                if (error != null) {
+                    BasicText(
+                        text = error,
+                        style = ppmText(12f, FontWeight.Normal).copy(color = tokens.error.color),
+                        modifier = Modifier.testTag("phone-logs-error"),
+                    )
+                }
+                if (hasMore && onLoadOlder != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 44.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .ppmClickable(onClickLabel = "Load earlier lines", onClick = onLoadOlder)
+                            .testTag("phone-logs-load-older"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        BasicText(
+                            text = if (loading) "Loading…" else "Load earlier lines…",
+                            style = ppmText(12f, FontWeight.Medium).copy(color = tokens.accent.color),
+                        )
+                    }
+                }
+                if (folded.isEmpty()) {
+                    BasicText(
+                        text = if (loading) "Loading…" else "No log lines match the current filter.",
+                        style = ppmText(12.5f, FontWeight.Normal).copy(color = tokens.text2.color),
+                        modifier = Modifier
+                            .padding(vertical = 16.dp)
+                            .testTag("phone-logs-empty"),
+                    )
+                }
                 for (row in folded) {
                     val entry = row.entry
                     if (row.key in dividers) {
@@ -648,6 +734,11 @@ fun PhoneLogsScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
+                                BasicText(
+                                    text = clockTime(entry.ts, state.showUtc),
+                                    style = ppmText(10.5f, FontWeight.Normal, FontKind.MONO).copy(color = tokens.text3.color),
+                                    modifier = Modifier.testTag("phone-log-time-${entry.id}"),
+                                )
                                 BasicText(
                                     text = entry.lv.uppercase(),
                                     style = ppmText(10.5f, FontWeight.Bold, FontKind.MONO).copy(color = levelColor),
@@ -745,11 +836,14 @@ fun PhoneLogsScreen(
                     )
                 },
                 footer = {
-                    Chip(
-                        label = "Download as .log",
-                        onClick = onDownloadLog,
-                        modifier = Modifier.testTag("phone-logs-download-btn"),
-                    )
+                    if (onDownloadLog != null) {
+                        Chip(
+                            label = "Download as .log",
+                            enabled = folded.isNotEmpty(),
+                            onClick = { onDownloadLog(folded) },
+                            modifier = Modifier.testTag("phone-logs-download-btn"),
+                        )
+                    }
                     ActionPrimaryButton(
                         label = "Show ${filtered.size} lines",
                         onClick = { state.filtersSheetOpen = false },
@@ -776,6 +870,43 @@ fun PhoneLogsScreen(
                                 modifier = Modifier.testTag("phone-logs-level-$lvl"),
                             )
                         }
+                    }
+
+                    SectionLabel(text = "Chat")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Chip(
+                            label = "All chats",
+                            selected = state.chat == null,
+                            onClick = { state.chat = null },
+                            modifier = Modifier.testTag("phone-logs-chat-all"),
+                        )
+                        val selectedSid = state.chat
+                        val chatChoices = chats.take(40).let { list ->
+                            if (selectedSid != null && list.none { it.sid == selectedSid }) {
+                                listOf(LogChatInfo(sid = selectedSid, title = titles[selectedSid], count = 0, last = 0L)) + list
+                            } else {
+                                list
+                            }
+                        }
+                        for (c in chatChoices) {
+                            Chip(
+                                label = c.title?.takeIf { it.isNotBlank() } ?: logChatName(c.sid, titles),
+                                selected = state.chat == c.sid,
+                                onClick = { state.chat = c.sid },
+                                modifier = Modifier.testTag("phone-logs-chat-${c.sid}"),
+                            )
+                        }
+                    }
+                    if (chats.isEmpty()) {
+                        BasicText(
+                            text = "No chat named in this range",
+                            style = ppmText(11.5f, FontWeight.Normal).copy(color = tokens.text3.color),
+                        )
                     }
 
                     SectionLabel(text = "Time Range")
@@ -807,6 +938,18 @@ fun PhoneLogsScreen(
     }
 }
 
+/** The right-hand word of a transport row, from what the host answered (`TunnelsModel.*Setup`). */
+internal fun transportMeta(setup: SetupState?, readyLabel: String): String = when {
+    setup == null -> "Checking…"
+    setup.done && !setup.warn -> readyLabel
+    setup.warn -> "Needs attention"
+    else -> "Not set up"
+}
+
+/** A chat as the web's logs pane names it: its title, else the first 8 characters of its id. */
+internal fun logChatName(sid: String, titles: Map<String, String>): String =
+    titles[sid]?.takeIf { it.isNotBlank() } ?: sid.take(8)
+
 /**
  * Port Forwarding screen for phone (`designs/ppm-mobile-tablet-redesign/phone/7-tools/index.html` Section 3,
  * Requirement 14.2).
@@ -822,18 +965,24 @@ fun PhoneLogsScreen(
 fun PhonePortForwardingScreen(
     state: PhonePortForwardingState,
     tunnels: List<TunnelEntry>,
-    tailscaleReady: Boolean = true,
-    tailscaleDetail: String = "tailnet-01.ts.net",
-    cloudflareReady: Boolean = true,
-    cloudflareDetail: String = "ppm.example.com",
-    onStartForward: (port: Int, transport: String) -> Unit = { _, _ -> },
-    onStopTunnel: (TunnelEntry) -> Unit = {},
-    onOpenInTab: (TunnelEntry) -> Unit = {},
-    onOpenInBrowser: (TunnelEntry) -> Unit = {},
-    onCopyLink: (TunnelEntry) -> Unit = {},
+    /** `null` while the host is still being asked (`/api/tunnels/transports`). */
+    tailscaleSetup: SetupState? = null,
+    /** `null` while the host is still being asked (`/api/tunnel/named/status`). */
+    cloudflareSetup: SetupState? = null,
+    starting: Boolean = false,
+    error: String? = null,
+    stoppingPid: Int? = null,
+    onStartForward: (port: Int, transport: String) -> Unit,
+    onStopTunnel: (TunnelEntry) -> Unit,
+    onOpenInTab: (TunnelEntry) -> Unit,
+    onOpenInBrowser: (TunnelEntry) -> Unit,
+    onCopyLink: (TunnelEntry) -> Unit,
+    onSelectTransport: (String) -> Unit = { state.transport = it },
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
+    val tailscaleReady = tailscaleSetup?.done == true
+    val cloudflareReady = cloudflareSetup?.done == true
 
     Box(
         modifier = modifier
@@ -853,20 +1002,21 @@ fun PhonePortForwardingScreen(
                 SectionLabel(text = "Transports")
                 ListRow(
                     title = "Tailscale",
-                    subtitle = tailscaleDetail,
-                    meta = if (tailscaleReady) "Connected" else "Not configured",
+                    subtitle = tailscaleSetup?.status ?: "Checking…",
+                    meta = transportMeta(tailscaleSetup, readyLabel = "Connected"),
                     dividerBottom = true,
                     modifier = Modifier.testTag("phone-tunnels-row-tailscale"),
                 )
                 ListRow(
                     title = "Cloudflare",
-                    subtitle = cloudflareDetail,
-                    meta = if (cloudflareReady) "Ready" else "Not configured",
+                    subtitle = cloudflareSetup?.status ?: "Checking…",
+                    meta = transportMeta(cloudflareSetup, readyLabel = "Ready"),
                     dividerBottom = true,
                     modifier = Modifier.testTag("phone-tunnels-row-cloudflare"),
                 )
 
-                if (state.shouldShowTabletSetupNotice(tailscaleReady = tailscaleReady, cloudflareReady = cloudflareReady)) {
+                val bothKnown = tailscaleSetup != null && cloudflareSetup != null
+                if (bothKnown && state.shouldShowTabletSetupNotice(tailscaleReady = tailscaleReady, cloudflareReady = cloudflareReady)) {
                     OpenOnTabletNotice(
                         text = state.tabletSetupNoticeText,
                         modifier = Modifier.testTag("phone-tunnels-tablet-setup-notice"),
@@ -924,16 +1074,25 @@ fun PhonePortForwardingScreen(
                                 }
 
                                 Chip(
-                                    label = "Stop",
+                                    label = if (stoppingPid == entry.pid) "Stopping…" else "Stop",
                                     alert = isExternal,
+                                    enabled = stoppingPid != entry.pid,
                                     onClick = { state.requestStopTunnel(entry, onStopTunnel) },
                                     modifier = Modifier.testTag("phone-tunnel-stop-$portKey"),
                                 )
                             }
 
-                            // 44dp URL action strip
-                            val urlText = entry.url ?: "http://localhost:$portKey"
-                            Row(
+                            // 44dp URL action strip: only an address the host reported can be opened or copied.
+                            val urlText = entry.url?.takeIf { it.isNotBlank() }
+                            if (urlText == null) {
+                                BasicText(
+                                    text = "Address not known",
+                                    style = ppmText(12f, FontWeight.Normal).copy(color = tokens.text2.color),
+                                    modifier = Modifier
+                                        .padding(vertical = 8.dp)
+                                        .testTag("phone-tunnel-no-url-$portKey"),
+                                )
+                            } else Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .defaultMinSize(minHeight = 44.dp)
@@ -988,38 +1147,41 @@ fun PhonePortForwardingScreen(
             val canForward = state.canSubmitForward(
                 tailscaleReady = tailscaleReady,
                 cloudflareReady = cloudflareReady,
+                starting = starting,
             )
             BottomActionCard(
                 modifier = Modifier.testTag("phone-tunnels-bottom-bar"),
                 applyWindowInsets = false,
                 topContent = {
                     BasicText(
-                        text = state.helperText,
-                        style = ppmText(11.5f, FontWeight.Normal).copy(color = tokens.text2.color),
+                        text = error ?: state.helperText,
+                        style = ppmText(11.5f, FontWeight.Normal).copy(
+                            color = if (error != null) tokens.error.color else tokens.text2.color,
+                        ),
+                        modifier = Modifier.testTag(if (error != null) "phone-tunnels-error" else "phone-tunnels-helper"),
                     )
                 },
                 chipsContent = {
                     Chip(
                         label = "Tailscale",
                         selected = state.transport == "tailscale",
-                        onClick = { state.transport = "tailscale" },
+                        onClick = { onSelectTransport("tailscale") },
                         modifier = Modifier.testTag("phone-tunnels-transport-tailscale"),
                     )
                     Chip(
                         label = "Cloudflare",
                         selected = state.transport == "cloudflare",
-                        onClick = { state.transport = "cloudflare" },
+                        onClick = { onSelectTransport("cloudflare") },
                         modifier = Modifier.testTag("phone-tunnels-transport-cloudflare"),
                     )
                 },
                 primaryAction = {
                     ActionPrimaryButton(
-                        label = "+ Forward",
+                        label = if (starting) "Forwarding…" else "+ Forward",
                         enabled = canForward,
                         onClick = {
                             val port = state.parsedPort ?: return@ActionPrimaryButton
                             onStartForward(port, state.transport)
-                            state.portInput = ""
                         },
                         modifier = Modifier.testTag("phone-tunnels-forward-btn"),
                     )
@@ -1073,12 +1235,14 @@ fun PhonePortForwardingScreen(
 @Composable
 fun PhoneSchedulesScreen(
     state: PhoneSchedulesState,
+    /** A schedule's run history (`/api/schedules/:id/runs`); a missing key means it is still being read. */
     runsByScheduleId: Map<Int, List<ScheduleRunRow>> = emptyMap(),
+    /** A script schedule's live log (`/api/schedules/:id/logs`). */
     logsByScheduleId: Map<Int, List<ScheduleLogLine>> = emptyMap(),
-    onRunOrRestart: (ScheduleRowState) -> Unit = {},
-    onToggleEnabled: (ScheduleRowState, Boolean) -> Unit = { row, enabled ->
-        state.toggleScheduleEnabled(row.id, enabled)
-    },
+    loading: Boolean = false,
+    error: String? = null,
+    onRunOrRestart: (ScheduleRowState) -> Unit,
+    onToggleEnabled: (ScheduleRowState, Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
@@ -1093,6 +1257,7 @@ fun PhoneSchedulesScreen(
             schedule = fullLogTarget,
             primaryActionLabel = state.primaryActionLabelFor(fullLogTarget),
             logLines = logsByScheduleId[fullLogTarget.id].orEmpty(),
+            runs = runsByScheduleId[fullLogTarget.id],
             onBack = { state.closeFullLog() },
             onRunOrRestart = { onRunOrRestart(fullLogTarget) },
             modifier = modifier,
@@ -1116,6 +1281,23 @@ fun PhoneSchedulesScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 SectionLabel(text = state.settingsBreadcrumb)
+
+                if (error != null) {
+                    BasicText(
+                        text = error,
+                        style = ppmText(12.5f, FontWeight.Normal).copy(color = tokens.error.color),
+                        modifier = Modifier.testTag("phone-schedules-error"),
+                    )
+                }
+                if (state.schedules.isEmpty()) {
+                    BasicText(
+                        text = if (loading) "Loading schedules…" else "No schedules yet.",
+                        style = ppmText(13f, FontWeight.Normal).copy(color = tokens.text2.color),
+                        modifier = Modifier
+                            .padding(vertical = 12.dp)
+                            .testTag("phone-schedules-empty"),
+                    )
+                }
 
                 for (schedule in state.schedules) {
                     val selected = schedule.id == state.selectedSchedule?.id
@@ -1166,25 +1348,16 @@ fun PhoneSchedulesScreen(
                                     style = ppmText(12f, FontWeight.Normal, FontKind.MONO).copy(color = tokens.text2.color),
                                     modifier = Modifier.testTag("phone-schedule-readonly-preview-${schedule.id}"),
                                 )
-                                val runs = runsByScheduleId[schedule.id].orEmpty().take(3)
-                                for (run in runs) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .testTag("phone-schedule-run-${schedule.id}-${run.id}"),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                    ) {
-                                        BasicText(
-                                            text = "#${run.id} · ${run.startedAt}",
-                                            style = ppmText(11.5f, FontWeight.Medium, FontKind.MONO).copy(color = tokens.text.color),
-                                        )
-                                        BasicText(
-                                            text = run.status,
-                                            style = ppmText(11.5f, FontWeight.SemiBold, FontKind.MONO).copy(
-                                                color = if (run.status == "error") tokens.error.color else tokens.success.color,
-                                            ),
-                                        )
-                                    }
+                                val runs = runsByScheduleId[schedule.id]
+                                if (runs.isNullOrEmpty()) {
+                                    BasicText(
+                                        text = if (runs == null) "Loading runs…" else "No runs yet.",
+                                        style = ppmText(11.5f, FontWeight.Normal).copy(color = tokens.text3.color),
+                                        modifier = Modifier.testTag("phone-schedule-runs-empty-${schedule.id}"),
+                                    )
+                                }
+                                for (run in runs.orEmpty().take(3)) {
+                                    PhoneScheduleRunRow(run = run, scheduleId = schedule.id)
                                 }
                             }
                         }
@@ -1234,6 +1407,79 @@ fun PhoneSchedulesScreen(
     }
 }
 
+/** SQLite's `YYYY-MM-DD HH:MM:SS` (UTC) or ISO-8601, as `schedule-runs.tsx` reads a run's times. */
+internal fun parseScheduleRunTime(ts: String?): java.time.Instant? {
+    if (ts.isNullOrBlank()) return null
+    val iso = if (ts.contains('T')) ts else ts.replace(' ', 'T') + "Z"
+    return runCatching { java.time.Instant.parse(iso) }
+        .recoverCatching { java.time.OffsetDateTime.parse(iso).toInstant() }
+        .getOrNull()
+}
+
+/** `#42 · 11/11 02:00 · 12s · $0.0123`: what the web's run row says, in the phone's own zone. */
+internal fun scheduleRunSummary(run: ScheduleRunRow, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
+    val started = parseScheduleRunTime(run.startedAt)
+    val ended = parseScheduleRunTime(run.endedAt)
+    val startedText = started?.let {
+        java.time.format.DateTimeFormatter.ofPattern("MM/dd HH:mm", Locale.US).withZone(zone).format(it)
+    } ?: run.startedAt
+    val duration = if (started != null && ended != null) "${java.time.Duration.between(started, ended).seconds}s" else "…"
+    return buildString {
+        append("#").append(run.id).append(" · ").append(startedText).append(" · ").append(duration)
+        run.costUsd?.let { append(" · $").append(String.format(Locale.US, "%.4f", it)) }
+    }
+}
+
+@Composable
+private fun PhoneScheduleRunRow(run: ScheduleRunRow, scheduleId: Int, showOutput: Boolean = false) {
+    val tokens = LocalPpmTokens.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("phone-schedule-run-$scheduleId-${run.id}"),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            BasicText(
+                text = scheduleRunSummary(run),
+                style = ppmText(11.5f, FontWeight.Medium, FontKind.MONO).copy(color = tokens.text.color),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            BasicText(
+                text = run.status,
+                style = ppmText(11.5f, FontWeight.SemiBold, FontKind.MONO).copy(
+                    color = when (run.status) {
+                        "error" -> tokens.error.color
+                        "running" -> tokens.warning.color
+                        "done" -> tokens.success.color
+                        else -> tokens.text2.color
+                    },
+                ),
+            )
+        }
+        if (showOutput) {
+            run.error?.takeIf { it.isNotBlank() }?.let {
+                BasicText(
+                    text = it,
+                    style = ppmText(11.5f, FontWeight.Normal, FontKind.MONO).copy(color = tokens.error.color),
+                )
+            }
+            run.outputTruncated?.takeIf { it.isNotBlank() }?.let {
+                BasicText(
+                    text = it,
+                    style = ppmText(11f, FontWeight.Normal, FontKind.MONO, lineHeight = 16f).copy(color = tokens.text2.color),
+                    modifier = Modifier.testTag("phone-schedule-run-output-${run.id}"),
+                )
+            }
+        }
+    }
+}
+
 /**
  * Full log sub-page for a phone schedule (`designs/ppm-mobile-tablet-redesign/phone/7-tools/index.html` Section 4.1).
  */
@@ -1245,6 +1491,7 @@ fun PhoneScheduleLogScreen(
     onBack: () -> Unit,
     onRunOrRestart: () -> Unit,
     modifier: Modifier = Modifier,
+    runs: List<ScheduleRunRow>? = null,
 ) {
     val tokens = LocalPpmTokens.current
 
@@ -1309,14 +1556,35 @@ fun PhoneScheduleLogScreen(
                 }
             }
 
-            for ((idx, line) in logLines.withIndex()) {
-                BasicText(
-                    text = "${line.stream}: ${line.text}",
-                    style = ppmText(12f, FontWeight.Normal, FontKind.MONO, lineHeight = 18f).copy(
-                        color = if (line.stream == "stderr") tokens.error.color else tokens.text.color,
-                    ),
-                    modifier = Modifier.testTag("phone-schedule-log-line-$idx"),
-                )
+            if (schedule.kind.equals("script", ignoreCase = true)) {
+                if (logLines.isEmpty()) {
+                    BasicText(
+                        text = "No output yet.",
+                        style = ppmText(12f, FontWeight.Normal).copy(color = tokens.text3.color),
+                        modifier = Modifier.testTag("phone-schedule-log-empty"),
+                    )
+                }
+                for ((idx, line) in logLines.withIndex()) {
+                    BasicText(
+                        text = "${line.stream}: ${line.text}",
+                        style = ppmText(12f, FontWeight.Normal, FontKind.MONO, lineHeight = 18f).copy(
+                            color = if (line.stream == "stderr") tokens.error.color else tokens.text.color,
+                        ),
+                        modifier = Modifier.testTag("phone-schedule-log-line-$idx"),
+                    )
+                }
+            } else {
+                // A prompt schedule has no process log: its history is its runs, each with its output.
+                if (runs.isNullOrEmpty()) {
+                    BasicText(
+                        text = if (runs == null) "Loading runs…" else "No runs yet.",
+                        style = ppmText(12f, FontWeight.Normal).copy(color = tokens.text3.color),
+                        modifier = Modifier.testTag("phone-schedule-log-empty"),
+                    )
+                }
+                for (run in runs.orEmpty()) {
+                    PhoneScheduleRunRow(run = run, scheduleId = schedule.id, showOutput = true)
+                }
             }
         }
 
@@ -1335,291 +1603,6 @@ fun PhoneScheduleLogScreen(
                 text = "Status: ${schedule.status.state}",
                 style = ppmText(12.5f, FontWeight.Medium, FontKind.MONO).copy(color = tokens.text2.color),
             )
-        }
-    }
-}
-
-/**
- * Drawer tile for Cloud & Share on phone (`designs/ppm-mobile-tablet-redesign/phone/7-tools/index.html` Section 5,
- * Requirement 14.2).
- */
-@Composable
-fun PhoneCloudShareDrawerTile(
-    state: PhoneCloudShareState,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(14.dp)
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = 56.dp)
-            .clip(shape)
-            .background(tokens.panel.color, shape)
-            .cssBorder(tokens.borderSoft.color, shape, width = 1.dp)
-            .ppmClickable(
-                shape = shape,
-                onClickLabel = "Cloud & Share",
-                onClick = onClick,
-            )
-            .padding(horizontal = 14.dp, vertical = 10.dp)
-            .testTag("phone-cloud-share-drawer-tile"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .background(
-                    if (state.tunnelActive) tokens.success.color else tokens.text3.color,
-                    CircleShape,
-                ),
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            BasicText(
-                text = "Cloud & Share",
-                style = ppmText(14f, FontWeight.SemiBold).copy(color = tokens.text.color),
-            )
-            BasicText(
-                text = state.drawerSubtitle,
-                style = ppmText(12f, FontWeight.Normal, FontKind.MONO).copy(color = tokens.text2.color),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        PpmIcon(
-            icon = ProductIcon.ChevronRight,
-            size = 16.dp,
-            tint = tokens.text3.color,
-        )
-    }
-}
-
-/**
- * Cloud & Share bottom sheet on phone (`designs/ppm-mobile-tablet-redesign/phone/7-tools/index.html` Section 5,
- * Requirement 14.2).
- *
- * Includes:
- * - Account row with Sign-out confirmation
- * - Linked device row with Unlink confirmation
- * - Permanent link (`ppm.cloud/<slug>`) with inline slug editor and `2–32 characters: lowercase letters, numbers, hyphens.` validation
- * - Local network row (`http://<lan-ip>:<port>`) with copy button
- * - Public URL section with `168dp` QR code box, copy button, and `Start Sharing` / `Stop Sharing`.
- */
-@Composable
-fun PhoneCloudShareSheet(
-    state: PhoneCloudShareState,
-    onDismiss: () -> Unit,
-    onCopyUrl: (String) -> Unit = {},
-    modifier: Modifier = Modifier,
-) {
-    val tokens = LocalPpmTokens.current
-
-    Sheet(
-        title = "Cloud & Share",
-        onDismiss = onDismiss,
-        forceBottomSheet = true,
-        applyWindowInsets = false,
-        modifier = modifier.testTag("phone-cloud-share-sheet"),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            // Account row
-            ListRow(
-                title = if (state.loggedIn) (state.email ?: "Signed in") else "PPM Cloud Account",
-                subtitle = if (state.loggedIn) "Signed in to PPM Cloud" else "Sign in with device code",
-                dividerBottom = true,
-                trailingContent = {
-                    if (state.loggedIn) {
-                        Chip(
-                            label = "Sign out",
-                            onClick = { state.confirmSignOut = true },
-                            modifier = Modifier.testTag("phone-cloud-signout-btn"),
-                        )
-                    } else {
-                        Chip(
-                            label = "Sign in",
-                            onClick = { state.loggedIn = true },
-                            modifier = Modifier.testTag("phone-cloud-signin-btn"),
-                        )
-                    }
-                },
-            )
-
-            if (state.confirmSignOut) {
-                ConfirmDialogCard(
-                    title = "Sign out of PPM Cloud?",
-                    message = "Your permanent link will pause until you sign in again.",
-                    confirmLabel = "Sign out",
-                    destructive = true,
-                    onConfirm = {
-                        state.loggedIn = false
-                        state.confirmSignOut = false
-                    },
-                    onDismiss = { state.confirmSignOut = false },
-                    modifier = Modifier.testTag("phone-cloud-signout-confirm"),
-                )
-            }
-
-            // Linked device row
-            if (state.linked) {
-                ListRow(
-                    title = state.deviceName ?: "Linked device",
-                    subtitle = "Device status: ${state.deviceStatus}",
-                    dividerBottom = true,
-                    trailingContent = {
-                        Chip(
-                            label = "Unlink",
-                            onClick = { state.confirmUnlink = true },
-                            modifier = Modifier.testTag("phone-cloud-unlink-btn"),
-                        )
-                    },
-                )
-            }
-
-            if (state.confirmUnlink) {
-                ConfirmDialogCard(
-                    title = "Unlink this device?",
-                    message = "Removes ${state.deviceName ?: "this device"} from PPM Cloud.",
-                    confirmLabel = "Unlink",
-                    destructive = true,
-                    onConfirm = {
-                        state.linked = false
-                        state.confirmUnlink = false
-                    },
-                    onDismiss = { state.confirmUnlink = false },
-                    modifier = Modifier.testTag("phone-cloud-unlink-confirm"),
-                )
-            }
-
-            // Permanent link row + inline editor
-            if (!state.editingSlug) {
-                ListRow(
-                    title = "Permanent link",
-                    subtitle = "ppm.cloud/${state.slug}",
-                    subtitleMono = true,
-                    dividerBottom = true,
-                    trailingContent = {
-                        Chip(
-                            label = "Edit",
-                            onClick = { state.startEditSlug() },
-                            modifier = Modifier.testTag("phone-cloud-slug-edit-btn"),
-                        )
-                    },
-                )
-            } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("phone-cloud-slug-editor"),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    PhoneBottomSearchField(
-                        value = state.slugDraft,
-                        placeholder = "workstation-01",
-                        onValueChange = { state.slugDraft = it },
-                        modifier = Modifier.testTag("phone-cloud-slug-input"),
-                    )
-                    BasicText(
-                        text = state.slugValidationMessage,
-                        style = ppmText(11.5f, FontWeight.Normal).copy(
-                            color = if (state.isSlugDraftValid) tokens.text2.color else tokens.error.color,
-                        ),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Chip(
-                            label = "Cancel",
-                            onClick = { state.cancelEditSlug() },
-                            modifier = Modifier.testTag("phone-cloud-slug-cancel"),
-                        )
-                        ActionPrimaryButton(
-                            label = "Save",
-                            enabled = state.isSlugDraftValid,
-                            onClick = { state.saveSlug() },
-                            modifier = Modifier.testTag("phone-cloud-slug-save"),
-                        )
-                    }
-                }
-            }
-
-            // Local network URL row
-            ListRow(
-                title = "Local network",
-                subtitle = state.localUrl,
-                subtitleMono = true,
-                dividerBottom = true,
-                trailingContent = {
-                    Chip(
-                        label = "Copy",
-                        onClick = { onCopyUrl(state.localUrl) },
-                        modifier = Modifier.testTag("phone-cloud-copy-local"),
-                    )
-                },
-            )
-
-            // Public URL + 168dp QR code section
-            SectionLabel(text = "Public URL")
-            if (state.tunnelActive) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    // 168dp QR container
-                    Box(
-                        modifier = Modifier
-                            .size(168.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White, RoundedCornerShape(16.dp))
-                            .cssBorder(tokens.borderSoft.color, RoundedCornerShape(16.dp), width = 1.dp)
-                            .testTag("phone-cloud-qr-box"),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        BasicText(
-                            text = "QR",
-                            style = ppmText(14f, FontWeight.Bold, FontKind.MONO).copy(color = Color.Black),
-                        )
-                    }
-
-                    val pubUrl = state.publicUrl ?: "https://ppm.cloud/${state.slug}"
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        BasicText(
-                            text = pubUrl,
-                            style = ppmText(12.5f, FontWeight.Medium, FontKind.MONO).copy(color = tokens.accent.color),
-                            modifier = Modifier.weight(1f),
-                        )
-                        Chip(
-                            label = "Copy",
-                            onClick = { onCopyUrl(pubUrl) },
-                            modifier = Modifier.testTag("phone-cloud-copy-public"),
-                        )
-                    }
-
-                    ActionPrimaryButton(
-                        label = "Stop Sharing",
-                        destructive = true,
-                        onClick = { state.stopSharing() },
-                        modifier = Modifier.testTag("phone-cloud-stop-sharing-btn"),
-                    )
-                }
-            } else {
-                ActionPrimaryButton(
-                    label = "Start Sharing",
-                    onClick = { state.startSharing() },
-                    modifier = Modifier.testTag("phone-cloud-start-sharing-btn"),
-                )
-            }
         }
     }
 }

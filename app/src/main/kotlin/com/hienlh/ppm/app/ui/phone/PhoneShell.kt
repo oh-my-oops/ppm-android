@@ -401,6 +401,16 @@ fun PhoneShell(
                         handleDrawerSelection(model, PhoneArea.CLOUD_AND_SHARE.id, openTabs, nav)
                     },
                 ),
+                DrawerToolTileItem(
+                    id = PhoneArea.SCHEDULES.id,
+                    title = PhoneArea.SCHEDULES.title,
+                    subtitle = "Runs & logs",
+                    icon = ProductIcon.CalendarClock,
+                    onClick = {
+                        nav.closeDrawer()
+                        handleDrawerSelection(model, PhoneArea.SCHEDULES.id, openTabs, nav)
+                    },
+                ),
             ),
             onProjectClick = {
                 nav.closeDrawer()
