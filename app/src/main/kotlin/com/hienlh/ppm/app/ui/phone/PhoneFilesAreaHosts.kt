@@ -51,6 +51,10 @@ import com.hienlh.ppm.app.ui.phone.files.PhoneDiffScreen
 import com.hienlh.ppm.app.ui.phone.files.PhoneFileTabHost
 import com.hienlh.ppm.app.ui.phone.files.PhoneFileTabScreen
 import com.hienlh.ppm.app.ui.phone.files.PhoneFilesTreeScreen
+import com.hienlh.ppm.app.ui.phone.files.PhoneSearchScreen
+import com.hienlh.ppm.app.ui.phone.files.copyTextToClipboard
+import com.hienlh.ppm.app.phoneSearch
+import androidx.activity.compose.BackHandler
 import com.hienlh.ppm.app.ui.phone.git.PhoneSourceControlScreen
 import com.hienlh.ppm.app.ui.phone.settings.PhoneSettingsScreen
 import com.hienlh.ppm.app.ui.phone.settings.resolvePhoneSettingsRoute
@@ -115,12 +119,36 @@ internal fun PhoneFilesAreaHost(
     nav: PhoneNav,
 ) {
     if (tab == null || tab.type == "files") {
+        val search = model.phoneSearch
+        val searchOpen = search?.open?.collectAsState()?.value == true
+        if (search != null && searchOpen) {
+            val context = LocalContext.current
+            BackHandler { search.setOpen(false) }
+            PhoneSearchScreen(
+                controller = search,
+                project = model.selectedProject,
+                onBack = { search.setOpen(false) },
+                onOpenMatch = { file, line ->
+                    val project = model.selectedProject
+                    if (project != null) {
+                        model.openFileTab(project, file, line = line.toLong())
+                        model.activeTabId?.let(nav::visitTab)
+                    }
+                },
+                onCopyPath = { file ->
+                    val root = model.currentProject?.path
+                    copyTextToClipboard(context, "Path", if (root.isNullOrEmpty()) file else root.trimEnd('/') + "/" + file)
+                },
+            )
+            return
+        }
         PhoneFilesTreeScreen(
             model = model,
             onNavigate = {
                 model.activeTabId?.let(nav::visitTab)
             },
             recentTabIds = nav.history.asReversed(),
+            onSearch = search?.let { { it.setOpen(true) } },
         )
         return
     }

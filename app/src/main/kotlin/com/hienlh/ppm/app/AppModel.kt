@@ -237,6 +237,10 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         return com.hienlh.ppm.state.files.FileDocumentController(client, project, path, scope).also { documents[tab.id] = it }
     }
 
+    /** An open editor tab holds unsaved edits to [path] of [project] (a search replace never writes under it). */
+    fun hasUnsavedEdits(project: String, path: String): Boolean =
+        documents.values.any { it.state.value.let { s -> s.project == project && s.path == path && s.dirty } }
+
     private fun syncDocuments(state: WorkspaceState) {
         val live = state.panels.values.flatMap { it.tabs }.filter { it.type == "editor" }.map { it.id }.toSet()
         for (id in documents.keys.toList()) if (id !in live) documents.remove(id)?.close()
