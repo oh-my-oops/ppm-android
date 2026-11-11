@@ -448,7 +448,8 @@ private fun CardColumn(grid: Boolean, modifier: Modifier, content: @Composable (
         val placeables = measurables.map { it.measure(constraints.copy(minWidth = 0, minHeight = 0, maxHeight = Constraints.Infinity)) }
         val sizes = IntArray(placeables.size) { placeables[it].height }
         val positions = IntArray(sizes.size)
-        val height = constraints.maxHeight
+        // In a scrolling page (Settings → Accounts) no height is offered: `height: auto`, the rows' own.
+        val height = if (constraints.hasBoundedHeight) constraints.maxHeight else sizes.sum().coerceAtLeast(constraints.minHeight)
         with(if (sizes.sum() > height) Arrangement.Center else Arrangement.SpaceEvenly) { arrange(height, sizes, positions) }
         layout(constraints.maxWidth, height) {
             placeables.forEachIndexed { i, placeable -> placeable.placeRelative(0, positions[i]) }
