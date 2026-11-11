@@ -34,6 +34,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -319,6 +321,35 @@ internal class EditorImeBridgeView(context: Context) : View(context) {
 private class HighlightedEditorCache(val code: HighlightedCode, val rows: List<AnnotatedString>)
 
 /**
+ * What a screen drawn around an [EditableFileCodeView] (the phone editor) shows of it and asks of it: its
+ * save state and cursor, and Save, Discard & Reload and Overwrite Disk. A view given one leaves its own
+ * conflict and save-error banners to that screen.
+ */
+@Stable
+class EditableFileHandle {
+    var dirty by mutableStateOf(false)
+        internal set
+    var saving by mutableStateOf(false)
+        internal set
+    var saveError by mutableStateOf<String?>(null)
+        internal set
+    /** The file changed on disk while there were unsaved edits. */
+    var conflict by mutableStateOf(false)
+        internal set
+    var cursorLine by mutableIntStateOf(1)
+        internal set
+    var cursorColumn by mutableIntStateOf(1)
+        internal set
+    internal var onSave: () -> Unit = {}
+    internal var onDiscardAndReload: () -> Unit = {}
+    internal var onOverwriteDisk: () -> Unit = {}
+
+    fun save() = onSave()
+    fun discardAndReload() = onDiscardAndReload()
+    fun overwriteDisk() = onOverwriteDisk()
+}
+
+/**
  * Editable file code view (Phase 07a + 07b) with:
  * - Piece-table document buffer + bounded `InputConnection`
  * - 1000 ms debounced autosave + immediate Ctrl+S save + flush on dispose
@@ -343,6 +374,7 @@ internal fun EditableFileCodeView(
     useWebHeader: Boolean = false,
     onDirtyChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
+    handle: EditableFileHandle? = null,
 ) {
     val api = model.api
     val scope = rememberCoroutineScope()
@@ -432,6 +464,7 @@ internal fun EditableFileCodeView(
         if (!forceOverwrite && (conflictVisible || docState.externalChangeConflict)) return
         val textToSave = docState.textToSave()
         docState.saving = true
+        handle?.saving = true
         try {
             client.writeFile(project, targetPath, textToSave)
             docState.markSaved(textToSave)
@@ -455,6 +488,35 @@ internal fun EditableFileCodeView(
             if (is4xx) {
                 haltedOn4xx = true
             }
+        } finally {
+            handle?.saving = false
+        }
+    }
+
+    fun discardAndReload() {
+        docState.session.reloadExternalContent(latestDiskContent)
+        docState.markSaved(latestDiskContent)
+        conflictVisible = false
+        saveError = null
+        haltedOn4xx = false
+        onDirtyChange(false)
+        editTick++
+    }
+
+    if (handle != null) {
+        SideEffect {
+            handle.onSave = {
+                haltedOn4xx = false
+                scope.launch { performSaveNow() }
+            }
+            handle.onDiscardAndReload = ::discardAndReload
+            handle.onOverwriteDisk = { scope.launch { performSaveNow(forceOverwrite = true) } }
+            handle.dirty = docState.isDirty
+            handle.conflict = conflictVisible
+            handle.saveError = saveError ?: docState.saveError
+            val cursor = docState.session.buffer.offsetToLineCol(docState.session.selectionStart)
+            handle.cursorLine = cursor.line + 1
+            handle.cursorColumn = cursor.column + 1
         }
     }
 
@@ -511,7 +573,7 @@ internal fun EditableFileCodeView(
     }
 
     Column(modifier.fillMaxSize()) {
-        if (conflictVisible) {
+        if (conflictVisible && handle == null) {
             val tokens = LocalPpmTokens.current
             Row(
                 Modifier
@@ -531,15 +593,7 @@ internal fun EditableFileCodeView(
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     SettingsButton(
                         label = "Discard & Reload",
-                        onClick = {
-                            docState.session.reloadExternalContent(latestDiskContent)
-                            docState.markSaved(latestDiskContent)
-                            conflictVisible = false
-                            saveError = null
-                            haltedOn4xx = false
-                            onDirtyChange(false)
-                            editTick++
-                        },
+                        onClick = ::discardAndReload,
                     )
                     SettingsButton(
                         label = "Overwrite Disk",
@@ -551,7 +605,7 @@ internal fun EditableFileCodeView(
         }
 
         val currentSaveError = saveError ?: docState.saveError
-        if (!currentSaveError.isNullOrBlank()) {
+        if (!currentSaveError.isNullOrBlank() && handle == null) {
             val tokens = LocalPpmTokens.current
             Row(
                 Modifier

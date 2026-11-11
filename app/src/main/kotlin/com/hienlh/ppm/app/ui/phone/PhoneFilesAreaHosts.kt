@@ -48,6 +48,7 @@ import com.hienlh.ppm.app.ui.phone.chat.PhoneSessionChangesSheet
 import com.hienlh.ppm.app.ui.phone.chat.PhoneSessionInfoData
 import com.hienlh.ppm.app.ui.phone.chat.PhoneSessionInfoSheet
 import com.hienlh.ppm.app.ui.phone.files.PhoneDiffScreen
+import com.hienlh.ppm.app.ui.phone.files.PhoneFileTabHost
 import com.hienlh.ppm.app.ui.phone.files.PhoneFileTabScreen
 import com.hienlh.ppm.app.ui.phone.files.PhoneFilesTreeScreen
 import com.hienlh.ppm.app.ui.phone.git.PhoneSourceControlScreen
@@ -119,40 +120,10 @@ internal fun PhoneFilesAreaHost(
             onNavigate = {
                 model.activeTabId?.let(nav::visitTab)
             },
+            recentTabIds = nav.history.asReversed(),
         )
         return
     }
 
-    val path = tab.metaString("filePath").orEmpty()
-    val buffer = tab.metadata["inlineContent"].string
-        ?: if (tab.metadata["isUntitled"].bool == true) {
-            tab.metadata["unsavedContent"].string.orEmpty()
-        } else {
-            null
-        }
-    val controller = if (buffer == null) {
-        remember(model, model.api, tab.id, path) { model.fileDocument(tab) }
-    } else {
-        null
-    }
-
-    DisposableEffect(controller) {
-        controller?.show(readAsText = false)
-        onDispose { controller?.hide() }
-    }
-
-    val docState = controller?.state?.collectAsState()?.value
-    val displayPath = path.ifBlank { tab.title.ifBlank { "Untitled" } }
-
-    PhoneFileTabScreen(
-        filePath = displayPath,
-        textContent = docState?.content ?: buffer.orEmpty(),
-        binaryBytes = docState?.raw?.bytes,
-        dirty = docState?.dirty == true,
-        loading = docState?.loading == true,
-        error = docState?.error,
-        cannotDisplayBinary = docState?.cannotDisplay == true,
-        onSave = {},
-        onRetry = { controller?.refresh() },
-    )
+    PhoneFileTabHost(model = model, tab = tab)
 }

@@ -108,7 +108,7 @@ fun PhoneImageViewerScreen(
     dimensionsLabel: String? = null,
     sizeBytes: Long? = null,
     onRetry: () -> Unit = {},
-    onDownload: () -> Unit = {},
+    onDownload: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val isDark = LocalPpmTheme.current.isDark
@@ -124,11 +124,10 @@ fun PhoneImageViewerScreen(
         ext.ifEmpty { "IMAGE" }
     }
     val resolvedDimensions = remember(dimensionsLabel, decodedBitmap) {
-        dimensionsLabel ?: decodedBitmap?.let { "${it.width} × ${it.height} px" } ?: "512 × 512 px"
+        dimensionsLabel ?: decodedBitmap?.let { "${it.width} × ${it.height} px" }
     }
     val resolvedSize = remember(sizeBytes, bytes) {
-        val count = sizeBytes ?: bytes?.size?.toLong() ?: 0L
-        formatPhoneFileSize(count)
+        (sizeBytes ?: bytes?.size?.toLong())?.let(::formatPhoneFileSize)
     }
 
     Column(
@@ -268,7 +267,7 @@ fun PhoneImageViewerScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BasicText(
-                text = "$resolvedDimensions · $resolvedSize · $formatLabel",
+                text = listOfNotNull(resolvedDimensions, resolvedSize, formatLabel).joinToString(" · "),
                 style = ppmText(12f, FontWeight.Normal, FontKind.MONO, lineHeight = 16f)
                     .copy(color = tokens.text2.color),
                 maxLines = 1,
@@ -335,7 +334,7 @@ fun PhoneImageViewerScreen(
                 )
             }
             Spacer(Modifier.weight(1f))
-            Box(
+            if (onDownload != null) Box(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(CircleShape)
@@ -775,7 +774,7 @@ fun PhoneUnsupportedFileScreen(
     filePath: String,
     modifier: Modifier = Modifier,
     sizeBytes: Long? = null,
-    onDownload: () -> Unit = {},
+    onDownload: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val fileName = remember(filePath) {
@@ -834,7 +833,7 @@ fun PhoneUnsupportedFileScreen(
                     textAlign = TextAlign.Center,
                 ),
             )
-            Row(
+            if (onDownload != null) Row(
                 modifier = Modifier.padding(top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -877,7 +876,7 @@ fun PhoneBinaryUnreadableScreen(
     filePath: String,
     modifier: Modifier = Modifier,
     sizeBytes: Long? = null,
-    onDownload: () -> Unit = {},
+    onDownload: (() -> Unit)? = null,
 ) {
     val fileName = remember(filePath) {
         filePath.substringAfterLast('/').substringAfterLast('\\').ifBlank { filePath }
@@ -893,7 +892,7 @@ fun PhoneBinaryUnreadableScreen(
         icon = ProductIcon.FileWarning,
         title = PHONE_BINARY_FILE_TITLE,
         monoDetail = monoDetail,
-        retryLabel = "Download",
+        retryLabel = onDownload?.let { "Download" },
         onRetry = onDownload,
         modifier = modifier,
         testTag = "phone-binary-unreadable-screen",
@@ -959,9 +958,25 @@ fun PhoneFileTabScreen(
     saving: Boolean = false,
     loading: Boolean = false,
     error: String? = null,
+    saveError: String? = null,
+    changedOnDisk: Boolean = false,
+    readOnly: Boolean = false,
+    languageLabel: String = phoneEditorLanguageLabel(filePath),
+    cursorLine: Int = 1,
+    cursorColumn: Int = 1,
+    wordWrap: Boolean = true,
+    offlineSeconds: Int? = null,
+    onToggleWordWrap: () -> Unit = {},
     onSave: () -> Unit = {},
-    onDownload: () -> Unit = {},
+    onDownload: (() -> Unit)? = null,
     onRetry: () -> Unit = {},
+    onDiscardAndReload: () -> Unit = {},
+    onOverwriteDisk: () -> Unit = {},
+    onReloadFromDisk: (() -> Unit)? = null,
+    onCopyPath: (() -> Unit)? = null,
+    onCloseTab: (() -> Unit)? = null,
+    onBreadcrumbSegmentClick: (PhonePathCrumb) -> Unit = {},
+    editorBodyContent: (@Composable () -> Unit)? = null,
 ) {
     var editMarkdownAsCode by remember(filePath) { mutableStateOf(false) }
     val kind = remember(filePath, forceCode, editMarkdownAsCode, cannotDisplayBinary) {
@@ -976,13 +991,29 @@ fun PhoneFileTabScreen(
         PhoneFileViewKind.CODE -> PhoneEditorScreen(
             filePath = filePath,
             content = textContent,
+            languageLabel = languageLabel,
+            cursorLine = cursorLine,
+            cursorColumn = cursorColumn,
             dirty = dirty,
             saving = saving,
+            saveError = saveError,
+            changedOnDisk = changedOnDisk,
+            readOnly = readOnly,
+            wordWrap = wordWrap,
             loading = loading,
             loadError = error,
+            offlineSeconds = offlineSeconds,
+            onToggleWordWrap = onToggleWordWrap,
             onSave = onSave,
+            onDiscardAndReload = onDiscardAndReload,
+            onOverwriteDisk = onOverwriteDisk,
+            onReloadFromDisk = onReloadFromDisk,
             onDownload = onDownload,
+            onCopyPath = onCopyPath,
+            onCloseTab = onCloseTab,
             onRetryLoad = onRetry,
+            onBreadcrumbSegmentClick = onBreadcrumbSegmentClick,
+            editorBodyContent = editorBodyContent,
             modifier = modifier,
         )
         PhoneFileViewKind.IMAGE -> PhoneImageViewerScreen(
@@ -1000,7 +1031,7 @@ fun PhoneFileTabScreen(
             bytes = binaryBytes,
             loading = loading,
             error = error,
-            onDownload = onDownload,
+            onDownload = onDownload ?: onRetry,
             modifier = modifier,
         )
         PhoneFileViewKind.MARKDOWN -> PhoneMarkdownViewerScreen(
