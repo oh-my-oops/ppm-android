@@ -7,11 +7,14 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -53,6 +56,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -76,18 +80,25 @@ import com.hienlh.ppm.design.cssExact
 import com.hienlh.ppm.design.cssHeight
 import com.hienlh.ppm.design.cssLines
 import com.hienlh.ppm.design.cssScrollX
+import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberCssExact
 import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ApprovalRequest
+import com.hienlh.ppm.protocol.ChatQuestions
 import com.hienlh.ppm.protocol.Question
+import com.hienlh.ppm.protocol.SessionCollabApprovalInput
 import com.hienlh.ppm.protocol.prettyString
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-/** What the AI is waiting on: a question form for `AskUserQuestion`, else Allow/Deny. */
+/**
+ * What the AI is waiting on (`message-approval-cards.tsx`): a question form for `AskUserQuestion`,
+ * a database change or a session tool's card, which are answered over HTTP and never through
+ * [respond], else Allow/Deny.
+ */
 @Composable
 fun PendingApprovalCard(request: ApprovalRequest, respond: (approved: Boolean, data: JsonElement?) -> Unit, modifier: Modifier = Modifier) {
     val questions = request.questions
@@ -97,10 +108,15 @@ fun PendingApprovalCard(request: ApprovalRequest, respond: (approved: Boolean, d
             onSubmit = { answers -> respond(true, JsonObject(answers.mapValues { JsonPrimitive(it.value) })) },
             onSkip = { respond(false, null) },
             modifier = modifier,
+            previews = remember(request.input) { ChatQuestions.optionPreviews(request.input) },
         )
-    } else {
-        ToolApprovalCard(request, respond, modifier)
+        return
     }
+    val db = remember(request.tool, request.input) { DbExecuteApproval.from(request.tool, request.input) }
+    if (db != null) return DbExecuteApprovalCard(request.requestId, db, modifier)
+    val collab = remember(request.tool, request.input) { SessionCollabApprovalInput.from(request.tool, request.input) }
+    if (collab != null) return CollabApprovalCard(request.requestId, collab, modifier)
+    ToolApprovalCard(request, respond, modifier)
 }
 
 private val xs = ppmText(12f, lineHeight = 16f)
@@ -216,6 +232,8 @@ internal fun QuestionCard(
     onSkip: () -> Unit,
     modifier: Modifier = Modifier,
     autoFocus: Boolean = true,
+    /** Each question's option previews ([ChatQuestions.optionPreviews]); none for a Codex question. */
+    previews: List<List<String?>> = emptyList(),
 ) {
     val tokens = LocalPpmTokens.current
     var active by remember { mutableIntStateOf(0) }
@@ -403,7 +421,7 @@ internal fun QuestionCard(
                 }
             }
             if (current.multiSelect) BasicText("Select multiple", Modifier.cssLines(16.5f), ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text2.color))
-            CssColumn(gap = 6.dp) {
+            val optionList: @Composable (Modifier) -> Unit = { optionsModifier -> CssColumn(optionsModifier, gap = 6.dp) {
                 current.options.forEachIndexed { index, option ->
                     val selected = option.label in picked[active].orEmpty()
                     val optionShape = RoundedCornerShape(4.dp)
@@ -452,6 +470,29 @@ internal fun QuestionCard(
                     },
                     onDone = ::onEnter,
                 )
+            } }
+            // The preview Claude attached to the options, for the focused one: beside them on a
+            // wide card (`@2xl`, the card's own width) and below them on a narrow one.
+            val optionPreviews = previews.getOrNull(active).orEmpty()
+            if (!ChatQuestions.hasOptionPreviews(optionPreviews)) {
+                optionList(Modifier)
+            } else {
+                val shown = ChatQuestions.previewOptionIndex(current.options, focused, picked[active].orEmpty())
+                val option = current.options.getOrNull(shown)
+                val preview = optionPreviews.getOrNull(shown)
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    if (maxWidth >= 672.dp) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                            optionList(Modifier.fillMaxWidth(0.4f))
+                            QuestionOptionPreview(option, preview, wide = true, modifier = Modifier.weight(1f))
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            optionList(Modifier)
+                            QuestionOptionPreview(option, preview, wide = false)
+                        }
+                    }
+                }
             }
         }
         // `pt-1` over a flex row, which stretches its buttons: Submit, with no border, as tall as
@@ -474,6 +515,46 @@ internal fun QuestionCard(
                     onClick = ::submit,
                 )
             }
+        }
+    }
+}
+
+/**
+ * The text Claude attached to an option (`QuestionOptionPreview`): monospace with its whitespace
+ * kept, since previews are mostly mockups, code and step lists, still wrapping; capped at a third
+ * of the window on a narrow card (35dvh) and 60% beside the options, scrolling inside.
+ */
+@Composable
+private fun QuestionOptionPreview(option: Question.Option?, preview: String?, wide: Boolean, modifier: Modifier = Modifier) {
+    val tokens = LocalPpmTokens.current
+    val text = preview?.trim()?.takeIf { it.isNotEmpty() }
+    val shape = RoundedCornerShape(4.dp)
+    val window = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
+    Column(modifier.fillMaxWidth().background(tokens.bgSolid.color, shape).cssBorder(tokens.border.color, shape)) {
+        BasicText(
+            ("Preview" + (option?.let { " · ${it.label}" } ?: "")).uppercase(),
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+            ppmText(10f, FontWeight.SemiBold, lineHeight = 15f).copy(color = tokens.text2.color, letterSpacing = 0.25.sp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Box(Modifier.fillMaxWidth().height(1.dp).background(tokens.border.color))
+        if (text != null) {
+            Box(Modifier.fillMaxWidth().heightIn(max = window * (if (wide) 0.6f else 0.35f)).cssScrollY()) {
+                SelectionContainer {
+                    BasicText(
+                        text,
+                        Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        ppmText(11f, kind = FontKind.MONO, lineHeight = 11f * 1.625f).copy(color = tokens.text.color),
+                    )
+                }
+            }
+        } else {
+            BasicText(
+                if (option != null) "No preview for this option." else "Choose an option to see its preview.",
+                Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                ppmText(11f, lineHeight = 44f / 3).copy(color = tokens.text3.color),
+            )
         }
     }
 }

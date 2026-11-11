@@ -98,7 +98,7 @@ import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmShadow
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
-import com.hienlh.ppm.protocol.ChatReply
+import com.hienlh.ppm.protocol.ChatMessageBlocks
 import com.hienlh.ppm.protocol.ParsedUserMessage
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.VersionGroup
@@ -176,7 +176,7 @@ class UserMessageEdits(
 
 /**
  * The user's message (`message-user-bubble.tsx`): what the composer and the runtime wrapped
- * around it taken apart into a reply card, badges and chips, then the text, two lines until
+ * around it taken apart into a reply card, turn chips, badges and chips, then the text, two lines until
  * "Show more", and its versions when it was edited. What the runtime put there on its own (a
  * task's result, a command's caveat) is drawn faint and full width, with no action bar.
  */
@@ -191,6 +191,11 @@ internal fun UserBubble(
 ) {
     val tokens = LocalPpmTokens.current
     val parsed = remember(content) { ParsedUserMessage.parse(content) }
+    // Another session's AI sent it: its own bubble, with no Edit, Fork or Reply.
+    parsed.fromSession?.let { from ->
+        FromSessionBubble(from, parsed.text, remember(content) { ChatMessageBlocks.decode(content).content }, parsed.turnRefs, timestamp, modifier)
+        return
+    }
     val system = parsed.isSystemContext
     val rad = tokens.rad.dp
     val shape = bubbleShape(system, rad)
@@ -220,6 +225,8 @@ internal fun UserBubble(
         val stroke = (if (system) tokens.border.opacity(0.4) else tokens.accentWashBorder).let { tokens.accent.opacity(0.4).mix(it, editing.toDouble()) }
         CssColumn(bubble.background(fill.color, shape).cssBorder(stroke.color, shape).padding(horizontal = 12.dp), top = 8.dp, bottom = 8.dp) {
             parsed.replyTo?.let { ReplyCard(it, replies.jump(it), Modifier.padding(bottom = 8.dp)) }
+            // Drawn from the message's own block: no request, and the same size on every render.
+            parsed.turnRefs?.takeIf { it.isNotEmpty() }?.let { TurnRefChipRow(it) }
             if (parsed.tags.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     for (tag in parsed.tags) {
@@ -259,7 +266,7 @@ internal fun UserBubble(
             if (!system && versions != null && switch != null) VersionSwitcher(versions, edits.versionsDisabled, switch)
         }
         if (!system) {
-            MessageActionBar(timestamp, remember(content) { ChatReply.decode(content).content }, onReply = onReply, alignEnd = true) {
+            MessageActionBar(timestamp, remember(content) { ChatMessageBlocks.decode(content).content }, onReply = onReply, alignEnd = true) {
                 edits?.onEdit?.let { ActionButton(ProductIcon.Pencil, "Edit", "Edit this message (continue in the same tab)", onClick = it) }
                 edits?.onFork?.let { ActionButton(ProductIcon.RotateCcw, "Fork", "Retry from this message (fork into a new tab)", onClick = it) }
             }

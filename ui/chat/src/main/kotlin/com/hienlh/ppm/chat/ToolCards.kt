@@ -138,6 +138,12 @@ fun ToolCardView(tool: ToolBlock, completed: Boolean, modifier: Modifier = Modif
         TabToolCard(tabCall, tool.toolUseId, result?.output, isError, isDone, modifier)
         return
     }
+    // So do the session tools: the session they reached, its reply, and a way to open it.
+    val collabCall = if (tool.requestId == null) remember(tool.name, tool.input) { sessionCollabToolCall(tool.name, tool.input) } else null
+    if (collabCall != null) {
+        SessionCollabToolCard(collabCall, result?.output, isError, isDone, modifier)
+        return
+    }
     if (tool.isAgent && variant == ToolCardVariant.Chat) {
         val opener = LocalAgentSessionOpener.current
         AgentRow(tool, if (isError || bgFailed) Status.FAILED else if (isDone) Status.DONE else Status.RUNNING, bgRunning, modifier) {
@@ -870,6 +876,47 @@ private fun AnsweredQuestions(input: JsonElement) {
                     }
                 }
                 if (answer.isNotEmpty()) CursorText("Answer: $answer", style = cardText.copy(color = tokens.text.color))
+                // Each option's preview stays readable after the answer: it is often the plan the answer agreed to.
+                for (option in q["options"].array.orEmpty()) {
+                    val preview = option["preview"].string?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+                    AnsweredPreview(option["label"].string ?: "", preview)
+                }
+            }
+        }
+    }
+}
+
+/** `details` of an answered option's preview: "Preview · label", opening on a `max-h-80` monospace box. */
+@Composable
+private fun AnsweredPreview(label: String, preview: String) {
+    val tokens = LocalPpmTokens.current
+    var open by remember(preview) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            Modifier.ppmClickable(pressedColor = Color.Transparent) { open = !open },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            PpmIcon(if (open) ProductIcon.ChevronDown else ProductIcon.ChevronRight, 12.dp, tokens.text3.color)
+            BasicText("Preview · $label", style = cardText.copy(color = tokens.text3.color))
+        }
+        if (open) {
+            val shape = RoundedCornerShape(4.dp)
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
+                    .background(tokens.bgSolid.color, shape)
+                    .cssBorder(tokens.border.color, shape)
+                    .cssScrollY(),
+            ) {
+                SelectionContainer {
+                    BasicText(
+                        preview,
+                        Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        ppmText(11f, kind = FontKind.MONO, lineHeight = 11f * 1.5f).copy(color = tokens.text.color),
+                    )
+                }
             }
         }
     }

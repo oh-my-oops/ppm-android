@@ -1,5 +1,7 @@
 package com.hienlh.ppm.protocol
 
+import com.hienlh.ppm.protocol.generated.TurnReference
+
 /**
  * A stored user message taken apart (`user-message-parse.ts`). What lands in the transcript is
  * not what was typed: the composer and the runtime wrap it in attachment markers, slash-command
@@ -18,6 +20,10 @@ data class ParsedUserMessage(
     val terminalBlocks: List<String>,
     val idePath: String?,
     val agent: String?,
+    /** Other sessions' turns the message links to, as chips (`turnRefs`). */
+    val turnRefs: List<TurnReference>? = null,
+    /** Set when another PPM session's AI sent the message: it is drawn as theirs, not the person's. */
+    val fromSession: FromSessionReference? = null,
 ) {
     data class SystemTag(val name: String, val label: String, val content: String) {
         /** The text of `<[tag]>…</[tag]>` inside, such as a task notification's `status`; null when absent or blank. */
@@ -33,7 +39,7 @@ data class ParsedUserMessage(
     companion object {
         /** Outermost wrapper first, as the web takes it apart. */
         fun parse(content: String): ParsedUserMessage {
-            val decoded = ChatReply.decode(content)
+            val decoded = ChatMessageBlocks.decode(content)
             val (idePath, afterIde) = ideOpenedFile(decoded.content)
             val (blocks, afterBlocks) = terminalBlocks(afterIde)
             val (files, attachmentsText) = attachments(afterBlocks)
@@ -43,7 +49,7 @@ data class ParsedUserMessage(
             val (agent, body) = agentTag(afterCommand)
             val args = command?.args
             val text = if (args != null) (if (body.isNotEmpty()) "$args\n\n$body" else args) else body
-            return ParsedUserMessage(decoded.replyTo, files, text, body, tags, command, blocks, idePath, agent)
+            return ParsedUserMessage(decoded.replyTo, files, text, body, tags, command, blocks, idePath, agent, decoded.turnRefs, decoded.fromSession)
         }
 
         /**

@@ -79,6 +79,10 @@ import com.hienlh.ppm.app.leavesTextOnTap
 import com.hienlh.ppm.app.ui.extensions.ExtensionOverlays
 import com.hienlh.ppm.app.ui.phone.PhoneShell
 import com.hienlh.ppm.app.ui.tablet.TabletShell
+import com.hienlh.ppm.chat.ChatSessionOpener
+import com.hienlh.ppm.chat.LocalChatSessionOpener
+import com.hienlh.ppm.chat.LocalPpmApprovals
+import com.hienlh.ppm.chat.ServerPpmApprovals
 import com.hienlh.ppm.client.designListSystems
 import com.hienlh.ppm.design.ImageViewer
 import com.hienlh.ppm.design.LocalIconFramework
@@ -174,6 +178,9 @@ fun PpmRoot(model: AppModel, beforeIme: (android.view.KeyEvent) -> Unit = {}) {
             LocalSizeClass provides sizeClass,
             LocalRedesign provides true,
             LocalTabScrollStore provides tabScrollStore,
+            // PPM's own approvals are answered over HTTP, and a from-session bubble or turn chip opens its session.
+            LocalPpmApprovals provides model.api?.let(::ServerPpmApprovals),
+            LocalChatSessionOpener provides remember(model) { ChatSessionOpener { model.openLinkedSession(it.projectName, it.sessionId, it.providerId, it.title) } },
         ) {
             PpmThemeProvider(theme, mobile) {
                 // Chrome's own word on a download, which the web leaves to the browser.
