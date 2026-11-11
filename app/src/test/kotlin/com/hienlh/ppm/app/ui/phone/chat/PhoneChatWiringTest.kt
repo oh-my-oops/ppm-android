@@ -20,6 +20,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
 import androidx.core.app.ActivityOptionsCompat
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
@@ -354,6 +355,26 @@ class PhoneChatWiringTest {
 
         feed(tab, ChatFrame.QueueState(emptyList()))
         assertTrue(composeRule.onAllNodesWithTag("phone-queued-messages").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun theActivityChip_listsTheSessionsThisChatOpened_inItsSheet() {
+        model.sessions = listOf(session, SessionInfo(id = "child-1", providerId = "claude", title = "Write the tests", spawnedBy = "s-1"))
+        val tab = startedTab()
+        show(tab)
+
+        composeRule.onNodeWithTag("activity-chip").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("activity-tab:sessions").assertExists()
+        // The sheet's row, with its status (the welcome list under it names the chat too).
+        composeRule.onNode(hasText("Write the tests") and hasText("Idle")).assertExists()
+    }
+
+    @Test
+    fun noActivityChip_whileTheChatHasNoAgentsOrLinkedSessions() {
+        val tab = startedTab()
+        show(tab)
+        assertTrue(composeRule.onAllNodesWithTag("activity-chip").fetchSemanticsNodes().isEmpty())
     }
 
     @Test

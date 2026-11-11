@@ -43,6 +43,7 @@ import com.hienlh.ppm.app.ui.SessionListPanel
 import com.hienlh.ppm.app.ui.rememberReconnectIndicator
 import com.hienlh.ppm.app.ui.rememberSwitchAccounts
 import com.hienlh.ppm.app.ui.phone.chat.PhoneAccountSheet
+import com.hienlh.ppm.app.ui.phone.chat.PhoneActivityChip
 import com.hienlh.ppm.app.ui.phone.chat.PhoneAttachSheet
 import com.hienlh.ppm.app.ui.phone.chat.PhoneBackgroundCommand
 import com.hienlh.ppm.app.ui.phone.chat.PhoneChatScreen
@@ -255,6 +256,9 @@ internal fun PhoneChatContent(
             queuedMessages = phoneQueuedMessages(chatState?.queue.orEmpty()),
             onSendQueuedNow = { chatController?.sendQueuedNow() },
             onEditQueued = { id -> chatController?.takeBackQueued(id) },
+            activityChip = {
+                if (chatTab != null && chatState != null) PhoneActivityChip(model, chatTab, chatState) { visitActive() }
+            },
             onRemoveQueued = { id -> chatController?.takeBackQueued(id, discard = true) },
             // The transcript's own pill scrolls to the waiting card.
             onScrollToWaitingCard = null,
