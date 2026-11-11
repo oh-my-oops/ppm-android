@@ -231,7 +231,7 @@ class PhoneFilesWiringTest {
     }
 
     @Test
-    fun tree_overflowRefreshesTheTree_andLongPressRenamesDeletesAndDownloads() {
+    fun tree_overflowRefreshesTheTree_longPressDownloads_andFileOperationsStayOnTheTablet() {
         val tree = ProjectFileTree(FileTreeBackend.api(api), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
         composeRule.setContent {
             remember(tree) { stateOf<ProjectFileTree?>("fileTree").value = tree }
@@ -247,41 +247,19 @@ class PhoneFilesWiringTest {
         val listsBefore = synchronized(requests) { requests.count { it.path.contains("/files/list") } }
         composeRule.onNodeWithTag("phone-breadcrumb-more", useUnmergedTree = true).performClick()
         composeRule.waitUntil(5_000) { shown("phone-files-overflow-sheet") }
-        assertTrue(shown("phone-files-overflow-new_file"))
+        assertFalse("no New File on a phone", shown("phone-files-overflow-new_file"))
         composeRule.onNodeWithTag("phone-files-overflow-refresh", useUnmergedTree = true).performClick()
         composeRule.waitUntil(5_000) { synchronized(requests) { requests.count { it.path.contains("/files/list") } } > listsBefore }
 
-        // Long-press → Rename asks for a name and renames on the server.
-        composeRule.onNodeWithTag("phone-tree-row-README.md").performSemanticsAction(SemanticsActions.OnLongClick)
-        composeRule.waitUntil(5_000) { shown("phone-tree-long-press-sheet") }
-        composeRule.onNodeWithTag("phone-tree-action-rename", useUnmergedTree = true).performClick()
-        composeRule.waitUntil(5_000) { shown("phone-file-name-sheet") }
-        composeRule.onNodeWithTag("phone-file-name-input").performTextReplacement("NOTES.md")
-        composeRule.onNodeWithTag("phone-file-name-confirm", useUnmergedTree = true).performClick()
-        composeRule.waitUntil(5_000) { recorded("POST", "/files/rename").isNotEmpty() && !shown("phone-file-name-sheet") }
-        val rename = recorded("POST", "/files/rename").single()
-        assertEquals("/api/project/ppm/files/rename", rename.path)
-        assertTrue(rename.body, rename.body.contains("\"oldPath\":\"README.md\"") && rename.body.contains("\"newPath\":\"NOTES.md\""))
-
-        // Long-press → Delete confirms, then deletes on the server.
-        composeRule.onNodeWithTag("phone-tree-row-README.md").performSemanticsAction(SemanticsActions.OnLongClick)
-        composeRule.waitUntil(5_000) { shown("phone-tree-long-press-sheet") }
-        composeRule.onNodeWithTag("phone-tree-action-delete", useUnmergedTree = true).performClick()
-        composeRule.waitUntil(5_000) { textShown("Delete File") }
-        composeRule.onNodeWithText("Delete", useUnmergedTree = true).performClick()
-        composeRule.waitUntil(5_000) { recorded("DELETE", "/files/delete").isNotEmpty() && !textShown("Delete File") }
-        assertTrue(recorded("DELETE", "/files/delete").single().body.contains("\"path\":\"README.md\""))
-
-        // Long-press a folder → New File creates it inside that folder.
+        // Rename, delete, move and create stay on the tablet, as the design says: the sheet offers none and says so.
         composeRule.onNodeWithTag("phone-tree-row-src").performSemanticsAction(SemanticsActions.OnLongClick)
-        composeRule.waitUntil(5_000) { shown("phone-tree-action-new_file") }
-        composeRule.onNodeWithTag("phone-tree-action-new_file", useUnmergedTree = true).performClick()
-        composeRule.waitUntil(5_000) { shown("phone-file-name-sheet") }
-        composeRule.onNodeWithTag("phone-file-name-input").performTextInput("Added.kt")
-        composeRule.onNodeWithTag("phone-file-name-confirm", useUnmergedTree = true).performClick()
-        composeRule.waitUntil(5_000) { recorded("POST", "/files/create").isNotEmpty() }
-        val create = recorded("POST", "/files/create").single().body
-        assertTrue(create, create.contains("\"path\":\"src/Added.kt\"") && create.contains("\"type\":\"file\""))
+        composeRule.waitUntil(5_000) { shown("phone-tree-long-press-sheet") }
+        for (id in listOf("new_file", "new_folder", "rename", "cut", "paste", "delete")) {
+            assertFalse("no $id on a phone", shown("phone-tree-action-$id"))
+        }
+        composeRule.onNodeWithText(PhoneTreeLongPressAction.TABLET_ONLY_FOOTER, useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithTag("phone-tree-action-copy_path", useUnmergedTree = true).performClick()
+        composeRule.waitUntil(5_000) { !shown("phone-tree-long-press-sheet") }
 
         // Long-press a file → Download goes to the system's Create Document screen, not to the editor.
         composeRule.onNodeWithTag("phone-tree-row-README.md").performSemanticsAction(SemanticsActions.OnLongClick)

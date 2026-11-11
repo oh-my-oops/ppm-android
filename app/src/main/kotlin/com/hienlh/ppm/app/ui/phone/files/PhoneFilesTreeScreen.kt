@@ -28,7 +28,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -56,9 +55,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ErrorToastMessage
-import com.hienlh.ppm.app.ui.files.ExplorerDeleteDialog
-import com.hienlh.ppm.app.ui.files.ExplorerMutationSession
-import com.hienlh.ppm.app.ui.files.rememberExplorerMutationCallbacks
 import com.hienlh.ppm.app.ui.git.gitStatusRgba
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
@@ -139,26 +135,6 @@ fun PhoneFilesTreeScreen(
     val download = rememberPhoneFileDownload(model)
     val offlineSeconds = rememberOfflineSeconds(model.connectionLost)
 
-    // The old explorer's file operations (ExplorerBody + ExplorerTree): one prompt session over the shared FileMutations.
-    val mutations = model.fileMutations
-    val info = model.currentProject
-    val callbacks = if (mutations != null && info != null) {
-        rememberExplorerMutationCallbacks(mutations, info) { report ->
-            if (model.fileMutations === mutations) model.filesMutated(report)
-        }
-    } else {
-        null
-    }
-    val session = remember(tree, project) { ExplorerMutationSession(project, scope) }
-    DisposableEffect(session) { onDispose { session.close() } }
-    val mutationState by session.state.collectAsState()
-    val mutationBusy = mutationState.busy || callbacks?.busy == true
-    LaunchedEffect(mutationState.error) {
-        val error = mutationState.error ?: return@LaunchedEffect
-        model.toast(ErrorToastMessage(error))
-        session.clearError()
-    }
-
     var longPressedRow by remember { mutableStateOf<FileTreeRow?>(null) }
     var showOverflowSheet by remember { mutableStateOf(false) }
     var showGoToFile by remember { mutableStateOf(false) }
@@ -222,11 +198,6 @@ fun PhoneFilesTreeScreen(
         PhoneTreeLongPressSheet(
             node = node,
             gitBadge = gitLetter,
-            mutationActions = if (callbacks != null && !mutationBusy) {
-                PhoneTreeLongPressAction.mutationActionsFor(node.isDirectory, canPaste = callbacks.canPaste)
-            } else {
-                emptyList()
-            },
             onDismiss = { longPressedRow = null },
             onAction = { action ->
                 longPressedRow = null
@@ -254,19 +225,6 @@ fun PhoneFilesTreeScreen(
                         model.toast(ErrorToastMessage("Copied full path", kind = ErrorToastMessage.Kind.INFO))
                     }
                     PhoneTreeLongPressAction.DOWNLOAD -> download(project, node.path, node.isDirectory)
-                    PhoneTreeLongPressAction.NEW_FILE, PhoneTreeLongPressAction.NEW_FOLDER -> {
-                        scope.launch { tree.setExpanded(node.path, true) }
-                        session.create(node.path, directory = action == PhoneTreeLongPressAction.NEW_FOLDER)
-                    }
-                    PhoneTreeLongPressAction.RENAME -> session.rename(node)
-                    PhoneTreeLongPressAction.DELETE -> session.askDelete(node)
-                    PhoneTreeLongPressAction.CUT -> {
-                        if (callbacks != null) {
-                            session.clipboard(listOf(node.path), cut = true, callbacks = callbacks)
-                            model.toast(ErrorToastMessage("Cut ${node.name}", "Long-press a folder and choose Paste to move it there.", kind = ErrorToastMessage.Kind.INFO))
-                        }
-                    }
-                    PhoneTreeLongPressAction.PASTE -> if (callbacks != null) session.paste(node.path, callbacks)
                 }
             },
         )
@@ -274,24 +232,6 @@ fun PhoneFilesTreeScreen(
 
     if (showOverflowSheet) {
         PhoneFilesOverflowSheet(
-            extraActions = if (callbacks != null && !mutationBusy) {
-                buildList {
-                    add(PhoneTreeLongPressAction.NEW_FILE)
-                    add(PhoneTreeLongPressAction.NEW_FOLDER)
-                    if (callbacks.canPaste) add(PhoneTreeLongPressAction.PASTE)
-                }
-            } else {
-                emptyList()
-            },
-            onExtraAction = { action ->
-                showOverflowSheet = false
-                when (action) {
-                    PhoneTreeLongPressAction.NEW_FILE -> session.create("", directory = false)
-                    PhoneTreeLongPressAction.NEW_FOLDER -> session.create("", directory = true)
-                    PhoneTreeLongPressAction.PASTE -> if (callbacks != null) session.paste("", callbacks)
-                    else -> Unit
-                }
-            },
             onDismiss = { showOverflowSheet = false },
             onAction = { action ->
                 showOverflowSheet = false
@@ -338,36 +278,6 @@ fun PhoneFilesTreeScreen(
                 onNavigate()
             },
             onDismiss = { showRecent = false },
-        )
-    }
-
-    val edit = mutationState.edit
-    if (edit != null && callbacks != null) {
-        val where = edit.parent.ifEmpty { project }
-        PhoneFileNameSheet(
-            title = when {
-                edit.node != null -> "Rename ${edit.node.name}"
-                edit.directory -> "New folder in $where"
-                else -> "New file in $where"
-            },
-            initialName = edit.node?.name.orEmpty(),
-            confirmLabel = if (edit.node != null) "Rename" else "Create",
-            busy = mutationState.busy,
-            error = mutationState.editError,
-            onSubmit = { value -> session.submit(edit, value, callbacks) },
-            onEdited = session::edited,
-            onDismiss = session::cancelEdit,
-        )
-    }
-
-    val deleting = mutationState.deleting
-    if (deleting != null && callbacks != null) {
-        ExplorerDeleteDialog(
-            node = deleting,
-            busy = mutationState.busy,
-            error = mutationState.deleteError,
-            onDelete = { session.confirmDelete(callbacks) },
-            onDismiss = session::cancelDelete,
         )
     }
 }
@@ -939,8 +849,6 @@ fun PhoneFilesOverflowSheet(
     onDismiss: () -> Unit,
     onAction: (PhoneFilesOverflowAction) -> Unit,
     modifier: Modifier = Modifier,
-    extraActions: List<PhoneTreeLongPressAction> = emptyList(),
-    onExtraAction: (PhoneTreeLongPressAction) -> Unit = {},
 ) {
     Sheet(
         title = "Files",
@@ -966,14 +874,6 @@ fun PhoneFilesOverflowSheet(
                     testTag = "phone-files-overflow-${action.id}",
                 )
             }
-            for (action in extraActions) {
-                PhoneSheetActionRow(
-                    icon = phoneTreeActionIcon(action),
-                    label = action.label,
-                    onClick = { onExtraAction(action) },
-                    testTag = "phone-files-overflow-${action.id}",
-                )
-            }
         }
     }
 }
@@ -991,7 +891,6 @@ fun PhoneTreeLongPressSheet(
     onDismiss: () -> Unit,
     onAction: (PhoneTreeLongPressAction) -> Unit,
     modifier: Modifier = Modifier,
-    mutationActions: List<PhoneTreeLongPressAction> = emptyList(),
 ) {
     val tokens = LocalPpmTokens.current
     val subtitle = buildString {
@@ -1001,9 +900,7 @@ fun PhoneTreeLongPressSheet(
             append(gitBadge)
         }
     }
-    val actions = remember(node.isDirectory, mutationActions) {
-        PhoneTreeLongPressAction.actionsFor(isDirectory = node.isDirectory) + mutationActions
-    }
+    val actions = remember(node.isDirectory) { PhoneTreeLongPressAction.actionsFor(isDirectory = node.isDirectory) }
 
     Sheet(
         title = node.name,
@@ -1026,11 +923,7 @@ fun PhoneTreeLongPressSheet(
                 )
             }
             BasicText(
-                text = if (mutationActions.isEmpty()) {
-                    PhoneTreeLongPressAction.TABLET_ONLY_FOOTER
-                } else {
-                    PhoneTreeLongPressAction.COMPARE_TABLET_ONLY_FOOTER
-                },
+                text = PhoneTreeLongPressAction.TABLET_ONLY_FOOTER,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 6.dp)
@@ -1047,12 +940,6 @@ internal fun phoneTreeActionIcon(action: PhoneTreeLongPressAction): ProductIcon 
     PhoneTreeLongPressAction.COPY_PATH -> ProductIcon.Link
     PhoneTreeLongPressAction.COPY_FULL_PATH -> ProductIcon.Link2
     PhoneTreeLongPressAction.DOWNLOAD -> ProductIcon.Download
-    PhoneTreeLongPressAction.NEW_FILE -> ProductIcon.FilePlus
-    PhoneTreeLongPressAction.NEW_FOLDER -> ProductIcon.FolderPlus
-    PhoneTreeLongPressAction.RENAME -> ProductIcon.Pencil
-    PhoneTreeLongPressAction.CUT -> ProductIcon.Scissors
-    PhoneTreeLongPressAction.PASTE -> ProductIcon.ClipboardPaste
-    PhoneTreeLongPressAction.DELETE -> ProductIcon.Trash2
 }
 
 @Composable

@@ -49,35 +49,11 @@ enum class PhoneTreeLongPressAction(
     COPY_PATH("copy_path", "Copy Path"),
     COPY_FULL_PATH("copy_full_path", "Copy Full Path"),
     DOWNLOAD("download", "Download"),
-    NEW_FILE("new_file", "New File"),
-    NEW_FOLDER("new_folder", "New Folder"),
-    RENAME("rename", "Rename"),
-    CUT("cut", "Cut"),
-    PASTE("paste", "Paste"),
-    DELETE("delete", "Delete"),
     ;
 
     companion object {
         const val TABLET_ONLY_FOOTER: String =
             "Rename, delete, move and compare: open on a tablet."
-
-        /** The footer once the sheet offers the file operations itself. */
-        const val COMPARE_TABLET_ONLY_FOOTER: String = "Compare: open on a tablet."
-
-        /**
-         * The old explorer's file operations (`ExplorerTreeMenu`): New File / New Folder inside a folder,
-         * Rename, Cut (paste it into a folder to move it), Paste into a folder, Delete.
-         */
-        fun mutationActionsFor(isDirectory: Boolean, canPaste: Boolean): List<PhoneTreeLongPressAction> = buildList {
-            if (isDirectory) {
-                add(NEW_FILE)
-                add(NEW_FOLDER)
-            }
-            add(RENAME)
-            add(CUT)
-            if (isDirectory && canPaste) add(PASTE)
-            add(DELETE)
-        }
 
         /** Actions offered when long-pressing a file or folder on a phone (Note 66). */
         fun actionsFor(isDirectory: Boolean): List<PhoneTreeLongPressAction> =
