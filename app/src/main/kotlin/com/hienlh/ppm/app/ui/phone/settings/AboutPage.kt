@@ -31,13 +31,18 @@ import com.hienlh.ppm.app.BuildConfig
 import com.hienlh.ppm.app.ui.Separator
 import com.hienlh.ppm.app.ui.SettingsToggleRow
 import com.hienlh.ppm.app.ui.phone.OpenOnTabletNotice
+import com.hienlh.ppm.client.ReleaseNotes
 import com.hienlh.ppm.client.applyUpgrade
 import com.hienlh.ppm.client.upgradeStatus
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.PpmIcon
+import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.kit.ListRow
 import com.hienlh.ppm.design.kit.Sheet
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.protocol.ChangelogSection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -102,6 +107,8 @@ fun PhoneAboutPage(
                     }
                 }
             },
+            installedVersion = model.info?.version,
+            loadReleaseNotes = { ReleaseNotes.recent(PHONE_RELEASE_NOTES_SHOWN) },
             onConfirmUpgrade = { targetVersion ->
                 val client = api ?: return@PhoneAboutContent
                 upgrading = true
@@ -140,9 +147,14 @@ fun PhoneAboutContent(
     onCheckUpdates: () -> Unit = {},
     onConfirmUpgrade: (String) -> Unit = {},
     modifier: Modifier = Modifier,
+    /** The server's version, marked in the release notes. */
+    installedVersion: String? = null,
+    /** The recent CHANGELOG sections; null hides Release notes. */
+    loadReleaseNotes: (suspend () -> List<ChangelogSection>)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     var confirmUpdateSheetOpen by remember { mutableStateOf(false) }
+    var releaseNotesOpen by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -238,11 +250,31 @@ fun PhoneAboutContent(
             }
         }
 
+        if (loadReleaseNotes != null) {
+            PhoneSectionCard {
+                ListRow(
+                    title = "Release notes",
+                    subtitle = "What changed in the recent versions of PPM.",
+                    modifier = Modifier.testTag("phone-about-release-notes"),
+                    trailingContent = { PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text3.color) },
+                    onClick = { releaseNotesOpen = true },
+                )
+            }
+        }
+
         OpenOnTabletNotice(
             text = "Device name, server password and onboarding guide open on a tablet.",
         )
 
         Spacer(Modifier.height(16.dp))
+    }
+
+    if (releaseNotesOpen && loadReleaseNotes != null) {
+        PhoneReleaseNotesSheet(
+            installedVersion = installedVersion,
+            load = loadReleaseNotes,
+            onDismiss = { releaseNotesOpen = false },
+        )
     }
 
     if (confirmUpdateSheetOpen && !availableVersion.isNullOrBlank()) {
