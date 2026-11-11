@@ -304,11 +304,13 @@ class PhoneChatWiringTest {
     }
 
     @Test
-    fun noSpecMode_noTurnJump_andTheAccountChipOpensTheAccountSwitcher() {
+    fun theSpecChipStartsSpecMode_andTheAccountChipOpensTheAccountSwitcher() {
         val tab = startedTab()
         show(tab)
 
-        assertTrue(composeRule.onAllNodesWithText("✦ Spec").fetchSemanticsNodes().isEmpty())
+        // ✦ Spec is offered (it calls AppModel.startSpec; what that does is PhoneSpecsTest's, which
+        // needs the tab in a workspace this test does not build).
+        composeRule.onNodeWithText("✦ Spec").assertExists()
         composeRule.onNodeWithText("Default account", substring = true).performClick()
         composeRule.waitForIdle()
         assertTrue(composeRule.onAllNodesWithTag("phone-account-sheet").fetchSemanticsNodes().isNotEmpty())

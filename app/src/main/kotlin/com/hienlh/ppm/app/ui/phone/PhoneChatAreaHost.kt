@@ -35,6 +35,8 @@ import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ChatTab
 import com.hienlh.ppm.app.NewChatGate
 import com.hienlh.ppm.app.attach
+import com.hienlh.ppm.app.pendingSpecStart
+import com.hienlh.ppm.app.startSpec
 import com.hienlh.ppm.app.removeAttachment
 import com.hienlh.ppm.app.ui.ComposerPickerList
 import com.hienlh.ppm.app.ui.ConnectionChip
@@ -312,8 +314,9 @@ internal fun PhoneChatContent(
             permissionModeLabel = permissionMode.shortLabel,
             accountName = accountName,
             accountUsageText = phoneAccountUsageText(usageSummary),
-            // Spec mode has no client in this app: the chip stays hidden.
-            onToggleSpecMode = null,
+            // ✦ Spec: a chat bound to a spec opens it, any other gets the workflow chooser (AppModelSpecs.kt).
+            specModeEnabled = chatTab?.let { model.pendingSpecStart(it.tabId) != null } == true,
+            onToggleSpecMode = chatTab?.let { tab -> { model.startSpec(tab.tabId) } },
             changes = changesChip,
             backgroundCommands = chatState?.backgroundShells.orEmpty().filter { !it.isStopped }
                 .map { PhoneBackgroundCommand(it.shellId, it.command, stopping = it.isStopping) },
