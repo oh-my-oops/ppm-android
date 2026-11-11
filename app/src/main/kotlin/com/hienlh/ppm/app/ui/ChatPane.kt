@@ -122,6 +122,9 @@ import com.hienlh.ppm.chat.McpSignInBar
 import com.hienlh.ppm.chat.ToolImages
 import com.hienlh.ppm.chat.TurnChangesHost
 import com.hienlh.ppm.chat.TurnStopBar
+import com.hienlh.ppm.app.ui.phone.chat.PhoneQueuedMessagesStack
+import com.hienlh.ppm.app.ui.phone.chat.QueuedMessageAnswerEffect
+import com.hienlh.ppm.app.ui.phone.chat.phoneQueuedMessages
 import com.hienlh.ppm.client.chatUsage
 import com.hienlh.ppm.client.teamActivity
 import com.hienlh.ppm.design.CssColumn
@@ -208,6 +211,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         delay(PREWARM_SETTLE_MILLIS)
         model.newChats.prewarm(tab, prewarm)
     }
+    QueuedMessageAnswerEffect(model, tab, chat, state)
     // A message the server refused (`onMessageRejected`): back in the box when the box holds
     // nothing it would join, else offered back from the toast.
     LaunchedEffect(state.rejected) {
@@ -636,6 +640,13 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                                         syncOverlayBounds()
                                     },
                             ) {
+                                // `QueuedMessagesStack`: what was sent while the AI worked, until it reads it.
+                                PhoneQueuedMessagesStack(
+                                    messages = phoneQueuedMessages(state.queue),
+                                    onSendNow = chat::sendQueuedNow,
+                                    onEdit = { chat.takeBackQueued(it) },
+                                    onRemove = { chat.takeBackQueued(it, discard = true) },
+                                )
                                 if (tab.editFork != null) EditingLine(onCancel = tab::cancelEdit)
                                 ChatComposer(
                                     model = model,

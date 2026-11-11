@@ -170,7 +170,6 @@ import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatItem
 import com.hienlh.ppm.state.ChatState
 import com.hienlh.ppm.state.Effort
-import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelCatalog
 import com.hienlh.ppm.state.ModelListStatus
 import com.hienlh.ppm.state.ModelNames
@@ -207,9 +206,9 @@ internal fun composerPlaceholder(running: Boolean, offline: Boolean = false): St
 /**
  * The message box (`message-input.tsx`): a single `rounded-[18px]` container with optional
  * reply/agent/attachment chips on top, the growing textarea in the middle, and ONE bottom action bar:
- * `[AttachButton, ModeChip, ComposerModelChip (shrinkable), PriorityChip, Spacer, PromptCacheChip, MicButton, Send/Stop]`.
+ * `[AttachButton, ModeChip, ComposerModelChip (shrinkable), Spacer, PromptCacheChip, MicButton, Send/Stop]`.
  *
- * [narrow] is the chat's `@max-[420px]/chat` — mode, priority, and cold prompt-cache chips drop their
+ * [narrow] is the chat's `@max-[420px]/chat` — mode and cold prompt-cache chips drop their
  * text labels, and the model chip drops its effort suffix and trailing chevron so the model name stays
  * readable. [offline] switches the placeholder to `"Will send when reconnected..."`.
  */
@@ -471,9 +470,6 @@ fun ChatComposer(
                             ModelPopover(model, tab, chat, state, onDismiss = { modelOpen = false })
                         }
                     }
-                }
-                if (running) {
-                    PriorityChip(tab, narrow)
                 }
             }
             PromptCacheChip(state.promptCache, narrow = narrow)
@@ -855,25 +851,6 @@ internal fun modelChipTitle(running: Boolean, text: String, providerId: String? 
  */
 internal fun modelChipName(model: String, effort: String, thinking: Boolean) =
     "Model $model, effort $effort${if (thinking) ", thinking on" else ""}"
-
-/**
- * `PriorityToggle` (`message-input.tsx`): visible only while streaming, stepping through
- * Queue → Later → Interrupt on each tap.
- */
-@Composable
-private fun PriorityChip(tab: ChatTab, narrow: Boolean) {
-    val priority = tab.priority
-    BarChip(
-        icon = priority.icon,
-        label = priority.label,
-        name = "Message priority: ${priority.label}",
-        narrow = narrow,
-        modifier = Modifier.webTitle("Your next message: ${priority.label} (tap to cycle Queue → Later → Interrupt)"),
-        tag = "composer-priority-chip",
-    ) {
-        tab.priority = priority.following
-    }
-}
 
 /**
  * `ModelThinkingSelector`'s trigger button (`data-model-chip`):
@@ -1592,11 +1569,4 @@ val PermissionMode.icon: ProductIcon
         PermissionMode.ACCEPT_EDITS -> ProductIcon.Code
         PermissionMode.PLAN -> ProductIcon.ClipboardList
         PermissionMode.BYPASS_PERMISSIONS -> ProductIcon.ShieldOff
-    }
-
-val MessagePriority.icon: ProductIcon
-    get() = when (this) {
-        MessagePriority.NOW -> ProductIcon.Zap
-        MessagePriority.NEXT -> ProductIcon.ListOrdered
-        MessagePriority.LATER -> ProductIcon.Clock
     }

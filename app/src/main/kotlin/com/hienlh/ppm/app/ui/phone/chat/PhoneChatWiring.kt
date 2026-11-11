@@ -122,24 +122,7 @@ import kotlinx.serialization.json.put
  */
 @Composable
 internal fun PhoneChatTabEffects(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState) {
-    // A queued message asked back with Edit joins what is in the composer, its reply with it, the
-    // way Claude Code's Up puts queued messages back into the input; one the AI already started on says so.
-    LaunchedEffect(state.queueAnswer) {
-        val answer = state.queueAnswer ?: return@LaunchedEffect
-        val content = answer.content
-        if (content != null) {
-            val decoded = ChatReply.decode(content)
-            val reply = decoded.replyTo?.let { quoted -> tab.session?.let { quoted.copy(sessionId = it.id) } ?: quoted }
-            if (decoded.content.isNotEmpty()) {
-                tab.restore(RejectedSend(decoded.content, reply ?: tab.replyTo, ""))
-            } else if (reply != null) {
-                tab.replyTo = reply
-            }
-        } else {
-            answer.error?.let { model.toast(ErrorToastMessage(it, kind = ErrorToastMessage.Kind.INFO)) }
-        }
-        chat.queueAnswerTaken()
-    }
+    QueuedMessageAnswerEffect(model, tab, chat, state)
     LaunchedEffect(state.title) {
         state.title?.takeIf { it.isNotEmpty() }?.let {
             tab.session?.let { session -> model.renameSession(session.id, it) }
@@ -565,6 +548,31 @@ internal fun PhoneAccountSheet(
             onAddAccount = accounts,
             onManage = accounts,
         )
+    }
+}
+
+/**
+ * A queued message asked back with Edit joins what is in the composer, its reply with it, the
+ * way Claude Code's Up puts queued messages back into the input; one the AI already started on
+ * says so. Shared by the phone's chat and the tablet's ChatPane.
+ */
+@Composable
+internal fun QueuedMessageAnswerEffect(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState) {
+    LaunchedEffect(state.queueAnswer) {
+        val answer = state.queueAnswer ?: return@LaunchedEffect
+        val content = answer.content
+        if (content != null) {
+            val decoded = ChatReply.decode(content)
+            val reply = decoded.replyTo?.let { quoted -> tab.session?.let { quoted.copy(sessionId = it.id) } ?: quoted }
+            if (decoded.content.isNotEmpty()) {
+                tab.restore(RejectedSend(decoded.content, reply ?: tab.replyTo, ""))
+            } else if (reply != null) {
+                tab.replyTo = reply
+            }
+        } else {
+            answer.error?.let { model.toast(ErrorToastMessage(it, kind = ErrorToastMessage.Kind.INFO)) }
+        }
+        chat.queueAnswerTaken()
     }
 }
 
