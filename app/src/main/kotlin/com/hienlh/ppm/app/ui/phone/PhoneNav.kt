@@ -32,6 +32,9 @@ enum class PhoneArea(
     PORT_FORWARDING("ports", "Port forwarding", "ports"),
     CLOUD_AND_SHARE("cloud-share", "Cloud & Share", "cloud-share"),
     SETTINGS("settings", "Settings", "settings"),
+
+    /** Spec mode's specs (the web's sidebar Specs panel), and the one opened from them or from a chat. */
+    SPECS("specs", "Specs", "specs"),
     ;
 
     companion object {
@@ -74,8 +77,22 @@ enum class PhoneArea(
             "ports", "port-forwarding", "web-preview" -> PORT_FORWARDING
             "tunnels", "cloud-share" -> CLOUD_AND_SHARE
             "settings" -> SETTINGS
+            "specs" -> SPECS
             else -> null
         }
+
+        /**
+         * The areas a server in minimal mode offers (`--minimal`): the chat, its files and Settings,
+         * as the web keeps only the History, Explorer and Search sections and the chat, editor and
+         * settings tabs. Everything else stays hidden rather than open onto a refusal.
+         */
+        val MINIMAL_AREAS: Set<PhoneArea> = setOf(CHAT, PROJECTS, FILES, SETTINGS)
+
+        /** True when [area] is offered by a server in minimal mode ([minimal]), or always when not. */
+        fun isAvailable(area: PhoneArea, minimal: Boolean): Boolean = !minimal || area in MINIMAL_AREAS
+
+        /** A tab minimal mode shows (`isMinimalTab`): chat, settings and editor tabs. */
+        fun isMinimalTabType(type: String): Boolean = type == "chat" || type == "settings" || type == "editor"
 
         /** Maps a [WorkspaceTab] to its [PhoneArea], or `null` if it is a tablet-only tab. */
         fun fromTab(tab: WorkspaceTab): PhoneArea? = fromTabType(tab.type)
