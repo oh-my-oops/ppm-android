@@ -63,6 +63,7 @@ import com.hienlh.ppm.protocol.FileSearchMatch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import com.hienlh.ppm.app.tracksTextFocus
 
 /**
  * Search in the phone's Files area: the web's Search panel in its phone layout (`search-panel.tsx`
@@ -288,7 +289,7 @@ private fun SearchField(
             BasicTextField(
                 state = state,
                 enabled = enabled,
-                modifier = Modifier.fillMaxWidth().testTag(testTag).semantics { contentDescription = label },
+                modifier = Modifier.fillMaxWidth().tracksTextFocus(state).testTag(testTag).semantics { contentDescription = label },
                 textStyle = ppmText(16f, lineHeight = 22f).copy(color = tokens.text.color),
                 cursorBrush = SolidColor(tokens.accent.color),
                 lineLimits = TextFieldLineLimits.SingleLine,

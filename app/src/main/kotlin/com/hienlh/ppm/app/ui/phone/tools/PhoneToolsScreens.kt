@@ -68,6 +68,7 @@ import com.hienlh.ppm.state.sysmon.TableRow
 import com.hienlh.ppm.state.tunnels.SetupState
 import com.hienlh.ppm.state.tunnels.TunnelEntry
 import java.util.Locale
+import com.hienlh.ppm.app.asksForTextFocus
 
 /**
  * Look-only System Monitor for phone (`designs/ppm-mobile-tablet-redesign/phone/7-tools/index.html` Section 1,
@@ -1924,6 +1925,7 @@ internal fun PhoneBottomSearchField(
         modifier = modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = 40.dp)
+            .asksForTextFocus()
             .clip(shape)
             .background(tokens.panel2.color, shape)
             .cssBorder(tokens.border.color, shape, width = 1.dp)

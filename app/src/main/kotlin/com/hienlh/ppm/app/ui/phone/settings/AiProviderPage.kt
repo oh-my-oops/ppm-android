@@ -63,6 +63,7 @@ import com.hienlh.ppm.protocol.ProviderProbeStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
+import com.hienlh.ppm.app.asksForTextFocus
 
 data class PhoneSelectOption(
     val value: String,
@@ -857,6 +858,7 @@ internal fun PhoneNumberSetting(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 44.dp)
+                .asksForTextFocus()
                 .onFocusChanged { state ->
                     if (focused && !state.isFocused) commit()
                     focused = state.isFocused

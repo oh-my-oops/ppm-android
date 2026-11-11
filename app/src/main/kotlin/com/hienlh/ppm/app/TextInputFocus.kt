@@ -16,6 +16,7 @@ import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.focus.FocusState
 import androidx.compose.ui.focus.FocusTargetModifierNode
 import androidx.compose.ui.focus.Focusability
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEvent
@@ -385,6 +386,12 @@ private class EveryTapNode(var action: () -> Unit) : DelegatingNode(), PointerIn
 
 /** Reports this text field, editing [state], to [TextInputFocus] while it has focus — where it is too — and the presses landing in it. */
 fun Modifier.tracksTextFocus(state: TextFieldState): Modifier = this then TextFocusElement(state)
+
+/**
+ * For a `value`-based text field, which [tracksTextFocus] cannot follow: the tap that focuses it asks to keep the focus
+ * ([TextInputFocus.asked]), or [leavesTextOnTap] takes it straight back and the keyboard types into nothing.
+ */
+fun Modifier.asksForTextFocus(): Modifier = onFocusChanged { if (it.isFocused) TextInputFocus.asked() }
 
 private data class TextFocusElement(val state: TextFieldState) : ModifierNodeElement<TextFocusNode>() {
     override fun create() = TextFocusNode(state)

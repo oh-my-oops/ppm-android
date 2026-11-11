@@ -91,6 +91,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
+import com.hienlh.ppm.app.asksForTextFocus
 
 // ───────────────────────── V1 · Phone Image Viewer ─────────────────────────
 
@@ -593,7 +594,7 @@ fun PhonePdfPageJumpSheet(
                         keyboardType = KeyboardType.Number,
                         imeAction = ImeAction.Done,
                     ),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().asksForTextFocus(),
                 )
             }
             Row(

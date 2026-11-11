@@ -48,6 +48,7 @@ import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.git.GitChangesView
 import com.hienlh.ppm.state.git.WriteWithAi
 import com.hienlh.ppm.state.git.WriteWithAiController
+import com.hienlh.ppm.app.asksForTextFocus
 
 /**
  * Derived state for the 5-mode Sync chip in the phone [CommitBox]
@@ -549,6 +550,7 @@ fun CommitBox(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 24.dp, max = 140.dp)
+                .asksForTextFocus()
                 .testTag("phone-git-commit-input"),
             decorationBox = { innerTextField ->
                 Box(modifier = Modifier.fillMaxWidth()) {

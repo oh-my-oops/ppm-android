@@ -38,6 +38,7 @@ import com.hienlh.ppm.design.kit.Sheet
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import kotlinx.coroutines.flow.drop
+import com.hienlh.ppm.app.tracksTextFocus
 
 /**
  * The name prompt for New File, New Folder and Rename on a phone: the old explorer's inline input
@@ -83,7 +84,7 @@ internal fun PhoneFileNameSheet(
                 BasicTextField(
                     state = field,
                     enabled = !busy,
-                    modifier = Modifier.fillMaxWidth().focusRequester(focus).testTag("phone-file-name-input"),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus).tracksTextFocus(field).testTag("phone-file-name-input"),
                     textStyle = ppmText(15f, lineHeight = 22f).copy(color = tokens.text.color),
                     cursorBrush = SolidColor(tokens.accent.color),
                     lineLimits = TextFieldLineLimits.SingleLine,

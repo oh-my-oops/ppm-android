@@ -44,6 +44,7 @@ import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.FileEntry
 import com.hienlh.ppm.state.FileIndexStore
 import com.hienlh.ppm.state.workspace.WorkspaceTab
+import com.hienlh.ppm.app.tracksTextFocus
 
 /**
  * Go to file… on a phone: the command palette's file search (`CommandPalette`, which the redesigned phone
@@ -116,7 +117,7 @@ internal fun PhoneGoToFileSheet(
                 PpmIcon(ProductIcon.Search, 18.dp, tokens.text3.color)
                 BasicTextField(
                     state = query,
-                    modifier = Modifier.weight(1f).focusRequester(focus).testTag("phone-go-to-file-input"),
+                    modifier = Modifier.weight(1f).focusRequester(focus).tracksTextFocus(query).testTag("phone-go-to-file-input"),
                     textStyle = ppmText(14.5f, lineHeight = 20f).copy(color = tokens.text.color),
                     cursorBrush = SolidColor(tokens.accent.color),
                     lineLimits = androidx.compose.foundation.text.input.TextFieldLineLimits.SingleLine,
