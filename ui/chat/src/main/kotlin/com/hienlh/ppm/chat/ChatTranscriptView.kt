@@ -186,11 +186,18 @@ fun ChatTranscriptView(
                 CenteredNotice("Loading messages...", pulsing = true)
             state.items.isEmpty() && state.live.isNullOrEmpty() && !state.isRunning && state.pendingApproval == null ->
                 Welcome(welcome, welcomeActions)
-            else -> TranscriptList(
-                state, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply, edits, jumpRequest, onJumpTaken,
-                bottomFade = bottomFade,
-                overlappedByFooter = overlappedByFooter,
-            )
+            else -> {
+                // A long press on an answer's markdown opens it selectable (SelectText.kt).
+                var selecting by remember { mutableStateOf<String?>(null) }
+                CompositionLocalProvider(LocalSelectText provides { selecting = it }) {
+                    TranscriptList(
+                        state, onRespond, onLoadEarlier, jumps, onDismiss, onClearErrors, onReply, edits, jumpRequest, onJumpTaken,
+                        bottomFade = bottomFade,
+                        overlappedByFooter = overlappedByFooter,
+                    )
+                }
+                selecting?.let { text -> SelectTextDialog(text) { selecting = null } }
+            }
         }
         state.historyError?.let { error ->
             HistoryErrorBanner(error, onReload, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))

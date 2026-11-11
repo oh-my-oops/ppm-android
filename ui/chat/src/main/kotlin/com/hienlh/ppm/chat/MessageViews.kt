@@ -271,7 +271,9 @@ fun AssistantBlocks(blocks: List<ChatBlock>, live: Boolean, actions: MessageActi
 @Composable
 private fun SelectableMarkdown(text: String, streaming: Boolean) {
     val exact = rememberCssExact()
-    SelectionContainer(Modifier.cssExact(exact)) {
+    // ChromeText cannot be selected in place: a long press opens the block selectable (SelectText.kt).
+    val selectText = LocalSelectText.current
+    SelectionContainer(Modifier.cssExact(exact).then(if (selectText != null) Modifier.longPressToSelect(text, selectText) else Modifier)) {
         TextCursorRegion { MarkdownContent(text, streaming = streaming, exact = exact) }
     }
 }
@@ -417,7 +419,14 @@ internal fun ThinkingBlock(text: String, streaming: Boolean) {
             LaunchedEffect(streaming) {
                 if (streaming) snapshotFlow { scroll.maxValue }.collect { scroll.scrollTo(it) }
             }
-            Column(Modifier.heightIn(max = 240.dp).cssScrollY(scroll).padding(start = 8.dp, end = 8.dp, bottom = 8.dp)) {
+            val selectText = LocalSelectText.current
+            Column(
+                Modifier
+                    .heightIn(max = 240.dp)
+                    .cssScrollY(scroll)
+                    .then(if (selectText != null) Modifier.longPressToSelect(text, selectText) else Modifier)
+                    .padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+            ) {
                 WithoutOnCopy(MARKDOWN_MARKS) {
                     SelectionContainer {
                         MarkdownContent(text, style = thinkingStyle.copy(color = tokens.text3.opacity(0.8)), streaming = streaming)
