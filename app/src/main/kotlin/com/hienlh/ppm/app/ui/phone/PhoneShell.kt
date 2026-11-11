@@ -1,13 +1,14 @@
 package com.hienlh.ppm.app.ui.phone
 
+import com.hienlh.ppm.design.kit.SheetScrimLayerHost
+import com.hienlh.ppm.design.kit.SheetScrimLayer
+import com.hienlh.ppm.design.kit.LocalSheetScrimLayer
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -225,17 +226,19 @@ fun PhoneShell(
 
     val isPushedPage = syntheticArea != null || activeWorkspaceTab?.type == "settings"
 
+    val sheetScrim = remember { SheetScrimLayer() }
+    CompositionLocalProvider(LocalSheetScrimLayer provides sheetScrim) {
     Box(
         modifier = modifier
             .fillMaxSize()
             .themeBackground(tokens.background),
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.statusBars),
+            modifier = Modifier.fillMaxSize(),
         ) {
+            // The app bar's own background runs up behind the status bar, as one header.
             AppBar(
+                statusBarsPadding = true,
                 title = titleText,
                 subline = sublineText,
                 connectionState = connectionState,
@@ -312,6 +315,9 @@ fun PhoneShell(
                 }
             }
         }
+
+        // A sheet opened in the page dims the app bar and the status bar above it too.
+        SheetScrimLayerHost(sheetScrim)
 
         // Left navigation drawer (Requirement 2.2)
         val drawerSubline = buildString {
@@ -602,6 +608,7 @@ fun PhoneShell(
             onOpenTerminal = { focusOrOpenTerminal(model, openTabs, nav) },
             onOpenSourceControl = { nav.visitTab(PhoneNav.areaTabId(PhoneArea.SOURCE_CONTROL)) },
         )
+    }
     }
 }
 

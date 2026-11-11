@@ -27,6 +27,11 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -77,9 +82,18 @@ fun Sheet(
     footer: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    // A sheet opened inside a page leaves the strip above it (app bar, status bar) to the shell's layer.
+    val scrimLayer = if (showScrim) LocalSheetScrimLayer.current else null
+    val currentDismiss by rememberUpdatedState(onDismiss)
+    val aboveEntry = remember(scrimLayer) { scrimLayer?.let { SheetScrimLayer.Entry { currentDismiss() } } }
+    DisposableEffect(aboveEntry) {
+        if (aboveEntry != null) scrimLayer?.add(aboveEntry)
+        onDispose { if (aboveEntry != null) scrimLayer?.remove(aboveEntry) }
+    }
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
+            .then(if (aboveEntry != null) Modifier.onGloballyPositioned { aboveEntry.topPx = it.positionInWindow().y } else Modifier)
             .then(
                 if (applyWindowInsets) {
                     Modifier.windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
@@ -93,6 +107,7 @@ fun Sheet(
 
         if (showScrim) {
             val scrimAlpha = if (isPhoneSheet) 0.52f else 0.36f
+            if (aboveEntry != null) SideEffect { aboveEntry.alpha = scrimAlpha }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
