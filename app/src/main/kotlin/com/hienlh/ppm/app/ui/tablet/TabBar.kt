@@ -174,14 +174,26 @@ fun TabBar(model: AppModel, panelId: String, tabs: List<WorkspaceTab>, activeTab
     DisposableEffect(drag, panelId) { onDispose { drag?.bars?.remove(panelId) } }
     // Each tab's span in the scrolled row, in pixels, to tell which ones are out of view.
     val spans = remember { mutableStateMapOf<String, IntRange>() }
+    // With Wrap Tabs, each tab's rows in the wrapped bar, to bring one below the third row into view.
+    val rowSpans = remember { mutableStateMapOf<String, IntRange>() }
     var viewport by remember { mutableIntStateOf(0) }
     // From 0, as the web's `prevTabCount`: a bar's first frame brings its active tab into view too.
     var shownCount by remember { mutableIntStateOf(0) }
     LaunchedEffect(tabs.size, activeTabId) {
         val grew = tabs.size > shownCount
         shownCount = tabs.size
-        if (!grew || activeTabId == null || model.tabWrap) return@LaunchedEffect
+        if (!grew || activeTabId == null) return@LaunchedEffect
         // The new tab is placed in the frame after the one that added it.
+        if (model.tabWrap) {
+            // `scrollIntoView({ block: "nearest" })` scrolls the wrapped bar down to the new tab's row.
+            val rows = withTimeoutOrNull(1_000) { snapshotFlow { rowSpans[activeTabId] }.filterNotNull().first() } ?: return@LaunchedEffect
+            val height = wrapScroll.viewportSize
+            when {
+                rows.first < wrapScroll.value -> wrapScroll.animateScrollTo(rows.first)
+                rows.last > wrapScroll.value + height -> wrapScroll.animateScrollTo(rows.last - height)
+            }
+            return@LaunchedEffect
+        }
         val span = withTimeoutOrNull(1_000) { snapshotFlow { spans[activeTabId] }.filterNotNull().first() } ?: return@LaunchedEffect
         when {
             span.first < scroll.value -> scroll.animateScrollTo(span.first)
@@ -199,7 +211,11 @@ fun TabBar(model: AppModel, panelId: String, tabs: List<WorkspaceTab>, activeTab
                 active = tab.id == activeTabId,
                 unread = entry,
                 streaming = tab.type == "chat" && sessionId != null && sessionId in running,
-                modifier = size.onPlaced { spans[tab.id] = it.positionInParent().x.toInt().let { x -> x..x + it.size.width } },
+                modifier = size.onPlaced {
+                    val at = it.positionInParent()
+                    spans[tab.id] = at.x.toInt().let { x -> x..x + it.size.width }
+                    rowSpans[tab.id] = at.y.toInt().let { y -> y..y + it.size.height }
+                },
                 onSelect = { model.activate(tab.id, panelId) },
                 onClose = { model.closeTab(tab.id, panelId) },
             )
