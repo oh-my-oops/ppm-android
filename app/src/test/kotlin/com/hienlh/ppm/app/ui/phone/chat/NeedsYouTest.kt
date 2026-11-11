@@ -107,7 +107,7 @@ class NeedsYouTest {
                     pendingApproval = bashReq,
                     atBottom = atBottom.value,
                     modelLabel = "Sonnet 4.6",
-                    onSendMessage = { _, _ -> },
+                    onSendMessage = {},
                     onStopTurn = {},
                     onScrollToWaitingCard = { scrolledToWaitingCard++ },
                 )

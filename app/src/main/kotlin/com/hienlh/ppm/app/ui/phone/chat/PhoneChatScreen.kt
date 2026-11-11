@@ -14,17 +14,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -59,8 +58,10 @@ import com.hienlh.ppm.state.WaitingCardKind
 import com.hienlh.ppm.state.resolveNeedsYouState
 
 /**
- * Queued follow-up message priority while a turn is streaming
- * (`designs/ppm-mobile-tablet-redesign/phone/1-chat/index.html`, Section 2 B10 & B11).
+ * The design's Now/Next/Later priority (`phone/1-chat/index.html`, B10 & B11). The chat no longer
+ * offers it: the server queues every message sent while a turn runs, whatever it carries, and the
+ * queue stack ([PhoneQueuedMessagesStack]) took its place. Kept only because other phone files
+ * still import it.
  */
 enum class PhoneMessagePriority(val chipLabel: String, val queueDescription: String, val snackbarTitle: String) {
     NOW(
@@ -86,6 +87,14 @@ enum class PhoneMessagePriority(val chipLabel: String, val queueDescription: Str
         LATER -> NOW
     }
 }
+
+/** One message of the server's queue, as the stack above the composer shows it. */
+data class PhoneQueuedMessage(
+    val id: String,
+    /** The typed text alone: a reply or turn references it carries are not shown. */
+    val text: String,
+    val imageCount: Int = 0,
+)
 
 /**
  * Reply or Edit banner state shown as a 52 dp strip above the composer (Phone 1 Section 2 B13).
@@ -135,7 +144,7 @@ data class PhoneTaskProgressSummary(
 @Composable
 fun PhoneChatScreen(
     composerState: TextFieldState,
-    onSendMessage: (String, PhoneMessagePriority) -> Unit,
+    onSendMessage: (String) -> Unit,
     onStopTurn: () -> Unit,
     /** Null leaves the pill to the transcript's own waiting-card pill, which knows where the card is. */
     onScrollToWaitingCard: (() -> Unit)?,
@@ -192,6 +201,15 @@ fun PhoneChatScreen(
     crossSessionNotice: AttentionNotice? = null,
     onGoToCrossSession: () -> Unit = {},
     onDismissCrossSessionNotice: () -> Unit = {},
+    /** Messages sent while the AI worked, not read by it yet: the stack above the composer. */
+    queuedMessages: List<PhoneQueuedMessage> = emptyList(),
+    onSendQueuedNow: () -> Unit = {},
+    onEditQueued: (String) -> Unit = {},
+    onRemoveQueued: (String) -> Unit = {},
+    /** First in the context row: running agents and linked sessions (`ActivityChip`); nothing when there are none. */
+    activityChip: @Composable () -> Unit = {},
+    /** Floats over the bottom of the transcript, just above the composer: the `/` and `@` pickers. */
+    pickerContent: @Composable () -> Unit = {},
     /** Over the composer, under the transcript: the stopped-turn bar, the MCP sign-in bar, the provider gate line. */
     bannersContent: @Composable () -> Unit = {},
     /** The chat's connection chip, first in the context row while the socket is down. */
@@ -207,9 +225,6 @@ fun PhoneChatScreen(
             cardKeyboardFocused = cardKeyboardFocused,
         )
     }
-    var priority by remember { mutableStateOf(PhoneMessagePriority.NEXT) }
-    var previousPriority by remember { mutableStateOf<PhoneMessagePriority?>(null) }
-    var showPrioritySnackbar by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -277,18 +292,16 @@ fun PhoneChatScreen(
                         )
                     }
                 }
-            }
 
-            // Priority snackbar when cycling Now / Next / Later (Phone 1 B11)
-            if (showPrioritySnackbar && streaming) {
-                PhonePrioritySnackbar(
-                    title = priority.snackbarTitle,
-                    subtitle = priority.queueDescription,
-                    onUndo = {
-                        previousPriority?.let { priority = it }
-                        showPrioritySnackbar = false
-                    },
-                )
+                // The `/` and `@` pickers float over the conversation's foot, above the composer.
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    pickerContent()
+                }
             }
 
             // Cross-session sticky attention snackbar (Phone 1 D7, 64 dp)
@@ -327,10 +340,19 @@ fun PhoneChatScreen(
                     specModeEnabled = specModeEnabled,
                     changes = changes,
                     connectionChip = connectionChip,
+                    activityChip = activityChip,
                     onOpenAccountSwitcher = onOpenAccountSwitcher,
                     onToggleSpecMode = onToggleSpecMode,
                     onOpenSessionChangesSheet = onOpenSessionChangesSheet,
                     onOpenSessionInfoSheet = onOpenSessionInfoSheet,
+                )
+
+                // The server's queue, right above the box it was typed in (`QueuedMessagesStack`).
+                PhoneQueuedMessagesStack(
+                    messages = queuedMessages,
+                    onSendNow = onSendQueuedNow,
+                    onEdit = onEditQueued,
+                    onRemove = onRemoveQueued,
                 )
 
                 // Composer inside BottomActionCard (Requirement 4.1, Phone 1 Section 5)
@@ -389,18 +411,6 @@ fun PhoneChatScreen(
                             onClick = onOpenModesSheet,
                             modifier = Modifier.semantics { contentDescription = "Permission mode: $permissionModeLabel" },
                         )
-                        if (streaming) {
-                            Chip(
-                                label = priority.chipLabel,
-                                icon = ProductIcon.Clock,
-                                selected = priority == PhoneMessagePriority.NOW,
-                                onClick = {
-                                    previousPriority = priority
-                                    priority = priority.next()
-                                    showPrioritySnackbar = true
-                                },
-                            )
-                        }
                     },
                     primaryAction = {
                         if (voiceRecording && onToggleVoiceRecording != null) {
@@ -417,7 +427,7 @@ fun PhoneChatScreen(
                                 enabled = canSend,
                                 onClick = {
                                     if (canSend) {
-                                        onSendMessage(draftText, priority)
+                                        onSendMessage(draftText)
                                     }
                                 },
                             )
@@ -615,6 +625,7 @@ fun PhoneContextChipRow(
     onOpenSessionInfoSheet: () -> Unit,
     modifier: Modifier = Modifier,
     connectionChip: @Composable () -> Unit = {},
+    activityChip: @Composable () -> Unit = {},
 ) {
     Row(
         modifier = modifier
@@ -626,6 +637,7 @@ fun PhoneContextChipRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         connectionChip()
+        activityChip()
 
         // Account switcher chip
         if (onOpenAccountSwitcher != null) {
@@ -717,59 +729,6 @@ fun PhoneVoiceRecordingBar(
             text = "Listening…",
             style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
         )
-    }
-}
-
-/**
- * Priority chip change snackbar (`"Next message: Interrupt"` + `Undo`, Phone 1 Section 2 B11).
- */
-@Composable
-fun PhonePrioritySnackbar(
-    title: String,
-    subtitle: String,
-    onUndo: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val tokens = LocalPpmTokens.current
-    val shape = RoundedCornerShape(12.dp)
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
-            .clip(shape)
-            .background(tokens.panel2.color)
-            .cssBorder(tokens.border.color, shape)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            BasicText(
-                text = title,
-                style = ppmText(12.5f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.text.color),
-            )
-            BasicText(
-                text = subtitle,
-                style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
-            )
-        }
-        Box(
-            modifier = Modifier
-                .height(36.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .ppmClickable(
-                    shape = RoundedCornerShape(8.dp),
-                    onClickLabel = "Undo",
-                    onClick = onUndo,
-                )
-                .padding(horizontal = 10.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            BasicText(
-                text = "Undo",
-                style = ppmText(12.5f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.accent.color),
-            )
-        }
     }
 }
 
@@ -1004,5 +963,128 @@ private fun CollabActionButton(
             text = label,
             style = ppmText(13.5f, FontWeight.SemiBold, lineHeight = 18f).copy(color = fg),
         )
+    }
+}
+
+/**
+ * Messages sent while the AI was working, shown above the composer until the AI reads them
+ * (`queued-messages-stack.tsx`). The list is the server's, so every device shows the same stack.
+ * Send now has the AI read the queue at once; Edit puts a message back into the composer; Remove
+ * drops it. Nothing at all while the queue is empty.
+ */
+@Composable
+fun PhoneQueuedMessagesStack(
+    messages: List<PhoneQueuedMessage>,
+    onSendNow: () -> Unit,
+    onEdit: (String) -> Unit,
+    onRemove: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (messages.isEmpty()) return
+    val tokens = LocalPpmTokens.current
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .clip(shape)
+            .background(tokens.panel2.color)
+            .cssBorder(tokens.borderSoft.color, shape)
+            .testTag("phone-queued-messages"),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 12.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PpmIcon(ProductIcon.Clock, 14.dp, tokens.text3.color)
+            BasicText(
+                text = "${messages.size} queued · sent when the AI is ready",
+                modifier = Modifier.weight(1f),
+                style = ppmText(11.5f, lineHeight = 15f).copy(color = tokens.text3.color),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Row(
+                modifier = Modifier
+                    .heightIn(min = KitSpec.MinTouchTarget)
+                    .clip(RoundedCornerShape(8.dp))
+                    .ppmClickable(
+                        shape = RoundedCornerShape(8.dp),
+                        onClickLabel = "Have the AI read the queue now",
+                        onClick = onSendNow,
+                    )
+                    .padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                PpmIcon(ProductIcon.Send, 14.dp, tokens.text2.color)
+                BasicText(
+                    text = "Send now",
+                    style = ppmText(11.5f, FontWeight.Medium, lineHeight = 15f).copy(color = tokens.text2.color),
+                )
+            }
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 160.dp)
+                .cssBorder(tokens.borderSoft.color, sides = CssSides.Top)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            messages.forEachIndexed { index, message ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(if (index > 0) Modifier.cssBorder(tokens.borderSoft.color, sides = CssSides.Top) else Modifier)
+                        .padding(start = 12.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    BasicText(
+                        text = message.text.ifEmpty { "(no text)" },
+                        modifier = Modifier.weight(1f),
+                        style = ppmText(13f, lineHeight = 18f)
+                            .copy(color = if (message.text.isEmpty()) tokens.text3.color else tokens.text2.color),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (message.imageCount > 0) {
+                        Row(
+                            modifier = Modifier.semantics {
+                                contentDescription = "${message.imageCount} image${if (message.imageCount == 1) "" else "s"}"
+                            },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            PpmIcon(ProductIcon.Image, 14.dp, tokens.text3.color)
+                            BasicText(
+                                text = "${message.imageCount}",
+                                style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+                            )
+                        }
+                    }
+                    QueuedRowButton(ProductIcon.Pencil, "Edit queued message") { onEdit(message.id) }
+                    QueuedRowButton(ProductIcon.X, "Remove queued message") { onRemove(message.id) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QueuedRowButton(icon: ProductIcon, label: String, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    Box(
+        modifier = Modifier
+            .size(KitSpec.MinTouchTarget)
+            .clip(RoundedCornerShape(8.dp))
+            .ppmClickable(shape = RoundedCornerShape(8.dp), onClickLabel = label, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        PpmIcon(icon, 14.dp, tokens.text3.color)
     }
 }

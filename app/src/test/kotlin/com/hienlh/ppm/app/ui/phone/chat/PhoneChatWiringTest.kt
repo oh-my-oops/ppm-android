@@ -18,6 +18,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.hasContentDescription
 import androidx.core.app.ActivityOptionsCompat
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
@@ -32,6 +34,8 @@ import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.protocol.BackgroundShell
 import com.hienlh.ppm.protocol.ChatFrame
 import com.hienlh.ppm.protocol.ProjectInfo
+import com.hienlh.ppm.protocol.QueuedMessage
+import com.hienlh.ppm.protocol.SessionPhase
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionFileChange
 import com.hienlh.ppm.protocol.SessionInfo
@@ -301,6 +305,55 @@ class PhoneChatWiringTest {
         composeRule.onNodeWithText("Default account", substring = true).performClick()
         composeRule.waitForIdle()
         assertTrue(composeRule.onAllNodesWithTag("phone-account-sheet").fetchSemanticsNodes().isNotEmpty())
+    }
+
+    @Test
+    fun aMessageSentMidTurn_drawsNoBubble_andThereIsNoPriorityChip() {
+        val tab = startedTab()
+        show(tab)
+        feed(tab, ChatFrame.PhaseChanged(SessionPhase.THINKING))
+        // The Now/Next/Later chip is gone: the server queues whatever a message carries.
+        assertTrue(composeRule.onAllNodesWithText("Next").fetchSemanticsNodes().isEmpty())
+
+        composeRule.onNode(hasSetTextAction()).performTextReplacement("one more thing")
+        composeRule.onNodeWithContentDescription("Send message").performClick()
+        composeRule.waitForIdle()
+        assertEquals("", tab.draft.text.toString())
+        assertTrue("queued, not drawn", tab.controller!!.state.value.items.none { it.text == "one more thing" })
+    }
+
+    @Test
+    fun theQueueStack_showsTheServersQueue_editBringsTheTextBack_andRemoveDoesNot() {
+        val tab = startedTab()
+        show(tab)
+        feed(tab, ChatFrame.PhaseChanged(SessionPhase.THINKING))
+        feed(
+            tab,
+            ChatFrame.QueueState(
+                listOf(
+                    QueuedMessage("q1", "fix the tests too", 0),
+                    QueuedMessage("q2", "and the docs", 2),
+                ),
+            ),
+        )
+        composeRule.onNodeWithText("2 queued · sent when the AI is ready").assertExists()
+        composeRule.onNodeWithText("fix the tests too").assertExists()
+        composeRule.onNodeWithContentDescription("2 images").assertExists()
+        composeRule.onNodeWithText("Send now").assertExists()
+
+        // Remove: what the server hands back is dropped.
+        composeRule.onAllNodes(hasContentDescription("Remove queued message")).onLast().performClick()
+        feed(tab, ChatFrame.QueueTakenBack("q2", "and the docs", null))
+        assertEquals("", tab.draft.text.toString())
+
+        // Edit: the text joins the box.
+        composeRule.onAllNodes(hasContentDescription("Edit queued message")).onFirst().performClick()
+        feed(tab, ChatFrame.QueueTakenBack("q1", "fix the tests too", null))
+        assertEquals("fix the tests too", tab.draft.text.toString())
+        assertNull(tab.controller!!.state.value.queueAnswer)
+
+        feed(tab, ChatFrame.QueueState(emptyList()))
+        assertTrue(composeRule.onAllNodesWithTag("phone-queued-messages").fetchSemanticsNodes().isEmpty())
     }
 
     @Test

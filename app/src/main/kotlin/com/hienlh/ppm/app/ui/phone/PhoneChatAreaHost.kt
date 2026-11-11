@@ -47,7 +47,6 @@ import com.hienlh.ppm.app.ui.phone.chat.PhoneAttachSheet
 import com.hienlh.ppm.app.ui.phone.chat.PhoneBackgroundCommand
 import com.hienlh.ppm.app.ui.phone.chat.PhoneChatScreen
 import com.hienlh.ppm.app.ui.phone.chat.PhoneChatTabEffects
-import com.hienlh.ppm.app.ui.phone.chat.PhoneMessagePriority
 import com.hienlh.ppm.app.ui.phone.chat.PhoneModelEffortSheet
 import com.hienlh.ppm.app.ui.phone.chat.PhoneModelOption
 import com.hienlh.ppm.app.ui.phone.chat.PhoneModesSheet
@@ -67,6 +66,7 @@ import com.hienlh.ppm.app.ui.phone.chat.phoneChangesChip
 import com.hienlh.ppm.app.ui.phone.chat.phoneCostLabel
 import com.hienlh.ppm.app.ui.phone.chat.phoneDraftAttachments
 import com.hienlh.ppm.app.ui.phone.chat.phoneElapsedLabel
+import com.hienlh.ppm.app.ui.phone.chat.phoneQueuedMessages
 import com.hienlh.ppm.app.ui.phone.chat.rememberPhoneAttachPickers
 import com.hienlh.ppm.app.ui.phone.chat.rememberPhoneChatUsage
 import com.hienlh.ppm.app.ui.phone.chat.rememberTurnElapsed
@@ -87,7 +87,6 @@ import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.Effort
-import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelNames
 import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.resolveFooterUsage
@@ -240,13 +239,9 @@ internal fun PhoneChatContent(
     Box(modifier = Modifier.fillMaxSize()) {
         PhoneChatScreen(
             composerState = composerState,
-            onSendMessage = { text, priority ->
+            onSendMessage = { text ->
                 if (chatTab != null) {
-                    chatTab.priority = when (priority) {
-                        PhoneMessagePriority.NOW -> MessagePriority.NOW
-                        PhoneMessagePriority.NEXT -> MessagePriority.NEXT
-                        PhoneMessagePriority.LATER -> MessagePriority.LATER
-                    }
+                    // Sent while the AI works, it joins the server's queue (ChatTranscript.send).
                     if (chatTab.draft.text.toString() != text) {
                         chatTab.draft.setTextAndPlaceCursorAtEnd(text)
                     }
@@ -257,6 +252,10 @@ internal fun PhoneChatContent(
                 }
             },
             onStopTurn = { chatController?.cancel() },
+            queuedMessages = phoneQueuedMessages(chatState?.queue.orEmpty()),
+            onSendQueuedNow = { chatController?.sendQueuedNow() },
+            onEditQueued = { id -> chatController?.takeBackQueued(id) },
+            onRemoveQueued = { id -> chatController?.takeBackQueued(id, discard = true) },
             // The transcript's own pill scrolls to the waiting card.
             onScrollToWaitingCard = null,
             modifier = Modifier.testTag("phone-chat-screen"),

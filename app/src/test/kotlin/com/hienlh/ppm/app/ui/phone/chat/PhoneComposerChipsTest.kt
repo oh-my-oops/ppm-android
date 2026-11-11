@@ -44,7 +44,7 @@ class PhoneComposerChipsTest {
                     permissionModeLabel = "Bypass",
                     onOpenAttachSheet = {},
                     onToggleVoiceRecording = {},
-                    onSendMessage = { _, _ -> },
+                    onSendMessage = {},
                     onStopTurn = {},
                     onScrollToWaitingCard = null,
                     onOpenModelEffortSheet = { modelSheet++ },
@@ -78,7 +78,7 @@ class PhoneComposerChipsTest {
                 PhoneChatScreen(
                     composerState = state,
                     modelLabel = "Sonnet 5.5",
-                    onSendMessage = { _, _ -> },
+                    onSendMessage = {},
                     onStopTurn = {},
                     onScrollToWaitingCard = null,
                 )
