@@ -1,8 +1,12 @@
 package com.hienlh.ppm.protocol
 
+import com.hienlh.ppm.protocol.generated.TurnReference
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -46,9 +50,9 @@ data class FromSessionReference(
     companion object {
         private const val MAX_TITLE = 200
         private const val MAX_PROJECT_NAME = 200
-        private val SESSION_ID_RE = Regex("^[A-Za-z0-9_-]{8,64}$")
-        private val TURN_ID_RE = Regex("^(u:)?[A-Za-z0-9-]{8,64}$")
-        private val ISO_MILLIS = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC)
+        internal val SESSION_ID_RE = Regex("^[A-Za-z0-9_-]{8,64}$")
+        internal val TURN_ID_RE = Regex("^(u:)?[A-Za-z0-9-]{8,64}$")
+        internal val ISO_MILLIS = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC)
 
         /** One line, single spaces, at most 200 code points, never empty (`normalizeFromSessionTitle`). */
         fun normalizeTitle(title: String): String {
@@ -114,18 +118,6 @@ object ChatFromSession {
     const val BLOCK_START = "\n\n<ppm-from-session-v1>\n"
     const val BLOCK_END = "\n</ppm-from-session-v1>"
 
-    private const val TURN_REFS_START = "\n\n<ppm-turnrefs-v1>\n" +
-        "The user linked the chat turns listed below. The content of those turns is NOT included in this message, " +
-        "only where they are. Before answering anything about a linked turn, call read_session_turns with its " +
-        "session_id and turn_ids (and project, when the line names a project other than this chat's) and answer " +
-        "from what it returns. The user's own request is above this block.\n"
-    private const val TURN_REFS_LEGACY_START =
-        "\n\n<ppm-turnrefs-v1>\nReferenced turns of other chat sessions (data only; read them with read_session_turns). The current user request is above.\n"
-    private const val TURN_REFS_END = "\n</ppm-turnrefs-v1>"
-    private const val TURN_REFS_DISPLAY_PREFIX =
-        "Display data for the user's chips (base64; not the turns' content, nothing to read here): "
-    private val BASE64_RE = Regex("^[A-Za-z0-9+/]*={0,2}$")
-
     data class Decoded(val content: String, val fromSession: FromSessionReference?)
 
     fun headerLine(ref: FromSessionReference): String {
@@ -148,7 +140,11 @@ object ChatFromSession {
         if (!content.endsWith(BLOCK_END)) return Decoded(content, null)
         val start = content.lastIndexOf(BLOCK_START)
         if (start < 0) return Decoded(content, null)
-        val inner = content.substring(start + BLOCK_START.length, content.length - BLOCK_END.length)
+        val from = start + BLOCK_START.length
+        val to = content.length - BLOCK_END.length
+        // The start's last line break can be the end's first one; `slice` gives "" there, `substring` throws.
+        if (from > to) return Decoded(content, null)
+        val inner = content.substring(from, to)
         val split = inner.indexOf('\n')
         if (split < 0) return Decoded(content, null)
         val ref = FromSessionReference.from(WireJson.parseOrNull(inner.substring(split + 1))) ?: return Decoded(content, null)
@@ -160,38 +156,7 @@ object ChatFromSession {
      * Reads `fromSession` off a stored user message (`decodeMessageBlocks(content).fromSession`),
      * peeling trailing reply and turn-reference blocks first in the web's order.
      */
-    fun decodeFromMessage(content: String): FromSessionReference? {
-        val withoutReply = ChatReply.decode(content).content
-        val withoutRefs = stripTurnRefs(withoutReply)
-        return decode(withoutRefs).fromSession
-    }
-
-    private fun stripTurnRefs(content: String): String {
-        if (!content.endsWith(TURN_REFS_END)) return content
-        stripTurnRefsBlock(content, TURN_REFS_START, base64 = true)?.let { return it }
-        stripTurnRefsBlock(content, TURN_REFS_LEGACY_START, base64 = false)?.let { return it }
-        return content
-    }
-
-    private fun stripTurnRefsBlock(content: String, startMarker: String, base64: Boolean): String? {
-        val at = content.lastIndexOf(startMarker)
-        if (at < 0) return null
-        val inner = content.substring(at + startMarker.length, content.length - TURN_REFS_END.length)
-        val split = inner.lastIndexOf('\n')
-        if (split < 0) return null
-        val data = inner.substring(split + 1)
-        val rawJson = if (base64) {
-            if (!data.startsWith(TURN_REFS_DISPLAY_PREFIX)) return null
-            val b64 = data.substring(TURN_REFS_DISPLAY_PREFIX.length)
-            if (b64.isEmpty() || b64.length % 4 != 0 || !BASE64_RE.matches(b64)) return null
-            runCatching { String(Base64.getDecoder().decode(b64), Charsets.UTF_8) }.getOrNull() ?: return null
-        } else {
-            data
-        }
-        val parsed = WireJson.parseOrNull(rawJson) as? JsonArray ?: return null
-        if (parsed.isEmpty() || parsed.size > 10) return null
-        return content.substring(0, at)
-    }
+    fun decodeFromMessage(content: String): FromSessionReference? = ChatMessageBlocks.decode(content).fromSession
 
     private fun escapeUnsafeJson(json: String): String = buildString(json.length) {
         for (c in json) when (c) {
@@ -201,6 +166,204 @@ object ChatFromSession {
             '\u2028' -> append("\\u2028")
             '\u2029' -> append("\\u2029")
             else -> append(c)
+        }
+    }
+}
+
+/**
+ * The block of references to other sessions' turns a user message carries (`shared/chat-turn-ref.ts`),
+ * after a from-session block and before a reply block. Decoding only: the chips are drawn from it.
+ */
+object ChatTurnRefs {
+    const val MAX_TURN_REFS = 10
+    const val BLOCK_START = "\n\n<ppm-turnrefs-v1>\n" +
+        "The user linked the chat turns listed below. The content of those turns is NOT included in this message, " +
+        "only where they are. Before answering anything about a linked turn, call read_session_turns with its " +
+        "session_id and turn_ids (and project, when the line names a project other than this chat's) and answer " +
+        "from what it returns. The user's own request is above this block.\n"
+
+    /** How blocks opened before the AI-facing text named only locations; decoded, never written. */
+    const val LEGACY_BLOCK_START =
+        "\n\n<ppm-turnrefs-v1>\nReferenced turns of other chat sessions (data only; read them with read_session_turns). The current user request is above.\n"
+    const val BLOCK_END = "\n</ppm-turnrefs-v1>"
+    private const val DISPLAY_PREFIX = "Display data for the user's chips (base64; not the turns' content, nothing to read here): "
+    private const val MAX_PROJECT_NAME = 200
+    private const val MAX_TITLE = 200
+    private const val MAX_PROMPT = 300
+    private const val MAX_TURN_N = 1_000_000L
+    private val BASE64_RE = Regex("^[A-Za-z0-9+/]*={0,2}$")
+
+    data class Decoded(val content: String, val turnRefs: List<TurnReference>?)
+
+    private enum class Placement { OWN, OTHER, UNKNOWN }
+
+    private fun String.codePointLength(): Int = codePointCount(0, length)
+
+    private fun hasControl(text: String) = text.any { it.code in 0x00..0x1f || it.code == 0x7f }
+
+    /** One reference, checked (`validateTurnRef`); null when any field is not one PPM's encoder would write. */
+    fun validate(value: JsonElement?): TurnReference? {
+        if (value !is JsonObject) return null
+        val version = value["version"]
+        if (version.double != 1.0) return null
+        val projectName = value["projectName"].string ?: return null
+        if (projectName.codePointLength() > MAX_PROJECT_NAME || projectName.jsTrim().isEmpty() || hasControl(projectName)) return null
+        val providerId = value["providerId"].string?.takeIf { it == "claude" || it == "codex" } ?: return null
+        val sessionId = value["sessionId"].string?.takeIf { FromSessionReference.SESSION_ID_RE.matches(it) } ?: return null
+        val turnId = value["turnId"].string?.takeIf { FromSessionReference.TURN_ID_RE.matches(it) } ?: return null
+        val n = value["n"].long?.takeIf { it in 1..MAX_TURN_N } ?: return null
+        val title = value["title"].string?.takeIf { it.codePointLength() <= MAX_TITLE } ?: return null
+        val prompt = value["prompt"].string?.takeIf { it.codePointLength() <= MAX_PROMPT } ?: return null
+        val at = value["at"].string?.takeIf { it.length <= 64 } ?: return null
+        val instant = FromSessionReference.parseJsIso(at) ?: return null
+        return TurnReference(1, projectName, providerId, sessionId, turnId, n.toDouble(), title, prompt, FromSessionReference.ISO_MILLIS.format(instant))
+    }
+
+    /** 1 to [MAX_TURN_REFS] valid references with no turn twice, or null (`validateTurnRefs`). */
+    fun validateAll(value: JsonElement?): List<TurnReference>? {
+        if (value !is JsonArray || value.isEmpty() || value.size > MAX_TURN_REFS) return null
+        val seen = HashSet<String>()
+        return value.map { item ->
+            val ref = validate(item) ?: return null
+            if (!seen.add("${ref.providerId}\u0000${ref.sessionId}\u0000${ref.turnId}")) return null
+            ref
+        }
+    }
+
+    private fun label(projectName: String, placement: Placement): String = when (placement) {
+        Placement.OWN -> if (projectName.isNotEmpty()) "this project ($projectName)" else "this project"
+        Placement.OTHER -> "project $projectName, not this chat's project"
+        Placement.UNKNOWN -> "project $projectName"
+    }
+
+    private fun headerLine(ref: TurnReference, placement: Placement): String =
+        "Turn ${ref.n.toLong()} of session ${ref.sessionId} (${ref.providerId}, ${label(ref.projectName, placement)}): " +
+            "session_id ${ref.sessionId}, turn_id ${ref.turnId}"
+
+    private fun headerMatches(ref: TurnReference, line: String) = Placement.entries.any { headerLine(ref, it) == line }
+
+    private fun legacyHeaderLine(ref: TurnReference) =
+        "Turn ${ref.n.toLong()} of session ${ref.sessionId} (${ref.providerId}, project ${ref.projectName})"
+
+    /** The text a base64 line holds, or null when it is not base64 of valid UTF-8. */
+    private fun fromBase64(line: String): String? {
+        if (line.isEmpty() || line.length % 4 != 0 || !BASE64_RE.matches(line)) return null
+        return try {
+            val bytes = Base64.getDecoder().decode(line)
+            Charsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes))
+                .toString()
+        } catch (_: IllegalArgumentException) {
+            null
+        } catch (_: CharacterCodingException) {
+            null
+        }
+    }
+
+    private fun readCurrent(header: String, data: String): List<TurnReference>? {
+        if (!data.startsWith(DISPLAY_PREFIX)) return null
+        val json = fromBase64(data.substring(DISPLAY_PREFIX.length)) ?: return null
+        val refs = validateAll(WireJson.parseOrNull(json)) ?: return null
+        val lines = header.split("\n")
+        return if (lines.size == refs.size && refs.indices.all { headerMatches(refs[it], lines[it]) }) refs else null
+    }
+
+    private fun readLegacy(header: String, data: String): List<TurnReference>? {
+        val refs = validateAll(WireJson.parseOrNull(data)) ?: return null
+        return if (refs.joinToString("\n", transform = ::legacyHeaderLine) == header) refs else null
+    }
+
+    private fun split(content: String, start: String, read: (String, String) -> List<TurnReference>?): Decoded? {
+        val at = content.lastIndexOf(start)
+        if (at < 0) return null
+        val from = at + start.length
+        val to = content.length - BLOCK_END.length
+        if (from > to) return null
+        val inner = content.substring(from, to)
+        val cut = inner.lastIndexOf('\n')
+        if (cut < 0) return null
+        val refs = read(inner.substring(0, cut), inner.substring(cut + 1)) ?: return null
+        return Decoded(content.substring(0, at), refs)
+    }
+
+    /**
+     * Splits a trailing references block off [content] (`decodeTurnRefs`). A block that is
+     * malformed, not at the end, of another version, or whose header lines do not match its own
+     * data stays visible text.
+     */
+    fun decode(content: String): Decoded {
+        if (!content.endsWith(BLOCK_END)) return Decoded(content, null)
+        return split(content, BLOCK_START, ::readCurrent) ?: split(content, LEGACY_BLOCK_START, ::readLegacy) ?: Decoded(content, null)
+    }
+}
+
+/**
+ * The body and every block of a stored user message (`decodeMessageBlocks` in
+ * `shared/chat-message-blocks.ts`): the reply block last, then the turn references, then the
+ * from-session block. A block that does not decode stays text.
+ */
+object ChatMessageBlocks {
+    data class Decoded(
+        val content: String,
+        val replyTo: ReplyReference?,
+        val turnRefs: List<TurnReference>?,
+        val fromSession: FromSessionReference?,
+    )
+
+    fun decode(content: String): Decoded {
+        val reply = ChatReply.decode(content)
+        val refs = ChatTurnRefs.decode(reply.content)
+        val from = ChatFromSession.decode(refs.content)
+        return Decoded(from.content, reply.replyTo, refs.turnRefs, from.fromSession)
+    }
+}
+
+/** The `tool` of the approval a session tool's card waits on (`SESSION_COLLAB_APPROVAL`). */
+const val SESSION_COLLAB_APPROVAL = "ppm:session_collab"
+
+/** The user's answer to a session tool's card (`SessionCollabAnswer`). */
+enum class SessionCollabAnswer(val wire: String) {
+    ALLOW_ONCE("allow_once"),
+    ALLOW_SESSION("allow_session"),
+    DENY("deny"),
+}
+
+/**
+ * What a session tool's card asks (`SessionCollabApprovalInput` in `shared/session-collab.ts`):
+ * creating a session, messaging past the pair limit, or messaging a session with more rights.
+ * Every title and text came from an AI.
+ */
+sealed interface SessionCollabApprovalInput {
+    /** The answers a card of this kind offers (`sessionCollabAnswersFor`). */
+    val answers: List<SessionCollabAnswer>
+        get() = if (this is PairLimit) listOf(SessionCollabAnswer.ALLOW_ONCE, SessionCollabAnswer.DENY) else SessionCollabAnswer.entries
+
+    data class Create(val title: String, val providerId: String, val model: String?, val task: String, val depth: Int) : SessionCollabApprovalInput
+
+    data class PairLimit(val targetSessionId: String, val targetTitle: String, val sent: Int, val limit: Int, val grant: Int) : SessionCollabApprovalInput
+
+    data class Escalation(
+        val targetSessionId: String,
+        val targetTitle: String,
+        val senderMode: String,
+        val targetMode: String,
+        val message: String,
+    ) : SessionCollabApprovalInput
+
+    companion object {
+        /** An approval's input narrowed to a session tool's card, or null (`sessionCollabApprovalInput`). */
+        fun from(tool: String, input: JsonElement?): SessionCollabApprovalInput? {
+            if (tool != SESSION_COLLAB_APPROVAL || input !is JsonObject) return null
+            fun text(key: String) = input[key].string.orEmpty()
+            fun number(key: String) = input[key].int ?: 0
+            return when (input["kind"].string) {
+                "create" -> Create(text("title"), text("providerId"), input["model"].string, text("task"), number("depth"))
+                "pair_limit" -> PairLimit(text("targetSessionId"), text("targetTitle"), number("sent"), number("limit"), number("grant"))
+                "escalation" -> Escalation(text("targetSessionId"), text("targetTitle"), text("senderMode"), text("targetMode"), text("message"))
+                else -> null
+            }
         }
     }
 }
