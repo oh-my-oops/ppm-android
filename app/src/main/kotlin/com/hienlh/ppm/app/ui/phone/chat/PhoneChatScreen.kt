@@ -166,6 +166,8 @@ fun PhoneChatScreen(
     providerId: String = "claude",
     modelLabel: String = "Sonnet 4.6",
     effortLabel: String = "Medium",
+    /** Why the turns do not run at the effort picked; the chip says so, and its sheet says why. */
+    effortNotice: PhoneEffortNotice? = null,
     permissionModeId: String = "default",
     permissionModeLabel: String = "Ask",
     accountName: String = "Primary",
@@ -402,9 +404,16 @@ fun PhoneChatScreen(
                         Chip(
                             label = modelLabel,
                             providerId = providerId,
-                            secondaryLabel = effortLabel,
+                            secondaryLabel = effortLabel.ifEmpty { null },
                             showCaret = true,
+                            alert = effortNotice != null,
                             onClick = onOpenModelEffortSheet,
+                            modifier = Modifier.semantics {
+                                contentDescription = buildString {
+                                    append("Model ").append(modelLabel).append(", effort ").append(effortLabel.ifEmpty { "none" })
+                                    effortNotice?.let { append(" (").append(it.title).append(")") }
+                                }
+                            },
                         )
                         // Icon only, as the web's composer on a phone: the shield's colour carries the mode.
                         Chip(

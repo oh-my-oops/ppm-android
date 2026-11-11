@@ -6,6 +6,7 @@ import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatFrame
 import com.hienlh.ppm.protocol.ChatReply
+import com.hienlh.ppm.protocol.EffortStatusReport
 import com.hienlh.ppm.protocol.HistoryMessage
 import com.hienlh.ppm.protocol.HistoryPage
 import com.hienlh.ppm.protocol.InlineImage
@@ -99,6 +100,10 @@ class ChatTranscript(var providerId: String? = null) {
 
     /** The MCP servers the session's Claude cannot use until someone signs in, as the server last listed them. */
     var mcpNeedsAuth: List<String> = emptyList()
+        private set
+
+    /** What decides the effort the session runs at, as the server last said; null while nothing is known. */
+    var effortStatus: EffortStatusReport? = null
         private set
 
     /** Messages sent while a turn ran, not yet read by the AI: the server's list. */
@@ -206,6 +211,7 @@ class ChatTranscript(var providerId: String? = null) {
                 val repeated = clientId == null && last?.role == ChatItem.Role.USER && last.text == frame.content
                 if (!drawn && !repeated) appendUser(frame.content, clientId, now)
             }
+            is ChatFrame.EffortStatusChanged -> effortStatus = frame.status
             is ChatFrame.QueueState -> queue.replace(frame.queue)
             is ChatFrame.QueueTakenBack -> queue.answered(frame)
             is ChatFrame.TitleUpdated -> if (frame.title.isNotEmpty()) title = frame.title
@@ -395,6 +401,7 @@ class ChatTranscript(var providerId: String? = null) {
         mcpNeedsAuth = state.mcpNeedsAuth
         // Answers that do not carry the queue leave it as it was.
         state.queue?.let(queue::replace)
+        (state.effortStatus as? Reported.Value)?.let { effortStatus = it.value }
         val wasRunning = phase.isRunning
         phase = state.phase
         val stop = state.turnStop

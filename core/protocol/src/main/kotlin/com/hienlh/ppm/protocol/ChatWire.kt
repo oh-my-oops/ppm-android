@@ -105,6 +105,45 @@ data class QueuedMessage(
     }
 }
 
+/** A setting that decides a Claude session's effort, and where it is written (`EffortSetting`). */
+data class EffortSettingReport(val value: String, val source: String, val file: String? = null) {
+    companion object {
+        fun from(json: JsonElement?): EffortSettingReport? {
+            val value = json["value"].string ?: return null
+            return EffortSettingReport(value, json["source"].string ?: "", json["file"].string)
+        }
+    }
+}
+
+/** The running CLI's own answer: the effort it was started with and the one it sends. */
+data class ObservedEffort(val requested: String?, val applied: String?, val model: String? = null)
+
+/**
+ * What decides the effort a Claude session actually runs at (`src/shared/effort-status.ts`): the
+ * `CLAUDE_CODE_EFFORT_LEVEL` variable, a settings file's `maxEffortLevel`, and the CLI's own answer.
+ */
+data class EffortStatusReport(
+    val env: EffortSettingReport? = null,
+    val cap: EffortSettingReport? = null,
+    val observed: ObservedEffort? = null,
+    /** Levels the model runs as themselves, empty when it takes none; null when the CLI did not say. */
+    val supported: List<String>? = null,
+) {
+    companion object {
+        /** Null for anything but an object: the server's `null`, which means nothing is known. */
+        fun from(json: JsonElement?): EffortStatusReport? {
+            if (json !is JsonObject) return null
+            val observed = json["observed"] as? JsonObject
+            return EffortStatusReport(
+                env = EffortSettingReport.from(json["env"]),
+                cap = EffortSettingReport.from(json["cap"]),
+                observed = observed?.let { ObservedEffort(it["requested"].string, it["applied"].string, it["model"].string) },
+                supported = (json["supported"] as? JsonArray)?.mapNotNull { it.string },
+            )
+        }
+    }
+}
+
 data class SessionStateFrame(
     val sessionId: String? = null,
     val phase: SessionPhase = SessionPhase.IDLE,
@@ -127,6 +166,8 @@ data class SessionStateFrame(
      * it; one that leaves it out (a session no chat has opened yet) means none, as on the web.
      */
     val mcpNeedsAuth: List<String> = emptyList(),
+    /** What decides the effort the session runs at; a frame without the key leaves it as it was. */
+    val effortStatus: Reported<EffortStatusReport> = Reported.NotReported,
     /** The session's queue; null when this greeting does not carry it, which leaves it as it was. */
     val queue: List<QueuedMessage>? = null,
 )
@@ -162,6 +203,9 @@ sealed interface ChatFrame {
      * the sending device's id for it.
      */
     data class UserMessage(val content: String, val clientMessageId: String? = null) : ChatFrame
+
+    /** What decides the session's effort, again (`effort_status`): at every turn's start, from the CLI itself. */
+    data class EffortStatusChanged(val status: EffortStatusReport?) : ChatFrame
 
     /** The session's queue, whole (`queue_state`), whenever it changes. */
     data class QueueState(val queue: List<QueuedMessage>) : ChatFrame
@@ -214,6 +258,11 @@ sealed interface ChatFrame {
                         promptCache = PromptCacheState.from(json["promptCache"]),
                         mcpNeedsAuth = names(json["mcpNeedsAuth"]),
                         queue = QueuedMessage.list(json["queue"]),
+                        effortStatus = if ((json as? JsonObject)?.containsKey("effortStatus") == true) {
+                            Reported.Value(EffortStatusReport.from(json["effortStatus"]))
+                        } else {
+                            Reported.NotReported
+                        },
                     ),
                 )
                 "turn_events" -> TurnEvents(
@@ -235,6 +284,7 @@ sealed interface ChatFrame {
                 )
                 "user_message" -> UserMessage(json["content"].string ?: "", json["clientMessageId"].string)
                 "queue_state" -> QueuedMessage.list(json["queue"])?.let(::QueueState) ?: Event(ChatEvent.from(json), seq)
+                "effort_status" -> EffortStatusChanged(EffortStatusReport.from(json["status"]))
                 "queue_taken_back" -> QueueTakenBack(json["id"].string ?: "", json["content"].string, json["error"].string)
                 "title_updated" -> TitleUpdated(json["title"].string ?: "")
                 "approval_resolved" -> {

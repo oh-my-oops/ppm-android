@@ -70,7 +70,9 @@ import com.hienlh.ppm.app.ui.phone.chat.phoneChangedFiles
 import com.hienlh.ppm.app.ui.phone.chat.phoneChangesChip
 import com.hienlh.ppm.app.ui.phone.chat.phoneCostLabel
 import com.hienlh.ppm.app.ui.phone.chat.phoneDraftAttachments
+import com.hienlh.ppm.app.ui.phone.chat.effortNotice
 import com.hienlh.ppm.app.ui.phone.chat.phoneElapsedLabel
+import com.hienlh.ppm.app.ui.phone.chat.shownEffort
 import com.hienlh.ppm.app.ui.phone.chat.phoneQueuedMessages
 import com.hienlh.ppm.app.ui.phone.chat.rememberPhoneAttachPickers
 import com.hienlh.ppm.app.ui.phone.chat.rememberPhoneChatUsage
@@ -168,6 +170,12 @@ internal fun PhoneChatContent(
     }
     val effortValue = chatState?.effort ?: ModelNames.suffixEffort(stateModel, providerId) ?: Effort.DEFAULT.value
     val effortLabel = Effort.label(effortValue)
+    // What the turns actually run at (`effort_status`): a setting outside PPM, a cap or the model can
+    // override the pick, and the chip shows what runs, as the web's does. Nothing known: the pick.
+    val effortStatus = chatState?.effortStatus
+    val shownEffort = shownEffort(effortValue, effortStatus)
+    val effortNotice = effortNotice(shownEffort, effortStatus, modelLabel)
+    val effortInEffect = if (effortStatus == null) effortLabel else shownEffort.level?.label.orEmpty()
     val thinkingEnabled = chatState?.thinking ?: true
     val permissionMode = chatTab?.permissionMode ?: PermissionMode.FALLBACK
     val permissionModeId = permissionMode.value
@@ -298,7 +306,8 @@ internal fun PhoneChatContent(
             elapsedTurnLabel = rememberTurnElapsed(isStreaming, chatState?.liveStartedAt),
             providerId = providerId,
             modelLabel = modelLabel,
-            effortLabel = effortLabel,
+            effortLabel = effortInEffect,
+            effortNotice = effortNotice,
             permissionModeId = permissionModeId,
             permissionModeLabel = permissionMode.shortLabel,
             accountName = accountName,
@@ -447,6 +456,8 @@ internal fun PhoneChatContent(
                     Effort.entries.firstOrNull { it.label.equals(label, ignoreCase = true) }?.let { chatController?.setEffort(it) }
                 },
                 onToggleThinking = { enabled -> chatController?.setThinking(enabled) },
+                inEffectEffort = if (effortStatus == null) null else shownEffort.level?.label ?: "None",
+                effortNotice = effortNotice,
                 onResetEffortToDefault = {
                     (Effort.of(defaults?.effort) ?: Effort.DEFAULT).let { chatController?.setEffort(it) }
                 },

@@ -10,6 +10,7 @@ import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ProviderDefaults
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatFrame
+import com.hienlh.ppm.protocol.EffortStatusReport
 import com.hienlh.ppm.protocol.InlineImage
 import com.hienlh.ppm.protocol.PickedAccount
 import com.hienlh.ppm.protocol.PromptCacheState
@@ -92,6 +93,8 @@ data class ChatState(
     val mcpNeedsAuth: List<String> = emptyList(),
     /** Messages sent while a turn ran, not yet read by the AI, in the order it will read them: the server's list. */
     val queue: List<QueuedMessage> = emptyList(),
+    /** What decides the effort the session runs at; null while nothing is known (no Claude session yet, an older server). */
+    val effortStatus: EffortStatusReport? = null,
     /** A queued message this device asked back, for the composer ([ChatController.queueAnswerTaken]). */
     val queueAnswer: QueueTakeBackAnswer? = null,
 ) {
@@ -691,6 +694,7 @@ class ChatController(
             mcpNeedsAuth = transcript.mcpNeedsAuth,
             queue = transcript.queue.messages,
             queueAnswer = transcript.queue.answer,
+            effortStatus = transcript.effortStatus,
         )
     }
 

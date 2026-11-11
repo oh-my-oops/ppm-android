@@ -34,6 +34,9 @@ import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.protocol.BackgroundShell
 import com.hienlh.ppm.protocol.ChatFrame
+import com.hienlh.ppm.protocol.EffortSettingReport
+import com.hienlh.ppm.protocol.EffortStatusReport
+import com.hienlh.ppm.protocol.ObservedEffort
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.QueuedMessage
 import com.hienlh.ppm.protocol.SessionPhase
@@ -414,6 +417,23 @@ class PhoneChatWiringTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("phone-account-sheet").assertExists()
         composeRule.onNodeWithText("Antigravity Usage").assertExists()
+    }
+
+    @Test
+    fun theModelChip_showsTheEffortTheTurnsRunAt_andItsSheetSaysWhy() {
+        val tab = startedTab()
+        show(tab)
+        feed(
+            tab,
+            ChatFrame.EffortStatusChanged(
+                EffortStatusReport(env = EffortSettingReport("max", "userSettings"), observed = ObservedEffort("high", "max")),
+            ),
+        )
+        composeRule.onNodeWithContentDescription("effort Max (Effort is set to Max outside PPM)", substring = true).performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("phone-effort-notice", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("CLAUDE_CODE_EFFORT_LEVEL=max in ~/.claude/settings.json", substring = true).assertExists()
+        composeRule.onNodeWithText("In effect: Max", substring = true).assertExists()
     }
 
     @Test
