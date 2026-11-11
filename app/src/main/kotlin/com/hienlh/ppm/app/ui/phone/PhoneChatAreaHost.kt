@@ -173,12 +173,14 @@ internal fun PhoneChatContent(
     val permissionModeId = permissionMode.value
 
     // The account the chat runs on and its usage windows, as the footer's rings and ··· menu read them.
-    val hasAccounts = providerId == "claude" || providerId == "codex"
-    val switcher = rememberSwitchAccounts(model, providerId, enabled = showAccountSheet)
+    // Antigravity's accounts are its own panel (`AntigravityUsagePanel`), not the Claude/Codex switcher.
+    val isAntigravity = providerId == "antigravity"
+    val hasAccounts = providerId == "claude" || providerId == "codex" || isAntigravity
+    val switcher = rememberSwitchAccounts(model, providerId, enabled = showAccountSheet && !isAntigravity)
     val pickedAccountId = chatTab?.servingAccount?.id ?: chatTab?.claimedAccountId
     val pickedAccountLabel = chatTab?.servingAccount?.label ?: chatTab?.claimedAccountLabel
     val usageSummary = remember(providerId, usageInfo, pickedAccountId, pickedAccountLabel, switcher.accounts) {
-        resolveFooterUsage(providerId, usageInfo, pickedAccountId, pickedAccountLabel, switcher.accounts)
+        resolveFooterUsage(providerId, usageInfo, pickedAccountId, pickedAccountLabel, if (isAntigravity) emptyList() else switcher.accounts)
     }
     val accountName = usageSummary.accountLabel ?: "Default account"
 

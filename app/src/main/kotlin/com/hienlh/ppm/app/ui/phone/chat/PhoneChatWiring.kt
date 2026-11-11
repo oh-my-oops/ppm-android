@@ -51,6 +51,7 @@ import com.hienlh.ppm.app.PREWARM_SETTLE_MILLIS
 import com.hienlh.ppm.app.PrewarmAsk
 import com.hienlh.ppm.app.ReviewTab
 import com.hienlh.ppm.app.TextInputFocus
+import com.hienlh.ppm.app.ui.AntigravityUsagePanel
 import com.hienlh.ppm.app.ui.BottomSheet
 import com.hienlh.ppm.app.ui.LocalSheetContentTop
 import com.hienlh.ppm.app.ui.SwitchAccountView
@@ -84,6 +85,7 @@ import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.ChatReply
 import com.hienlh.ppm.protocol.QueuedMessage
 import com.hienlh.ppm.protocol.SessionFileChange
+import com.hienlh.ppm.protocol.UsageInfo
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.agentTranscriptProvider
 import com.hienlh.ppm.state.AgentSessionIdentity
@@ -516,6 +518,28 @@ internal fun PhoneAccountSheet(
     switcher: SwitchAccountsState,
     onDismiss: () -> Unit,
 ) {
+    if (tab.providerId == "antigravity") {
+        // The tablet footer's Antigravity usage: its accounts, their quota with its age and a stale
+        // warning, and the pick for this chat.
+        BottomSheet(onDismiss, Modifier.testTag("phone-account-sheet")) {
+            val shown = usage.shown?.usage ?: UsageInfo()
+            AntigravityUsagePanel(
+                model = model,
+                usage = shown,
+                loading = usage.loading,
+                lastFetchedAt = usage.shown?.fetchedAt,
+                selectedAccountId = tab.servingAccount?.id ?: tab.claimedAccountId ?: shown.activeAccountId,
+                onSelectAccount = if (!tab.providerPending && !tab.firstSendPending) {
+                    { id, label -> model.selectAccount(tab, id, label) { usage.reader.read(refresh = false) } }
+                } else {
+                    null
+                },
+                onReload = { usage.reader.read(refresh = true) },
+                onClose = onDismiss,
+            )
+        }
+        return
+    }
     val providerName = if (tab.providerId == "codex") "Codex" else "Claude"
     val select: (suspend (String, String) -> String?)? = if (!tab.providerPending && !tab.firstSendPending) {
         { id, label ->

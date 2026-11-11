@@ -402,6 +402,21 @@ class PhoneChatWiringTest {
     }
 
     @Test
+    fun anAntigravityChat_hasTheAccountChip_whichOpensItsUsagePanel() {
+        val agy = SessionInfo(id = "s-agy", providerId = "antigravity", title = "Agy chat")
+        model.sessions = listOf(agy)
+        val tab = ChatTab("tab-agy", agy, "p", "antigravity").also {
+            it.start(api, scope, DraftLocalStore(PrefsStore(context, "phone-chat-wiring-test"), "server"))
+        }
+        show(tab)
+
+        composeRule.onNodeWithText("Default account", substring = true).performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("phone-account-sheet").assertExists()
+        composeRule.onNodeWithText("Antigravity Usage").assertExists()
+    }
+
+    @Test
     fun noActivityChip_whileTheChatHasNoAgentsOrLinkedSessions() {
         val tab = startedTab()
         show(tab)
