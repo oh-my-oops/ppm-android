@@ -151,4 +151,36 @@ class ChatReconnectTest {
         chat.stop()
         assertNull(withContext(Dispatchers.IO) { server.sockets.poll(600, TimeUnit.MILLISECONDS) })
     }
+
+    @Test
+    fun `the queue the server sends is the chat's, and Edit, Remove and Send now go out on the socket`() = withServer { server, api ->
+        val chat = ChatController(api, "p", SessionInfo(id = "s-1", providerId = "mock", title = ""), this)
+        chat.start()
+        val socket = server.sockets.next() ?: return@withServer fail("no socket")
+        waitFor("the socket") { chat.state.value.connected }
+        assertEquals(ready, server.received[0].next())
+
+        socket.send("""{"type":"phase_changed","phase":"thinking"}""")
+        waitFor("the turn") { chat.state.value.isRunning }
+        chat.send("queued one")
+        val sent = server.received[0].next()
+        assertEquals("true", field(sent, "queued"))
+        assertTrue("nothing drawn", chat.state.value.items.isEmpty())
+
+        socket.send("""{"type":"queue_state","queue":[{"id":"q1","content":"queued one","imageCount":0,"clientMessageId":"${field(sent, "clientMessageId")}"}]}""")
+        waitFor("the queue") { chat.state.value.queue.map { it.id } == listOf("q1") }
+
+        chat.takeBackQueued("q1")
+        assertEquals("queue_take_back" to "q1", server.received[0].next().let { field(it, "type") to field(it, "id") })
+        socket.send("""{"type":"queue_taken_back","id":"q1","content":"queued one","imageCount":0}""")
+        waitFor("the answer") { chat.state.value.queueAnswer == QueueTakeBackAnswer("q1", "queued one", null) }
+        chat.queueAnswerTaken()
+        assertNull(chat.state.value.queueAnswer)
+
+        chat.takeBackQueued("q2", discard = true)
+        assertEquals("q2", field(server.received[0].next(), "id"))
+        chat.sendQueuedNow()
+        assertEquals("queue_send_now", field(server.received[0].next(), "type"))
+        chat.stop()
+    }
 }

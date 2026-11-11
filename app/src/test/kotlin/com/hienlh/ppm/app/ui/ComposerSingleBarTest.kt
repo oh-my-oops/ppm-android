@@ -318,25 +318,19 @@ class ComposerSingleBarTest {
         }
         compose.waitForIdle()
 
-        // Idle: Send disabled (empty draft), no Stop, no Priority chip, Model chip enabled.
+        // Idle: Send disabled (empty draft), no Stop, Model chip enabled.
         compose.onNodeWithContentDescription("Send message").assertIsDisplayed().assertIsNotEnabled()
         assertTrue(compose.onAllNodes(hasContentDescription("Stop response")).fetchSemanticsNodes().isEmpty())
-        assertTrue(compose.onAllNodesWithTag("composer-priority-chip").fetchSemanticsNodes().isEmpty())
         compose.onNodeWithTag("composer-model-chip").assertIsEnabled()
 
-        // Streaming with empty draft: Stop replaces Send, Model chip locks, Priority chip cycles Queue -> Later -> Interrupt.
+        // Streaming with empty draft: Stop replaces Send, Model chip locks. No priority chip: a message
+        // sent now joins the server's queue (the stack above the composer), as on the web.
         phase = SessionPhase.STREAMING
         compose.waitForIdle()
         compose.onNodeWithContentDescription("Stop response").assertIsDisplayed().assertIsEnabled()
         assertTrue(compose.onAllNodes(hasContentDescription("Send message")).fetchSemanticsNodes().isEmpty())
         compose.onNodeWithTag("composer-model-chip").assertIsNotEnabled()
 
-        assertEquals("Queue", compose.onNodeWithTag("composer-priority-chip").fetchSemanticsNode().config[DisplayedChipTextKey])
-        compose.onNodeWithTag("composer-priority-chip").performClick()
-        compose.waitForIdle()
-        assertEquals("Later", compose.onNodeWithTag("composer-priority-chip").fetchSemanticsNode().config[DisplayedChipTextKey])
-        compose.onNodeWithTag("composer-priority-chip").performClick()
-        compose.waitForIdle()
-        assertEquals("Interrupt", compose.onNodeWithTag("composer-priority-chip").fetchSemanticsNode().config[DisplayedChipTextKey])
+        assertTrue(compose.onAllNodesWithTag("composer-priority-chip").fetchSemanticsNodes().isEmpty())
     }
 }

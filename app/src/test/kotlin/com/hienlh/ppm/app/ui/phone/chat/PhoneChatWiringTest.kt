@@ -18,6 +18,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
 import androidx.core.app.ActivityOptionsCompat
 import androidx.test.core.app.ApplicationProvider
 import com.hienlh.ppm.app.AppModel
@@ -31,13 +34,21 @@ import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.protocol.BackgroundShell
 import com.hienlh.ppm.protocol.ChatFrame
+import com.hienlh.ppm.protocol.EffortSettingReport
+import com.hienlh.ppm.protocol.EffortStatusReport
+import com.hienlh.ppm.protocol.ObservedEffort
 import com.hienlh.ppm.protocol.ProjectInfo
+import com.hienlh.ppm.protocol.QueuedMessage
+import com.hienlh.ppm.protocol.SessionPhase
+import com.hienlh.ppm.protocol.SlashItem
+import com.hienlh.ppm.protocol.SlashItemsPayload
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionFileChange
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.TurnStop
 import com.hienlh.ppm.state.DraftLocalStore
 import com.hienlh.ppm.state.PermissionMode
+import com.hienlh.ppm.state.SlashItemsStore
 import com.hienlh.ppm.state.UsageReader
 import java.io.File
 import java.time.Instant
@@ -301,6 +312,135 @@ class PhoneChatWiringTest {
         composeRule.onNodeWithText("Default account", substring = true).performClick()
         composeRule.waitForIdle()
         assertTrue(composeRule.onAllNodesWithTag("phone-account-sheet").fetchSemanticsNodes().isNotEmpty())
+    }
+
+    @Test
+    fun aMessageSentMidTurn_drawsNoBubble_andThereIsNoPriorityChip() {
+        val tab = startedTab()
+        show(tab)
+        feed(tab, ChatFrame.PhaseChanged(SessionPhase.THINKING))
+        // The Now/Next/Later chip is gone: the server queues whatever a message carries.
+        assertTrue(composeRule.onAllNodesWithText("Next").fetchSemanticsNodes().isEmpty())
+
+        composeRule.onNode(hasSetTextAction()).performTextReplacement("one more thing")
+        composeRule.onNodeWithContentDescription("Send message").performClick()
+        composeRule.waitForIdle()
+        assertEquals("", tab.draft.text.toString())
+        assertTrue("queued, not drawn", tab.controller!!.state.value.items.none { it.text == "one more thing" })
+    }
+
+    @Test
+    fun theQueueStack_showsTheServersQueue_editBringsTheTextBack_andRemoveDoesNot() {
+        val tab = startedTab()
+        show(tab)
+        feed(tab, ChatFrame.PhaseChanged(SessionPhase.THINKING))
+        feed(
+            tab,
+            ChatFrame.QueueState(
+                listOf(
+                    QueuedMessage("q1", "fix the tests too", 0),
+                    QueuedMessage("q2", "and the docs", 2),
+                ),
+            ),
+        )
+        composeRule.onNodeWithText("2 queued · sent when the AI is ready").assertExists()
+        composeRule.onNodeWithText("fix the tests too").assertExists()
+        composeRule.onNodeWithContentDescription("2 images").assertExists()
+        composeRule.onNodeWithText("Send now").assertExists()
+
+        // Remove: what the server hands back is dropped.
+        composeRule.onAllNodes(hasContentDescription("Remove queued message")).onLast().performClick()
+        feed(tab, ChatFrame.QueueTakenBack("q2", "and the docs", null))
+        assertEquals("", tab.draft.text.toString())
+
+        // Edit: the text joins the box.
+        composeRule.onAllNodes(hasContentDescription("Edit queued message")).onFirst().performClick()
+        feed(tab, ChatFrame.QueueTakenBack("q1", "fix the tests too", null))
+        assertEquals("fix the tests too", tab.draft.text.toString())
+        assertNull(tab.controller!!.state.value.queueAnswer)
+
+        feed(tab, ChatFrame.QueueState(emptyList()))
+        assertTrue(composeRule.onAllNodesWithTag("phone-queued-messages").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun theActivityChip_listsTheSessionsThisChatOpened_inItsSheet() {
+        model.sessions = listOf(session, SessionInfo(id = "child-1", providerId = "claude", title = "Write the tests", spawnedBy = "s-1"))
+        val tab = startedTab()
+        show(tab)
+
+        composeRule.onNodeWithTag("activity-chip").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("activity-tab:sessions").assertExists()
+        // The sheet's row, with its status (the welcome list under it names the chat too).
+        composeRule.onNode(hasText("Write the tests") and hasText("Idle")).assertExists()
+    }
+
+    @Test
+    fun typingSlash_opensThePicker_andARowPicksIntoTheBox_andAtOpensTheFileQuery() {
+        val store = SlashItemsStore(scope)
+        store.seed(
+            SlashItemsPayload(listOf(SlashItem(type = "builtin", name = "compact", description = "Summarize the conversation.", scope = "bundled")), recentNames = emptyList()),
+            "p",
+            "claude",
+        )
+        model.slashItems = store
+        val tab = startedTab()
+        show(tab)
+
+        // The composer, not the welcome list's search under a chat with no messages.
+        composeRule.onNode(hasSetTextAction() and hasText("Message", substring = true)).performTextReplacement("/comp")
+        composeRule.waitForIdle()
+        assertEquals("comp", tab.slashQuery)
+        composeRule.onNodeWithTag("composer-picker").assertExists()
+        composeRule.onNodeWithText("Summarize the conversation.").performClick()
+        composeRule.waitForIdle()
+        assertTrue(tab.draft.text.toString(), tab.draft.text.startsWith("/compact"))
+        assertTrue(composeRule.onAllNodesWithTag("composer-picker").fetchSemanticsNodes().isEmpty())
+
+        composeRule.onNode(hasSetTextAction() and hasText("/compact", substring = true)).performTextReplacement("look at @src/Pa")
+        composeRule.waitForIdle()
+        assertEquals("src/Pa", tab.fileQuery)
+        assertNull(tab.slashQuery)
+    }
+
+    @Test
+    fun anAntigravityChat_hasTheAccountChip_whichOpensItsUsagePanel() {
+        val agy = SessionInfo(id = "s-agy", providerId = "antigravity", title = "Agy chat")
+        model.sessions = listOf(agy)
+        val tab = ChatTab("tab-agy", agy, "p", "antigravity").also {
+            it.start(api, scope, DraftLocalStore(PrefsStore(context, "phone-chat-wiring-test"), "server"))
+        }
+        show(tab)
+
+        composeRule.onNodeWithText("Default account", substring = true).performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("phone-account-sheet").assertExists()
+        composeRule.onNodeWithText("Antigravity Usage").assertExists()
+    }
+
+    @Test
+    fun theModelChip_showsTheEffortTheTurnsRunAt_andItsSheetSaysWhy() {
+        val tab = startedTab()
+        show(tab)
+        feed(
+            tab,
+            ChatFrame.EffortStatusChanged(
+                EffortStatusReport(env = EffortSettingReport("max", "userSettings"), observed = ObservedEffort("high", "max")),
+            ),
+        )
+        composeRule.onNodeWithContentDescription("effort Max (Effort is set to Max outside PPM)", substring = true).performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("phone-effort-notice", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithText("CLAUDE_CODE_EFFORT_LEVEL=max in ~/.claude/settings.json", substring = true).assertExists()
+        composeRule.onNodeWithText("In effect: Max", substring = true).assertExists()
+    }
+
+    @Test
+    fun noActivityChip_whileTheChatHasNoAgentsOrLinkedSessions() {
+        val tab = startedTab()
+        show(tab)
+        assertTrue(composeRule.onAllNodesWithTag("activity-chip").fetchSemanticsNodes().isEmpty())
     }
 
     @Test

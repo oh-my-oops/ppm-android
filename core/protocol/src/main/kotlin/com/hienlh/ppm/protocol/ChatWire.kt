@@ -1,5 +1,6 @@
 package com.hienlh.ppm.protocol
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -73,6 +74,76 @@ data class PromptCacheState(
     }
 }
 
+/**
+ * A message sent while the AI was working, waiting to reach it (`src/shared/chat-queue.ts`). The
+ * server holds the list per session and sends it whole, so every device shows the same stack.
+ */
+data class QueuedMessage(
+    /** The server's id for it, which Edit and Remove name. */
+    val id: String,
+    /** As the server stores it: a reply or turn references ride in it as blocks. */
+    val content: String,
+    val imageCount: Int = 0,
+    /** The sending device's id for it, which the echo carries when the AI starts on it. */
+    val clientMessageId: String? = null,
+    val queuedAt: String? = null,
+) {
+    companion object {
+        fun from(json: JsonElement?): QueuedMessage? {
+            val id = json["id"].string ?: return null
+            return QueuedMessage(
+                id = id,
+                content = json["content"].string ?: "",
+                imageCount = json["imageCount"].int ?: 0,
+                clientMessageId = json["clientMessageId"].string,
+                queuedAt = json["queuedAt"].string,
+            )
+        }
+
+        /** Null for anything but an array: a frame that leaves the queue out leaves it as it was. */
+        fun list(json: JsonElement?): List<QueuedMessage>? = (json as? JsonArray)?.mapNotNull(::from)
+    }
+}
+
+/** A setting that decides a Claude session's effort, and where it is written (`EffortSetting`). */
+data class EffortSettingReport(val value: String, val source: String, val file: String? = null) {
+    companion object {
+        fun from(json: JsonElement?): EffortSettingReport? {
+            val value = json["value"].string ?: return null
+            return EffortSettingReport(value, json["source"].string ?: "", json["file"].string)
+        }
+    }
+}
+
+/** The running CLI's own answer: the effort it was started with and the one it sends. */
+data class ObservedEffort(val requested: String?, val applied: String?, val model: String? = null)
+
+/**
+ * What decides the effort a Claude session actually runs at (`src/shared/effort-status.ts`): the
+ * `CLAUDE_CODE_EFFORT_LEVEL` variable, a settings file's `maxEffortLevel`, and the CLI's own answer.
+ */
+data class EffortStatusReport(
+    val env: EffortSettingReport? = null,
+    val cap: EffortSettingReport? = null,
+    val observed: ObservedEffort? = null,
+    /** Levels the model runs as themselves, empty when it takes none; null when the CLI did not say. */
+    val supported: List<String>? = null,
+) {
+    companion object {
+        /** Null for anything but an object: the server's `null`, which means nothing is known. */
+        fun from(json: JsonElement?): EffortStatusReport? {
+            if (json !is JsonObject) return null
+            val observed = json["observed"] as? JsonObject
+            return EffortStatusReport(
+                env = EffortSettingReport.from(json["env"]),
+                cap = EffortSettingReport.from(json["cap"]),
+                observed = observed?.let { ObservedEffort(it["requested"].string, it["applied"].string, it["model"].string) },
+                supported = (json["supported"] as? JsonArray)?.mapNotNull { it.string },
+            )
+        }
+    }
+}
+
 data class SessionStateFrame(
     val sessionId: String? = null,
     val phase: SessionPhase = SessionPhase.IDLE,
@@ -95,6 +166,10 @@ data class SessionStateFrame(
      * it; one that leaves it out (a session no chat has opened yet) means none, as on the web.
      */
     val mcpNeedsAuth: List<String> = emptyList(),
+    /** What decides the effort the session runs at; a frame without the key leaves it as it was. */
+    val effortStatus: Reported<EffortStatusReport> = Reported.NotReported,
+    /** The session's queue; null when this greeting does not carry it, which leaves it as it was. */
+    val queue: List<QueuedMessage>? = null,
 )
 
 /** `turn_events`: every buffered event of the running turn — a full snapshot, not a delta. */
@@ -122,7 +197,24 @@ sealed interface ChatFrame {
         val content: String? = null,
         val replyTo: ReplyReference? = null,
     ) : ChatFrame
-    data class UserMessage(val content: String) : ChatFrame
+    /**
+     * A message entering the conversation that this device did not draw: one sent from another
+     * device, or a queued one (this device's too) the AI has just started on. [clientMessageId] is
+     * the sending device's id for it.
+     */
+    data class UserMessage(val content: String, val clientMessageId: String? = null) : ChatFrame
+
+    /** What decides the session's effort, again (`effort_status`): at every turn's start, from the CLI itself. */
+    data class EffortStatusChanged(val status: EffortStatusReport?) : ChatFrame
+
+    /** The session's queue, whole (`queue_state`), whenever it changes. */
+    data class QueueState(val queue: List<QueuedMessage>) : ChatFrame
+
+    /**
+     * The answer to this device's `queue_take_back`: the message's [content] for the composer, or
+     * [error] when the AI had already started on it.
+     */
+    data class QueueTakenBack(val id: String, val content: String?, val error: String?) : ChatFrame
     data class TitleUpdated(val title: String) : ChatFrame
 
     /** [answers] when a question was answered, from this device or another. */
@@ -165,6 +257,12 @@ sealed interface ChatFrame {
                         thinking = json["thinking"].bool,
                         promptCache = PromptCacheState.from(json["promptCache"]),
                         mcpNeedsAuth = names(json["mcpNeedsAuth"]),
+                        queue = QueuedMessage.list(json["queue"]),
+                        effortStatus = if ((json as? JsonObject)?.containsKey("effortStatus") == true) {
+                            Reported.Value(EffortStatusReport.from(json["effortStatus"]))
+                        } else {
+                            Reported.NotReported
+                        },
                     ),
                 )
                 "turn_events" -> TurnEvents(
@@ -184,7 +282,10 @@ sealed interface ChatFrame {
                     content = json["content"].string,
                     replyTo = ReplyReference.from(json["replyTo"]),
                 )
-                "user_message" -> UserMessage(json["content"].string ?: "")
+                "user_message" -> UserMessage(json["content"].string ?: "", json["clientMessageId"].string)
+                "queue_state" -> QueuedMessage.list(json["queue"])?.let(::QueueState) ?: Event(ChatEvent.from(json), seq)
+                "effort_status" -> EffortStatusChanged(EffortStatusReport.from(json["status"]))
+                "queue_taken_back" -> QueueTakenBack(json["id"].string ?: "", json["content"].string, json["error"].string)
                 "title_updated" -> TitleUpdated(json["title"].string ?: "")
                 "approval_resolved" -> {
                     val answers = if (json["approved"].bool == true) json["answers"] else null
@@ -242,12 +343,21 @@ sealed interface ChatClientMessage {
         val replyTo: ReplyReference? = null,
         val images: List<InlineImage> = emptyList(),
         val imagePaths: List<String> = emptyList(),
+        /**
+         * Sent while a turn runs: the server queues it and echoes it to every device, this one
+         * included, when the AI starts on it. Nothing is drawn for it here until then.
+         */
+        val queued: Boolean = false,
+        /** With [queued]: the AI reads the queue at once (Claude Code's Send now). */
+        val sendNow: Boolean = false,
     ) : ChatClientMessage {
         override val json
             get() = buildJsonObject {
                 put("type", "message")
                 put("clientMessageId", clientMessageId)
                 put("content", content)
+                if (queued) put("queued", true)
+                if (queued && sendNow) put("sendNow", true)
                 options.permissionMode?.let { put("permissionMode", it) }
                 options.priority?.let { put("priority", it) }
                 if (images.isNotEmpty()) {
@@ -269,6 +379,20 @@ sealed interface ChatClientMessage {
                 options.effort?.let { put("effort", it) }
                 options.thinking?.let { put("thinking", it) }
             }
+    }
+
+    /** Takes a queued message back; the server answers this device with `queue_taken_back`. */
+    data class QueueTakeBack(val id: String) : ChatClientMessage {
+        override val json
+            get() = buildJsonObject {
+                put("type", "queue_take_back")
+                put("id", id)
+            }
+    }
+
+    /** Claude Code's Send now: the AI reads the queue now instead of at its next step. */
+    data object QueueSendNow : ChatClientMessage {
+        override val json get() = buildJsonObject { put("type", "queue_send_now") }
     }
 
     /** Stored for the session; the server answers with a `session_state`. */

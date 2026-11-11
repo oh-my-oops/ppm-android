@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Composable
@@ -35,7 +36,10 @@ import com.hienlh.ppm.app.ChatTab
 import com.hienlh.ppm.app.NewChatGate
 import com.hienlh.ppm.app.attach
 import com.hienlh.ppm.app.removeAttachment
+import com.hienlh.ppm.app.ui.ComposerPickerList
 import com.hienlh.ppm.app.ui.ConnectionChip
+import com.hienlh.ppm.app.ui.PickerVariant
+import com.hienlh.ppm.app.ui.rememberComposerPickers
 import com.hienlh.ppm.app.ui.PromptDialog
 import com.hienlh.ppm.app.ui.SessionDebugDialog
 import com.hienlh.ppm.app.ui.SessionHistoryPanel
@@ -43,11 +47,11 @@ import com.hienlh.ppm.app.ui.SessionListPanel
 import com.hienlh.ppm.app.ui.rememberReconnectIndicator
 import com.hienlh.ppm.app.ui.rememberSwitchAccounts
 import com.hienlh.ppm.app.ui.phone.chat.PhoneAccountSheet
+import com.hienlh.ppm.app.ui.phone.chat.PhoneActivityChip
 import com.hienlh.ppm.app.ui.phone.chat.PhoneAttachSheet
 import com.hienlh.ppm.app.ui.phone.chat.PhoneBackgroundCommand
 import com.hienlh.ppm.app.ui.phone.chat.PhoneChatScreen
 import com.hienlh.ppm.app.ui.phone.chat.PhoneChatTabEffects
-import com.hienlh.ppm.app.ui.phone.chat.PhoneMessagePriority
 import com.hienlh.ppm.app.ui.phone.chat.PhoneModelEffortSheet
 import com.hienlh.ppm.app.ui.phone.chat.PhoneModelOption
 import com.hienlh.ppm.app.ui.phone.chat.PhoneModesSheet
@@ -66,7 +70,10 @@ import com.hienlh.ppm.app.ui.phone.chat.phoneChangedFiles
 import com.hienlh.ppm.app.ui.phone.chat.phoneChangesChip
 import com.hienlh.ppm.app.ui.phone.chat.phoneCostLabel
 import com.hienlh.ppm.app.ui.phone.chat.phoneDraftAttachments
+import com.hienlh.ppm.app.ui.phone.chat.effortNotice
 import com.hienlh.ppm.app.ui.phone.chat.phoneElapsedLabel
+import com.hienlh.ppm.app.ui.phone.chat.shownEffort
+import com.hienlh.ppm.app.ui.phone.chat.phoneQueuedMessages
 import com.hienlh.ppm.app.ui.phone.chat.rememberPhoneAttachPickers
 import com.hienlh.ppm.app.ui.phone.chat.rememberPhoneChatUsage
 import com.hienlh.ppm.app.ui.phone.chat.rememberTurnElapsed
@@ -87,7 +94,6 @@ import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.Effort
-import com.hienlh.ppm.state.MessagePriority
 import com.hienlh.ppm.state.ModelNames
 import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.resolveFooterUsage
@@ -164,17 +170,25 @@ internal fun PhoneChatContent(
     }
     val effortValue = chatState?.effort ?: ModelNames.suffixEffort(stateModel, providerId) ?: Effort.DEFAULT.value
     val effortLabel = Effort.label(effortValue)
+    // What the turns actually run at (`effort_status`): a setting outside PPM, a cap or the model can
+    // override the pick, and the chip shows what runs, as the web's does. Nothing known: the pick.
+    val effortStatus = chatState?.effortStatus
+    val shownEffort = shownEffort(effortValue, effortStatus)
+    val effortNotice = effortNotice(shownEffort, effortStatus, modelLabel)
+    val effortInEffect = if (effortStatus == null) effortLabel else shownEffort.level?.label.orEmpty()
     val thinkingEnabled = chatState?.thinking ?: true
     val permissionMode = chatTab?.permissionMode ?: PermissionMode.FALLBACK
     val permissionModeId = permissionMode.value
 
     // The account the chat runs on and its usage windows, as the footer's rings and ··· menu read them.
-    val hasAccounts = providerId == "claude" || providerId == "codex"
-    val switcher = rememberSwitchAccounts(model, providerId, enabled = showAccountSheet)
+    // Antigravity's accounts are its own panel (`AntigravityUsagePanel`), not the Claude/Codex switcher.
+    val isAntigravity = providerId == "antigravity"
+    val hasAccounts = providerId == "claude" || providerId == "codex" || isAntigravity
+    val switcher = rememberSwitchAccounts(model, providerId, enabled = showAccountSheet && !isAntigravity)
     val pickedAccountId = chatTab?.servingAccount?.id ?: chatTab?.claimedAccountId
     val pickedAccountLabel = chatTab?.servingAccount?.label ?: chatTab?.claimedAccountLabel
     val usageSummary = remember(providerId, usageInfo, pickedAccountId, pickedAccountLabel, switcher.accounts) {
-        resolveFooterUsage(providerId, usageInfo, pickedAccountId, pickedAccountLabel, switcher.accounts)
+        resolveFooterUsage(providerId, usageInfo, pickedAccountId, pickedAccountLabel, if (isAntigravity) emptyList() else switcher.accounts)
     }
     val accountName = usageSummary.accountLabel ?: "Default account"
 
@@ -236,17 +250,27 @@ internal fun PhoneChatContent(
         }
     }
     val visitActive = { model.activeTabId?.let(visit) }
+    // What the user types (`onContentChange`), as the tablet composer hears it: a recalled message
+    // becomes a draft again, the draft is saved, and the `/` and `@` pickers open or close. A pick's
+    // or a restore's own writes are not the user's, so only a changed text counts.
+    val composerTransformation = remember(chatTab) {
+        chatTab?.let { tab ->
+            InputTransformation {
+                if (!asCharSequence().contentEquals(originalText)) {
+                    tab.historyIndex = -1
+                    tab.updatePickers(asCharSequence(), selection.min)
+                    tab.edited(asCharSequence())
+                }
+            }
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         PhoneChatScreen(
             composerState = composerState,
-            onSendMessage = { text, priority ->
+            onSendMessage = { text ->
                 if (chatTab != null) {
-                    chatTab.priority = when (priority) {
-                        PhoneMessagePriority.NOW -> MessagePriority.NOW
-                        PhoneMessagePriority.NEXT -> MessagePriority.NEXT
-                        PhoneMessagePriority.LATER -> MessagePriority.LATER
-                    }
+                    // Sent while the AI works, it joins the server's queue (ChatTranscript.send).
                     if (chatTab.draft.text.toString() != text) {
                         chatTab.draft.setTextAndPlaceCursorAtEnd(text)
                     }
@@ -257,6 +281,13 @@ internal fun PhoneChatContent(
                 }
             },
             onStopTurn = { chatController?.cancel() },
+            queuedMessages = phoneQueuedMessages(chatState?.queue.orEmpty()),
+            onSendQueuedNow = { chatController?.sendQueuedNow() },
+            onEditQueued = { id -> chatController?.takeBackQueued(id) },
+            activityChip = {
+                if (chatTab != null && chatState != null) PhoneActivityChip(model, chatTab, chatState) { visitActive() }
+            },
+            onRemoveQueued = { id -> chatController?.takeBackQueued(id, discard = true) },
             // The transcript's own pill scrolls to the waiting card.
             onScrollToWaitingCard = null,
             modifier = Modifier.testTag("phone-chat-screen"),
@@ -275,7 +306,8 @@ internal fun PhoneChatContent(
             elapsedTurnLabel = rememberTurnElapsed(isStreaming, chatState?.liveStartedAt),
             providerId = providerId,
             modelLabel = modelLabel,
-            effortLabel = effortLabel,
+            effortLabel = effortInEffect,
+            effortNotice = effortNotice,
             permissionModeId = permissionModeId,
             permissionModeLabel = permissionMode.shortLabel,
             accountName = accountName,
@@ -306,6 +338,16 @@ internal fun PhoneChatContent(
             },
             onOpenSessionInfoSheet = { showSessionInfoSheet = true },
             sendEnabled = !startingConversation,
+            composerInputTransformation = composerTransformation,
+            pickerContent = {
+                if (chatTab != null) {
+                    // The `/` and `@` pickers, as the tablet composer has them (`rememberComposerPickers`).
+                    val pickers = rememberComposerPickers(model, chatTab)
+                    if (pickers.isShowing) {
+                        ComposerPickerList(model, chatTab, pickers, narrow = true, variant = PickerVariant.FLOATING)
+                    }
+                }
+            },
             connectionChip = {
                 if (chatController != null) {
                     ConnectionChip(
@@ -414,6 +456,8 @@ internal fun PhoneChatContent(
                     Effort.entries.firstOrNull { it.label.equals(label, ignoreCase = true) }?.let { chatController?.setEffort(it) }
                 },
                 onToggleThinking = { enabled -> chatController?.setThinking(enabled) },
+                inEffectEffort = if (effortStatus == null) null else shownEffort.level?.label ?: "None",
+                effortNotice = effortNotice,
                 onResetEffortToDefault = {
                     (Effort.of(defaults?.effort) ?: Effort.DEFAULT).let { chatController?.setEffort(it) }
                 },

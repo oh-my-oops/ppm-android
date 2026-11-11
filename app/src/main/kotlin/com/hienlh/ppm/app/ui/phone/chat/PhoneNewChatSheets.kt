@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
@@ -407,6 +408,10 @@ fun PhoneModelEffortSheet(
     onResetEffortToDefault: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The level the turns run at when it is not [selectedEffort] ("None" when no effort is sent); null: the pick. */
+    inEffectEffort: String? = null,
+    /** Why the turns do not run at the pick (`effort_status`): a setting outside PPM, a cap, or the model. */
+    effortNotice: PhoneEffortNotice? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val currentProvider = providers.find { it.id.equals(selectedProviderId, ignoreCase = true) }
@@ -516,6 +521,32 @@ fun PhoneModelEffortSheet(
                                 )
                             }
                         }
+                    }
+                }
+            }
+
+            // What Claude Code actually runs at, when a setting outside PPM, a cap or the model decides it.
+            if (effortNotice != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(tokens.warning.opacity(0.12).color)
+                        .cssBorder(tokens.warning.opacity(0.38).color, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                        .testTag("phone-effort-notice"),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    PpmIcon(ProductIcon.TriangleAlert, 16.dp, tokens.warning.color)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        BasicText(
+                            text = effortNotice.title,
+                            style = ppmText(12.5f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.text.color),
+                        )
+                        BasicText(
+                            text = effortNotice.detail,
+                            style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text2.color),
+                        )
                     }
                 }
             }
@@ -673,7 +704,7 @@ fun PhoneModelEffortSheet(
                     }
                 }
                 BasicText(
-                    text = "Default: $defaultEffort · In effect: $selectedEffort",
+                    text = "Default: $defaultEffort · In effect: ${inEffectEffort ?: selectedEffort}",
                     style = ppmText(11.5f, FontWeight.Normal, FontKind.MONO, lineHeight = 16f)
                         .copy(color = tokens.text3.color),
                 )

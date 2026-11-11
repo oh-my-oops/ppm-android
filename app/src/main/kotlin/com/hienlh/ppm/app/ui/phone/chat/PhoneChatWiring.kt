@@ -51,6 +51,7 @@ import com.hienlh.ppm.app.PREWARM_SETTLE_MILLIS
 import com.hienlh.ppm.app.PrewarmAsk
 import com.hienlh.ppm.app.ReviewTab
 import com.hienlh.ppm.app.TextInputFocus
+import com.hienlh.ppm.app.ui.AntigravityUsagePanel
 import com.hienlh.ppm.app.ui.BottomSheet
 import com.hienlh.ppm.app.ui.LocalSheetContentTop
 import com.hienlh.ppm.app.ui.SwitchAccountView
@@ -81,13 +82,17 @@ import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
+import com.hienlh.ppm.protocol.ChatReply
+import com.hienlh.ppm.protocol.QueuedMessage
 import com.hienlh.ppm.protocol.SessionFileChange
+import com.hienlh.ppm.protocol.UsageInfo
 import com.hienlh.ppm.protocol.TurnOptions
 import com.hienlh.ppm.protocol.agentTranscriptProvider
 import com.hienlh.ppm.state.AgentSessionIdentity
 import com.hienlh.ppm.state.ChatController
 import com.hienlh.ppm.state.ChatState
 import com.hienlh.ppm.state.FooterUsageSummary
+import com.hienlh.ppm.state.RejectedSend
 import com.hienlh.ppm.state.SessionChangeList
 import com.hienlh.ppm.state.UsageCache
 import com.hienlh.ppm.state.UsageReader
@@ -117,6 +122,7 @@ import kotlinx.serialization.json.put
  */
 @Composable
 internal fun PhoneChatTabEffects(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState) {
+    QueuedMessageAnswerEffect(model, tab, chat, state)
     LaunchedEffect(state.title) {
         state.title?.takeIf { it.isNotEmpty() }?.let {
             tab.session?.let { session -> model.renameSession(session.id, it) }
@@ -495,6 +501,28 @@ internal fun PhoneAccountSheet(
     switcher: SwitchAccountsState,
     onDismiss: () -> Unit,
 ) {
+    if (tab.providerId == "antigravity") {
+        // The tablet footer's Antigravity usage: its accounts, their quota with its age and a stale
+        // warning, and the pick for this chat.
+        BottomSheet(onDismiss, Modifier.testTag("phone-account-sheet")) {
+            val shown = usage.shown?.usage ?: UsageInfo()
+            AntigravityUsagePanel(
+                model = model,
+                usage = shown,
+                loading = usage.loading,
+                lastFetchedAt = usage.shown?.fetchedAt,
+                selectedAccountId = tab.servingAccount?.id ?: tab.claimedAccountId ?: shown.activeAccountId,
+                onSelectAccount = if (!tab.providerPending && !tab.firstSendPending) {
+                    { id, label -> model.selectAccount(tab, id, label) { usage.reader.read(refresh = false) } }
+                } else {
+                    null
+                },
+                onReload = { usage.reader.read(refresh = true) },
+                onClose = onDismiss,
+            )
+        }
+        return
+    }
     val providerName = if (tab.providerId == "codex") "Codex" else "Claude"
     val select: (suspend (String, String) -> String?)? = if (!tab.providerPending && !tab.firstSendPending) {
         { id, label ->
@@ -521,4 +549,34 @@ internal fun PhoneAccountSheet(
             onManage = accounts,
         )
     }
+}
+
+/**
+ * A queued message asked back with Edit joins what is in the composer, its reply with it, the
+ * way Claude Code's Up puts queued messages back into the input; one the AI already started on
+ * says so. Shared by the phone's chat and the tablet's ChatPane.
+ */
+@Composable
+internal fun QueuedMessageAnswerEffect(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState) {
+    LaunchedEffect(state.queueAnswer) {
+        val answer = state.queueAnswer ?: return@LaunchedEffect
+        val content = answer.content
+        if (content != null) {
+            val decoded = ChatReply.decode(content)
+            val reply = decoded.replyTo?.let { quoted -> tab.session?.let { quoted.copy(sessionId = it.id) } ?: quoted }
+            if (decoded.content.isNotEmpty()) {
+                tab.restore(RejectedSend(decoded.content, reply ?: tab.replyTo, ""))
+            } else if (reply != null) {
+                tab.replyTo = reply
+            }
+        } else {
+            answer.error?.let { model.toast(ErrorToastMessage(it, kind = ErrorToastMessage.Kind.INFO)) }
+        }
+        chat.queueAnswerTaken()
+    }
+}
+
+/** The server's queue as the stack shows it: the typed text without the reply it carries. */
+internal fun phoneQueuedMessages(queue: List<QueuedMessage>): List<PhoneQueuedMessage> = queue.map {
+    PhoneQueuedMessage(it.id, ChatReply.decode(it.content).content.trim(), it.imageCount)
 }
