@@ -1160,7 +1160,7 @@ fun InlineRename(model: AppModel, session: SessionInfo, field: RenameField, modi
  * its Review tab, and on a phone a sheet up to 90% of the page with `rounded-t-[14px]`.
  */
 @Composable
-private fun rememberTurnChangesHost(model: AppModel, tab: ChatTab, state: ChatState): TurnChangesHost {
+internal fun rememberTurnChangesHost(model: AppModel, tab: ChatTab, state: ChatState): TurnChangesHost {
     val changes = tab.sessionChanges
     val title by rememberUpdatedState(state.title)
     val statusBar = WindowInsets.statusBars.getTop(LocalDensity.current)

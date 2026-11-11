@@ -396,7 +396,8 @@ fun PhoneAttachmentTray(
 @Composable
 fun PhoneAttachSheet(
     onPickPhotos: () -> Unit,
-    onOpenCamera: () -> Unit,
+    /** Null hides Camera (no camera app on this device). */
+    onOpenCamera: (() -> Unit)?,
     onPickFiles: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
@@ -471,15 +472,17 @@ fun PhoneAttachSheet(
                     },
                     modifier = Modifier.weight(1f),
                 )
-                AttachActionTile(
-                    icon = ProductIcon.ImagePlus,
-                    label = "Camera",
-                    onClick = {
-                        onOpenCamera()
-                        onDismiss()
-                    },
-                    modifier = Modifier.weight(1f),
-                )
+                if (onOpenCamera != null) {
+                    AttachActionTile(
+                        icon = ProductIcon.ImagePlus,
+                        label = "Camera",
+                        onClick = {
+                            onOpenCamera()
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
                 AttachActionTile(
                     icon = ProductIcon.Folder,
                     label = "Files",
@@ -765,6 +768,9 @@ fun PhoneAgentSessionSheet(
     }
 }
 
+/** One background command the bar shows: its shell id, command line, and whether a stop is under way. */
+data class PhoneBackgroundCommand(val id: String, val command: String, val stopping: Boolean = false)
+
 /**
  * 52 dp top bar for a running background command with 44 dp `"View output"` and `"Stop"` buttons
  * (Phone 1 Section 6 F1, Note 90: kept at the top of the chat view so it stays clear of the thumb zone).
@@ -774,7 +780,8 @@ fun PhoneBackgroundCommandBar(
     command: String,
     elapsedLabel: String,
     onViewOutput: () -> Unit,
-    onStop: () -> Unit,
+    /** Null hides Stop (already asked to stop). */
+    onStop: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
@@ -821,7 +828,7 @@ fun PhoneBackgroundCommandBar(
                 style = ppmText(12f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.text.color),
             )
         }
-        Box(
+        if (onStop != null) Box(
             modifier = Modifier
                 .height(44.dp)
                 .clip(RoundedCornerShape(10.dp))
@@ -901,10 +908,13 @@ fun PhoneBackgroundOutputSheet(
  * File entry in [PhoneSessionChangesSheet] and [PhoneTurnChangesSheet] (Phone 1 Section 6 F4 & F5).
  */
 data class PhoneChangedFileItem(
+    /** What identifies the file to the callbacks (the server's absolute path for a session's change). */
     val path: String,
     val additions: Int,
     val deletions: Int,
     val reviewed: Boolean = false,
+    /** What the row shows: the path relative to the project. */
+    val displayPath: String = path,
 )
 
 /**
@@ -945,7 +955,7 @@ fun PhoneSessionChangesSheet(
                         .heightIn(min = 56.dp)
                         .then(if (index > 0) Modifier.cssBorder(tokens.borderSoft.color, sides = CssSides.Top) else Modifier)
                         .ppmClickable(
-                            onClickLabel = "Open diff for ${file.path}",
+                            onClickLabel = "Open diff for ${file.displayPath}",
                             onClick = {
                                 onOpenFileDiff(file.path)
                                 onDismiss()
@@ -962,10 +972,10 @@ fun PhoneSessionChangesSheet(
                             .clip(RoundedCornerShape(10.dp))
                             .ppmClickable(
                                 shape = RoundedCornerShape(10.dp),
-                                onClickLabel = "Reviewed ${file.path}",
+                                onClickLabel = "Reviewed ${file.displayPath}",
                                 onClick = { onToggleReviewed(file.path) },
                             )
-                            .semantics { contentDescription = "Reviewed ${file.path}" },
+                            .semantics { contentDescription = "Reviewed ${file.displayPath}" },
                         contentAlignment = Alignment.Center,
                     ) {
                         Box(
@@ -986,7 +996,7 @@ fun PhoneSessionChangesSheet(
                     }
 
                     BasicText(
-                        text = file.path,
+                        text = file.displayPath,
                         modifier = Modifier.weight(1f),
                         style = ppmText(13f, FontWeight.Medium, FontKind.MONO, lineHeight = 18f)
                             .copy(color = if (file.reviewed) tokens.text3.color else tokens.text.color),
@@ -1222,14 +1232,17 @@ data class PhoneSessionInfoData(
 @Composable
 fun PhoneSessionInfoSheet(
     info: PhoneSessionInfoData,
-    onRename: () -> Unit,
+    /** Null (a chat with no session yet) hides Rename and the session's action rows. */
+    onRename: (() -> Unit)?,
     onOpenModelSheet: () -> Unit,
     onOpenModeSheet: () -> Unit,
-    onMarkAsUnread: () -> Unit,
-    onShowLogs: () -> Unit,
-    onOpenSessionDebug: () -> Unit,
+    onMarkAsUnread: (() -> Unit)?,
+    onShowLogs: (() -> Unit)?,
+    onOpenSessionDebug: (() -> Unit)?,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The session is unread already: the row marks it read, as the ··· menu's does. */
+    hasUnread: Boolean = false,
 ) {
     val tokens = LocalPpmTokens.current
     val clipboard = LocalClipboard.current
@@ -1279,7 +1292,7 @@ fun PhoneSessionInfoSheet(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Box(
+                    if (onRename != null) Box(
                         modifier = Modifier
                             .height(36.dp)
                             .clip(RoundedCornerShape(8.dp))
@@ -1366,39 +1379,29 @@ fun PhoneSessionInfoSheet(
             }
 
             // Action rows (52 dp each)
-            Column(
+            val actions = listOfNotNull(
+                onMarkAsUnread?.let { Triple(ProductIcon.Circle, if (hasUnread) "Mark as read" else "Mark as unread", it) },
+                onShowLogs?.let { Triple(ProductIcon.ScrollText, "Show logs for this chat", it) },
+                onOpenSessionDebug?.let { Triple(ProductIcon.Bug, "Session debug info", it) },
+            )
+            if (actions.isNotEmpty()) Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
                     .background(tokens.panel.color)
                     .cssBorder(tokens.border.color, RoundedCornerShape(14.dp)),
             ) {
-                SessionInfoActionRow(
-                    icon = ProductIcon.Circle,
-                    label = "Mark as unread",
-                    onClick = {
-                        onMarkAsUnread()
-                        onDismiss()
-                    },
-                )
-                SessionInfoActionRow(
-                    icon = ProductIcon.ScrollText,
-                    label = "Show logs for this chat",
-                    showTopBorder = true,
-                    onClick = {
-                        onShowLogs()
-                        onDismiss()
-                    },
-                )
-                SessionInfoActionRow(
-                    icon = ProductIcon.Bug,
-                    label = "Session debug info",
-                    showTopBorder = true,
-                    onClick = {
-                        onOpenSessionDebug()
-                        onDismiss()
-                    },
-                )
+                actions.forEachIndexed { index, (icon, label, action) ->
+                    SessionInfoActionRow(
+                        icon = icon,
+                        label = label,
+                        showTopBorder = index > 0,
+                        onClick = {
+                            action()
+                            onDismiss()
+                        },
+                    )
+                }
             }
         }
     }
