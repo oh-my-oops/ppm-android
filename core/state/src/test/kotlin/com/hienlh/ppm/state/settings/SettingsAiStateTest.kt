@@ -23,6 +23,49 @@ class SettingsAiStateTest {
     }
 
     @Test
+    fun `the tool groups are the web's Settings - Tools groups, in its order`() {
+        assertEquals(
+            listOf("Tabs", "Terminal", "Session history", "Database", "Session collaboration", "Spec mode"),
+            PPM_TOOL_GROUPS.map { it.title },
+        )
+        assertEquals(
+            listOf(
+                "open_file", "open_preview", "open_url", "read_terminal", "run_in_terminal",
+                "search_sessions", "list_session_turns", "read_session_turns", "db_query", "open_query", "db_execute",
+                "create_session", "send_to_session", "session_status",
+                "spec_status", "spec_create", "spec_submit", "spec_open_design", "task_start", "task_done", "task_red", "task_green", "suite_check",
+            ),
+            PPM_TOOL_GROUPS.flatMap { group -> group.tools.map { it.id } },
+        )
+    }
+
+    @Test
+    fun `an introduced feature's tools are off until decided, then follow the switches set`() {
+        // Nothing set: the session tools wait for the tour's answer; spec and database tools are on.
+        assertFalse(isPpmToolEnabled(emptyMap(), "search_sessions"))
+        assertFalse(isPpmToolEnabled(emptyMap(), "create_session"))
+        assertTrue(isPpmToolEnabled(emptyMap(), "spec_submit"))
+        assertTrue(isPpmToolEnabled(emptyMap(), "db_query"))
+        // A setting saved before the feature: the missing ones follow the set ones, on if any is on.
+        assertTrue(isPpmToolEnabled(mapOf("send_to_session" to true, "create_session" to false), "read_session_turns"))
+        assertFalse(isPpmToolEnabled(mapOf("send_to_session" to false), "read_session_turns"))
+        assertFalse(isPpmToolEnabled(mapOf("send_to_session" to true, "create_session" to false), "create_session"))
+    }
+
+    @Test
+    fun `flipping one tool of a feature writes its siblings as they showed`() {
+        val next = patchPpmToolSwitches(mapOf("db_query" to false), "create_session", true)
+        assertEquals(
+            mapOf(
+                "db_query" to false, "create_session" to true, "send_to_session" to false, "session_status" to false,
+                "search_sessions" to false, "list_session_turns" to false, "read_session_turns" to false,
+            ),
+            next,
+        )
+        assertEquals(mapOf("spec_create" to false), patchPpmToolSwitches(emptyMap(), "spec_create", false))
+    }
+
+    @Test
     fun `looksLikeAnthropicOAuthCode and looksLikeCodexLoopbackUrl detect clipboard formats`() {
         assertTrue(looksLikeAnthropicOAuthCode("abcDEF1234567890_xyz#state987654321"))
         assertTrue(looksLikeAnthropicOAuthCode("abcDEF1234567890_xyz"))
