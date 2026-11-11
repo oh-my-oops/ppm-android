@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,6 +35,15 @@ import com.hienlh.ppm.app.ui.Separator
 import com.hienlh.ppm.app.ui.SettingsCategory
 import com.hienlh.ppm.app.ui.phone.OpenOnTablet
 import com.hienlh.ppm.app.ui.phone.OpenOnTabletNotice
+import com.hienlh.ppm.app.ui.phone.PhoneSchedulesAreaHost
+import com.hienlh.ppm.client.aiSettings
+import com.hienlh.ppm.client.notificationsGetNtfy
+import com.hienlh.ppm.client.notificationsGetPush
+import com.hienlh.ppm.client.notificationsGetTelegram
+import com.hienlh.ppm.state.settings.parseNtfyStatus
+import com.hienlh.ppm.state.settings.parsePushStatus
+import com.hienlh.ppm.state.settings.parseTelegramNotifyStatus
+import kotlinx.coroutines.CancellationException
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -75,6 +85,24 @@ fun PhoneSettingsScreen(
         goHome()
     }
 
+    // The home rows' summaries say what the server holds; until it answers (or when it cannot), each row keeps its
+    // plain description rather than a value it does not know.
+    var aiSummary by remember { mutableStateOf<String?>(null) }
+    var notificationsSummary by remember { mutableStateOf<String?>(null) }
+    val api = model.api
+    LaunchedEffect(api, route == PhoneSettingsRoute.Home) {
+        val client = api ?: return@LaunchedEffect
+        if (route != PhoneSettingsRoute.Home) return@LaunchedEffect
+        aiSummary = runCatchingNonCancel { phoneAiProviderSummary(client.aiSettings()) } ?: aiSummary
+        val push = runCatchingNonCancel { parsePushStatus(client.notificationsGetPush()) }
+        val telegram = runCatchingNonCancel { parseTelegramNotifyStatus(client.notificationsGetTelegram()) }
+        val ntfy = runCatchingNonCancel { parseNtfyStatus(client.notificationsGetNtfy()) }
+        if (push != null || telegram != null || ntfy != null) {
+            notificationsSummary = phoneNotificationsSummary(push, telegram, ntfy)
+        }
+    }
+    val accountsSummary = phoneAccountsSummary(model.providers.map { it.name })
+
     val servers by model.store.servers.collectAsState()
     val selectedServerId by model.store.selectedId.collectAsState()
     val activeServerName = servers.firstOrNull { it.id == selectedServerId }?.name ?: model.serverName
@@ -89,6 +117,9 @@ fun PhoneSettingsScreen(
         when (val current = route) {
             PhoneSettingsRoute.Home -> {
                 PhoneSettingsHomeList(
+                    accountsSummary = accountsSummary ?: PhoneSettingsSection.Accounts.subtitle,
+                    aiProviderSummary = aiSummary ?: PhoneSettingsSection.AiProvider.subtitle,
+                    notificationsSummary = notificationsSummary ?: PhoneSettingsSection.Notifications.subtitle,
                     themeLabel = themeName,
                     serverLabel = activeServerName,
                     aboutLabel = serverVersion,
@@ -126,6 +157,22 @@ fun PhoneSettingsScreen(
                         model = model,
                         onBack = goHome,
                     )
+                    PhoneSettingsSection.Schedules -> Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("phone-settings-schedules-page"),
+                    ) {
+                        PhoneSettingsSubPageHeader(
+                            title = "Schedules",
+                            onBack = goHome,
+                        )
+                        PhoneSchedulesAreaHost(
+                            model = model,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                        )
+                    }
                     PhoneSettingsSection.About -> PhoneAboutPage(
                         model = model,
                         onBack = goHome,
@@ -145,11 +192,11 @@ fun PhoneSettingsScreen(
 
 @Composable
 fun PhoneSettingsHomeList(
-    accountsSummary: String = "Claude, Codex & Antigravity",
-    aiProviderSummary: String = "Model, effort & permission",
-    notificationsSummary: String = "Push, Telegram & ntfy",
-    themeLabel: String = "Aurora Dark",
-    serverLabel: String = "Connected",
+    accountsSummary: String = PhoneSettingsSection.Accounts.subtitle,
+    aiProviderSummary: String = PhoneSettingsSection.AiProvider.subtitle,
+    notificationsSummary: String = PhoneSettingsSection.Notifications.subtitle,
+    themeLabel: String? = null,
+    serverLabel: String? = null,
     aboutLabel: String = "v${BuildConfig.VERSION_NAME}",
     onSelectSection: (PhoneSettingsSection) -> Unit,
     onSelectCategory: (SettingsCategory) -> Unit = {},
@@ -180,6 +227,7 @@ fun PhoneSettingsHomeList(
                             PhoneSettingsSection.Notifications -> null
                             PhoneSettingsSection.Theme -> themeLabel
                             PhoneSettingsSection.Servers -> serverLabel
+                            PhoneSettingsSection.Schedules -> null
                             PhoneSettingsSection.About -> aboutLabel
                         }
                         val subtitleText = when (section) {
@@ -261,4 +309,13 @@ fun PhoneTabletOnlySectionPage(
                 .fillMaxWidth(),
         )
     }
+}
+
+/** The value of [block], or null when it failed; a cancellation still cancels. */
+private suspend fun <T> runCatchingNonCancel(block: suspend () -> T): T? = try {
+    block()
+} catch (e: CancellationException) {
+    throw e
+} catch (_: Exception) {
+    null
 }

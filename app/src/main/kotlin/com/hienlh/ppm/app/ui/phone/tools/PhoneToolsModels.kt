@@ -8,7 +8,6 @@ import com.hienlh.ppm.state.logs.LogEntry
 import com.hienlh.ppm.state.logs.LogFilter
 import com.hienlh.ppm.state.logs.compileLogSearch
 import com.hienlh.ppm.state.logs.matchesLogFilter
-import com.hienlh.ppm.state.settings.CloudDeviceCodeFlowState
 import com.hienlh.ppm.state.settings.ScheduleRowState
 import com.hienlh.ppm.state.sysmon.AppRowData
 import com.hienlh.ppm.state.sysmon.AppRowsModel
@@ -211,6 +210,7 @@ enum class PhoneLogSourceChip(val id: String, val label: String) {
 class PhoneLogsState(
     initialSource: String = "all",
     initialFollow: Boolean = true,
+    initialChat: String? = null,
 ) {
     var source: String by mutableStateOf(initialSource)
     var follow: Boolean by mutableStateOf(initialFollow)
@@ -220,7 +220,8 @@ class PhoneLogsState(
 
     var filtersSheetOpen: Boolean by mutableStateOf(false)
     var levels: Set<String> by mutableStateOf(setOf("error", "warn", "info", "debug"))
-    var chatFilter: String by mutableStateOf("All chats")
+    /** Session id whose lines alone are shown (`logsChat`, the web's chat menu); null for every chat. */
+    var chat: String? by mutableStateOf(initialChat)
     var timeRange: String by mutableStateOf("1h")
     var showUtc: Boolean by mutableStateOf(false)
     var expandedMoreIds: Set<String> by mutableStateOf(emptySet())
@@ -234,7 +235,7 @@ class PhoneLogsState(
         get() {
             var count = 0
             if (levels.size < 4) count++
-            if (chatFilter != "All chats") count++
+            if (chat != null) count++
             if (timeRange != "1h") count++
             if (showUtc) count++
             return count
@@ -255,7 +256,7 @@ class PhoneLogsState(
 
     fun resetFilters() {
         levels = setOf("error", "warn", "info", "debug")
-        chatFilter = "All chats"
+        chat = null
         timeRange = "1h"
         showUtc = false
     }
@@ -268,17 +269,21 @@ class PhoneLogsState(
         }
     }
 
-    fun filterEntries(entries: List<LogEntry>): List<LogEntry> {
-        val filter = LogFilter(
-            src = source,
-            levels = listOf("error", "warn", "info", "debug").associateWith { it in levels },
-            q = search,
-            regex = regex,
-            caseSensitive = caseSensitive,
-        )
+    /** The filter the server is asked with (`/api/logs?…`), the same one the web's logs pane sends. */
+    fun toLogFilter(): LogFilter = LogFilter(
+        src = source,
+        levels = listOf("error", "warn", "info", "debug").associateWith { it in levels },
+        q = search,
+        regex = regex,
+        caseSensitive = caseSensitive,
+        chat = chat,
+    )
+
+    fun filterEntries(entries: List<LogEntry>, titles: Map<String, String> = emptyMap()): List<LogEntry> {
+        val filter = toLogFilter()
         val compiled = compileLogSearch(filter)
         return entries.filter { entry ->
-            matchesLogFilter(entry, filter, compiled)
+            matchesLogFilter(entry, filter, compiled, titles)
         }
     }
 }
@@ -416,92 +421,6 @@ class PhoneSchedulesState(
             return true
         }
         return false
-    }
-}
-
-/**
- * State holder for the Phone Cloud & Share drawer tile and bottom sheet
- * (Requirement 14.2, Phone 7 Section 5).
- */
-@Stable
-class PhoneCloudShareState(
-    initialLoggedIn: Boolean = true,
-    initialEmail: String? = "hienlh@ppm.local",
-    initialLinked: Boolean = true,
-    initialDeviceName: String? = "workstation-01",
-    initialDeviceStatus: String = "online",
-    initialSlug: String = "workstation-01",
-    initialLocalUrl: String = "http://192.168.1.42:3210",
-    initialTunnelActive: Boolean = true,
-    initialPublicUrl: String? = "https://ppm.cloud/workstation-01",
-    initialTempUrl: String? = "https://bold-meadow-4291.trycloudflare.com",
-) {
-    var loggedIn: Boolean by mutableStateOf(initialLoggedIn)
-    var email: String? by mutableStateOf(initialEmail)
-    var deviceCodeFlow: CloudDeviceCodeFlowState? by mutableStateOf(null)
-    var confirmSignOut: Boolean by mutableStateOf(false)
-
-    var linked: Boolean by mutableStateOf(initialLinked)
-    var deviceName: String? by mutableStateOf(initialDeviceName)
-    var deviceStatus: String by mutableStateOf(initialDeviceStatus)
-    var confirmUnlink: Boolean by mutableStateOf(false)
-
-    var slug: String by mutableStateOf(initialSlug)
-    var editingSlug: Boolean by mutableStateOf(false)
-    var slugDraft: String by mutableStateOf(initialSlug)
-
-    var localUrl: String by mutableStateOf(initialLocalUrl)
-    var tunnelActive: Boolean by mutableStateOf(initialTunnelActive)
-    var publicUrl: String? by mutableStateOf(initialPublicUrl)
-    var tempUrl: String? by mutableStateOf(initialTempUrl)
-
-    val slugValidationMessage: String = "2–32 characters: lowercase letters, numbers, hyphens."
-
-    val isSlugDraftValid: Boolean
-        get() = isValidSlug(slugDraft)
-
-    val drawerSubtitle: String
-        get() = when {
-            tunnelActive && !publicUrl.isNullOrBlank() ->
-                publicUrl!!.removePrefix("https://").removePrefix("http://")
-            tunnelActive -> "Public link active"
-            else -> "Not sharing"
-        }
-
-    fun startEditSlug() {
-        slugDraft = slug
-        editingSlug = true
-    }
-
-    fun cancelEditSlug() {
-        slugDraft = slug
-        editingSlug = false
-    }
-
-    fun saveSlug(): Boolean {
-        val cleaned = slugDraft.trim()
-        if (!isValidSlug(cleaned)) return false
-        slug = cleaned
-        publicUrl = "https://ppm.cloud/$cleaned"
-        editingSlug = false
-        return true
-    }
-
-    fun startSharing() {
-        tunnelActive = true
-        if (publicUrl.isNullOrBlank()) {
-            publicUrl = "https://ppm.cloud/$slug"
-        }
-    }
-
-    fun stopSharing() {
-        tunnelActive = false
-    }
-
-    companion object {
-        private val SLUG_REGEX = Regex("^[a-z0-9-]{2,32}$")
-
-        fun isValidSlug(candidate: String): Boolean = SLUG_REGEX.matches(candidate.trim())
     }
 }
 

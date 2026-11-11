@@ -1,112 +1,35 @@
 package com.hienlh.ppm.app.ui.phone
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
-import com.hienlh.ppm.app.ChatTab
-import com.hienlh.ppm.app.ui.HistoryByDay
-import com.hienlh.ppm.app.ui.PhoneSessionHistoryList
 import com.hienlh.ppm.app.ui.TerminalBody
-import com.hienlh.ppm.app.ui.TerminalMobileToolbar
-import com.hienlh.ppm.app.ui.database.DatabaseQueryTabBody
-import com.hienlh.ppm.app.ui.database.DatabaseSidebarPane
-import com.hienlh.ppm.app.ui.database.DatabaseTableTabBody
-import com.hienlh.ppm.app.ui.database.DbSqlObjectTabBody
-import com.hienlh.ppm.app.ui.database.SqliteViewerTabBody
-import com.hienlh.ppm.app.ui.phone.chat.PhoneAttachSheet
-import com.hienlh.ppm.app.ui.phone.chat.PhoneChangedFileItem
-import com.hienlh.ppm.app.ui.phone.chat.PhoneChatScreen
-import com.hienlh.ppm.app.ui.phone.chat.PhoneMessagePriority
-import com.hienlh.ppm.app.ui.phone.chat.PhoneModelEffortSheet
-import com.hienlh.ppm.app.ui.phone.chat.PhoneModelOption
-import com.hienlh.ppm.app.ui.phone.chat.PhoneModesSheet
-import com.hienlh.ppm.app.ui.phone.chat.PhoneProviderOption
-import com.hienlh.ppm.app.ui.phone.chat.PhoneSessionChangesSheet
-import com.hienlh.ppm.app.ui.phone.chat.PhoneSessionInfoData
-import com.hienlh.ppm.app.ui.phone.chat.PhoneSessionInfoSheet
-import com.hienlh.ppm.app.ui.phone.files.PhoneDiffScreen
-import com.hienlh.ppm.app.ui.phone.files.PhoneFileTabScreen
-import com.hienlh.ppm.app.ui.phone.files.PhoneFilesTreeScreen
-import com.hienlh.ppm.app.ui.phone.git.PhoneSourceControlScreen
-import com.hienlh.ppm.app.ui.phone.settings.PhoneSettingsScreen
-import com.hienlh.ppm.app.ui.phone.settings.resolvePhoneSettingsRoute
-import com.hienlh.ppm.app.ui.phone.terminal.PhoneTerminalActionsSheet
-import com.hienlh.ppm.app.ui.phone.terminal.PhoneTerminalStatusBar
 import com.hienlh.ppm.app.ui.phone.terminal.resolvePhoneTerminalTab
-import com.hienlh.ppm.app.ui.phone.tools.PhoneCloudShareSheet
-import com.hienlh.ppm.app.ui.phone.tools.PhoneCloudShareState
-import com.hienlh.ppm.app.ui.phone.tools.PhoneLogsScreen
-import com.hienlh.ppm.app.ui.phone.tools.PhoneLogsState
-import com.hienlh.ppm.app.ui.phone.tools.PhoneMonitorState
-import com.hienlh.ppm.app.ui.phone.tools.PhoneMonitorTab
-import com.hienlh.ppm.app.ui.phone.tools.PhonePortForwardingScreen
-import com.hienlh.ppm.app.ui.phone.tools.PhonePortForwardingState
-import com.hienlh.ppm.app.ui.phone.tools.PhoneSchedulesScreen
-import com.hienlh.ppm.app.ui.phone.tools.PhoneSchedulesState
-import com.hienlh.ppm.app.ui.phone.tools.PhoneSystemMonitorScreen
-import com.hienlh.ppm.app.ui.projects.ProjectSwitcherSheet
-import com.hienlh.ppm.chat.ChatTranscriptView
-import com.hienlh.ppm.client.gitCommitMessage
-import com.hienlh.ppm.client.namedTunnelStatus
-import com.hienlh.ppm.client.queryLogs
-import com.hienlh.ppm.client.schedulesList
-import com.hienlh.ppm.client.schedulesRunNow
-import com.hienlh.ppm.client.schedulesUpdate
-import com.hienlh.ppm.client.tunnelStart
-import com.hienlh.ppm.client.tunnelStop
-import com.hienlh.ppm.client.tunnelsList
-import com.hienlh.ppm.client.tunnelsTransports
-import com.hienlh.ppm.design.kit.Sheet
-import com.hienlh.ppm.protocol.array
-import com.hienlh.ppm.protocol.bool
-import com.hienlh.ppm.protocol.get
-import com.hienlh.ppm.protocol.string
-import com.hienlh.ppm.state.MessagePriority
-import com.hienlh.ppm.state.Effort
-import com.hienlh.ppm.state.ModelNames
-import com.hienlh.ppm.protocol.ProviderInfo
-import com.hienlh.ppm.state.PermissionMode
-import com.hienlh.ppm.state.logs.LogEntry
-import com.hienlh.ppm.state.logs.LogFilter
-import com.hienlh.ppm.state.logs.LogQueryResult
-import com.hienlh.ppm.state.logs.logsQueryPairs
-import com.hienlh.ppm.state.logs.rangeStart
-import com.hienlh.ppm.state.settings.parseSchedulesList
-import com.hienlh.ppm.state.terminal.TerminalState
-import com.hienlh.ppm.state.tunnels.NamedTunnelStatus
-import com.hienlh.ppm.state.tunnels.TailscaleAvailability
-import com.hienlh.ppm.state.tunnels.TunnelEntry
-import com.hienlh.ppm.state.tunnels.TunnelsModel
+import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.PpmIcon
+import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.kit.ActionPrimaryButton
+import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.state.workspace.WorkspaceTab
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 
+/**
+ * The phone's Terminal area. A real terminal tab is drawn by [TerminalBody], which already carries the redesigned phone
+ * parts of `phone/terminal/` (status bar, key row, selection bar, exited bar, `⋮` actions sheet) on the live session.
+ * Without a terminal tab, or without a server to attach its shell to, the area says so instead of drawing controls that
+ * have no shell behind them.
+ */
 @Composable
 internal fun PhoneTerminalAreaHost(
     model: AppModel,
@@ -116,111 +39,77 @@ internal fun PhoneTerminalAreaHost(
     val gridTabs = model.openTabs.map { it.first }
     val dockTabs = model.dockTabs
     val activeDockTabId = model.layout?.dockPanel?.activeTabId
-    val fallbackTab = remember(tab, gridTabs, dockTabs, model.selectedProject) {
-        tab
-            ?: gridTabs.lastOrNull { it.type == "terminal" }
-            ?: dockTabs.lastOrNull { it.type == "terminal" }
-            ?: WorkspaceTab(
-                id = "terminal:1",
-                type = "terminal",
-                title = "Terminal",
-                projectId = model.selectedProject,
+    val requested = tab?.takeIf { it.type == "terminal" }
+        ?: gridTabs.lastOrNull { it.type == "terminal" }
+        ?: dockTabs.lastOrNull { it.type == "terminal" }
+    val resolvedTab = remember(requested, gridTabs, dockTabs, activeDockTabId, model.selectedProject) {
+        requested?.let {
+            resolvePhoneTerminalTab(
+                requestedTab = it,
+                gridTabs = gridTabs,
+                dockTabs = dockTabs,
+                activeDockTabId = activeDockTabId,
+                currentProject = model.selectedProject,
             )
+        }
     }
-    val resolvedTab = remember(fallbackTab, gridTabs, dockTabs, activeDockTabId, model.selectedProject) {
-        resolvePhoneTerminalTab(
-            requestedTab = fallbackTab,
-            gridTabs = gridTabs,
-            dockTabs = dockTabs,
-            activeDockTabId = activeDockTabId,
-            currentProject = model.selectedProject,
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("phone-terminal-screen"),
+    ) {
+        when {
+            resolvedTab == null -> PhoneTerminalEmptyState(
+                title = "No terminal open",
+                detail = if (model.api == null) "Connect to a server to open a terminal." else "Open one to run commands on the host.",
+                actionLabel = if (model.api != null) "Open a terminal" else null,
+                onAction = {
+                    model.openTerminal(inDock = false)
+                    model.activeTabId?.let(nav::visitTab)
+                },
+            )
+            model.api == null -> PhoneTerminalEmptyState(
+                title = resolvedTab.title.ifBlank { "Terminal" },
+                detail = if (model.connectionLost) "Reconnecting to the server…" else "Not connected to a server.",
+                actionLabel = null,
+                onAction = {},
+            )
+            else -> TerminalBody(model = model, tab = resolvedTab)
+        }
+    }
+}
+
+@Composable
+private fun PhoneTerminalEmptyState(
+    title: String,
+    detail: String,
+    actionLabel: String?,
+    onAction: () -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp)
+            .testTag("phone-terminal-empty"),
+        verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        PpmIcon(ProductIcon.TerminalSquare, 32.dp, tokens.text3.color)
+        BasicText(
+            text = title,
+            style = ppmText(15f, FontWeight.SemiBold).copy(color = tokens.text.color, textAlign = TextAlign.Center),
         )
-    }
-
-    val session = remember(model, model.api, resolvedTab.id) {
-        model.terminal(resolvedTab)
-    }
-
-    if (session != null) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .testTag("phone-terminal-screen"),
-        ) {
-            TerminalBody(
-                model = model,
-                tab = resolvedTab,
-            )
-        }
-    } else {
-        var ctrlMode by remember { mutableStateOf(false) }
-        var selectMode by remember { mutableStateOf(false) }
-        var actionsSheetOpen by remember { mutableStateOf(false) }
-
-        val offlineState = remember(model.api, model.connectionLost, resolvedTab) {
-            TerminalState(
-                connected = model.api != null && !model.connectionLost,
-                reconnecting = model.connectionLost,
-                sessionId = resolvedTab.metaString("sessionId"),
-            )
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .testTag("phone-terminal-screen"),
-        ) {
-            PhoneTerminalStatusBar(
-                state = offlineState,
-                cwd = resolvedTab.metaString("cwd") ?: model.currentProject?.path,
-                foldedInLandscape = false,
-                onOpenActionsSheet = { actionsSheetOpen = true },
-            )
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-            )
-            TerminalMobileToolbar(
-                ctrlMode = ctrlMode,
-                onToggleCtrl = { ctrlMode = !ctrlMode },
-                selectMode = selectMode,
-                onToggleSelect = { selectMode = !selectMode },
-                onKey = { _, _ -> },
-                onCopy = {},
-                onPaste = {},
-                onSendToChat = {},
-                onOpenLinks = {},
-                phoneKeyRowMode = true,
-                hideWhenHardwareKeyboardConnected = false,
-            )
-        }
-
-        if (actionsSheetOpen) {
-            PhoneTerminalActionsSheet(
-                sessionId = offlineState.sessionId,
-                cwd = resolvedTab.metaString("cwd") ?: model.currentProject?.path,
-                hasSelection = false,
-                selectMode = selectMode,
-                linkCount = 0,
-                exited = false,
-                projectTerminals = gridTabs.filter { it.type == "terminal" },
-                activeTerminalId = resolvedTab.id,
-                onCopy = { actionsSheetOpen = false },
-                onPaste = { actionsSheetOpen = false },
-                onToggleSelect = {
-                    selectMode = !selectMode
-                    actionsSheetOpen = false
-                },
-                onOpenLinks = { actionsSheetOpen = false },
-                onSendToChat = { actionsSheetOpen = false },
-                onRestart = { actionsSheetOpen = false },
-                onSelectTerminal = { picked ->
-                    actionsSheetOpen = false
-                    nav.visitTab(picked.id)
-                    model.activate(picked.id)
-                },
-                onDismiss = { actionsSheetOpen = false },
+        BasicText(
+            text = detail,
+            style = ppmText(13f, FontWeight.Normal).copy(color = tokens.text2.color, textAlign = TextAlign.Center),
+        )
+        if (actionLabel != null) {
+            ActionPrimaryButton(
+                label = actionLabel,
+                onClick = onAction,
+                modifier = Modifier.testTag("phone-terminal-open"),
             )
         }
     }

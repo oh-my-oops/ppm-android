@@ -24,6 +24,8 @@ import com.hienlh.ppm.state.logs.LogEntry
 import com.hienlh.ppm.state.logs.LogIssuesResult
 import com.hienlh.ppm.state.logs.LogQueryResult
 import com.hienlh.ppm.state.remotedesktop.RemoteDesktopCapabilities
+import com.hienlh.ppm.state.settings.CloudStatusState
+import com.hienlh.ppm.state.settings.PublicTunnelState
 import com.hienlh.ppm.state.settings.ScheduleLogLine
 import com.hienlh.ppm.state.settings.ScheduleRowState
 import com.hienlh.ppm.state.settings.ScheduleRunRow
@@ -38,6 +40,7 @@ import com.hienlh.ppm.state.sysmon.ProcessInfo
 import com.hienlh.ppm.state.sysmon.ServiceInfo
 import com.hienlh.ppm.state.sysmon.ServicesSnapshot
 import com.hienlh.ppm.state.sysmon.SystemMetrics
+import com.hienlh.ppm.state.tunnels.SetupState
 import com.hienlh.ppm.state.tunnels.TunnelEntry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -312,10 +315,13 @@ class PhoneToolsTest {
                 PhonePortForwardingScreen(
                     state = state,
                     tunnels = listOf(externalTunnel),
-                    tailscaleReady = true,
-                    cloudflareReady = false,
+                    tailscaleSetup = SetupState("devbox.tail1234.ts.net", done = true),
+                    cloudflareSetup = SetupState("No domain set up", done = false),
                     onStartForward = { port, _ -> forwardedPort = port },
                     onStopTunnel = { entry -> stoppedPid = entry.pid },
+                    onOpenInTab = {},
+                    onOpenInBrowser = {},
+                    onCopyLink = {},
                 )
             }
         }
@@ -378,6 +384,7 @@ class PhoneToolsTest {
                         ),
                     ),
                     onRunOrRestart = { row -> ranId = row.id },
+                    onToggleEnabled = { row, enabled -> state.toggleScheduleEnabled(row.id, enabled) },
                 )
             }
         }
@@ -406,35 +413,49 @@ class PhoneToolsTest {
 
     @Test
     fun phoneCloudShareSheet_rendersQrCode_validatesSlug_andTogglesSharing() {
-        val state = PhoneCloudShareState(
-            initialSlug = "workstation-01",
-            initialTunnelActive = true,
-        )
+        val state = PhoneCloudShareState().apply {
+            loading = false
+            cloud = CloudStatusState(loggedIn = true, email = "dev@host.io", cloudUrl = "https://ppm.bot", linked = true, deviceName = "Workbench")
+            tunnel = PublicTunnelState(active = true, url = "https://abc.trycloudflare.com", localUrl = "http://192.168.1.5:8080", enabled = true)
+            slug = "workstation-01"
+        }
         var copiedUrl: String? = null
+        var savedSlug: String? = null
 
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
                 PhoneCloudShareSheet(
                     state = state,
                     onDismiss = {},
+                    onSignIn = {},
+                    onSignOut = {},
+                    onLink = {},
+                    onUnlink = {},
+                    onSaveSlug = { savedSlug = state.slugDraft },
+                    onStartSharing = {},
+                    onStopSharing = {},
+                    onStartTempLink = {},
+                    onStopTempLink = {},
                     onCopyUrl = { copiedUrl = it },
+                    onOpenUrl = {},
                 )
             }
         }
 
-        // 168dp QR box and Copy public URL
+        // 168dp QR box and Copy public URL: the address the server reported, not a made-up one
         composeRule.onNodeWithTag("phone-cloud-qr-box", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("phone-cloud-copy-public", useUnmergedTree = true).performScrollTo().performClick()
-        assertEquals("https://ppm.cloud/workstation-01", copiedUrl)
+        assertEquals("https://abc.trycloudflare.com", copiedUrl)
+        composeRule.onNodeWithText("ppm.bot/workstation-01", substring = true, useUnmergedTree = true).assertExists()
 
-        // Edit permanent link slug with validation
+        // Edit permanent link slug with validation; Save hands the draft to the caller (which PUTs /api/cloud/alias)
         composeRule.onNodeWithTag("phone-cloud-slug-edit-btn", useUnmergedTree = true).performScrollTo().performClick()
         composeRule.onNodeWithTag("phone-cloud-slug-input", useUnmergedTree = true).performTextReplacement("INVALID SLUG!")
         assertFalse(state.isSlugDraftValid)
         composeRule.onNodeWithTag("phone-cloud-slug-input", useUnmergedTree = true).performTextReplacement("dev-box-2")
         assertTrue(state.isSlugDraftValid)
         composeRule.onNodeWithTag("phone-cloud-slug-save", useUnmergedTree = true).performClick()
-        assertEquals("dev-box-2", state.slug)
+        assertEquals("dev-box-2", savedSlug)
     }
 
     @Test

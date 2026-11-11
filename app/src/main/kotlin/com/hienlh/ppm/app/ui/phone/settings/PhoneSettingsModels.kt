@@ -2,6 +2,11 @@ package com.hienlh.ppm.app.ui.phone.settings
 
 import com.hienlh.ppm.app.ui.SettingsCategory
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.protocol.AiSettings
+import com.hienlh.ppm.state.ModelNames
+import com.hienlh.ppm.state.settings.NtfyStatusState
+import com.hienlh.ppm.state.settings.PushStatusState
+import com.hienlh.ppm.state.settings.TelegramNotifyState
 
 /**
  * Grouping for the Phone 6 · Settings home screen (`designs/ppm-mobile-tablet-redesign/phone/6-settings/`).
@@ -13,12 +18,13 @@ enum class PhoneSettingsGroup(val title: String) {
 }
 
 /**
- * The 6 full-page sections available in Phone Settings (Requirement 15.1):
+ * The full-page sections available in Phone Settings (Requirement 15.1):
  * - [Accounts] (sign in, usage, enable or disable)
  * - [AiProvider] (model, effort, permission mode)
  * - [Notifications] (events, delay, push, Telegram, ntfy)
  * - [Theme] (Light / Dark / System mode + color theme grid)
  * - [Servers] (connected server, switch, remove, log out, add server)
+ * - [Schedules] (run now / restart, on or off, run history and full log; editing stays on a tablet)
  * - [About] (server & app versions, server update, debug redesign toggle)
  */
 enum class PhoneSettingsSection(
@@ -69,6 +75,14 @@ enum class PhoneSettingsSection(
         group = PhoneSettingsGroup.SERVER,
         category = SettingsCategory.Servers,
     ),
+    Schedules(
+        id = "schedules",
+        title = "Schedules",
+        subtitle = "Run now, on or off, runs & logs",
+        icon = ProductIcon.CalendarClock,
+        group = PhoneSettingsGroup.SERVER,
+        category = SettingsCategory.Schedules,
+    ),
     About(
         id = "about",
         title = "About",
@@ -112,6 +126,7 @@ fun isPhoneFullSettingsCategory(category: SettingsCategory): Boolean = when (cat
     SettingsCategory.Notifications,
     SettingsCategory.Appearance,
     SettingsCategory.Servers,
+    SettingsCategory.Schedules,
     -> true
     else -> false
 }
@@ -125,6 +140,7 @@ fun resolvePhoneSettingsCategory(category: SettingsCategory): PhoneSettingsRoute
     SettingsCategory.Notifications -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Notifications)
     SettingsCategory.Appearance -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Theme)
     SettingsCategory.Servers -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Servers)
+    SettingsCategory.Schedules -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Schedules)
     else -> PhoneSettingsRoute.TabletOnlyPage(category)
 }
 
@@ -141,10 +157,49 @@ fun resolvePhoneSettingsRoute(rawCategory: String?): PhoneSettingsRoute {
         "notifications", "notification" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Notifications)
         "appearance", "theme", "themes" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Theme)
         "servers", "server" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Servers)
+        "schedules", "schedule" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Schedules)
         "about" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.About)
         else -> {
             val category = SettingsCategory.resolveOrNull(cleaned) ?: SettingsCategory.General
             resolvePhoneSettingsCategory(category)
         }
     }
+}
+
+/** "Claude, Codex & Antigravity": the providers this server offers, as the Accounts row's summary. */
+fun phoneAccountsSummary(providerNames: List<String>): String? {
+    val names = providerNames.filter { it.isNotBlank() }.distinct()
+    return when (names.size) {
+        0 -> null
+        1 -> names[0]
+        else -> names.dropLast(1).joinToString(", ") + " & " + names.last()
+    }
+}
+
+/** "Claude · Opus 4.7 · High": the default provider for new chats, with its model and effort as saved. */
+fun phoneAiProviderSummary(settings: AiSettings): String {
+    val id = settings.defaultProvider.ifEmpty { "claude" }
+    val cfg = settings.providers[id]
+    return buildList {
+        add(phoneProviderDisplayName(id))
+        cfg?.model?.takeIf { it.isNotBlank() }?.let { add(ModelNames.displayName(it)) }
+        cfg?.effort?.takeIf { it.isNotBlank() }?.let { e ->
+            add(PhoneEffortOptions.firstOrNull { it.value == e }?.label ?: e)
+        }
+    }.joinToString(" · ")
+}
+
+/** "Push on 2 devices · Telegram · ntfy", or that no channel is set up, from the three notification channels. */
+fun phoneNotificationsSummary(
+    push: PushStatusState?,
+    telegram: TelegramNotifyState?,
+    ntfy: NtfyStatusState?,
+): String {
+    val parts = buildList {
+        val devices = push?.devices?.size ?: 0
+        if (devices > 0) add("Push on $devices ${if (devices == 1) "device" else "devices"}")
+        if (telegram?.configured == true && telegram.chats.isNotEmpty()) add("Telegram")
+        if (ntfy?.configured == true) add("ntfy")
+    }
+    return if (parts.isEmpty()) "No channels set up" else parts.joinToString(" · ")
 }
