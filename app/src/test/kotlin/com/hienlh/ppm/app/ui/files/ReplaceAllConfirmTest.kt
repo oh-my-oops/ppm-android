@@ -11,9 +11,7 @@ import androidx.compose.ui.test.performClick
 import com.hienlh.ppm.app.ui.osexplorer.isOsExplorerTab
 import com.hienlh.ppm.app.ui.osexplorer.openOsExplorerTab
 import com.hienlh.ppm.app.ui.osexplorer.osExplorerTabPath
-import com.hienlh.ppm.app.ui.windows.absorbExplorerWindowsToTabs
 import com.hienlh.ppm.app.withComposeActivity
-import com.hienlh.ppm.client.KeyValueStore
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.design.RegexHighlight
@@ -26,8 +24,6 @@ import com.hienlh.ppm.state.files.FileSearchBackend
 import com.hienlh.ppm.state.files.FileSearchRegex
 import com.hienlh.ppm.state.files.FileSearchReplacement
 import com.hienlh.ppm.state.files.ProjectFileSearch
-import com.hienlh.ppm.state.windows.WindowKind
-import com.hienlh.ppm.state.windows.WindowStore
 import com.hienlh.ppm.state.workspace.LayoutStorage
 import com.hienlh.ppm.state.workspace.PanelLayout
 import com.hienlh.ppm.state.workspace.WorkspaceStore
@@ -35,8 +31,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -262,30 +256,5 @@ class ReplaceAllConfirmTest {
         assertTrue("tab must be recognized as OS File Explorer tab", isOsExplorerTab(opened))
         assertEquals("ppm", opened.title)
         assertEquals("/home/thawng/Projects/ppm", osExplorerTabPath(opened))
-
-        // If a WindowKind.Explorer window is opened on a tablet, absorbExplorerWindowsToTabs promotes it to a tab and closes the window.
-        val windowStore = WindowStore(
-            object : KeyValueStore {
-                private val map = mutableMapOf<String, String>()
-                override fun get(key: String): String? = map[key]
-                override fun put(key: String, value: String?) {
-                    if (value == null) map.remove(key) else map[key] = value
-                }
-            },
-            "windows",
-        )
-        windowStore.open(WindowKind.Explorer, buildJsonObject { put("path", "/var/log") })
-        assertEquals(1, windowStore.state.value.windows.size)
-
-        val remaining = absorbExplorerWindowsToTabs(windowStore, windowStore.state.value) { path ->
-            openOsExplorerTab(workspace, path, projectId = "ppm", newInstance = true)
-        }
-        assertTrue("no floating Explorer window remains", remaining.isEmpty())
-        assertTrue("windowStore has closed the Explorer window", windowStore.state.value.windows.isEmpty())
-        val activeAfter = workspace.state.value.activeGridTab
-        requireNotNull(activeAfter)
-        assertTrue(isOsExplorerTab(activeAfter))
-        assertEquals("log", activeAfter.title)
-        assertEquals("/var/log", osExplorerTabPath(activeAfter))
     }
 }

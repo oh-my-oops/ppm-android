@@ -97,25 +97,6 @@ internal fun openOsExplorerTab(
     newInstance: Boolean = false,
 ): String = store.openTab(osExplorerNewTab(path, projectId, newInstance))
 
-internal fun openOsExplorerTab(
-    model: AppModel,
-    path: String = model.hostFilesystem?.state?.value?.host?.home ?: "~",
-    newInstance: Boolean = false,
-) {
-    val resolved = path.ifBlank { model.hostFilesystem?.state?.value?.host?.home ?: "~" }
-    if (!model.wide || model.layout == null) {
-        model.openExplorer(resolved)
-        return
-    }
-    val tab = osExplorerNewTab(resolved, model.selectedProject, newInstance)
-    model.openWorkspaceTab(
-        type = tab.type,
-        title = tab.title,
-        metadata = tab.metadata,
-        projectId = tab.projectId,
-    )
-}
-
 @Composable
 internal fun HostExplorerTab(model: AppModel, tab: WorkspaceTab) {
     val client = model.api ?: return

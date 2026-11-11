@@ -34,7 +34,7 @@ internal class HostExplorerMenuActions(
             HostMenuCommand.UPLOAD_FOLDER -> uploads.folder(directory)
             HostMenuCommand.OPEN_IN_TERMINAL -> model.openTerminalAt(single?.takeIf { it.isDirectory }?.path ?: directory)
             HostMenuCommand.OPEN -> single?.let(open)
-            HostMenuCommand.OPEN_IN_NEW_WINDOW -> single?.let { openOsExplorerTab(model, it.path, newInstance = true) }
+            HostMenuCommand.OPEN_IN_NEW_WINDOW -> single?.let { model.openExplorer(it.path) }
             HostMenuCommand.CUT -> clipboard(targets, FileClipboardOperation.CUT)
             HostMenuCommand.COPY -> clipboard(targets, FileClipboardOperation.COPY)
             HostMenuCommand.RENAME -> single?.let { commands?.rename(it) }
