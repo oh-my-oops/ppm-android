@@ -36,7 +36,14 @@ class NewChatCache(private val values: KeyValueStore, private val scope: String)
         val json = buildJsonObject {
             put("default_provider", settings.defaultProvider)
             settings.newChatProviderMode?.let { put("new_chat_provider_mode", it) }
-            put("providers", JsonObject(settings.permissionModes.mapValues { (_, mode) -> buildJsonObject { put("permission_mode", mode) } }))
+            val ids = settings.permissionModes.keys + settings.defaults.keys
+            put("providers", JsonObject(ids.associateWith { id ->
+                buildJsonObject {
+                    settings.permissionModes[id]?.let { put("permission_mode", it) }
+                    settings.defaults[id]?.model?.let { put("model", it) }
+                    settings.defaults[id]?.effort?.let { put("effort", it) }
+                }
+            }))
         }
         values.put(settingsKey, json.toString())
     }

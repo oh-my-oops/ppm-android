@@ -110,6 +110,7 @@ internal class NewChats(private val model: AppModel) {
             // must not restore providers or seed any project-scoped caches after eviction.
             if (!cache.writeProvidersIfCurrent(project, projectRevision, result.providers)) return@start
             cache.writeSettings(result.settings)
+            model.chat(tabId)?.controller?.defaultsChanged()
             preparationCache.seedProviders(project, result.providers)
             result.slash?.let { slash?.seed(it, project, result.providerId) }
             result.tags?.let { model.seedTags(project, it) }

@@ -7,6 +7,7 @@ import com.hienlh.ppm.client.teams
 import com.hienlh.ppm.protocol.ApprovalRequest
 import com.hienlh.ppm.protocol.BackgroundShell
 import com.hienlh.ppm.protocol.ChatClientMessage
+import com.hienlh.ppm.protocol.ProviderDefaults
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ChatFrame
 import com.hienlh.ppm.protocol.InlineImage
@@ -134,6 +135,20 @@ class ChatController(
      * either way, so none is ever left unanswered.
      */
     var tabOpener: (suspend (TabOpenRequest) -> TabOpenAnswer)? = null
+
+    /**
+     * The AI settings' default model and effort for a provider. A chat with no session has had no
+     * `session_state`, so until it does its state shows these: what its first message runs on
+     * unless something is picked (only picks ride on a message, [ChatSettings.turnOptions]).
+     */
+    var defaultsFor: ((providerId: String) -> ProviderDefaults?)? = null
+        set(value) {
+            field = value
+            publish()
+        }
+
+    /** The settings behind [defaultsFor] changed. */
+    fun defaultsChanged() = publish()
 
     /** Hears what may need the user's attention: the app decides whether the chat is in front. */
     var onAttention: ((ChatAttention) -> Unit)? = null
@@ -611,6 +626,7 @@ class ChatController(
 
     private fun publish() {
         askForTasks()
+        val newChatDefaults = if (sessionId == null) defaultsFor?.invoke(providerId) else null
         _state.value = ChatState(
             sessionId = sessionId,
             providerId = providerId,
@@ -637,8 +653,8 @@ class ChatController(
             loadingEarlier = loadingEarlier,
             earlierError = earlierError,
             tasks = tasks,
-            model = settings.model,
-            effort = settings.effort,
+            model = settings.model ?: newChatDefaults?.model,
+            effort = settings.effort ?: newChatDefaults?.effort,
             thinking = settings.thinking,
             promptCache = settings.promptCache,
             liveAccount = liveAccount,

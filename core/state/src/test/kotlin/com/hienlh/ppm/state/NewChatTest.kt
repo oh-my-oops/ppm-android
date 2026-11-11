@@ -4,6 +4,7 @@ import com.hienlh.ppm.protocol.AccountPick
 import com.hienlh.ppm.protocol.ChatPreparationSettings
 import com.hienlh.ppm.protocol.PickedAccount
 import com.hienlh.ppm.protocol.PreparedChat
+import com.hienlh.ppm.protocol.ProviderDefaults
 import com.hienlh.ppm.protocol.ProviderInfo
 import com.hienlh.ppm.state.workspace.MemoryValues
 import kotlinx.coroutines.CompletableDeferred
@@ -67,7 +68,11 @@ class NewChatTest {
         val values = MemoryValues()
         val cache = NewChatCache(values, "server-a")
         assertNull(cache.settings())
-        val settings = ChatPreparationSettings("codex", "follow-focus", mapOf("claude" to "default"))
+        val settings = ChatPreparationSettings(
+            "codex", "follow-focus", mapOf("claude" to "default"),
+            // The defaults a new chat's chip shows survive the round trip, a provider with no mode included.
+            mapOf("claude" to ProviderDefaults("claude-sonnet-5", "low"), "codex" to ProviderDefaults("gpt-6-astra", null)),
+        )
         cache.writeSettings(settings)
         cache.writeProviders("my app", listOf(ProviderInfo("claude", "Claude"), ProviderInfo("codex", "Codex")))
         assertEquals(settings, cache.settings())

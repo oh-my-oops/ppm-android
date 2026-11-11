@@ -36,6 +36,9 @@ sealed interface AccountPick {
     }
 }
 
+/** A provider's default model and effort from the AI settings. */
+data class ProviderDefaults(val model: String?, val effort: String?)
+
 /**
  * The part of the AI settings a new chat picks its provider and mode from
  * (`ChatPreparationSettings`): never a key, a prompt or anything else a client must not see.
@@ -46,6 +49,8 @@ data class ChatPreparationSettings(
     val newChatProviderMode: String?,
     /** Each provider's default permission mode, by provider id. */
     val permissionModes: Map<String, String>,
+    /** Each provider's default model and effort, by provider id: what a new chat runs on until something is picked. */
+    val defaults: Map<String, ProviderDefaults> = emptyMap(),
 ) {
     /** `resolveNewChatProvider`: the focused chat's provider when the mode follows focus, else the default, else Claude. */
     fun resolveProvider(focusedProvider: String?): String =
@@ -66,6 +71,10 @@ data class ChatPreparationSettings(
                 newChatProviderMode = value["new_chat_provider_mode"].string,
                 permissionModes = value["providers"].obj.orEmpty().mapNotNull { (id, provider) ->
                     provider["permission_mode"].string?.let { id to it }
+                }.toMap(),
+                defaults = value["providers"].obj.orEmpty().mapNotNull { (id, provider) ->
+                    ProviderDefaults(provider["model"].string, provider["effort"].string)
+                        .takeIf { it.model != null || it.effort != null }?.let { id to it }
                 }.toMap(),
             )
         }

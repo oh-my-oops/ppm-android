@@ -1,6 +1,7 @@
 package com.hienlh.ppm.state
 
 import com.hienlh.ppm.client.ApiClient
+import com.hienlh.ppm.protocol.ProviderDefaults
 import com.hienlh.ppm.protocol.SessionInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -60,4 +61,30 @@ class NewChatControllerTest {
         assertEquals("s-1", chat.state.value.sessionId)
         chat.stop()
     }
+
+    @Test
+    fun `a new chat shows its provider's default model and effort until something is picked or a session reports`() =
+        withServer(emptyHistory) { _, api ->
+            val chat = ChatController(api, "p", null, this, providerId = "claude")
+            chat.start()
+            assertNull(chat.state.value.model)
+            val defaults = mapOf("claude" to ProviderDefaults("claude-sonnet-5", "low"), "codex" to ProviderDefaults("gpt-6-astra", "high"))
+            chat.defaultsFor = { defaults[it] }
+            assertEquals("claude-sonnet-5", chat.state.value.model)
+            assertEquals("low", chat.state.value.effort)
+            // Shown only: a default never rides on the first message, the server applies it itself.
+            assertNull(chat.turnPicks.model)
+            assertNull(chat.turnPicks.effort)
+            chat.chooseProvider("codex")
+            assertEquals("gpt-6-astra", chat.state.value.model)
+            chat.setModel("gpt-6")
+            assertEquals("gpt-6", chat.state.value.model)
+            assertEquals("high", chat.state.value.effort)
+            // Once the chat has a session, only what the session reports is shown.
+            val other = ChatController(api, "p", SessionInfo(id = "s-9", providerId = "claude", title = ""), this, providerId = "claude")
+            other.defaultsFor = { defaults[it] }
+            assertNull(other.state.value.model)
+            chat.stop()
+            other.stop()
+        }
 }

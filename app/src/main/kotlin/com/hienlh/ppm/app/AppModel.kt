@@ -75,6 +75,7 @@ import com.hienlh.ppm.protocol.McpSignInDismissals
 import com.hienlh.ppm.protocol.PickedAccount
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.ProjectTags
+import com.hienlh.ppm.protocol.ProviderDefaults
 import com.hienlh.ppm.protocol.ProviderInfo
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.ServerInfo
@@ -3308,6 +3309,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                 chat.prewarmTouch = { newChats.touchPrewarm(chat) }
                 chat.tabOpener = { request -> answerAiTabOpen(chat, request) }
                 chat.onAttention = { attention -> chatAttention(chat, attention) }
+                chat.defaultsFor = { provider -> newChatCache.settings()?.defaults?.get(provider) }
                 chat.modePicked = { mode -> patchTabMetadata(id, "permissionMode" to JsonPrimitive(mode.value), "permissionModeSource" to JsonPrimitive("user")) }
                 chat.changesListed = { sessionId, list ->
                     for (review in reviews.values) if (review.sessionId == sessionId && review.project == project) review.takeLive(list)
@@ -4828,6 +4830,9 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
     /** Hears what may need the user while this chat is not in front (set by the model). */
     var onAttention: ((ChatAttention) -> Unit)? = null
 
+    /** The AI settings' default model and effort per provider, shown while there is no session (set by the model). */
+    var defaultsFor: ((String) -> ProviderDefaults?)? = null
+
     /** The toast this chat raised for a request still waiting (`approvalToastRef`): it goes once that is answered. */
     internal var attentionToast: ErrorToastMessage? = null
 
@@ -5406,6 +5411,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         val controller = ChatController(from.api, project, next, from.scope, providerId = providerId, stale = stale).also {
             it.tabOpener = tabOpener
             it.onAttention = onAttention
+            it.defaultsFor = defaultsFor
             it.start()
         }
         this.controller = controller
@@ -5455,6 +5461,7 @@ class ChatTab(val tabId: String, session: SessionInfo?, val project: String, pro
         val controller = ChatController(api, project, session, scope, providerId = providerId).also {
             it.tabOpener = tabOpener
             it.onAttention = onAttention
+            it.defaultsFor = defaultsFor
             it.start()
         }
         this.controller = controller
