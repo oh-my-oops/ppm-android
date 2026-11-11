@@ -4,6 +4,9 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.hasStateDescription
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -31,43 +34,74 @@ class PhoneComposerChipsTest {
     val rules: org.junit.rules.RuleChain = com.hienlh.ppm.app.withComposeActivity(composeRule)
 
     @Test
-    fun modelAndModeChips_sitInTheComposerBarBesideSend_fitAPhone_andOpenTheirSheets() {
+    fun theBarHoldsPlusMicModelAndASmallSend_andThePermissionModeMovedIntoThePlusSheet() {
         var modelSheet = 0
-        var modesSheet = 0
+        var attachSheet = 0
         composeRule.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
                 PhoneChatScreen(
-                    composerState = TextFieldState(""),
+                    composerState = TextFieldState("hi"),
                     modelLabel = "Sonnet 5.5",
                     effortLabel = "High",
                     permissionModeId = "bypassPermissions",
-                    permissionModeLabel = "Bypass",
-                    onOpenAttachSheet = {},
+                    onOpenAttachSheet = { attachSheet++ },
                     onToggleVoiceRecording = {},
                     onSendMessage = {},
                     onStopTurn = {},
                     onScrollToWaitingCard = null,
                     onOpenModelEffortSheet = { modelSheet++ },
-                    onOpenModesSheet = { modesSheet++ },
                 )
             }
         }
 
         val model = composeRule.onNodeWithText("Sonnet 5.5").assertIsDisplayed().getBoundsInRoot()
-        val mode = composeRule.onNodeWithContentDescription("Permission mode: Bypass").assertIsDisplayed().getBoundsInRoot()
-        val send = composeRule.onNodeWithContentDescription("Send message").getBoundsInRoot()
-
-        // One row with Send: same vertical centre band, model before mode before Send, nothing past Send.
+        val send = composeRule.onNodeWithContentDescription("Send message").assertIsDisplayed().getBoundsInRoot()
         assertTrue("model chip shares Send's row", model.top < send.bottom && model.bottom > send.top)
-        assertTrue("mode chip shares Send's row", mode.top < send.bottom && mode.bottom > send.top)
-        assertTrue("model, then mode", model.right <= mode.left)
-        assertTrue("the mode chip is not cut by Send", mode.right <= send.left)
-        assertTrue("the mode chip is icon-only", mode.right - mode.left < 60.dp)
+        assertTrue("model chip before Send", model.right <= send.left)
+
+        // As Claude's app: no permission chip in the bar; the + says when Bypass is on.
+        assertTrue(composeRule.onAllNodes(hasContentDescription("Permission mode", substring = true)).fetchSemanticsNodes().isEmpty())
+        composeRule.onNode(hasContentDescription("Attach") and hasStateDescription("Bypass permissions on")).assertIsDisplayed()
+
+        // Send is drawn as small as + and the mic (36 dp), with the same 48 dp touch target.
+        val circle = composeRule.onNodeWithTag("phone-send-circle", useUnmergedTree = true).getBoundsInRoot()
+        assertEquals(36f, (circle.right - circle.left).value, 0.5f)
+        assertEquals(48f, (send.right - send.left).value, 0.5f)
 
         composeRule.onNodeWithText("Sonnet 5.5").performClick()
-        composeRule.onNodeWithContentDescription("Permission mode: Bypass").performClick()
+        composeRule.onNodeWithContentDescription("Attach").performClick()
         assertEquals(1, modelSheet)
-        assertEquals(1, modesSheet)
+        assertEquals(1, attachSheet)
+    }
+
+    @Test
+    fun thePlusSheetIsAddToChat_withCameraPhotosFiles_andThePermissionModeRow() {
+        var modeOpened = 0
+        var dismissed = 0
+        composeRule.setContent {
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
+                PhoneAttachSheet(
+                    onPickPhotos = {},
+                    onOpenCamera = {},
+                    onPickFiles = {},
+                    onDismiss = { dismissed++ },
+                    permissionModeLabel = "Bypass",
+                    permissionModeAlert = true,
+                    onOpenPermissionMode = { modeOpened++ },
+                )
+            }
+        }
+        composeRule.onNodeWithText("Add to Chat").assertIsDisplayed()
+        val camera = composeRule.onNodeWithText("Camera").getBoundsInRoot()
+        val photos = composeRule.onNodeWithText("Photos").getBoundsInRoot()
+        val files = composeRule.onNodeWithText("Files").getBoundsInRoot()
+        assertTrue("Camera, Photos, Files in that order", camera.right <= photos.left && photos.right <= files.left)
+
+        composeRule.onNodeWithText("Permission mode").assertIsDisplayed()
+        composeRule.onNodeWithText("Bypass").assertIsDisplayed()
+        composeRule.onNodeWithTag("phone-attach-permission-mode").performClick()
+        assertEquals(1, modeOpened)
+        assertEquals(1, dismissed)
     }
 
     @Test

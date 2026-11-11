@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -169,7 +170,6 @@ fun PhoneChatScreen(
     /** Why the turns do not run at the effort picked; the chip says so, and its sheet says why. */
     effortNotice: PhoneEffortNotice? = null,
     permissionModeId: String = "default",
-    permissionModeLabel: String = "Ask",
     accountName: String = "Primary",
     accountUsageText: String? = null,
     specModeEnabled: Boolean = false,
@@ -196,7 +196,6 @@ fun PhoneChatScreen(
     /** Null hides the mic (no recogniser on this device). */
     onToggleVoiceRecording: (() -> Unit)? = null,
     onOpenModelEffortSheet: () -> Unit = {},
-    onOpenModesSheet: () -> Unit = {},
     /** Null hides the account chip (a provider with no accounts to switch). */
     onOpenAccountSwitcher: (() -> Unit)? = null,
     onOpenSessionChangesSheet: () -> Unit = {},
@@ -386,11 +385,26 @@ fun PhoneChatScreen(
                     },
                     chipsContent = {
                         if (onOpenAttachSheet != null) {
-                            ActionIconButton(
-                                icon = ProductIcon.Plus.vector,
-                                label = "Attach",
-                                onClick = onOpenAttachSheet,
-                            )
+                            // The + holds attachments and the permission mode, as Claude's app does; a dot
+                            // keeps Bypass visible now that its chip is gone.
+                            val bypass = permissionModeId == "bypassPermissions"
+                            Box {
+                                ActionIconButton(
+                                    icon = ProductIcon.Plus.vector,
+                                    label = "Attach",
+                                    onClick = onOpenAttachSheet,
+                                    modifier = if (bypass) Modifier.semantics { stateDescription = "Bypass permissions on" } else Modifier,
+                                )
+                                if (bypass) {
+                                    Box(
+                                        Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(top = 8.dp, end = 8.dp)
+                                            .size(8.dp)
+                                            .background(LocalPpmTokens.current.error.color, CircleShape),
+                                    )
+                                }
+                            }
                         }
                         if (onToggleVoiceRecording != null) {
                             ActionIconButton(
@@ -400,7 +414,7 @@ fun PhoneChatScreen(
                                 onClick = onToggleVoiceRecording,
                             )
                         }
-                        // Model & effort, then permission mode: inside the composer, as on the web.
+                        // Model & effort inside the composer, as on the web.
                         Chip(
                             label = modelLabel,
                             providerId = providerId,
@@ -415,14 +429,6 @@ fun PhoneChatScreen(
                                 }
                             },
                         )
-                        // Icon only, as the web's composer on a phone: the shield's colour carries the mode.
-                        Chip(
-                            label = "",
-                            icon = ProductIcon.ShieldAlert,
-                            alert = permissionModeId == "bypassPermissions",
-                            onClick = onOpenModesSheet,
-                            modifier = Modifier.semantics { contentDescription = "Permission mode: $permissionModeLabel" },
-                        )
                     },
                     primaryAction = {
                         if (voiceRecording && onToggleVoiceRecording != null) {
@@ -433,15 +439,9 @@ fun PhoneChatScreen(
                                 onClick = onToggleVoiceRecording,
                             )
                         } else {
-                            ActionPrimaryButton(
-                                icon = ProductIcon.ArrowUp,
-                                contentDescriptionLabel = "Send message",
+                            PhoneSendButton(
                                 enabled = canSend,
-                                onClick = {
-                                    if (canSend) {
-                                        onSendMessage(draftText)
-                                    }
-                                },
+                                onClick = { onSendMessage(draftText) },
                             )
                         }
                     },
@@ -1099,5 +1099,30 @@ private fun QueuedRowButton(icon: ProductIcon, label: String, onClick: () -> Uni
         contentAlignment = Alignment.Center,
     ) {
         PpmIcon(icon, 14.dp, tokens.text3.color)
+    }
+}
+
+/** Send as Claude's app draws it: a 36 dp circle, the size of + and the mic, in the same 48 dp touch target. */
+@Composable
+private fun PhoneSendButton(enabled: Boolean, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    Box(
+        Modifier
+            .size(KitSpec.MinTouchTarget)
+            .clip(CircleShape)
+            .ppmClickable(enabled = enabled, shape = CircleShape, onClickLabel = "Send message", onClick = onClick)
+            .semantics { contentDescription = "Send message" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(KitSpec.ChipVisualHeight)
+                .background(if (enabled) tokens.accent.color else tokens.panel2.color, CircleShape)
+                .then(if (enabled) Modifier else Modifier.cssBorder(tokens.border.color, CircleShape, width = 1.dp))
+                .testTag("phone-send-circle"),
+            contentAlignment = Alignment.Center,
+        ) {
+            PpmIcon(ProductIcon.ArrowUp, 16.dp, if (enabled) tokens.accentFg.color else tokens.text3.color)
+        }
     }
 }

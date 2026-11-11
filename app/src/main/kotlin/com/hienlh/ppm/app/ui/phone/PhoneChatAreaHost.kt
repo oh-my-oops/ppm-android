@@ -311,7 +311,6 @@ internal fun PhoneChatContent(
             effortLabel = effortInEffect,
             effortNotice = effortNotice,
             permissionModeId = permissionModeId,
-            permissionModeLabel = permissionMode.shortLabel,
             accountName = accountName,
             accountUsageText = phoneAccountUsageText(usageSummary),
             // ✦ Spec: a chat bound to a spec opens it, any other gets the workflow chooser (AppModelSpecs.kt).
@@ -333,7 +332,6 @@ internal fun PhoneChatContent(
             voiceElapsedLabel = listeningSince?.let { phoneElapsedLabel(it, voiceNow) } ?: "0:00",
             onToggleVoiceRecording = toggleMic,
             onOpenModelEffortSheet = { showModelSheet = true },
-            onOpenModesSheet = { showModesSheet = true },
             onOpenAccountSwitcher = if (chatTab != null && hasAccounts) ({ showAccountSheet = true }) else null,
             onOpenSessionChangesSheet = {
                 sessionChanges?.refresh()
@@ -564,6 +562,9 @@ internal fun PhoneChatContent(
                 onOpenCamera = pickers.camera,
                 onPickFiles = pickers.files,
                 onDismiss = { showAttachSheet = false },
+                permissionModeLabel = permissionMode.shortLabel,
+                permissionModeAlert = permissionModeId == "bypassPermissions",
+                onOpenPermissionMode = { showModesSheet = true },
             )
         }
 

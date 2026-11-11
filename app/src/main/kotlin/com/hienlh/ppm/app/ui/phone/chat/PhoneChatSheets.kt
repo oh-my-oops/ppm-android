@@ -26,6 +26,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ClipEntry
@@ -390,8 +391,9 @@ fun PhoneAttachmentTray(
 }
 
 /**
- * Attach bottom sheet on phone (Phone 1 Section 5 E2):
- * Recent photos strip (76x76 dp tiles) + 3 72 dp action tiles (`Photos`, `Camera`, `Files`).
+ * The composer's + sheet on phone, laid out as Claude's app's "Add to Chat": recent photos strip
+ * (76x76 dp tiles), then `Camera`, `Photos`, `Files` tiles, then the chat's settings as rows — the
+ * permission mode ([onOpenPermissionMode]; null hides the row).
  */
 @Composable
 fun PhoneAttachSheet(
@@ -403,10 +405,14 @@ fun PhoneAttachSheet(
     modifier: Modifier = Modifier,
     recentPhotoLabels: List<String> = emptyList(),
     onSelectRecentPhoto: (Int) -> Unit = {},
+    permissionModeLabel: String = "",
+    /** The mode is Bypass: the row is drawn in the error colour, as the + button's dot. */
+    permissionModeAlert: Boolean = false,
+    onOpenPermissionMode: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     Sheet(
-        title = "Attach to message",
+        title = "Add to Chat",
         onDismiss = onDismiss,
         forceBottomSheet = true,
         modifier = modifier,
@@ -463,15 +469,6 @@ fun PhoneAttachSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                AttachActionTile(
-                    icon = ProductIcon.Image,
-                    label = "Photos",
-                    onClick = {
-                        onPickPhotos()
-                        onDismiss()
-                    },
-                    modifier = Modifier.weight(1f),
-                )
                 if (onOpenCamera != null) {
                     AttachActionTile(
                         icon = ProductIcon.ImagePlus,
@@ -484,6 +481,15 @@ fun PhoneAttachSheet(
                     )
                 }
                 AttachActionTile(
+                    icon = ProductIcon.Image,
+                    label = "Photos",
+                    onClick = {
+                        onPickPhotos()
+                        onDismiss()
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                AttachActionTile(
                     icon = ProductIcon.Folder,
                     label = "Files",
                     onClick = {
@@ -492,6 +498,44 @@ fun PhoneAttachSheet(
                     },
                     modifier = Modifier.weight(1f),
                 )
+            }
+
+            if (onOpenPermissionMode != null) {
+                val shape = RoundedCornerShape(14.dp)
+                val tint = if (permissionModeAlert) tokens.error.color else tokens.text2.color
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .clip(shape)
+                        .background(tokens.panel.color)
+                        .cssBorder(tokens.border.color, shape)
+                        .ppmClickable(
+                            shape = shape,
+                            onClickLabel = "Permission mode: $permissionModeLabel",
+                            onClick = {
+                                onDismiss()
+                                onOpenPermissionMode()
+                            },
+                        )
+                        .testTag("phone-attach-permission-mode")
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    PpmIcon(ProductIcon.ShieldAlert, 20.dp, tint)
+                    BasicText(
+                        text = "Permission mode",
+                        modifier = Modifier.weight(1f),
+                        style = ppmText(15f, lineHeight = 20f).copy(color = tokens.text.color),
+                    )
+                    BasicText(
+                        text = permissionModeLabel,
+                        style = ppmText(14f, lineHeight = 18f).copy(color = if (permissionModeAlert) tokens.error.color else tokens.text3.color),
+                        maxLines = 1,
+                    )
+                    PpmIcon(ProductIcon.ChevronRight, 16.dp, tokens.text3.color)
+                }
             }
         }
     }
@@ -508,7 +552,7 @@ private fun AttachActionTile(
     val shape = RoundedCornerShape(14.dp)
     Column(
         modifier = modifier
-            .height(72.dp)
+            .height(84.dp)
             .clip(shape)
             .background(tokens.panel.color)
             .cssBorder(tokens.border.color, shape)
@@ -520,10 +564,10 @@ private fun AttachActionTile(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
     ) {
-        PpmIcon(icon, 20.dp, tokens.accent.color)
+        PpmIcon(icon, 22.dp, tokens.text.color)
         BasicText(
             text = label,
-            style = ppmText(13f, FontWeight.SemiBold, lineHeight = 17f).copy(color = tokens.text.color),
+            style = ppmText(15f, lineHeight = 20f).copy(color = tokens.text.color),
         )
     }
 }
