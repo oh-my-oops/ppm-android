@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -15,6 +16,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,9 +48,9 @@ import com.hienlh.ppm.state.git.GitChangeGroup
  * Unified read-only file diff screen pushed from phone Source Control (`Foundation N17`,
  * Requirements 9.2, 9.3, 9.6).
  *
- * - Renders inline unified diff hunks without hunk/line checkboxes (whole-file staging only on phone).
- * - Bottom [BottomActionCard] provides a `"Whole file"` indicator chip and a 48 dp
- *   `"Stage file"` / `"Unstage file"` primary button.
+ * - Renders inline unified diff hunks; no line checkboxes on a phone.
+ * - Bottom [BottomActionCard] has a 48 dp `"Stage file"` / `"Unstage file"` primary button and, when
+ *   [onStageHunk] is given, `"Whole file"` / `"By hunk"` chips; By hunk puts Stage / Unstage on each hunk.
  */
 @Composable
 fun PhoneGitDiffScreen(
@@ -58,8 +63,13 @@ fun PhoneGitDiffScreen(
     onToggleWholeFileStage: (FileChange) -> Unit,
     onOpenFile: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
+    onStageHunk: ((FileChange, DiffHunk) -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
+    // "Whole file" stages the file from the bottom button; "By hunk" puts Stage / Unstage on every hunk
+    // (the old hunk dialog's whole-hunk selection, `POST /git/stage-hunks` / `unstage-hunks`).
+    var byHunk by remember(change.path, change.group) { mutableStateOf(false) }
+    val hunkStaging = onStageHunk != null && !change.conflict && fileHunks?.binary != true
     val scopeLabel = if (change.group == GitChangeGroup.STAGED) "Staged" else "Working Tree"
     val countsSuffix = change.lineCounts?.let { (add, del) -> " · +$add −$del" }.orEmpty()
     val sublineBase = change.directoryPath.ifEmpty { change.path }
@@ -194,6 +204,13 @@ fun PhoneGitDiffScreen(
                 else -> {
                     PhoneGitHunksList(
                         hunks = fileHunks.hunks,
+                        hunkActionLabel = if (byHunk && hunkStaging) {
+                            if (change.isStaged) "Unstage hunk" else "Stage hunk"
+                        } else {
+                            null
+                        },
+                        hunkActionEnabled = !busyStaging,
+                        onHunkAction = { hunk -> onStageHunk?.invoke(change, hunk) },
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -203,14 +220,25 @@ fun PhoneGitDiffScreen(
         if (!change.conflict) {
             BottomActionCard(
                 applyWindowInsets = false,
-                chipsContent = {
-                    Chip(
-                        label = "Whole file",
-                        icon = ProductIcon.FileCode,
-                        selected = true,
-                        onClick = {},
-                        modifier = Modifier.testTag("phone-git-diff-whole-file-chip"),
-                    )
+                chipsContent = if (hunkStaging) {
+                    {
+                        Chip(
+                            label = "Whole file",
+                            icon = ProductIcon.FileCode,
+                            selected = !byHunk,
+                            onClick = { byHunk = false },
+                            modifier = Modifier.testTag("phone-git-diff-whole-file-chip"),
+                        )
+                        Chip(
+                            label = "By hunk",
+                            icon = ProductIcon.ListChecks,
+                            selected = byHunk,
+                            onClick = { byHunk = true },
+                            modifier = Modifier.testTag("phone-git-diff-by-hunk-chip"),
+                        )
+                    }
+                } else {
+                    null
                 },
                 primaryAction = {
                     ActionPrimaryButton(
@@ -235,6 +263,9 @@ fun PhoneGitDiffScreen(
 private fun PhoneGitHunksList(
     hunks: List<DiffHunk>,
     modifier: Modifier = Modifier,
+    hunkActionLabel: String? = null,
+    hunkActionEnabled: Boolean = true,
+    onHunkAction: (DiffHunk) -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     val horizontalScroll = rememberScrollState()
@@ -262,6 +293,14 @@ private fun PhoneGitHunksList(
                             .copy(color = tokens.text2.color),
                         maxLines = 1,
                     )
+                    if (hunkActionLabel != null) {
+                        Spacer(Modifier.width(12.dp))
+                        Chip(
+                            label = hunkActionLabel,
+                            onClick = { if (hunkActionEnabled) onHunkAction(hunk) },
+                            modifier = Modifier.testTag("phone-git-diff-hunk-action-${hunk.index}"),
+                        )
+                    }
                 }
             }
             items(

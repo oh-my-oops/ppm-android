@@ -50,7 +50,18 @@ import com.hienlh.ppm.app.ui.phone.chat.PhoneSessionInfoSheet
 import com.hienlh.ppm.app.ui.phone.files.PhoneDiffScreen
 import com.hienlh.ppm.app.ui.phone.files.PhoneFileTabScreen
 import com.hienlh.ppm.app.ui.phone.files.PhoneFilesTreeScreen
+import com.hienlh.ppm.app.ui.phone.git.PhoneGitDiffTabHost
 import com.hienlh.ppm.app.ui.phone.git.PhoneSourceControlScreen
+import com.hienlh.ppm.client.gitStageHunks
+import com.hienlh.ppm.client.gitUnstageHunks
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import com.hienlh.ppm.app.ui.phone.settings.PhoneSettingsScreen
 import com.hienlh.ppm.app.ui.phone.settings.resolvePhoneSettingsRoute
 import com.hienlh.ppm.app.ui.phone.terminal.PhoneTerminalActionsSheet
@@ -114,17 +125,12 @@ internal fun PhoneSourceControlAreaHost(
     nav: PhoneNav,
 ) {
     if (tab != null && tab.type == "git-diff") {
-        val filePath = tab.metaString("filePath") ?: tab.title.ifBlank { "diff" }
-        val diffText = tab.metaString("diff") ?: tab.metaString("inlineContent").orEmpty()
-        PhoneDiffScreen(
-            filePath = filePath,
-            diffText = diffText,
-            onOpenFile = {
-                val project = tab.projectId ?: model.selectedProject
-                if (!project.isNullOrBlank()) {
-                    model.openFileTab(project, filePath)
-                    model.activeTabId?.let(nav::visitTab)
-                }
+        PhoneGitDiffTabHost(
+            model = model,
+            tab = tab,
+            onOpenFile = { project, path ->
+                model.openFileTab(project, path)
+                model.activeTabId?.let(nav::visitTab)
             },
         )
         return
@@ -132,8 +138,19 @@ internal fun PhoneSourceControlAreaHost(
 
     val project = model.selectedProject.orEmpty()
     val initialStatus = model.gitBranches[project]
-    val initialChanges = model.gitChangesCache[model.gitChangesKey(project, null)]
-        ?: model.gitChangesCache[project]
+    val initialChanges = model.cachedGitChanges(project)
+        ?: model.gitChangesCache[model.gitChangesKey(project, null)]
+
+    // While this screen is up it is what reads the project's changes, as the old panel was: watchGit
+    // stands down, and the drawer badge, the tree's letters and the chat's changes chip follow its reads.
+    DisposableEffect(model, project) {
+        if (project.isNotEmpty()) model.onGitStatusPanelMounted(project)
+        onDispose { if (project.isNotEmpty()) model.onGitStatusPanelUnmounted(project) }
+    }
+    LaunchedEffect(model.api, project) {
+        if (project.isNotEmpty()) model.loadGitRepos(project)
+    }
+    val refreshEvents = remember(model, project) { phoneGitRefreshEvents(model, project) }
 
     PhoneSourceControlScreen(
         projectName = project,
@@ -152,6 +169,36 @@ internal fun PhoneSourceControlAreaHost(
         },
         onDrawerClick = { nav.openDrawer() },
         onTitleClick = { nav.pushSheet(SheetKey.TabSwitcher) },
-        onStatusChanged = { model.refreshGitStatus() },
+        refreshEvents = refreshEvents,
+        onChangesLoaded = { repo, changes -> model.applyGitChanges(project, repo, changes) },
+        commitDrafts = model.commitDrafts,
+        chosenRepoPath = model.gitChosenRepoPath[project],
+        onRepoChosen = { repo -> model.chooseGitRepo(project, repo.path) },
+        onStageHunks = { change, hunks ->
+            val client = model.api ?: error("Not connected")
+            val repo = com.hienlh.ppm.state.git.GitRepoScope.resolveRepo(model.gitDiscovery[project], model.gitChosenRepoPath[project])
+            val items = hunks.map { com.hienlh.ppm.client.HunkSelectionItem(hunk = it.index, id = it.id) }
+            if (change.isStaged) {
+                client.gitUnstageHunks(project, change.path, items, repo)
+            } else {
+                client.gitStageHunks(project, change.path, items, repo)
+            }
+        },
     )
 }
+
+/**
+ * When the phone Source Control reads the changes again (the old panel's three triggers): PPM wrote to the
+ * project's repository or one of its files changed (`gitChangedEvents`, which the app bar's Refresh status
+ * also sends), the app came back to the front, and every 5 s while it is in front.
+ */
+internal fun phoneGitRefreshEvents(model: AppModel, project: String): Flow<Unit> = merge(
+    model.gitChangedEvents.filter { it == project }.map { },
+    snapshotFlow { model.windowVisible }.drop(1).filter { it }.map { },
+    flow {
+        while (true) {
+            delay(5_000)
+            if (model.windowVisible) emit(Unit)
+        }
+    },
+)
