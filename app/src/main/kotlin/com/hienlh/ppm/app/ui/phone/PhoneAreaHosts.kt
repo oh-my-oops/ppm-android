@@ -85,6 +85,9 @@ import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.string
 import com.hienlh.ppm.state.MessagePriority
+import com.hienlh.ppm.state.Effort
+import com.hienlh.ppm.state.ModelNames
+import com.hienlh.ppm.protocol.ProviderInfo
 import com.hienlh.ppm.state.PermissionMode
 import com.hienlh.ppm.state.logs.LogEntry
 import com.hienlh.ppm.state.logs.LogFilter
@@ -198,20 +201,22 @@ internal fun PhoneChatAreaHost(
     var showSessionInfoSheet by remember { mutableStateOf(false) }
     var showAttachSheet by remember { mutableStateOf(false) }
     var showHistorySheet by remember(showHistoryInitially) { mutableStateOf(showHistoryInitially) }
-    var thinkingEnabled by remember { mutableStateOf(true) }
-
     val providerId = chatTab?.providerId ?: "claude"
-    val modelLabel = remember(openChatTab?.metadata, providerId) {
-        openChatTab?.metaString("model")?.takeIf { it.isNotBlank() } ?: when (providerId) {
-            "codex" -> "Codex"
-            "cursor" -> "Cursor"
-            else -> "Claude Sonnet 4.6"
-        }
+    // What the chat runs on, as the tablet composer's chip shows it: the session's model and effort
+    // from `session_state`, or, before a session exists, the provider's defaults (ChatController).
+    val catalog = model.models
+    val catalogEntries = catalog?.entries?.collectAsState()?.value
+    LaunchedEffect(catalog, providerId) { catalog?.load(providerId) }
+    val stateModel = chatState?.model
+    val modelLabel = remember(catalogEntries, stateModel, providerId) {
+        catalog?.displayName(stateModel, providerId)
+            ?: ModelNames.effectiveModel(stateModel, providerId)?.let(ModelNames::displayName)
+            ?: "Model"
     }
-    val effortLabel = remember(openChatTab?.metadata) {
-        (openChatTab?.metaString("effort") ?: "Medium").replaceFirstChar { it.uppercase() }
-    }
-    val permissionModeId = chatTab?.permissionMode?.value ?: PermissionMode.DEFAULT.value
+    val effortValue = chatState?.effort ?: ModelNames.suffixEffort(stateModel, providerId) ?: Effort.DEFAULT.value
+    val effortLabel = Effort.label(effortValue)
+    val thinkingEnabled = chatState?.thinking ?: true
+    val permissionModeId = (chatTab?.permissionMode ?: PermissionMode.FALLBACK).value
     val accountName = chatTab?.servingAccount?.label
         ?: chatTab?.claimedAccountLabel
         ?: "Default"
@@ -258,7 +263,7 @@ internal fun PhoneChatAreaHost(
                     model.activeTabId?.let(nav::visitTab)
                 }
             },
-            onStopTurn = { chatController?.stop() },
+            onStopTurn = { chatController?.cancel() },
             onScrollToWaitingCard = {},
             modifier = Modifier.testTag("phone-chat-screen"),
             isNewChat = isNewChat,
@@ -275,6 +280,7 @@ internal fun PhoneChatAreaHost(
             modelLabel = modelLabel,
             effortLabel = effortLabel,
             permissionModeId = permissionModeId,
+            permissionModeLabel = (PermissionMode.of(permissionModeId) ?: PermissionMode.FALLBACK).shortLabel,
             accountName = accountName,
             changedFiles = changeFiles,
             onOpenAttachSheet = { showAttachSheet = true },
@@ -296,40 +302,50 @@ internal fun PhoneChatAreaHost(
         )
 
         if (showModelSheet) {
-            val providers = remember(providerId) {
-                listOf(
-                    PhoneProviderOption(
-                        id = providerId,
-                        name = providerId.replaceFirstChar { it.uppercase() },
-                        subtitle = "Active provider",
-                    ),
-                )
+            val project = chatTab?.project ?: model.selectedProject.orEmpty()
+            val providerInfos = model.newChats.preparationCache.peekProviders(project)
+                ?: model.newChatCache.providers(project)
+                ?: emptyList()
+            val providers = remember(providerInfos, providerId) {
+                (providerInfos.takeIf { list -> list.any { it.id == providerId } } ?: providerInfos + ProviderInfo(providerId, providerId.replaceFirstChar { it.uppercase() }))
+                    .map { info ->
+                        PhoneProviderOption(
+                            id = info.id,
+                            name = info.name,
+                            subtitle = if (info.id == providerId) "Active provider" else "",
+                            effortLevels = Effort.optionsFor(info.id).map { it.label },
+                        )
+                    }
             }
-            val availableModels = remember(modelLabel) {
-                listOf(
+            val defaults = model.newChatCache.settings()?.defaults?.get(providerId)
+            val defaultEffortLabel = Effort.label(defaults?.effort ?: Effort.DEFAULT.value)
+            val availableModels = remember(catalogEntries, providerId, defaults) {
+                catalog?.models(providerId).orEmpty().map { option ->
                     PhoneModelOption(
-                        id = modelLabel,
-                        name = modelLabel,
-                        description = "Default model",
-                    ),
-                )
+                        id = option.value,
+                        name = ModelNames.shortLabel(option.label, providerId),
+                        description = if (option.value == defaults?.model) "Default" else "",
+                        defaultEffort = defaultEffortLabel,
+                    )
+                }
             }
             PhoneModelEffortSheet(
                 providers = providers,
                 selectedProviderId = providerId,
                 models = availableModels,
-                selectedModelId = modelLabel,
+                selectedModelId = ModelNames.effectiveModel(stateModel, providerId).orEmpty(),
                 selectedEffort = effortLabel,
                 thinkingEnabled = thinkingEnabled,
-                providerLocked = chatTab?.session != null,
-                onSelectProvider = { id -> chatController?.chooseProvider(id) },
+                providerLocked = chatTab?.session != null || chatTab == null,
+                onSelectProvider = { id -> chatTab?.let { model.newChats.pickProvider(it, id) } },
                 onSelectModel = { id -> chatController?.setModel(id) },
-                onSelectEffort = {},
-                onToggleThinking = { enabled ->
-                    thinkingEnabled = enabled
-                    chatController?.setThinking(enabled)
+                onSelectEffort = { label ->
+                    Effort.entries.firstOrNull { it.label.equals(label, ignoreCase = true) }?.let { chatController?.setEffort(it) }
                 },
-                onResetEffortToDefault = {},
+                onToggleThinking = { enabled -> chatController?.setThinking(enabled) },
+                onResetEffortToDefault = {
+                    (Effort.of(defaults?.effort) ?: Effort.DEFAULT).let { chatController?.setEffort(it) }
+                },
                 onDismiss = { showModelSheet = false },
             )
         }
