@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -41,19 +42,28 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.PrefsStore
+import com.hienlh.ppm.app.specs
+import com.hienlh.ppm.client.chatHistoryViewMode
+import com.hienlh.ppm.client.putChatHistoryViewMode
+import com.hienlh.ppm.client.specs
 import com.hienlh.ppm.chat.RelativeTime
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.LocalPpmMobile
@@ -71,8 +81,14 @@ import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionTag
+import com.hienlh.ppm.client.SpecSummary
 import com.hienlh.ppm.state.ChatSearch
 import com.hienlh.ppm.state.HistoryList
+import com.hienlh.ppm.state.SessionTree
+import com.hienlh.ppm.state.SessionTreeNode
+import com.hienlh.ppm.state.SessionTreeRoot
+import com.hienlh.ppm.state.SpecBarCell
+import com.hienlh.ppm.state.SpecFamily
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -101,6 +117,23 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
         }
     }
     val unread = model.unreadSessions()
+    val mobile = LocalPpmMobile.current
+    val viewMode = rememberHistoryViewMode(model)
+    val project = model.selectedProject
+    // The specs whose chats show their progress in the tree; none from a server without the field.
+    var specList by remember(project) { mutableStateOf<List<SpecSummary>>(emptyList()) }
+    val tree = mobile && viewMode.mode == "tree"
+    LaunchedEffect(model.api, project, tree, model.sessions.size) {
+        val api = model.api ?: return@LaunchedEffect
+        if (!tree || project == null) return@LaunchedEffect
+        specList = try {
+            api.specs(project)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
     Column(modifier.fillMaxSize()) {
         // `SidebarHeader`: `flex items-center gap-1 px-2 py-2 border-b border-border`.
         Row(
@@ -117,6 +150,21 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
                 overflow = TextOverflow.Ellipsis,
             )
             SyncIndicator(model.syncingSessions, model.sessionsSyncError)
+            // The list/tree switch, where Source Control keeps its own.
+            if (mobile) {
+                val label = if (viewMode.mode == "tree") "Show as a list" else "Show as a tree"
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .ppmClickable(onClickLabel = label) { viewMode.toggle() }
+                        .semantics { contentDescription = label }
+                        .testTag("history-view-toggle"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    PpmIcon(if (viewMode.mode == "tree") ProductIcon.List else ProductIcon.FolderTree, 16.dp, tokens.text2.color)
+                }
+            }
         }
         // Search + bulk delete + refresh: `flex items-center gap-1 px-2 py-2`.
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -176,7 +224,6 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
         }
         val sessions = state.shown(all)
         val sessionList = rememberLazyListState()
-        val mobile = LocalPpmMobile.current
         when {
             state.loading && all.isEmpty() || (state.searchPage == null && model.sessionsLoad == AppModel.Load.Loading && all.isEmpty()) ->
                 Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
@@ -188,8 +235,24 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
                 style = ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text3.color, textAlign = TextAlign.Center),
             )
             mobile -> {
-                val groups = remember(sessions) { HistoryByDay.groupSessionsByDay(sessions) }
+                // The tree is built over the list sorted by activity, so each family sits where its newest member would.
+                val roots = remember(sessions, tree) {
+                    if (tree) SessionTree.build(sessions.sortedWith(compareByDescending<SessionInfo> { it.pinned }.thenByDescending { it.lastActive ?: Instant.EPOCH })) else emptyList()
+                }
+                val groups = remember(sessions, roots, tree) {
+                    if (tree) HistoryByDay.groupFamiliesByDay(roots) else HistoryByDay.groupSessionsByDay(sessions)
+                }
+                val running = model.events?.running?.collectAsState()?.value.orEmpty()
                 PhoneSessionHistoryList(
+                    families = remember(roots) { roots.associateBy { it.id } },
+                    specByChat = remember(specList) { SpecFamily.byChat(specList) },
+                    runningSessionIds = running,
+                    onOpenStandIn = { root ->
+                        val title = root.parentTitle?.trim().takeUnless { it.isNullOrEmpty() } ?: "Chat"
+                        project?.let { model.openLinkedSession(it, root.id, root.children.firstOrNull()?.session?.providerId ?: "", title) }
+                        onNavigate()
+                    },
+                    spawnedBadge = { session -> project?.let { SpawnedSessionBadge(model, session, it) } },
                     groups = groups,
                     unreadTypes = unread.mapValues { it.value.type },
                     tags = model.tags.tags,
@@ -568,14 +631,46 @@ object HistoryByDay {
         sessions: List<SessionInfo>,
         now: Instant = Instant.now(),
         zoneId: ZoneId = ZoneId.systemDefault(),
+    ): List<SessionDayGroup> = groupByDay(sessions.map { it to it.lastActive }, now, zoneId)
+
+    /**
+     * Chat History's tree grouped as [groupSessionsByDay] groups sessions: one entry per family,
+     * standing for its top chat ([SessionTreeRoot.session], or a stand-in named by its children's
+     * `parentTitle` when the creator is not in the list) and placed by its most recently active
+     * member, so a spec whose task chats still run stays near the top though its own chat went quiet.
+     */
+    fun groupFamiliesByDay(
+        roots: List<SessionTreeRoot>,
+        now: Instant = Instant.now(),
+        zoneId: ZoneId = ZoneId.systemDefault(),
+    ): List<SessionDayGroup> = groupByDay(
+        roots.map { root -> familyRepresentative(root) to root.members.mapNotNull { it.lastActive }.maxOrNull() },
+        now,
+        zoneId,
+    )
+
+    /** The row a family stands under: its top chat, or a stand-in for a creator not in the list. */
+    fun familyRepresentative(root: SessionTreeRoot): SessionInfo = root.session ?: SessionInfo(
+        id = root.id,
+        providerId = root.children.firstOrNull()?.session?.providerId ?: "claude",
+        title = root.parentTitle?.trim().takeUnless { it.isNullOrEmpty() } ?: "Another session",
+    )
+
+    /** [entries] (a row and when its family was last active) in Pinned, Today, Yesterday and dated groups. */
+    private fun groupByDay(
+        entries: List<Pair<SessionInfo, Instant?>>,
+        now: Instant,
+        zoneId: ZoneId,
     ): List<SessionDayGroup> {
-        if (sessions.isEmpty()) return emptyList()
+        if (entries.isEmpty()) return emptyList()
         val today = now.atZone(zoneId).toLocalDate()
         val yesterday = today.minusDays(1)
+        val activity = entries.associate { it.first.id to it.second }
 
-        val comparator = compareByDescending<SessionInfo> { it.lastActive ?: Instant.EPOCH }
+        val comparator = compareByDescending<SessionInfo> { activity[it.id] ?: Instant.EPOCH }
             .thenBy { it.id }
 
+        val sessions = entries.map { it.first }
         val pinned = sessions.filter { it.pinned }.sortedWith(comparator)
         val unpinned = sessions.filterNot { it.pinned }.sortedWith(comparator)
 
@@ -592,7 +687,7 @@ object HistoryByDay {
 
         val byDate = LinkedHashMap<LocalDate?, MutableList<SessionInfo>>()
         for (session in unpinned) {
-            val localDate = session.lastActive?.atZone(zoneId)?.toLocalDate()
+            val localDate = activity[session.id]?.atZone(zoneId)?.toLocalDate()
             byDate.getOrPut(localDate) { mutableListOf() }.add(session)
         }
 
@@ -695,6 +790,104 @@ object HistoryByDay {
     }
 }
 
+/** One line of the phone's Chat History tree: a chat, the toggle over a family, or "Show N more". */
+sealed interface HistoryLine {
+    val key: String
+
+    /**
+     * A chat [depth] levels under the top of its family. [standIn]: the creator is not in the list,
+     * so the line stands for it. [spec]: the spec this chat drives, whose progress the line shows.
+     * [task]: a task chat under its spec, with its task's state in [taskCell].
+     */
+    data class Chat(
+        val session: SessionInfo,
+        val depth: Int,
+        val standIn: Boolean = false,
+        val spec: SpecSummary? = null,
+        val task: Boolean = false,
+        val taskCell: SpecBarCell? = null,
+    ) : HistoryLine {
+        override val key: String get() = "s:" + session.id
+    }
+
+    /** "N sub-chats" (or a spec's task chats) under [parentId], with how many run and how many are unread. */
+    data class Toggle(
+        val parentId: String,
+        val count: Int,
+        val running: Int,
+        val unread: Int,
+        val depth: Int,
+        val open: Boolean,
+        val taskChats: Boolean = false,
+    ) : HistoryLine {
+        override val key: String get() = "t:$parentId"
+    }
+
+    /** The spec's task chats past the first few: "Show N more". */
+    data class More(val parentId: String, val hidden: Int) : HistoryLine {
+        override val key: String get() = "m:$parentId"
+    }
+}
+
+/**
+ * The lines one family of Chat History's tree draws (`renderRoot` in session-history-list.tsx):
+ * its top chat, then its sub-chats behind a toggle, collapsed until asked for or while one of them
+ * is the open chat. A spec's chat shows its progress, and its task chats come running first, then
+ * failed, then the rest, the first [TASK_CHATS_SHOWN] of them until "Show N more".
+ */
+object HistoryTreeLines {
+    /** Task chats listed under an open spec before "Show N more". */
+    const val TASK_CHATS_SHOWN = 7
+
+    fun lines(
+        root: SessionTreeRoot,
+        expanded: Map<String, Boolean> = emptyMap(),
+        showAll: Set<String> = emptySet(),
+        activeSessionId: String? = null,
+        running: Set<String> = emptySet(),
+        unread: Set<String> = emptySet(),
+        specByChat: Map<String, SpecSummary> = emptyMap(),
+    ): List<HistoryLine> {
+        val out = mutableListOf<HistoryLine>()
+        val spec = root.session?.let { specByChat[it.id] }?.takeIf { root.children.isNotEmpty() }
+        out += HistoryLine.Chat(HistoryByDay.familyRepresentative(root), 0, standIn = root.session == null, spec = spec)
+
+        fun isOpen(parentId: String, all: List<SessionInfo>) = expanded[parentId] ?: all.any { it.id == activeSessionId }
+
+        fun children(parentId: String, kids: List<SessionTreeNode>, depth: Int) {
+            if (kids.isEmpty()) return
+            val all = SessionTree.descendantsOf(kids)
+            val open = isOpen(parentId, all)
+            out += HistoryLine.Toggle(parentId, all.size, all.count { it.id in running }, all.count { it.id in unread }, depth, open)
+            if (!open) return
+            for (n in kids) {
+                out += HistoryLine.Chat(n.session, depth)
+                children(n.session.id, n.children, depth + 1)
+            }
+        }
+
+        if (spec == null) {
+            children(root.id, root.children, 1)
+            return out
+        }
+        val all = root.descendants
+        val open = isOpen(root.id, all)
+        out += HistoryLine.Toggle(root.id, all.size, all.count { it.id in running }, all.count { it.id in unread }, 1, open, taskChats = true)
+        if (!open) return out
+        val cells = SpecFamily.cellBySession(spec)
+        val ordered = SpecFamily.orderTaskChats(root.children, cells)
+        // The open chat is never hidden behind "Show more".
+        val everything = root.id in showAll || ordered.indexOfFirst { it.session.id == activeSessionId } >= TASK_CHATS_SHOWN
+        val shown = if (everything) ordered else ordered.take(TASK_CHATS_SHOWN)
+        for (n in shown) {
+            out += HistoryLine.Chat(n.session, 1, task = true, taskCell = cells[n.session.id])
+            children(n.session.id, n.children, 2)
+        }
+        if (ordered.size > shown.size) out += HistoryLine.More(root.id, ordered.size - shown.size)
+        return out
+    }
+}
+
 /** Width of each swipe-revealed action button in phone Chat History (Phone 1 G2 = 76 dp). */
 val PhoneHistorySwipeActionWidth = 76.dp
 
@@ -725,12 +918,24 @@ fun PhoneSessionHistoryList(
     onSetTag: (SessionInfo, SessionTag?) -> Unit = { _, _ -> },
     onLoadMore: () -> Unit = {},
     renderInlineRename: (@Composable (SessionInfo, () -> Unit) -> Unit)? = null,
+    /** Tree mode: each group entry's family by its id (`SessionTree`); empty draws the flat list. */
+    families: Map<String, SessionTreeRoot> = emptyMap(),
+    /** The specs whose chats show their progress, by chat id (`SpecFamily.byChat`). */
+    specByChat: Map<String, SpecSummary> = emptyMap(),
+    /** A family whose creator is not in the list: open that creator. */
+    onOpenStandIn: (SessionTreeRoot) -> Unit = {},
+    /** The "Created by" mark of a chat an AI created, on a top-level row. */
+    spawnedBadge: (@Composable (SessionInfo) -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val listState = rememberLazyListState()
     var swipedSessionId by remember { mutableStateOf<String?>(null) }
     var renamingSessionId by remember { mutableStateOf<String?>(null) }
     var sheetSession by remember { mutableStateOf<SessionInfo?>(null) }
+    // Families the user opened or closed; the rest follow the open chat.
+    var familyOpen by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+    var showAll by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val unreadIds = unreadTypes.keys
 
     Box(modifier = modifier) {
         LazyColumn(
@@ -758,50 +963,89 @@ fun PhoneSessionHistoryList(
                         )
                     }
                 }
-                items(group.sessions, key = { "${group.key}_${it.id}" }) { session ->
-                    val unreadType = unreadTypes[session.id]
-                    val isUnread = unreadTypes.containsKey(session.id)
-                    val liveState = when {
-                        session.id in needsYouSessionIds ||
-                            unreadType == "approval_request" ||
-                            unreadType == "question" -> SessionLiveState.NEEDS_YOU
-                        session.id in runningSessionIds -> SessionLiveState.RUNNING
-                        isUnread -> SessionLiveState.UNREAD
-                        else -> SessionLiveState.IDLE
+                val lines = group.sessions.flatMap { top ->
+                    val family = families[top.id]
+                    if (family == null) {
+                        listOf(HistoryLine.Chat(top, 0))
+                    } else {
+                        HistoryTreeLines.lines(family, familyOpen, showAll, activeSessionId, runningSessionIds, unreadIds, specByChat)
                     }
-                    PhoneSessionHistoryRow(
-                        session = session,
-                        liveState = liveState,
-                        unreadType = unreadType,
-                        selected = session.id == activeSessionId,
-                        swipeExpanded = swipedSessionId == session.id,
-                        onSwipeExpandChange = { expanded ->
-                            swipedSessionId = if (expanded) session.id else if (swipedSessionId == session.id) null else swipedSessionId
-                        },
-                        renaming = renamingSessionId == session.id,
-                        onStartRename = {
-                            swipedSessionId = null
-                            renamingSessionId = session.id
-                        },
-                        onFinishRename = { renamingSessionId = null },
-                        onOpen = {
-                            swipedSessionId = null
-                            onOpenSession(session)
-                        },
-                        onLongPress = {
-                            swipedSessionId = null
-                            sheetSession = session
-                        },
-                        onTogglePin = {
-                            swipedSessionId = null
-                            onTogglePin(session)
-                        },
-                        onDelete = {
-                            swipedSessionId = null
-                            onDeleteSession(session)
-                        },
-                        renderInlineRename = renderInlineRename,
-                    )
+                }
+                items(lines, key = { "${group.key}_${it.key}" }) { line ->
+                    when (line) {
+                        is HistoryLine.Toggle -> PhoneHistoryFamilyToggle(line) {
+                            familyOpen = familyOpen + (line.parentId to !line.open)
+                        }
+                        is HistoryLine.More -> PhoneHistoryShowMore(line) { showAll = showAll + line.parentId }
+                        is HistoryLine.Chat -> when {
+                            line.standIn -> families[line.session.id]?.let { root ->
+                                PhoneHistoryStandInRow(line.session) { onOpenStandIn(root) }
+                            }
+                            line.task -> PhoneHistoryTaskRow(
+                                session = line.session,
+                                cell = line.taskCell,
+                                running = line.session.id in runningSessionIds,
+                                unreadType = unreadTypes[line.session.id],
+                                unread = line.session.id in unreadIds,
+                                selected = line.session.id == activeSessionId,
+                                onOpen = { onOpenSession(line.session) },
+                                onLongPress = { sheetSession = line.session },
+                            )
+                            else -> {
+                                val session = line.session
+                                val unreadType = unreadTypes[session.id]
+                                val isUnread = unreadTypes.containsKey(session.id)
+                                val liveState = when {
+                                    session.id in needsYouSessionIds ||
+                                        unreadType == "approval_request" ||
+                                        unreadType == "question" -> SessionLiveState.NEEDS_YOU
+                                    session.id in runningSessionIds -> SessionLiveState.RUNNING
+                                    isUnread -> SessionLiveState.UNREAD
+                                    else -> SessionLiveState.IDLE
+                                }
+                                PhoneSessionHistoryRow(
+                                    session = session,
+                                    liveState = liveState,
+                                    unreadType = unreadType,
+                                    selected = session.id == activeSessionId,
+                                    swipeExpanded = swipedSessionId == session.id,
+                                    onSwipeExpandChange = { expanded ->
+                                        swipedSessionId = if (expanded) session.id else if (swipedSessionId == session.id) null else swipedSessionId
+                                    },
+                                    renaming = renamingSessionId == session.id,
+                                    onStartRename = {
+                                        swipedSessionId = null
+                                        renamingSessionId = session.id
+                                    },
+                                    onFinishRename = { renamingSessionId = null },
+                                    onOpen = {
+                                        swipedSessionId = null
+                                        onOpenSession(session)
+                                    },
+                                    onLongPress = {
+                                        swipedSessionId = null
+                                        sheetSession = session
+                                    },
+                                    onTogglePin = {
+                                        swipedSessionId = null
+                                        onTogglePin(session)
+                                    },
+                                    onDelete = {
+                                        swipedSessionId = null
+                                        onDeleteSession(session)
+                                    },
+                                    renderInlineRename = renderInlineRename,
+                                    indent = (line.depth * 16).dp,
+                                    spec = line.spec,
+                                    badge = if (line.depth == 0 && spawnedBadge != null) {
+                                        { spawnedBadge(session) }
+                                    } else {
+                                        null
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
@@ -891,6 +1135,12 @@ fun PhoneSessionHistoryRow(
     onFinishRename: () -> Unit = {},
     onLongPress: () -> Unit = {},
     renderInlineRename: (@Composable (SessionInfo, () -> Unit) -> Unit)? = null,
+    /** How far under the top of its family the row sits. */
+    indent: Dp = 0.dp,
+    /** The spec this chat drives: its progress takes the time line's place. */
+    spec: SpecSummary? = null,
+    /** The "Created by" mark, after the provider. */
+    badge: (@Composable () -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val density = LocalDensity.current
@@ -1020,11 +1270,12 @@ fun PhoneSessionHistoryRow(
                         }
                     },
                 )
-                .padding(horizontal = 16.dp),
+                .padding(start = 16.dp + indent, end = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             ProviderBadge(session.providerId)
+            badge?.invoke()
 
             if (renaming && renderInlineRename != null) {
                 renderInlineRename(session, onFinishRename)
@@ -1070,7 +1321,9 @@ fun PhoneSessionHistoryRow(
                         }
                     }
 
-                    Row(
+                    if (spec != null) {
+                        PhoneSpecProgress(spec)
+                    } else Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
@@ -1304,3 +1557,192 @@ fun PhoneSessionActionSheet(
     }
 }
 
+
+/** A spec chat's progress in place of its time line: a cell per required task, then the counts (`renderSpecFamily`). */
+@Composable
+internal fun PhoneSpecProgress(spec: SpecSummary) {
+    val tokens = LocalPpmTokens.current
+    val p = SpecFamily.progress(spec)
+    Column(Modifier.fillMaxWidth().testTag("history-spec-progress:" + spec.slug), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(999.dp)), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            for (cell in SpecFamily.bar(spec)) {
+                val color = when (cell) {
+                    SpecBarCell.DONE -> tokens.success.color
+                    SpecBarCell.RUNNING -> tokens.info.color
+                    SpecBarCell.FAILED -> tokens.error.color
+                    SpecBarCell.TODO -> tokens.border.color
+                }
+                Box(Modifier.weight(1f).fillMaxHeight().background(color))
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            val style = ppmText(12f, lineHeight = 16f)
+            BasicText("" + p.done + "/" + p.total + " done", style = style.copy(color = tokens.text2.color), maxLines = 1)
+            if (p.running > 0) BasicText("· " + p.running + " running", style = style.copy(color = tokens.info.color), maxLines = 1)
+            if (p.failed > 0) BasicText("· " + p.failed + " failed", style = style.copy(color = tokens.error.color), maxLines = 1)
+        }
+    }
+}
+
+/** "N sub-chats · k running · u unread" over a family, opening or closing it. */
+@Composable
+internal fun PhoneHistoryFamilyToggle(line: HistoryLine.Toggle, onToggle: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    val noun = if (line.taskChats) "task chat" else "sub-chat"
+    val label = "" + line.count + " " + noun + (if (line.count == 1) "" else "s")
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .ppmClickable(onClickLabel = if (line.open) "Hide $label" else "Show $label", onClick = onToggle)
+            .padding(start = 16.dp + (line.depth * 16).dp, end = 16.dp)
+            .semantics { stateDescription = if (line.open) "Expanded" else "Collapsed" }
+            .testTag("history-family-toggle:" + line.parentId),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        PpmIcon(if (line.open) ProductIcon.ChevronDown else ProductIcon.ChevronRight, 14.dp, tokens.text3.color)
+        val style = ppmText(12f, lineHeight = 16f)
+        BasicText(label, style = style.copy(color = tokens.text3.color))
+        if (line.running > 0) BasicText("· " + line.running + " running", style = style.copy(color = tokens.info.color))
+        if (line.unread > 0) BasicText("· " + line.unread + " unread", style = ppmText(12f, FontWeight.SemiBold, lineHeight = 16f).copy(color = tokens.text.color))
+    }
+}
+
+/** The spec's task chats past the first few. */
+@Composable
+internal fun PhoneHistoryShowMore(line: HistoryLine.More, onClick: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    BasicText(
+        "Show " + line.hidden + " more",
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .ppmClickable(onClickLabel = "Show " + line.hidden + " more", onClick = onClick)
+            .padding(start = 48.dp, end = 16.dp, top = 14.dp, bottom = 14.dp)
+            .testTag("history-family-more:" + line.parentId),
+        style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
+    )
+}
+
+/** A family whose creator is not in the list (a later page, another tag): the row stands for that creator. */
+@Composable
+internal fun PhoneHistoryStandInRow(session: SessionInfo, onOpen: () -> Unit) {
+    val tokens = LocalPpmTokens.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .ppmClickable(onClickLabel = "Open " + session.title, onClick = onOpen)
+            .cssBorder(tokens.borderSoft.color, sides = CssSides.Bottom)
+            .padding(horizontal = 16.dp)
+            .testTag("history-stand-in:" + session.id),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        PpmIcon(ProductIcon.GitBranch, 16.dp, tokens.info.color)
+        BasicText(
+            session.title,
+            Modifier.weight(1f),
+            style = ppmText(14f, FontWeight.Medium, lineHeight = 19f).copy(color = tokens.text2.color),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** A task chat under its spec: one line, its task's state in front (`renderTaskRow`). */
+@Composable
+internal fun PhoneHistoryTaskRow(
+    session: SessionInfo,
+    cell: SpecBarCell?,
+    running: Boolean,
+    unreadType: String?,
+    unread: Boolean,
+    selected: Boolean,
+    onOpen: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    val bg = when {
+        selected -> tokens.accentWash.color
+        unread -> tokens.notification(unreadType).opacity(0.10).color
+        else -> Color.Transparent
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .background(bg)
+            .pressable(pressedColor = tokens.surfaceHover.color, hoverColor = tokens.surfaceHover.color, onLongClick = { onLongPress() }, onClick = onOpen)
+            .padding(start = 32.dp, end = 16.dp)
+            .testTag("history-task-chat:" + session.id),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        when {
+            running || cell == SpecBarCell.RUNNING -> PpmIcon(ProductIcon.Loader2, 14.dp, tokens.info.color, spinning = true)
+            cell == SpecBarCell.FAILED -> PpmIcon(ProductIcon.CircleX, 14.dp, tokens.error.color)
+            cell == SpecBarCell.DONE -> PpmIcon(ProductIcon.Check, 14.dp, tokens.success.color)
+            else -> Box(Modifier.size(14.dp))
+        }
+        val color = when {
+            unread || selected -> tokens.text.color
+            cell == SpecBarCell.DONE -> tokens.text3.color
+            else -> tokens.text2.color
+        }
+        BasicText(
+            PpmFormat.collapsedWhitespace(session.title).ifEmpty { "Untitled" },
+            Modifier.weight(1f),
+            style = ppmText(13f, if (unread) FontWeight.SemiBold else FontWeight.Normal, lineHeight = 18f).copy(color = color),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        session.lastActive?.let { RelativeTime(it, ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color)) }
+    }
+}
+
+/** History's list or tree, and the switch between them. */
+@Stable
+internal class HistoryViewMode(private val model: AppModel, private val prefs: PrefsStore) {
+    /** `tree` (the web's default) or `flat`. */
+    val mode: String get() = model.specs.historyViewMode ?: prefs.get(HISTORY_VIEW_MODE_KEY)?.takeIf { it == "flat" || it == "tree" } ?: "tree"
+
+    /** Switches, keeps it on this device for the next start, and saves it for every device (`chatHistoryViewMode`). */
+    fun toggle() {
+        val next = if (mode == "tree") "flat" else "tree"
+        model.specs.historyViewMode = next
+        prefs.put(HISTORY_VIEW_MODE_KEY, next)
+        val api = model.api ?: return
+        model.scope.launch {
+            try {
+                api.putChatHistoryViewMode(next)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
+        }
+    }
+}
+
+private const val HISTORY_VIEW_MODE_KEY = "chatHistoryViewMode"
+
+/** The choice as this device last had it, then as the server has it (another device may have changed it). */
+@Composable
+internal fun rememberHistoryViewMode(model: AppModel): HistoryViewMode {
+    val context = LocalContext.current
+    val view = remember(model, context) { HistoryViewMode(model, PrefsStore(context)) }
+    LaunchedEffect(model.api) {
+        val api = model.api ?: return@LaunchedEffect
+        val saved = try {
+            api.chatHistoryViewMode()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        } ?: return@LaunchedEffect
+        model.specs.historyViewMode = saved
+        PrefsStore(context).put(HISTORY_VIEW_MODE_KEY, saved)
+    }
+    return view
+}

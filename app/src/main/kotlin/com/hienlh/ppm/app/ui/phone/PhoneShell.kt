@@ -23,6 +23,8 @@ import com.hienlh.ppm.app.ui.phone.notifications.NotificationsSheet
 import com.hienlh.ppm.app.ui.phone.onboarding.PhoneOnboardingController
 import com.hienlh.ppm.app.ui.phone.onboarding.PhoneOnboardingHost
 import com.hienlh.ppm.app.ui.phone.onboarding.rememberPhoneOnboardingController
+import com.hienlh.ppm.app.ui.phone.specs.PhoneSpecStartSheet
+import com.hienlh.ppm.app.specs
 import com.hienlh.ppm.app.ui.projects.ProjectSwitcherSheet
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.LucideIcon
@@ -81,6 +83,8 @@ fun PhoneShell(
     val resolvedOnboarding = onboardingController
         ?: rememberPhoneOnboardingController(resolvedPrefs)
 
+    // A server in minimal mode offers the chat, its files and Settings only (`--minimal`).
+    val minimal = model.info?.minimalMode == true
     val openTabPairs = model.openTabs
     val openTabs = overrideOpenTabs ?: openTabPairs.map { it.first }
     val openTabIds = openTabs.mapTo(LinkedHashSet()) { it.id }
@@ -94,6 +98,20 @@ fun PhoneShell(
         nav.syncOpenTabs(openTabIds = openTabIds, activeTabId = activeWorkspaceTabId)
     }
 
+    // A chat that starts as a spec gets its spec once its first message makes the session.
+    LaunchedEffect(openTabIds) {
+        model.specs.armPending(openTabs)
+    }
+
+    // `openSpecs()` / `openSpec()` from anywhere (a chat's Spec chip, a notification): show the Specs area.
+    val specsRequested = model.specs.showRequested
+    LaunchedEffect(specsRequested) {
+        if (specsRequested) {
+            model.specs.showRequested = false
+            if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.SPECS))
+        }
+    }
+
     // Handle legacy sidebar/drawer open requests bridged from AppModel.showSidebarSection.
     val drawerRequest = model.mobileDrawerOpenRequest
     LaunchedEffect(drawerRequest) {
@@ -101,9 +119,10 @@ fun PhoneShell(
             model.mobileDrawerOpenRequest = null
             when (drawerRequest) {
                 "explorer" -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.FILES))
-                "git" -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.SOURCE_CONTROL))
-                "database" -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.DATABASE))
-                "tunnels" -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.PORT_FORWARDING))
+                "git" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.SOURCE_CONTROL))
+                "database" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.DATABASE))
+                "tunnels" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.PORT_FORWARDING))
+                "specs" -> if (!minimal) nav.visitTab(PhoneNav.areaTabId(PhoneArea.SPECS))
                 "history" -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.CHAT))
                 else -> nav.openDrawer()
             }
@@ -152,7 +171,12 @@ fun PhoneShell(
         AppBarConnectionState.None -> ""
     }
 
+    val specs = model.specs
+    val onOpenSpec = syntheticArea == PhoneArea.SPECS && specs.openSlug != null
+    // A spec opened from the list goes back to the list; one a chat opened goes back to the chat.
+    val specBack = onOpenSpec && specs.openedFromList
     val titleText = when {
+        onOpenSpec -> specs.openTitle ?: "Spec"
         syntheticArea != null -> syntheticArea.title
         activeWorkspaceTab != null -> activeWorkspaceTab.title.ifBlank {
             PhoneArea.fromTab(activeWorkspaceTab)?.title ?: activeWorkspaceTab.type
@@ -196,6 +220,7 @@ fun PhoneShell(
         },
         onRefreshGit = { model.refreshGitStatus() },
         onBackToChat = { focusOrOpenChat(model, openTabs, nav) },
+        minimal = minimal,
     )
 
     val isPushedPage = syntheticArea != null || activeWorkspaceTab?.type == "settings"
@@ -215,12 +240,14 @@ fun PhoneShell(
                 subline = sublineText,
                 connectionState = connectionState,
                 hasUnreadAttention = hasUnreadAttention,
-                onDrawerClick = if (!isPushedPage || nav.history.isEmpty()) {
+                onDrawerClick = if (!specBack && (!isPushedPage || nav.history.isEmpty())) {
                     { nav.openDrawer() }
                 } else {
                     null
                 },
-                onBack = if (isPushedPage && nav.history.isNotEmpty()) {
+                onBack = if (specBack) {
+                    { specs.closeSpec() }
+                } else if (isPushedPage && nav.history.isNotEmpty()) {
                     {
                         val res = nav.back()
                         if (res is BackResult.PoppedTab && PhoneNav.parseAreaTabId(res.tabId) == null) {
@@ -316,6 +343,16 @@ fun PhoneShell(
                     },
                 ),
                 DrawerNavItem(
+                    id = PhoneArea.SPECS.id,
+                    label = PhoneArea.SPECS.title,
+                    icon = ProductIcon.ClipboardList,
+                    selected = activeArea == PhoneArea.SPECS,
+                    onClick = {
+                        nav.closeDrawer()
+                        handleDrawerSelection(model, PhoneArea.SPECS.id, openTabs, nav)
+                    },
+                ),
+                DrawerNavItem(
                     id = PhoneArea.FILES.id,
                     label = PhoneArea.FILES.title,
                     icon = ProductIcon.Folder,
@@ -357,7 +394,7 @@ fun PhoneShell(
                         handleDrawerSelection(model, PhoneArea.DATABASE.id, openTabs, nav)
                     },
                 ),
-            ),
+            ).filter { item -> PhoneArea.fromId(item.id)?.let { PhoneArea.isAvailable(it, minimal) } ?: true },
             toolTiles = listOf(
                 DrawerToolTileItem(
                     id = PhoneArea.PORT_FORWARDING.id,
@@ -411,7 +448,7 @@ fun PhoneShell(
                         handleDrawerSelection(model, PhoneArea.SCHEDULES.id, openTabs, nav)
                     },
                 ),
-            ),
+            ).filter { tile -> PhoneArea.fromId(tile.id)?.let { PhoneArea.isAvailable(it, minimal) } ?: true },
             onProjectClick = {
                 nav.closeDrawer()
                 nav.pushSheet(SheetKey.ProjectSwitcher)
@@ -433,7 +470,7 @@ fun PhoneShell(
         // Tab switcher bottom sheet (Requirement 2.3)
         if (nav.topSheet == SheetKey.TabSwitcher) {
             TabSwitcherSheet(
-                tabs = openTabs.map { tab ->
+                tabs = openTabs.filter { !minimal || PhoneArea.isMinimalTabType(it.type) }.map { tab ->
                     val sessionId = tabSessionId(tab)
                     val isUnread = sessionId != null && unreadMap.containsKey(sessionId)
                     val isRunning = sessionId != null && runningSet.contains(sessionId)
@@ -506,7 +543,7 @@ fun PhoneShell(
                             nav.visitTab(PhoneNav.areaTabId(PhoneArea.DATABASE))
                         },
                     ),
-                ),
+                ).filter { option -> PhoneArea.fromId(option.id)?.let { PhoneArea.isAvailable(it, minimal) } ?: true },
             )
         }
 
@@ -534,6 +571,17 @@ fun PhoneShell(
             PhoneCloudShareAreaHost(
                 model = model,
                 onDismiss = { nav.closeSheet(SheetKey.CloudShare) },
+            )
+        }
+
+        // The workflow chooser a chat asked for (`startSpec`).
+        val choosingFor = specs.choosingFor
+        if (choosingFor != null) {
+            BackHandler { specs.choosingFor = null }
+            PhoneSpecStartSheet(
+                model = model,
+                chatTabId = choosingFor,
+                onDismiss = { specs.choosingFor = null },
             )
         }
 
@@ -622,19 +670,25 @@ internal fun buildPhoneAppBarActions(
     onNewTerminal: () -> Unit,
     onRefreshGit: () -> Unit,
     onBackToChat: () -> Unit,
+    minimal: Boolean = false,
 ): List<AppBarAction> {
     if (activeArea == PhoneArea.CHAT && syntheticArea == null) {
-        return listOf(
+        return listOfNotNull(
             AppBarAction(
                 icon = ProductIcon.History,
                 label = "Chat history",
                 onClick = onOpenChatHistory,
             ),
-            AppBarAction(
-                icon = ProductIcon.TerminalSquare,
-                label = "Open terminal",
-                onClick = onOpenTerminal,
-            ),
+            // Minimal mode has no terminal.
+            if (minimal) {
+                null
+            } else {
+                AppBarAction(
+                    icon = ProductIcon.TerminalSquare,
+                    label = "Open terminal",
+                    onClick = onOpenTerminal,
+                )
+            },
         )
     }
 
@@ -697,6 +751,10 @@ private fun handleDrawerSelection(
         PhoneArea.SCHEDULES -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.SCHEDULES))
         PhoneArea.PORT_FORWARDING -> nav.visitTab(PhoneNav.areaTabId(PhoneArea.PORT_FORWARDING))
         PhoneArea.CLOUD_AND_SHARE -> nav.pushSheet(SheetKey.CloudShare)
+        PhoneArea.SPECS -> {
+            model.specs.closeSpec()
+            nav.visitTab(PhoneNav.areaTabId(PhoneArea.SPECS))
+        }
         PhoneArea.SETTINGS -> {
             model.openSettings()
             model.activeTabId?.let(nav::visitTab)

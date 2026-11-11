@@ -19,7 +19,7 @@ import org.junit.Test
 class PhoneAreaTest {
 
     @Test
-    fun `PhoneArea enum contains the closed set of 12 phone areas from Requirement 3_1`() {
+    fun `PhoneArea enum contains the closed set of 13 phone areas, Specs included`() {
         val expectedIds = setOf(
             "chat",
             "projects",
@@ -33,9 +33,10 @@ class PhoneAreaTest {
             "ports",
             "cloud-share",
             "settings",
+            "specs",
         )
         assertEquals(expectedIds, PhoneArea.entries.map { it.id }.toSet())
-        assertEquals(12, PhoneArea.entries.size)
+        assertEquals(13, PhoneArea.entries.size)
     }
 
     @Test

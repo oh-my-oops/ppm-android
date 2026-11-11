@@ -3,6 +3,7 @@ package com.hienlh.ppm.app.ui.phone
 import androidx.compose.runtime.Composable
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.ui.TabBody
+import com.hienlh.ppm.app.ui.phone.specs.PhoneSpecsAreaHost
 import com.hienlh.ppm.app.ui.projects.ProjectSwitcherSheet
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 
@@ -76,6 +77,10 @@ internal fun PhoneWorkspaceAreaBody(
         )
         PhoneArea.SETTINGS -> PhoneSettingsAreaHost(
             model = model,
+        )
+        PhoneArea.SPECS -> PhoneSpecsAreaHost(
+            model = model,
+            nav = nav,
         )
     }
 }
