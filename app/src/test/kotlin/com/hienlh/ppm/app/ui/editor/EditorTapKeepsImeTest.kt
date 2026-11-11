@@ -16,12 +16,15 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
+import com.hienlh.ppm.app.TextInputFocus
 import com.hienlh.ppm.app.leavesTextOnTap
 import com.hienlh.ppm.app.withComposeActivity
 import com.hienlh.ppm.design.BuiltInThemes
 import com.hienlh.ppm.design.PpmThemeProvider
 import com.hienlh.ppm.state.editor.EditorSessionState
+import org.junit.After
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -31,10 +34,11 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * A finger tap on the code keeps the keyboard's focus on the editor's IME bridge. Every shell sits under
- * `Root`'s [leavesTextOnTap], which clears the focus after a tap unless the tap's handler asked for it
- * ([com.hienlh.ppm.app.TextInputFocus.asked]); the editor's tap focused the bridge without asking, so the
- * focus was cleared 2 ms later and Gboard, still up, typed into nothing (measured on the phone layout).
+ * A finger tap on the code, or on a key of the editor's key row, keeps the keyboard's focus on the editor's IME
+ * bridge. Every shell sits under `Root`'s [leavesTextOnTap], which clears the focus after a tap unless the tap's
+ * handler asked for it ([TextInputFocus.asked]) or landed in the focused field ([TextInputFocus.pressed]); the
+ * editor's tap focused the bridge without asking, so the focus was cleared 2 ms later and Gboard, still up, typed
+ * into nothing (measured on the phone layout).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
@@ -44,11 +48,15 @@ class EditorTapKeepsImeTest {
     @get:Rule
     val rules: RuleChain = withComposeActivity(composeRule)
 
-    @Test
-    fun `a tap on the code under the app's tap-to-blur root leaves the bridge focused and typing reaches the document`() {
-        val session = EditorSessionState(initialText = "hi", language = "plaintext")
-        lateinit var host: View
+    private val session = EditorSessionState(initialText = "hi", language = "plaintext")
+    private lateinit var host: View
 
+    @After
+    fun releaseEditor() {
+        TextInputFocus.releaseNative(session)
+    }
+
+    private fun showEditor() {
         composeRule.setContent {
             host = LocalView.current
             val focusManager = LocalFocusManager.current
@@ -65,19 +73,54 @@ class EditorTapKeepsImeTest {
                 }
             }
         }
+    }
+
+    private fun bridge(): EditorImeBridgeView {
+        val found = composeRule.runOnIdle { findBridge(host.rootView) }
+        assertNotNull("the editor hosts its IME bridge", found)
+        return found!!
+    }
+
+    /** Types [text] the way the soft keyboard does, through the bridge's InputConnection. */
+    private fun typeThroughIme(bridge: EditorImeBridgeView, text: String) = composeRule.runOnIdle {
+        val ic = bridge.onCreateInputConnection(EditorInfo())
+        assertNotNull("an editable file gives the IME a connection", ic)
+        ic!!.commitText(text, 1)
+    }
+
+    @Test
+    fun `a tap on the code under the app's tap-to-blur root leaves the bridge focused and typing reaches the document`() {
+        showEditor()
 
         composeRule.onNodeWithTag("native-code-editor-canvas").performTouchInput { click() }
         composeRule.waitForIdle()
 
-        val bridge = composeRule.runOnIdle { findBridge(host.rootView) }
-        assertNotNull("the editor hosts its IME bridge", bridge)
+        val bridge = bridge()
         composeRule.runOnIdle {
-            assertTrue("the bridge still holds the focus after the tap", bridge!!.isFocused)
-            val ic = bridge.onCreateInputConnection(EditorInfo())
-            assertNotNull("an editable file gives the IME a connection", ic)
-            ic!!.commitText("X", 1)
+            assertTrue("the bridge still holds the focus after the tap", bridge.isFocused)
+            assertSame("the editor is the focused field", session, TextInputFocus.field)
         }
+        typeThroughIme(bridge, "X")
         assertTrue("typed text reaches the document", session.buffer.toString().contains("X"))
+    }
+
+    @Test
+    fun `a tap on a key of the key row keeps the focus and inserts the key, and typing goes on after it`() {
+        showEditor()
+        composeRule.onNodeWithTag("native-code-editor-canvas").performTouchInput { click() }
+        composeRule.waitForIdle()
+        val bridge = bridge()
+
+        composeRule.onNodeWithTag("mobile-key-sym-(").performTouchInput { click() }
+        composeRule.waitForIdle()
+
+        composeRule.runOnIdle {
+            assertTrue("the bridge still holds the focus after the key", bridge.isFocused)
+            assertSame("the editor is still the focused field", session, TextInputFocus.field)
+        }
+        assertTrue("the key's bracket is in the document", session.buffer.toString().contains("("))
+        typeThroughIme(bridge, "a")
+        assertTrue("typing after the key reaches the document", session.buffer.toString().contains("(a"))
     }
 
     private fun findBridge(view: View): EditorImeBridgeView? {

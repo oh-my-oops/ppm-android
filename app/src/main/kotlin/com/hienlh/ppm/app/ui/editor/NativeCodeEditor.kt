@@ -52,6 +52,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -63,7 +64,14 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.utf16CodePoint
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.findRootCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
@@ -143,7 +151,15 @@ internal class EditorImeBridgeView(context: Context) : View(context) {
         isFocusableInTouchMode = true
     }
 
+    /** Told when the bridge gains or loses the view focus: the editor registers as the focused field ([TextInputFocus.takeNative]). */
+    var onFocusChange: ((Boolean) -> Unit)? = null
+
     override fun onCheckIsTextEditor(): Boolean = session?.readOnly == false
+
+    override fun onFocusChanged(gainFocus: Boolean, direction: Int, previouslyFocusedRect: android.graphics.Rect?) {
+        super.onFocusChanged(gainFocus, direction, previouslyFocusedRect)
+        onFocusChange?.invoke(gainFocus)
+    }
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         val currentSession = session ?: return null
@@ -281,12 +297,18 @@ internal class EditorImeBridgeView(context: Context) : View(context) {
     }
 
     fun requestSoftKeyboard() {
-        // Called from a tap on the code: say so, or `Root`'s leavesTextOnTap clears the focus as the tap ends and the
-        // keyboard, still up, types into nothing.
+        // Called from a tap (on the code, or a key of the key row): say so, or `Root`'s leavesTextOnTap clears the focus
+        // as the tap ends and the keyboard, still up, types into nothing.
         TextInputFocus.asked()
         requestFocus()
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
         imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    /** Only a view that still holds the focus can hide the keyboard: called just before a tap elsewhere clears it. */
+    fun hideSoftKeyboard() {
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        imm?.hideSoftInputFromWindow(windowToken, 0)
     }
 
     fun sendCursorAnchorInfo() {
@@ -319,6 +341,40 @@ internal class EditorImeBridgeView(context: Context) : View(context) {
         if (monitorCursorUpdates) {
             sendCursorAnchorInfo()
         }
+    }
+}
+
+/**
+ * Where the editor's caret row and its key row are, for the keyboard's pan ([TextInputFocus.takeNative]); the
+ * editor's counterpart of the terminal's `TerminalCaret`. [layout] goes up with every placement, so a pan
+ * reading either answer is asked again when the caret moves to another row or the rows move in the page.
+ */
+private class EditorCaret {
+    private var layout by mutableIntStateOf(0)
+    private var row: LayoutCoordinates? = null
+    private var keys: LayoutCoordinates? = null
+
+    fun rowPlaced(coordinates: LayoutCoordinates) {
+        row = coordinates
+        layout++
+    }
+
+    fun keysPlaced(coordinates: LayoutCoordinates) {
+        keys = coordinates
+        layout++
+    }
+
+    /** The caret's row in [page], null while it is scrolled out of the list or laid out in another window. */
+    fun caretIn(page: LayoutCoordinates): Rect? = boundsIn(row, page)
+
+    fun keysIn(page: LayoutCoordinates): Rect? = boundsIn(keys, page)
+
+    private fun boundsIn(placed: LayoutCoordinates?, page: LayoutCoordinates): Rect? {
+        @Suppress("UNUSED_EXPRESSION")
+        layout
+        val at = placed?.takeIf { it.isAttached && page.isAttached && it.findRootCoordinates() == page.findRootCoordinates() }
+            ?: return null
+        return page.localBoundingBoxOf(at, clipBounds = false)
     }
 }
 
@@ -972,6 +1028,26 @@ internal fun NativeCodeEditorCanvas(
     val horizontalScroll = rememberScrollState()
     val focusRequester = remember { FocusRequester() }
     var imeViewRef by remember { mutableStateOf<EditorImeBridgeView?>(null) }
+    val focusManager = LocalFocusManager.current
+    val caret = remember(session) { EditorCaret() }
+    DisposableEffect(session) {
+        onDispose { TextInputFocus.releaseNative(session) }
+    }
+    // The editor is the focused field while its bridge holds the view focus, as the terminal is (`TerminalBody`): a tap
+    // on nothing blurs it and hides its keyboard, and the keyboard's pan follows its caret row and key row.
+    val onBridgeFocus: (Boolean) -> Unit = { focused ->
+        if (focused) {
+            TextInputFocus.takeNative(
+                session,
+                focusManager,
+                onBlur = { imeViewRef?.hideSoftKeyboard() },
+                keep = caret::keysIn,
+                bounds = caret::caretIn,
+            )
+        } else {
+            TextInputFocus.releaseNative(session)
+        }
+    }
 
     var showFindBar by remember { mutableStateOf(false) }
     var showGoToLineBar by remember { mutableStateOf(false) }
@@ -1171,12 +1247,14 @@ internal fun NativeCodeEditorCanvas(
                 EditorImeBridgeView(ctx).apply {
                     this.session = session
                     this.onMutated = onMutated
+                    this.onFocusChange = onBridgeFocus
                     imeViewRef = this
                 }
             },
             update = { view ->
                 view.session = session
                 view.onMutated = onMutated
+                view.onFocusChange = onBridgeFocus
                 imeViewRef = view
             },
             modifier = Modifier.size(1.dp),
@@ -1455,6 +1533,15 @@ internal fun NativeCodeEditorCanvas(
                 .weight(1f)
                 .fillMaxWidth()
                 .clipToBounds()
+                .pointerInput(session) {
+                    // A press on the code is a press on the focused field, which a tap-to-blur leaves focused.
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            if (event.type == PointerEventType.Press) TextInputFocus.pressed(session)
+                        }
+                    }
+                }
                 .clickable {
                     focusRequester.requestFocus()
                     imeViewRef?.requestSoftKeyboard()
@@ -1523,6 +1610,7 @@ internal fun NativeCodeEditorCanvas(
                         Row(
                             Modifier
                                 .heightIn(min = 19.dp)
+                                .then(if (isCursorRow) Modifier.onGloballyPositioned(caret::rowPlaced) else Modifier)
                                 .clickable {
                                     session.setSelection(rowEndOffset, rowEndOffset)
                                     onMutated()
@@ -1575,6 +1663,11 @@ internal fun NativeCodeEditorCanvas(
                 wrap = wrap,
                 onToggleWrap = onToggleWrap,
                 onMutated = onMutated,
+                keepFocus = {
+                    imeViewRef?.requestSoftKeyboard()
+                    imeViewRef?.syncImmSelection()
+                },
+                modifier = Modifier.onGloballyPositioned(caret::keysPlaced),
             )
         }
     }
@@ -1656,12 +1749,23 @@ internal fun MobileEditorSymbolBar(
     wrap: Boolean,
     onToggleWrap: () -> Unit,
     onMutated: () -> Unit,
+    keepFocus: () -> Unit = {},
+    modifier: Modifier = Modifier,
 ) {
     val tokens = LocalPpmTokens.current
     val context = LocalContext.current
 
+    // The web's toolbar keys keep the editor focused (and its keyboard up), as the terminal's key row does: each key
+    // ends the IME's composition first, so a Telex word in progress is not replaced by the key's text, then asks
+    // for the focus back before `Root`'s leavesTextOnTap would clear it.
+    fun key(action: () -> Unit): () -> Unit = {
+        session.finishComposingText()
+        action()
+        keepFocus()
+    }
+
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .background(tokens.panel.color)
             .cssBorder(tokens.border.color, sides = CssSides.Top)
@@ -1671,37 +1775,37 @@ internal fun MobileEditorSymbolBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        MobileKeyIconButton(ProductIcon.ClipboardPaste, testTag = "mobile-key-paste") {
+        MobileKeyIconButton(ProductIcon.ClipboardPaste, testTag = "mobile-key-paste", onClick = key {
             val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             val clip = cm?.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
             if (!clip.isNullOrEmpty() && session.commitText(clip, 1)) {
                 onMutated()
             }
-        }
-        MobileKeyIconButton(ProductIcon.Undo2, enabled = session.canUndo, testTag = "mobile-key-undo") {
+        })
+        MobileKeyIconButton(ProductIcon.Undo2, enabled = session.canUndo, testTag = "mobile-key-undo", onClick = key {
             if (session.undo()) onMutated()
-        }
-        MobileKeyIconButton(ProductIcon.Redo2, enabled = session.canRedo, testTag = "mobile-key-redo") {
+        })
+        MobileKeyIconButton(ProductIcon.Redo2, enabled = session.canRedo, testTag = "mobile-key-redo", onClick = key {
             if (session.redo()) onMutated()
-        }
-        MobileKeyIconButton(ProductIcon.WrapText, active = wrap, testTag = "mobile-key-wrap", onClick = onToggleWrap)
+        })
+        MobileKeyIconButton(ProductIcon.WrapText, active = wrap, testTag = "mobile-key-wrap", onClick = key(onToggleWrap))
 
         Box(Modifier.padding(horizontal = 2.dp).width(1.dp).height(20.dp).background(tokens.border.color))
 
-        MobileKeyButton("Tab", mono = true, testTag = "mobile-key-tab") {
+        MobileKeyButton("Tab", mono = true, testTag = "mobile-key-tab", onClick = key {
             if (session.indentSelection()) onMutated()
-        }
+        })
 
         Box(Modifier.padding(horizontal = 2.dp).width(1.dp).height(20.dp).background(tokens.border.color))
 
         for (sym in MOBILE_EDITOR_SYMBOLS) {
-            MobileKeyButton(sym, mono = true, testTag = "mobile-key-sym-$sym") {
+            MobileKeyButton(sym, mono = true, testTag = "mobile-key-sym-$sym", onClick = key {
                 if (sym.length == 1 && session.typeChar(sym[0])) {
                     onMutated()
                 } else if (session.commitText(sym, 1)) {
                     onMutated()
                 }
-            }
+            })
         }
     }
 }
