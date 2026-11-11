@@ -101,7 +101,14 @@ import com.hienlh.ppm.state.git.PhoneFileActionKind
 import com.hienlh.ppm.state.git.PhoneGitCapabilities
 import com.hienlh.ppm.state.git.WriteWithAi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberUpdatedState
+import com.hienlh.ppm.client.DiffHunk
+import com.hienlh.ppm.state.git.CommitDraftSync
+import com.hienlh.ppm.state.git.GitRepoScope
 
 /**
  * Details of a failed Sync/Push/Pull/Publish/Fetch action shown in [PhoneSyncErrorSheet] (`SY1`).
@@ -113,6 +120,10 @@ data class PhoneSyncFailureState(
     val gitOutput: String,
 )
 
+/** The branch, or the detached commit, or null while neither is known yet. */
+fun phoneGitBranchName(branch: GitBranchState): String? =
+    branch.head ?: branch.oid?.take(7)?.let { "$it (detached)" }
+
 /**
  * Formats the AppBar subline for phone Source Control (`"main · ↑1 · 3 changed"`, `"main · Clean"`).
  */
@@ -120,8 +131,7 @@ fun formatPhoneGitSubline(
     branch: GitBranchState,
     groups: GitChangeGroups,
 ): String {
-    val head = branch.head ?: (branch.oid?.take(7)?.let { "$it (detached)" } ?: "main")
-    val parts = mutableListOf(head)
+    val parts = listOfNotNull(phoneGitBranchName(branch)).toMutableList()
     val aheadBehind = buildList {
         if (branch.ahead > 0) add("↑${branch.ahead}")
         if (branch.behind > 0) add("↓${branch.behind}")
@@ -175,6 +185,12 @@ fun PhoneSourceControlScreen(
     onDrawerClick: (() -> Unit)? = null,
     onTitleClick: (() -> Unit)? = null,
     onStatusChanged: () -> Unit = {},
+    refreshEvents: Flow<Unit>? = null,
+    onChangesLoaded: (GitRepo?, GitChanges) -> Unit = { _, _ -> },
+    commitDrafts: CommitDraftSync? = null,
+    chosenRepoPath: String? = null,
+    onRepoChosen: (GitRepo) -> Unit = {},
+    onStageHunks: (suspend (FileChange, List<DiffHunk>) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     var reloadTick by remember { mutableIntStateOf(0) }
@@ -184,7 +200,7 @@ fun PhoneSourceControlScreen(
     var loading by remember(projectName) { mutableStateOf(api != null && initialChanges == null) }
     var changes by remember(projectName, initialChanges) { mutableStateOf(initialChanges) }
     var branches by remember(projectName, initialBranches) { mutableStateOf(initialBranches) }
-    var commitMessage by remember(projectName) { mutableStateOf("") }
+    var localCommitMessage by remember(projectName) { mutableStateOf("") }
     var draftLoaded by remember(projectName) { mutableStateOf(false) }
 
     var busyAction by remember { mutableStateOf<String?>(null) }
@@ -217,13 +233,34 @@ fun PhoneSourceControlScreen(
         }
     }
 
-    val resolvedRepo: GitRepo? = selectedRepo ?: reposState?.resolved
+    val resolvedRepo: GitRepo? = selectedRepo
+        ?: GitRepoScope.resolveRepo(reposState, chosenRepoPath)
+        ?: reposState?.resolved
+
+    // The commit message is the repository's shared draft (`/git/commit-draft`, synced across devices) when
+    // [commitDrafts] is given, as the old panel keeps it; otherwise a local field.
+    val syncedDrafts = commitDrafts?.drafts?.collectAsState()?.value
+    val commitMessage = if (commitDrafts != null) {
+        syncedDrafts?.get(CommitDraftSync.draftKey(projectName, resolvedRepo?.path)).orEmpty()
+    } else {
+        localCommitMessage
+    }
+    fun setCommitMessage(message: String) {
+        if (commitDrafts != null) commitDrafts.setMessage(api, projectName, resolvedRepo, message) else localCommitMessage = message
+    }
+    LaunchedEffect(commitDrafts, api, projectName, resolvedRepo?.path) {
+        if (commitDrafts != null && api != null && (resolvedRepo != null || reposState?.rootIsRepo == true)) {
+            commitDrafts.load(api, projectName, resolvedRepo)
+        }
+    }
 
     suspend fun refreshGitState(targetRepo: GitRepo? = resolvedRepo) {
         val client = api ?: return
         try {
             val loadedRepos = reposState ?: client.gitRepos(projectName).also { reposState = it }
-            val effectiveRepo = targetRepo ?: selectedRepo ?: loadedRepos.resolved
+            val effectiveRepo = targetRepo ?: selectedRepo
+                ?: GitRepoScope.resolveRepo(loadedRepos, chosenRepoPath)
+                ?: loadedRepos.resolved
             if (effectiveRepo == null && loadedRepos.repos.size > 1 && !loadedRepos.rootIsRepo) {
                 loading = false
                 return
@@ -234,13 +271,14 @@ fun PhoneSourceControlScreen(
             }
             val nextChanges = client.gitChanges(projectName, effectiveRepo)
             changes = nextChanges
-            if (!draftLoaded) {
+            onChangesLoaded(effectiveRepo, nextChanges)
+            if (!draftLoaded && commitDrafts == null) {
                 draftLoaded = true
                 runCatching { client.gitCommitDraft(projectName, effectiveRepo) }
                     .getOrNull()
                     ?.let { draft ->
-                        if (commitMessage.isEmpty() && draft.message.isNotEmpty()) {
-                            commitMessage = draft.message
+                        if (localCommitMessage.isEmpty() && draft.message.isNotEmpty()) {
+                            localCommitMessage = draft.message
                         }
                     }
             }
@@ -256,7 +294,18 @@ fun PhoneSourceControlScreen(
 
     LaunchedEffect(projectName, api, selectedRepo?.path, reloadTick) {
         if (api != null) {
-            refreshGitState(selectedRepo ?: reposState?.resolved)
+            refreshGitState(selectedRepo ?: GitRepoScope.resolveRepo(reposState, chosenRepoPath) ?: reposState?.resolved)
+        }
+    }
+
+    // PPM wrote to the repository, a file changed, the app came back or the poll ticked (the old panel's
+    // `gitChangedEvents` / `windowVisible` / 5 s loop): read the changes again, 300 ms after the last ask.
+    val latestRefresh = rememberUpdatedState<suspend () -> Unit> { refreshGitState() }
+    LaunchedEffect(refreshEvents, api, projectName) {
+        if (refreshEvents == null || api == null) return@LaunchedEffect
+        refreshEvents.collectLatest {
+            delay(300)
+            latestRefresh.value()
         }
     }
 
@@ -290,7 +339,7 @@ fun PhoneSourceControlScreen(
 
     val branchState = remember(changes, initialStatus) {
         changes?.branch ?: GitBranchState(
-            head = initialStatus?.branch ?: "main",
+            head = initialStatus?.branch,
             oid = null,
             upstream = initialStatus?.tracking,
             upstreamGone = false,
@@ -460,9 +509,14 @@ fun PhoneSourceControlScreen(
             busyAction = "commit"
             bannerError = null
             try {
+                commitDrafts?.flush(api, projectName, resolvedRepo)
                 client.gitCommit(projectName, trimmed, repo = resolvedRepo)
-                commitMessage = ""
-                runCatching { client.putGitCommitDraft(projectName, "", repo = resolvedRepo) }
+                if (commitDrafts != null) {
+                    commitDrafts.consumed(projectName, resolvedRepo, commitMessage)
+                } else {
+                    localCommitMessage = ""
+                    runCatching { client.putGitCommitDraft(projectName, "", repo = resolvedRepo) }
+                }
                 refreshGitState()
                 onStatusChanged()
             } catch (error: Throwable) {
@@ -482,7 +536,7 @@ fun PhoneSourceControlScreen(
             try {
                 client.gitUndoCommit(projectName, commit.hash, resolvedRepo)
                 if (commitMessage.isBlank() && commit.subject.isNotBlank()) {
-                    commitMessage = commit.subject
+                    setCommitMessage(commit.subject)
                 }
                 refreshGitState()
                 onStatusChanged()
@@ -577,8 +631,8 @@ fun PhoneSourceControlScreen(
             try {
                 val generated = generator(resolvedRepo)
                 if (!generated.isNullOrBlank()) {
-                    commitMessage = generated.trim()
-                    aiState = WriteWithAi.Written(commitMessage)
+                    setCommitMessage(generated.trim())
+                    aiState = WriteWithAi.Written(generated.trim())
                 } else {
                     aiState = WriteWithAi.Idle
                 }
@@ -605,6 +659,27 @@ fun PhoneSourceControlScreen(
             onToggleWholeFileStage = { target ->
                 handleToggleFileStage(target, closeDiffOnSuccess = true)
             },
+            onStageHunk = if (onStageHunks != null && api != null) {
+                { target, hunk ->
+                    scope.launch {
+                        busyAction = if (target.isStaged) "unstage" else "stage"
+                        bannerError = null
+                        try {
+                            onStageHunks(target, listOf(hunk))
+                            refreshGitState()
+                            onStatusChanged()
+                            activeDiffHunks = api.gitHunks(projectName, target.path, target.diffScope, resolvedRepo)
+                        } catch (error: Throwable) {
+                            if (error is kotlinx.coroutines.CancellationException) throw error
+                            diffError = error.message ?: "Failed to stage the hunk"
+                        } finally {
+                            busyAction = null
+                        }
+                    }
+                }
+            } else {
+                null
+            },
             onOpenFile = onOpenFile,
             modifier = modifier,
         )
@@ -623,7 +698,7 @@ fun PhoneSourceControlScreen(
         busyAction = busyAction,
         commitMessage = commitMessage,
         onCommitMessageChange = { next ->
-            commitMessage = next
+            setCommitMessage(next)
         },
         aiAvailable = aiAvailable,
         aiLoading = aiState is WriteWithAi.Writing,
@@ -644,6 +719,7 @@ fun PhoneSourceControlScreen(
         onSelectRepo = { repo ->
             selectedRepo = repo
             draftLoaded = false
+            onRepoChosen(repo)
             reloadTick++
         },
         onRescanRepos = {
@@ -1247,7 +1323,7 @@ private fun PhoneBranchHeaderBar(
     onRefresh: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
-    val branchLabel = branchState.head ?: (branchState.oid?.take(7)?.let { "$it (detached)" } ?: "main")
+    val branchLabel = phoneGitBranchName(branchState) ?: "Branch"
     val pillShape = RoundedCornerShape(999.dp)
     val slotShape = RoundedCornerShape(12.dp)
 

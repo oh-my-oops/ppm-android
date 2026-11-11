@@ -73,7 +73,7 @@ fun PhoneEditorScreen(
     saving: Boolean = false,
     saveError: String? = null,
     changedOnDisk: Boolean = false,
-    changedOnDiskSubtitle: String = "The AI edited it 12 s ago.",
+    changedOnDiskSubtitle: String = CHANGED_ON_DISK_SUBTITLE,
     readOnly: Boolean = false,
     isReadOnlyCell: Boolean = false,
     typing: Boolean = false,
@@ -86,10 +86,10 @@ fun PhoneEditorScreen(
     onSave: () -> Unit = {},
     onDiscardAndReload: () -> Unit = {},
     onOverwriteDisk: () -> Unit = {},
-    onReloadFromDisk: () -> Unit = {},
-    onDownload: () -> Unit = {},
-    onCopyPath: () -> Unit = {},
-    onCloseTab: () -> Unit = {},
+    onReloadFromDisk: (() -> Unit)? = null,
+    onDownload: (() -> Unit)? = null,
+    onCopyPath: (() -> Unit)? = null,
+    onCloseTab: (() -> Unit)? = null,
     onRetryLoad: () -> Unit = {},
     onKeyPress: (PhoneEditorKey) -> Unit = {},
     onSelectionAction: (PhoneSelectionAction) -> Unit = {},
@@ -119,6 +119,17 @@ fun PhoneEditorScreen(
     }
 
     val crumbs = remember(filePath) { buildPhoneEditorBreadcrumbs(filePath) }
+    var overflowOpen by remember { mutableStateOf(false) }
+    val overflowActions = remember(onReloadFromDisk, onDownload, onCopyPath) {
+        PhoneEditorOverflowAction.phoneMenu().filter { action ->
+            when (action) {
+                PhoneEditorOverflowAction.WORD_WRAP -> true
+                PhoneEditorOverflowAction.RELOAD_FROM_DISK -> onReloadFromDisk != null
+                PhoneEditorOverflowAction.DOWNLOAD -> onDownload != null
+                PhoneEditorOverflowAction.COPY_PATH -> onCopyPath != null
+            }
+        }
+    }
 
     val saveState: PhoneEditorSaveState = remember(
         dirty,
@@ -130,7 +141,7 @@ fun PhoneEditorScreen(
         cursorColumn,
     ) {
         when {
-            saveError != null -> PhoneEditorSaveState.Failed(message = "Failed to save file")
+            saveError != null -> PhoneEditorSaveState.Failed(message = "Failed to save file", detail = saveError)
             saving -> PhoneEditorSaveState.Saving
             dirty -> PhoneEditorSaveState.Edited(changedOnDisk = changedOnDisk)
             else -> PhoneEditorSaveState.Saved(
@@ -141,8 +152,9 @@ fun PhoneEditorScreen(
         }
     }
 
+    Box(modifier = modifier.fillMaxSize()) {
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
             .background(tokens.panel2.color)
             .testTag("phone-editor-screen"),
@@ -184,7 +196,7 @@ fun PhoneEditorScreen(
                 isError = true,
                 title = "Failed to load file",
                 monoDetail = loadError,
-                secondaryLabel = "Close tab",
+                secondaryLabel = onCloseTab?.let { "Close tab" },
                 onSecondary = onCloseTab,
                 retryLabel = "Retry",
                 onRetry = onRetryLoad,
@@ -198,6 +210,8 @@ fun PhoneEditorScreen(
             PhoneTreeBreadcrumbBar(
                 crumbs = crumbs,
                 onCrumbClick = onBreadcrumbSegmentClick,
+                onMore = { overflowOpen = true },
+                moreLabel = "File actions",
             )
         }
 
@@ -335,7 +349,28 @@ fun PhoneEditorScreen(
             }
         }
     }
+    if (overflowOpen) {
+        PhoneEditorOverflowSheet(
+            fileName = filePath.substringAfterLast('/').ifBlank { filePath },
+            wordWrap = wordWrap,
+            actions = overflowActions,
+            onDismiss = { overflowOpen = false },
+            onAction = { action ->
+                overflowOpen = false
+                when (action) {
+                    PhoneEditorOverflowAction.WORD_WRAP -> onToggleWordWrap()
+                    PhoneEditorOverflowAction.RELOAD_FROM_DISK -> onReloadFromDisk?.invoke()
+                    PhoneEditorOverflowAction.DOWNLOAD -> onDownload?.invoke()
+                    PhoneEditorOverflowAction.COPY_PATH -> onCopyPath?.invoke()
+                }
+            },
+        )
+    }
+    }
 }
+
+/** What the changed-on-disk banner says when the caller knows no more about the change. */
+internal const val CHANGED_ON_DISK_SUBTITLE = "Discard & Reload loses your edits; Overwrite Disk replaces the file with them."
 
 /**
  * Native 12.5 dp Monaspace code lines view with 40 dp line-number gutter (`code3`, Section 8).
@@ -404,7 +439,7 @@ internal fun PhoneCodeLinesView(
  */
 @Composable
 fun PhoneChangedOnDiskBanner(
-    subtitle: String = "The AI edited it 12 s ago.",
+    subtitle: String = CHANGED_ON_DISK_SUBTITLE,
     onDiscardAndReload: () -> Unit,
     onOverwriteDisk: () -> Unit,
     modifier: Modifier = Modifier,
@@ -740,6 +775,7 @@ fun PhoneEditorOverflowSheet(
     onDismiss: () -> Unit,
     onAction: (PhoneEditorOverflowAction) -> Unit,
     modifier: Modifier = Modifier,
+    actions: List<PhoneEditorOverflowAction> = PhoneEditorOverflowAction.phoneMenu(),
 ) {
     val tokens = LocalPpmTokens.current
     Sheet(
@@ -753,7 +789,7 @@ fun PhoneEditorOverflowSheet(
                 .fillMaxWidth()
                 .padding(bottom = 12.dp),
         ) {
-            for (action in PhoneEditorOverflowAction.phoneMenu()) {
+            for (action in actions) {
                 val icon = when (action) {
                     PhoneEditorOverflowAction.WORD_WRAP -> ProductIcon.WrapText
                     PhoneEditorOverflowAction.RELOAD_FROM_DISK -> ProductIcon.RefreshCw

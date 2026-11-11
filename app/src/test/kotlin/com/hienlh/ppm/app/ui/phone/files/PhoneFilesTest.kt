@@ -2,6 +2,8 @@ package com.hienlh.ppm.app.ui.phone.files
 
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -330,11 +332,14 @@ class PhoneFilesTest {
 
     @Test
     fun `phone unsupported file screen shows tablet notice and download button`() {
+        var downloads = 0
+        var canDownload by androidx.compose.runtime.mutableStateOf(true)
         compose.setContent {
             PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
                 PhoneFileTabScreen(
                     filePath = "data/sales-q3.xlsx",
                     sizeBytes = 100_761L,
+                    onDownload = if (canDownload) ({ downloads++ }) else null,
                 )
             }
         }
@@ -342,6 +347,12 @@ class PhoneFilesTest {
         compose.onNode(hasTestTag("phone-unsupported-file-screen")).assertExists()
         compose.onNodeWithText("sales-q3.xlsx").assertExists()
         compose.onNodeWithText(PHONE_UNSUPPORTED_FILE_LINE).assertExists()
-        compose.onNodeWithText("Download").assertExists()
+        compose.onNodeWithText("Download").performClick()
+        assertEquals(1, downloads)
+
+        // Nothing to download with (no project file): no dead button.
+        canDownload = false
+        compose.waitForIdle()
+        assertTrue(compose.onAllNodesWithText("Download").fetchSemanticsNodes().isEmpty())
     }
 }

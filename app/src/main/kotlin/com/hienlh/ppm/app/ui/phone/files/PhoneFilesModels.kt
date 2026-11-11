@@ -49,11 +49,35 @@ enum class PhoneTreeLongPressAction(
     COPY_PATH("copy_path", "Copy Path"),
     COPY_FULL_PATH("copy_full_path", "Copy Full Path"),
     DOWNLOAD("download", "Download"),
+    NEW_FILE("new_file", "New File"),
+    NEW_FOLDER("new_folder", "New Folder"),
+    RENAME("rename", "Rename"),
+    CUT("cut", "Cut"),
+    PASTE("paste", "Paste"),
+    DELETE("delete", "Delete"),
     ;
 
     companion object {
         const val TABLET_ONLY_FOOTER: String =
             "Rename, delete, move and compare: open on a tablet."
+
+        /** The footer once the sheet offers the file operations itself. */
+        const val COMPARE_TABLET_ONLY_FOOTER: String = "Compare: open on a tablet."
+
+        /**
+         * The old explorer's file operations (`ExplorerTreeMenu`): New File / New Folder inside a folder,
+         * Rename, Cut (paste it into a folder to move it), Paste into a folder, Delete.
+         */
+        fun mutationActionsFor(isDirectory: Boolean, canPaste: Boolean): List<PhoneTreeLongPressAction> = buildList {
+            if (isDirectory) {
+                add(NEW_FILE)
+                add(NEW_FOLDER)
+            }
+            add(RENAME)
+            add(CUT)
+            if (isDirectory && canPaste) add(PASTE)
+            add(DELETE)
+        }
 
         /** Actions offered when long-pressing a file or folder on a phone (Note 66). */
         fun actionsFor(isDirectory: Boolean): List<PhoneTreeLongPressAction> =
@@ -288,6 +312,33 @@ sealed interface PhoneEditorSaveState {
         override val saveButtonEnabled: Boolean = true
     }
 }
+
+/**
+ * The editor status bar's language name for [path] (VS Code's names, as Monaco's language picker shows
+ * them), or for the tab's own language when one was picked ([override]).
+ */
+fun phoneEditorLanguageLabel(path: String?, override: String? = null): String {
+    val name = path.orEmpty().substringAfterLast('/').substringAfterLast('\\').lowercase(Locale.ROOT)
+    val ext = name.substringAfterLast('.', "")
+    if (override.isNullOrBlank()) {
+        when (ext) {
+            "tsx" -> return "TypeScript React"
+            "jsx" -> return "JavaScript React"
+        }
+    }
+    val id = com.hienlh.ppm.app.ui.files.fileCodeLanguage(path, override).lowercase(Locale.ROOT)
+    return PHONE_LANGUAGE_LABELS[id] ?: id.replaceFirstChar { it.titlecase(Locale.ROOT) }
+}
+
+private val PHONE_LANGUAGE_LABELS = mapOf(
+    "plaintext" to "Plain Text", "text" to "Plain Text", "txt" to "Plain Text",
+    "typescript" to "TypeScript", "javascript" to "JavaScript", "kotlin" to "Kotlin", "python" to "Python",
+    "ruby" to "Ruby", "rust" to "Rust", "go" to "Go", "java" to "Java", "swift" to "Swift", "shell" to "Shell Script",
+    "yaml" to "YAML", "json" to "JSON", "html" to "HTML", "css" to "CSS", "scss" to "SCSS", "md" to "Markdown",
+    "markdown" to "Markdown", "csharp" to "C#", "cpp" to "C++", "c" to "C", "sql" to "SQL", "xml" to "XML",
+    "dotenv" to "Dotenv", "dockerfile" to "Dockerfile", "make" to "Makefile", "php" to "PHP", "lua" to "Lua",
+    "toml" to "TOML", "dart" to "Dart", "vue" to "Vue", "svelte" to "Svelte", "csv" to "CSV",
+)
 
 /**
  * Key specification in the phone editor key row (`Phone 3 · E2`, `t-ekeys-p`, Note 16).
