@@ -112,17 +112,20 @@ fun Chip(
                 )
             }
 
-            BasicText(
-                text = label,
-                style = ppmText(
-                    size = 12.5f,
-                    weight = if (selected || alert) FontWeight.SemiBold else FontWeight.Medium,
-                    kind = if (monoLabel) FontKind.MONO else FontKind.SANS,
-                    lineHeight = 16f,
-                ).copy(color = fgColor),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // An empty label makes an icon-only chip.
+            if (label.isNotEmpty()) {
+                BasicText(
+                    text = label,
+                    style = ppmText(
+                        size = 12.5f,
+                        weight = if (selected || alert) FontWeight.SemiBold else FontWeight.Medium,
+                        kind = if (monoLabel) FontKind.MONO else FontKind.SANS,
+                        lineHeight = 16f,
+                    ).copy(color = fgColor),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
 
             if (!secondaryLabel.isNullOrEmpty()) {
                 BasicText(

@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -321,18 +322,11 @@ fun PhoneChatScreen(
 
                 // 52 dp horizontal context chip row above the composer
                 PhoneContextChipRow(
-                    providerId = providerId,
-                    modelLabel = modelLabel,
-                    effortLabel = effortLabel,
-                    permissionModeId = permissionModeId,
-                    permissionModeLabel = permissionModeLabel,
                     accountName = accountName,
                     accountUsageText = accountUsageText,
                     specModeEnabled = specModeEnabled,
                     changes = changes,
                     connectionChip = connectionChip,
-                    onOpenModelEffortSheet = onOpenModelEffortSheet,
-                    onOpenModesSheet = onOpenModesSheet,
                     onOpenAccountSwitcher = onOpenAccountSwitcher,
                     onToggleSpecMode = onToggleSpecMode,
                     onOpenSessionChangesSheet = onOpenSessionChangesSheet,
@@ -379,6 +373,22 @@ fun PhoneChatScreen(
                                 onClick = onToggleVoiceRecording,
                             )
                         }
+                        // Model & effort, then permission mode: inside the composer, as on the web.
+                        Chip(
+                            label = modelLabel,
+                            providerId = providerId,
+                            secondaryLabel = effortLabel,
+                            showCaret = true,
+                            onClick = onOpenModelEffortSheet,
+                        )
+                        // Icon only, as the web's composer on a phone: the shield's colour carries the mode.
+                        Chip(
+                            label = "",
+                            icon = ProductIcon.ShieldAlert,
+                            alert = permissionModeId == "bypassPermissions",
+                            onClick = onOpenModesSheet,
+                            modifier = Modifier.semantics { contentDescription = "Permission mode: $permissionModeLabel" },
+                        )
                         if (streaming) {
                             Chip(
                                 label = priority.chipLabel,
@@ -426,6 +436,8 @@ fun PhoneChatScreen(
                             .heightIn(min = 28.dp, max = 140.dp)
                             .padding(horizontal = 4.dp, vertical = 4.dp),
                         style = ppmText(15f, lineHeight = 21f),
+                        // A textarea, as the old composer and the web's: long text wraps and the box grows to 140 dp.
+                        lineLimits = TextFieldLineLimits.MultiLine(),
                     )
                 }
             }
@@ -593,17 +605,10 @@ fun PhoneReplyEditStrip(
  */
 @Composable
 fun PhoneContextChipRow(
-    providerId: String,
-    modelLabel: String,
-    effortLabel: String,
-    permissionModeId: String,
-    permissionModeLabel: String,
     accountName: String,
     accountUsageText: String?,
     specModeEnabled: Boolean,
     changes: PhoneChangesChipState?,
-    onOpenModelEffortSheet: () -> Unit,
-    onOpenModesSheet: () -> Unit,
     onOpenAccountSwitcher: (() -> Unit)?,
     onToggleSpecMode: (() -> Unit)?,
     onOpenSessionChangesSheet: () -> Unit,
@@ -611,9 +616,6 @@ fun PhoneContextChipRow(
     modifier: Modifier = Modifier,
     connectionChip: @Composable () -> Unit = {},
 ) {
-    val tokens = LocalPpmTokens.current
-    val isBypass = permissionModeId == "bypassPermissions"
-
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -624,24 +626,6 @@ fun PhoneContextChipRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         connectionChip()
-
-        // Model & Effort chip
-        Chip(
-            label = modelLabel,
-            providerId = providerId,
-            secondaryLabel = effortLabel,
-            showCaret = true,
-            onClick = onOpenModelEffortSheet,
-        )
-
-        // Permission Mode chip
-        Chip(
-            label = permissionModeLabel,
-            icon = ProductIcon.ShieldAlert,
-            alert = isBypass,
-            showCaret = true,
-            onClick = onOpenModesSheet,
-        )
 
         // Account switcher chip
         if (onOpenAccountSwitcher != null) {
