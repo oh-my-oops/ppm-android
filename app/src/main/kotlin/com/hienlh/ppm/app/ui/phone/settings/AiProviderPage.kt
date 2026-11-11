@@ -212,7 +212,7 @@ fun PhoneAiProviderPage(
             activeProvider = activeProvider,
             onSelectProvider = { activeProvider = it },
             modelValue = if (isSdk) {
-                currentConfig?.model ?: models.firstOrNull()?.value ?: "claude-sonnet-4-6"
+                currentConfig?.model ?: models.firstOrNull()?.value ?: ""
             } else {
                 currentConfig?.model?.ifEmpty { null } ?: PHONE_DEFAULT_MODEL
             },
@@ -283,18 +283,17 @@ fun PhoneAiProviderContent(
         val mapped = models.map { PhoneSelectOption(it.value, it.label) }
         if (includeAutoDefaultModel) {
             listOf(PhoneSelectOption(PHONE_DEFAULT_MODEL, "Auto (default)", "Auto")) + mapped
-        } else if (mapped.isNotEmpty()) {
-            mapped
         } else {
-            listOf(
-                PhoneSelectOption("claude-sonnet-4-6", "Sonnet 4.6", "Sonnet 4.6"),
-                PhoneSelectOption("claude-opus-4-7", "Opus 4.7", "Opus 4.7"),
-                PhoneSelectOption("claude-haiku-4-5", "Haiku 4.5", "Haiku 4.5"),
-            )
+            // Only the models the server lists for this provider; none listed means none offered, not Claude's.
+            mapped
         }
     }
     val selectedModelOption = modelOptions.firstOrNull { it.value == modelValue }
-        ?: PhoneSelectOption(modelValue, if (modelValue == PHONE_DEFAULT_MODEL) "Auto (default)" else modelValue)
+        ?: when {
+            modelValue == PHONE_DEFAULT_MODEL -> PhoneSelectOption(modelValue, "Auto (default)", "Auto")
+            modelValue.isBlank() -> PhoneSelectOption(modelValue, "Not set", "Not set")
+            else -> PhoneSelectOption(modelValue, modelValue, modelValue)
+        }
 
     val effortOptions = if (activeProvider.equals("antigravity", ignoreCase = true)) {
         PhoneAntigravityEffortOptions
@@ -474,6 +473,15 @@ fun PhoneAiProviderContent(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
+                if (modelOptions.isEmpty()) {
+                    BasicText(
+                        text = if (modelsLoading) "Loading models…" else "The server lists no models for ${phoneProviderDisplayName(activeProvider)}.",
+                        style = ppmText(13f, lineHeight = 18f).copy(color = tokens.text2.color),
+                        modifier = Modifier
+                            .padding(horizontal = 8.dp, vertical = 12.dp)
+                            .testTag("phone-ai-model-empty"),
+                    )
+                }
                 for (opt in modelOptions) {
                     val isSelected = opt.value == selectedModelOption.value
                     ListRow(
