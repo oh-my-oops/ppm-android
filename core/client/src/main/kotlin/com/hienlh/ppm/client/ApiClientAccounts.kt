@@ -52,6 +52,14 @@ suspend fun ApiClient.setAccountStatus(id: String, status: String) {
     call("PATCH", "/api/accounts/${ApiClient.escape(id)}", body = buildJsonObject { put("status", status) })
 }
 
+/**
+ * `PATCH /api/accounts/:id {label}`: gives a Claude account a name of its own (`account-rename-dialog.tsx`).
+ * The server trims and caps it (80 characters) and refuses with a message worth showing.
+ */
+suspend fun ApiClient.renameAccount(id: String, label: String) {
+    call("PATCH", "/api/accounts/${ApiClient.escape(id)}", body = buildJsonObject { put("label", label) })
+}
+
 /** `GET /api/codex-accounts`: the Codex accounts PPM manages; none means chats run on `~/.codex`. */
 suspend fun ApiClient.codexAccounts(): List<CodexAccount> =
     call("GET", "/api/codex-accounts")["accounts"].array.orEmpty().mapNotNull(CodexAccount::from)
