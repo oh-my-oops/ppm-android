@@ -3,6 +3,10 @@ package com.hienlh.ppm.app.ui.phone.chat
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.hasStateDescription
@@ -118,6 +122,7 @@ class PhoneComposerChipsTest {
                 )
             }
         }
+        composeRule.onNodeWithTag("phone-composer-collapsed").performClick()
         val field = composeRule.onNode(hasSetTextAction())
         val oneLine = field.getBoundsInRoot().let { it.bottom - it.top }
         // Robolectric does not measure glyph widths, so a long line never wraps here (it does on a device);
@@ -127,5 +132,49 @@ class PhoneComposerChipsTest {
         }
         val wrapped = field.getBoundsInRoot().let { it.bottom - it.top }
         assertTrue("the field grows when the text wraps ($oneLine -> $wrapped)", wrapped > oneLine + 10.dp)
+    }
+
+    @Test
+    fun anEmptyUnfocusedComposerIsOneRow_aTapOpensItFocused_andLeavingItEmptyFoldsItBack() {
+        val state = TextFieldState("")
+        lateinit var focusManager: FocusManager
+        composeRule.setContent {
+            focusManager = LocalFocusManager.current
+            PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
+                PhoneChatScreen(
+                    composerState = state,
+                    modelLabel = "Sonnet 5.5",
+                    onOpenAttachSheet = {},
+                    onToggleVoiceRecording = {},
+                    onSendMessage = {},
+                    onStopTurn = {},
+                    onScrollToWaitingCard = null,
+                )
+            }
+        }
+
+        // Folded, as Claude's app: +, the placeholder and the mic on one row; no field, chip or Send yet.
+        val plus = composeRule.onNodeWithContentDescription("Attach").assertIsDisplayed().getBoundsInRoot()
+        val row = composeRule.onNodeWithTag("phone-composer-collapsed").assertIsDisplayed().getBoundsInRoot()
+        val mic = composeRule.onNodeWithContentDescription("Voice input").assertIsDisplayed().getBoundsInRoot()
+        assertTrue("one row", plus.top < row.bottom && row.top < plus.bottom && mic.top < row.bottom && row.top < mic.bottom)
+        composeRule.onNodeWithText("Message Sonnet 5.5…").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodes(hasContentDescription("Send message")).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeRule.onAllNodesWithText("Sonnet 5.5").fetchSemanticsNodes().isEmpty())
+
+        // A tap opens the full box with the field focused (the keyboard comes up with it).
+        composeRule.onNodeWithTag("phone-composer-collapsed").performClick()
+        composeRule.onNode(hasSetTextAction()).assertIsFocused()
+        composeRule.onNodeWithText("Sonnet 5.5").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Send message").assertIsDisplayed()
+
+        // Typed text keeps it open when the focus leaves; an empty box folds back.
+        composeRule.runOnIdle { state.setTextAndPlaceCursorAtEnd("draft") }
+        composeRule.runOnIdle { focusManager.clearFocus() }
+        composeRule.onNode(hasSetTextAction()).assertIsDisplayed()
+        composeRule.runOnIdle { state.setTextAndPlaceCursorAtEnd("") }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("phone-composer-collapsed").assertIsDisplayed()
     }
 }

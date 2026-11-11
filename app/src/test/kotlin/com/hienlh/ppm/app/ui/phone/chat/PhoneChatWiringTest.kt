@@ -324,6 +324,7 @@ class PhoneChatWiringTest {
         // The Now/Next/Later chip is gone: the server queues whatever a message carries.
         assertTrue(composeRule.onAllNodesWithText("Next").fetchSemanticsNodes().isEmpty())
 
+        composeRule.onNodeWithTag("phone-composer-collapsed").performClick() // an empty composer starts folded to one row
         composeRule.onNode(hasSetTextAction()).performTextReplacement("one more thing")
         composeRule.onNodeWithContentDescription("Send message").performClick()
         composeRule.waitForIdle()
@@ -391,6 +392,7 @@ class PhoneChatWiringTest {
         show(tab)
 
         // The composer, not the welcome list's search under a chat with no messages.
+        composeRule.onNodeWithTag("phone-composer-collapsed").performClick() // an empty composer starts folded to one row
         composeRule.onNode(hasSetTextAction() and hasText("Message", substring = true)).performTextReplacement("/comp")
         composeRule.waitForIdle()
         assertEquals("comp", tab.slashQuery)
@@ -431,6 +433,7 @@ class PhoneChatWiringTest {
                 EffortStatusReport(env = EffortSettingReport("max", "userSettings"), observed = ObservedEffort("high", "max")),
             ),
         )
+        composeRule.onNodeWithTag("phone-composer-collapsed").performClick() // an empty composer starts folded to one row
         composeRule.onNodeWithContentDescription("effort Max (Effort is set to Max outside PPM)", substring = true).performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("phone-effort-notice", useUnmergedTree = true).assertExists()

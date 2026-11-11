@@ -22,6 +22,17 @@ import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
+import com.hienlh.ppm.app.TextInputFocus
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
@@ -362,7 +373,58 @@ fun PhoneChatScreen(
                 // Composer inside BottomActionCard (Requirement 4.1, Phone 1 Section 5)
                 val draftText = composerState.text.toString()
                 val canSend = sendEnabled && (draftText.isNotBlank() || attachments.isNotEmpty())
-                BottomActionCard(
+                val bypass = permissionModeId == "bypassPermissions"
+                val placeholder = if (specModeEnabled) "Describe the feature or bug for Spec mode…" else "Message ${modelLabel}…"
+                val composerFocus = remember { FocusRequester() }
+                var composerFocused by remember { mutableStateOf(false) }
+                var openingComposer by remember { mutableStateOf(false) }
+                // Claude's app: one row (+, the placeholder, the mic) until the box is used; a tap opens it
+                // with the keyboard, and an empty box folds back when it loses focus or the keyboard closes.
+                val collapsed = !composerFocused && !openingComposer && draftText.isEmpty() &&
+                    attachments.isEmpty() && !voiceRecording
+                LaunchedEffect(openingComposer) {
+                    if (openingComposer) {
+                        composerFocus.requestFocus()
+                        openingComposer = false
+                    }
+                }
+                FoldComposerWhenKeyboardCloses(focused = composerFocused, empty = draftText.isEmpty())
+                if (collapsed) {
+                    BottomActionCard(applyWindowInsets = true) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            if (onOpenAttachSheet != null) PhoneAttachButton(bypass, onOpenAttachSheet)
+                            Box(
+                                Modifier
+                                    .weight(1f)
+                                    .height(KitSpec.MinTouchTarget)
+                                    .ppmClickable(onClickLabel = "Write a message") {
+                                        TextInputFocus.asked()
+                                        openingComposer = true
+                                    }
+                                    .testTag("phone-composer-collapsed"),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                BasicText(
+                                    placeholder,
+                                    style = ppmText(15f, lineHeight = 21f).copy(color = LocalPpmTokens.current.text3.color),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (onToggleVoiceRecording != null) {
+                                ActionIconButton(
+                                    icon = ProductIcon.Mic.vector,
+                                    label = "Voice input",
+                                    onClick = onToggleVoiceRecording,
+                                )
+                            }
+                        }
+                    }
+                } else BottomActionCard(
                     applyWindowInsets = true,
                     topContent = if (attachments.isNotEmpty() || (voiceRecording && onToggleVoiceRecording != null)) {
                         {
@@ -384,28 +446,7 @@ fun PhoneChatScreen(
                         null
                     },
                     chipsContent = {
-                        if (onOpenAttachSheet != null) {
-                            // The + holds attachments and the permission mode, as Claude's app does; a dot
-                            // keeps Bypass visible now that its chip is gone.
-                            val bypass = permissionModeId == "bypassPermissions"
-                            Box {
-                                ActionIconButton(
-                                    icon = ProductIcon.Plus.vector,
-                                    label = "Attach",
-                                    onClick = onOpenAttachSheet,
-                                    modifier = if (bypass) Modifier.semantics { stateDescription = "Bypass permissions on" } else Modifier,
-                                )
-                                if (bypass) {
-                                    Box(
-                                        Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(top = 8.dp, end = 8.dp)
-                                            .size(8.dp)
-                                            .background(LocalPpmTokens.current.error.color, CircleShape),
-                                    )
-                                }
-                            }
-                        }
+                        if (onOpenAttachSheet != null) PhoneAttachButton(bypass, onOpenAttachSheet)
                         if (onToggleVoiceRecording != null) {
                             ActionIconButton(
                                 icon = ProductIcon.Mic.vector,
@@ -448,11 +489,9 @@ fun PhoneChatScreen(
                 ) {
                     PpmTextField(
                         state = composerState,
-                        placeholder = if (specModeEnabled) {
-                            "Describe the feature or bug for Spec mode…"
-                        } else {
-                            "Message ${modelLabel}…"
-                        },
+                        placeholder = placeholder,
+                        focusRequester = composerFocus,
+                        onFocusChanged = { composerFocused = it },
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 28.dp, max = 140.dp)
@@ -1123,6 +1162,47 @@ private fun PhoneSendButton(enabled: Boolean, onClick: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             PpmIcon(ProductIcon.ArrowUp, 16.dp, if (enabled) tokens.accentFg.color else tokens.text3.color)
+        }
+    }
+}
+
+/** The composer's +: attachments and the permission mode, as Claude's app; a red dot while Bypass is on. */
+@Composable
+private fun PhoneAttachButton(bypass: Boolean, onClick: () -> Unit) {
+    Box {
+        ActionIconButton(
+            icon = ProductIcon.Plus.vector,
+            label = "Attach",
+            onClick = onClick,
+            modifier = if (bypass) Modifier.semantics { stateDescription = "Bypass permissions on" } else Modifier,
+        )
+        if (bypass) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 8.dp, end = 8.dp)
+                    .size(8.dp)
+                    .background(LocalPpmTokens.current.error.color, CircleShape),
+            )
+        }
+    }
+}
+
+/** Closing the keyboard over an empty composer folds it back to one row, as Claude's app does. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FoldComposerWhenKeyboardCloses(focused: Boolean, empty: Boolean) {
+    val imeVisible = WindowInsets.isImeVisible
+    val focusManager = LocalFocusManager.current
+    val isFocused by rememberUpdatedState(focused)
+    val isEmpty by rememberUpdatedState(empty)
+    var keyboardWasUp by remember { mutableStateOf(false) }
+    LaunchedEffect(imeVisible) {
+        if (imeVisible) {
+            keyboardWasUp = true
+        } else if (keyboardWasUp) {
+            keyboardWasUp = false
+            if (isFocused && isEmpty) focusManager.clearFocus()
         }
     }
 }
