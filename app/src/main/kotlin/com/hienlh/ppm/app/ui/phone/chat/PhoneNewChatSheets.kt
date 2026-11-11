@@ -127,7 +127,7 @@ fun PhoneNewChatWelcome(
     projectName: String,
     sessions: List<SessionInfo>,
     onOpenSession: (SessionInfo) -> Unit,
-    onQuickOrientation: () -> Unit,
+    onQuickOrientation: (() -> Unit)?,
     modifier: Modifier = Modifier,
     initialVisibleRecentCount: Int = 4,
     startingConversation: Boolean = false,
@@ -191,7 +191,7 @@ fun PhoneNewChatWelcome(
         }
 
         // Quick orientation button (44 dp height)
-        Row(
+        if (onQuickOrientation != null) Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(12.dp))
                 .background(tokens.accentWash.color)

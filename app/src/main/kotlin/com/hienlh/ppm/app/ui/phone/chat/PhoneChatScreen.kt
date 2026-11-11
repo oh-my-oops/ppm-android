@@ -96,6 +96,17 @@ data class PhoneReplyEditBanner(
 )
 
 /**
+ * The session-changes chip (Phone 1 F4): [count] files, with their line totals once the list is
+ * loaded ([additions]/[deletions] null before), or "reviewed" when every file is marked reviewed.
+ */
+data class PhoneChangesChipState(
+    val count: Int,
+    val additions: Int? = null,
+    val deletions: Int? = null,
+    val allReviewed: Boolean = false,
+)
+
+/**
  * Task tracker summary shown as a 52 dp bar under the app bar (Phone 1 Section 3 C6).
  */
 data class PhoneTaskProgressSummary(
@@ -125,19 +136,21 @@ fun PhoneChatScreen(
     composerState: TextFieldState,
     onSendMessage: (String, PhoneMessagePriority) -> Unit,
     onStopTurn: () -> Unit,
-    onScrollToWaitingCard: () -> Unit,
+    /** Null leaves the pill to the transcript's own waiting-card pill, which knows where the card is. */
+    onScrollToWaitingCard: (() -> Unit)?,
     modifier: Modifier = Modifier,
     isNewChat: Boolean = false,
     startingConversation: Boolean = false,
     projectName: String = "",
     recentSessions: List<SessionInfo> = emptyList(),
     onOpenRecentSession: (SessionInfo) -> Unit = {},
-    onQuickOrientation: () -> Unit = {},
+    /** Null hides "Quick orientation". */
+    onQuickOrientation: (() -> Unit)? = null,
     pendingApproval: ApprovalRequest? = null,
     atBottom: Boolean = true,
     cardKeyboardFocused: Boolean = false,
     streaming: Boolean = false,
-    elapsedTurnLabel: String = "0:04",
+    elapsedTurnLabel: String? = null,
     turnTokensLabel: String? = null,
     providerId: String = "claude",
     modelLabel: String = "Sonnet 4.6",
@@ -147,13 +160,14 @@ fun PhoneChatScreen(
     accountName: String = "Primary",
     accountUsageText: String? = null,
     specModeEnabled: Boolean = false,
-    onToggleSpecMode: () -> Unit = {},
-    changedFiles: List<PhoneChangedFileItem> = emptyList(),
+    /** Null hides the Spec chip. */
+    onToggleSpecMode: (() -> Unit)? = null,
+    changes: PhoneChangesChipState? = null,
     taskProgress: PhoneTaskProgressSummary? = null,
-    backgroundCommand: String? = null,
-    backgroundElapsedLabel: String = "running",
-    onViewBackgroundOutput: () -> Unit = {},
-    onStopBackgroundCommand: () -> Unit = {},
+    /** The session's background commands not stopped yet, one bar each (`BackgroundCommandBar`). */
+    backgroundCommands: List<PhoneBackgroundCommand> = emptyList(),
+    onViewBackgroundOutput: (String) -> Unit = {},
+    onStopBackgroundCommand: (String) -> Unit = {},
     viewingTurnNumber: Int? = null,
     onBackToLatestTurn: () -> Unit = {},
     errorCount: Int = 0,
@@ -162,18 +176,26 @@ fun PhoneChatScreen(
     onCancelReplyEdit: () -> Unit = {},
     attachments: List<PhoneDraftAttachment> = emptyList(),
     onRemoveAttachment: (String) -> Unit = {},
-    onOpenAttachSheet: () -> Unit = {},
+    /** Null hides Attach (no chat yet to attach to). */
+    onOpenAttachSheet: (() -> Unit)? = null,
     voiceRecording: Boolean = false,
     voiceElapsedLabel: String = "0:00",
-    onToggleVoiceRecording: () -> Unit = {},
+    /** Null hides the mic (no recogniser on this device). */
+    onToggleVoiceRecording: (() -> Unit)? = null,
     onOpenModelEffortSheet: () -> Unit = {},
     onOpenModesSheet: () -> Unit = {},
-    onOpenAccountSwitcher: () -> Unit = {},
+    /** Null hides the account chip (a provider with no accounts to switch). */
+    onOpenAccountSwitcher: (() -> Unit)? = null,
     onOpenSessionChangesSheet: () -> Unit = {},
     onOpenSessionInfoSheet: () -> Unit = {},
     crossSessionNotice: AttentionNotice? = null,
     onGoToCrossSession: () -> Unit = {},
     onDismissCrossSessionNotice: () -> Unit = {},
+    /** Over the composer, under the transcript: the stopped-turn bar, the MCP sign-in bar, the provider gate line. */
+    bannersContent: @Composable () -> Unit = {},
+    /** The chat's connection chip, first in the context row while the socket is down. */
+    connectionChip: @Composable () -> Unit = {},
+    sendEnabled: Boolean = true,
     transcriptContent: @Composable () -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
@@ -200,12 +222,12 @@ fun PhoneChatScreen(
             }
 
             // Top bar 2: Running background command bar (52 dp, Phone 1 F1)
-            if (!backgroundCommand.isNullOrEmpty()) {
+            backgroundCommands.forEach { command ->
                 PhoneBackgroundCommandBar(
-                    command = backgroundCommand,
-                    elapsedLabel = backgroundElapsedLabel,
-                    onViewOutput = onViewBackgroundOutput,
-                    onStop = onStopBackgroundCommand,
+                    command = command.command,
+                    elapsedLabel = if (command.stopping) "stopping…" else "running",
+                    onViewOutput = { onViewBackgroundOutput(command.id) },
+                    onStop = if (command.stopping) null else ({ onStopBackgroundCommand(command.id) }),
                 )
             }
 
@@ -247,7 +269,7 @@ fun PhoneChatScreen(
                             onBackToLatest = onBackToLatestTurn,
                         )
                     }
-                    if (needsYouState.visible) {
+                    if (needsYouState.visible && onScrollToWaitingCard != null) {
                         NeedsYouPill(
                             label = needsYouState.label,
                             onClick = onScrollToWaitingCard,
@@ -281,6 +303,7 @@ fun PhoneChatScreen(
             // has keyboard focus, the composer and context chip row step aside so the card sits
             // directly above the keyboard (Phone 1 D2 & D3 `cardKeyboard`).
             if (!needsYouState.hidesComposerOnKeyboard) {
+                bannersContent()
                 if (streaming) {
                     PhoneTurnStopBar(
                         elapsedLabel = elapsedTurnLabel,
@@ -306,7 +329,8 @@ fun PhoneChatScreen(
                     accountName = accountName,
                     accountUsageText = accountUsageText,
                     specModeEnabled = specModeEnabled,
-                    changedFiles = changedFiles,
+                    changes = changes,
+                    connectionChip = connectionChip,
                     onOpenModelEffortSheet = onOpenModelEffortSheet,
                     onOpenModesSheet = onOpenModesSheet,
                     onOpenAccountSwitcher = onOpenAccountSwitcher,
@@ -317,31 +341,44 @@ fun PhoneChatScreen(
 
                 // Composer inside BottomActionCard (Requirement 4.1, Phone 1 Section 5)
                 val draftText = composerState.text.toString()
-                val canSend = draftText.isNotBlank() || attachments.isNotEmpty()
+                val canSend = sendEnabled && (draftText.isNotBlank() || attachments.isNotEmpty())
                 BottomActionCard(
                     applyWindowInsets = true,
-                    topContent = if (attachments.isNotEmpty()) {
+                    topContent = if (attachments.isNotEmpty() || (voiceRecording && onToggleVoiceRecording != null)) {
                         {
-                            PhoneAttachmentTray(
-                                attachments = attachments,
-                                onRemove = onRemoveAttachment,
-                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                // What the mic hears is written into the box below as it comes.
+                                if (voiceRecording && onToggleVoiceRecording != null) {
+                                    PhoneVoiceRecordingBar(
+                                        elapsedLabel = voiceElapsedLabel,
+                                        onStop = onToggleVoiceRecording,
+                                    )
+                                }
+                                PhoneAttachmentTray(
+                                    attachments = attachments,
+                                    onRemove = onRemoveAttachment,
+                                )
+                            }
                         }
                     } else {
                         null
                     },
                     chipsContent = {
-                        ActionIconButton(
-                            icon = ProductIcon.Plus.vector,
-                            label = "Attach",
-                            onClick = onOpenAttachSheet,
-                        )
-                        ActionIconButton(
-                            icon = ProductIcon.Mic.vector,
-                            label = if (voiceRecording) "Stop voice input" else "Voice input",
-                            active = voiceRecording,
-                            onClick = onToggleVoiceRecording,
-                        )
+                        if (onOpenAttachSheet != null) {
+                            ActionIconButton(
+                                icon = ProductIcon.Plus.vector,
+                                label = "Attach",
+                                onClick = onOpenAttachSheet,
+                            )
+                        }
+                        if (onToggleVoiceRecording != null) {
+                            ActionIconButton(
+                                icon = ProductIcon.Mic.vector,
+                                label = if (voiceRecording) "Stop voice input" else "Voice input",
+                                active = voiceRecording,
+                                onClick = onToggleVoiceRecording,
+                            )
+                        }
                         if (streaming) {
                             Chip(
                                 label = priority.chipLabel,
@@ -356,7 +393,7 @@ fun PhoneChatScreen(
                         }
                     },
                     primaryAction = {
-                        if (voiceRecording) {
+                        if (voiceRecording && onToggleVoiceRecording != null) {
                             ActionPrimaryButton(
                                 icon = ProductIcon.Square,
                                 label = "Stop",
@@ -377,26 +414,19 @@ fun PhoneChatScreen(
                         }
                     },
                 ) {
-                    if (voiceRecording) {
-                        PhoneVoiceRecordingBar(
-                            elapsedLabel = voiceElapsedLabel,
-                            onStop = onToggleVoiceRecording,
-                        )
-                    } else {
-                        PpmTextField(
-                            state = composerState,
-                            placeholder = if (specModeEnabled) {
-                                "Describe the feature or bug for Spec mode…"
-                            } else {
-                                "Message ${modelLabel}…"
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 28.dp, max = 140.dp)
-                                .padding(horizontal = 4.dp, vertical = 4.dp),
-                            style = ppmText(15f, lineHeight = 21f),
-                        )
-                    }
+                    PpmTextField(
+                        state = composerState,
+                        placeholder = if (specModeEnabled) {
+                            "Describe the feature or bug for Spec mode…"
+                        } else {
+                            "Message ${modelLabel}…"
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 28.dp, max = 140.dp)
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                        style = ppmText(15f, lineHeight = 21f),
+                    )
                 }
             }
         }
@@ -442,7 +472,7 @@ fun PhoneTaskTrackerBar(
  */
 @Composable
 fun PhoneTurnStopBar(
-    elapsedLabel: String,
+    elapsedLabel: String?,
     tokensLabel: String?,
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
@@ -461,8 +491,11 @@ fun PhoneTurnStopBar(
         PpmIcon(ProductIcon.Loader2, 15.dp, tokens.accent.color, spinning = true)
         BasicText(
             text = buildString {
-                append("Generating · ")
-                append(elapsedLabel)
+                append("Generating")
+                if (!elapsedLabel.isNullOrEmpty()) {
+                    append(" · ")
+                    append(elapsedLabel)
+                }
                 if (!tokensLabel.isNullOrEmpty()) {
                     append(" · ")
                     append(tokensLabel)
@@ -568,14 +601,15 @@ fun PhoneContextChipRow(
     accountName: String,
     accountUsageText: String?,
     specModeEnabled: Boolean,
-    changedFiles: List<PhoneChangedFileItem>,
+    changes: PhoneChangesChipState?,
     onOpenModelEffortSheet: () -> Unit,
     onOpenModesSheet: () -> Unit,
-    onOpenAccountSwitcher: () -> Unit,
-    onToggleSpecMode: () -> Unit,
+    onOpenAccountSwitcher: (() -> Unit)?,
+    onToggleSpecMode: (() -> Unit)?,
     onOpenSessionChangesSheet: () -> Unit,
     onOpenSessionInfoSheet: () -> Unit,
     modifier: Modifier = Modifier,
+    connectionChip: @Composable () -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     val isBypass = permissionModeId == "bypassPermissions"
@@ -589,6 +623,8 @@ fun PhoneContextChipRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        connectionChip()
+
         // Model & Effort chip
         Chip(
             label = modelLabel,
@@ -608,27 +644,34 @@ fun PhoneContextChipRow(
         )
 
         // Account switcher chip
-        AccountChip(
-            name = accountName,
-            usageText = accountUsageText,
-            onClick = onOpenAccountSwitcher,
-        )
+        if (onOpenAccountSwitcher != null) {
+            AccountChip(
+                name = accountName,
+                usageText = accountUsageText,
+                onClick = onOpenAccountSwitcher,
+            )
+        }
 
         // Spec mode toggle chip (Section 9 I1: `✦ Spec`)
-        Chip(
-            label = "✦ Spec",
-            selected = specModeEnabled,
-            onClick = onToggleSpecMode,
-        )
+        if (onToggleSpecMode != null) {
+            Chip(
+                label = "✦ Spec",
+                selected = specModeEnabled,
+                onClick = onToggleSpecMode,
+            )
+        }
 
         // Session changes pill when files changed (Section 6 F4)
-        if (changedFiles.isNotEmpty()) {
-            val adds = changedFiles.sumOf { it.additions }
-            val dels = changedFiles.sumOf { it.deletions }
+        if (changes != null && changes.count > 0) {
+            val noun = if (changes.allReviewed) "reviewed" else "file${if (changes.count == 1) "" else "s"}"
             Chip(
-                label = "${changedFiles.size} file${if (changedFiles.size == 1) "" else "s"}",
-                secondaryLabel = "+$adds −$dels",
-                icon = ProductIcon.FileCode,
+                label = "${changes.count} $noun",
+                secondaryLabel = if (changes.additions != null && changes.deletions != null && !changes.allReviewed) {
+                    "+${changes.additions} −${changes.deletions}"
+                } else {
+                    null
+                },
+                icon = if (changes.allReviewed) ProductIcon.CheckCircle2.vector else ProductIcon.FileCode.vector,
                 onClick = onOpenSessionChangesSheet,
             )
         }
