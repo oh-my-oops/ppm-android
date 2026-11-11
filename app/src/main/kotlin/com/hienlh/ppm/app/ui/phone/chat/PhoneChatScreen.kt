@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
@@ -215,6 +216,8 @@ fun PhoneChatScreen(
     /** The chat's connection chip, first in the context row while the socket is down. */
     connectionChip: @Composable () -> Unit = {},
     sendEnabled: Boolean = true,
+    /** What the box does with what the user types: saves the draft and opens the `/` and `@` pickers. */
+    composerInputTransformation: InputTransformation? = null,
     transcriptContent: @Composable () -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
@@ -448,6 +451,7 @@ fun PhoneChatScreen(
                         style = ppmText(15f, lineHeight = 21f),
                         // A textarea, as the old composer and the web's: long text wraps and the box grows to 140 dp.
                         lineLimits = TextFieldLineLimits.MultiLine(),
+                        inputTransformation = composerInputTransformation,
                     )
                 }
             }

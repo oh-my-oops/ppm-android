@@ -37,12 +37,15 @@ import com.hienlh.ppm.protocol.ChatFrame
 import com.hienlh.ppm.protocol.ProjectInfo
 import com.hienlh.ppm.protocol.QueuedMessage
 import com.hienlh.ppm.protocol.SessionPhase
+import com.hienlh.ppm.protocol.SlashItem
+import com.hienlh.ppm.protocol.SlashItemsPayload
 import com.hienlh.ppm.protocol.ReplyReference
 import com.hienlh.ppm.protocol.SessionFileChange
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.TurnStop
 import com.hienlh.ppm.state.DraftLocalStore
 import com.hienlh.ppm.state.PermissionMode
+import com.hienlh.ppm.state.SlashItemsStore
 import com.hienlh.ppm.state.UsageReader
 import java.io.File
 import java.time.Instant
@@ -368,6 +371,34 @@ class PhoneChatWiringTest {
         composeRule.onNodeWithTag("activity-tab:sessions").assertExists()
         // The sheet's row, with its status (the welcome list under it names the chat too).
         composeRule.onNode(hasText("Write the tests") and hasText("Idle")).assertExists()
+    }
+
+    @Test
+    fun typingSlash_opensThePicker_andARowPicksIntoTheBox_andAtOpensTheFileQuery() {
+        val store = SlashItemsStore(scope)
+        store.seed(
+            SlashItemsPayload(listOf(SlashItem(type = "builtin", name = "compact", description = "Summarize the conversation.", scope = "bundled")), recentNames = emptyList()),
+            "p",
+            "claude",
+        )
+        model.slashItems = store
+        val tab = startedTab()
+        show(tab)
+
+        // The composer, not the welcome list's search under a chat with no messages.
+        composeRule.onNode(hasSetTextAction() and hasText("Message", substring = true)).performTextReplacement("/comp")
+        composeRule.waitForIdle()
+        assertEquals("comp", tab.slashQuery)
+        composeRule.onNodeWithTag("composer-picker").assertExists()
+        composeRule.onNodeWithText("Summarize the conversation.").performClick()
+        composeRule.waitForIdle()
+        assertTrue(tab.draft.text.toString(), tab.draft.text.startsWith("/compact"))
+        assertTrue(composeRule.onAllNodesWithTag("composer-picker").fetchSemanticsNodes().isEmpty())
+
+        composeRule.onNode(hasSetTextAction() and hasText("/compact", substring = true)).performTextReplacement("look at @src/Pa")
+        composeRule.waitForIdle()
+        assertEquals("src/Pa", tab.fileQuery)
+        assertNull(tab.slashQuery)
     }
 
     @Test

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Composable
@@ -35,7 +36,10 @@ import com.hienlh.ppm.app.ChatTab
 import com.hienlh.ppm.app.NewChatGate
 import com.hienlh.ppm.app.attach
 import com.hienlh.ppm.app.removeAttachment
+import com.hienlh.ppm.app.ui.ComposerPickerList
 import com.hienlh.ppm.app.ui.ConnectionChip
+import com.hienlh.ppm.app.ui.PickerVariant
+import com.hienlh.ppm.app.ui.rememberComposerPickers
 import com.hienlh.ppm.app.ui.PromptDialog
 import com.hienlh.ppm.app.ui.SessionDebugDialog
 import com.hienlh.ppm.app.ui.SessionHistoryPanel
@@ -236,6 +240,20 @@ internal fun PhoneChatContent(
         }
     }
     val visitActive = { model.activeTabId?.let(visit) }
+    // What the user types (`onContentChange`), as the tablet composer hears it: a recalled message
+    // becomes a draft again, the draft is saved, and the `/` and `@` pickers open or close. A pick's
+    // or a restore's own writes are not the user's, so only a changed text counts.
+    val composerTransformation = remember(chatTab) {
+        chatTab?.let { tab ->
+            InputTransformation {
+                if (!asCharSequence().contentEquals(originalText)) {
+                    tab.historyIndex = -1
+                    tab.updatePickers(asCharSequence(), selection.min)
+                    tab.edited(asCharSequence())
+                }
+            }
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         PhoneChatScreen(
@@ -309,6 +327,16 @@ internal fun PhoneChatContent(
             },
             onOpenSessionInfoSheet = { showSessionInfoSheet = true },
             sendEnabled = !startingConversation,
+            composerInputTransformation = composerTransformation,
+            pickerContent = {
+                if (chatTab != null) {
+                    // The `/` and `@` pickers, as the tablet composer has them (`rememberComposerPickers`).
+                    val pickers = rememberComposerPickers(model, chatTab)
+                    if (pickers.isShowing) {
+                        ComposerPickerList(model, chatTab, pickers, narrow = true, variant = PickerVariant.FLOATING)
+                    }
+                }
+            },
             connectionChip = {
                 if (chatController != null) {
                     ConnectionChip(
