@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.hienlh.ppm.app.AppModel
+import com.hienlh.ppm.app.TextInputFocus
 import com.hienlh.ppm.app.ui.SettingsButton
 import com.hienlh.ppm.app.ui.SettingsTextInput
 import com.hienlh.ppm.app.ui.files.FileCodeLines
@@ -280,6 +281,9 @@ internal class EditorImeBridgeView(context: Context) : View(context) {
     }
 
     fun requestSoftKeyboard() {
+        // Called from a tap on the code: say so, or `Root`'s leavesTextOnTap clears the focus as the tap ends and the
+        // keyboard, still up, types into nothing.
+        TextInputFocus.asked()
         requestFocus()
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
         imm?.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
