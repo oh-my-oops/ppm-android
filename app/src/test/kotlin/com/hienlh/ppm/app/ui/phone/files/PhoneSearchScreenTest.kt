@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui.phone.files
 
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -86,6 +87,9 @@ class PhoneSearchScreenTest {
 
     private fun shown(tag: String) = composeRule.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
 
+    private fun fieldText(): String =
+        composeRule.onNodeWithTag("phone-search-query").fetchSemanticsNode().config[SemanticsProperties.EditableText].text
+
     private fun setContent() = composeRule.setContent {
         PpmThemeProvider(theme = BuiltInThemes.auroraDark, mobile = true) {
             PhoneSearchScreen(controller, "app", onBack = {}, onOpenMatch = { f, l -> opened += f to l }, onCopyPath = {})
@@ -137,5 +141,31 @@ class PhoneSearchScreenTest {
         composeRule.onNodeWithTag("phone-replace-all-done").performClick()
         // Closing after a replace reads the project again.
         composeRule.waitUntil(5_000) { recorded("/files/search").size > searchesBefore }
+    }
+
+    @Test
+    fun `keys typed faster than the screen redraws all stay in the field, and a Clear still empties it`() {
+        setContent()
+        val field = composeRule.onNodeWithTag("phone-search-query")
+        // A keyboard commits a key per frame or faster; the query the field reported comes back a frame later.
+        composeRule.mainClock.autoAdvance = false
+        for (key in "abcdefgh") {
+            field.performTextInput(key.toString())
+            composeRule.mainClock.advanceTimeByFrame()
+        }
+        composeRule.mainClock.autoAdvance = true
+        composeRule.waitForIdle()
+        assertEquals("abcdefgh", fieldText())
+        assertEquals("abcdefgh", controller.state.value.fields.query)
+
+        composeRule.runOnIdle { controller.clear() }
+        composeRule.waitForIdle()
+        assertEquals("", fieldText())
+        // A second Clear after more typing empties it too.
+        field.performTextInput("xy")
+        composeRule.waitForIdle()
+        composeRule.runOnIdle { controller.clear() }
+        composeRule.waitForIdle()
+        assertEquals("", fieldText())
     }
 }

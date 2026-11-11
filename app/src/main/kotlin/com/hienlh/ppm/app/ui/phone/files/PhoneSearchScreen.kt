@@ -269,9 +269,21 @@ private fun SearchField(
 ) {
     val tokens = LocalPpmTokens.current
     val state = remember(key, label) { TextFieldState(value) }
+    // What the field reported and has not yet seen come back as [value]: the stored query trails the field by a
+    // frame, and putting that older text back dropped every key typed in between ("abcdefgh" became "aceg").
+    val reported = remember(state) { ArrayDeque<String>() }
     // A Clear from the toolbar empties the stored query: follow it into the field.
-    LaunchedEffect(value) { if (state.text.toString() != value) state.edit { replace(0, length, value) } }
-    LaunchedEffect(state) { snapshotFlow { state.text.toString() }.drop(1).collect { onChange(it) } }
+    LaunchedEffect(value) {
+        val echo = reported.indexOf(value)
+        if (echo >= 0) repeat(echo + 1) { reported.removeFirst() }
+        else if (state.text.toString() != value) state.edit { replace(0, length, value) }
+    }
+    LaunchedEffect(state) {
+        snapshotFlow { state.text.toString() }.drop(1).collect {
+            reported.addLast(it)
+            onChange(it)
+        }
+    }
     val shape = RoundedCornerShape(12.dp)
     Row(
         Modifier.fillMaxWidth().heightIn(min = KitSpec.MinTouchTarget).clip(shape)
