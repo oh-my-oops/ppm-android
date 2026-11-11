@@ -122,6 +122,7 @@ class GlobalEvents(
     private val designHistoryListeners = LinkedHashSet<(String, String) -> Unit>()
     private val designCommentsListeners = LinkedHashSet<(String, String) -> Unit>()
     private val designCheckListeners = LinkedHashSet<(String, String, String?, Boolean) -> Unit>()
+    private val featureIntrosListeners = LinkedHashSet<(change: String, id: String?) -> Unit>()
     private var socket: SocketConnection? = null
 
     /** Persisted notification feed (`/api/notifications/feed`), with fallback to [unread] on older servers. */
@@ -281,6 +282,12 @@ class GlobalEvents(
         return { designCommentsListeners -= listener }
     }
 
+    /** A device answered, put off or settled a new-feature question (`feature-intros:changed`). */
+    fun onFeatureIntrosChanged(listener: (change: String, id: String?) -> Unit): () -> Unit {
+        featureIntrosListeners += listener
+        return { featureIntrosListeners -= listener }
+    }
+
     fun onDesignCheckRequest(
         listener: (projectName: String, slug: String, requestId: String?, screenshot: Boolean) -> Unit,
     ): () -> Unit {
@@ -339,6 +346,7 @@ class GlobalEvents(
                 AgentTranscriptFrame.from(frame)?.let { agent -> agentListeners.toList().forEach { it(agent) } }
             "logs:lines" -> logsLinesListeners.toList().forEach { it(frame) }
             "logs:issues-changed" -> logsIssuesListeners.toList().forEach { it() }
+            "feature-intros:changed" -> featureIntrosListeners.toList().forEach { it(frame["change"].string.orEmpty(), frame["id"].string) }
             "design:history_changed" -> {
                 val proj = frame["projectName"].string ?: return
                 val slug = frame["slug"].string ?: return
