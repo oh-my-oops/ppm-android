@@ -42,6 +42,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -64,6 +67,7 @@ import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.LucideIcon
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.design.SyntaxHighlighter
 import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.state.ReviewBlocks
@@ -339,6 +343,30 @@ fun GitDiffViewer(
                 )
             }
             val wrapBtnSize = if (mobile) 36.dp else 24.dp
+            // Inline or side by side is the user's choice, shared with the Review changes tab; a phone is always
+            // inline, since two columns of code do not fit (`diff-viewer.tsx`).
+            if (!mobile) {
+                Box(
+                    modifier = Modifier
+                        .size(wrapBtnSize)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (model.diffSideBySide) tokens.panel2.color else Color.Transparent)
+                        .webTitle(if (model.diffSideBySide) "Side by side — click for inline" else "Inline — click for side by side")
+                        .clickable { model.toggleDiffSideBySide() }
+                        .semantics {
+                            contentDescription = "Side by side"
+                            selected = model.diffSideBySide
+                        }
+                        .testTag("git-diff-side-by-side-toggle"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    PpmIcon(
+                        ProductIcon.Columns2,
+                        size = 14.dp,
+                        tint = if (model.diffSideBySide) tokens.text.color else tokens.text3.color,
+                    )
+                }
+            }
             Box(
                 modifier = Modifier
                     .size(wrapBtnSize)
@@ -356,14 +384,15 @@ fun GitDiffViewer(
             }
         }
 
-        // 2-column side-by-side diff on tablet (`!mobile`), 1-column unified diff on phone (`mobile`)
+        // 2-column side-by-side diff on tablet while the shared choice says so, 1-column unified diff otherwise
+        // and always on a phone (`mobile`)
         val openedGaps = remember(original, modified) { mutableStateMapOf<Int, Boolean>() }
         val oldLines = remember(original) { ReviewBlocks.splitLines(original).map(::stripDiffEol) }
         val newLines = remember(modified) { ReviewBlocks.splitLines(modified).map(::stripDiffEol) }
         val oldFileTokens = rememberShikiTokenLines(oldLines.joinToString("\n"), language)
         val newFileTokens = if (modified == original) oldFileTokens else rememberShikiTokenLines(newLines.joinToString("\n"), language)
 
-        if (mobile) {
+        if (mobile || !model.diffSideBySide) {
             val entries = remember(diff, original, modified, openedGaps.toMap()) {
                 buildUnifiedDiffEntries(diff, original, modified, newLines, openedGaps)
             }
@@ -413,7 +442,7 @@ fun GitDiffViewer(
                                     tokenLine = tokenLine,
                                     changedRange = wordSpans.getOrNull(idx),
                                     wordWrap = wordWrap,
-                                    compact = true,
+                                    compact = mobile,
                                 )
                             }
                         }

@@ -622,6 +622,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     var inlineBlame by mutableStateOf(true)
         private set
 
+    /**
+     * Diffs side by side rather than inline (`diffSideBySide`, on by default), shared through the
+     * server's UI prefs: the diff tab and Review changes. A phone is always inline.
+     */
+    var diffSideBySide by mutableStateOf(true)
+        private set
+
     /** Design Canvas floating windows (`designWindows`), shared through the server's UI prefs. */
     var designWindows by mutableStateOf(false)
         private set
@@ -713,6 +720,12 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             mobileWordWrap = enabled
             prefs.put("mobileWordWrap", enabled.toString())
         }
+    }
+
+    fun toggleDiffSideBySide() {
+        diffSideBySide = !diffSideBySide
+        saveUiPrefs()
+        putUiPref { put("diffSideBySide", diffSideBySide) }
     }
 
     fun setEditorTabStylePref(style: String) {
@@ -1711,6 +1724,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                     prefs.wordWrap?.let { wordWrap = it }
                     prefs.editorTabStyle?.let { editorTabStyle = it }
                     prefs.inlineBlame?.let { inlineBlame = it }
+                    prefs.diffSideBySide?.let { diffSideBySide = it }
                     prefs.designWindows?.let { designWindows = it }
                     prefs.remoteDesktopStatsVisible?.let { remoteDesktopStatsVisible = it }
                     prefs.remoteDesktopWarningDismissed?.let { remoteDesktopWarningDismissed = it }
@@ -1768,6 +1782,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
         wordWrap = saved.wordWrap ?: true
         editorTabStyle = saved.editorTabStyle ?: "default"
         inlineBlame = saved.inlineBlame ?: true
+        diffSideBySide = saved.diffSideBySide ?: true
         designWindows = saved.designWindows ?: false
         remoteDesktopStatsVisible = saved.remoteDesktopStatsVisible ?: false
         remoteDesktopWarningDismissed = saved.remoteDesktopWarningDismissed ?: false
@@ -1809,6 +1824,7 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             wordWrap = wordWrap,
             editorTabStyle = editorTabStyle,
             inlineBlame = inlineBlame,
+            diffSideBySide = diffSideBySide,
             designWindows = designWindows,
             remoteDesktopStatsVisible = remoteDesktopStatsVisible,
             remoteDesktopWarningDismissed = remoteDesktopWarningDismissed,

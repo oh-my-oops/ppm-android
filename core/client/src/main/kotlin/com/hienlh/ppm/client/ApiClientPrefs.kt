@@ -45,6 +45,8 @@ data class UiPrefs(
     val editorTabStyle: String? = null,
     /** Inline git blame in editor (`inlineBlame`). */
     val inlineBlame: Boolean? = null,
+    /** Diffs side by side rather than inline (`diffSideBySide`): the diff tab and Review changes; a phone is always inline. */
+    val diffSideBySide: Boolean? = null,
     /** Design Canvas floating window mode (`designWindows`). */
     val designWindows: Boolean? = null,
     /** Remote Desktop stats overlay (`remoteDesktopStatsVisible`). */
@@ -72,6 +74,7 @@ data class UiPrefs(
         wordWrap?.let { put("wordWrap", it) }
         editorTabStyle?.let { put("editorTabStyle", it) }
         inlineBlame?.let { put("inlineBlame", it) }
+        diffSideBySide?.let { put("diffSideBySide", it) }
         designWindows?.let { put("designWindows", it) }
         remoteDesktopStatsVisible?.let { put("remoteDesktopStatsVisible", it) }
         remoteDesktopWarningDismissed?.let { put("remoteDesktopWarningDismissed", it) }
@@ -96,6 +99,7 @@ data class UiPrefs(
             wordWrap = json["wordWrap"].bool,
             editorTabStyle = json["editorTabStyle"].string?.takeIf { it in EDITOR_TAB_STYLES },
             inlineBlame = json["inlineBlame"].bool,
+            diffSideBySide = json["diffSideBySide"].bool,
             designWindows = json["designWindows"].bool,
             remoteDesktopStatsVisible = json["remoteDesktopStatsVisible"].bool,
             remoteDesktopWarningDismissed = json["remoteDesktopWarningDismissed"].bool,

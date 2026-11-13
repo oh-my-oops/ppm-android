@@ -45,4 +45,12 @@ class UiPrefsTest {
         assertEquals(null, wrong.sidebarActiveTab)
         assertEquals(null, wrong.sidebarTabOrder)
     }
+
+    @Test
+    fun `side by side or inline is read as a boolean and kept`() {
+        val prefs = UiPrefs.from(Json.parseToJsonElement("""{"diffSideBySide":false}"""))
+        assertEquals(false, prefs.diffSideBySide)
+        assertEquals(prefs, UiPrefs.from(Json.parseToJsonElement(prefs.toJson().toString())))
+        assertEquals(null, UiPrefs.from(Json.parseToJsonElement("""{"diffSideBySide":"inline"}""")).diffSideBySide)
+    }
 }

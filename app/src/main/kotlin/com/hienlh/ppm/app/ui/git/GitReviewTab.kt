@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -56,6 +57,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.utf16CodePoint
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -66,6 +70,8 @@ import com.hienlh.ppm.app.ErrorToastMessage
 import com.hienlh.ppm.client.ChangeHunk
 import com.hienlh.ppm.client.ChangedFile
 import com.hienlh.ppm.client.FileChangeDetail
+import com.hienlh.ppm.client.FileFullDiff
+import com.hienlh.ppm.client.gitFileFullDiff
 import com.hienlh.ppm.client.GitChanges
 import com.hienlh.ppm.client.HunkSelectionItem
 import com.hienlh.ppm.client.gitChanges
@@ -89,6 +95,7 @@ import com.hienlh.ppm.design.LucideIcon
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
+import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.state.ReviewBlocks
 import com.hienlh.ppm.state.git.ChangeTotals
 import com.hienlh.ppm.state.git.CommitDraftSync
@@ -100,6 +107,7 @@ import com.hienlh.ppm.state.git.GitRepoScope
 import com.hienlh.ppm.state.git.GitReviewBlock
 import com.hienlh.ppm.state.git.GitReviewFocus
 import com.hienlh.ppm.state.git.GitReviewModel
+import com.hienlh.ppm.state.git.GitReviewSideBySide
 import com.hienlh.ppm.state.workspace.WorkspaceTab
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -888,6 +896,11 @@ fun GitReviewBody(model: AppModel, tab: WorkspaceTab) {
             onOpenFile = openEditorFile,
             onResolveConflict = openConflictFile,
             onOpenGraph = openGraph,
+            sideBySide = model.diffSideBySide,
+            onToggleSideBySide = model::toggleDiffSideBySide,
+            readWholeFile = api?.let { client -> { path: String -> client.gitFileFullDiff(projectName, path, ref = "HEAD", repo = repo) } },
+            describeError = model::describe,
+            wordWrap = model.wordWrap,
         )
     }
 }
@@ -930,6 +943,11 @@ internal fun GitReviewDesktopLayout(
     onOpenFile: (String) -> Unit,
     onResolveConflict: (ChangedFile) -> Unit,
     onOpenGraph: () -> Unit,
+    sideBySide: Boolean = false,
+    onToggleSideBySide: () -> Unit = {},
+    readWholeFile: (suspend (String) -> FileFullDiff)? = null,
+    describeError: (Exception) -> String = { it.message ?: "Could not read the file" },
+    wordWrap: Boolean = false,
 ) {
     val tokens = LocalPpmTokens.current
     var showKeys by remember { mutableStateOf(false) }
@@ -940,9 +958,16 @@ internal fun GitReviewDesktopLayout(
     var rootHasFocus by remember { mutableStateOf(false) }
     var commitInputFocused by remember { mutableStateOf(false) }
 
+    // Inline is the block list; side by side is the whole file, the same choice as the diff tab's.
+    // A pick of single lines is the list's, and so is a file with no lines to put side by side
+    // (binary, a rename, …).
+    val showSide = sideBySide && readWholeFile != null && pickSet == null && focusedTriple != null &&
+        GitReviewSideBySide.supported(focusedTriple.first.blocks)
+
     // Match web `git-review-desktop.tsx:40-44`: keep focus on the root when opening or when a
-    // block action removes the focused element, but never steal focus from a text input.
-    LaunchedEffect(focus?.path, focus?.key) {
+    // block action removes the focused element, but never steal focus from a text input. A pick
+    // or a switch of view also takes the button that was pressed away with the view.
+    LaunchedEffect(focus?.path, focus?.key, showSide, pickSet != null) {
         if (!commitInputFocused && !com.hienlh.ppm.app.TextInputFocus.focused && !rootHasFocus) {
             runCatching { rootFocusRequester.requestFocus() }
         }
@@ -1193,6 +1218,27 @@ internal fun GitReviewDesktopLayout(
                         modifier = Modifier
                             .size(28.dp)
                             .clip(RoundedCornerShape(6.dp))
+                            .background(if (sideBySide) tokens.panel2.color else Color.Transparent)
+                            .webTitle(if (sideBySide) "Side by side — click for inline" else "Inline — click for side by side")
+                            .clickable(onClick = onToggleSideBySide)
+                            .semantics {
+                                contentDescription = "Side by side"
+                                selected = sideBySide
+                            }
+                            .testTag("git-review-side-by-side-toggle"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        PpmIcon(
+                            ProductIcon.Columns2,
+                            size = 16.dp,
+                            tint = if (sideBySide) tokens.text.color else tokens.text3.color,
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(6.dp))
                             .background(if (showKeys) tokens.panel2.color else Color.Transparent)
                             .clickable { showKeys = !showKeys }
                             .testTag("git-review-shortcuts-toggle"),
@@ -1286,7 +1332,22 @@ internal fun GitReviewDesktopLayout(
                                         }
                                     }
                                 }
-                                LazyColumn(
+                                if (showSide) {
+                                    ReviewSideBySide(
+                                        review = fileRev,
+                                        focusKey = focusedBlock.key,
+                                        busy = busy != null,
+                                        wordWrap = wordWrap,
+                                        readWholeFile = readWholeFile!!,
+                                        describeError = describeError,
+                                        onFocusBlock = { k -> onFocusBlock(fileRev.path, k) },
+                                        onStage = { k -> onStage(fileRev.path, k) },
+                                        onDiscard = { k -> onDiscard(fileRev.path, k) },
+                                        onUnstage = { k -> onUnstage(fileRev.path, k) },
+                                        onUndoDiscard = onUndoDiscard,
+                                        onStartPick = onStartPick,
+                                    )
+                                } else LazyColumn(
                                     state = codeListState,
                                     modifier = Modifier
                                         .fillMaxSize()
@@ -2146,7 +2207,6 @@ internal fun ReviewBlockCardView(
     onStagePicked: () -> Unit,
 ) {
     val tokens = LocalPpmTokens.current
-    val range = remember(block) { GitReviewModel.rangeText(block) }
     val staged = block.state == "staged"
     val gone = block.state == "discarded"
     val isPicking = pick != null && focused && block.state == "open"
@@ -2185,177 +2245,23 @@ internal fun ReviewBlockCardView(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            when {
-                gone -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    ) {
-                        PpmIcon(ProductIcon.Trash2, size = 14.dp, tint = tokens.error.color)
-                        BasicText("Discarded", style = PpmFont.sans(12, FontWeight.SemiBold, lineHeight = 16, color = tokens.error.color))
-                    }
-                    BasicText(range, style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color))
-                    Spacer(Modifier.weight(1f))
-                    if (!compact && block.recordId != null) {
-                        Row(
-                            modifier = Modifier
-                                .height(24.dp)
-                                .clip(RoundedCornerShape(5.dp))
-                                .alpha(if (busy) 0.45f else 1f)
-                                .clickable(enabled = !busy) { onUndoDiscard(block.recordId!!) }
-                                .padding(horizontal = 6.dp)
-                                .testTag("git-review-block-undo-${block.key}"),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            PpmIcon(ProductIcon.Undo2, size = 14.dp, tint = tokens.text2.color)
-                            BasicText("Undo", style = PpmFont.sans(11, FontWeight.Medium, lineHeight = 15, color = tokens.text2.color))
-                        }
-                    }
-                }
-                staged -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    ) {
-                        PpmIcon(ProductIcon.Check, size = 14.dp, tint = tokens.accent.color)
-                        BasicText("Staged", style = PpmFont.sans(12, FontWeight.SemiBold, lineHeight = 16, color = tokens.accent.color))
-                    }
-                    BasicText(range, style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color))
-                    ReviewCountsInline(added = block.added, removed = block.removed)
-                    Spacer(Modifier.weight(1f))
-                    if (!compact) {
-                        Row(
-                            modifier = Modifier
-                                .height(24.dp)
-                                .clip(RoundedCornerShape(5.dp))
-                                .clickable(onClick = onUnstage)
-                                .padding(horizontal = 6.dp)
-                                .testTag("git-review-block-unstage-${block.key}"),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            PpmIcon(ProductIcon.Undo2, size = 14.dp, tint = tokens.text2.color)
-                            BasicText("Unstage", style = PpmFont.sans(11, FontWeight.Medium, lineHeight = 15, color = tokens.text2.color))
-                        }
-                    }
-                }
-                isPicking -> {
-                    BasicText("Pick lines", style = PpmFont.sans(12, FontWeight.SemiBold, lineHeight = 16, color = tokens.text2.color))
-                    BasicText("${pick.size} of ${pickable.size} selected", style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color))
-                    Spacer(Modifier.weight(1f))
-                    Box(
-                        modifier = Modifier
-                            .height(24.dp)
-                            .clip(RoundedCornerShape(5.dp))
-                            .clickable { onSetPick(pickable) }
-                            .padding(horizontal = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        BasicText("All", style = PpmFont.sans(11, FontWeight.Medium, lineHeight = 15, color = tokens.text2.color))
-                    }
-                    Box(
-                        modifier = Modifier
-                            .height(24.dp)
-                            .clip(RoundedCornerShape(5.dp))
-                            .clickable { onSetPick(emptyList()) }
-                            .padding(horizontal = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        BasicText("None", style = PpmFont.sans(11, FontWeight.Medium, lineHeight = 15, color = tokens.text2.color))
-                    }
-                    val btnShape = RoundedCornerShape(7.dp)
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(btnShape)
-                            .background(tokens.bgSolid.color)
-                            .cssBorder(tokens.border.color, btnShape)
-                            .clickable { onSetPick(null) }
-                            .padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        BasicText("Cancel", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text.color))
-                        KbdPill("Esc")
-                    }
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(btnShape)
-                            .background(tokens.accent.color)
-                            .alpha(if (pick.isNotEmpty()) 1f else 0.45f)
-                            .clickable(enabled = pick.isNotEmpty(), onClick = onStagePicked)
-                            .padding(horizontal = 8.dp)
-                            .testTag("git-review-stage-picked"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        PpmIcon(if (busy) ProductIcon.Loader2 else ProductIcon.Check, size = 14.dp, tint = tokens.accentFg.color)
-                        BasicText(
-                            text = "Stage ${pluralize(pick.size, "line")}",
-                            style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.accentFg.color),
-                        )
-                    }
-                }
-                else -> {
-                    BasicText(
-                        text = "Block ${index + 1} of $total",
-                        style = PpmFont.sans(12, FontWeight.SemiBold, lineHeight = 16, color = tokens.text2.color),
-                    )
-                    BasicText(range, style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color))
-                    ReviewCountsInline(added = block.added, removed = block.removed)
-                    Spacer(Modifier.weight(1f))
-                    if (!compact) {
-                        if (block.hunk != null && block.parts != null) {
-                            Row(
-                                modifier = Modifier
-                                    .height(24.dp)
-                                    .clip(RoundedCornerShape(5.dp))
-                                    .clickable(onClick = onStartPick)
-                                    .padding(horizontal = 6.dp)
-                                    .testTag("git-review-block-lines-${block.key}"),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                BasicText("Lines…", style = PpmFont.sans(11, FontWeight.Medium, lineHeight = 15, color = tokens.text2.color))
-                            }
-                        }
-                        val btnShape = RoundedCornerShape(7.dp)
-                        Row(
-                            modifier = Modifier
-                                .height(28.dp)
-                                .clip(btnShape)
-                                .background(tokens.bgSolid.color)
-                                .cssBorder(tokens.border.color, btnShape)
-                                .clickable(onClick = onDiscard)
-                                .padding(horizontal = 8.dp)
-                                .testTag("git-review-block-discard-${block.key}"),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            PpmIcon(ProductIcon.Trash2, size = 13.dp, tint = tokens.text.color)
-                            BasicText("Discard", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text.color))
-                            if (focused) KbdPill("N")
-                        }
-                        Row(
-                            modifier = Modifier
-                                .height(28.dp)
-                                .clip(btnShape)
-                                .background(tokens.accent.color)
-                                .clickable(onClick = onStage)
-                                .padding(horizontal = 8.dp)
-                                .testTag("git-review-block-stage-${block.key}"),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            PpmIcon(ProductIcon.Check, size = 13.dp, tint = tokens.accentFg.color)
-                            BasicText("Stage", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.accentFg.color))
-                            if (focused) KbdPill("Y", light = true)
-                        }
-                    }
-                }
-            }
+            ReviewBlockBar(
+                block = block,
+                index = index,
+                total = total,
+                focused = focused,
+                pick = if (isPicking) pick else null,
+                pickable = pickable,
+                compact = compact,
+                busy = busy,
+                onStage = onStage,
+                onDiscard = onDiscard,
+                onUnstage = onUnstage,
+                onUndoDiscard = onUndoDiscard,
+                onStartPick = onStartPick,
+                onSetPick = onSetPick,
+                onStagePicked = onStagePicked,
+            )
         }
 
         // Block Body
@@ -2433,6 +2339,206 @@ internal fun ReviewBlockCardView(
                         rowLineIndices = indices,
                         onToggleLine = onTogglePickLine,
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A block's bar: where it is and what is decided, with the answers on a desktop (`ReviewBlockBar`
+ * in `git-review-block.tsx`). Shared by the block list and the side-by-side view, which draws it
+ * above the block's lines in the whole file.
+ */
+@Composable
+internal fun RowScope.ReviewBlockBar(
+    block: GitReviewBlock,
+    index: Int,
+    total: Int,
+    focused: Boolean,
+    pick: Set<Int>?,
+    pickable: List<Int>,
+    compact: Boolean,
+    busy: Boolean,
+    onStage: () -> Unit,
+    onDiscard: () -> Unit,
+    onUnstage: () -> Unit,
+    onUndoDiscard: (String) -> Unit,
+    onStartPick: () -> Unit,
+    onSetPick: (List<Int>?) -> Unit,
+    onStagePicked: () -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    val range = remember(block) { GitReviewModel.rangeText(block) }
+    val staged = block.state == "staged"
+    val gone = block.state == "discarded"
+    when {
+        gone -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                PpmIcon(ProductIcon.Trash2, size = 14.dp, tint = tokens.error.color)
+                BasicText("Discarded", style = PpmFont.sans(12, FontWeight.SemiBold, lineHeight = 16, color = tokens.error.color))
+            }
+            BasicText(range, style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color))
+            Spacer(Modifier.weight(1f))
+            if (!compact && block.recordId != null) {
+                Row(
+                    modifier = Modifier
+                        .height(24.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .alpha(if (busy) 0.45f else 1f)
+                        .clickable(enabled = !busy) { onUndoDiscard(block.recordId!!) }
+                        .padding(horizontal = 6.dp)
+                        .testTag("git-review-block-undo-${block.key}"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    PpmIcon(ProductIcon.Undo2, size = 14.dp, tint = tokens.text2.color)
+                    BasicText("Undo", style = PpmFont.sans(11, FontWeight.Medium, lineHeight = 15, color = tokens.text2.color))
+                }
+            }
+        }
+        staged -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                PpmIcon(ProductIcon.Check, size = 14.dp, tint = tokens.accent.color)
+                BasicText("Staged", style = PpmFont.sans(12, FontWeight.SemiBold, lineHeight = 16, color = tokens.accent.color))
+            }
+            BasicText(range, style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color))
+            ReviewCountsInline(added = block.added, removed = block.removed)
+            Spacer(Modifier.weight(1f))
+            if (!compact) {
+                Row(
+                    modifier = Modifier
+                        .height(24.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .clickable(onClick = onUnstage)
+                        .padding(horizontal = 6.dp)
+                        .testTag("git-review-block-unstage-${block.key}"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    PpmIcon(ProductIcon.Undo2, size = 14.dp, tint = tokens.text2.color)
+                    BasicText("Unstage", style = PpmFont.sans(11, FontWeight.Medium, lineHeight = 15, color = tokens.text2.color))
+                }
+            }
+        }
+        pick != null -> {
+            BasicText("Pick lines", style = PpmFont.sans(12, FontWeight.SemiBold, lineHeight = 16, color = tokens.text2.color))
+            BasicText("${pick.size} of ${pickable.size} selected", style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color))
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .height(24.dp)
+                    .clip(RoundedCornerShape(5.dp))
+                    .clickable { onSetPick(pickable) }
+                    .padding(horizontal = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText("All", style = PpmFont.sans(11, FontWeight.Medium, lineHeight = 15, color = tokens.text2.color))
+            }
+            Box(
+                modifier = Modifier
+                    .height(24.dp)
+                    .clip(RoundedCornerShape(5.dp))
+                    .clickable { onSetPick(emptyList()) }
+                    .padding(horizontal = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText("None", style = PpmFont.sans(11, FontWeight.Medium, lineHeight = 15, color = tokens.text2.color))
+            }
+            val btnShape = RoundedCornerShape(7.dp)
+            Row(
+                modifier = Modifier
+                    .height(28.dp)
+                    .clip(btnShape)
+                    .background(tokens.bgSolid.color)
+                    .cssBorder(tokens.border.color, btnShape)
+                    .clickable { onSetPick(null) }
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                BasicText("Cancel", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text.color))
+                KbdPill("Esc")
+            }
+            Row(
+                modifier = Modifier
+                    .height(28.dp)
+                    .clip(btnShape)
+                    .background(tokens.accent.color)
+                    .alpha(if (pick.isNotEmpty()) 1f else 0.45f)
+                    .clickable(enabled = pick.isNotEmpty(), onClick = onStagePicked)
+                    .padding(horizontal = 8.dp)
+                    .testTag("git-review-stage-picked"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                PpmIcon(if (busy) ProductIcon.Loader2 else ProductIcon.Check, size = 14.dp, tint = tokens.accentFg.color)
+                BasicText(
+                    text = "Stage ${pluralize(pick.size, "line")}",
+                    style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.accentFg.color),
+                )
+            }
+        }
+        else -> {
+            BasicText(
+                text = "Block ${index + 1} of $total",
+                style = PpmFont.sans(12, FontWeight.SemiBold, lineHeight = 16, color = tokens.text2.color),
+            )
+            BasicText(range, style = PpmFont.sans(12, lineHeight = 16, color = tokens.text3.color))
+            ReviewCountsInline(added = block.added, removed = block.removed)
+            Spacer(Modifier.weight(1f))
+            if (!compact) {
+                if (block.hunk != null && block.parts != null) {
+                    Row(
+                        modifier = Modifier
+                            .height(24.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .clickable(onClick = onStartPick)
+                            .padding(horizontal = 6.dp)
+                            .testTag("git-review-block-lines-${block.key}"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        BasicText("Lines…", style = PpmFont.sans(11, FontWeight.Medium, lineHeight = 15, color = tokens.text2.color))
+                    }
+                }
+                val btnShape = RoundedCornerShape(7.dp)
+                Row(
+                    modifier = Modifier
+                        .height(28.dp)
+                        .clip(btnShape)
+                        .background(tokens.bgSolid.color)
+                        .cssBorder(tokens.border.color, btnShape)
+                        .clickable(onClick = onDiscard)
+                        .padding(horizontal = 8.dp)
+                        .testTag("git-review-block-discard-${block.key}"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    PpmIcon(ProductIcon.Trash2, size = 13.dp, tint = tokens.text.color)
+                    BasicText("Discard", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.text.color))
+                    if (focused) KbdPill("N")
+                }
+                Row(
+                    modifier = Modifier
+                        .height(28.dp)
+                        .clip(btnShape)
+                        .background(tokens.accent.color)
+                        .clickable(onClick = onStage)
+                        .padding(horizontal = 8.dp)
+                        .testTag("git-review-block-stage-${block.key}"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    PpmIcon(ProductIcon.Check, size = 13.dp, tint = tokens.accentFg.color)
+                    BasicText("Stage", style = PpmFont.sans(12, FontWeight.Medium, lineHeight = 16, color = tokens.accentFg.color))
+                    if (focused) KbdPill("Y", light = true)
                 }
             }
         }
