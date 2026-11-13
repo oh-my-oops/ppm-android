@@ -196,6 +196,8 @@ fun ChatFooterTools(
     onReauthAccount: ((SwitchAccount) -> Unit)? = null,
     onAddAccount: () -> Unit = {},
     onManageAccounts: () -> Unit = {},
+    /** Show an account's free resets in Settings (`requestAccountFocus` + `openSettings("accounts")`). */
+    onOpenAccountResets: ((providerId: String, account: SwitchAccount) -> Unit)? = null,
     isConnected: Boolean = true,
     onReload: (() -> Unit)? = null,
     connectionTrouble: Boolean = false,
@@ -378,6 +380,12 @@ fun ChatFooterTools(
                     close()
                     onManageAccounts()
                 },
+                onOpenResets = onOpenAccountResets?.let { open ->
+                    { account ->
+                        close()
+                        open(if (isCodex) "codex" else "claude", account)
+                    }
+                },
             )
         } else {
             ChatMoreMenu(
@@ -552,6 +560,10 @@ fun ChatPaneFooterTools(
         onReauthAccount = { model.openSettings("accounts") },
         onAddAccount = { model.openSettings("accounts") },
         onManageAccounts = { model.openSettings("accounts") },
+        onOpenAccountResets = { provider, account ->
+            AccountFocus.request(provider, account.id)
+            model.openSettings("accounts")
+        },
         isConnected = state.connected,
         onReload = chat::reloadChat,
         connectionTrouble = connectionTrouble,

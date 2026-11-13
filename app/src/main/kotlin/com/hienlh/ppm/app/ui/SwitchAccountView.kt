@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -70,7 +71,9 @@ import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.state.MANY_SWITCH_ACCOUNTS
+import com.hienlh.ppm.state.ResetsSummary
 import com.hienlh.ppm.state.SwitchAccount
+import com.hienlh.ppm.state.resetDay
 import com.hienlh.ppm.state.formatResetLine
 import com.hienlh.ppm.state.matchesAccountQuery
 import com.hienlh.ppm.state.orderSwitchAccounts
@@ -98,6 +101,8 @@ fun SwitchAccountView(
     onAddAccount: () -> Unit,
     onManage: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Show this account's free resets in Settings, where they are spent. */
+    onOpenResets: ((SwitchAccount) -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -335,6 +340,7 @@ fun SwitchAccountView(
                                 active = account.id == currentId,
                                 picking = pickingId == account.id,
                                 onPick = { pick(account) },
+                                onOpenResets = onOpenResets?.let { open -> { open(account) } },
                             )
                         }
                         if (!many) {
@@ -344,6 +350,7 @@ fun SwitchAccountView(
                                     active = account.id == currentId,
                                     picking = pickingId == account.id,
                                     onPick = { pick(account) },
+                                    onOpenResets = onOpenResets?.let { open -> { open(account) } },
                                 )
                             }
                         }
@@ -407,6 +414,7 @@ fun SwitchAccountView(
                                         active = account.id == currentId,
                                         picking = pickingId == account.id,
                                         onPick = { pick(account) },
+                                        onOpenResets = onOpenResets?.let { open -> { open(account) } },
                                     )
                                 }
                             }
@@ -453,6 +461,7 @@ private fun SwitchAccountCard(
     active: Boolean,
     picking: Boolean,
     onPick: () -> Unit,
+    onOpenResets: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val mobile = LocalPpmMobile.current
@@ -482,128 +491,190 @@ private fun SwitchAccountCard(
         else -> account.label
     }
 
+    // The resets line is a button of its own, so the card is a box holding two buttons rather than
+    // one (a tap on the resets must not pick the account).
     Column(
         Modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = if (mobile) 44.dp else 0.dp)
-            .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
-            }
             .clip(shape)
             .background(bg)
             .cssBorder(border, shape)
-            .webTitle(title)
-            .semantics {
-                selected = active
-                stateDescription = when {
-                    blocked && !account.signedOut -> "disabled"
-                    active -> "current"
-                    else -> ""
-                }
-            }
-            .hoverable(interactions)
-            .clickable(
-                interactionSource = interactions,
-                indication = null,
-                role = Role.Button,
-                onClick = onPick,
-            )
-            .padding(10.dp)
-            .testTag("account-row:${account.id}"),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .hoverable(interactions),
     ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .defaultMinSize(minHeight = if (mobile) 44.dp else 0.dp)
+                .graphicsLayer {
+                    scaleX = pressScale
+                    scaleY = pressScale
+                }
+                .clip(shape)
+                .webTitle(title)
+                .semantics {
+                    selected = active
+                    stateDescription = when {
+                        blocked && !account.signedOut -> "disabled"
+                        active -> "current"
+                        else -> ""
+                    }
+                }
+                .clickable(
+                    interactionSource = interactions,
+                    indication = null,
+                    role = Role.Button,
+                    onClick = onPick,
+                )
+                .padding(10.dp)
+                .testTag("account-row:${account.id}"),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            TruncatedText(
-                AnnotatedString(account.label),
-                ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(
-                    color = if (blocked) tokens.text3.color else tokens.text.color,
-                ),
-                Modifier.weight(1f, fill = false),
-            )
-            account.plan?.let { plan ->
-                Box(
-                    Modifier
-                        .clip(CircleShape)
-                        .background(tokens.panel2.color)
-                        .cssBorder(tokens.borderSoft.color, CircleShape)
-                        .padding(horizontal = 6.dp, vertical = 1.dp),
-                ) {
-                    BasicText(
-                        plan,
-                        style = ppmText(10f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tokens.text2.color),
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            if (picking) {
-                val spinAngle = if (!reducedMotion) {
-                    val transition = rememberInfiniteTransition(label = "accountPicking")
-                    val angle by transition.animateFloat(
-                        initialValue = 0f,
-                        targetValue = 360f,
-                        animationSpec = infiniteRepeatable(tween(800, easing = LinearEasing)),
-                        label = "accountPickingAngle",
-                    )
-                    angle
-                } else {
-                    0f
-                }
-                PpmIcon(ProductIcon.Loader2, 14.dp, tokens.accent.color, Modifier.rotate(spinAngle))
-            } else if (active) {
-                PpmIcon(ProductIcon.CheckCircle2, 14.dp, tokens.accent.color, Modifier.testTag("account-active:${account.id}"))
-            } else {
-                Spacer(Modifier.size(14.dp))
-            }
-        }
-
-        account.refusal?.let { refusal ->
-            BasicText(
-                refusal,
-                Modifier.padding(top = 0.dp),
-                style = ppmText(11f, lineHeight = 15f).copy(
-                    color = tokens.error.color,
-                    textDecoration = if (account.signedOut) TextDecoration.Underline else TextDecoration.None,
-                ),
-                maxLines = 1,
-                softWrap = false,
-            )
-        }
-
-        if (!account.signedOut) {
-            val now = rememberResetClockMillis()
-            val zone = LocalResetZone.current
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.Top,
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                AccountCardMeter(
-                    accountId = account.id,
-                    label = "5h",
-                    pct = account.fiveHourPct,
-                    resetsAt = account.fiveHourResetsAt,
-                    dim = blocked,
-                    now = now,
-                    zone = zone,
-                    modifier = Modifier.weight(1f),
+                TruncatedText(
+                    AnnotatedString(account.label),
+                    ppmText(13f, FontWeight.Medium, lineHeight = 18f).copy(
+                        color = if (blocked) tokens.text3.color else tokens.text.color,
+                    ),
+                    Modifier.weight(1f, fill = false),
                 )
-                AccountCardMeter(
-                    accountId = account.id,
-                    label = "Week",
-                    pct = account.weekPct,
-                    resetsAt = account.weekResetsAt,
-                    dim = blocked,
-                    now = now,
-                    zone = zone,
-                    modifier = Modifier.weight(1f),
+                account.plan?.let { plan ->
+                    Box(
+                        Modifier
+                            .clip(CircleShape)
+                            .background(tokens.panel2.color)
+                            .cssBorder(tokens.borderSoft.color, CircleShape)
+                            .padding(horizontal = 6.dp, vertical = 1.dp),
+                    ) {
+                        BasicText(
+                            plan,
+                            style = ppmText(10f, FontWeight.SemiBold, lineHeight = 14f).copy(color = tokens.text2.color),
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                if (picking) {
+                    val spinAngle = if (!reducedMotion) {
+                        val transition = rememberInfiniteTransition(label = "accountPicking")
+                        val angle by transition.animateFloat(
+                            initialValue = 0f,
+                            targetValue = 360f,
+                            animationSpec = infiniteRepeatable(tween(800, easing = LinearEasing)),
+                            label = "accountPickingAngle",
+                        )
+                        angle
+                    } else {
+                        0f
+                    }
+                    PpmIcon(ProductIcon.Loader2, 14.dp, tokens.accent.color, Modifier.rotate(spinAngle))
+                } else if (active) {
+                    PpmIcon(ProductIcon.CheckCircle2, 14.dp, tokens.accent.color, Modifier.testTag("account-active:${account.id}"))
+                } else {
+                    Spacer(Modifier.size(14.dp))
+                }
+            }
+
+            account.refusal?.let { refusal ->
+                BasicText(
+                    refusal,
+                    Modifier.padding(top = 0.dp),
+                    style = ppmText(11f, lineHeight = 15f).copy(
+                        color = tokens.error.color,
+                        textDecoration = if (account.signedOut) TextDecoration.Underline else TextDecoration.None,
+                    ),
+                    maxLines = 1,
+                    softWrap = false,
                 )
+            }
+
+            if (!account.signedOut) {
+                val now = rememberResetClockMillis()
+                val zone = LocalResetZone.current
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    AccountCardMeter(
+                        accountId = account.id,
+                        label = "5h",
+                        pct = account.fiveHourPct,
+                        resetsAt = account.fiveHourResetsAt,
+                        dim = blocked,
+                        now = now,
+                        zone = zone,
+                        modifier = Modifier.weight(1f),
+                    )
+                    AccountCardMeter(
+                        accountId = account.id,
+                        label = "Week",
+                        pct = account.weekPct,
+                        resetsAt = account.weekResetsAt,
+                        dim = blocked,
+                        now = now,
+                        zone = zone,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+        account.resets?.let { ResetsLine(account.id, it, onOpenResets) }
+    }
+}
+
+/**
+ * "⟲ 3 resets · next expires Dec 11" under the bars. Drawn on every card, "No free resets"
+ * included, so the cards stay one height. A tap opens Settings on this account, where the resets
+ * are listed one by one and spent; nothing is spent from the chat.
+ */
+@Composable
+private fun ResetsLine(accountId: String, resets: ResetsSummary, onOpen: (() -> Unit)?) {
+    val tokens = LocalPpmTokens.current
+    val mobile = LocalPpmMobile.current
+    val shape = RoundedCornerShape(6.dp)
+    val style = ppmText(11f, lineHeight = 16f)
+    val open = onOpen.takeIf { resets.count > 0 }
+    val live = open != null
+    // `-mt-1 mx-1 mb-1 flex min-h-6 items-center gap-1 self-start rounded-md px-1.5 max-md:min-h-11`
+    Row(
+        Modifier
+            .padding(start = 4.dp, end = 4.dp, bottom = 4.dp)
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                val up = 4.dp.roundToPx()
+                layout(placeable.width, (placeable.height - up).coerceAtLeast(0)) { placeable.place(0, -up) }
+            }
+            .heightIn(min = if (mobile) 44.dp else 24.dp)
+            .clip(shape)
+            .then(
+                if (open != null) {
+                    Modifier
+                        .webTitle("See them in Settings")
+                        .ppmClickable(shape = shape, hoverColor = tokens.surfaceHover.color, onClick = open)
+                } else {
+                    Modifier
+                },
+            )
+            .padding(horizontal = 6.dp)
+            .testTag("account-resets:$accountId"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        val n = resets.count
+        val countText = "$n reset${if (n == 1) "" else "s"}"
+        if (!live) {
+            PpmIcon(ProductIcon.RotateCcw, 12.dp, tokens.text3.color)
+            BasicText(if (n == 0) "No free resets" else countText, style = style.copy(color = tokens.text3.color), maxLines = 1)
+        } else {
+            PpmIcon(ProductIcon.RotateCcw, 12.dp, tokens.accent.color)
+            BasicText(countText, style = style.copy(color = tokens.accent.color), maxLines = 1)
+            resets.nextExpiresAt?.let(::resetDay)?.let {
+                BasicText("· next expires $it", style = style.copy(color = tokens.text3.color), maxLines = 1)
             }
         }
     }

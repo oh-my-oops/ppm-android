@@ -1,5 +1,19 @@
 package com.hienlh.ppm.app.ui.phone.settings
 
+import com.hienlh.ppm.app.ui.AccountFocus
+import com.hienlh.ppm.app.ui.AccountFocusRequest
+import com.hienlh.ppm.app.ui.AccountReveal
+import com.hienlh.ppm.app.ui.ClaudeLimitResetsButton
+import com.hienlh.ppm.app.ui.CodexResetCreditButton
+import com.hienlh.ppm.app.ui.rememberAccountReveal
+import com.hienlh.ppm.client.spendClaudeLimitReset
+import com.hienlh.ppm.client.spendCodexResetCredit
+import com.hienlh.ppm.protocol.ClaudeLimitResetGrant
+import com.hienlh.ppm.protocol.ClaudeLimitResets
+import com.hienlh.ppm.state.CodexCredit
+import com.hienlh.ppm.state.claudeResetResultMessage
+import com.hienlh.ppm.state.resetCreditOutcome
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -108,6 +122,10 @@ data class PhoneAccountCardData(
     val meters: List<PhoneUsageMeterItem> = emptyList(),
     /** The name the account was given (`accountLabel`, empty for none); null where it cannot be renamed. */
     val renameCurrent: String? = null,
+    /** A Claude account's free limit resets. */
+    val limitResets: ClaudeLimitResets? = null,
+    /** A Codex account's quota, which says what free resets it holds and whether a limit is reached. */
+    val codexUsage: UsageInfo? = null,
 ) {
     val isEnabled: Boolean
         get() = status != "disabled"
@@ -122,7 +140,16 @@ fun PhoneAccountsPage(
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
 
-    var activeProvider by remember { mutableStateOf("claude") }
+    // An account the chat asked to be shown (`account-focus.ts`): its provider's tab opens on it.
+    var focus by remember { mutableStateOf(AccountFocus.take()) }
+    var activeProvider by remember { mutableStateOf(focus?.provider ?: "claude") }
+    val pendingFocus = AccountFocus.pending
+    LaunchedEffect(pendingFocus) {
+        AccountFocus.take()?.let {
+            activeProvider = it.provider
+            focus = it
+        }
+    }
     var claudeCards by remember { mutableStateOf<List<PhoneAccountCardData>>(emptyList()) }
     var codexCards by remember { mutableStateOf<List<PhoneAccountCardData>>(emptyList()) }
     var antigravityCards by remember { mutableStateOf<List<PhoneAccountCardData>>(emptyList()) }
@@ -161,6 +188,7 @@ fun PhoneAccountsPage(
                     isActive = entry.accountId == activeId,
                     needsSignIn = entry.accountStatus == "expired" || entry.accountStatus == "error",
                     renameCurrent = entry.accountLabel.orEmpty(),
+                    limitResets = entry.usage.limitResets,
                     meters = listOf(
                         PhoneUsageMeterItem("5-hour session", sPct, sReset),
                         PhoneUsageMeterItem("7-day weekly", wPct, wReset),
@@ -183,6 +211,7 @@ fun PhoneAccountsPage(
                     status = acc.status,
                     isActive = idx == 0 && acc.status == "active",
                     needsSignIn = acc.status == "expired" || acc.status == "error" || acc.signedOut,
+                    codexUsage = u ?: UsageInfo(),
                     meters = listOf(
                         PhoneUsageMeterItem("5-hour window", sPct, formatResetTime(u?.session, now)),
                         PhoneUsageMeterItem("7-day window", wPct, formatResetTime(u?.weekly, now)),
@@ -406,6 +435,18 @@ fun PhoneAccountsPage(
             codexDeviceCode = codexDeviceFlow?.userCode,
             codexVerificationUrl = codexDeviceFlow?.verificationUrl,
             modifier = Modifier.weight(1f),
+            focus = focus,
+            spendClaudeReset = api?.let { client ->
+                { card, grant -> claudeResetResultMessage(card.label, client.spendClaudeLimitReset(card.id, grant.id)) }
+            },
+            spendCodexReset = api?.let { client ->
+                { card, credit -> resetCreditOutcome(client.spendCodexResetCredit(card.id, credit.id), card.label) }
+            },
+            onResetDone = { message, failed ->
+                statusMsg = message
+                isError = failed
+                scope.launch { reloadAll() }
+            },
         )
     }
 }
@@ -429,6 +470,10 @@ fun PhoneAccountsContent(
     onSubmitCodeOrKey: (provider: String, mode: String, value: String, label: String?) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier,
     onRenameAccount: (suspend (PhoneAccountCardData, String) -> Unit)? = null,
+    focus: AccountFocusRequest? = null,
+    spendClaudeReset: (suspend (PhoneAccountCardData, ClaudeLimitResetGrant) -> String)? = null,
+    spendCodexReset: (suspend (PhoneAccountCardData, CodexCredit) -> String)? = null,
+    onResetDone: (message: String, failed: Boolean) -> Unit = { _, _ -> },
 ) {
     val tokens = LocalPpmTokens.current
     var menuCard by remember { mutableStateOf<PhoneAccountCardData?>(null) }
@@ -500,11 +545,24 @@ fun PhoneAccountsContent(
             }
 
             for (card in cards) {
+                val claudeSpend = spendClaudeReset.takeIf { card.provider == "claude" }
+                val codexSpend = spendCodexReset.takeIf { card.provider == "codex" }
+                val codexUsage = card.codexUsage
                 PhoneAccountCard(
                     card = card,
                     onToggle = { enabled -> onToggleAccount(card, enabled) },
                     onOpenSignIn = { signInSheetOpen = true },
                     onOpenMenu = { menuCard = card },
+                    reveal = rememberAccountReveal(focus, card.id),
+                    resets = when {
+                        claudeSpend != null -> {
+                            { ClaudeLimitResetsButton(card.label, card.limitResets, { grant -> claudeSpend(card, grant) }, onResetDone) }
+                        }
+                        codexSpend != null && codexUsage != null -> {
+                            { CodexResetCreditButton(card.label, codexUsage, { credit -> codexSpend(card, credit) }, onResetDone) }
+                        }
+                        else -> null
+                    },
                 )
             }
 
@@ -658,10 +716,13 @@ private fun PhoneAccountCard(
     onToggle: (Boolean) -> Unit,
     onOpenSignIn: () -> Unit,
     onOpenMenu: () -> Unit,
+    reveal: AccountReveal? = null,
+    resets: (@Composable () -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(14.dp)
     val borderColor = when {
+        reveal?.flash == true -> tokens.accent.color
         card.needsSignIn -> tokens.warning.opacity(0.45).color
         card.isActive -> tokens.accent.opacity(0.55).color
         else -> tokens.borderSoft.color
@@ -669,6 +730,7 @@ private fun PhoneAccountCard(
 
     Column(
         modifier = Modifier
+            .then(if (reveal != null) Modifier.bringIntoViewRequester(reveal.requester) else Modifier)
             .fillMaxWidth()
             .clip(shape)
             .background(tokens.panel.color)
@@ -818,6 +880,9 @@ private fun PhoneAccountCard(
                 }
             }
         }
+
+        // The account's free resets, a section of its own at the bottom of the card.
+        resets?.invoke()
     }
 }
 

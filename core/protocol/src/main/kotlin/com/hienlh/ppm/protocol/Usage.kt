@@ -27,12 +27,27 @@ data class LimitBucket(
     }
 }
 
-/** Codex's free rate-limit resets still open to an account (`ResetCredits`). */
-data class ResetCredits(val available: Int, val nextExpiresAt: String?, val title: String?, val nextCreditId: String?) {
+/**
+ * Codex's free rate-limit resets still open to an account (`ResetCredits`). [credits] lists every
+ * one, soonest to lapse first; an older stored reading has only the count and the soonest.
+ */
+data class ResetCredits(
+    val available: Int,
+    val nextExpiresAt: String?,
+    val title: String?,
+    val nextCreditId: String?,
+    val credits: List<ResetCredit> = emptyList(),
+) {
     companion object {
         fun from(value: JsonElement?): ResetCredits? {
             val available = value["available"].int ?: return null
-            return ResetCredits(available, value["nextExpiresAt"].string, value["title"].string, value["nextCreditId"].string)
+            return ResetCredits(
+                available,
+                value["nextExpiresAt"].string,
+                value["title"].string,
+                value["nextCreditId"].string,
+                value["credits"].array.orEmpty().mapNotNull(ResetCredit::from),
+            )
         }
     }
 }
