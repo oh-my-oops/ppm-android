@@ -443,6 +443,15 @@ class WorkspaceStore(
         persist()
     }
 
+    /** Pins or unpins a tab (`setTabPinned`); pinned tabs stay at the start of their panel's bar. */
+    fun setTabPinned(tabId: String, pinned: Boolean) {
+        val panel = s.panelOf(tabId) ?: return
+        val tabs = withPinned(panel.tabs, tabId, pinned)
+        if (tabs === panel.tabs) return
+        commit(s.copy(panels = s.panels + (panel.id to panel.copy(tabs = tabs))))
+        persist()
+    }
+
     fun reorderTab(tabId: String, panelId: String, newIndex: Int) {
         val panel = s.panels[panelId] ?: return
         val oldIndex = panel.tabs.indexOfFirst { it.id == tabId }
@@ -450,7 +459,9 @@ class WorkspaceStore(
         val tabs = panel.tabs.toMutableList()
         val moved = tabs.removeAt(oldIndex)
         tabs.add(newIndex.coerceIn(0, tabs.size), moved)
-        commit(s.copy(panels = s.panels + (panelId to panel.copy(tabs = tabs))))
+        // A drag cannot cross the pinned edge: pins stay first, so a tab dropped among them lands
+        // right after them, and a pinned one dropped among the others lands at the end of the pins.
+        commit(s.copy(panels = s.panels + (panelId to panel.copy(tabs = pinnedFirst(tabs)))))
         persist()
     }
 
@@ -463,7 +474,7 @@ class WorkspaceStore(
         val fromTabs = from.tabs.filter { it.id != tabId }
         val fromHistory = from.tabHistory.filter { it != tabId }
         val fromActive = if (from.activeTabId == tabId) fromHistory.lastOrNull() ?: fromTabs.lastOrNull()?.id else from.activeTabId
-        val toTabs = to.tabs.toMutableList().apply { if (insertIndex != null) add(insertIndex.coerceIn(0, size), tab) else add(tab) }
+        val toTabs = pinnedFirst(to.tabs.toMutableList().apply { if (insertIndex != null) add(insertIndex.coerceIn(0, size), tab) else add(tab) })
         val target = to.copy(tabs = toTabs, activeTabId = tabId, tabHistory = pushHistory(to.tabHistory, tabId))
 
         val st = s

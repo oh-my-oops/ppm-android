@@ -30,6 +30,8 @@ data class WorkspaceTab(
     val metadata: JsonObject = EMPTY_OBJECT,
     val closable: Boolean = true,
     val extra: JsonObject = EMPTY_OBJECT,
+    /** Pinned: kept at the start of its bar and skipped by Close Others/Right/Saved/All (`tab-pins.ts`). */
+    val pinned: Boolean = false,
 ) {
     fun metaString(key: String): String? = metadata[key].string
 
@@ -45,10 +47,12 @@ data class WorkspaceTab(
         put("projectId", projectId?.let(::JsonPrimitive) ?: JsonNull)
         put("metadata", metadata)
         put("closable", JsonPrimitive(closable))
+        // The web drops the key on unpin (`withPinned`), so only a pinned tab carries it.
+        if (pinned) put("pinned", JsonPrimitive(true))
     }
 
     companion object {
-        private val KNOWN = setOf("id", "type", "title", "projectId", "metadata", "closable")
+        private val KNOWN = setOf("id", "type", "title", "projectId", "metadata", "closable", "pinned")
 
         fun fromJson(json: JsonElement?): WorkspaceTab? {
             val obj = json as? JsonObject ?: return null
@@ -61,6 +65,7 @@ data class WorkspaceTab(
                 // Missing reads as the web reads `undefined`: not closable.
                 closable = obj["closable"].bool ?: false,
                 extra = JsonObject(obj.filterKeys { it !in KNOWN }),
+                pinned = obj["pinned"].bool == true,
             )
         }
     }

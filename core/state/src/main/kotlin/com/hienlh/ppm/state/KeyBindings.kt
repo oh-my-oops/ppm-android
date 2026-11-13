@@ -30,6 +30,12 @@ val KEY_ACTIONS: List<KeyAction> = listOf(
         note = "No default shortcut — Mod+' now toggles the terminal panel; still available via the command palette",
     ),
     KeyAction("open-settings", "Open Settings", "tabs", "Mod+,"),
+    KeyAction(
+        "toggle-pin-tab", "Pin / Unpin Tab", "tabs", "",
+        note = "No default shortcut — VS Code's is the two-step Ctrl+K Shift+Enter, which PPM cannot bind; also in the command palette and the tab's menu",
+    ),
+    KeyAction("close-saved-tabs", "Close Saved Tabs", "tabs", "", note = "No default shortcut (VS Code: Ctrl+K U). Keeps pinned tabs and tabs with unsaved work"),
+    KeyAction("close-all-tabs", "Close All Tabs", "tabs", "", note = "No default shortcut (VS Code: Ctrl+K W). Keeps pinned tabs; asks before closing unsaved work"),
     KeyAction("open-git-status", "Git Status (sidebar)", "tabs", "Mod+Shift+E"),
     KeyAction("open-search", "Search Files (sidebar)", "tabs", "Mod+Shift+F"),
     KeyAction("open-problems", "Problems", "tabs", "Mod+Shift+M", note = "Errors and warnings across the open files, in the panel — VS Code's shortcut"),

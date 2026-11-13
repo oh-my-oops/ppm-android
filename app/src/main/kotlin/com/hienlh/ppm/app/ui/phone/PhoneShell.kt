@@ -12,7 +12,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -43,6 +46,8 @@ import com.hienlh.ppm.design.kit.PhoneDrawer
 import com.hienlh.ppm.design.kit.TabCardItem
 import com.hienlh.ppm.design.kit.TabDotKind
 import com.hienlh.ppm.design.kit.TabSwitcherSheet
+import com.hienlh.ppm.design.kit.RowAction
+import com.hienlh.ppm.design.kit.RowActionsSheet
 import com.hienlh.ppm.design.themeBackground
 import com.hienlh.ppm.design.vector
 import com.hienlh.ppm.state.workspace.WorkspaceTab
@@ -93,6 +98,8 @@ fun PhoneShell(
         ?: openTabs.firstOrNull { it.id == nav.currentTabId }
         ?: model.activeTab
     val activeWorkspaceTabId = activeWorkspaceTab?.id
+    // The tab whose long-press menu is open in the tab switcher.
+    var tabMenuFor by remember { mutableStateOf<String?>(null) }
 
     // Synchronize workspace tab changes into PhoneNav while keeping synthetic area views intact.
     LaunchedEffect(openTabIds, activeWorkspaceTabId) {
@@ -474,9 +481,10 @@ fun PhoneShell(
         )
 
         // Tab switcher bottom sheet (Requirement 2.3)
+        val switcherTabs = openTabs.filter { !minimal || PhoneArea.isMinimalTabType(it.type) }
         if (nav.topSheet == SheetKey.TabSwitcher) {
             TabSwitcherSheet(
-                tabs = openTabs.filter { !minimal || PhoneArea.isMinimalTabType(it.type) }.map { tab ->
+                tabs = switcherTabs.map { tab ->
                     val sessionId = tabSessionId(tab)
                     val isUnread = sessionId != null && unreadMap.containsKey(sessionId)
                     val isRunning = sessionId != null && runningSet.contains(sessionId)
@@ -498,8 +506,11 @@ fun PhoneShell(
                         icon = phoneTabIconVector(tab.type),
                         active = syntheticArea == null && tab.id == activeWorkspaceTabId,
                         dotKind = dotKind,
+                        pinned = tab.pinned,
                     )
                 },
+                onUnpinTab = { tabId -> model.setTabPinned(tabId, false) },
+                onLongPressTab = { tabId -> tabMenuFor = tabId },
                 onSelectTab = { tabId ->
                     nav.closeSheet(SheetKey.TabSwitcher)
                     nav.visitTab(tabId)
@@ -550,6 +561,31 @@ fun PhoneShell(
                         },
                     ),
                 ).filter { option -> PhoneArea.fromId(option.id)?.let { PhoneArea.isAvailable(it, minimal) } ?: true },
+            )
+        }
+
+        // A tab's long-press menu: Pin / Unpin and the closes, which leave pinned tabs open (`mobile-nav.tsx`).
+        val menuTab = tabMenuFor?.let { id -> switcherTabs.firstOrNull { it.id == id } }
+        if (menuTab != null) {
+            // The tabs of the menu tab's panel, as the web's menu counts them; a list handed in has no panels.
+            val panelId = openTabPairs.firstOrNull { it.first.id == menuTab.id }?.second
+            val panelTabs = if (panelId == null) switcherTabs else switcherTabs.filter { tab -> openTabPairs.any { it.first.id == tab.id && it.second == panelId } }
+            val minimalShown = { tab: WorkspaceTab -> !minimal || PhoneArea.isMinimalTabType(tab.type) }
+            RowActionsSheet(
+                title = menuTab.title.ifBlank { menuTab.type },
+                actions = phoneTabMenuItems(menuTab, panelTabs).map { item ->
+                    RowAction(item.id, item.label, item.icon) {
+                        when {
+                            item.bulk != null -> model.bulkCloseTabs(menuTab.id, item.bulk, shown = minimalShown)
+                            item.id == "close" -> {
+                                model.closeTab(menuTab.id)
+                                nav.onTabClosed(menuTab.id, model.activeTabId)
+                            }
+                            else -> model.setTabPinned(menuTab.id, !menuTab.pinned)
+                        }
+                    }
+                },
+                onDismiss = { tabMenuFor = null },
             )
         }
 

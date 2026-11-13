@@ -1,6 +1,11 @@
 package com.hienlh.ppm.design.kit
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -65,6 +71,8 @@ data class TabCardItem(
     val active: Boolean = false,
     val dotKind: TabDotKind = TabDotKind.None,
     val dotColor: Color? = null,
+    /** Pinned: a pin stands where the close button would be, tapping it unpins, and a swipe does not close it. */
+    val pinned: Boolean = false,
 ) {
     constructor(
         id: String,
@@ -74,7 +82,8 @@ data class TabCardItem(
         active: Boolean = false,
         dotKind: TabDotKind = TabDotKind.None,
         dotColor: Color? = null,
-    ) : this(id, title, subtitle, icon.vector, active, dotKind, dotColor)
+        pinned: Boolean = false,
+    ) : this(id, title, subtitle, icon.vector, active, dotKind, dotColor, pinned)
 
     constructor(
         id: String,
@@ -84,7 +93,8 @@ data class TabCardItem(
         active: Boolean = false,
         dotKind: TabDotKind = TabDotKind.None,
         dotColor: Color? = null,
-    ) : this(id, title, subtitle, icon.vector, active, dotKind, dotColor)
+        pinned: Boolean = false,
+    ) : this(id, title, subtitle, icon.vector, active, dotKind, dotColor, pinned)
 }
 
 /** One "New tab" tile at the bottom of [TabSwitcherSheet] (Chat, Terminal, Files, Database). */
@@ -124,6 +134,8 @@ fun TabSwitcherSheet(
     modifier: Modifier = Modifier,
     newTabOptions: List<NewTabOption> = emptyList(),
     title: String = "Open tabs \u00B7 ${tabs.size}",
+    onUnpinTab: (String) -> Unit = {},
+    onLongPressTab: ((String) -> Unit)? = null,
 ) {
     Sheet(
         title = title,
@@ -135,6 +147,8 @@ fun TabSwitcherSheet(
             onSelectTab = onSelectTab,
             onCloseTab = onCloseTab,
             newTabOptions = newTabOptions,
+            onUnpinTab = onUnpinTab,
+            onLongPressTab = onLongPressTab,
         )
     }
 }
@@ -149,6 +163,8 @@ fun TabSwitcherContent(
     onCloseTab: (String) -> Unit,
     modifier: Modifier = Modifier,
     newTabOptions: List<NewTabOption> = emptyList(),
+    onUnpinTab: (String) -> Unit = {},
+    onLongPressTab: ((String) -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
 
@@ -169,6 +185,8 @@ fun TabSwitcherContent(
                     item = tab,
                     onClick = { onSelectTab(tab.id) },
                     onClose = { onCloseTab(tab.id) },
+                    onUnpin = { onUnpinTab(tab.id) },
+                    onLongClick = onLongPressTab?.let { press -> { press(tab.id) } },
                 )
             }
         }
@@ -218,6 +236,8 @@ fun TabCard(
     onClick: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    onUnpin: () -> Unit = {},
+    onLongClick: (() -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(KitSpec.TabCardRadius)
@@ -236,13 +256,18 @@ fun TabCard(
     }
 
     var dragOffsetPx by remember(item.id) { mutableFloatStateOf(0f) }
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val hovered by source.collectIsHoveredAsState()
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = KitSpec.TabCardMinHeight)
             .offset { IntOffset(dragOffsetPx.roundToInt(), 0) }
-            .pointerInput(item.id, onClose) {
+            // A pinned tab is closed only by its menu's Close, never by a swipe.
+            .pointerInput(item.id, onClose, item.pinned) {
+                if (item.pinned) return@pointerInput
                 detectHorizontalDragGestures(
                     onDragEnd = {
                         if (abs(dragOffsetPx) > 96.dp.toPx()) {
@@ -259,11 +284,28 @@ fun TabCard(
             .clip(shape)
             .background(bgColor, shape)
             .cssBorder(borderColor, shape, width = 1.dp)
-            .ppmClickable(
-                shape = shape,
-                hoverColor = tokens.surfaceHover.color,
-                onClickLabel = item.title,
-                onClick = onClick,
+            .then(
+                if (onLongClick == null) {
+                    Modifier.ppmClickable(
+                        shape = shape,
+                        hoverColor = tokens.surfaceHover.color,
+                        onClickLabel = item.title,
+                        onClick = onClick,
+                    )
+                } else {
+                    // A long press opens the tab's menu (`onTabLongPress` in mobile-nav.tsx).
+                    Modifier
+                        .background(if (pressed || hovered) tokens.surfaceHover.color else Color.Transparent, shape)
+                        .hoverable(source)
+                        .combinedClickable(
+                            interactionSource = source,
+                            indication = null,
+                            role = Role.Button,
+                            onClickLabel = item.title,
+                            onLongClick = onLongClick,
+                            onClick = onClick,
+                        )
+                }
             )
             .padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -316,7 +358,8 @@ fun TabCard(
             }
         }
 
-        // 48 x 48 dp close button
+        // 48 x 48 dp close button; on a pinned tab the pin stands there, and tapping it unpins (as on desktop).
+        val trailingLabel = if (item.pinned) "Unpin ${item.title}" else "Close ${item.title}"
         Box(
             modifier = Modifier
                 .size(KitSpec.MinTouchTarget)
@@ -324,14 +367,14 @@ fun TabCard(
                 .ppmClickable(
                     shape = closeShape,
                     hoverColor = tokens.surfaceHover.color,
-                    onClickLabel = "Close ${item.title}",
-                    onClick = onClose,
+                    onClickLabel = trailingLabel,
+                    onClick = if (item.pinned) onUnpin else onClose,
                 )
-                .semantics { contentDescription = "Close ${item.title}" },
+                .semantics { contentDescription = trailingLabel },
             contentAlignment = Alignment.Center,
         ) {
             PpmIcon(
-                icon = ProductIcon.X,
+                icon = if (item.pinned) ProductIcon.Pin else ProductIcon.X,
                 size = 16.dp,
                 tint = tokens.text3.color,
             )
