@@ -67,7 +67,7 @@ class PhoneSpecsTest {
     private data class Seen(val line: String, val body: String)
 
     /** The spec routes of one spec, `login`, whose state moves as the buttons are pressed. */
-    private inner class SpecServer(var state: String) : Dispatcher() {
+    private inner class SpecServer(var state: String, val designBlocked: String? = null) : Dispatcher() {
         val seen = CopyOnWriteArrayList<Seen>()
 
         override fun dispatch(request: RecordedRequest): MockResponse {
@@ -95,8 +95,8 @@ class PhoneSpecsTest {
             return MockResponse.Builder().addHeader("Content-Type", "application/json").body("""{"ok":true,"data":$data}""").build()
         }
 
-        private fun phase(status: String, file: String, text: String?, submitted: Boolean = false) =
-            """{"status":"$status","file":"specs/login/$file","issues":[],"text":${text?.let { "\"$it\"" } ?: "null"},"submitted":$submitted}"""
+        private fun phase(status: String, file: String, text: String?, submitted: Boolean = false, blocked: String? = null) =
+            """{"status":"$status","file":"specs/login/$file","issues":[],"text":${text?.let { "\"$it\"" } ?: "null"},"submitted":$submitted,"approveBlocked":${blocked?.let { "\"$it\"" } ?: "null"}}"""
 
         fun view(): String {
             val execution = state == "execution" || state == "running"
@@ -108,7 +108,7 @@ class PhoneSpecsTest {
             val req = if (state == "requirements") phase("draft", "requirements.md", "# Login needs\\n1. WHEN a user signs in THE SYSTEM SHALL greet them", true) else phase("approved", "requirements.md", "# Login needs")
             val design = when (state) {
                 "requirements" -> phase("missing", "design.md", null)
-                "design" -> phase("draft", "design.md", "# Design body", true)
+                "design" -> phase("draft", "design.md", "# Design body", true, designBlocked)
                 else -> phase("approved", "design.md", "# Design body")
             }
             val tasks = if (execution) phase("approved", "tasks.md", "- [ ] 1. Model") else phase("missing", "tasks.md", null)
@@ -177,6 +177,19 @@ class PhoneSpecsTest {
         }
         composeRule.onNodeWithTag("phone-spec-approve").assertExists()
         assertEquals("Login flow", model.specs.openTitle)
+    }
+
+    @Test
+    fun `a document something still holds back offers no Approve and says what it waits for`() {
+        showSpec(model(SpecServer("design", designBlocked = "Approve the UI drawing first (UI: yes).")))
+
+        waitForTag("phone-spec-document")
+        composeRule.waitUntil(5_000L) {
+            composeRule.onAllNodes(hasText("Design body", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("Submitted by the AI · waiting for you · Approve the UI drawing first (UI: yes).", useUnmergedTree = true).assertExists()
+        assertEquals(0, composeRule.onAllNodesWithTag("phone-spec-approve").fetchSemanticsNodes().size)
+        assertEquals(0, composeRule.onAllNodesWithTag("phone-spec-request-changes").fetchSemanticsNodes().size)
     }
 
     @Test

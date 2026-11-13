@@ -30,7 +30,7 @@ class SpecsApiTest {
          "folder":"specs/login","current":"requirements","order":["requirements","design","tasks"],
          "phases":{
            "requirements":{"status":"draft","file":"specs/login/requirements.md","issues":[{"line":3,"severity":"error","message":"No criteria"}],"text":"# Login","submitted":true},
-           "design":{"status":"missing","file":"specs/login/design.md","issues":[],"text":null,"submitted":false},
+           "design":{"status":"missing","file":"specs/login/design.md","issues":[],"text":null,"submitted":false,"approveBlocked":"Approve requirements.md first."},
            "tasks":{"status":"missing","file":"specs/login/tasks.md","issues":[],"text":null,"submitted":false}},
          "needsDrawing":false,"drawing":"not-needed","designSlug":null,"testCommand":null,
          "waves":{"waves":[["1","2"],["3"]],"moved":[{"id":"3","reason":"shares src/a.ts with 1"}],"optional":[],"issues":[]},
@@ -83,6 +83,8 @@ class SpecsApiTest {
         assertEquals(listOf(SpecIssue(3, "error", "No criteria")), req.issues)
         assertNull(spec.phases.getValue("design").text)
         assertFalse(spec.phases.getValue("design").canAct)
+        assertNull(req.approveBlocked)
+        assertEquals("Approve requirements.md first.", spec.phases.getValue("design").approveBlocked)
         assertEquals(listOf(listOf("1", "2"), listOf("3")), spec.waves)
         assertEquals(mapOf("3" to "shares src/a.ts with 1"), spec.moved)
         assertEquals(listOf("1", "3"), spec.tasks.map { it.id })

@@ -1,5 +1,6 @@
 package com.hienlh.ppm.state
 
+import com.hienlh.ppm.client.SpecPhaseView
 import com.hienlh.ppm.client.SpecSummary
 import com.hienlh.ppm.client.SpecSummaryTask
 import com.hienlh.ppm.protocol.SessionInfo
@@ -120,5 +121,31 @@ class SpecsTest {
             SpecDocument.shown("requirements", md),
         )
         assertEquals("# D\n- WHEN x", SpecDocument.shown("design", "# D\n<!-- n -->\n- WHEN x"))
+    }
+
+    private fun phase(status: String = "draft", submitted: Boolean = false, approveBlocked: String? = null) =
+        SpecPhaseView(status, "specs/x/design.md", emptyList(), "", submitted, approveBlocked)
+
+    @Test
+    fun `the status line says where a document stands and what an approval waits for`() {
+        assertEquals(
+            "Draft · the AI has not submitted it yet · Approve the UI drawing first (UI: yes).",
+            SpecWorkflowCopy.phaseState(phase(approveBlocked = "Approve the UI drawing first (UI: yes).")),
+        )
+        assertEquals("Submitted by the AI · waiting for you", SpecWorkflowCopy.phaseState(phase(submitted = true)))
+        assertEquals("Approved", SpecWorkflowCopy.phaseState(phase("approved")))
+        assertEquals("Changed after you approved it", SpecWorkflowCopy.phaseState(phase("stale")))
+        assertEquals("Not written yet", SpecWorkflowCopy.phaseState(phase("missing")))
+        assertEquals("Has problems the AI must fix", SpecWorkflowCopy.phaseState(phase("invalid", submitted = true)))
+    }
+
+    @Test
+    fun `Approve and Request changes are offered only on a document ready for review`() {
+        assertTrue(phase(submitted = true).canAct)
+        assertTrue(phase("stale").canAct)
+        // A draft the AI has not submitted, or one something else holds back.
+        assertFalse(phase().canAct)
+        assertFalse(phase(submitted = true, approveBlocked = "Approve the UI drawing first (UI: yes).").canAct)
+        assertFalse(phase("approved").canAct)
     }
 }
