@@ -25,6 +25,9 @@ internal data class TabToolCall(val tool: String, val path: String, val line: In
 internal sealed interface DeviceToolCall {
     data class OpenUrl(val url: String) : DeviceToolCall
 
+    /** `open_branch_review`: none of the refs is required, the host picks what is left out. */
+    data class OpenBranchReview(val base: String? = null, val head: String? = null, val repo: String? = null) : DeviceToolCall
+
     data class ReadTerminal(val terminal: String? = null, val lines: Long? = null) : DeviceToolCall
 
     data class RunInTerminal(val command: String, val cwd: String? = null) : DeviceToolCall
@@ -40,13 +43,14 @@ data class DbToolCall(
 )
 
 internal const val OPEN_URL_TOOL = "open_url"
+internal const val OPEN_BRANCH_REVIEW_TOOL = "open_branch_review"
 const val OPEN_QUERY_TOOL = "open_query"
 const val DB_QUERY_TOOL = "db_query"
 const val DB_EXECUTE_TOOL = "db_execute"
 const val DB_EXECUTE_APPROVAL = "ppm:db_execute"
 
 private val TAB_TOOL_NAME = Regex("""(?:mcp__ppm-tabs__|ppm_tabs:)(open_file|open_preview)""")
-private val DEVICE_TOOL_NAME = Regex("""(?:mcp__ppm-tabs__|ppm_tabs:)(open_url|read_terminal|run_in_terminal)""")
+private val DEVICE_TOOL_NAME = Regex("""(?:mcp__ppm-tabs__|ppm_tabs:)(open_url|open_branch_review|read_terminal|run_in_terminal)""")
 private val DB_TOOL_NAME = Regex("""(?:mcp__ppm-db__|ppm_db:)(db_query|open_query|db_execute)""")
 
 /** The highest line a tab opens at (`MAX_TAB_LINE`). */
@@ -72,10 +76,10 @@ internal fun tabToolCall(name: String, input: JsonElement?): TabToolCall? {
     return TabToolCall(tool, path, if (valid) line!!.toInt() else null)
 }
 
-/** The `open_url` / `read_terminal` / `run_in_terminal` tool a tool name is, or null: the card's icon needs only that. */
+/** The `open_url` / `open_branch_review` / `read_terminal` / `run_in_terminal` tool a tool name is, or null: the card's icon needs only that. */
 internal fun deviceToolOf(name: String): String? = DEVICE_TOOL_NAME.matchEntire(name)?.groupValues?.get(1)
 
-/** The `open_url` / `read_terminal` / `run_in_terminal` call an event is, under either provider's name, or null. */
+/** The `open_url` / `open_branch_review` / `read_terminal` / `run_in_terminal` call an event is, under either provider's name, or null. */
 internal fun deviceToolCall(name: String, input: JsonElement?): DeviceToolCall? {
     val tool = deviceToolOf(name) ?: return null
     if (input !is JsonObject) return null
@@ -83,6 +87,7 @@ internal fun deviceToolCall(name: String, input: JsonElement?): DeviceToolCall? 
     fun text(key: String) = args[key].text()?.takeIf { it.isNotBlank() }
     return when (tool) {
         OPEN_URL_TOOL -> text("url")?.let(DeviceToolCall::OpenUrl)
+        OPEN_BRANCH_REVIEW_TOOL -> DeviceToolCall.OpenBranchReview(text("base"), text("head"), text("repo"))
         "run_in_terminal" -> text("command")?.let { DeviceToolCall.RunInTerminal(it, text("cwd")) }
         else -> {
             val lines = args["lines"].number()?.takeIf { it == floor(it) && it > 0 }

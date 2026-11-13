@@ -14,6 +14,7 @@ import kotlinx.serialization.json.JsonObject
 const val OPEN_URL_TOOL = "open_url"
 const val RUN_IN_TERMINAL_TOOL = "run_in_terminal"
 const val OPEN_QUERY_TOOL = "open_query"
+const val OPEN_BRANCH_REVIEW_TOOL = "open_branch_review"
 
 /** An HTML page `open_preview` shows: check it once it has loaded, with an image when [screenshot]. */
 data class TabOpenCheck(val screenshot: Boolean)
@@ -57,6 +58,19 @@ sealed interface TabOpenRequest {
         val cwd: String,
     ) : TabOpenRequest
 
+    /** `open_branch_review`: the Branch Review tab on one pair of refs, checked on the host first. */
+    data class BranchReview(
+        override val requestId: String,
+        val projectName: String,
+        /**
+         * The repository's path as `GET /git/repos` names it, when the project folder is a container
+         * of checkouts; null when the project is the repository.
+         */
+        val repo: String?,
+        val base: String,
+        val head: String,
+    ) : TabOpenRequest
+
     /** A tool this app does not know, or a request without what its tool needs. */
     data class Other(override val requestId: String, val tool: String?) : TabOpenRequest
 
@@ -87,6 +101,13 @@ sealed interface TabOpenRequest {
                     terminalId = json["terminalId"].string ?: return other,
                     projectName = json["projectName"].string,
                     cwd = json["cwd"].string ?: "",
+                )
+                OPEN_BRANCH_REVIEW_TOOL -> BranchReview(
+                    requestId = id,
+                    projectName = json["projectName"].string ?: return other,
+                    repo = json["repo"].string?.takeIf { it.isNotEmpty() },
+                    base = json["base"].string ?: return other,
+                    head = json["head"].string ?: return other,
                 )
                 else -> other
             }

@@ -28,6 +28,7 @@ fun tabOpenRefusal(request: TabOpenRequest): String? = when (request) {
     }
     is TabOpenRequest.Query -> null
     is TabOpenRequest.Terminal -> null
+    is TabOpenRequest.BranchReview -> null
     is TabOpenRequest.Other -> "the PPM Android app does not know the ${request.tool ?: "requested"} tool"
 }
 
@@ -38,8 +39,9 @@ fun tabOpenRefusal(request: TabOpenRequest): String? = when (request) {
  *
  * [openFile] opens (or brings back) the file's tab beside the chat and says which preview shows
  * it; [openUrl] opens a web-preview tab; [openTerminal] attaches to the server's terminal;
- * [openQuery] opens a database Query tab without running the script.
- * Each throws, with what to tell the AI, when it cannot. A terminal or query never waits for a preview.
+ * [openQuery] opens a database Query tab without running the script; [openBranchReview] opens Branch
+ * Review on the refs the host checked, or moves the one already open there.
+ * Each throws, with what to tell the AI, when it cannot. None but a page waits for a preview.
  * [frame] is the device frame the page is seen in: "Phone" in the phone layout, else "Desktop".
  */
 suspend fun answerTabOpen(
@@ -55,6 +57,9 @@ suspend fun answerTabOpen(
     openQuery: suspend (TabOpenRequest.Query) -> Unit = {
         throw UnsupportedOperationException("the PPM Android app cannot open database queries yet")
     },
+    openBranchReview: suspend (TabOpenRequest.BranchReview) -> Unit = {
+        throw UnsupportedOperationException("the PPM Android app cannot open Branch Review yet")
+    },
 ): TabOpenAnswer {
     tabOpenRefusal(request)?.let { return TabOpenAnswer(opened = false, error = it) }
     val ticket = try {
@@ -69,6 +74,10 @@ suspend fun answerTabOpen(
             }
             is TabOpenRequest.Query -> {
                 openQuery(request)
+                return TabOpenAnswer(opened = true)
+            }
+            is TabOpenRequest.BranchReview -> {
+                openBranchReview(request)
                 return TabOpenAnswer(opened = true)
             }
             is TabOpenRequest.File -> openFile(AiTabTarget(request.tool, request.filePath, request.projectName, request.line))

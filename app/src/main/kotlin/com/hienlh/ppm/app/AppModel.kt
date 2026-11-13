@@ -158,6 +158,7 @@ import com.hienlh.ppm.state.workspace.BulkClose
 import com.hienlh.ppm.state.workspace.bulkCloseIds
 import com.hienlh.ppm.state.workspace.tabHoldsUnsavedWork
 import com.hienlh.ppm.state.workspace.visibleTabs
+import com.hienlh.ppm.state.workspace.openAiBranchReviewTab
 import com.hienlh.ppm.state.workspace.openAiQueryTab
 import com.hienlh.ppm.state.workspace.openAiTab
 import com.hienlh.ppm.state.workspace.openAiUrlTab
@@ -2555,6 +2556,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
             openQuery = { queryReq ->
                 inChatProject(chat.project) { store ->
                     store.openAiQueryTab(queryReq.query, sessionId)
+                }
+            },
+            openBranchReview = { review ->
+                inChatProject(chat.project) { store ->
+                    // The repository the server named becomes this device's choice, as picking it in Source Control would.
+                    review.repo?.let { chooseGitRepo(review.projectName, it) }
+                    store.openAiBranchReviewTab(review, sessionId)
                 }
             },
             frame = { if (wide) "Desktop" else "Phone" },

@@ -302,6 +302,29 @@ class AiTabsTest {
         for (host in listOf("10.0.2.2", "192.168.1.20", "127.0.0", "localhost.example", "ppm.ts.net")) assertFalse(host, browserOnHost(host))
     }
 
+    @Test
+    fun `Branch Review opens beside the chat on the pair asked for, and a later call moves the tab already open`() {
+        val store = store()
+        val review = TabOpenRequest.BranchReview("q1", "app", null, base = "main", head = "feat/x")
+        val id = store.openAiBranchReviewTab(review, session)
+        val s = store.state.value
+        assertEquals(2, s.gridPanelIds.size)
+        val tab = s.panels.getValue(s.gridPanelIds[1]).tab(id)!!
+        assertEquals(Triple("branch-review", "Branch Review", "app"), Triple(tab.type, tab.title, tab.projectId))
+        assertEquals(meta("""{"projectName":"app","base":"main","head":"feat/x","aiOpenAt":5000}"""), tab.metadata.withoutStamp())
+        assertEquals("chat", s.panels.getValue(s.gridPanelIds[0]).activeTab?.type)
+
+        // The project's one Branch Review tab takes the new pair, whatever else its metadata holds.
+        store.updateTab(id) { it.copy(metadata = it.metadata.merged(mapOf("note" to JsonPrimitive("kept")))) }
+        now = 6_000L
+        assertEquals(id, store.openAiBranchReviewTab(review.copy(requestId = "q2", base = "develop", head = "feat/y"), session))
+        assertEquals(2, store.state.value.gridPanelIds.size)
+        assertEquals(
+            meta("""{"projectName":"app","base":"develop","head":"feat/y","aiOpenAt":6000,"note":"kept"}"""),
+            store.state.value.panelOf(id)!!.tab(id)!!.metadata.withoutStamp(),
+        )
+    }
+
     /** The store stamps every tab it shows. */
     private fun JsonObject.withoutStamp() = JsonObject(filterKeys { it != "lastActiveAt" })
 
