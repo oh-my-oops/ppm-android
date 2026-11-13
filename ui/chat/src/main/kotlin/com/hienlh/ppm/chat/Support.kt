@@ -1,6 +1,7 @@
 package com.hienlh.ppm.chat
 
 import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -11,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.AndroidClipboard
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.LocalClipboard
@@ -368,7 +370,13 @@ internal fun WithoutOnCopy(marks: String, content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalClipboard provides clean, content = content)
 }
 
-private class CleanClipboard(private val inner: Clipboard, private val marks: String) : Clipboard by inner {
+/**
+ * An [AndroidClipboard] like the one it wraps: a text field's context menu asks for Android's own manager to see
+ * whether there is something to paste, and Compose throws on any other kind of clipboard (it closed the app).
+ */
+private class CleanClipboard(private val inner: Clipboard, private val marks: String) : AndroidClipboard, Clipboard by inner {
+    override val clipboardManager: ClipboardManager get() = (inner as AndroidClipboard).clipboardManager
+
     override suspend fun setClipEntry(clipEntry: ClipEntry?) {
         val data = clipEntry?.clipData
         val text = data?.takeIf { it.itemCount == 1 }?.getItemAt(0)?.text
