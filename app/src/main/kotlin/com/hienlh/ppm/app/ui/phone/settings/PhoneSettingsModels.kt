@@ -21,6 +21,7 @@ enum class PhoneSettingsGroup(val title: String) {
  * The full-page sections available in Phone Settings (Requirement 15.1):
  * - [Accounts] (sign in, usage, enable or disable)
  * - [AiProvider] (model, effort, permission mode)
+ * - [Memory] (on or off, where memories live, sync from providers, search by meaning)
  * - [Notifications] (events, delay, push, Telegram, ntfy)
  * - [Theme] (Light / Dark / System mode + color theme grid)
  * - [Servers] (connected server, switch, remove, log out, add server)
@@ -51,6 +52,14 @@ enum class PhoneSettingsSection(
         icon = ProductIcon.Sparkles,
         group = PhoneSettingsGroup.AI,
         category = SettingsCategory.Ai,
+    ),
+    Memory(
+        id = "memory",
+        title = "Memory",
+        subtitle = "One memory store for every provider, synced",
+        icon = ProductIcon.Brain,
+        group = PhoneSettingsGroup.AI,
+        category = SettingsCategory.Memory,
     ),
     Notifications(
         id = "notifications",
@@ -133,6 +142,7 @@ sealed interface PhoneSettingsRoute {
 fun isPhoneFullSettingsCategory(category: SettingsCategory): Boolean = when (category) {
     SettingsCategory.Accounts,
     SettingsCategory.Ai,
+    SettingsCategory.Memory,
     SettingsCategory.Notifications,
     SettingsCategory.Appearance,
     SettingsCategory.Servers,
@@ -148,6 +158,7 @@ fun isPhoneFullSettingsCategory(category: SettingsCategory): Boolean = when (cat
 fun resolvePhoneSettingsCategory(category: SettingsCategory): PhoneSettingsRoute = when (category) {
     SettingsCategory.Accounts -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Accounts)
     SettingsCategory.Ai -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.AiProvider)
+    SettingsCategory.Memory -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Memory)
     SettingsCategory.Notifications -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Notifications)
     SettingsCategory.Appearance -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Theme)
     SettingsCategory.Servers -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Servers)
@@ -166,6 +177,7 @@ fun resolvePhoneSettingsRoute(rawCategory: String?): PhoneSettingsRoute {
     return when (cleaned) {
         "accounts", "account" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Accounts)
         "ai", "ai-provider", "aiprovider" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.AiProvider)
+        "memory" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Memory)
         "notifications", "notification" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Notifications)
         "appearance", "theme", "themes" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Theme)
         "servers", "server" -> PhoneSettingsRoute.FullPage(PhoneSettingsSection.Servers)

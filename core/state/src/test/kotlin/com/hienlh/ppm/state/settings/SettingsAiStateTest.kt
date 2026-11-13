@@ -25,7 +25,7 @@ class SettingsAiStateTest {
     @Test
     fun `the tool groups are the web's Settings - Tools groups, in its order`() {
         assertEquals(
-            listOf("Tabs", "Terminal", "Session history", "Database", "Session collaboration", "Spec mode"),
+            listOf("Tabs", "Terminal", "Session history", "Database", "Session collaboration", "Spec mode", "Memory"),
             PPM_TOOL_GROUPS.map { it.title },
         )
         assertEquals(
@@ -34,6 +34,7 @@ class SettingsAiStateTest {
                 "search_sessions", "list_session_turns", "read_session_turns", "db_query", "open_query", "db_execute",
                 "create_session", "send_to_session", "session_status",
                 "spec_status", "spec_create", "spec_submit", "spec_open_design", "task_start", "task_done", "task_red", "task_green", "suite_check",
+                "memory_search", "memory_read", "memory_write", "memory_forget",
             ),
             PPM_TOOL_GROUPS.flatMap { group -> group.tools.map { it.id } },
         )
@@ -50,6 +51,13 @@ class SettingsAiStateTest {
         assertTrue(isPpmToolEnabled(mapOf("send_to_session" to true, "create_session" to false), "read_session_turns"))
         assertFalse(isPpmToolEnabled(mapOf("send_to_session" to false), "read_session_turns"))
         assertFalse(isPpmToolEnabled(mapOf("send_to_session" to true, "create_session" to false), "create_session"))
+        // Memory is introduced the same way, as a feature of its own: its switches never follow the session tools'.
+        assertFalse(isPpmToolEnabled(mapOf("search_sessions" to true), "memory_search"))
+        assertTrue(isPpmToolEnabled(mapOf("memory_write" to true), "memory_read"))
+        assertEquals(
+            mapOf("memory_search" to false, "memory_read" to true, "memory_write" to false, "memory_forget" to false),
+            patchPpmToolSwitches(emptyMap(), "memory_read", true),
+        )
     }
 
     @Test
