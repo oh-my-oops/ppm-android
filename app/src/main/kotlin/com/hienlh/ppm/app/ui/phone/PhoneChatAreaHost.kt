@@ -447,7 +447,7 @@ internal fun PhoneChatContent(
                 providers = providers,
                 selectedProviderId = providerId,
                 models = availableModels,
-                selectedModelId = ModelNames.effectiveModel(stateModel, providerId).orEmpty(),
+                selectedModelId = ModelNames.effectiveModel(stateModel, providerId, catalog?.models(providerId).orEmpty()).orEmpty(),
                 selectedEffort = effortLabel,
                 thinkingEnabled = thinkingEnabled,
                 providerLocked = chatTab?.session != null || chatTab == null,

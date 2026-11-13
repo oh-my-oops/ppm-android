@@ -1418,7 +1418,7 @@ internal fun ModelColumns(
     LaunchedEffect(catalog, chat.providerId) { catalog?.load(chat.providerId) }
     val models: List<ModelOption> = remember(catalog, entries, chat.providerId) { catalog?.models(chat.providerId).orEmpty() }
     val status: ModelListStatus? = remember(catalog, entries, chat.providerId) { catalog?.status(chat.providerId) ?: ModelListStatus.LOADING }
-    val effectiveModel = ModelNames.effectiveModel(state.model, chat.providerId)
+    val effectiveModel = ModelNames.effectiveModel(state.model, chat.providerId, models)
     val effectiveEffort = Effort.of(state.effort ?: ModelNames.suffixEffort(state.model, chat.providerId)) ?: Effort.DEFAULT
     ModelPickerColumns(
         models, status, effectiveModel, effectiveEffort, state.thinking, box, inner,

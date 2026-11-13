@@ -39,13 +39,16 @@ class AiSettingsTest {
     fun `provider status, a probe and a provider's models`() = withServer(
         ok("""[{"id":"codex","registered":false,"reason":"not found","attempts":2,"lastProbeAt":"2026-10-24T10:00:00Z"}]"""),
         ok("""{"id":"codex","registered":true,"attempts":3,"lastProbeAt":"2026-10-24T10:01:00Z"}"""),
-        ok("""[{"value":"gpt-6-sol","label":"GPT-6 Sol"},{"value":"bare"},{"label":"no value"}]"""),
+        ok("""[{"value":"gpt-6-sol","label":"GPT-6 Sol","isDefault":true},{"value":"bare"},{"label":"no value"}]"""),
     ) { server, api ->
         assertEquals("not found", api.providerStatuses().single().reason)
         assertEquals("GET /api/settings/ai/providers/status", server.takeRequest().let { "${it.method} ${it.target}" })
         assertEquals(true, api.probeProvider("codex").registered)
         assertEquals("POST /api/settings/ai/providers/codex/probe", server.takeRequest().let { "${it.method} ${it.target}" })
-        assertEquals(listOf("GPT-6 Sol", "bare"), api.settingsModels("codex").map { it.label })
+        val models = api.settingsModels("codex")
+        assertEquals(listOf("GPT-6 Sol", "bare"), models.map { it.label })
+        // The list marks the model the provider runs on when none is chosen ("Auto").
+        assertEquals(listOf(true, false), models.map { it.isDefault })
         assertEquals("GET /api/settings/ai/providers/codex/models", server.takeRequest().let { "${it.method} ${it.target}" })
     }
 

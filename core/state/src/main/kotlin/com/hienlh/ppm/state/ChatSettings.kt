@@ -137,9 +137,9 @@ class ModelCatalog(
         return null
     }
 
-    /** The chip's name for [model]: the list's label (without "Claude " on Claude), else a readable id. */
+    /** The chip's name for [model], or for the provider's own pick when none is chosen: the list's label (without "Claude " on Claude), else a readable id. */
     fun displayName(model: String?, providerId: String): String {
-        val effective = ModelNames.effectiveModel(model, providerId) ?: return "Model"
+        val effective = ModelNames.effectiveModel(model, providerId, models(providerId)) ?: return "Model"
         models(providerId).firstOrNull { it.value == effective }?.let { return ModelNames.shortLabel(it.label, providerId) }
         return ModelNames.displayName(effective)
     }
