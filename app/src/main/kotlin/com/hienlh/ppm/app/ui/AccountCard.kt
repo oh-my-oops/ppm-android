@@ -65,9 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import java.text.BreakIterator
-import java.time.Instant
 import com.hienlh.ppm.design.LocalPpmTokens
-import com.hienlh.ppm.design.PpmFormat
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.Rgba
@@ -84,7 +82,6 @@ import com.hienlh.ppm.design.rememberHover
 import com.hienlh.ppm.protocol.AccountInfo
 import com.hienlh.ppm.protocol.AccountUsageEntry
 import com.hienlh.ppm.protocol.LimitBucket
-import com.hienlh.ppm.protocol.ResetCredits
 import com.hienlh.ppm.state.DailyGuardState
 import com.hienlh.ppm.state.UsageTone
 import com.hienlh.ppm.state.formatExpiry
@@ -113,8 +110,8 @@ private val FlashFade = tween<Color>(500, easing = FastOutSlowInEasing)
 /**
  * One account as the chat's usage panel shows it (account-card.tsx, dense): its name and badges,
  * the Use button and the on/off switch beside them, its windows, a weekly-only Codex account's
- * Daily guard, and a footer of the facts worth acting on — its free resets and [resetCreditAction]
- * beside them, when the figures were read and when the sign-in ends. An expired account, or one
+ * Daily guard, its free resets ([resetCreditAction], a section of their own at the bottom), and a
+ * footer of the facts worth acting on — when the figures were read and when the sign-in ends. An expired account, or one
  * whose sign-in was refused, is dimmed; the expired one also loses its switch.
  *
  * The badges' explanations are the web's tooltips, which a tap never opens there: they wait for
@@ -141,7 +138,6 @@ fun AccountCard(
     dailyGuard: CardDailyGuard? = null,
     onDailyGuardToggle: (() -> Unit)? = null,
     dailyGuardToggling: Boolean = false,
-    resetCredits: ResetCredits? = null,
     resetCreditAction: (@Composable () -> Unit)? = null,
     staleUsageHint: String? = null,
     now: Long = System.currentTimeMillis(),
@@ -244,6 +240,8 @@ fun AccountCard(
             )
         }
         dailyGuard?.let { DailyGuardBox(it, onDailyGuardToggle, dailyGuardToggling, gap) }
+        // The account's free resets, last above the footer, so cards side by side line up.
+        resetCreditAction?.let { Box(gap.fillMaxWidth()) { it() } }
         // Always there, even empty: `space-y` still puts its gap above it. `gap-2` both ways, so
         // the facts that wrap in a narrow grid cell sit 8 apart.
         FlowRow(
@@ -251,8 +249,6 @@ fun AccountCard(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             itemVerticalAlignment = Alignment.CenterVertically,
         ) {
-            resetCredits?.let { ResetCreditsChip(it) }
-            resetCreditAction?.invoke()
             val fact = ppmText(10f, lineHeight = 15f)
             usage.lastFetchedAt?.let(::isoMillis)?.let { read ->
                 val stale = staleUsageHint != null
@@ -314,27 +310,6 @@ private fun DailyGuardBox(guard: CardDailyGuard, onToggle: (() -> Unit)?, toggli
             )
         }
         if (onToggle != null) PpmSwitch(checked = guard.enabled, enabled = !toggling, onChange = onToggle)
-    }
-}
-
-/**
- * Codex's free rate-limit resets (`ResetCreditsChip`): "2 free resets" in the accent and when the
- * next one lapses, or "No free resets" in the footer's colour. Its explanation waits for 13a.
- */
-@Composable
-private fun ResetCreditsChip(credits: ResetCredits) {
-    val tokens = LocalPpmTokens.current
-    val n = credits.available
-    val color = if (n > 0) tokens.accent else tokens.text3
-    val style = ppmText(10f, lineHeight = 15f)
-    // `inline-flex items-center gap-1`: narrower than the cell, the count and the date each wrap.
-    ShrinkRow(4.dp, between = false, Modifier.pointerHoverIcon(WebCursor.Help)) {
-        PpmIcon(ProductIcon.RotateCcw, 12.dp, color.color)
-        BasicText(if (n == 0) "No free resets" else "$n free reset${if (n == 1) "" else "s"}", style = style.copy(color = color.color))
-        val expires = credits.nextExpiresAt?.let(::isoMillis)
-        if (n > 0 && expires != null) {
-            BasicText("· until ${PpmFormat.monthDay(Instant.ofEpochMilli(expires))}", style = style.copy(color = tokens.text3.color))
-        }
     }
 }
 

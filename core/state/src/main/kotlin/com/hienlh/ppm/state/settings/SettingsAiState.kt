@@ -184,6 +184,32 @@ val PPM_TOOL_GROUPS: List<PpmToolGroup> = listOf(
             ),
         ),
     ),
+    PpmToolGroup(
+        title = "Memory",
+        intro = "PPM's memory store, shared by Claude, Codex and Antigravity.",
+        tools = listOf(
+            PpmToolDef(
+                id = "memory_search",
+                label = "Search memory",
+                note = "Finds memories by words and meaning; answers names and one-line descriptions only.",
+            ),
+            PpmToolDef(
+                id = "memory_read",
+                label = "Read memory",
+                note = "Reads one memory in full.",
+            ),
+            PpmToolDef(
+                id = "memory_write",
+                label = "Save memory",
+                note = "Creates or updates a PPM memory. A memory copied from a provider cannot be changed here.",
+            ),
+            PpmToolDef(
+                id = "memory_forget",
+                label = "Forget memory",
+                note = "Archives a PPM memory. The file is kept.",
+            ),
+        ),
+    ),
 )
 
 /**
@@ -196,6 +222,10 @@ val PPM_FEATURE_INTROS: List<PpmFeatureIntro> = listOf(
     PpmFeatureIntro(
         id = "session-tools-2026-11",
         tools = listOf("search_sessions", "list_session_turns", "read_session_turns", "create_session", "send_to_session", "session_status"),
+    ),
+    PpmFeatureIntro(
+        id = "ppm-memory-2026-11",
+        tools = listOf("memory_search", "memory_read", "memory_write", "memory_forget"),
     ),
 )
 

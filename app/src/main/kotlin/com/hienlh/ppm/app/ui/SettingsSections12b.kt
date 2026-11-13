@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
@@ -41,6 +42,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.client.accountUsages
+import com.hienlh.ppm.client.spendClaudeLimitReset
+import com.hienlh.ppm.client.spendCodexResetCredit
+import com.hienlh.ppm.state.claudeResetResultMessage
+import com.hienlh.ppm.state.resetCreditOutcome
 import com.hienlh.ppm.client.accounts
 import com.hienlh.ppm.client.accountsAddManual
 import com.hienlh.ppm.client.accountsDelete
@@ -302,7 +307,16 @@ internal fun ToolsSettingsContent(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun AccountsSettingsSection(model: AppModel) {
-    var activeTab by remember { mutableStateOf("claude") }
+    // An account the chat asked to be shown: its provider's tab opens on it.
+    var focus by remember { mutableStateOf(AccountFocus.take()) }
+    var activeTab by remember { mutableStateOf(focus?.provider ?: "claude") }
+    val pendingFocus = AccountFocus.pending
+    LaunchedEffect(pendingFocus) {
+        AccountFocus.take()?.let {
+            activeTab = it.provider
+            focus = it
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         FlowRow(
@@ -325,8 +339,8 @@ internal fun AccountsSettingsSection(model: AppModel) {
         }
         Separator()
         when (activeTab) {
-            "claude" -> ClaudeAccountsPane(model)
-            "codex" -> CodexAccountsPane(model)
+            "claude" -> ClaudeAccountsPane(model, focus)
+            "codex" -> CodexAccountsPane(model, focus)
             "antigravity" -> AntigravityAccountsPane(model)
         }
     }
@@ -334,7 +348,7 @@ internal fun AccountsSettingsSection(model: AppModel) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ClaudeAccountsPane(model: AppModel) {
+private fun ClaudeAccountsPane(model: AppModel, focus: AccountFocusRequest? = null) {
     val tokens = LocalPpmTokens.current
     val api = model.api
     val scope = rememberCoroutineScope()
@@ -461,8 +475,10 @@ private fun ClaudeAccountsPane(model: AppModel) {
         for (entry in usages) {
             val info = infoById[entry.accountId]
             val shape = RoundedCornerShape(10.dp)
+            val reveal = rememberAccountReveal(focus, entry.accountId)
             Column(
                 Modifier
+                    .bringIntoViewRequester(reveal.requester)
                     .fillMaxWidth()
                     .clip(shape)
                     .background(tokens.panel.color)
@@ -475,6 +491,23 @@ private fun ClaudeAccountsPane(model: AppModel) {
                     isActive = entry.accountId == activeId,
                     accountInfo = info,
                     layout = AccountCardLayout.Grid,
+                    flash = reveal.flash,
+                    resetCreditAction = {
+                        val label = entry.accountLabel ?: entry.accountId.take(8)
+                        ClaudeLimitResetsButton(
+                            accountLabel = label,
+                            resets = entry.usage.limitResets,
+                            spend = { grant ->
+                                val client = api ?: error("Not connected")
+                                claudeResetResultMessage(label, client.spendClaudeLimitReset(entry.accountId, grant.id))
+                            },
+                            onDone = { message, failed ->
+                                statusMsg = message
+                                isError = failed
+                                scope.launch { reload() }
+                            },
+                        )
+                    },
                     toggling = togglingId == entry.accountId,
                     onToggle = { id, currentStatus ->
                         val client = api ?: return@AccountCard
@@ -1016,7 +1049,7 @@ private fun ClaudeAccountsPane(model: AppModel) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CodexAccountsPane(model: AppModel) {
+private fun CodexAccountsPane(model: AppModel, focus: AccountFocusRequest? = null) {
     val tokens = LocalPpmTokens.current
     val api = model.api
     val scope = rememberCoroutineScope()
@@ -1209,8 +1242,10 @@ private fun CodexAccountsPane(model: AppModel) {
             val u = usages[account.id] ?: UsageInfo()
             val guard = if (u.session == null) dailyGuardState(u.weekly, now) else null
             val shape = RoundedCornerShape(10.dp)
+            val reveal = rememberAccountReveal(focus, account.id)
             Column(
                 Modifier
+                    .bringIntoViewRequester(reveal.requester)
                     .fillMaxWidth()
                     .clip(shape)
                     .background(tokens.panel.color)
@@ -1248,7 +1283,22 @@ private fun CodexAccountsPane(model: AppModel) {
                             reload()
                         }
                     },
-                    resetCredits = u.resetCredits,
+                    flash = reveal.flash,
+                    resetCreditAction = {
+                        CodexResetCreditButton(
+                            accountLabel = account.label,
+                            usage = u,
+                            spend = { credit ->
+                                val client = api ?: error("Not connected")
+                                resetCreditOutcome(client.spendCodexResetCredit(account.id, credit.id), account.label)
+                            },
+                            onDone = { message, failed ->
+                                statusMsg = message
+                                isError = failed
+                                scope.launch { reload() }
+                            },
+                        )
+                    },
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SettingsButton(

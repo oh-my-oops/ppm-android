@@ -3,6 +3,7 @@ package com.hienlh.ppm.client
 import com.hienlh.ppm.protocol.AccountInfo
 import com.hienlh.ppm.protocol.AccountUsageEntry
 import com.hienlh.ppm.protocol.AntigravityAccount
+import com.hienlh.ppm.protocol.ClaudeLimitResetAnswer
 import com.hienlh.ppm.protocol.CodexAccount
 import com.hienlh.ppm.protocol.UsageInfo
 import com.hienlh.ppm.protocol.array
@@ -79,12 +80,26 @@ suspend fun ApiClient.setCodexDailyGuard(id: String, enabled: Boolean) {
 }
 
 /**
- * `POST /api/codex-accounts/:id/reset-credit`: spends one free rate-limit reset. Answers how it
- * went — `reset`, `nothingToReset`, `noCredit` or `alreadyRedeemed` — and is refused (409) unless
- * a limit is reached right now.
+ * `POST /api/codex-accounts/:id/reset-credit {creditId?}`: spends one free rate-limit reset, the
+ * [creditId] picked or, without one, the soonest to lapse. Answers how it went — `reset`,
+ * `nothingToReset`, `noCredit` or `alreadyRedeemed` — and is refused (409) unless a limit is
+ * reached right now and the credit is still listed.
  */
-suspend fun ApiClient.spendCodexResetCredit(id: String): String =
-    call("POST", "/api/codex-accounts/${ApiClient.escape(id)}/reset-credit")["outcome"].string.orEmpty()
+suspend fun ApiClient.spendCodexResetCredit(id: String, creditId: String? = null): String =
+    call(
+        "POST",
+        "/api/codex-accounts/${ApiClient.escape(id)}/reset-credit",
+        body = buildJsonObject { if (creditId != null) put("creditId", creditId) },
+    )["outcome"].string.orEmpty()
+
+/**
+ * `POST /api/accounts/:id/limit-reset {grantId}`: spends one of a Claude account's free limit
+ * resets. Refused (409) unless Anthropic lists that grant as usable right now, read live.
+ */
+suspend fun ApiClient.spendClaudeLimitReset(id: String, grantId: String): ClaudeLimitResetAnswer =
+    ClaudeLimitResetAnswer.from(
+        call("POST", "/api/accounts/${ApiClient.escape(id)}/limit-reset", body = buildJsonObject { put("grantId", grantId) }),
+    )
 
 /** `GET /api/antigravity-accounts`: the Antigravity accounts PPM manages (ambient `~/.gemini` + isolated logins). */
 suspend fun ApiClient.antigravityAccounts(): List<AntigravityAccount> =

@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.BuildConfig
+import com.hienlh.ppm.app.ui.MemorySettingsSection
 import com.hienlh.ppm.app.ui.Separator
 import com.hienlh.ppm.app.ui.SettingsCategory
 import com.hienlh.ppm.app.ui.phone.OpenOnTablet
@@ -145,6 +146,26 @@ fun PhoneSettingsScreen(
                             navigate(PhoneSettingsRoute.FullPage(PhoneSettingsSection.Accounts))
                         },
                     )
+                    PhoneSettingsSection.Memory -> Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(LocalPpmTokens.current.bgSolid.color)
+                            .testTag("phone-settings-memory-page"),
+                    ) {
+                        PhoneSettingsSubPageHeader(
+                            title = "Memory",
+                            onBack = goHome,
+                        )
+                        Column(
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                                .padding(16.dp),
+                        ) {
+                            MemorySettingsSection(model)
+                        }
+                    }
                     PhoneSettingsSection.Notifications -> NotificationsPage(
                         model = model,
                         onBack = goHome,
@@ -228,6 +249,7 @@ fun PhoneSettingsHomeList(
                         val trailingValue = when (section) {
                             PhoneSettingsSection.Accounts -> null
                             PhoneSettingsSection.AiProvider -> null
+                            PhoneSettingsSection.Memory -> null
                             PhoneSettingsSection.Notifications -> null
                             PhoneSettingsSection.Theme -> themeLabel
                             PhoneSettingsSection.Servers -> serverLabel

@@ -44,6 +44,8 @@ data class SwitchAccount(
     val refusal: String? = null,
     /** Login was refused or expired without refresh: row offers signing in again. */
     val signedOut: Boolean = false,
+    /** Free limit resets the account holds and when the nearest expires; count 0 when it holds none. */
+    val resets: ResetsSummary? = null,
 )
 
 /** Result of [orderSwitchAccounts]. */
@@ -100,6 +102,7 @@ fun claudeSwitchAccount(
         weekResetsAt = bucketResetsAt(entry.usage.weekly, now),
         refusal = refusal,
         signedOut = signedOut,
+        resets = claudeResetsSummary(entry.usage.limitResets),
     )
 }
 
@@ -137,6 +140,7 @@ fun codexSwitchAccount(
         weekResetsAt = bucketResetsAt(usage?.weekly, now),
         refusal = refusal,
         signedOut = signedOut,
+        resets = codexResetsSummary(usage?.resetCredits),
     )
 }
 

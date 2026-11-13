@@ -15,6 +15,7 @@ import com.hienlh.ppm.protocol.WireJson
 import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.int
+import com.hienlh.ppm.protocol.obj
 import com.hienlh.ppm.protocol.string
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -123,6 +124,8 @@ class GlobalEvents(
     private val designCommentsListeners = LinkedHashSet<(String, String) -> Unit>()
     private val designCheckListeners = LinkedHashSet<(String, String, String?, Boolean) -> Unit>()
     private val featureIntrosListeners = LinkedHashSet<(change: String, id: String?) -> Unit>()
+    private val memoryChangedListeners = LinkedHashSet<() -> Unit>()
+    private val memoryInstallListeners = LinkedHashSet<(status: JsonElement) -> Unit>()
     private var socket: SocketConnection? = null
 
     /** Persisted notification feed (`/api/notifications/feed`), with fallback to [unread] on older servers. */
@@ -288,6 +291,18 @@ class GlobalEvents(
         return { featureIntrosListeners -= listener }
     }
 
+    /** The memory store, its settings or its embedding progress changed (`memory:changed`): Settings → Memory reads again. */
+    fun onMemoryChanged(listener: () -> Unit): () -> Unit {
+        memoryChangedListeners += listener
+        return { memoryChangedListeners -= listener }
+    }
+
+    /** The local embedding model's install moved (`memory:embed-install`): its `status` object. */
+    fun onMemoryEmbedInstall(listener: (status: JsonElement) -> Unit): () -> Unit {
+        memoryInstallListeners += listener
+        return { memoryInstallListeners -= listener }
+    }
+
     fun onDesignCheckRequest(
         listener: (projectName: String, slug: String, requestId: String?, screenshot: Boolean) -> Unit,
     ): () -> Unit {
@@ -347,6 +362,10 @@ class GlobalEvents(
             "logs:lines" -> logsLinesListeners.toList().forEach { it(frame) }
             "logs:issues-changed" -> logsIssuesListeners.toList().forEach { it() }
             "feature-intros:changed" -> featureIntrosListeners.toList().forEach { it(frame["change"].string.orEmpty(), frame["id"].string) }
+            "memory:changed" -> memoryChangedListeners.toList().forEach { it() }
+            "memory:embed-install" -> frame["status"]?.takeIf { it.obj != null }?.let { status ->
+                memoryInstallListeners.toList().forEach { it(status) }
+            }
             "design:history_changed" -> {
                 val proj = frame["projectName"].string ?: return
                 val slug = frame["slug"].string ?: return

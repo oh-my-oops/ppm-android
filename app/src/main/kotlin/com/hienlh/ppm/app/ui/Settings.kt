@@ -215,6 +215,7 @@ enum class SettingsCategory(
     // AI & Accounts
     Ai("ai", "AI Provider", "Default provider, models, effort & budgets", ProductIcon.Sparkles, SettingsGroup.Ai, minimalSafe = true),
     Tools("tools", "Tools", "Built-in PPM tools exposed to AI chats", ProductIcon.Wrench, SettingsGroup.Ai, minimalSafe = true),
+    Memory("memory", "Memory", "One memory store for every provider, synced", ProductIcon.Brain, SettingsGroup.Ai, minimalSafe = false),
     Accounts("accounts", "Accounts", "Claude, Codex and Antigravity sign-ins, rotation", ProductIcon.Users, SettingsGroup.Ai, minimalSafe = true),
     Mcp("mcp", "MCP Servers", "Model Context Protocol servers & sign-in", ProductIcon.Plug, SettingsGroup.Ai, minimalSafe = true),
     AiResources("ai-resources", "AI Resources", "Skills, agents, commands & MCP configs", ProductIcon.Layers, SettingsGroup.Ai, minimalSafe = false),
@@ -538,6 +539,7 @@ private fun SettingsPane(model: AppModel, category: SettingsCategory, split: Boo
                     SettingsCategory.Files -> FilesSettingsSection(model)
                     SettingsCategory.Ai -> AiProviderSettingsSection(model)
                     SettingsCategory.Tools -> ToolsSettingsSection(model)
+                    SettingsCategory.Memory -> MemorySettingsSection(model)
                     SettingsCategory.Accounts -> AccountsSettingsSection(model)
                     SettingsCategory.Mcp -> McpSettingsSection(model)
                     SettingsCategory.AiResources -> AiResourcesSettingsSection(model)

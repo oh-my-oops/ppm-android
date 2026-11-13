@@ -50,6 +50,8 @@ data class AccountUsage(
     val weeklyOpus: LimitBucket? = null,
     val weeklySonnet: LimitBucket? = null,
     val weeklyScoped: List<LimitBucket> = emptyList(),
+    /** Claude's free limit resets the account holds. */
+    val limitResets: ClaudeLimitResets? = null,
 ) {
     val hasBuckets: Boolean
         get() = session != null || weekly != null || weeklyOpus != null || weeklySonnet != null || weeklyScoped.isNotEmpty()
@@ -62,6 +64,7 @@ data class AccountUsage(
             weeklyOpus = LimitBucket.from(value["weeklyOpus"]),
             weeklySonnet = LimitBucket.from(value["weeklySonnet"]),
             weeklyScoped = value["weeklyScoped"].array.orEmpty().mapNotNull(LimitBucket::from),
+            limitResets = ClaudeLimitResets.from(value["limitResets"]),
         )
     }
 }
