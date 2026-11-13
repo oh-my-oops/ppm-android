@@ -3,6 +3,7 @@ package com.hienlh.ppm.client
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Callback
@@ -62,7 +63,9 @@ internal suspend fun Call.await(): Response = suspendCancellableCoroutine { cont
             }
 
             override fun onResponse(call: Call, response: Response) {
-                continuation.resume(response) { _, value, _ -> value.close() }
+                // Dropped because the coroutine was cancelled: closed off its thread, which may be the UI thread,
+                // where Android refuses the socket work closing can do (NetworkOnMainThreadException).
+                continuation.resume(response) { _, value, _ -> Background.scope.launch { value.close() } }
             }
         },
     )
