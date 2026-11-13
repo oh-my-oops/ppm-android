@@ -65,7 +65,7 @@ class ComposerModelColumnsTest {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val body = if (request.url.encodedPath.endsWith("/antigravity/models")) {
-                    """{"ok":true,"data":[{"value":"gemini-4-argon","label":"Gemini 4 Argon"},{"value":"claude-opus-5-5","label":"Claude Opus 5.5"}]}"""
+                    """{"ok":true,"data":[{"value":"gemini-4-argon","label":"Gemini 4 Argon","isDefault":true},{"value":"claude-opus-5-5","label":"Claude Opus 5.5"}]}"""
                 } else {
                     """{"ok":true,"data":[{"value":"opus","label":"Claude Opus"},{"value":"sonnet","label":"Claude Sonnet"}]}"""
                 }
@@ -162,7 +162,7 @@ class ComposerModelColumnsTest {
     }
 
     @Test
-    fun `Antigravity defaults to Gemini 4 Argon, keeps Claude prefix, offers three efforts and hides Thinking`() {
+    fun `Antigravity's Auto is the model its list marks, keeps Claude prefix, offers three efforts and hides Thinking`() {
         val api = ApiClient(server.url("/"), "secret")
         chat = ChatController(api, "p", null, scope, providerId = "antigravity")
         compose.setContent {
@@ -172,7 +172,7 @@ class ComposerModelColumnsTest {
         }
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Gemini 4 Argon").fetchSemanticsNodes().isNotEmpty() }
 
-        // Default null model resolves to gemini-4-argon; Claude Opus 5.5 keeps "Claude "; only Low/Medium/High exist; no Thinking switch
+        // No model chosen resolves to the one the list marks isDefault; Claude Opus 5.5 keeps "Claude "; only Low/Medium/High exist; no Thinking switch
         assertEquals(
             listOf("Gemini 4 Argon", "High"),
             checked("Gemini 4 Argon", "Claude Opus 5.5", "Low", "Medium", "High"),

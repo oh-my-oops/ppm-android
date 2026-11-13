@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -117,6 +118,8 @@ import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
+import com.hienlh.ppm.design.webTitle
+import com.hienlh.ppm.state.workspace.BulkClose
 import com.hienlh.ppm.design.Rgba
 import com.hienlh.ppm.design.WebCursor
 import com.hienlh.ppm.design.colorsFade
@@ -835,11 +838,12 @@ private fun TabChip(
             .then(if (redesign) Modifier.widthIn(min = 108.dp, max = 220.dp) else Modifier)
             .pointerHoverIcon(if (pressed) WebCursor.Grabbing else WebCursor.Grab)
             .onGloballyPositioned { drag?.chips?.set(tab.id, panelId to Rect(it.positionInRoot(), it.size.toSize())) }
-            .pointerInput(tab.id, tab.closable) {
+            .pointerInput(tab.id, tab.closable, tab.pinned) {
                 awaitEachGesture {
                     val press = awaitPointerEvent()
                     val down = press.changes.firstOrNull { it.changedToDown() } ?: return@awaitEachGesture
-                    if (down.type == PointerType.Mouse && press.buttons.isTertiaryPressed && tab.closable) {
+                    // A pinned tab is not closed by a middle click (VS Code's preventPinnedEditorClose); its menu's Close does.
+                    if (down.type == PointerType.Mouse && press.buttons.isTertiaryPressed && tab.closable && !tab.pinned) {
                         down.consume()
                         onClose()
                     }
@@ -884,7 +888,7 @@ private fun TabChip(
                     // `[border-right:1px_solid_var(--border-soft)]`, and `border-t-2` in the accent while active.
                     .cssBorder(tokens.borderSoft.color, sides = CssSides.End)
                     .cssBorder(tokens.accent.opacity(on.toDouble()).color, width = 2.dp, sides = CssSides.Top)
-                    .padding(start = 12.dp, end = if (tab.closable) 6.dp else 12.dp),
+                    .padding(start = 12.dp, end = if (tab.closable || tab.pinned) 6.dp else 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -914,7 +918,20 @@ private fun TabChip(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                if (tab.closable) {
+                if (tab.pinned) {
+                    // Always shown, where the × would be: the pin says why the tab has no ×, and tapping it unpins.
+                    if (!renaming) {
+                        Box(
+                            Modifier
+                                .size(if (redesign) 28.dp else 16.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .ppmClickable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, onClickLabel = "Unpin", onClick = { model.setTabPinned(tab.id, false) })
+                                .webTitle("Unpin")
+                                .testTag("tab-pin-" + tab.id),
+                            contentAlignment = Alignment.Center,
+                        ) { PpmIcon(ProductIcon.Pin, 12.dp, color.color) }
+                    }
+                } else if (tab.closable) {
                     // 28×28 dp touch target around the 18×18 dp visual close pill.
                     Box(
                         Modifier
@@ -1005,7 +1022,8 @@ private fun InlineTabRename(
  * A tab's menu (draggable-tab.tsx, with tab-bar.tsx's items for a chat): Open in window where
  * the tablet can float it, Split right / Split down so splitting is reachable by touch without
  * dragging, Rename chat for chat tabs, Mark as unread while the chat has none and Set Tag while
- * the project has tags, then Close, Close Others and Close to the Right.
+ * the project has tags, Pin / Unpin, then Close, Close Others, Close to the Right, Close Saved
+ * and Close All, the last four leaving pinned tabs open.
  */
 @Composable
 private fun TabMenu(
@@ -1047,8 +1065,17 @@ private fun TabMenu(
             SetTagMenuItem(model, session, onDismiss)
             MenuSeparator()
         }
+        MenuItem(
+            if (tab.pinned) "Unpin" else "Pin",
+            onClick = { pick { model.setTabPinned(tab.id, !tab.pinned) } },
+            icon = { MenuIcon(if (tab.pinned) ProductIcon.PinOff else ProductIcon.Pin) },
+        )
+        MenuSeparator()
         if (tab.closable) MenuItem("Close", onClick = { pick { model.closeTab(tab.id, panelId) } })
-        MenuItem("Close Others", onClick = { pick { model.closeOtherTabs(tab.id) } })
-        MenuItem("Close to the Right", onClick = { pick { model.closeTabsToRight(tab.id) } })
+        // Never a pinned tab (`bulkCloseIds`).
+        MenuItem("Close Others", onClick = { pick { model.bulkCloseTabs(tab.id, BulkClose.OTHERS, panelId) } })
+        MenuItem("Close to the Right", onClick = { pick { model.bulkCloseTabs(tab.id, BulkClose.RIGHT, panelId) } })
+        MenuItem("Close Saved", onClick = { pick { model.bulkCloseTabs(tab.id, BulkClose.SAVED, panelId) } })
+        MenuItem("Close All", onClick = { pick { model.bulkCloseTabs(tab.id, BulkClose.ALL, panelId) } })
     }
 }

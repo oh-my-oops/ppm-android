@@ -4,6 +4,7 @@ import com.hienlh.ppm.protocol.ChatSearchPage
 import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.SessionLink
 import com.hienlh.ppm.protocol.array
+import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.int
 import com.hienlh.ppm.protocol.string
@@ -92,7 +93,7 @@ suspend fun ApiClient.resetTags(project: String) {
 suspend fun ApiClient.providerModels(project: String, providerId: String): List<ModelOption> =
     call("GET", "${chatPath(project)}/providers/${ApiClient.escape(providerId)}/models").array.orEmpty().mapNotNull { entry ->
         val value = entry["value"].string ?: return@mapNotNull null
-        ModelOption(value, entry["label"].string ?: value)
+        ModelOption(value, entry["label"].string ?: value, isDefault = entry["isDefault"].bool == true)
     }
 
 /** The links the server holds for [sessionId]: its creator, its children, and sessions it messaged (`fetchSessionLinks`). */

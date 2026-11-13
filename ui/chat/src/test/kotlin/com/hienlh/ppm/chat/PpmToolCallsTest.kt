@@ -85,6 +85,12 @@ class PpmToolCallsTest {
         assertEquals(DeviceToolCall.OpenUrl("http://localhost:5173/"), deviceToolCall("mcp__ppm-tabs__open_url", json("""{"url":"http://localhost:5173/"}""")))
         assertEquals(DeviceToolCall.ReadTerminal(), deviceToolCall("mcp__ppm-tabs__read_terminal", json("{}")))
         assertEquals(DeviceToolCall.ReadTerminal("3f2a9c1e", 200), deviceToolCall("mcp__ppm-tabs__read_terminal", json("""{"terminal":"3f2a9c1e","lines":200}""")))
+        assertEquals(DeviceToolCall.OpenBranchReview(), deviceToolCall("mcp__ppm-tabs__open_branch_review", json("{}")))
+        assertEquals(
+            DeviceToolCall.OpenBranchReview(base = "main", head = "feat/x"),
+            deviceToolCall("ppm_tabs:open_branch_review", json("""{"arguments":{"base":"main","head":"feat/x","repo":" ","extra":1}}""")),
+        )
+        assertEquals("open_branch_review", deviceToolOf("mcp__ppm-tabs__open_branch_review"))
         assertEquals(
             DeviceToolCall.RunInTerminal("sudo apt install ffmpeg", "tools"),
             deviceToolCall("ppm_tabs:run_in_terminal", json("""{"server":"ppm_tabs","tool":"run_in_terminal","arguments":{"command":"sudo apt install ffmpeg","cwd":"tools"}}""")),
@@ -141,5 +147,9 @@ class PpmToolCallsTest {
         assertEquals("Read terminal", read.name)
         assertEquals(listOf(SummaryPart(" 3f2a", subtle = true, mono = true), SummaryPart(" · 50 lines", subtle = true)), read.parts)
         assertEquals(emptyList<SummaryPart>(), toolSummary("mcp__ppm-tabs__read_terminal", json("{}")).parts)
+        val review = toolSummary("mcp__ppm-tabs__open_branch_review", json("""{"base":"main","head":"feat/x"}"""))
+        assertEquals("Branch Review ", review.name)
+        assertEquals(listOf(SummaryPart("feat/x ← main", subtle = true, mono = true)), review.parts)
+        assertEquals(listOf(SummaryPart("current branch ← main", subtle = true, mono = true)), toolSummary("mcp__ppm-tabs__open_branch_review", json("{}")).parts)
     }
 }

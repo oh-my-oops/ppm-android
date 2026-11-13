@@ -1,5 +1,6 @@
 package com.hienlh.ppm.state
 
+import com.hienlh.ppm.client.SpecPhaseView
 import com.hienlh.ppm.client.SpecSummary
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.get
@@ -92,14 +93,19 @@ object SpecWorkflowCopy {
         else -> current
     }
 
-    /** A document's state under it (the pane's footer line). */
-    fun phaseState(status: String, submitted: Boolean): String = when {
-        status == "approved" -> "Approved"
-        status == "stale" -> "Changed after you approved it"
-        submitted -> "Submitted by the AI · waiting for you"
-        status == "invalid" -> "Has problems the AI must fix"
-        status == "missing" -> "Not written yet"
-        else -> "Draft · not submitted yet"
+    /** A document's state under it (the pane's footer line, `specDocumentStatus`), and what an approval waits for. */
+    fun phaseState(phase: SpecPhaseView): String {
+        when (phase.status) {
+            "approved" -> return "Approved"
+            "missing" -> return "Not written yet"
+            "invalid" -> return "Has problems the AI must fix"
+        }
+        val base = when {
+            phase.status == "stale" -> "Changed after you approved it"
+            phase.submitted -> "Submitted by the AI · waiting for you"
+            else -> "Draft · the AI has not submitted it yet"
+        }
+        return phase.approveBlocked?.let { "$base · $it" } ?: base
     }
 }
 

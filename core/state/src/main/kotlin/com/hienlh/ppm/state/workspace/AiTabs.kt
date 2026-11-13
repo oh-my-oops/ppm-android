@@ -1,6 +1,7 @@
 package com.hienlh.ppm.state.workspace
 
 import com.hienlh.ppm.client.FsStat
+import com.hienlh.ppm.protocol.TabOpenRequest
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
@@ -208,6 +209,41 @@ fun WorkspaceStore.openAiQueryTab(query: kotlinx.serialization.json.JsonObject, 
     if (tabId.isEmpty()) throw IllegalStateException("PPM could not open the tab")
     if (placement.split) splitPanel(SplitDirection.Right, tabId, placement.panelId)
     return tabId
+}
+
+/**
+ * Opens Branch Review beside the chat showing [sessionId] on the refs `open_branch_review` checked
+ * (`openAiBranchReviewTab`), or points the one already open there: a project has one Branch Review
+ * tab, and the tab takes `base`/`head` from its metadata whenever `aiOpenAt` moves. Choosing the
+ * repository a container folder's request names is the caller's. Throws, with what to tell the
+ * AI, when there is nowhere to open it.
+ */
+fun WorkspaceStore.openAiBranchReviewTab(request: TabOpenRequest.BranchReview, sessionId: String): String {
+    val st = state.value
+    val placement = chooseAiTabPlacement(st.grid, st.panels, st.focusedPanelId, mobile, sessionId) { tab ->
+        tab.type == "branch-review" && (tab.metadata["projectName"] as? JsonPrimitive)?.let { it.isString && it.content == request.projectName } == true
+    } ?: throw IllegalStateException("PPM has no panel to open the tab in")
+    val view = mapOf<String, JsonElement?>(
+        "base" to JsonPrimitive(request.base),
+        "head" to JsonPrimitive(request.head),
+        "aiOpenAt" to JsonPrimitive(clock()),
+    )
+    return when (placement) {
+        is AiTabPlacement.Open -> {
+            val metadata = buildJsonObject { put("projectName", request.projectName) }.merged(view)
+            val tabId = openTab(NewTab("branch-review", "Branch Review", request.projectName, metadata), placement.panelId)
+            if (tabId.isEmpty()) throw IllegalStateException("PPM could not open the tab")
+            if (placement.split) splitPanel(SplitDirection.Right, tabId, placement.panelId)
+            tabId
+        }
+        is AiTabPlacement.Focus -> placement.tabId.also { reviewAgain(it, placement, view) }
+        is AiTabPlacement.Move -> placement.tabId.also { reviewAgain(it, placement, view) }
+    }
+}
+
+private fun WorkspaceStore.reviewAgain(tabId: String, placement: AiTabPlacement, view: Map<String, JsonElement?>) {
+    updateTab(tabId) { it.copy(metadata = it.metadata.merged(view)) }
+    showExistingTab(placement)
 }
 
 /** Brings a tab that is already open to where the placement wants it: in front, moved or split out. */

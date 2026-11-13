@@ -103,8 +103,18 @@ fun BranchReviewBody(model: AppModel, tab: WorkspaceTab) {
     val noRepo = remember(discovery) { GitRepoScope.hasNoRepo(discovery) }
 
     var branches by remember(projectName, repo?.path) { mutableStateOf<List<GitBranch>>(emptyList()) }
-    var base by remember(projectName, repo?.path) { mutableStateOf("") }
-    var head by remember(projectName, repo?.path) { mutableStateOf("") }
+    // The AI's `open_branch_review` names the pair in the metadata; a later call on a tab already
+    // open moves `aiOpenAt`, and the pair it names replaces whatever the pickers show.
+    val askedBase = tab.metaString("base").orEmpty()
+    val askedHead = tab.metaString("head").orEmpty()
+    val aiOpenAt = tab.metadata["aiOpenAt"]
+    var base by remember(projectName, repo?.path) { mutableStateOf(askedBase) }
+    var head by remember(projectName, repo?.path) { mutableStateOf(askedHead) }
+    // Only a new call moves the pickers, never the user's own picks recomposing the tab.
+    LaunchedEffect(aiOpenAt) {
+        if (askedBase.isNotEmpty()) base = askedBase
+        if (askedHead.isNotEmpty()) head = askedHead
+    }
     var diff by remember(projectName, repo?.path) { mutableStateOf<BranchDiff?>(null) }
     var selectedPath by remember(projectName, repo?.path) { mutableStateOf<String?>(null) }
     var reviewed by remember(projectName, repo?.path) { mutableStateOf<Map<String, String>>(emptyMap()) }

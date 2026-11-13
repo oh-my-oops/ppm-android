@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui
 
+import com.hienlh.ppm.state.ModelNames
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -124,7 +125,7 @@ private val ProviderNames = mapOf(
 
 private fun providerName(id: String) = ProviderNames[id] ?: id
 
-/** The model select's "Auto (default)", for a provider that picks its own model. */
+/** The model select's "Auto" entry (`autoModelLabel`), for a provider that picks its own model. */
 private const val DEFAULT_MODEL = "__default__"
 
 private val WindowPresets = listOf(128_000L, 272_000L, 400_000L, 512_000L, 872_000L, 1_000_000L)
@@ -407,7 +408,7 @@ private fun ProviderSettings(
                 val options = models.map { SelectOption(it.value, it.label) }
                 SelectField(
                     if (isSdk) config?.model ?: models.first().value else config?.model?.ifEmpty { null } ?: DEFAULT_MODEL,
-                    if (isSdk) options else listOf(SelectOption(DEFAULT_MODEL, "Auto (default)")) + options,
+                    if (isSdk) options else listOf(SelectOption(DEFAULT_MODEL, ModelNames.autoModelLabel(models))) + options,
                     onValueChange = { state.saveField(provider, "model", it.takeUnless { v -> v == DEFAULT_MODEL }) },
                     enabled = !state.modelsLoading,
                     placeholder = if (state.modelsLoading) "Loading models..." else "Select model",

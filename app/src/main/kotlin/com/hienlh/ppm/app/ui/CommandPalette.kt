@@ -124,6 +124,7 @@ import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.FileEntry
 import com.hienlh.ppm.protocol.array
 import com.hienlh.ppm.protocol.get
+import com.hienlh.ppm.state.workspace.BulkClose
 import com.hienlh.ppm.state.FileIndexStore
 import com.hienlh.ppm.state.database.nextQueryNumber
 import com.hienlh.ppm.state.database.queryTabMetadata
@@ -255,6 +256,9 @@ fun CommandPalette(model: AppModel, initialQuery: String, onDismiss: () -> Unit)
             }))
             add(action("Voice Input", ProductIcon.Mic, words = "speech microphone dictate voice", shortcut = formatShortcut(bindings.binding("voice-input")), run = run { model.toggleVoiceInput() }))
             add(action("Git Status", iconVector = LucideIcon.GitCommitHorizontal.vector, words = "changes diff staged", shortcut = formatShortcut(bindings.binding("open-git-status")), run = run { model.showSidebarSection("git") }))
+            add(action("Pin / Unpin Tab", ProductIcon.Pin, words = "pin unpin sticky keep tab", shortcut = formatShortcut(bindings.binding("toggle-pin-tab")), run = run { model.togglePinActiveTab() }))
+            add(action("Close Saved Tabs", ProductIcon.X, words = "close saved tabs editors", shortcut = formatShortcut(bindings.binding("close-saved-tabs")), run = run { model.bulkCloseInFocusedPanel(BulkClose.SAVED) }))
+            add(action("Close All Tabs", ProductIcon.X, words = "close all tabs editors", shortcut = formatShortcut(bindings.binding("close-all-tabs")), run = run { model.bulkCloseInFocusedPanel(BulkClose.ALL) }))
             add(action("Problems", ProductIcon.CircleX, words = "errors warnings diagnostics lint typescript", shortcut = formatShortcut(bindings.binding("open-problems")), run = run { model.openProblems() }))
             add(action(
                 label = "Toggle Word Wrap",

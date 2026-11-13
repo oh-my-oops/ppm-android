@@ -1,5 +1,6 @@
 package com.hienlh.ppm.app.ui.phone.settings
 
+import com.hienlh.ppm.state.ModelNames
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -339,7 +340,7 @@ fun PhoneAiProviderContent(
     val modelOptions = remember(models, includeAutoDefaultModel) {
         val mapped = models.map { PhoneSelectOption(it.value, it.label) }
         if (includeAutoDefaultModel) {
-            listOf(PhoneSelectOption(PHONE_DEFAULT_MODEL, "Auto (default)", "Auto")) + mapped
+            listOf(PhoneSelectOption(PHONE_DEFAULT_MODEL, ModelNames.autoModelLabel(models), "Auto")) + mapped
         } else {
             // Only the models the server lists for this provider; none listed means none offered, not Claude's.
             mapped
@@ -347,7 +348,7 @@ fun PhoneAiProviderContent(
     }
     val selectedModelOption = modelOptions.firstOrNull { it.value == modelValue }
         ?: when {
-            modelValue == PHONE_DEFAULT_MODEL -> PhoneSelectOption(modelValue, "Auto (default)", "Auto")
+            modelValue == PHONE_DEFAULT_MODEL -> PhoneSelectOption(modelValue, ModelNames.autoModelLabel(models), "Auto")
             modelValue.isBlank() -> PhoneSelectOption(modelValue, "Not set", "Not set")
             else -> PhoneSelectOption(modelValue, modelValue, modelValue)
         }

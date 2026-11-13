@@ -548,7 +548,7 @@ private fun SpecDocumentPane(
     BottomActionCard {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             BasicText(
-                SpecWorkflowCopy.phaseState(ph.status, ph.submitted),
+                SpecWorkflowCopy.phaseState(ph),
                 style = ppmText(12f, lineHeight = 16f).copy(color = tokens.text3.color),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

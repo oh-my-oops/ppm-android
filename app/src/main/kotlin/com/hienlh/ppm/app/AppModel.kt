@@ -153,6 +153,12 @@ import com.hienlh.ppm.state.workspace.WorkspaceCache
 import com.hienlh.ppm.state.workspace.WorkspaceState
 import com.hienlh.ppm.state.workspace.WorkspaceStore
 import com.hienlh.ppm.state.workspace.WorkspaceTab
+import com.hienlh.ppm.state.workspace.WorkspacePanel
+import com.hienlh.ppm.state.workspace.BulkClose
+import com.hienlh.ppm.state.workspace.bulkCloseIds
+import com.hienlh.ppm.state.workspace.tabHoldsUnsavedWork
+import com.hienlh.ppm.state.workspace.visibleTabs
+import com.hienlh.ppm.state.workspace.openAiBranchReviewTab
 import com.hienlh.ppm.state.workspace.openAiQueryTab
 import com.hienlh.ppm.state.workspace.openAiTab
 import com.hienlh.ppm.state.workspace.openAiUrlTab
@@ -2568,6 +2574,13 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
                     store.openAiQueryTab(queryReq.query, sessionId)
                 }
             },
+            openBranchReview = { review ->
+                inChatProject(chat.project) { store ->
+                    // The repository the server named becomes this device's choice, as picking it in Source Control would.
+                    review.repo?.let { chooseGitRepo(review.projectName, it) }
+                    store.openAiBranchReviewTab(review, sessionId)
+                }
+            },
             frame = { if (wide) "Desktop" else "Phone" },
         )
     }
@@ -4341,28 +4354,49 @@ class AppModel(context: Context, val debug: DebugLaunch? = null, private val win
     /** A tab's Mark as unread: its chat, under the tab's title. */
     fun markUnread(sessionId: String, title: String) = events?.markUnread(sessionId, title)
 
-    /** Close Others: the other closable tabs of [keep]'s panel (`mobile-nav.tsx`). */
-    fun closeOtherTabs(keep: String) {
-        val panel = panelTabs(keep) ?: return
-        closeAll(panel.second, panel.first.filter { it.id != keep && it.closable }.map { it.id })
+    /** A tab's Pin / Unpin (`setTabPinned`): a pinned tab sits at the start of its bar and outlives the bulk closes. */
+    fun setTabPinned(tabId: String, pinned: Boolean) {
+        workspace?.setTabPinned(tabId, pinned)
     }
 
-    /** Close to the Right: the closable tabs after [tabId] in its panel. */
-    fun closeTabsToRight(tabId: String) {
-        val panel = panelTabs(tabId) ?: return
-        closeAll(panel.second, panel.first.dropWhile { it.id != tabId }.drop(1).filter { it.closable }.map { it.id })
+    /**
+     * Close Others / to the Right / Saved / All from [anchorId]'s menu (`bulkCloseIds`), over the
+     * tabs its bar shows ([shown] narrows them further, as minimal mode does on a phone): never a
+     * pinned tab, and Close Saved never one holding unsaved work. The others still ask first.
+     */
+    fun bulkCloseTabs(anchorId: String, kind: BulkClose, panelId: String? = panelOf(anchorId), shown: (WorkspaceTab) -> Boolean = { true }) {
+        val pid = panelId ?: return
+        val tabs = panelTabs(pid, shown) ?: return
+        closeAll(pid, bulkCloseIds(tabs, anchorId, kind, ::tabHoldsUnsavedWork))
     }
 
-    /** Whether the tab menu offers Close Others: another closable tab in the panel. */
-    fun canCloseOthers(tabId: String): Boolean = panelTabs(tabId)?.first?.any { it.id != tabId && it.closable } == true
+    /** Whether the menu offers [kind]: it would close some tab (`mobile-nav.tsx`). */
+    fun canBulkClose(anchorId: String, kind: BulkClose, panelId: String? = panelOf(anchorId), shown: (WorkspaceTab) -> Boolean = { true }): Boolean =
+        panelId?.let { panelTabs(it, shown) }?.let { tabs -> bulkCloseIds(tabs, anchorId, kind) { false }.isNotEmpty() } == true
 
-    /** Whether it offers Close to the Right: the tab is not its panel's last. */
-    fun hasTabsToRight(tabId: String): Boolean = panelTabs(tabId)?.first?.let { tabs -> tabs.indexOfFirst { it.id == tabId } in 0 until tabs.lastIndex } == true
+    /** The palette's and the shortcut's Pin / Unpin Tab (`togglePinActiveTab`): the focused panel's active tab. */
+    fun togglePinActiveTab() {
+        val active = focusedPanelTabs()?.let { (tabs, panel) -> tabs.firstOrNull { it.id == panel.activeTabId } } ?: return
+        setTabPinned(active.id, !active.pinned)
+    }
 
-    private fun panelTabs(tabId: String): Pair<List<WorkspaceTab>, String>? {
-        val panelId = panelOf(tabId) ?: return null
-        val panel = layout?.panels?.get(panelId) ?: return null
-        return panel.tabs to panelId
+    /** Close Saved / Close All from the palette or a shortcut (`bulkCloseInFocusedPanel`), anchored on the focused panel's active tab. */
+    fun bulkCloseInFocusedPanel(kind: BulkClose) {
+        val (tabs, panel) = focusedPanelTabs() ?: return
+        closeAll(panel.id, bulkCloseIds(tabs, panel.activeTabId.orEmpty(), kind, ::tabHoldsUnsavedWork))
+    }
+
+    private fun focusedPanelTabs(): Pair<List<WorkspaceTab>, WorkspacePanel>? {
+        val state = layout ?: return null
+        val panel = state.panels[state.focusedPanelId] ?: return null
+        return visibleTabs(panel.tabs, state.currentProject) to panel
+    }
+
+    /** The tabs [panelId]'s bar shows, as `visibleTabs` has them. */
+    private fun panelTabs(panelId: String, shown: (WorkspaceTab) -> Boolean): List<WorkspaceTab>? {
+        val state = layout ?: return null
+        val panel = state.panels[panelId] ?: return null
+        return visibleTabs(panel.tabs, state.currentProject).filter(shown)
     }
 
     private fun closeAll(panelId: String, ids: List<String>) {

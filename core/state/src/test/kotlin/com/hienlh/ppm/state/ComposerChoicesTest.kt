@@ -1,5 +1,6 @@
 package com.hienlh.ppm.state
 
+import com.hienlh.ppm.protocol.ModelOption
 import com.hienlh.ppm.protocol.ChatClientMessage
 import com.hienlh.ppm.protocol.ChatFrame
 import com.hienlh.ppm.protocol.PromptCacheState
@@ -55,14 +56,14 @@ class ComposerChoicesTest {
         assertEquals("Sonnet 4", ModelNames.displayName("claude-sonnet-4-20250514"))
         assertEquals("Haiku 5.5", ModelNames.displayName("claude-haiku-5-5-20261001"))
         assertEquals("gpt-5-codex", ModelNames.displayName("gpt-5-codex"))
-        // Antigravity known model IDs
+        // Antigravity's ids are named by their shape, so a new model needs no entry.
+        assertEquals("Gemini 4 Carbon", ModelNames.displayName("gemini-4-carbon-high"))
         assertEquals("Gemini 4 Argon", ModelNames.displayName("gemini-4-argon"))
-        assertEquals("Gemini 4 Argon", ModelNames.displayName("gemini-4-argon-high"))
-        assertEquals("Gemini 3.8 Flash", ModelNames.displayName("gemini-3.8-flash-low"))
-        assertEquals("Claude Opus 5.5", ModelNames.displayName("claude-opus-5-5-medium"))
-        assertEquals("Claude Sonnet 5.5", ModelNames.displayName("claude-sonnet-5-5-high"))
-        assertEquals("GPT-OSS 120B", ModelNames.displayName("gpt-oss-120b"))
-        assertEquals("GPT-OSS 120B", ModelNames.displayName("gpt-oss-120b-medium"))
+        assertEquals("Gemini 3.8 Flash", ModelNames.displayName("gemini-3.8-flash-medium"))
+        assertEquals("Gemini 5 Neon Pro", ModelNames.displayName("gemini-5-neon-pro"))
+        assertEquals("Opus 5.5", ModelNames.displayName("claude-opus-5-5-high"))
+        // Anything else is shown as given.
+        assertEquals("gpt-oss-120b", ModelNames.displayName("gpt-oss-120b"))
         assertEquals("Opus 5", ModelNames.shortLabel("Claude Opus 5"))
         assertEquals("Opus 5", ModelNames.shortLabel("Claude Opus 5", "claude"))
         assertEquals("Claude Opus 5.5", ModelNames.shortLabel("Claude Opus 5.5", "antigravity"))
@@ -73,13 +74,24 @@ class ComposerChoicesTest {
     }
 
     @Test
+    fun `the Auto entry names the model the provider picks when its list says`() {
+        assertEquals("Auto (GPT-6.1-Sol)", ModelNames.autoModelLabel(listOf(ModelOption("a", "A"), ModelOption("b", "GPT-6.1-Sol", isDefault = true))))
+        assertEquals("Auto (default)", ModelNames.autoModelLabel(listOf(ModelOption("a", "A"))))
+    }
+
+    @Test
     fun `Antigravity effective model, suffix effort and effort options match web selector`() {
-        assertEquals("gemini-4-argon", ModelNames.effectiveModel(null, "antigravity"))
-        assertEquals("gemini-4-argon", ModelNames.effectiveModel("", "antigravity"))
-        assertEquals("gemini-4-argon", ModelNames.effectiveModel("pro", "antigravity"))
+        val agy = listOf(ModelOption("gemini-3.8-flash", "Gemini 3.8 Flash"), ModelOption("gemini-4-carbon", "Gemini 4 Carbon", isDefault = true))
+        // No model chosen ("Auto") is the provider's own pick, which its list marks; none before the list comes.
+        assertEquals("gemini-4-carbon", ModelNames.effectiveModel(null, "antigravity", agy))
+        assertEquals("gemini-4-carbon", ModelNames.effectiveModel("", "antigravity", agy))
+        assertEquals("gemini-4-carbon", ModelNames.effectiveModel("pro", "antigravity", agy))
+        assertNull(ModelNames.effectiveModel(null, "antigravity"))
         assertEquals("claude-opus-5-5", ModelNames.effectiveModel("claude-opus-5-5-medium", "antigravity"))
         assertEquals("gemini-3.8-flash", ModelNames.effectiveModel("gemini-3.8-flash-HIGH", "antigravity"))
         assertNull(ModelNames.effectiveModel(null, "claude"))
+        assertEquals("gpt-6.1-sol", ModelNames.effectiveModel(null, "codex", listOf(ModelOption("gpt-6.1-sol", "GPT-6.1-Sol", isDefault = true))))
+        assertEquals("gpt-6.1-terra", ModelNames.effectiveModel("gpt-6.1-terra", "codex", listOf(ModelOption("gpt-6.1-sol", "GPT-6.1-Sol", isDefault = true))))
         assertEquals("pro", ModelNames.effectiveModel("pro", "gemini"))
 
         assertEquals("medium", ModelNames.suffixEffort("claude-opus-5-5-medium", "antigravity"))

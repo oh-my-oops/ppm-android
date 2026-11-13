@@ -106,9 +106,14 @@ data class SpecPhaseView(
     val text: String?,
     /** The AI submitted it and it has not changed since: it waits for the user. */
     val submitted: Boolean,
+    /** Why this phase cannot be approved now (the drawing, the test command, an earlier phase…); null when it can. */
+    val approveBlocked: String? = null,
 ) {
-    /** Approve and Request changes are offered (`canAct` in spec-pane.tsx). */
-    val canAct: Boolean get() = status == "draft" || status == "stale"
+    /**
+     * Approve and Request changes are offered (`canAct` in spec-pane.tsx) once there is something to
+     * review: a document the AI submitted, or one changed after its approval, that nothing else holds back.
+     */
+    val canAct: Boolean get() = (submitted || status == "stale") && approveBlocked == null
 }
 
 /** What a test run looked like (`SpecRunRecord`), as much of it as the task list shows. */
@@ -226,6 +231,7 @@ data class SpecView(
                     issues = SpecIssue.list(p["issues"]),
                     text = p["text"].string,
                     submitted = p["submitted"].bool ?: false,
+                    approveBlocked = p["approveBlocked"].string,
                 )
             }
             val waves = json["waves"]

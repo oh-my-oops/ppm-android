@@ -188,6 +188,24 @@ class TabOpenAnswerTest {
     }
 
     @Test
+    fun `Branch Review is opened with the refs the host checked and answered at once, with no preview`() = runTest {
+        val review = TabOpenRequest.BranchReview("review-1", "app", null, "main", "feat/x")
+        assertNull(tabOpenRefusal(review))
+        val opened = mutableListOf<TabOpenRequest.BranchReview>()
+        val answer = answerTabOpen(
+            review, PreviewLoads(), { error("not a file") }, { error("not a URL") }, { error("not a preview") },
+            openBranchReview = { opened += it },
+        )
+        assertEquals(TabOpenAnswer(opened = true), answer)
+        assertEquals(listOf(review), opened)
+        val refused = answerTabOpen(
+            review, PreviewLoads(), { error("not a file") }, { error("not a URL") }, { error("not a preview") },
+            openBranchReview = { throw IllegalStateException("PPM has no panel to open the tab in") },
+        )
+        assertEquals(TabOpenAnswer(opened = false, error = "PPM has no panel to open the tab in"), refused)
+    }
+
+    @Test
     fun `terminal opener cancellation propagates instead of becoming a refusal`() = runTest {
         val cancelled = CancellationException("terminal owner closed")
         try {

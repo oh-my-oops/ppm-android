@@ -60,6 +60,7 @@ import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.CursorText
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.design.LucideIcon
 import com.hienlh.ppm.design.PpmFonts
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
@@ -73,6 +74,7 @@ import com.hienlh.ppm.design.cssScrollY
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
+import com.hienlh.ppm.design.vector
 import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.ChatEvent
 import com.hienlh.ppm.protocol.ToolOutcome
@@ -324,7 +326,13 @@ internal fun stepCount(n: Int): String = if (n == 1) "1 step" else "$n steps"
 
 // Chip and status
 
-internal data class ToolChipStyle(val icon: ProductIcon, val background: Rgba, val foreground: Rgba) {
+internal data class ToolChipStyle(
+    val icon: ProductIcon,
+    val background: Rgba,
+    val foreground: Rgba,
+    /** One of the few icons the web keeps on lucide, drawn instead of [icon]. */
+    val lucide: LucideIcon? = null,
+) {
     companion object {
         fun of(name: String, input: JsonElement, isError: Boolean, t: ThemeTokens): ToolChipStyle {
             val wash = ToolChipStyle(ProductIcon.Code, t.accentWash, t.accent)
@@ -337,7 +345,11 @@ internal data class ToolChipStyle(val icon: ProductIcon, val background: Rgba, v
                 return if (tool == DB_EXECUTE_TOOL) tinted(ProductIcon.DatabaseZap, t.warning) else tinted(ProductIcon.Database, t.info)
             }
             deviceToolOf(name)?.let { tool ->
-                return if (tool == OPEN_URL_TOOL) tinted(ProductIcon.Globe, t.info) else plain(ProductIcon.Terminal)
+                return when (tool) {
+                    OPEN_URL_TOOL -> tinted(ProductIcon.Globe, t.info)
+                    OPEN_BRANCH_REVIEW_TOOL -> tinted(ProductIcon.GitBranch, t.info).copy(lucide = LucideIcon.FileDiff)
+                    else -> plain(ProductIcon.Terminal)
+                }
             }
             return when (name) {
                 "Read", "Glob", "LS" -> washed(ProductIcon.FileSearch)
@@ -363,7 +375,7 @@ internal data class ToolChipStyle(val icon: ProductIcon, val background: Rgba, v
 @Composable
 internal fun ToolChip(style: ToolChipStyle) {
     Box(Modifier.size(24.dp).background(style.background.color, RoundedCornerShape(7.dp)), contentAlignment = Alignment.Center) {
-        PpmIcon(style.icon, 14.dp, style.foreground.color)
+        if (style.lucide != null) PpmIcon(vector = style.lucide.vector, size = 14.dp, tint = style.foreground.color) else PpmIcon(style.icon, 14.dp, style.foreground.color)
     }
 }
 
@@ -482,6 +494,11 @@ internal fun deviceToolSummary(call: DeviceToolCall): ToolSummaryText = when (ca
         name = "Open app ",
         detail = "",
         parts = listOf(SummaryPart(truncate(call.url.replaceFirst(HTTP_SCHEME, ""), 60), subtle = true, mono = true)),
+    )
+    is DeviceToolCall.OpenBranchReview -> ToolSummaryText(
+        name = "Branch Review ",
+        detail = "",
+        parts = listOf(SummaryPart("${truncate(call.head ?: "current branch", 40)} ← ${truncate(call.base ?: "main", 40)}", subtle = true, mono = true)),
     )
     is DeviceToolCall.RunInTerminal -> ToolSummaryText(
         name = "Type in terminal ",
@@ -702,12 +719,27 @@ private fun DbToolDetails(call: DbToolCall) {
     }
 }
 
-/** `DeviceToolDetails`: the address, the terminal read, or the command typed and where. */
+/** `DeviceToolDetails`: the address, the refs reviewed, the terminal read, or the command typed and where. */
 @Composable
 private fun DeviceToolDetails(call: DeviceToolCall) {
     val tokens = LocalPpmTokens.current
     when (call) {
         is DeviceToolCall.OpenUrl -> Mono(call.url, tokens.text2, breakAll = true)
+        is DeviceToolCall.OpenBranchReview -> {
+            val line = buildAnnotatedString {
+                fun ref(text: String) = withStyle(SpanStyle(color = tokens.text2.color, fontFamily = PpmFonts.mono)) {
+                    append(if (BREAK in text) text else breakAnywhere(text))
+                }
+                ref(call.head ?: "The branch checked out")
+                append(" against ")
+                ref(call.base ?: "main or master")
+                call.repo?.let {
+                    append(" in ")
+                    ref(it)
+                }
+            }
+            CursorText(line, style = cardText.copy(color = tokens.text3.color))
+        }
         is DeviceToolCall.RunInTerminal -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Mono(call.command, tokens.text2, breakAll = true)
             call.cwd?.let { cwd ->

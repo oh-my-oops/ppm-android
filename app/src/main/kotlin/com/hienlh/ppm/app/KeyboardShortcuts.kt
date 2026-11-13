@@ -14,6 +14,7 @@ import com.hienlh.ppm.state.KeyPress
 import com.hienlh.ppm.state.editor.CompareSelection
 import com.hienlh.ppm.state.windows.WindowVisualState
 import com.hienlh.ppm.state.windows.frontWindowId
+import com.hienlh.ppm.state.workspace.BulkClose
 import com.hienlh.ppm.state.workspace.closesItsTabs
 
 /**
@@ -143,6 +144,9 @@ class KeyboardShortcuts(private val model: AppModel) {
             matches(press, "command-palette") -> model.openPalette()
             matches(press, "toggle-sidebar") -> model.toggleSidebar()
             toggleDock(press) -> Unit
+            matches(press, "toggle-pin-tab") -> model.togglePinActiveTab()
+            matches(press, "close-saved-tabs") -> model.bulkCloseInFocusedPanel(BulkClose.SAVED)
+            matches(press, "close-all-tabs") -> model.bulkCloseInFocusedPanel(BulkClose.ALL)
             matches(press, "next-tab") -> model.cycleTab(forward = true)
             matches(press, "prev-tab") -> model.cycleTab(forward = false)
             press == KeyPress("Tab", ctrl = true) -> {
@@ -270,6 +274,9 @@ internal fun shortcutActionIds(wide: Boolean, projectCount: Int): List<String> =
             "open-chat",
             "open-terminal",
             "open-settings",
+            "toggle-pin-tab",
+            "close-saved-tabs",
+            "close-all-tabs",
             "open-git-status",
             "open-search",
             "open-problems",
