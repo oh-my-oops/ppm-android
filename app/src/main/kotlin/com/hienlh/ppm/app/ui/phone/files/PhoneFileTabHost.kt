@@ -80,6 +80,11 @@ fun PhoneFileTabHost(model: AppModel, tab: WorkspaceTab, modifier: Modifier = Mo
     val download = rememberPhoneFileDownload(model)
     val offlineSeconds = rememberOfflineSeconds(model.connectionLost)
     var siblingsOf by remember(tab.id, path) { mutableStateOf<String?>(null) }
+    // The editor's change bars ask git only once the repository holding the file is known; the
+    // tablet's status bar reads it for the open project, and a phone reads it here (`useGitRepo`).
+    LaunchedEffect(api, project, isRelativeProjectFile) {
+        if (isRelativeProjectFile) model.loadGitRepos(project!!)
+    }
 
     Box(modifier.fillMaxSize()) {
         PhoneFileTabScreen(

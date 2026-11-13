@@ -1372,3 +1372,35 @@ suspend fun ApiClient.gitCommitLine(
     return call("GET", "/api/project/${ApiClient.escape(project)}/git/commit-line", query)
 }
 
+
+/**
+ * The file as git's index holds it, which the editor's change bars compare the buffer with
+ * (`src/shared/git-index-base.ts`). [Same] means the index still names the blob the caller
+ * already holds; [None] that there is nothing to compare with.
+ */
+sealed interface IndexBase {
+    data class Ok(val oid: String, val content: String) : IndexBase
+    data class Same(val oid: String) : IndexBase
+
+    /** [reason]: `untracked`, `conflict`, `not-a-file`, `binary` or `too-large`; the last two carry the blob id. */
+    data class None(val reason: String, val oid: String? = null) : IndexBase
+
+    companion object {
+        fun from(json: JsonElement?): IndexBase = when (json["state"].string) {
+            "ok" -> Ok(json["oid"].string ?: "", json["content"].string ?: "")
+            "same" -> Same(json["oid"].string ?: "")
+            "none" -> None(json["reason"].string ?: "untracked", json["oid"].string)
+            else -> throw PpmError.BadResponse("The server answered an index base this app does not know.")
+        }
+    }
+}
+
+/** `GET /git/index-base?path=&known=`: [known] is the blob id already held, answered [IndexBase.Same] while still current. */
+suspend fun ApiClient.gitIndexBase(project: String, path: String, known: String? = null, repo: GitRepo? = null): IndexBase {
+    val query = buildList {
+        add("path" to path)
+        if (!known.isNullOrEmpty()) add("known" to known)
+        addAll(gitRepoScope(repo))
+    }
+    return IndexBase.from(call("GET", "/api/project/${ApiClient.escape(project)}/git/index-base", query))
+}

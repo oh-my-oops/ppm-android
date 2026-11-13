@@ -714,6 +714,21 @@ internal fun EditableFileCodeView(
         val repoFile = fileGitScope?.filePath ?: path
         val fileRepo = fileGitScope?.repo
 
+        // Change bars in the gutter against the file in git's index, as VS Code draws them, on a
+        // phone too (`use-gutter-changes.ts`): one git call per open, then a cheap check every few
+        // seconds while the editor is up. Like the web, nothing is asked until the repository that
+        // holds the file is known.
+        val gutterChanges = rememberGutterChanges(
+            model = model,
+            project = project,
+            repoFile = repoFile,
+            fileRepo = fileRepo,
+            enabled = model.info?.minimalMode != true && isRelativeProjectFile &&
+                fileGitScope?.kind == com.hienlh.ppm.state.git.FileGitScopeKind.REPO,
+            bufferVersion = currentBufferVersion,
+            readText = { docState.session.buffer.toString() },
+        )
+
         LaunchedEffect(api, project, repoFile, fileRepo?.path, blameEnabled, docState.isDirty) {
             if (!blameEnabled || docState.isDirty || api == null || !isRelativeProjectFile || project == null || repoFile.isNullOrBlank()) {
                 if (docState.isDirty) blameData = null
@@ -961,6 +976,7 @@ internal fun EditableFileCodeView(
             onRequestDefinition = if (lspBridge != null) ({ triggerLspDefinition() }) else null,
             onRequestFormatting = if (lspBridge != null && !docState.session.readOnly) ({ triggerLspFormatting() }) else null,
             diagnostics = lspDiagnostics,
+            gutterChanges = gutterChanges,
             lineNumber = lineNumber,
             endLine = endLine,
             revealAt = revealAt,
@@ -1009,6 +1025,7 @@ internal fun NativeCodeEditorCanvas(
     onRequestDefinition: (() -> Unit)? = null,
     onRequestFormatting: (() -> Unit)? = null,
     diagnostics: List<com.hienlh.ppm.state.editor.LspDiagnostic> = emptyList(),
+    gutterChanges: List<com.hienlh.ppm.state.editor.GutterChanges.Change> = emptyList(),
     lineNumber: Long? = null,
     endLine: Long? = null,
     revealAt: String? = null,
@@ -1527,6 +1544,9 @@ internal fun NativeCodeEditorCanvas(
         )
         val advance = with(density) { (14.sp.toPx() * PpmFonts.MONO_ADVANCE).toDp() }
         val gutterWidth = 36.dp + advance * maxOf(3, lineCount.toString().length) + 28.dp
+        val gutterMarks = remember(gutterChanges, lineCount) {
+            com.hienlh.ppm.state.editor.GutterChanges.rowMarks(gutterChanges, lineCount)
+        }
 
         BoxWithConstraints(
             Modifier
@@ -1620,7 +1640,7 @@ internal fun NativeCodeEditorCanvas(
                         ) {
                             BasicText(
                                 "${row + 1}",
-                                Modifier.width(gutterWidth).padding(end = 28.dp),
+                                Modifier.width(gutterWidth).gutterChangeMark(gutterMarks[row], row + 1, 28.dp, colors).padding(end = 28.dp),
                                 style = style.copy(
                                     color = if (isCursorRow) colors.text2.color else colors.text3.color,
                                     textAlign = TextAlign.End,
