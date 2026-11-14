@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -78,6 +79,7 @@ import com.hienlh.ppm.design.kit.Sheet
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.design.rememberHover
+import com.hienlh.ppm.design.webTitle
 import com.hienlh.ppm.protocol.ChatSearchHit
 import com.hienlh.ppm.protocol.SessionInfo
 import com.hienlh.ppm.protocol.SessionTag
@@ -89,6 +91,7 @@ import com.hienlh.ppm.state.SessionTreeNode
 import com.hienlh.ppm.state.SessionTreeRoot
 import com.hienlh.ppm.state.SpecBarCell
 import com.hienlh.ppm.state.SpecFamily
+import com.hienlh.ppm.state.workspace.tabSessionId
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -122,7 +125,7 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
     val project = model.selectedProject
     // The specs whose chats show their progress in the tree; none from a server without the field.
     var specList by remember(project) { mutableStateOf<List<SpecSummary>>(emptyList()) }
-    val tree = mobile && viewMode.mode == "tree"
+    val tree = viewMode.mode == "tree"
     LaunchedEffect(model.api, project, tree, model.sessions.size) {
         val api = model.api ?: return@LaunchedEffect
         if (!tree || project == null) return@LaunchedEffect
@@ -163,6 +166,28 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
                     contentAlignment = Alignment.Center,
                 ) {
                     PpmIcon(if (viewMode.mode == "tree") ProductIcon.List else ProductIcon.FolderTree, 16.dp, tokens.text2.color)
+                }
+            } else {
+                // `Button variant="ghost" size="icon-xs"`: 24 px, a 14 px icon, `dark:hover:bg-accent/50`.
+                val label = if (tree) "Show as a list" else "Show as a tree"
+                val hover = rememberHover(instant = true)
+                Box(
+                    Modifier
+                        .size(24.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .webTitle(if (tree) "Show as a list" else "Group under the chat that opened them")
+                        .ppmClickable(
+                            pressedColor = tokens.panel2.opacity(0.5).color,
+                            hoverColor = tokens.panel2.opacity(0.5).color,
+                            fade = false,
+                            source = hover.source,
+                            onClickLabel = label,
+                        ) { viewMode.toggle() }
+                        .semantics { contentDescription = label }
+                        .testTag("history-view-toggle"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    PpmIcon(if (tree) ProductIcon.List else ProductIcon.FolderTree, 14.dp, tokens.text.color)
                 }
             }
         }
@@ -286,31 +311,68 @@ fun SessionHistoryPanel(model: AppModel, list: HistoryList, search: ChatSearch, 
                     },
                 )
             }
-            else -> LazyColumn(Modifier.weight(1f).fillMaxWidth().cssScrollbar(sessionList), sessionList) {
-                items(sessions, key = { it.id }) { session ->
-                    val entry = unread[session.id]
-                    SidebarSessionRow(model, session, entry?.type, entry != null) {
-                        model.openTab(session)
-                        onNavigate()
-                    }
+            else -> {
+                // The web's desktop sidebar: families in the list's order, no day headers.
+                val roots = remember(sessions, tree) { if (tree) SessionTree.build(sessions) else emptyList() }
+                val specByChat = remember(specList) { SpecFamily.byChat(specList) }
+                val running = model.events?.running?.collectAsState()?.value.orEmpty()
+                // Families the user opened or closed; the rest follow the open chat.
+                var expanded by remember(project) { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+                var showAll by remember(project) { mutableStateOf<Set<String>>(emptySet()) }
+                val activeSessionId = tabSessionId(model.activeTab)
+                val openSession = { session: SessionInfo ->
+                    model.openTab(session)
+                    onNavigate()
                 }
-                if (state.hasMore(model.hasMoreSessions)) {
-                    item(key = "more") {
-                        // `hover:text-text-secondary hover:bg-surface-elevated`.
-                        val hover = rememberHover(enabled = !state.loadingMore)
-                        val text = tokens.text2.mix(tokens.text3, hover.lit.toDouble()).color
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .ppmClickable(enabled = !state.loadingMore, pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, source = hover.source) {
-                                    scope.launch { list.loadMore(model.sessions, model.hasMoreSessions) }
-                                }
-                                .padding(vertical = 6.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (state.loadingMore) PpmIcon(ProductIcon.Loader2, 12.dp, text, spinning = true)
-                            BasicText(if (state.loadingMore) "Loading..." else "Load more", style = ppmText(11f, lineHeight = 16.5f).copy(color = text))
+                LazyColumn(Modifier.weight(1f).fillMaxWidth().cssScrollbar(sessionList), sessionList) {
+                    if (tree) {
+                        items(roots, key = { "f:" + it.id }) { root ->
+                            SidebarHistoryFamily(
+                                model = model,
+                                project = project,
+                                lines = HistoryTreeLines.lines(root, expanded, showAll, activeSessionId, running, unread.keys, specByChat),
+                                unread = unread,
+                                running = running,
+                                onToggle = { line -> expanded = expanded + (line.parentId to !line.open) },
+                                onShowAll = { parentId -> showAll = showAll + parentId },
+                                onOpen = openSession,
+                                onOpenStandIn = {
+                                    val title = root.parentTitle?.trim().takeUnless { it.isNullOrEmpty() } ?: "Chat"
+                                    project?.let { model.openLinkedSession(it, root.id, root.children.firstOrNull()?.session?.providerId ?: "", title) }
+                                    onNavigate()
+                                },
+                            )
+                        }
+                    } else {
+                        items(sessions, key = { it.id }) { session ->
+                            val entry = unread[session.id]
+                            SidebarSessionRow(
+                                model,
+                                session,
+                                entry?.type,
+                                entry != null,
+                                badge = project?.let { p -> { SpawnedSessionBadge(model, session, p) } },
+                            ) { openSession(session) }
+                        }
+                    }
+                    if (state.hasMore(model.hasMoreSessions)) {
+                        item(key = "more") {
+                            // `hover:text-text-secondary hover:bg-surface-elevated`.
+                            val hover = rememberHover(enabled = !state.loadingMore)
+                            val text = tokens.text2.mix(tokens.text3, hover.lit.toDouble()).color
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .ppmClickable(enabled = !state.loadingMore, pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, source = hover.source) {
+                                        scope.launch { list.loadMore(model.sessions, model.hasMoreSessions) }
+                                    }
+                                    .padding(vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (state.loadingMore) PpmIcon(ProductIcon.Loader2, 12.dp, text, spinning = true)
+                                BasicText(if (state.loadingMore) "Loading..." else "Load more", style = ppmText(11f, lineHeight = 16.5f).copy(color = text))
+                            }
                         }
                     }
                 }
@@ -424,7 +486,21 @@ private fun PillChip(label: String, selected: Boolean, color: Rgba?, onClick: ()
  * `surface-elevated`, over the tint too, as `hover:` outranks the tint's class.
  */
 @Composable
-private fun SidebarSessionRow(model: AppModel, session: SessionInfo, unreadType: String?, isUnread: Boolean, open: () -> Unit) {
+internal fun SidebarSessionRow(
+    model: AppModel,
+    session: SessionInfo,
+    unreadType: String?,
+    isUnread: Boolean,
+    /** `px-2`, or `indent(depth)` under the top of its family. */
+    start: Dp = 8.dp,
+    /** The "Created by" mark, on a top-level row. */
+    badge: (@Composable () -> Unit)? = null,
+    /** In place of the time line under the title (a spec chat's progress). */
+    meta: (@Composable () -> Unit)? = null,
+    /** At the row's end (a spec chat's task-chats chevron). */
+    trailing: (@Composable RowScope.() -> Unit)? = null,
+    open: () -> Unit,
+) {
     val tokens = LocalPpmTokens.current
     var renaming by remember { mutableStateOf(false) }
     var menuAt by remember { mutableStateOf<Offset?>(null) }
@@ -436,12 +512,13 @@ private fun SidebarSessionRow(model: AppModel, session: SessionInfo, unreadType:
             Modifier
                 .fillMaxWidth()
                 .pressable(pressedColor = tokens.panel2.color, hoverColor = tokens.panel2.color, enabled = !renaming, onLongClick = { menuAt = it }, onClick = open)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .padding(start = start, end = 8.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             ProviderBadge(session.providerId)
             session.tag?.let { TagDot(it.color) }
+            badge?.invoke()
             if (renaming) {
                 InlineRename(model, session, RenameField.HistoryList, Modifier.weight(1f)) { renaming = false }
             } else {
@@ -456,7 +533,7 @@ private fun SidebarSessionRow(model: AppModel, session: SessionInfo, unreadType:
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    session.updatedAt?.let { RelativeTime(it, ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text3.color)) }
+                    if (meta != null) meta() else session.updatedAt?.let { RelativeTime(it, ppmText(11f, lineHeight = 16.5f).copy(color = tokens.text3.color)) }
                 }
                 if (session.pinned) {
                     HistoryIcon(ProductIcon.PinOff, tokens.accent, tokens.accent.opacity(0.7)) { model.scope.launch { model.togglePin(session) } }
@@ -468,6 +545,7 @@ private fun SidebarSessionRow(model: AppModel, session: SessionInfo, unreadType:
                     HistoryIcon(ProductIcon.Pencil, tokens.text3, tokens.text2) { renaming = true }
                     HistoryIcon(ProductIcon.Trash2, tokens.text3, tokens.error, tokens.error.opacity(0.2).color) { model.confirmDeleteSession = session }
                 }
+                trailing?.invoke(this)
             }
         }
         menuAt?.let { at ->
