@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -253,14 +254,13 @@ internal fun SheetSeparator() {
 }
 
 /**
- * A slot of [slot] holding the `CircleIcon size-2 fill-current` of the chosen radio. That icon is Fluent's `circle`,
- * two circles wound against each other (radius 8 and 7 in a 20 box), so `fill-current` has nothing to fill: the web
- * draws a thin ring 6.4 across and 0.4 thick, never a dot. The glyph is the web's own, so the ring is too.
+ * A slot of [slot] holding the chosen radio's `RadioDot` (`block size-2 rounded-full bg-current`): a filled dot, not
+ * the `circle` glyph, which is a ring (two circles wound against each other) however it is filled.
  */
 @Composable
 private fun RadioMark(selected: Boolean, slot: Dp) {
     Box(Modifier.size(slot), contentAlignment = Alignment.Center) {
-        if (selected) PpmIcon(ProductIcon.CircleIcon, 8.dp, LocalPpmTokens.current.text.color)
+        if (selected) Box(Modifier.size(8.dp).background(LocalPpmTokens.current.text.color, CircleShape))
     }
 }
 

@@ -19,10 +19,10 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * The mark of the chosen radio as it is painted. The web's is `CircleIcon className="size-2 fill-current"`, and that icon is
- * Fluent's `circle`, an outline whose two circles are wound against each other: it draws a ring 6.4 across and 0.4 thick, a
- * hollow one, however it is filled. Nothing but pixels can tell that from a dot, so this reads them (native graphics, at 3
- * pixels to the dp: a ring 1.2 pixels thick is then drawn dark where it is, which at 1 pixel to the dp it would barely be).
+ * The mark of the chosen radio as it is painted: the web's `RadioDot`, `block size-2 rounded-full bg-current`, a filled dot
+ * 8 across. It was `CircleIcon className="size-2 fill-current"`, Fluent's `circle`, whose two circles are wound against each
+ * other, so it drew a hollow ring however it was filled. Nothing but pixels can tell a ring from a dot, so this reads them
+ * (native graphics, at 3 pixels to the dp).
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -55,19 +55,21 @@ class HostMenuRadioMarkTest {
     }
 
     @Test
-    fun `the chosen radio is drawn as a ring 6 dp across with nothing in it, as the web draws it, not as a dot`() {
+    fun `the chosen radio is drawn as a filled dot 8 dp across, as the web's RadioDot`() {
         rows()
         val ink = ink("Name")
         assertTrue("the chosen radio drew nothing", ink.isNotEmpty())
         val wide = ink.maxOf { it.first } - ink.minOf { it.first } + 1
         val tall = ink.maxOf { it.second } - ink.minOf { it.second } + 1
-        // 8 dp x 16/20 = 6.4 dp, 19.2 pixels, and up to a pixel more where the edge is only half covered.
-        assertTrue("$wide pixels wide", wide in 17..21)
-        assertTrue("$tall pixels tall", tall in 17..21)
+        // 8 dp, 24 pixels, and up to a pixel more where the edge is only half covered.
+        assertTrue("$wide pixels wide", wide in 23..26)
+        assertTrue("$tall pixels tall", tall in 23..26)
         val centre = (ink.minOf { it.first } + ink.maxOf { it.first }) / 2.0 to (ink.minOf { it.second } + ink.maxOf { it.second }) / 2.0
         assertEquals("the middle of the 14 dp slot, 15 dp in", 15.0 * perDp, centre.first, 2.0)
-        val inside = ink.count { hypot(it.first - centre.first, it.second - centre.second) < 7.0 }
-        assertEquals("pixels inside the ring", 0, inside)
+        // Every pixel well inside the edge is inked: a dot, not a ring.
+        val core = (0 until 30 * perDp).flatMap { x -> (0 until 60 * perDp).map { y -> x to y } }
+            .filter { hypot(it.first - centre.first, it.second - centre.second) < 9.0 }
+        assertEquals("pixels inside the dot left blank", emptyList<Pair<Int, Int>>(), core.filter { it !in ink })
     }
 
     @Test
