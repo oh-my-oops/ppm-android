@@ -2,12 +2,16 @@ package com.hienlh.ppm.app
 
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import com.hienlh.ppm.client.ApiClient
 import com.hienlh.ppm.client.SpecView
+import com.hienlh.ppm.client.attachSpecSession
 import com.hienlh.ppm.client.createSpec
+import com.hienlh.ppm.client.spec
 import com.hienlh.ppm.client.specBySession
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.string
@@ -50,6 +54,45 @@ class AppSpecs internal constructor(private val model: AppModel) {
     /** Chats waiting for their first message's session, to bind the spec they were started as. */
     private val binders = mutableMapOf<String, Job>()
 
+    /**
+     * The tablet's chat tabs bound to a spec (`useSessionSpec`), by tab id: what the composer's
+     * chip and Modes menu name, and where a request to show a spec finds its pane.
+     */
+    val bound = mutableStateMapOf<String, ChatSpecBinding>()
+
+    /** Tablet chat tabs whose spec pane was hidden; a pane is open unless listed (`specPaneOpen`, open on desktop). */
+    private val paneHidden = mutableStateMapOf<String, Boolean>()
+
+    /** Specs whose pane must open in the chat bound to them (`takeSpecPaneRequest`), by slug. */
+    private val paneRequests = mutableStateMapOf<String, Boolean>()
+
+    /** Moves each time this device binds a chat to a spec, so a chat looks for its spec again at once. */
+    var bindings by mutableIntStateOf(0)
+        private set
+
+    fun paneOpen(tabId: String): Boolean = paneHidden[tabId] != true
+
+    fun setPaneOpen(tabId: String, open: Boolean) {
+        if (open) paneHidden.remove(tabId) else paneHidden[tabId] = true
+    }
+
+    fun togglePane(tabId: String) = setPaneOpen(tabId, !paneOpen(tabId))
+
+    /** The open chat tab bound to [slug], if any. */
+    fun tabShowing(slug: String): String? =
+        bound.entries.firstOrNull { it.value.slug == slug && model.tabOf(it.key) != null }?.key
+
+    /** Asks the chat bound to [slug] to show its pane, when it next learns or already knows its spec. */
+    fun requestPane(slug: String) {
+        paneRequests[slug] = true
+    }
+
+    /** Whether a pane request for [slug] waits (read in composition, so a chat hears a new one). */
+    fun paneRequested(slug: String): Boolean = paneRequests[slug] == true
+
+    /** True once per request: the chat bound to [slug] should open its pane. */
+    fun takePaneRequest(slug: String): Boolean = paneRequests.remove(slug) != null
+
     internal fun requestShow() {
         showRequested = true
     }
@@ -70,6 +113,7 @@ class AppSpecs internal constructor(private val model: AppModel) {
         // A chat already bound (its first send carried the spec, or another device started one) keeps its spec.
         api.specBySession(project, sessionId)?.let { return it.slug }
         val view: SpecView = api.createSpec(project, SpecStartChoice.titleFrom(title).ifEmpty { "Spec" }, kind, workflow, choice.checks, sessionId)
+        bindings++
         return view.slug
     }
 
@@ -86,6 +130,7 @@ class AppSpecs internal constructor(private val model: AppModel) {
             val project = projectOf(tab) ?: return@launch
             try {
                 bindSession(api, project, sessionId, model.sessions.firstOrNull { it.id == sessionId }?.title ?: tab.title, choice)
+                    ?.let { slug -> bound[tabId] = ChatSpecBinding(slug) }
                 model.patchTabMetadata(tabId, "specStart" to null)
             } catch (error: CancellationException) {
                 throw error
@@ -109,6 +154,9 @@ class AppSpecs internal constructor(private val model: AppModel) {
         tab.metadata["projectName"].string?.takeIf { it.isNotEmpty() } ?: tab.projectId ?: model.selectedProject
 }
 
+/** A chat's spec as its tab knows it: the slug, and once read its title and task checks. */
+data class ChatSpecBinding(val slug: String, val title: String? = null, val checks: String? = null)
+
 private val holders = WeakHashMap<AppModel, AppSpecs>()
 
 /** Spec mode's state on this model. */
@@ -129,6 +177,8 @@ fun AppModel.openSpec(slug: String, fromList: Boolean = false) {
     specs.openSlug = slug
     specs.openTitle = null
     specs.openedFromList = fromList
+    // A tablet shows a spec in the pane of the chat bound to it.
+    specs.requestPane(slug)
     if (!fromList) specs.requestShow()
 }
 
@@ -174,12 +224,31 @@ fun AppModel.startSpec(chatTabId: String, choice: SpecStartChoice) {
         return
     }
     if (!choice.isSpec) return
-    val api = api ?: return
     val project = specs.projectOf(tab) ?: return
-    val title = sessions.firstOrNull { it.id == sessionId }?.title ?: tab.title
+    bindAndShow(chatTabId, project, sessionId, sessions.firstOrNull { it.id == sessionId }?.title ?: tab.title, choice)
+}
+
+/**
+ * `startSpecHere` (the tablet's Modes menu): the chat [tab], which has a session, gets a spec of
+ * [choice] bound to it now, shown beside it. The chat's own session and project are used, as the
+ * web's chat tab uses its own; a chat with no session keeps the choice for its first message.
+ */
+fun AppModel.startSpecHere(tab: ChatTab, choice: SpecStartChoice) {
+    val session = tab.session ?: return startSpec(tab.tabId, choice)
+    specs.choosingFor = null
+    if (!choice.isSpec || tab.project.isEmpty()) return
+    bindAndShow(tab.tabId, tab.project, session.id, sessions.firstOrNull { it.id == session.id }?.title ?: session.title, choice)
+}
+
+private fun AppModel.bindAndShow(chatTabId: String, project: String, sessionId: String, title: String, choice: SpecStartChoice) {
+    val api = api ?: return
     scope.launch {
         try {
-            specs.bindSession(api, project, sessionId, title, choice)?.let { openSpec(it) }
+            specs.bindSession(api, project, sessionId, title, choice)?.let {
+                specs.bound[chatTabId] = ChatSpecBinding(it)
+                specs.setPaneOpen(chatTabId, true)
+                openSpec(it)
+            }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -222,5 +291,57 @@ fun AppModel.openSpecChat(project: String, sessionId: String, title: String, pro
         }
         openLinkedSession(project, sessionId, provider ?: "", title)
         then()
+    }
+}
+
+/**
+ * The tablet's Specs list tap (`SpecsSidebarPanel.open`): the spec's chat with its pane open, or,
+ * for a spec with no chat yet (one `ppm spec new` made), a new chat bound to it.
+ */
+fun AppModel.openSpecInChat(project: String, slug: String, title: String, sessionId: String?, then: () -> Unit = {}) {
+    specs.requestPane(slug)
+    if (sessionId != null) {
+        openSpecChat(project, sessionId, title, then = then)
+        return
+    }
+    val api = api ?: return
+    scope.launch {
+        try {
+            val session = api.createSession(project, providerId = null, title = title)
+            api.attachSpecSession(project, slug, session.id)
+            openLinkedSession(project, session.id, session.providerId, title)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            toast(ErrorToastMessage("Could not open the spec", error.message))
+        } finally {
+            then()
+        }
+    }
+}
+
+/**
+ * What showing the spec [slug] means on a tablet, where a spec sits beside its chat: the chat
+ * bound to it comes forward with its pane open, or its chat is opened, or a new one made for it.
+ */
+fun AppModel.showSpecOnTablet(slug: String) {
+    specs.tabShowing(slug)?.let { tabId ->
+        specs.setPaneOpen(tabId, true)
+        specs.takePaneRequest(slug)
+        activate(tabId)
+        return
+    }
+    val api = api ?: return
+    val project = selectedProject ?: return
+    scope.launch {
+        val view = try {
+            api.spec(project, slug)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            toast(ErrorToastMessage("Could not open the spec", error.message))
+            return@launch
+        }
+        openSpecInChat(project, slug, view.title, view.sessionId)
     }
 }

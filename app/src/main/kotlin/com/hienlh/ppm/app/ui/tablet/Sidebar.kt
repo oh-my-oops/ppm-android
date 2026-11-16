@@ -301,6 +301,7 @@ private fun SidebarSectionBody(model: AppModel, onChooseProject: () -> Unit) {
         sec == "git" -> com.hienlh.ppm.app.ui.git.GitStatusPanel(model)
         sec == "database" -> com.hienlh.ppm.app.ui.database.DatabaseSidebarPane(model)
         sec == "designs" -> com.hienlh.ppm.app.ui.design.DesignsSidebarPane(model)
+        sec == "specs" -> SpecsSidebarPanel(model)
         sec == "tunnels" -> com.hienlh.ppm.app.ui.tunnels.PortForwardingPanel(model)
         sec == "ai-resources" -> com.hienlh.ppm.app.ui.AiResourcesSidebarPanel(model)
         sec.startsWith("ext:") -> {
@@ -557,6 +558,7 @@ internal val DEFAULT_RAIL_SECTIONS = listOf(
     "history",
     "teams",
     "designs",
+    "specs",
     "explorer",
     "search",
     "git",
@@ -657,6 +659,7 @@ private fun NavSectionRail(model: AppModel, modifier: Modifier = Modifier, portr
                         )
                         "database" -> RailSectionSpec(ProductIcon.Database, "Database", 0, null, null)
                         "designs" -> RailSectionSpec(ProductIcon.Palette, "Designs", 0, FeatureBadgeKind.NEW, null)
+                        "specs" -> RailSectionSpec(ProductIcon.ClipboardList, "Specs", 0, null, null)
                         "teams" -> RailSectionSpec(ProductIcon.Users, "Teams", 0, FeatureBadgeKind.BETA, null)
                         "tunnels" -> RailSectionSpec(ProductIcon.Globe, "Port Forwarding", 0, null, null)
                         "ai-resources" -> RailSectionSpec(ProductIcon.Sparkles, "AI Resources", 0, null, null)

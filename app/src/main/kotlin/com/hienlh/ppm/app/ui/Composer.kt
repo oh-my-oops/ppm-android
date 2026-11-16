@@ -134,6 +134,8 @@ import com.hienlh.ppm.app.attach
 import com.hienlh.ppm.app.onEveryTap
 import com.hienlh.ppm.app.removeAttachment
 import com.hienlh.ppm.app.tracksTextFocus
+import com.hienlh.ppm.app.ui.tablet.SpecWorkflowChip
+import com.hienlh.ppm.app.ui.tablet.SpecWorkflowMenuSection
 import com.hienlh.ppm.chat.ReplyCard
 import com.hienlh.ppm.chat.sky400
 import com.hienlh.ppm.chat.sky500
@@ -452,9 +454,19 @@ fun ChatComposer(
                 if (!tab.providerPending) {
                     Box {
                         ModeChip(mode, narrow) { modeOpen = !modeOpen }
-                        if (modeOpen) ModePopover(mode, onDismiss = { modeOpen = false }, pick = pickMode)
+                        if (modeOpen) {
+                            ModePopover(
+                                mode,
+                                onDismiss = { modeOpen = false },
+                                pick = pickMode,
+                                // The Workflow group (`modeMenuFooter`): Spec mode, on the tablet's layout.
+                                footer = if (mobile) null else ({ SpecWorkflowMenuSection(model, tab, onDone = { modeOpen = false }) }),
+                            )
+                        }
                     }
                 }
+                // `workflowSlot`: the spec this chat drives, or the workflow a new chat will start in.
+                if (!mobile) SpecWorkflowChip(model, tab, narrow)
                 if (!tab.providerPending && !tab.firstSendPending) {
                     // `[data-model-slot]` (`shrink` while siblings stay `shrink-0`): the only chip that yields width.
                     Box(Modifier.weight(1f, fill = false).testTag("composer-model-slot")) {
@@ -1137,8 +1149,12 @@ private fun SendButton(tab: ChatTab, mobile: Boolean, enabled: Boolean, onClick:
  * 4 px clear (`absolute bottom-full left-0 mb-1`).
  */
 @Composable
-private fun ModePopover(current: PermissionMode, onDismiss: () -> Unit, pick: (PermissionMode) -> Unit) =
-    ComposerPopover(onDismiss) { ModePanel(current, pick) }
+private fun ModePopover(
+    current: PermissionMode,
+    onDismiss: () -> Unit,
+    pick: (PermissionMode) -> Unit,
+    footer: (@Composable () -> Unit)? = null,
+) = ComposerPopover(onDismiss) { ModePanel(current, pick, footer) }
 
 @Composable
 private fun ComposerPopover(onDismiss: () -> Unit, content: @Composable () -> Unit) {
@@ -1148,7 +1164,7 @@ private fun ComposerPopover(onDismiss: () -> Unit, content: @Composable () -> Un
 
 /** What [ModePopover] opens: "Modes" and its key over a row for each mode. */
 @Composable
-internal fun ModePanel(current: PermissionMode, pick: (PermissionMode) -> Unit) {
+internal fun ModePanel(current: PermissionMode, pick: (PermissionMode) -> Unit, footer: (@Composable () -> Unit)? = null) {
     val tokens = LocalPpmTokens.current
     val width = if (LocalPpmMobile.current) 288.dp else 320.dp
     val shape = RoundedCornerShape(12.dp)
@@ -1196,6 +1212,7 @@ internal fun ModePanel(current: PermissionMode, pick: (PermissionMode) -> Unit) 
                 }
             }
         }
+        footer?.invoke()
     }
 }
 

@@ -4783,7 +4783,7 @@ internal fun filePathTab(path: String, projectName: String?) = NewTab(
 private val DOCK_POSITIONS = setOf("bottom", "left", "right")
 
 /** The sections this app has, in the web's default rail order (`BUILTIN_SIDEBAR_TABS`). */
-private val SIDEBAR_SECTIONS = listOf("history", "teams", "designs", "explorer", "search", "git", "database", "tunnels", "ai-resources")
+private val SIDEBAR_SECTIONS = listOf("history", "teams", "designs", "specs", "explorer", "search", "git", "database", "tunnels", "ai-resources")
 private val MINIMAL_SIDEBAR_SECTIONS = setOf("history", "explorer", "search")
 
 private val PROJECT_SORT_MODES = setOf("recent", "priority", "name")

@@ -98,6 +98,8 @@ import com.hienlh.ppm.app.attach
 import com.hienlh.ppm.app.tracksTextFocus
 import com.hienlh.ppm.app.ui.files.ENTRY_DRAG_MIME
 import com.hienlh.ppm.app.ui.files.TREE_PATH_MIME
+import com.hienlh.ppm.app.ui.tablet.ChatSpecBindingEffect
+import com.hienlh.ppm.app.ui.tablet.ChatWithSpecPane
 import com.hienlh.ppm.app.ui.tablet.dashedBorder
 import com.hienlh.ppm.chat.AgentSessionContent
 import com.hienlh.ppm.chat.AgentSessionOpener
@@ -374,8 +376,11 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         }
     }
 
+    // The spec this chat drives (Spec mode), shown beside or above the conversation on a tablet.
+    if (!mobile) ChatSpecBindingEffect(model, tab, currentSessionId)
+    ChatWithSpecPane(model, tab, modifier, enabled = !mobile) { chatArea ->
     BoxWithConstraints(
-        modifier
+        chatArea
             .fillMaxSize()
             .onGloballyPositioned {
                 coordsHolder.root = it
@@ -762,6 +767,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
         }
         if (fileDrop.showing) DropFilesOverlay()
         if (tab.editForking) EditForkingOverlay()
+    }
     }
 }
 

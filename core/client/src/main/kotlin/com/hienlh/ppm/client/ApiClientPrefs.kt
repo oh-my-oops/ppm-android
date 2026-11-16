@@ -111,7 +111,7 @@ data class UiPrefs(
         private val GIT_VIEW_MODES = setOf("flat", "tree")
         private val EDITOR_TAB_STYLES = setOf("default", "boxed", "pill")
 
-        private val SIDEBAR_TABS = setOf("explorer", "git", "database", "search", "jira", "ai-resources", "history", "tunnels", "teams", "designs")
+        private val SIDEBAR_TABS = setOf("explorer", "git", "database", "search", "jira", "ai-resources", "history", "tunnels", "teams", "designs", "specs")
 
         /** A section of the web's sidebar, an extension's view (`ext:`) included (`isValidSidebarTab`). */
         private fun isSidebarTab(id: String): Boolean = id in SIDEBAR_TABS || id.startsWith("ext:")

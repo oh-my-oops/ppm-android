@@ -38,6 +38,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -76,6 +77,8 @@ import androidx.compose.ui.zIndex
 import com.hienlh.ppm.app.AppModel
 import com.hienlh.ppm.app.TabletEscapeStack
 import com.hienlh.ppm.app.TabletShortcutBridge
+import com.hienlh.ppm.app.showSpecOnTablet
+import com.hienlh.ppm.app.specs
 import com.hienlh.ppm.app.ui.Backdrop
 import com.hienlh.ppm.app.ui.CornerChrome
 import com.hienlh.ppm.app.ui.DropRouter
@@ -221,6 +224,7 @@ fun TabletShell(model: AppModel, shellState: TabletShellState = remember { Table
     BackHandler(enabled = shellState.hasOpenLayer(model)) {
         shellState.closeTopLayer(model)
     }
+    TabletSpecRequests(model)
     CompositionLocalProvider(
         LocalTabDrag provides drag,
         LocalHeldCursor provides held,
@@ -291,6 +295,8 @@ fun TabletShell(model: AppModel, shellState: TabletShellState = remember { Table
             if (shellState.shortcutsSheetOpen) {
                 KeyboardShortcutsModal(model, onDismiss = { shellState.shortcutsSheetOpen = false })
             }
+            // The workflow dialog a chat's chip asked for (`startSpec`).
+            TabletSpecStartDialog(model)
         }
     }
 }
@@ -718,4 +724,27 @@ fun Modifier.screenDrag(
 /** Where a handle was last laid out; read by its gesture, never by composition. */
 internal class PlacedAt {
     var coordinates: LayoutCoordinates? = null
+}
+
+/**
+ * Spec mode's requests on a tablet: a chat started as a spec gets its spec once its first message
+ * makes the session, `openSpecs()` shows the sidebar's Specs, and `openSpec()` shows the spec in
+ * the pane of its chat. Back closes the workflow dialog.
+ */
+@Composable
+private fun TabletSpecRequests(model: AppModel) {
+    val specs = model.specs
+    val openTabs = model.openTabs.map { it.first }
+    val openTabIds = openTabs.mapTo(LinkedHashSet()) { it.id }
+    LaunchedEffect(openTabIds) {
+        specs.armPending(openTabs)
+    }
+    val requested = specs.showRequested
+    LaunchedEffect(requested) {
+        if (!requested) return@LaunchedEffect
+        specs.showRequested = false
+        val slug = specs.openSlug
+        if (slug == null) model.showSidebarSection("specs") else model.showSpecOnTablet(slug)
+    }
+    BackHandler(enabled = specs.choosingFor != null) { specs.choosingFor = null }
 }
