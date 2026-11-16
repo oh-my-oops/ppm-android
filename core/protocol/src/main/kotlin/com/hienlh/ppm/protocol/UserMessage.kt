@@ -27,14 +27,6 @@ data class ParsedUserMessage(
     /** Set when one of the chat's session schedules sent it: drawn as one line, not the person's bubble. */
     val scheduleRun: ScheduleRunReference? = null,
 ) {
-    /** `typedText`: the body with a command written back as `/name args`, as it was sent. */
-    val typedText: String
-        get() {
-            val command = command ?: return body
-            val typed = "/${command.name.trimStart('/')}" + (command.args?.let { " $it" } ?: "")
-            return if (body.isNotEmpty()) "$typed\n\n$body" else typed
-        }
-
     data class SystemTag(val name: String, val label: String, val content: String) {
         /** The text of `<[tag]>…</[tag]>` inside, such as a task notification's `status`; null when absent or blank. */
         fun field(tag: String): String? =
