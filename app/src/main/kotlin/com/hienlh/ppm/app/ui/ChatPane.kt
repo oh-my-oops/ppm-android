@@ -452,10 +452,12 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                             LocalChatTabs provides tabs,
                             LocalRunInTerminal provides { command -> model.runInTerminal(command, tab.project) },
                             LocalAgentSessionOpener provides agentOpener,
-                            // A Codex question's answer goes out as the composer would send it, in its permission mode.
+                            // A Codex question's answer goes out as the composer would send it, in its permission mode,
+                            // and mid-turn as Send now: steered into the running turn, not left in the queue.
                             LocalAsyncQuestions provides AsyncQuestions(
                                 state.items,
-                                if (state.connected) { content -> chat.send(content, TurnOptions(permissionMode = tab.permissionMode?.value)) } else null,
+                                state.queue,
+                                if (state.connected) { content -> chat.send(content, TurnOptions(permissionMode = tab.permissionMode?.value), sendNow = true) } else null,
                             ),
                         ) {
                             val preview = tab.firstSendPreview

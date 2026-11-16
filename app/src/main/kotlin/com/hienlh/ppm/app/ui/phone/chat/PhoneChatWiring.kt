@@ -369,7 +369,8 @@ internal fun PhoneTranscriptLocals(model: AppModel, tab: ChatTab, chat: ChatCont
         LocalAgentSessionOpener provides agents,
         LocalAsyncQuestions provides AsyncQuestions(
             state.items,
-            if (state.connected) { text -> chat.send(text, TurnOptions(permissionMode = tab.permissionMode?.value)) } else null,
+            state.queue,
+            if (state.connected) { text -> chat.send(text, TurnOptions(permissionMode = tab.permissionMode?.value), sendNow = true) } else null,
         ),
         LocalTurnChanges provides turnChanges,
         content = content,
