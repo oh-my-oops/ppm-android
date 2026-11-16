@@ -24,7 +24,17 @@ data class ParsedUserMessage(
     val turnRefs: List<TurnReference>? = null,
     /** Set when another PPM session's AI sent the message: it is drawn as theirs, not the person's. */
     val fromSession: FromSessionReference? = null,
+    /** Set when one of the chat's session schedules sent it: drawn as one line, not the person's bubble. */
+    val scheduleRun: ScheduleRunReference? = null,
 ) {
+    /** `typedText`: the body with a command written back as `/name args`, as it was sent. */
+    val typedText: String
+        get() {
+            val command = command ?: return body
+            val typed = "/${command.name.trimStart('/')}" + (command.args?.let { " $it" } ?: "")
+            return if (body.isNotEmpty()) "$typed\n\n$body" else typed
+        }
+
     data class SystemTag(val name: String, val label: String, val content: String) {
         /** The text of `<[tag]>…</[tag]>` inside, such as a task notification's `status`; null when absent or blank. */
         fun field(tag: String): String? =
@@ -45,11 +55,28 @@ data class ParsedUserMessage(
             val (files, attachmentsText) = attachments(afterBlocks)
             // Command output tags go, their text stays.
             val (cleanText, tags) = systemTags(COMMAND_OUTPUT.replace(attachmentsText, "$1"))
-            val (command, afterCommand) = commandTags(cleanText)
+            var (command, afterCommand) = commandTags(cleanText)
+            // A scheduled slash command as Claude Code records it: its run block rides in the command's args.
+            var scheduleRun = decoded.scheduleRun
+            if (scheduleRun == null && command?.args != null && decoded.fromSession == null) {
+                scheduleRun = scheduleRunInCommandRecord(decoded.content)
+                if (scheduleRun != null) command = command.copy(args = ChatScheduleRun.decodeInCommandArgs(command.args!!).args.ifEmpty { null })
+            }
             val (agent, body) = agentTag(afterCommand)
             val args = command?.args
             val text = if (args != null) (if (body.isNotEmpty()) "$args\n\n$body" else args) else body
-            return ParsedUserMessage(decoded.replyTo, files, text, body, tags, command, blocks, idePath, agent, decoded.turnRefs, decoded.fromSession)
+            return ParsedUserMessage(decoded.replyTo, files, text, body, tags, command, blocks, idePath, agent, decoded.turnRefs, decoded.fromSession, scheduleRun)
+        }
+
+        /**
+         * The run block a scheduled slash command carries in its args, read from the message exactly
+         * as stored, and only from Claude's own record of a command: stripping another tag first could
+         * join a sentinel typed in two halves around it.
+         */
+        private fun scheduleRunInCommandRecord(raw: String): ScheduleRunReference? {
+            if (!COMMAND_RECORD_START.containsMatchIn(raw)) return null
+            val args = COMMAND_ARGS.find(raw)?.groupValues?.get(1)?.jsTrim()?.ifEmpty { null } ?: return null
+            return ChatScheduleRun.decodeInCommandArgs(args).scheduleRun
         }
 
         /**
@@ -80,6 +107,7 @@ data class ParsedUserMessage(
         private val COMMAND_NAME = Regex("""<command-name>([\s\S]*?)</command-name>""")
         private val COMMAND_ARGS = Regex("""<command-args>([\s\S]*?)</command-args>""")
         private val COMMAND_MESSAGE = Regex("""<command-message>[\s\S]*?</command-message>""")
+        private val COMMAND_RECORD_START = Regex("""^<command-(?:message|name)>""")
         private val AGENT_PREFIX = Regex("""^Use the (\S+) agent to\s?""")
         private val IDE_TAG = Regex("""<ide_opened_file>([\s\S]*?)</ide_opened_file>""")
         private val IDE_PATH = Regex("""opened the file (.+?) in the IDE""")

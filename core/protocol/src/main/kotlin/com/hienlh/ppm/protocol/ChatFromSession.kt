@@ -302,7 +302,8 @@ object ChatTurnRefs {
 /**
  * The body and every block of a stored user message (`decodeMessageBlocks` in
  * `shared/chat-message-blocks.ts`): the reply block last, then the turn references, then the
- * from-session block. A block that does not decode stays text.
+ * from-session block, and a session schedule's run block in front of the text (or after a slash
+ * command). A block that does not decode stays text.
  */
 object ChatMessageBlocks {
     data class Decoded(
@@ -310,13 +311,17 @@ object ChatMessageBlocks {
         val replyTo: ReplyReference?,
         val turnRefs: List<TurnReference>?,
         val fromSession: FromSessionReference?,
+        /** Set when a session schedule sent the message; never with another session as sender. */
+        val scheduleRun: ScheduleRunReference? = null,
     )
 
     fun decode(content: String): Decoded {
         val reply = ChatReply.decode(content)
         val refs = ChatTurnRefs.decode(reply.content)
         val from = ChatFromSession.decode(refs.content)
-        return Decoded(from.content, reply.replyTo, refs.turnRefs, from.fromSession)
+        // A schedule's run is never another session's message.
+        val run = if (from.fromSession != null) ChatScheduleRun.Decoded(from.content, null) else ChatScheduleRun.decode(from.content)
+        return Decoded(run.content, reply.replyTo, refs.turnRefs, from.fromSession, run.scheduleRun)
     }
 }
 

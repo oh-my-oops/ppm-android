@@ -125,6 +125,7 @@ class GlobalEvents(
     private val designCheckListeners = LinkedHashSet<(String, String, String?, Boolean) -> Unit>()
     private val featureIntrosListeners = LinkedHashSet<(change: String, id: String?) -> Unit>()
     private val memoryChangedListeners = LinkedHashSet<() -> Unit>()
+    private val schedulesChangedListeners = LinkedHashSet<() -> Unit>()
     private val memoryInstallListeners = LinkedHashSet<(status: JsonElement) -> Unit>()
     private var socket: SocketConnection? = null
 
@@ -297,6 +298,15 @@ class GlobalEvents(
         return { memoryChangedListeners -= listener }
     }
 
+    /**
+     * A schedule was written, or delivery changed one on its own — a fire coming due, a turn taking it,
+     * a pause (`schedules:changed`): a chat's schedule chip and Settings → Schedules read again.
+     */
+    fun onSchedulesChanged(listener: () -> Unit): () -> Unit {
+        schedulesChangedListeners += listener
+        return { schedulesChangedListeners -= listener }
+    }
+
     /** The local embedding model's install moved (`memory:embed-install`): its `status` object. */
     fun onMemoryEmbedInstall(listener: (status: JsonElement) -> Unit): () -> Unit {
         memoryInstallListeners += listener
@@ -363,6 +373,7 @@ class GlobalEvents(
             "logs:issues-changed" -> logsIssuesListeners.toList().forEach { it() }
             "feature-intros:changed" -> featureIntrosListeners.toList().forEach { it(frame["change"].string.orEmpty(), frame["id"].string) }
             "memory:changed" -> memoryChangedListeners.toList().forEach { it() }
+            "schedules:changed" -> schedulesChangedListeners.toList().forEach { it() }
             "memory:embed-install" -> frame["status"]?.takeIf { it.obj != null }?.let { status ->
                 memoryInstallListeners.toList().forEach { it(status) }
             }
