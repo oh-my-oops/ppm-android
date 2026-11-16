@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -76,6 +77,7 @@ import com.hienlh.ppm.design.CssText
 import com.hienlh.ppm.design.CursorText
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.GalleryImage
+import com.hienlh.ppm.design.LocalImageViewer
 import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
 import com.hienlh.ppm.design.LucideIcon
@@ -149,7 +151,8 @@ val sky400 = Rgba(0.0, 187.79 / 255, 1.0, 1.0)
 /** `IMAGE_EXTS` in message-media.tsx. */
 private val IMAGE_EXTENSIONS = setOf(".png", ".jpg", ".jpeg", ".gif", ".webp")
 
-internal fun isImagePath(path: String): Boolean {
+/** An attachment the web draws as a thumbnail (`isImagePath`), by its extension. */
+fun isImagePath(path: String): Boolean {
     val dot = path.lastIndexOf('.')
     return dot >= 0 && path.substring(dot).lowercase() in IMAGE_EXTENSIONS
 }
@@ -514,6 +517,30 @@ private fun AttachmentName(path: String) {
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
     )
+}
+
+/**
+ * A message's attachments outside the transcript, as the queue above the composer shows them
+ * (`queued-messages-stack.tsx`): images as the sent bubble's thumbnails, other files by name,
+ * wrapping with 6 px between them. The row is a gallery of its own (`GALLERY_ROOT_ATTR`): a tap
+ * opens the lightbox among its pictures.
+ */
+@Composable
+fun MessageAttachmentChips(files: List<String>, modifier: Modifier = Modifier) {
+    val viewer = LocalImageViewer.current
+    val uploads = LocalChatImages.current
+    val gallery = remember(files, viewer, uploads) {
+        ChatGallery { self ->
+            val images = files.filter(::isImagePath).map { galleryImage(GalleryRef.Upload(it), uploads, null, null) }
+            val index = images.indexOfFirst { it.key == self.key }
+            if (index < 0) viewer?.show(listOf(self), 0) else viewer?.show(images.toMutableList().also { it[index] = self }, index)
+        }
+    }
+    CompositionLocalProvider(LocalChatGallery provides gallery) {
+        FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (path in files) if (isImagePath(path)) ImageChip(path) else FileChip(path)
+        }
+    }
 }
 
 /** A file that is not an image: its icon and name. */

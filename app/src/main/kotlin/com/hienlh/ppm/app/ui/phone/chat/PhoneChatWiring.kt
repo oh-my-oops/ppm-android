@@ -83,6 +83,7 @@ import com.hienlh.ppm.design.cssBorder
 import com.hienlh.ppm.design.ppmClickable
 import com.hienlh.ppm.design.ppmText
 import com.hienlh.ppm.protocol.ChatReply
+import com.hienlh.ppm.protocol.ParsedUserMessage
 import com.hienlh.ppm.protocol.QueuedMessage
 import com.hienlh.ppm.protocol.SessionFileChange
 import com.hienlh.ppm.protocol.UsageInfo
@@ -331,12 +332,7 @@ private fun cameraFile(context: Context): File {
  */
 @Composable
 internal fun PhoneTranscriptLocals(model: AppModel, tab: ChatTab, chat: ChatController, state: ChatState, content: @Composable () -> Unit) {
-    val images = remember(tab.project) {
-        object : ChatImages {
-            override suspend fun load(path: String) = model.chatImage(tab.project, path)
-            override suspend fun read(path: String) = model.chatImageFile(tab.project, path)
-        }
-    }
+    val images = rememberChatImages(model, tab.project)
     val toolImages = remember(tab.project) { ToolImages { model.toolImage(tab.project, it) } }
     val markdownImages = remember(tab.project) {
         object : MarkdownImages {
@@ -577,7 +573,21 @@ internal fun QueuedMessageAnswerEffect(model: AppModel, tab: ChatTab, chat: Chat
     }
 }
 
-/** The server's queue as the stack shows it: the typed text without the reply it carries. */
+/** The images a chat in [project] was sent, read with the server's credentials (`useAuthBlob`). */
+@Composable
+internal fun rememberChatImages(model: AppModel, project: String): ChatImages = remember(project) {
+    object : ChatImages {
+        override suspend fun load(path: String) = model.chatImage(project, path)
+        override suspend fun read(path: String) = model.chatImageFile(project, path)
+    }
+}
+
+/**
+ * The server's queue as the stack shows it, each message parsed as the sent bubble parses it
+ * (`parseUserMessage`): the typed text without the reply or attachment markers it carries, and
+ * the attachments apart, for their thumbnails.
+ */
 internal fun phoneQueuedMessages(queue: List<QueuedMessage>): List<PhoneQueuedMessage> = queue.map {
-    PhoneQueuedMessage(it.id, ChatReply.decode(it.content).content.trim(), it.imageCount)
+    val parsed = ParsedUserMessage.parse(it.content)
+    PhoneQueuedMessage(it.id, parsed.typedText.trim(), it.imageCount, parsed.files, parsed.terminalBlocks.isNotEmpty())
 }

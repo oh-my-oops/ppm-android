@@ -66,6 +66,7 @@ import com.hienlh.ppm.app.ui.phone.chat.PhoneSessionInfoSheet
 import com.hienlh.ppm.app.ui.phone.chat.PhoneSessionReview
 import com.hienlh.ppm.app.ui.phone.chat.PhoneSessionReviewOverlay
 import com.hienlh.ppm.app.ui.phone.chat.PhoneTranscriptLocals
+import com.hienlh.ppm.app.ui.phone.chat.rememberChatImages
 import com.hienlh.ppm.app.ui.phone.chat.openPhoneSessionReview
 import com.hienlh.ppm.app.ui.phone.chat.phoneAccountUsageText
 import com.hienlh.ppm.app.ui.phone.chat.phoneChangedFiles
@@ -290,6 +291,7 @@ internal fun PhoneChatContent(
                 if (chatTab != null && chatState != null) PhoneActivityChip(model, chatTab, chatState) { visitActive() }
             },
             onRemoveQueued = { id -> chatController?.takeBackQueued(id, discard = true) },
+            queuedImages = chatTab?.let { rememberChatImages(model, it.project) },
             // The transcript's own pill scrolls to the waiting card.
             onScrollToWaitingCard = null,
             modifier = Modifier.testTag("phone-chat-screen"),

@@ -37,6 +37,13 @@ class UserMessageTest {
     }
 
     @Test
+    fun `the typed text leaves the attachments out and brings a command back as typed`() {
+        assertEquals("look at this", parse(inline("/u/1c5040cb-image.png") + "\n\nlook at this").typedText)
+        assertEquals("", parse(inline("/u/1c5040cb-image.png")).typedText)
+        assertEquals("/review src\n\nplease", parse("<command-name>review</command-name><command-args>src</command-args>\nplease").typedText)
+    }
+
+    @Test
     fun `extracts the IDE-opened-file context tag`() {
         val p = parse("<ide_opened_file>The user opened the file /repo/src/app.ts in the IDE.</ide_opened_file>\nexplain this")
         assertEquals("/repo/src/app.ts", p.idePath)

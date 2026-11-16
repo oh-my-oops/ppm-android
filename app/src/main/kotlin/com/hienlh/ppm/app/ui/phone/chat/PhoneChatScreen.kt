@@ -22,6 +22,7 @@ import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import com.hienlh.ppm.app.TextInputFocus
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.WindowInsets
@@ -46,6 +47,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hienlh.ppm.app.ui.PpmTextField
+import com.hienlh.ppm.chat.ChatImages
+import com.hienlh.ppm.chat.LocalChatImages
+import com.hienlh.ppm.chat.MessageAttachmentChips
+import com.hienlh.ppm.chat.isImagePath
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -104,10 +109,17 @@ enum class PhoneMessagePriority(val chipLabel: String, val queueDescription: Str
 /** One message of the server's queue, as the stack above the composer shows it. */
 data class PhoneQueuedMessage(
     val id: String,
-    /** The typed text alone: a reply or turn references it carries are not shown. */
+    /** The typed text alone: a reply, turn references and attachment markers it carries are not shown. */
     val text: String,
     val imageCount: Int = 0,
-)
+    /** Its attachments, from the message's markers: images as thumbnails, other files by name. */
+    val files: List<String> = emptyList(),
+    /** It carries terminal output, said so when nothing was typed. */
+    val terminalOutput: Boolean = false,
+) {
+    /** Images sent with no path in the message: nothing to draw a thumbnail from, so they are counted. */
+    val unshownImages: Int get() = maxOf(0, imageCount - files.count(::isImagePath))
+}
 
 /**
  * Reply or Edit banner state shown as a 52 dp strip above the composer (Phone 1 Section 2 B13).
@@ -219,6 +231,8 @@ fun PhoneChatScreen(
     onSendQueuedNow: () -> Unit = {},
     onEditQueued: (String) -> Unit = {},
     onRemoveQueued: (String) -> Unit = {},
+    /** How the queued messages' attached images are read, for their thumbnails. */
+    queuedImages: ChatImages? = null,
     /** First in the context row: running agents and linked sessions (`ActivityChip`); nothing when there are none. */
     activityChip: @Composable () -> Unit = {},
     /** Floats over the bottom of the transcript, just above the composer: the `/` and `@` pickers. */
@@ -368,6 +382,7 @@ fun PhoneChatScreen(
                     onSendNow = onSendQueuedNow,
                     onEdit = onEditQueued,
                     onRemove = onRemoveQueued,
+                    images = queuedImages,
                 )
 
                 // Composer inside BottomActionCard (Requirement 4.1, Phone 1 Section 5)
@@ -1031,8 +1046,23 @@ fun PhoneQueuedMessagesStack(
     onEdit: (String) -> Unit,
     onRemove: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /** How the chat's attached images are read, for their thumbnails; the surrounding chat's when null. */
+    images: ChatImages? = null,
 ) {
     if (messages.isEmpty()) return
+    CompositionLocalProvider(LocalChatImages provides (images ?: LocalChatImages.current)) {
+        QueuedMessagesStackBody(messages, onSendNow, onEdit, onRemove, modifier)
+    }
+}
+
+@Composable
+private fun QueuedMessagesStackBody(
+    messages: List<PhoneQueuedMessage>,
+    onSendNow: () -> Unit,
+    onEdit: (String) -> Unit,
+    onRemove: (String) -> Unit,
+    modifier: Modifier,
+) {
     val tokens = LocalPpmTokens.current
     val shape = RoundedCornerShape(12.dp)
     Column(
@@ -1095,25 +1125,37 @@ fun PhoneQueuedMessagesStack(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    BasicText(
-                        text = message.text.ifEmpty { "(no text)" },
-                        modifier = Modifier.weight(1f),
-                        style = ppmText(13f, lineHeight = 18f)
-                            .copy(color = if (message.text.isEmpty()) tokens.text3.color else tokens.text2.color),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (message.imageCount > 0) {
+                    // Attached images as the sent bubble's thumbnails, other files by name, then what was typed.
+                    Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+                        if (message.files.isNotEmpty()) MessageAttachmentChips(message.files, Modifier.padding(bottom = 2.dp))
+                        val placeholder = when {
+                            message.text.isNotEmpty() -> null
+                            message.terminalOutput -> "(terminal output)"
+                            message.files.isEmpty() -> "(no text)"
+                            else -> ""
+                        }
+                        if (placeholder != "") {
+                            BasicText(
+                                text = placeholder ?: message.text,
+                                style = ppmText(13f, lineHeight = 18f)
+                                    .copy(color = if (placeholder != null) tokens.text3.color else tokens.text2.color),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                    val unshown = message.unshownImages
+                    if (unshown > 0) {
                         Row(
                             modifier = Modifier.semantics {
-                                contentDescription = "${message.imageCount} image${if (message.imageCount == 1) "" else "s"}"
+                                contentDescription = if (unshown == 1) "1 image" else "$unshown images"
                             },
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
                             PpmIcon(ProductIcon.Image, 14.dp, tokens.text3.color)
                             BasicText(
-                                text = "${message.imageCount}",
+                                text = "$unshown",
                                 style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
                             )
                         }

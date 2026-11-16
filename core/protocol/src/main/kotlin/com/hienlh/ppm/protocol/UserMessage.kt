@@ -31,6 +31,18 @@ data class ParsedUserMessage(
             Regex("<$tag>([\\s\\S]*?)</$tag>").find(content)?.groupValues?.get(1)?.jsTrim()?.ifEmpty { null }
     }
 
+    /**
+     * What the user typed (`typedText`): the body, a command coming back as `/name args` above it.
+     * Attachments, terminal blocks and context are not in it.
+     */
+    val typedText: String
+        get() {
+            val command = command ?: return body
+            // Stored with and without the leading slash.
+            val typed = "/${command.name.trimStart('/')}" + (command.args?.let { " $it" } ?: "")
+            return if (body.isNotEmpty()) "$typed\n\n$body" else typed
+        }
+
     /** Put there by the runtime, not typed: drawn as context, with no action bar, and never quoted. */
     val isSystemContext: Boolean get() = tags.any { it.name in SYSTEM_CONTEXT_TAGS }
 
@@ -59,10 +71,7 @@ data class ParsedUserMessage(
          */
         fun composerDraft(content: String): Pair<String?, String> {
             val parsed = parse(content)
-            val command = parsed.command ?: return parsed.agent to parsed.body
-            // Stored with and without the leading slash.
-            val typed = "/${command.name.trimStart('/')}" + (command.args?.let { " $it" } ?: "")
-            return parsed.agent to (if (parsed.body.isNotEmpty()) "$typed\n\n${parsed.body}" else typed)
+            return parsed.agent to parsed.typedText
         }
 
         private val SYSTEM_CONTEXT_TAGS = setOf("task-notification", "environment_details", "local-command-caveat")

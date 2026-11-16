@@ -648,6 +648,7 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                                     onSendNow = chat::sendQueuedNow,
                                     onEdit = { chat.takeBackQueued(it) },
                                     onRemove = { chat.takeBackQueued(it, discard = true) },
+                                    images = images,
                                 )
                                 if (tab.editFork != null) EditingLine(onCancel = tab::cancelEdit)
                                 ChatComposer(
