@@ -150,7 +150,7 @@ data class SessionCollabState(
 }
 
 private val NEEDS_USER_TYPES = setOf("approval_request", "question", "collab_approval")
-private val COLLAB_TOOL_RE = Regex("^(?:mcp__ppm-sessions__|ppm_sessions:)(create_session|send_to_session|session_status)$")
+private val COLLAB_TOOL_RE = Regex("^(?:mcp__ppm-sessions__|ppm_sessions:|mcp_ppm-sessions_)(create_session|send_to_session|session_status)$")
 private val CODEX_IMAGE_LABEL_RE = Regex("^\\[image(?: [^\\]\\s]+)?]$")
 
 /**

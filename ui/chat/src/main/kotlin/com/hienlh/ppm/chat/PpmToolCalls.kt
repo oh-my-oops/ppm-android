@@ -15,7 +15,8 @@ import kotlin.math.floor
  * A chat event read as a call of PPM's own tools, for the cards that show them: the tab tools
  * (src/web/lib/tab-tool-call.ts) and the database tools (db-tool-call.ts). Claude names a tool
  * `mcp__ppm-tabs__open_file`; Codex names it `ppm_tabs:open_file` and wraps the arguments as
- * `{ server, tool, arguments }`, live and in the history read back alike.
+ * `{ server, tool, arguments }`, live and in the history read back alike. Antigravity names it
+ * `mcp_ppm-tabs_open_file`.
  */
 
 /** `open_file` / `open_preview`, with the path as the AI passed it: absolute, `~`-relative, or relative to the chat's project. */
@@ -49,9 +50,10 @@ const val DB_QUERY_TOOL = "db_query"
 const val DB_EXECUTE_TOOL = "db_execute"
 const val DB_EXECUTE_APPROVAL = "ppm:db_execute"
 
-private val TAB_TOOL_NAME = Regex("""(?:mcp__ppm-tabs__|ppm_tabs:)(open_file|open_preview)""")
-private val DEVICE_TOOL_NAME = Regex("""(?:mcp__ppm-tabs__|ppm_tabs:)(open_url|open_branch_review|read_terminal|run_in_terminal)""")
-private val DB_TOOL_NAME = Regex("""(?:mcp__ppm-db__|ppm_db:)(db_query|open_query|db_execute)""")
+private const val TAB_TOOL_PREFIX = """(?:mcp__ppm-tabs__|ppm_tabs:|mcp_ppm-tabs_)"""
+private val TAB_TOOL_NAME = Regex("""$TAB_TOOL_PREFIX(open_file|open_preview)""")
+private val DEVICE_TOOL_NAME = Regex("""$TAB_TOOL_PREFIX(open_url|open_branch_review|read_terminal|run_in_terminal)""")
+private val DB_TOOL_NAME = Regex("""(?:mcp__ppm-db__|ppm_db:|mcp_ppm-db_)(db_query|open_query|db_execute)""")
 
 /** The highest line a tab opens at (`MAX_TAB_LINE`). */
 private const val MAX_TAB_LINE = 10_000_000

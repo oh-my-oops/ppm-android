@@ -102,7 +102,8 @@ internal data class SessionCollabToolResult(
 /** Where a card stands (`SessionCollabCardState`). */
 internal enum class CollabCardState { RUNNING, WAITING, ANSWERED, ERROR, STOPPED }
 
-private val COLLAB_TOOL_NAME = Regex("""^(?:mcp__ppm-sessions__|ppm_sessions:)(create_session|send_to_session|session_status)$""")
+/** Claude's `mcp__ppm-sessions__create_session`, Codex's `ppm_sessions:create_session`, Antigravity's `mcp_ppm-sessions_create_session`. */
+private val COLLAB_TOOL_NAME = Regex("""^(?:mcp__ppm-sessions__|ppm_sessions:|mcp_ppm-sessions_)(create_session|send_to_session|session_status)$""")
 private val WAIT_REASONS = setOf("turn_ended_without_reply", "timeout", "cancelled")
 private val DELIVERIES = setOf("inserted", "queued", "started")
 

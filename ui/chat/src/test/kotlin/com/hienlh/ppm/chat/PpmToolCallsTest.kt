@@ -5,7 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/** tab-tool-call.test.ts and db-tool-call.test.ts, case by case. */
+/** tab-tool-call.test.ts, db-tool-call.test.ts and session-collab-tool-call.test.ts, case by case. */
 class PpmToolCallsTest {
     private fun json(text: String) = WireJson.parse(text)
 
@@ -151,5 +151,33 @@ class PpmToolCallsTest {
         assertEquals("Branch Review ", review.name)
         assertEquals(listOf(SummaryPart("feat/x ← main", subtle = true, mono = true)), review.parts)
         assertEquals(listOf(SummaryPart("current branch ← main", subtle = true, mono = true)), toolSummary("mcp__ppm-tabs__open_branch_review", json("{}")).parts)
+    }
+
+    @Test
+    fun `Antigravity's names, which join server and tool with one underscore`() {
+        assertEquals(TabToolCall("open_file", "src/a.ts"), tabToolCall("mcp_ppm-tabs_open_file", json("""{"path":"src/a.ts"}""")))
+        assertEquals(
+            DeviceToolCall.OpenUrl("http://localhost:5173/"),
+            deviceToolCall("mcp_ppm-tabs_open_url", json("""{"url":"http://localhost:5173/","toolSummary":"Open the app"}""")),
+        )
+        assertEquals("read_terminal", deviceToolOf("mcp_ppm-tabs_read_terminal"))
+        assertEquals(DbToolCall("db_query", "Prod", "SELECT 1"), dbToolCall("mcp_ppm-db_db_query", json("""{"connection":"Prod","sql":"SELECT 1","toolSummary":"Count rows"}""")))
+        assertEquals("open_query", dbToolOf("mcp_ppm-db_open_query"))
+        assertNull(dbToolOf("mcp_ppm-tabs_open_file"))
+        assertNull(tabToolCall("mcp_ppm-db_db_query", json("""{"path":"a.ts"}""")))
+    }
+
+    @Test
+    fun `session tools under Antigravity's name are the session cards' calls`() {
+        val target = "dddddddd-3333-4000-8000-000000000003"
+        assertEquals(
+            SessionCollabToolCall.Create("T", "do it", "codex", null, false),
+            sessionCollabToolCall("mcp_ppm-sessions_create_session", json("""{"title":"T","task":"do it","provider":"codex","toolSummary":"Open a session"}""")),
+        )
+        assertEquals(
+            SessionCollabToolCall.Send(target, "hi", false),
+            sessionCollabToolCall("mcp_ppm-sessions_send_to_session", json("""{"session_id":"$target","message":"hi"}""")),
+        )
+        assertNull(sessionCollabToolCall("mcp_ppm-tabs_open_file", json("""{"path":"a"}""")))
     }
 }

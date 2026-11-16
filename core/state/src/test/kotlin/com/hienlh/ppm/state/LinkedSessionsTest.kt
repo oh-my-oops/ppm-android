@@ -246,6 +246,39 @@ class LinkedSessionsTest {
     }
 
     @Test
+    fun `an Antigravity session links as a sender, and its session tools as calls`() {
+        // An agy chat sends with PPM's session tools now: its block names "antigravity", and its
+        // tool calls are named `mcp_ppm-sessions_<tool>`.
+        val from = fromUserItem(peer, "2026-11-15T00:00:00.000Z", providerId = "antigravity", title = "Agy")
+        val created = """{"sessionId":"$child","title":"Tests","providerId":"antigravity"}"""
+        val call = ChatItem(
+            id = "agy",
+            role = ChatItem.Role.ASSISTANT,
+            blocks = listOf(
+                ChatBlock.Tool(
+                    ToolBlock(
+                        toolUseId = "t4",
+                        name = "mcp_ppm-sessions_create_session",
+                        input = buildJsonObject {
+                            put("title", "Tests")
+                            put("task", "run them")
+                        },
+                        result = ToolOutcome(created, isError = false),
+                    ),
+                ),
+            ),
+            timestamp = null,
+        )
+        assertEquals(
+            listOf(
+                LinkedSession(child, "Tests", "antigravity", listOf(SessionLinkRelation.CHILD)),
+                LinkedSession(peer, "Agy", "antigravity", listOf(SessionLinkRelation.MESSAGED)),
+            ),
+            collectLinkedSessions(me, emptyList(), listOf(call, from)),
+        )
+    }
+
+    @Test
     fun `linkedSessionStatus ranks approval above running above unread, and tracks collab events`() {
         assertEquals(LinkedSessionStatus.IDLE, linkedSessionStatus(child, emptySet(), emptyMap(), emptyMap()))
         assertEquals(LinkedSessionStatus.RUNNING, linkedSessionStatus(child, setOf(child), emptyMap(), emptyMap()))

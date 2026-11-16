@@ -78,7 +78,7 @@ data class FromSessionReference(
         fun from(value: JsonElement?): FromSessionReference? {
             if (value !is JsonObject || value["version"].long != 1L) return null
             val sessionId = value["sessionId"].string?.takeIf { SESSION_ID_RE.matches(it) } ?: return null
-            val providerId = value["providerId"].string?.takeIf { it == "claude" || it == "codex" } ?: return null
+            val providerId = value["providerId"].string?.takeIf { it == "claude" || it == "codex" || it == "antigravity" } ?: return null
             val projectName = value["projectName"].string?.takeIf {
                 it.jsTrim().isNotEmpty() &&
                     it.codePointCount(0, it.length) <= MAX_PROJECT_NAME &&
