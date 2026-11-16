@@ -177,7 +177,7 @@ class UserMessageEdits(
 /**
  * The user's message (`message-user-bubble.tsx`): what the composer and the runtime wrapped
  * around it taken apart into a reply card, turn chips, badges and chips, then the text, two lines until
- * "Show more", and its versions when it was edited. What the runtime put there on its own (a
+ * "Show more", and its versions when it was edited. A session schedule's run is one line instead. What the runtime put there on its own (a
  * task's result, a command's caveat) is drawn faint and full width, with no action bar.
  */
 @Composable
@@ -194,6 +194,12 @@ internal fun UserBubble(
     // Another session's AI sent it: its own bubble, with no Edit, Fork or Reply.
     parsed.fromSession?.let { from ->
         FromSessionBubble(from, parsed.text, remember(content) { ChatMessageBlocks.decode(content).content }, parsed.turnRefs, timestamp, modifier)
+        return
+    }
+    // A session schedule's prompt: PPM sent it on its own, so it is a line, not the person's bubble.
+    // Shown as written: a scheduled `/skill args` that Claude Code recorded as a command keeps its name.
+    parsed.scheduleRun?.let { run ->
+        ScheduleRunLine(run, parsed.typedText, modifier)
         return
     }
     val system = parsed.isSystemContext

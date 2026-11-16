@@ -221,6 +221,8 @@ fun PhoneChatScreen(
     onRemoveQueued: (String) -> Unit = {},
     /** First in the context row: running agents and linked sessions (`ActivityChip`); nothing when there are none. */
     activityChip: @Composable () -> Unit = {},
+    /** After the changes pill: the chat's session schedules (`SessionSchedulesChip`); nothing when there are none. */
+    schedulesChip: @Composable () -> Unit = {},
     /** Floats over the bottom of the transcript, just above the composer: the `/` and `@` pickers. */
     pickerContent: @Composable () -> Unit = {},
     /** Over the composer, under the transcript: the stopped-turn bar, the MCP sign-in bar, the provider gate line. */
@@ -356,6 +358,7 @@ fun PhoneChatScreen(
                     changes = changes,
                     connectionChip = connectionChip,
                     activityChip = activityChip,
+                    schedulesChip = schedulesChip,
                     onOpenAccountSwitcher = onOpenAccountSwitcher,
                     onToggleSpecMode = onToggleSpecMode,
                     onOpenSessionChangesSheet = onOpenSessionChangesSheet,
@@ -678,6 +681,7 @@ fun PhoneContextChipRow(
     modifier: Modifier = Modifier,
     connectionChip: @Composable () -> Unit = {},
     activityChip: @Composable () -> Unit = {},
+    schedulesChip: @Composable () -> Unit = {},
 ) {
     Row(
         modifier = modifier
@@ -723,6 +727,8 @@ fun PhoneContextChipRow(
                 onClick = onOpenSessionChangesSheet,
             )
         }
+
+        schedulesChip()
 
         // Session info chip (Section 8 H2)
         Chip(

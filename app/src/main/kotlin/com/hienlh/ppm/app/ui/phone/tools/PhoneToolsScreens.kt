@@ -35,7 +35,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hienlh.ppm.app.ui.ScheduleSessionTarget
+import com.hienlh.ppm.app.ui.ScheduleStatusPill
 import com.hienlh.ppm.app.ui.phone.OpenOnTabletNotice
+import com.hienlh.ppm.chat.DeviceScheduleClock
 import com.hienlh.ppm.design.CssSides
 import com.hienlh.ppm.design.FontKind
 import com.hienlh.ppm.design.LocalPpmTokens
@@ -58,8 +61,12 @@ import com.hienlh.ppm.state.logs.clockTime
 import com.hienlh.ppm.state.logs.foldRepeats
 import com.hienlh.ppm.state.logs.restartDividers
 import com.hienlh.ppm.state.settings.ScheduleLogLine
+import com.hienlh.ppm.state.settings.ScheduleProjectOption
 import com.hienlh.ppm.state.settings.ScheduleRowState
 import com.hienlh.ppm.state.settings.ScheduleRunRow
+import com.hienlh.ppm.state.settings.nextRunText
+import com.hienlh.ppm.state.settings.sessionScheduleStatus
+import com.hienlh.ppm.state.settings.zoneCity
 import com.hienlh.ppm.state.sysmon.MetricsSnapshot
 import com.hienlh.ppm.state.sysmon.PerformanceDevices
 import com.hienlh.ppm.state.sysmon.ServiceDetails
@@ -1245,6 +1252,10 @@ fun PhoneSchedulesScreen(
     onRunOrRestart: (ScheduleRowState) -> Unit,
     onToggleEnabled: (ScheduleRowState, Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    /** The registered projects, to name (and open) a chat schedule's chat. */
+    projects: List<ScheduleProjectOption> = emptyList(),
+    /** Opens a chat schedule's chat. */
+    onOpenChat: ((ScheduleRowState) -> Unit)? = null,
 ) {
     val tokens = LocalPpmTokens.current
 
@@ -1319,7 +1330,13 @@ fun PhoneSchedulesScreen(
                     ) {
                         ListRow(
                             title = schedule.name,
-                            subtitle = "${schedule.cronExpr} · ${schedule.kind}",
+                            subtitle = if (schedule.isSession) {
+                                // As the web's row says it: when, in which zone, once or again, and the next run.
+                                "${schedule.cronExpr} · ${schedule.timezone?.let(::zoneCity) ?: "host time"} · " +
+                                    "${if (schedule.recurring) "repeats" else "once"} · ${nextRunText(schedule, clock = DeviceScheduleClock)}"
+                            } else {
+                                "${schedule.cronExpr} · ${schedule.kind}"
+                            },
                             subtitleMono = true,
                             selected = selected,
                             onClick = { state.selectAndToggleExpand(schedule.id) },
@@ -1332,6 +1349,24 @@ fun PhoneSchedulesScreen(
                                 )
                             },
                         )
+                        if (schedule.isSession) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .cssBorder(tokens.borderSoft.color, width = 1.dp, sides = CssSides.Top)
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                val status = sessionScheduleStatus(schedule, clock = DeviceScheduleClock)
+                                ScheduleStatusPill(status.text, status.tone, Modifier.testTag("phone-schedule-status-${schedule.id}"))
+                                ScheduleSessionTarget(
+                                    row = schedule,
+                                    projectName = projects.firstOrNull { it.path == schedule.projectPath }?.name,
+                                    onOpenChat = onOpenChat,
+                                    onResume = { onToggleEnabled(schedule, true) },
+                                )
+                            }
+                        }
 
                         if (expanded) {
                             Column(
