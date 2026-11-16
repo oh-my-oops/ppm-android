@@ -134,6 +134,27 @@ val PPM_TOOL_GROUPS: List<PpmToolGroup> = listOf(
         ),
     ),
     PpmToolGroup(
+        title = "Schedules",
+        intro = "Prompts a chat schedules into itself. Each one is listed in Settings → Schedules, where you can turn it off or delete it.",
+        tools = listOf(
+            PpmToolDef(
+                id = "session_schedule_create",
+                label = "Schedule prompts",
+                note = "Schedules a prompt into its own chat on a cron, repeating or once. It survives restarts and is delivered when the chat is idle.",
+            ),
+            PpmToolDef(
+                id = "session_schedule_list",
+                label = "List schedules",
+                note = "Lists the prompts scheduled into its own chat, with their next fire.",
+            ),
+            PpmToolDef(
+                id = "session_schedule_delete",
+                label = "Delete schedules",
+                note = "Deletes a prompt scheduled into its own chat. Another chat's schedules are out of its reach.",
+            ),
+        ),
+    ),
+    PpmToolGroup(
         title = "Spec mode",
         intro = "Requirements, design and tasks you approve step by step. Thorough checks run the tests the design names, in the project folder.",
         tools = listOf(
@@ -222,6 +243,10 @@ val PPM_FEATURE_INTROS: List<PpmFeatureIntro> = listOf(
     PpmFeatureIntro(
         id = "session-tools-2026-11",
         tools = listOf("search_sessions", "list_session_turns", "read_session_turns", "create_session", "send_to_session", "session_status"),
+    ),
+    PpmFeatureIntro(
+        id = "session-schedules-2026-11",
+        tools = listOf("session_schedule_create", "session_schedule_list", "session_schedule_delete"),
     ),
     PpmFeatureIntro(
         id = "ppm-memory-2026-11",

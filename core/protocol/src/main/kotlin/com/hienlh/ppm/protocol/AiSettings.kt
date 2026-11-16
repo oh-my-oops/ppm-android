@@ -21,6 +21,8 @@ data class AiSettings(
     val providers: Map<String, AiProviderSettings>,
     val ppmTools: Map<String, Boolean> = emptyMap(),
     val leftoverProcessesIdleMinutes: Int? = null,
+    /** `hide_builtin_cron`: Claude chats start without its own cron tools while PPM's are on; null when never set (on). */
+    val hideBuiltinCron: Boolean? = null,
 ) {
     /** `providerTabs`: every configured provider but the mock one, in the server's order. */
     val providerTabs: List<String>
@@ -44,6 +46,7 @@ data class AiSettings(
                 providers = providers.mapValues { (_, provider) -> AiProviderSettings.from(provider) },
                 ppmTools = ppmTools,
                 leftoverProcessesIdleMinutes = value["leftover_processes_idle_minutes"].int,
+                hideBuiltinCron = value["hide_builtin_cron"].bool,
             )
         }
     }
@@ -110,6 +113,8 @@ object AiSettingsPatch {
 
     fun ppmTool(tool: String, on: Boolean): JsonObject =
         buildJsonObject { put("ppm_tools", buildJsonObject { put(tool, on) }) }
+
+    fun hideBuiltinCron(on: Boolean): JsonObject = buildJsonObject { put("hide_builtin_cron", on) }
 
     fun leftoverIdleMinutes(minutes: Int): JsonObject =
         buildJsonObject { put("leftover_processes_idle_minutes", minutes) }

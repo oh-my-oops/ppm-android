@@ -34,6 +34,7 @@ val NOTIFICATION_EVENT_DEFS: List<NotificationEventDef> = listOf(
     NotificationEventDef("approval_request", "Permission request", "When a tool needs your approval to run"),
     NotificationEventDef("question", "Question asked", "When the assistant asks a clarifying question"),
     NotificationEventDef("schedule", "Scheduled run", "When a scheduled task completes or fails"),
+    NotificationEventDef("schedule_created", "AI scheduled a prompt", "A chat's AI set up a schedule that sends a prompt into that chat."),
     NotificationEventDef("jira", "Jira watcher", "When a Jira watcher pulls or debugs an issue"),
     NotificationEventDef("design_review", "Design review", "When a Design Canvas review needs input"),
 )
