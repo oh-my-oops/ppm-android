@@ -34,6 +34,7 @@ val NOTIFICATION_EVENT_DEFS: List<NotificationEventDef> = listOf(
     NotificationEventDef("approval_request", "Permission request", "When a tool needs your approval to run"),
     NotificationEventDef("question", "Question asked", "When the assistant asks a clarifying question"),
     NotificationEventDef("schedule", "Scheduled run", "When a scheduled task completes or fails"),
+    NotificationEventDef("schedule_created", "AI scheduled a prompt", "A chat's AI set up a schedule that sends a prompt into that chat."),
     NotificationEventDef("jira", "Jira watcher", "When a Jira watcher pulls or debugs an issue"),
     NotificationEventDef("design_review", "Design review", "When a Design Canvas review needs input"),
 )
@@ -863,7 +864,7 @@ data class ScheduleRowState(
     val id: Int,
     val name: String,
     val description: String? = null,
-    val kind: String = "prompt", // "prompt" | "script"
+    val kind: String = "prompt", // "prompt" | "script" | "session"
     val mode: String = "tick", // "tick" | "always-on"
     val cronExpr: String = "* * * * *",
     val providerId: String = "claude",
@@ -883,7 +884,23 @@ data class ScheduleRowState(
     val inputValues: Map<String, String> = emptyMap(),
     val secretsSet: List<String> = emptyList(),
     val status: ScheduleStatusState = ScheduleStatusState(),
-)
+    /** The chat a session schedule sends into; null for the other kinds. */
+    val targetSessionId: String? = null,
+    /** That chat's title as the user knows it; null when it has none. */
+    val targetTitle: String? = null,
+    /** IANA zone a session schedule's cron is read in; null is the PPM host's own. */
+    val timezone: String? = null,
+    /** False: it fires once and is then removed. */
+    val recurring: Boolean = true,
+    /** When a session schedule came due and is still waiting for its chat (ISO). */
+    val pendingSince: String? = null,
+    /** Why PPM stopped it firing (its chat is gone, say); null while it can fire. */
+    val pausedReason: String? = null,
+    /** Its pending fire is held because the user stopped a turn in its chat. */
+    val heldAfterStop: Boolean = false,
+) {
+    val isSession: Boolean get() = kind == "session"
+}
 
 data class ScheduleRunRow(
     val id: Int,
@@ -972,6 +989,13 @@ fun parseSchedulesList(element: JsonElement?): List<ScheduleRowState> {
             inputValues = inputValues,
             secretsSet = secrets,
             status = parseScheduleStatus(obj["status"]?.obj),
+            targetSessionId = obj["target_session_id"].string,
+            targetTitle = obj["target_title"].string,
+            timezone = obj["timezone"].string,
+            recurring = obj["recurring"]?.let { el -> el.bool ?: (el.int != 0) } ?: true,
+            pendingSince = obj["pending_since"].string,
+            pausedReason = obj["paused_reason"].string,
+            heldAfterStop = obj["held_after_stop"]?.bool ?: false,
         )
     }
 }

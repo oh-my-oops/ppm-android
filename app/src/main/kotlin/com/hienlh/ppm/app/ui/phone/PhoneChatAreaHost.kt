@@ -39,6 +39,7 @@ import com.hienlh.ppm.app.pendingSpecStart
 import com.hienlh.ppm.app.startSpec
 import com.hienlh.ppm.app.removeAttachment
 import com.hienlh.ppm.app.ui.ComposerPickerList
+import com.hienlh.ppm.app.ui.ChatSessionSchedulesChip
 import com.hienlh.ppm.app.ui.ConnectionChip
 import com.hienlh.ppm.app.ui.PickerVariant
 import com.hienlh.ppm.app.ui.rememberComposerPickers
@@ -289,6 +290,11 @@ internal fun PhoneChatContent(
             onEditQueued = { id -> chatController?.takeBackQueued(id) },
             activityChip = {
                 if (chatTab != null && chatState != null) PhoneActivityChip(model, chatTab, chatState) { visitActive() }
+            },
+            schedulesChip = {
+                if (chatTab != null && model.info?.minimalMode != true) {
+                    ChatSessionSchedulesChip(model, chatTab.session?.id ?: chatState?.sessionId, narrow = true)
+                }
             },
             onRemoveQueued = { id -> chatController?.takeBackQueued(id, discard = true) },
             queuedImages = chatTab?.let { rememberChatImages(model, it.project) },

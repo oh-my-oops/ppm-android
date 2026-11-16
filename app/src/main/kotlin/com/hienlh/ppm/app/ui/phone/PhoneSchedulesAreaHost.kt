@@ -1,6 +1,7 @@
 package com.hienlh.ppm.app.ui.phone
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,6 +25,7 @@ import com.hienlh.ppm.protocol.bool
 import com.hienlh.ppm.protocol.get
 import com.hienlh.ppm.protocol.int
 import com.hienlh.ppm.state.settings.ScheduleLogBufferState
+import com.hienlh.ppm.state.settings.ScheduleProjectOption
 import com.hienlh.ppm.state.settings.ScheduleRunRow
 import com.hienlh.ppm.state.settings.mergeScheduleLogs
 import com.hienlh.ppm.state.settings.parseScheduleLogs
@@ -99,6 +101,13 @@ internal fun PhoneSchedulesAreaHost(
         }
     }
 
+    // Any write to /api/schedules, and each delivery or pause the server makes, reads the list again.
+    val events = model.events
+    DisposableEffect(events) {
+        val off = events?.onSchedulesChanged { scope.launch { reloadSchedules() } }
+        onDispose { off?.invoke() }
+    }
+
     // A schedule's history is read when its row opens (`ScheduleRuns`) and when its log page opens.
     val expandedId = schedulesState.expandedScheduleId
     LaunchedEffect(model.api, expandedId) {
@@ -130,6 +139,12 @@ internal fun PhoneSchedulesAreaHost(
         loading = loading,
         error = listError,
         modifier = modifier,
+        projects = model.projects.map { ScheduleProjectOption(name = it.name, path = it.path) },
+        onOpenChat = { row ->
+            val project = model.projects.firstOrNull { it.path == row.projectPath }?.name
+            val session = row.targetSessionId
+            if (project != null && session != null) model.openLinkedSession(project, session, row.providerId, row.targetTitle ?: "Untitled chat")
+        },
         onRunOrRestart = { row ->
             val api = model.api ?: return@PhoneSchedulesScreen
             val alwaysOn = row.mode.equals("always-on", ignoreCase = true)
@@ -141,6 +156,7 @@ internal fun PhoneSchedulesAreaHost(
                     model.toast(
                         ErrorToastMessage(
                             when {
+                                row.isSession -> "Queued: it is sent once its chat is idle"
                                 runId != null -> "Run #$runId started" + if (wasRunning) " (previous run still active)" else ""
                                 alwaysOn -> "Restarting"
                                 else -> "Tick started"

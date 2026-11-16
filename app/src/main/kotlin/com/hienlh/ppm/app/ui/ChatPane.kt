@@ -607,6 +607,9 @@ fun ChatPane(model: AppModel, tab: ChatTab, modifier: Modifier = Modifier) {
                                             onSetReviewed = sessionChanges::setReviewed,
                                         )
                                     }
+                                    if (model.info?.minimalMode != true) {
+                                        ChatSessionSchedulesChip(model, currentSessionId, narrow)
+                                    }
                                     ConnectionChip(
                                         stage = reconnect.stage,
                                         narrow = narrow,

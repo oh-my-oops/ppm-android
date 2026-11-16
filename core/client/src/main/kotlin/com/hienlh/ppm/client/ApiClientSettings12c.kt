@@ -426,11 +426,12 @@ suspend fun ApiClient.jiraGetUnreadCount(): JsonElement =
 // 5. Schedules (/api/schedules/*)
 // ===========================================================================
 
-suspend fun ApiClient.schedulesList(enabledOnly: Boolean = false): JsonElement =
+/** Every schedule, or with [session] the session schedules aimed at that chat under any id it had. */
+suspend fun ApiClient.schedulesList(enabledOnly: Boolean = false, session: String? = null): JsonElement =
     call(
         "GET",
         "/api/schedules",
-        query = if (enabledOnly) listOf("enabledOnly" to "true") else emptyList(),
+        query = listOfNotNull(session?.let { "session" to it }, ("enabledOnly" to "true").takeIf { enabledOnly }),
     )
 
 suspend fun ApiClient.schedulesGet(id: Int): JsonElement =

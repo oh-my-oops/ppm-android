@@ -79,6 +79,8 @@ enum class FooterChipTone {
     Default,
     AlertBorder,
     Danger,
+    /** `border-warning/40 text-warning`: something in it needs a glance (the schedules chip). */
+    Warning,
 }
 
 /**
@@ -133,11 +135,13 @@ fun FooterChip(
         expanded -> tokens.accentWashBorder.color
         tone == FooterChipTone.Danger -> tokens.error.opacity(0.35 + 0.25 * hoverLit).color
         tone == FooterChipTone.AlertBorder -> tokens.error.opacity(0.35 + 0.25 * hoverLit).color
+        tone == FooterChipTone.Warning -> tokens.warning.opacity(0.4).color
         else -> tokens.border.mix(tokens.borderSoft, hoverLit.toDouble()).color
     }
     val fg = when {
         expanded -> tokens.text.color
         tone == FooterChipTone.Danger -> tokens.error.color
+        tone == FooterChipTone.Warning -> tokens.warning.color
         hoverLit > 0f -> tokens.text.mix(tokens.text2, hoverLit.toDouble()).color
         else -> tokens.text2.color
     }

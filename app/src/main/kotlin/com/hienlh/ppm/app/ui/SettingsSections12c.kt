@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -119,7 +120,9 @@ import com.hienlh.ppm.client.tailscaleStartLogin
 import com.hienlh.ppm.client.tunnelGetStatus
 import com.hienlh.ppm.client.tunnelSetEnabled
 import com.hienlh.ppm.design.FontKind
+import com.hienlh.ppm.design.LocalPpmMobile
 import com.hienlh.ppm.design.LocalPpmTokens
+import com.hienlh.ppm.chat.DeviceScheduleClock
 import com.hienlh.ppm.design.PpmIcon
 import com.hienlh.ppm.design.ProductIcon
 import com.hienlh.ppm.design.cssBorder
@@ -147,6 +150,8 @@ import com.hienlh.ppm.state.settings.PushStatusState
 import com.hienlh.ppm.state.settings.ScheduleLogBufferState
 import com.hienlh.ppm.state.settings.ScheduleProjectOption
 import com.hienlh.ppm.state.settings.ScheduleRowState
+import com.hienlh.ppm.state.settings.SessionScheduleForm
+import com.hienlh.ppm.state.settings.SessionScheduleTone
 import com.hienlh.ppm.state.settings.TAILSCALE_POLL_MS
 import com.hienlh.ppm.state.settings.TailscaleLoginState
 import com.hienlh.ppm.state.settings.TailscaleState
@@ -188,12 +193,17 @@ import com.hienlh.ppm.state.settings.parseScheduleTemplateJson
 import com.hienlh.ppm.state.settings.parseSchedulesList
 import com.hienlh.ppm.state.settings.parseTailscaleState
 import com.hienlh.ppm.state.settings.parseTelegramNotifyStatus
+import com.hienlh.ppm.state.settings.describeCron
+import com.hienlh.ppm.state.settings.nextRunText
 import com.hienlh.ppm.state.settings.scheduleFormProblems
+import com.hienlh.ppm.state.settings.sessionScheduleStatus
 import com.hienlh.ppm.state.settings.tailscaleNeedsPolling
 import com.hienlh.ppm.state.settings.tailscaleOperatorCommand
 import com.hienlh.ppm.state.settings.tailscaleServiceUrl
+import com.hienlh.ppm.state.settings.timezoneProblem
 import com.hienlh.ppm.state.settings.validateNtfyTopic
 import com.hienlh.ppm.state.settings.validateTailscaleServiceName
+import com.hienlh.ppm.state.settings.zoneCity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -2968,6 +2978,13 @@ internal fun SchedulesSettingsSection(model: AppModel) {
         }
     }
 
+    // Any write to /api/schedules, and each delivery or pause the server makes, reads the list again.
+    val events = model.events
+    DisposableEffect(events, api, enabledOnly) {
+        val off = events?.onSchedulesChanged { scope.launch { reload() } }
+        onDispose { off?.invoke() }
+    }
+
     // Live script log ring-buffer polling (every 2s while dialog is open)
     LaunchedEffect(api, activeLogsSchedule?.id) {
         val client = api ?: return@LaunchedEffect
@@ -3003,8 +3020,12 @@ internal fun SchedulesSettingsSection(model: AppModel) {
         onToggleEnabledOnly = { enabledOnly = it },
         onRunNow = { id ->
             val client = api ?: return@SchedulesSettingsContent
+            val session = schedules.firstOrNull { it.id == id }?.isSession == true
             scope.launch {
                 runCatchingNonCancelled { client.schedulesRunNow(id) }
+                    // A chat schedule waiting to retry is refused with when it goes next.
+                    .onSuccess { if (session) statusMessage = "Queued: it is sent once its chat is idle" }
+                    .onFailure { if (session) statusMessage = it.message ?: "Run failed" }
                 reload()
             }
         },
@@ -3089,8 +3110,20 @@ internal fun SchedulesSettingsSection(model: AppModel) {
         },
         onOpenLogs = { activeLogsSchedule = it },
         onCloseLogs = { activeLogsSchedule = null },
+        onOpenChat = { row ->
+            val project = model.projects.firstOrNull { it.path == row.projectPath }?.name
+            val session = row.targetSessionId
+            if (project != null && session != null) model.openLinkedSession(project, session, row.providerId, row.targetTitle ?: "Untitled chat")
+        },
+        loadChats = loadChats@{ projectName ->
+            val client = api ?: return@loadChats emptyList()
+            client.sessions(projectName, limit = 50, offset = 0).sessions.map { ScheduleChatOption(it.id, it.title.trim().ifEmpty { "Untitled chat" }) }
+        },
     )
 }
+
+/** A chat a session schedule may send into, as the form's picker lists it (`chatOptions`). */
+internal data class ScheduleChatOption(val id: String, val title: String)
 
 @Composable
 internal fun SchedulesSettingsContent(
@@ -3110,6 +3143,10 @@ internal fun SchedulesSettingsContent(
     onImportTemplateWithTrust: (String, String, Boolean) -> Unit = { raw, proj, _ -> onImportTemplate(raw, proj) },
     onOpenLogs: (ScheduleRowState) -> Unit,
     onCloseLogs: () -> Unit,
+    /** Opens a chat schedule's chat; null where it cannot be opened. */
+    onOpenChat: ((ScheduleRowState) -> Unit)? = null,
+    /** The recent chats of a project, for a new chat schedule's picker. */
+    loadChats: (suspend (projectName: String) -> List<ScheduleChatOption>)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -3167,24 +3204,43 @@ internal fun SchedulesSettingsContent(
                 IntegrationCard(Modifier.testTag("schedule-card-${row.id}")) {
                     SettingsToggleRow(
                         title = row.name,
-                        subtitle = "$projectDisplay · ${row.kind}/${row.mode} · ${if (row.mode == "always-on") "daemon" else row.cronExpr}",
+                        subtitle = if (row.isSession) {
+                            // A chat schedule: when, in which zone, once or again, and its next run.
+                            "$projectDisplay · ${row.cronExpr} · ${row.timezone?.let(::zoneCity) ?: "host time"} · " +
+                                "${if (row.recurring) "repeats" else "once"} · ${nextRunText(row, clock = DeviceScheduleClock)}"
+                        } else {
+                            "$projectDisplay · ${row.kind}/${row.mode} · ${if (row.mode == "always-on") "daemon" else row.cronExpr}"
+                        },
                         checked = row.enabled,
                         testTag = "schedule-toggle-${row.id}",
                         onCheckedChange = { onToggleScheduleEnabled(row.id, it) },
                     )
+                    if (row.isSession) {
+                        ScheduleSessionTarget(
+                            row = row,
+                            projectName = projects.firstOrNull { it.path == row.projectPath }?.name,
+                            onOpenChat = onOpenChat,
+                            onResume = { onToggleScheduleEnabled(row.id, true) },
+                        )
+                    }
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        BasicText(
-                            buildString {
-                                append("Status: ${row.status.state}")
-                                row.lastRunAt?.let { append(" · Last: $it") }
-                                row.nextFireAt?.let { append(" · Next: $it") }
-                            },
-                            style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text3.color),
-                        )
+                        if (row.isSession) {
+                            val status = sessionScheduleStatus(row, clock = DeviceScheduleClock)
+                            ScheduleStatusPill(status.text, status.tone, Modifier.testTag("schedule-status-${row.id}"))
+                        } else {
+                            BasicText(
+                                buildString {
+                                    append("Status: ${row.status.state}")
+                                    row.lastRunAt?.let { append(" · Last: $it") }
+                                    row.nextFireAt?.let { append(" · Next: $it") }
+                                },
+                                style = ppmText(11f, kind = FontKind.MONO).copy(color = tokens.text3.color),
+                            )
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             SettingsButton(
                                 label = if (row.mode == "always-on") "Restart" else "Run Now",
@@ -3199,10 +3255,12 @@ internal fun SchedulesSettingsContent(
                                     onClick = { onOpenLogs(row) },
                                 )
                             }
-                            SettingsButton(
-                                label = "Export",
-                                onClick = { onExportTemplate(row.id) },
-                            )
+                            if (!row.isSession) {
+                                SettingsButton(
+                                    label = "Export",
+                                    onClick = { onExportTemplate(row.id) },
+                                )
+                            }
                             SettingsButton(
                                 label = "Delete",
                                 danger = true,
@@ -3219,6 +3277,7 @@ internal fun SchedulesSettingsContent(
     if (showCreateDialog) {
         ScheduleCreateDialog(
             projects = projects,
+            loadChats = loadChats,
             onDismiss = { showCreateDialog = false },
             onSubmit = { payload ->
                 showCreateDialog = false
@@ -3250,12 +3309,14 @@ internal fun SchedulesSettingsContent(
 @Composable
 private fun ScheduleCreateDialog(
     projects: List<ScheduleProjectOption>,
+    loadChats: (suspend (projectName: String) -> List<ScheduleChatOption>)?,
     onDismiss: () -> Unit,
     onSubmit: (kotlinx.serialization.json.JsonObject) -> Unit,
 ) {
     Dialog(onDismissRequest = onDismiss) {
         ScheduleCreateFormContent(
             projects = projects,
+            loadChats = loadChats,
             onDismiss = onDismiss,
             onSubmit = onSubmit,
         )
@@ -3268,26 +3329,57 @@ internal fun ScheduleCreateFormContent(
     projects: List<ScheduleProjectOption>,
     onDismiss: () -> Unit,
     onSubmit: (kotlinx.serialization.json.JsonObject) -> Unit,
+    /** A project's recent chats, for the "Chat" kind's picker (`SessionChatPicker`). */
+    loadChats: (suspend (projectName: String) -> List<ScheduleChatOption>)? = null,
 ) {
     val tokens = LocalPpmTokens.current
     var name by remember { mutableStateOf("") }
     var selectedProjectPath by remember(projects) { mutableStateOf(projects.firstOrNull()?.path.orEmpty()) }
-    var kind by remember { mutableStateOf("prompt") } // "prompt" | "script"
+    var kind by remember { mutableStateOf("prompt") } // "prompt" | "script" | "session"
     var mode by remember { mutableStateOf("tick") } // "tick" | "always-on"
     var cron by remember { mutableStateOf("0 * * * *") }
     var prompt by remember { mutableStateOf("") }
     var script by remember { mutableStateOf("") }
-
-    val problems = scheduleFormProblems(
-        name = name,
+    // A chat schedule's own fields: its chat, the zone its cron is read in, and whether it runs once.
+    var targetSessionId by remember { mutableStateOf("") }
+    var timezone by remember { mutableStateOf("") }
+    var runOnce by remember { mutableStateOf(false) }
+    val isSession = kind == "session"
+    val projectName = projects.firstOrNull { it.path == selectedProjectPath }?.name
+    var chats by remember { mutableStateOf<List<ScheduleChatOption>?>(null) }
+    LaunchedEffect(isSession, projectName, loadChats) {
+        if (!isSession) return@LaunchedEffect
+        chats = null
+        chats = if (projectName == null || loadChats == null) {
+            emptyList()
+        } else {
+            runCatchingNonCancelled { loadChats(projectName) }.getOrDefault(emptyList())
+        }
+    }
+    val sessionForm = SessionScheduleForm(
         projectPath = selectedProjectPath,
-        kind = kind,
-        mode = mode,
-        cron = cron,
+        targetSessionId = targetSessionId,
+        name = name,
         prompt = prompt,
-        script = script,
-        timeoutMs = 900_000,
+        cron = cron,
+        timezone = timezone,
+        recurring = !runOnce,
     )
+
+    val problems = if (isSession) {
+        sessionForm.problems()
+    } else {
+        scheduleFormProblems(
+            name = name,
+            projectPath = selectedProjectPath,
+            kind = kind,
+            mode = mode,
+            cron = cron,
+            prompt = prompt,
+            script = script,
+            timeoutMs = 900_000,
+        )
+    }
 
     val shape = RoundedCornerShape(12.dp)
     Column(
@@ -3304,7 +3396,7 @@ internal fun ScheduleCreateFormContent(
         SettingsTextInput(
             value = name,
             onValueChange = { name = it },
-            placeholder = "Schedule name",
+            placeholder = if (isSession) "Optional — the prompt's first line" else "Schedule name",
             modifier = Modifier.fillMaxWidth().testTag("schedule-form-name"),
         )
         if (projects.isNotEmpty()) {
@@ -3318,7 +3410,11 @@ internal fun ScheduleCreateFormContent(
                         label = proj.name,
                         selected = selectedProjectPath == proj.path,
                         testTag = "schedule-project-${proj.name}",
-                        onClick = { selectedProjectPath = proj.path },
+                        onClick = {
+                            // A chat belongs to one project: another project means picking its chat again.
+                            if (proj.path != selectedProjectPath) targetSessionId = ""
+                            selectedProjectPath = proj.path
+                        },
                     )
                 }
             }
@@ -3339,6 +3435,15 @@ internal fun ScheduleCreateFormContent(
                 testTag = "schedule-kind-script",
                 onClick = { kind = "script" },
             )
+            FilterChip12c(
+                label = "Chat",
+                selected = isSession,
+                testTag = "schedule-kind-session",
+                onClick = {
+                    kind = "session"
+                    mode = "tick"
+                },
+            )
             if (kind == "script") {
                 FilterChip12c(
                     label = if (mode == "always-on") "Always-On" else "Cron Tick",
@@ -3347,7 +3452,20 @@ internal fun ScheduleCreateFormContent(
                 )
             }
         }
+        if (isSession) {
+            BasicText(
+                "Sends the prompt into an existing chat, on that chat's own model and permissions, once it is idle.",
+                style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color),
+            )
+            SessionChatPicker(
+                chats = if (projectName == null) emptyList() else chats,
+                projectPicked = projectName != null,
+                value = targetSessionId,
+                onChange = { targetSessionId = it },
+            )
+        }
         if (mode != "always-on") {
+            if (isSession) BasicText("Cron expression (in the time zone below)", style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text2.color))
             SettingsTextInput(
                 value = cron,
                 onValueChange = { cron = it },
@@ -3355,8 +3473,34 @@ internal fun ScheduleCreateFormContent(
                 mono = true,
                 modifier = Modifier.fillMaxWidth().testTag("schedule-form-cron"),
             )
+            if (isSession && cron.isNotBlank()) {
+                BasicText(describeCron(cron), style = ppmText(11f, lineHeight = 15f).copy(color = tokens.text3.color))
+            }
         }
-        if (kind == "prompt") {
+        if (isSession) {
+            val zoneProblem = timezoneProblem(timezone.trim())
+            val device = java.time.ZoneId.systemDefault().id
+            BasicText("Time zone (optional)", style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text2.color))
+            SettingsTextInput(
+                value = timezone,
+                onValueChange = { timezone = it },
+                placeholder = "e.g. $device",
+                mono = true,
+                modifier = Modifier.fillMaxWidth().testTag("schedule-form-timezone"),
+            )
+            BasicText(
+                zoneProblem ?: "Blank reads the cron in the PPM host's own time zone.",
+                style = ppmText(11f, lineHeight = 15f).copy(color = if (zoneProblem != null) tokens.error.color else tokens.text3.color),
+            )
+            SettingsToggleRow(
+                title = "Run once",
+                subtitle = "Fires at the first match, then removes itself.",
+                checked = runOnce,
+                testTag = "schedule-form-run-once",
+                onCheckedChange = { runOnce = it },
+            )
+        }
+        if (kind != "script") {
             SettingsTextInput(
                 value = prompt,
                 onValueChange = { prompt = it },
@@ -3390,6 +3534,10 @@ internal fun ScheduleCreateFormContent(
                 enabled = problems.isEmpty(),
                 modifier = Modifier.testTag("schedule-form-submit"),
                 onClick = {
+                    if (isSession) {
+                        onSubmit(sessionForm.requestBody())
+                        return@SettingsButton
+                    }
                     onSubmit(
                         buildJsonObject {
                             put("name", name.trim())
@@ -3404,6 +3552,97 @@ internal fun ScheduleCreateFormContent(
                     )
                 },
             )
+        }
+    }
+}
+
+/**
+ * Which of the project's chats a chat schedule sends into (`SessionChatPicker`): its recent chats,
+ * pinned first, as chips.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SessionChatPicker(
+    /** Null while they are being read. */
+    chats: List<ScheduleChatOption>?,
+    projectPicked: Boolean,
+    value: String,
+    onChange: (String) -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    BasicText("Chat", style = ppmText(11f, FontWeight.Medium).copy(color = tokens.text2.color))
+    when {
+        !projectPicked || chats.isNullOrEmpty() -> BasicText(
+            when {
+                !projectPicked -> "Pick a project first"
+                chats == null -> "Loading chats…"
+                else -> "No chats in this project"
+            },
+            style = ppmText(11f).copy(color = tokens.text3.color),
+            modifier = Modifier.testTag("schedule-form-chats-empty"),
+        )
+        else -> FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (chat in chats) {
+                FilterChip12c(
+                    label = chat.title,
+                    selected = value == chat.id,
+                    testTag = "schedule-chat-${chat.id}",
+                    onClick = { onChange(chat.id) },
+                )
+            }
+        }
+    }
+    BasicText("Sent into this chat on its own settings, once it is idle.", style = ppmText(11f).copy(color = tokens.text3.color))
+}
+
+/**
+ * Under a chat schedule's row (`ScheduleSessionTarget`): the chat it sends into (tap to open it),
+ * and when PPM paused it, why, with Resume right there; when it waits for its chat, since when.
+ */
+@Composable
+internal fun ScheduleSessionTarget(
+    row: ScheduleRowState,
+    projectName: String?,
+    onOpenChat: ((ScheduleRowState) -> Unit)?,
+    onResume: () -> Unit,
+) {
+    val tokens = LocalPpmTokens.current
+    val status = sessionScheduleStatus(row, clock = DeviceScheduleClock)
+    val title = row.targetTitle?.takeIf { it.isNotBlank() } ?: "Untitled chat"
+    val canOpen = projectName != null && onOpenChat != null && row.targetSessionId != null
+    val mobile = LocalPpmMobile.current
+    Column(Modifier.fillMaxWidth().testTag("schedule-target-${row.id}"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = if (mobile) 44.dp else 28.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .then(if (canOpen) Modifier.clickable { onOpenChat?.invoke(row) } else Modifier),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            PpmIcon(ProductIcon.MessageSquare, 14.dp, tokens.text3.color)
+            BasicText("Session", style = ppmText(11f).copy(color = tokens.text3.color))
+            BasicText(
+                title,
+                Modifier.weight(1f, fill = false),
+                style = ppmText(11f, FontWeight.Medium).copy(color = if (projectName != null) tokens.accent.color else tokens.text3.color),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (projectName != null) BasicText("· $projectName", style = ppmText(11f).copy(color = tokens.text3.color), maxLines = 1)
+        }
+        status.detail?.let { detail ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                BasicText(
+                    detail,
+                    Modifier.weight(1f),
+                    style = ppmText(11f, lineHeight = 15f).copy(color = if (status.tone == SessionScheduleTone.BAD) tokens.error.color else tokens.text3.color),
+                )
+                if (!row.pausedReason.isNullOrEmpty()) {
+                    SettingsButton(label = "Resume", modifier = Modifier.testTag("schedule-resume-${row.id}"), onClick = onResume)
+                }
+            }
         }
     }
 }

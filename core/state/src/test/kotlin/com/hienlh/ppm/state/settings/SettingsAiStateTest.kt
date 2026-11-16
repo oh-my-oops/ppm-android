@@ -25,7 +25,7 @@ class SettingsAiStateTest {
     @Test
     fun `the tool groups are the web's Settings - Tools groups, in its order`() {
         assertEquals(
-            listOf("Tabs", "Terminal", "Session history", "Database", "Session collaboration", "Spec mode", "Memory"),
+            listOf("Tabs", "Terminal", "Session history", "Database", "Session collaboration", "Schedules", "Spec mode", "Memory"),
             PPM_TOOL_GROUPS.map { it.title },
         )
         assertEquals(
@@ -33,6 +33,7 @@ class SettingsAiStateTest {
                 "open_file", "open_preview", "open_url", "read_terminal", "run_in_terminal",
                 "search_sessions", "list_session_turns", "read_session_turns", "db_query", "open_query", "db_execute",
                 "create_session", "send_to_session", "session_status",
+                "session_schedule_create", "session_schedule_list", "session_schedule_delete",
                 "spec_status", "spec_create", "spec_submit", "spec_open_design", "task_start", "task_done", "task_red", "task_green", "suite_check",
                 "memory_search", "memory_read", "memory_write", "memory_forget",
             ),
@@ -54,6 +55,10 @@ class SettingsAiStateTest {
         // Memory is introduced the same way, as a feature of its own: its switches never follow the session tools'.
         assertFalse(isPpmToolEnabled(mapOf("search_sessions" to true), "memory_search"))
         assertTrue(isPpmToolEnabled(mapOf("memory_write" to true), "memory_read"))
+        // So are a chat's scheduled prompts: turning the session tools on does not turn them on.
+        assertFalse(isPpmToolEnabled(emptyMap(), "session_schedule_create"))
+        assertFalse(isPpmToolEnabled(mapOf("create_session" to true), "session_schedule_create"))
+        assertTrue(isPpmToolEnabled(mapOf("session_schedule_list" to true), "session_schedule_delete"))
         assertEquals(
             mapOf("memory_search" to false, "memory_read" to true, "memory_write" to false, "memory_forget" to false),
             patchPpmToolSwitches(emptyMap(), "memory_read", true),

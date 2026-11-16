@@ -212,6 +212,7 @@ internal fun ToolsSettingsSection(model: AppModel) {
     val api = model.api
     val scope = rememberCoroutineScope()
     var ppmTools by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+    var hideBuiltinCron by remember { mutableStateOf<Boolean?>(null) }
     var loading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
@@ -220,6 +221,7 @@ internal fun ToolsSettingsSection(model: AppModel) {
         try {
             val loaded = client.aiSettings()
             ppmTools = loaded.ppmTools
+            hideBuiltinCron = loaded.hideBuiltinCron
             errorMsg = null
         } catch (t: Throwable) {
             errorMsg = t.message ?: "Failed to load tools settings"
@@ -254,6 +256,21 @@ internal fun ToolsSettingsSection(model: AppModel) {
                 }
             }
         },
+        hideBuiltinCron = hideBuiltinCron != false,
+        onHideBuiltinCron = { on ->
+            val previous = hideBuiltinCron
+            hideBuiltinCron = on
+            errorMsg = null
+            val client = api ?: return@ToolsSettingsContent
+            scope.launch {
+                try {
+                    hideBuiltinCron = client.updateAiSettings(AiSettingsPatch.hideBuiltinCron(on)).hideBuiltinCron
+                } catch (t: Throwable) {
+                    hideBuiltinCron = previous
+                    errorMsg = t.message ?: "Failed to update the cron setting"
+                }
+            }
+        },
     )
 }
 
@@ -263,6 +280,9 @@ internal fun ToolsSettingsContent(
     loading: Boolean = false,
     errorMsg: String? = null,
     onToggleTool: (toolId: String, enabled: Boolean) -> Unit,
+    /** `hide_builtin_cron`, on unless set off. */
+    hideBuiltinCron: Boolean = true,
+    onHideBuiltinCron: (Boolean) -> Unit = {},
 ) {
     val tokens = LocalPpmTokens.current
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -293,6 +313,19 @@ internal fun ToolsSettingsContent(
                         checked = enabled,
                         onCheckedChange = { next -> onToggleTool(tool.id, next) },
                         testTag = "ppm-tool-toggle-${tool.id}",
+                    )
+                }
+                if (group.tools.any { it.id == "session_schedule_create" }) {
+                    SettingsToggleRow(
+                        title = "Hide Claude's built-in cron tools",
+                        subtitle = if (isPpmToolEnabled(ppmTools, "session_schedule_create")) {
+                            "Claude chats start without CronCreate, CronList and CronDelete, whose jobs end with the chat's process, so Claude schedules through PPM. /loop keeps working."
+                        } else {
+                            "Takes effect while “Schedule prompts” is on. Claude only: Codex has no cron tools of its own."
+                        },
+                        checked = hideBuiltinCron,
+                        onCheckedChange = onHideBuiltinCron,
+                        testTag = "ppm-hide-builtin-cron",
                     )
                 }
             }
